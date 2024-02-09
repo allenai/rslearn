@@ -1,0 +1,21 @@
+[project]
+name = "rslearn"
+description = "A library for developing remote sensing datasets and models"
+authors = [
+    {name = "Favyen Bastani", email = "favyenb@allenai.org"},
+    {name = "Piper Wolters", email = "piperw@allenai.org"},
+]
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.9"
+
+dependencies = [
+# ...
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project.entry-points.console-scripts]
+rslearn = "bin.rslearn:main"
