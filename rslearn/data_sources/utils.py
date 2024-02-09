@@ -10,8 +10,8 @@ def match_candidate_items_to_window(
 ) -> list[list[Item]]:
     """Match candidate items to a window based on the query configuration.
 
-    Candidate items should be collected that intersect with the window's spatial extent
-    in the projection of the items.
+    Candidate items should be collected that intersect with the window's spatial
+    extent.
 
     Args:
         geometry: the window projected to the same projection as the items
@@ -21,6 +21,12 @@ def match_candidate_items_to_window(
     Returns:
         list of matched item groups.
     """
+    item_shps = []
+    for item in items:
+        item_geom = item.geometry
+        if not item_geom.has_same_projection(geometry):
+            item_geom = item_geom.to_crs(geometry.crs, geometry.resolution)
+        item_shps.append(item_geom.shp)
 
     # Use time mode to filter and order the items.
     if geometry.time_range:
@@ -28,7 +34,7 @@ def match_candidate_items_to_window(
             items = [
                 item
                 for item in items
-                if not item.time or geometry.contains_time(item.time)
+                if geometry.intersects_time_range(item.geometry.time_range)
             ]
         elif query_config.time_mode in [
             TimeMode.NEAREST,
@@ -39,32 +45,33 @@ def match_candidate_items_to_window(
                 items = [
                     item
                     for item in items
-                    if not item.time or item.time < geometry.time_range[0]
+                    if not item.time_range or item.range[1] <= geometry.time_range[0]
                 ]
             elif query_config.time_mode == TimeMode.AFTER:
                 items = [
                     item
                     for item in items
-                    if not item.time or item.time > geometry.time_range[1]
+                    if not item.time_range
+                    or item.time_range[0] >= geometry.time_range[1]
                 ]
             items.sort(
-                lambda item: 0 if not item.time else geometry.time_distance(item.time)
+                key=lambda item: geometry.distance_to_time_range(item.time_range)
             )
 
     # Now apply space mode.
     groups = []
 
     if query_config.space_mode == SpaceMode.CONTAINS:
-        for item in items:
-            if not item.shp.contains(geometry.shp):
+        for item, item_shp in zip(items, item_shps):
+            if not item_shp.contains(geometry.shp):
                 continue
             groups.append([item])
             if len(groups) >= query_config.max_matches:
                 break
 
     elif query_config.space_mode == SpaceMode.INTERSECTS:
-        for item in items:
-            if not item.shp.intersects(geometry.shp):
+        for item, item_shp in zip(items, item_shps):
+            if not item_shp.intersects(geometry.shp):
                 continue
             groups.append([item])
             if len(groups) >= query_config.max_matches:
@@ -77,23 +84,23 @@ def match_candidate_items_to_window(
         cur_remainder = None
         cur_group = []
 
-        for item in items:
+        for item, item_shp in zip(items, item_shps):
             if cur_remainder is None:
                 cur_remainder = geometry.shp
 
-            if not item.shp.intersects(cur_remainder):
+            if not item_shp.intersects(cur_remainder):
                 continue
 
             # Check if the intersection area is too small.
             # If it is a sizable part of the item or of the geometry, then continue.
-            intersect_area = item.shp.intersection(cur_remainder).area
+            intersect_area = item_shp.intersection(cur_remainder).area
             if (
-                intersect_area / item.shp.area < MOSAIC_MIN_ITEM_COVERAGE
+                intersect_area / item_shp.area < MOSAIC_MIN_ITEM_COVERAGE
                 and intersect_area / cur_remainder.area < MOSAIC_MIN_ITEM_COVERAGE
             ):
                 continue
 
-            cur_remainder = cur_remainder - item.shp
+            cur_remainder = cur_remainder - item_shp
             cur_group.append(item)
 
             if cur_remainder.area <= 0:

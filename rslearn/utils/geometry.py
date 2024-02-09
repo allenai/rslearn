@@ -6,6 +6,8 @@ import shapely
 import shapely.wkt
 from rasterio.crs import CRS
 
+RESOLUTION_EPSILON = 1e-6
+
 
 class STGeometry:
     """A spatiotemporal geometry.
@@ -40,7 +42,7 @@ class STGeometry:
             return True
         return time >= self.time_range[0] and time < self.time_range[1]
 
-    def time_distance(self, time: datetime) -> timedelta:
+    def distance_to_time(self, time: datetime) -> timedelta:
         """Returns the distance from this box to the specified time.
 
         Args:
@@ -57,15 +59,44 @@ class STGeometry:
             return time - self.time_range[1]
         return timedelta()
 
+    def distance_to_time_range(
+        self, time_range: Optional[tuple[datetime, datetime]]
+    ) -> timedelta:
+        """Returns the distance from this geometry to the specified time range.
+
+        Args:
+            time_range: the time range to compute distance from
+
+        Returns:
+            the distance, which is 0 if the time ranges intersect
+        """
+        if self.time_range is None or time_range is None:
+            return timedelta()
+        if time_range[1] < self.time_range[0]:
+            return self.time_range[0] - time_range[1]
+        if self.time_range[1] < time_range[0]:
+            return time_range[0] - self.time_range[1]
+        return timedelta()
+
+    def intersects_time_range(
+        self, time_range: Optional[tuple[datetime, datetime]]
+    ) -> timedelta:
+        """Returns whether this geometry intersects the other time range."""
+        if self.time_range is None or time_range is None:
+            return True
+        if self.time_range[1] <= time_range[0]:
+            return False
+        if time_range[1] <= self.time_range[0]:
+            return False
+        return True
+
     def intersects(self, other: "STGeometry") -> bool:
         """Returns whether this box intersects the other box."""
-        if self.time_range and other.time_range:
-            if (
-                self.time_range[1] <= other.time_range[0]
-                or self.time_range[0] >= other.time_range[1]
-            ):
-                return False
-        return self.shp.intersects(other.shp)
+        if not self.intersects_time_range(other.time_range):
+            return False
+        if not self.shp.intersects(other.shp):
+            return False
+        return True
 
     def to_crs(self, crs: CRS, resolution: float) -> "STGeometry":
         """Transforms this geometry to the specified CRS and resolution."""
@@ -113,3 +144,14 @@ class STGeometry:
                 else None
             ),
         )
+
+    def has_same_projection(self, other: "STGeometry") -> bool:
+        """Returns whether the two geometries have the same projection."""
+        return self.crs == other.crs and is_same_resolution(
+            self.resolution, other.resolution
+        )
+
+
+def is_same_resolution(res1: float, res2: float) -> bool:
+    """Returns whether the two resolutions are the same."""
+    return (max(res1, res2) / min(res1, res2) - 1) < RESOLUTION_EPSILON

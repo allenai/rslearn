@@ -1,11 +1,7 @@
 """Base classes for rslearn data sources."""
 
-from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
-
-import shapely
-from shapely import Geometry
+from typing import Any
 
 from rslearn.tile_stores import TileStore
 from rslearn.utils import STGeometry
@@ -18,24 +14,21 @@ class Item:
     (e.g., Sentinel-2 scene) or a vector file (e.g., a single shapefile).
     """
 
-    def __init__(self, name: str, shp: Geometry, time: Optional[datetime]):
+    def __init__(self, name: str, geometry: STGeometry):
         """Creates a new item.
 
         Args:
             name: unique name of the item
-            shp: the geometry of the item
-            time: the time of the item
+            geometry: the spatial and temporal extent of the item
         """
         self.name = name
-        self.shp = shp
-        self.time = time
+        self.geometry = geometry
 
     def serialize(self) -> dict:
         """Serializes the item to a JSON-encodable dictionary."""
         return {
             "name": self.name,
-            "shp": self.shp.wkt,
-            "time": self.time.isoformat() if self.time else None,
+            "geometry": self.geometry.serialize(),
         }
 
     @staticmethod
@@ -43,8 +36,7 @@ class Item:
         """Deserializes an item from a JSON-decoded dictionary."""
         return Item(
             name=d["name"],
-            shp=shapely.from_wkt(d["shp"]),
-            time=datetime.fromisoformat(d["time"]) if d["time"] else None,
+            geometry=STGeometry.deserialize(d["geometry"]),
         )
 
 

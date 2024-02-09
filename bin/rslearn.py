@@ -3,8 +3,7 @@
 import argparse
 import sys
 
-from rslearn.dataset import (Dataset, ingest_dataset_windows,
-                             prepare_dataset_windows)
+from rslearn.dataset import Dataset, ingest_dataset_windows, prepare_dataset_windows
 
 handler_registry = {}
 

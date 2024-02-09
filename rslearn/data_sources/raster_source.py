@@ -10,8 +10,8 @@ from PIL import Image
 from rasterio.crs import CRS
 
 from rslearn.tile_stores import LayerMetadata, TileStore
+from rslearn.utils import is_same_resolution
 
-RESOLUTION_EPSILON = 1e-6
 TILE_SIZE = 512
 
 
@@ -51,6 +51,16 @@ class RasterOptions:
         self.format = format
         self.dtype = dtype
         self.zoom_offset = zoom_offset
+
+    @staticmethod
+    def from_config(config: dict[str, Any]) -> "RasterOptions":
+        """Creates a new RasterOptions instance from a configuration dictionary."""
+        return RasterOptions(
+            band_sets=config.get("band_sets"),
+            format=RasterFormat(config.get("format", RasterFormat.GEOTIFF)),
+            dtype=DType(config.get("dtype", DType.Native)),
+            zoom_offset=config.get("zoom_offset", 0),
+        )
 
 
 class ArrayWithTransform:
@@ -182,8 +192,8 @@ def ingest_from_rasters(
 
             if (
                 raster.crs == crs
-                and abs(pixel_size_x - resolution) < RESOLUTION_EPSILON
-                and abs(pixel_size_y - resolution) < RESOLUTION_EPSILON
+                and is_same_resolution(pixel_size_x, resolution)
+                and is_same_resolution(pixel_size_y, resolution)
             ):
                 # Include the top-left pixel index.
                 warped_arrays.append(

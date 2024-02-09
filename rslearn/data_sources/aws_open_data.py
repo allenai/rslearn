@@ -4,20 +4,24 @@ import glob
 import io
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import Any, Generator, Optional
 
 import boto3
+import dateutil.parser
 import fiona
 import fiona.transform
+import pytimeparse
 import rasterio
 import shapely
 import tqdm
 from rasterio.crs import CRS
 
 import rslearn.data_sources.utils
+import rslearn.utils.mgrs
 from rslearn.tile_stores import TileStore
-from rslearn.utils import WGS84_EPSG, GridIndex, STGeometry
+from rslearn.utils import WGS84_EPSG, GridIndex, STGeometry, daterange
 
 from .data_source import DataSource, Item, QueryConfig
 from .raster_source import RasterOptions, ingest_from_rasters
@@ -26,18 +30,15 @@ from .raster_source import RasterOptions, ingest_from_rasters
 class NaipItem(Item):
     """An item in the Naip data source."""
 
-    def __init__(
-        self, name: str, shp: shapely.Geometry, time: datetime, blob_path: str
-    ):
+    def __init__(self, name: str, geometry: STGeometry, blob_path: str):
         """Creates a new NaipItem.
 
         Args:
             name: unique name of the item
-            shp: the geometry of the item
-            time: the time of the item
+            geometry: the spatial and temporal extent of the item
             blob_path: path in bucket
         """
-        super().__init__(name, shp, time)
+        super().__init__(name, geometry)
         self.blob_path = blob_path
 
     def serialize(self) -> dict:
@@ -49,13 +50,10 @@ class NaipItem(Item):
     @staticmethod
     def deserialize(d: dict) -> Item:
         """Deserializes an item from a JSON-decoded dictionary."""
-        if "name" not in d:
-            d["name"] = d["blob_path"].split("/")[-1].split(".tif")[0]
         item = super(NaipItem, NaipItem).deserialize(d)
         return NaipItem(
             name=item.name,
-            shp=item.shp,
-            time=item.time,
+            geometry=item.geometry,
             blob_path=d["blob_path"],
         )
 
@@ -97,6 +95,15 @@ class Naip(DataSource):
                 self._build_index()
         else:
             self.rtree_index = None
+
+    @staticmethod
+    def from_config(config: dict[str, Any]) -> "Naip":
+        """Creates a new Naip instance from a configuration dictionary."""
+        return Naip(
+            index_cache_dir=config["index_cache_dir"],
+            raster_options=RasterOptions.from_config(config.get("raster_options", {})),
+            use_rtree_index=config.get("use_rtree_index", False),
+        )
 
     def _download_manifest(self) -> str:
         """Download the manifest that enumerates files in the bucket.
@@ -175,6 +182,7 @@ class Naip(DataSource):
             with fiona.open(os.path.join(self.index_cache_dir, shp_fname)) as f:
                 src_crs = f.crs
                 dst_crs = fiona.crs.from_epsg(WGS84_EPSG)
+                wgs84_crs = CRS.from_epsg(WGS84_EPSG)
 
                 for feature in f:
                     geometry = fiona.transform.transform_geom(
@@ -220,17 +228,20 @@ class Naip(DataSource):
                         tzinfo=timezone.utc
                     )
 
+                    geometry = STGeometry(wgs84_crs, 1, shp, (time, time))
+
                     yield NaipItem(
                         name=blob_path.split("/")[-1].split(".tif")[0],
-                        shp=shp,
-                        time=time,
+                        geometry=geometry,
                         blob_path=blob_path,
                     )
 
     def _build_index(self):
         """Build the RtreeIndex from items in the data source."""
         for item in self._read_index_shapefiles(desc="Building rtree index"):
-            self.rtree_index.insert(item.shp.bounds, json.dumps(item.serialize()))
+            self.rtree_index.insert(
+                item.geometry.shp.bounds, json.dumps(item.serialize())
+            )
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
@@ -253,7 +264,7 @@ class Naip(DataSource):
                 encoded_items = self.rtree_index.query(geometry.shp.bounds)
                 for encoded_item in encoded_items:
                     item = NaipItem.deserialize(json.loads(encoded_item))
-                    if not item.shp.intersects(geometry.shp):
+                    if not item.geometry.shp.intersects(geometry.shp):
                         continue
                     items[idx].append(item)
         else:
@@ -261,10 +272,10 @@ class Naip(DataSource):
             for idx, geometry in wgs84_geometries:
                 index.insert(geometry.bounds, idx)
             for i, item in enumerate(self._read_index_shapefiles()):
-                results = index.query(item.shp.bounds)
+                results = index.query(item.geometry.shp.bounds)
                 for idx in results:
                     geometry = wgs84_geometries[idx]
-                    if not geometry.shp.intersects(item.shp):
+                    if not geometry.shp.intersects(item.geometry.shp):
                         continue
                     items[idx].append(item)
 
@@ -323,6 +334,305 @@ class Naip(DataSource):
             buf.seek(0)
             raster = rasterio.open(buf)
             rasters = [(raster, ["R", "G", "B", "IR"])]
+            ingest_from_rasters(
+                tile_store, layer_prefix, rasters, projections, self.raster_options
+            )
+
+
+class Sentinel2Modality(Enum):
+    L1C = "L1C"
+    L2A = "L2A"
+
+
+class Sentinel2Item(Item):
+    """An item in the Sentinel2 data source."""
+
+    def __init__(self, name: str, geometry: STGeometry, blob_path: str):
+        """Creates a new Sentinel2Item.
+
+        Args:
+            name: unique name of the item
+            geometry: the spatial and temporal extent of the item
+            blob_path: path in bucket, e.g. tiles/51/C/WM/2024/2/1/0/
+        """
+        super().__init__(name, geometry)
+        self.blob_path = blob_path
+
+    def serialize(self) -> dict:
+        """Serializes the item to a JSON-encodable dictionary."""
+        d = super().serialize()
+        d["blob_path"] = self.blob_path
+        return d
+
+    @staticmethod
+    def deserialize(d: dict) -> Item:
+        """Deserializes an item from a JSON-decoded dictionary."""
+        if "name" not in d:
+            d["name"] = d["blob_path"].split("/")[-1].split(".tif")[0]
+        item = super(Sentinel2Item, Sentinel2Item).deserialize(d)
+        return Sentinel2Item(
+            name=item.name,
+            geometry=item.geometry,
+            blob_path=d["blob_path"],
+        )
+
+
+class Sentinel2(DataSource):
+    """A data source for Sentinel-2 L1C and L2A imagery on AWS.
+
+    Specifically, uses the sentinel-s2-l1c and sentinel-s2-l2a S3 buckets maintained by
+    Sinergise. They state the data is "added regularly, usually within few hours after
+    they are available on Copernicus OpenHub".
+
+    See https://aws.amazon.com/marketplace/pp/prodview-2ostsvrguftb2 for details about
+    the buckets.
+    """
+
+    bucket_names = {
+        Sentinel2Modality.L1C: "sentinel-s2-l1c",
+        Sentinel2Modality.L2A: "sentinel-s2-l2a",
+    }
+
+    band_fnames = {
+        Sentinel2Modality.L1C: [
+            ("B01.jp2", ["B01"]),
+            ("B02.jp2", ["B02"]),
+            ("B03.jp2", ["B03"]),
+            ("B04.jp2", ["B04"]),
+            ("B05.jp2", ["B05"]),
+            ("B06.jp2", ["B06"]),
+            ("B07.jp2", ["B07"]),
+            ("B08.jp2", ["B08"]),
+            ("B09.jp2", ["B09"]),
+            ("B10.jp2", ["B10"]),
+            ("B11.jp2", ["B11"]),
+            ("B12.jp2", ["B12"]),
+            ("B8A.jp2", ["B8A"]),
+            ("TCI.jp2", ["R", "G", "B"]),
+        ],
+        Sentinel2Modality.L2A: [
+            ("R20m/B01.jp2", ["B01"]),
+            ("R10m/B02.jp2", ["B02"]),
+            ("R10m/B03.jp2", ["B03"]),
+            ("R10m/B04.jp2", ["B04"]),
+            ("R20m/B05.jp2", ["B05"]),
+            ("R20m/B06.jp2", ["B06"]),
+            ("R20m/B07.jp2", ["B07"]),
+            ("R10m/B08.jp2", ["B08"]),
+            ("R60m/B09.jp2", ["B09"]),
+            ("R20m/B11.jp2", ["B11"]),
+            ("R20m/B12.jp2", ["B12"]),
+            ("R20m/B8A.jp2", ["B8A"]),
+            ("R10m/TCI.jp2", ["R", "G", "B"]),
+        ],
+    }
+
+    def __init__(
+        self,
+        modality: Sentinel2Modality,
+        metadata_cache_dir: str,
+        max_time_delta: timedelta = timedelta(days=30),
+        raster_options: Optional[RasterOptions] = RasterOptions(),
+    ) -> None:
+        """Initialize a new Sentinel2 instance.
+
+        Args:
+            modality: L1C or L2A.
+            metadata_cache_dir: local directory to cache product metadata files.
+            max_time_delta: maximum time before a query start time or after a
+                query end time to look for products. This is required due to the large
+                number of available products, and defaults to 30 days.
+            raster_options: common raster configuration options.
+        """
+        self.modality = modality
+        self.metadata_cache_dir = metadata_cache_dir
+        self.max_time_delta = max_time_delta
+        self.raster_options = raster_options
+
+        bucket_name = self.bucket_names[modality]
+        self.bucket = boto3.resource("s3").Bucket(bucket_name)
+
+    @staticmethod
+    def from_config(config: dict[str, Any]) -> "Sentinel2":
+        """Creates a new Sentinel2 instance from a configuration dictionary."""
+        if "max_time_delta" in config:
+            max_time_delta = timedelta(
+                seconds=pytimeparse.parse(config["max_time_delta"])
+            )
+        else:
+            max_time_delta = timedelta(days=30)
+        return Sentinel2(
+            Sentinel2Modality(config["modality"]),
+            metadata_cache_dir=config["metadata_cache_dir"],
+            max_time_delta=max_time_delta,
+            raster_options=RasterOptions.from_config(config.get("raster_options", {})),
+        )
+
+    def _read_products(
+        self, needed_cell_days: set[tuple[str, int, int, int]]
+    ) -> Generator[Sentinel2Item, None, None]:
+        """Read productInfo.json files and yield relevant Sentinel2Items.
+
+        Args:
+            needed_cell_days: set of (mgrs grid cell, year, month, day) where we need
+                to search for images.
+        """
+        for cell_id, year, month, day in tqdm.tqdm(
+            needed_cell_days, desc="Reading product infos"
+        ):
+            assert len(cell_id) == 5
+            local_fname = os.path.join(
+                self.metadata_cache_dir, f"{cell_id}_{year}_{month}_{day}.json"
+            )
+
+            if not os.path.exists(local_fname):
+                cell_part1 = cell_id[0:2]
+                cell_part2 = cell_id[2:3]
+                cell_part3 = cell_id[3:5]
+                prefix = (
+                    f"tiles/{cell_part1}/{cell_part2}/{cell_part3}/"
+                    + f"{year}/{month}/{day}/"
+                )
+
+                products = []
+                for obj in self.bucket.objects.filter(
+                    Prefix=prefix, RequestPayer="requester"
+                ):
+                    if not obj.key.endswith("tileInfo.json"):
+                        continue
+                    buf = io.BytesIO()
+                    self.bucket.download_fileobj(
+                        obj.key, buf, ExtraArgs={"RequestPayer": "requester"}
+                    )
+                    buf.seek(0)
+                    products.append(json.load(buf))
+
+                with open(local_fname, "w") as f:
+                    json.dump(products, f)
+
+            else:
+                with open(local_fname) as f:
+                    products = json.load(f)
+
+            for product in products:
+                tile_geometry_dict = product["tileDataGeometry"]
+                assert tile_geometry_dict["type"] == "Polygon"
+                assert tile_geometry_dict["crs"]["type"] == "name"
+                crs = CRS.from_string(tile_geometry_dict["crs"]["properties"]["name"])
+                ts = dateutil.parser.isoparse(product["timestamp"])
+                geometry = STGeometry(
+                    crs, 1, shapely.geometry.shape(tile_geometry_dict), (ts, ts)
+                )
+                yield Sentinel2Item(
+                    name=product["productName"],
+                    geometry=geometry,
+                    blob_path=product["path"] + "/",
+                )
+
+    def get_items(
+        self, geometries: list[STGeometry], query_config: QueryConfig
+    ) -> list[list[list[Item]]]:
+        """Get a list of items in the data source intersecting the given geometries.
+
+        Args:
+            geometries: the spatiotemporal geometries
+            query_config: the query configuration
+
+        Returns:
+            List of groups of items that should be retrieved for each geometry.
+        """
+        # Identify all (mgrs grid cell, year, month, day) where we need to search for
+        # images.
+        # To do so, we iterate over the geometries and figure out all the MGRS cells
+        # that they intersect.
+        needed_cell_days = set()
+        wgs84_crs = CRS.from_epsg(WGS84_EPSG)
+        wgs84_geometries = [geometry.to_crs(wgs84_crs, 1) for geometry in geometries]
+        for wgs84_geometry in wgs84_geometries:
+            if wgs84_geometry.time_range is None:
+                raise ValueError(
+                    "Sentinel2 on AWS requires geometry time ranges to be set"
+                )
+            for cell_id in rslearn.utils.mgrs.for_each_cell(wgs84_geometry.shp.bounds):
+                for ts in daterange(
+                    wgs84_geometry.time_range[0] - self.max_time_delta,
+                    wgs84_geometry.time_range[1] + self.max_time_delta,
+                ):
+                    needed_cell_days.add((cell_id, ts.year, ts.month, ts.day))
+
+        items_by_cell = {}
+        for item in self._read_products(needed_cell_days):
+            cell_id = "".join(item.blob_path.split("/")[1:4])
+            if cell_id not in items_by_cell:
+                items_by_cell[cell_id] = []
+            items_by_cell[cell_id].append(item)
+
+        groups = []
+        for geometry, wgs84_geometry in zip(geometries, wgs84_geometries):
+            items = []
+            for cell_id in rslearn.utils.mgrs.for_each_cell(wgs84_geometry.shp.bounds):
+                for item in items_by_cell.get(cell_id, []):
+                    item_geom = item.geometry.to_crs(geometry.crs, geometry.resolution)
+                    if not geometry.shp.intersects(item_geom.shp):
+                        continue
+                    items.append(item)
+            cur_groups = rslearn.data_sources.utils.match_candidate_items_to_window(
+                geometry, items, query_config
+            )
+            groups.append(cur_groups)
+
+        return groups
+
+    def deserialize_item(self, serialized_item: Any) -> Item:
+        """Deserializes an item from JSON-decoded data."""
+        assert isinstance(serialized_item, dict)
+        return Sentinel2Item.deserialize(serialized_item)
+
+    def ingest(
+        self,
+        tile_store: TileStore,
+        items: list[Item],
+        geometries: list[list[STGeometry]],
+    ) -> None:
+        """Ingest items into the given tile store.
+
+        Args:
+            tile_store: the tile store to ingest into
+            items: the items to ingest
+            geometries: a list of geometries needed for each item
+        """
+        for item, cur_geometries in zip(items, geometries):
+            # Get distinct CRS/resolution pairs.
+            projections = set()
+            for geometry in cur_geometries:
+                projections.add((geometry.crs, geometry.resolution))
+            projections = list(projections)
+
+            # Check if this item was already ingested for all the projections needed.
+            layer_prefix = (item.name,)
+            any_needed = False
+            for crs, resolution in projections:
+                ts_layer = tile_store.get_layer(
+                    layer_prefix + (crs.to_string(), str(resolution))
+                )
+                any_needed = (
+                    any_needed
+                    or ts_layer is None
+                    or not ts_layer.get_metadata().properties.get("completed")
+                )
+            if not any_needed:
+                continue
+
+            rasters = []
+            for fname, band_names in self.band_fnames[self.modality]:
+                buf = io.BytesIO()
+                self.bucket.download_fileobj(
+                    item.blob_path + fname, buf, ExtraArgs={"RequestPayer": "requester"}
+                )
+                buf.seek(0)
+                raster = rasterio.open(buf)
+                rasters.append((raster, band_names))
+
             ingest_from_rasters(
                 tile_store, layer_prefix, rasters, projections, self.raster_options
             )

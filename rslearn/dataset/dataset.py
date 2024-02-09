@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import timedelta
 from typing import Optional
 
 import pytimeparse
@@ -108,9 +109,8 @@ def prepare_dataset_windows(
         if "data_source" not in layer_cfg:
             continue
 
-        data_source = rslearn.data_sources.load_data_source(
-            layer_cfg["data_source"]["name"],
-            layer_cfg["data_source"]["args"],
+        data_source = rslearn.data_sources.data_source_from_config(
+            layer_cfg["data_source"],
         )
 
         # Get windows that need to be prepared for this layer.
@@ -129,7 +129,9 @@ def prepare_dataset_windows(
             geometry = window.get_geometry()
 
             if "time_offset" in layer_cfg:
-                time_offset = pytimeparse.parse(layer_cfg["time_offset"])
+                time_offset = timedelta(
+                    seconds=pytimeparse.parse(layer_cfg["time_offset"])
+                )
                 if geometry.time_range:
                     geometry.time_range = (
                         geometry.time_range[0] + time_offset,
@@ -172,9 +174,8 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
         if "data_source" not in layer_cfg:
             continue
 
-        data_source = rslearn.data_sources.load_data_source(
-            layer_cfg["data_source"]["name"],
-            layer_cfg["data_source"]["args"],
+        data_source = rslearn.data_sources.data_source_from_config(
+            layer_cfg["data_source"],
         )
 
         geometries_by_item = {}
