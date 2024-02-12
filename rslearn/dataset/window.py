@@ -4,9 +4,8 @@ from datetime import datetime
 from typing import Any, Optional
 
 import shapely
-from rasterio.crs import CRS
 
-from rslearn.utils import STGeometry
+from rslearn.utils import Projection, STGeometry
 
 
 class WindowLayerData:
@@ -39,13 +38,12 @@ class WindowLayerData:
 class Window:
     def __init__(
         self,
+        window_root: str,
         group: str,
         name: str,
-        crs: CRS,
-        resolution: float,
+        projection: Projection,
         bounds: tuple[float, float, float, float],
         time_range: Optional[tuple[datetime, datetime]],
-        layer_datas: dict[str, WindowLayerData] = {},
         options: dict[str, Any] = {},
     ) -> None:
         """Creates a new Window instance.
@@ -54,76 +52,81 @@ class Window:
         stored in metadata.json.
 
         Args:
+            window_root: the root directory of this window
             group: the group the window belongs to
             name: the unique name for this window
-            crs: the projection
-            resolution: resolution in projection units per pixel
+            projection: the projection of the window
             bounds: the bounds of the window in pixel coordinates
             time_range: optional time range of the window
-            layer_datas: a dictionary of layer names to WindowLayerData objects
-                specifying items for each layer computed via prepare
             options: additional options (?)
         """
+        self.window_root = window_root
         self.group = group
         self.name = name
-        self.crs = crs
-        self.resolution = resolution
+        self.projection = projection
         self.bounds = bounds
         self.time_range = time_range
-        self.layer_datas = layer_datas
         self.options = options
 
-    def get_root(self, ds_root: str) -> str:
-        return os.path.join(ds_root, "windows", self.group, self.name)
-
-    def save(self, ds_root: str) -> None:
-        window_root = self.get_root(ds_root)
-        os.makedirs(window_root, exist_ok=True)
+    def save(self) -> None:
+        os.makedirs(self.window_root, exist_ok=True)
         metadata = {
             "group": self.group,
             "name": self.name,
-            "crs": self.crs.to_string(),
-            "resolution": self.resolution,
+            "crs": self.projection.serialize(),
             "bounds": self.bounds,
             "time_range": (
                 [self.time_range[0].isoformat(), self.time_range[1].isoformat()]
                 if self.time_range
                 else None
             ),
-            "layer_datas": [
-                layer_data.serialize() for layer_data in self.layer_datas.values()
-            ],
             "options": self.options,
         }
-        with open(os.path.join(window_root, "metadata.json.tmp"), "w") as f:
+        with open(os.path.join(self.window_root, "metadata.json.tmp"), "w") as f:
             json.dump(metadata, f)
         os.rename(
-            os.path.join(window_root, "metadata.json.tmp"),
-            os.path.join(window_root, "metadata.json"),
+            os.path.join(self.window_root, "metadata.json.tmp"),
+            os.path.join(self.window_root, "metadata.json"),
         )
 
     def get_geometry(self) -> STGeometry:
         """Computes the STGeometry corresponding to this window."""
         return STGeometry(
-            crs=self.crs,
-            resolution=self.resolution,
+            projection=self.projection,
             shp=shapely.geometry.box(*self.bounds),
             time_range=self.time_range,
+        )
+
+    def load_layer_datas(self) -> dict[str, WindowLayerData]:
+        """Load layer datas describing items in retrieved layers from items.json."""
+        items_fname = os.path.join(self.window_root, "items.json")
+        if not os.path.exists(items_fname):
+            return {}
+        with open(items_fname) as f:
+            layer_datas = [
+                WindowLayerData.deserialize(layer_data) for layer_data in json.load(f)
+            ]
+        return {layer_data.layer_name: layer_data for layer_data in layer_datas}
+
+    def save_layer_datas(self, layer_datas: dict[str, WindowLayerData]) -> None:
+        """Save layer datas to items.json."""
+        json_data = [layer_data.serialize() for layer_data in layer_datas.values()]
+        with open(os.path.join(self.window_root, "items.json.tmp"), "w") as f:
+            json.dump(json_data, f)
+        os.rename(
+            os.path.join(self.window_root, "items.json.tmp"),
+            os.path.join(self.window_root, "items.json"),
         )
 
     @staticmethod
     def load(window_root: str) -> "Window":
         with open(os.path.join(window_root, "metadata.json"), "r") as f:
             metadata = json.load(f)
-        layer_datas = [
-            WindowLayerData.deserialize(layer_data)
-            for layer_data in metadata["layer_datas"]
-        ]
         return Window(
+            window_root=window_root,
             group=metadata["group"],
             name=metadata["name"],
-            crs=CRS.from_string(metadata["crs"]),
-            resolution=metadata["resolution"],
+            projection=Projection.deserialize(metadata["projection"]),
             bounds=metadata["bounds"],
             time_range=(
                 (
@@ -133,8 +136,18 @@ class Window:
                 if metadata["time_range"]
                 else None
             ),
-            layer_datas={
-                layer_data.layer_name: layer_data for layer_data in layer_datas
-            },
             options=metadata["options"],
         )
+
+    @staticmethod
+    def get_window_root(ds_root: str, group: str, name: str) -> str:
+        """Gets the root directory of a window.
+
+        Args:
+            ds_root: the dataset root directory
+            group: the group of the window
+            name: the name of the window
+        Returns:
+            the window root directory
+        """
+        return os.path.join(ds_root, "windows", group, name)

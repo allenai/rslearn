@@ -1,13 +1,10 @@
 import json
 import os
-from datetime import timedelta
 from typing import Optional
 
-import pytimeparse
-
 import rslearn.data_sources
-from rslearn.data_sources import QueryConfig, SpaceMode, TimeMode
-from rslearn.tile_stores import FileTileStore, TileStore
+from rslearn.config import load_layer_config
+from rslearn.tile_stores import FileTileStore, PrefixedTileStore, TileStore
 
 from .window import Window, WindowLayerData
 
@@ -47,7 +44,11 @@ class Dataset:
 
         # Load dataset configuration.
         with open(os.path.join(ds_root, "config.json"), "r") as f:
-            self.config = json.load(f)
+            config = json.load(f)
+            self.layers = {
+                layer_name: load_layer_config(d)
+                for layer_name, d in config["layers"].items()
+            }
 
     def load_windows(
         self, groups: Optional[list[str]] = None, names: Optional[list[str]] = None
@@ -105,20 +106,19 @@ def prepare_dataset_windows(
             (default false)
     """
     # Iterate over retrieved layers, and prepare each one.
-    for layer_name, layer_cfg in dataset.config.get("layers", {}).items():
-        if "data_source" not in layer_cfg:
+    for layer_name, layer_cfg in dataset.layers.items():
+        if not layer_cfg.data_source:
             continue
 
-        data_source = rslearn.data_sources.data_source_from_config(
-            layer_cfg["data_source"],
-        )
+        data_source = rslearn.data_sources.data_source_from_config(layer_cfg)
 
         # Get windows that need to be prepared for this layer.
         needed_windows = []
         for window in windows:
-            if layer_name in window.layer_datas and not force:
+            layer_datas = window.load_layer_datas()
+            if layer_name in layer_datas and not force:
                 continue
-        needed_windows.append(window)
+            needed_windows.append(window)
         print(
             "Preparing {} windows for layer {}".format(len(needed_windows), layer_name)
         )
@@ -128,35 +128,25 @@ def prepare_dataset_windows(
         for window in needed_windows:
             geometry = window.get_geometry()
 
-            if "time_offset" in layer_cfg:
-                time_offset = timedelta(
-                    seconds=pytimeparse.parse(layer_cfg["time_offset"])
+            time_offset = layer_cfg.data_source.time_offset
+            if geometry.time_range and time_offset:
+                geometry.time_range = (
+                    geometry.time_range[0] + time_offset,
+                    geometry.time_range[1] + time_offset,
                 )
-                if geometry.time_range:
-                    geometry.time_range = (
-                        geometry.time_range[0] + time_offset,
-                        geometry.time_range[1] + time_offset,
-                    )
 
             geometries.append(geometry)
 
-        # Create QueryConfig.
-        query_config_dict = layer_cfg["data_source"].get("query_config", {})
-        query_config = QueryConfig(
-            space_mode=SpaceMode[query_config_dict.get("space_mode", "MOSAIC")],
-            time_mode=TimeMode[query_config_dict.get("time_mode", "WITHIN")],
-            max_matches=query_config_dict.get("max_matches", 1),
-        )
-
-        results = data_source.get_items(geometries, query_config)
+        results = data_source.get_items(geometries, layer_cfg.data_source.query_config)
         for window, result in zip(needed_windows, results):
-            window.layer_datas[layer_name] = WindowLayerData(
+            layer_datas = window.load_layer_datas()
+            layer_datas[layer_name] = WindowLayerData(
                 layer_name=layer_name,
                 serialized_item_groups=[
                     [item.serialize() for item in group] for group in result
                 ],
             )
-            window.save(ds_root=dataset.ds_root)
+            window.save_layer_datas(layer_datas)
 
 
 def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
@@ -170,20 +160,19 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
         windows: the windows to ingest
     """
     tile_store = dataset.get_tile_store()
-    for layer_name, layer_cfg in dataset.config.get("layers", {}).items():
-        if "data_source" not in layer_cfg:
+    for layer_name, layer_cfg in dataset.layers.items():
+        if not layer_cfg.data_source:
             continue
 
-        data_source = rslearn.data_sources.data_source_from_config(
-            layer_cfg["data_source"],
-        )
+        data_source = rslearn.data_sources.data_source_from_config(layer_cfg)
 
         geometries_by_item = {}
         for window in windows:
-            if layer_name not in window.layer_datas:
+            layer_datas = window.load_layer_datas()
+            if layer_name not in layer_datas:
                 continue
             geometry = window.get_geometry()
-            layer_data = window.layer_datas[layer_name]
+            layer_data = layer_datas[layer_name]
             for group in layer_data.serialized_item_groups:
                 for serialized_item in group:
                     item = data_source.deserialize_item(serialized_item)
@@ -194,9 +183,10 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
         print(
             "Ingesting {} items in layer {}".format(len(geometries_by_item), layer_name)
         )
+        cur_tile_store = PrefixedTileStore(tile_store, (layer_name,))
         geometries_and_items = list(geometries_by_item.items())
         data_source.ingest(
-            tile_store=tile_store,
+            tile_store=cur_tile_store,
             items=[item for item, _ in geometries_and_items],
             geometries=[geometries for _, geometries in geometries_and_items],
         )

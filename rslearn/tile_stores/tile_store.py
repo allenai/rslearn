@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Optional
 
-from rasterio.crs import CRS
+from rslearn.utils import Projection
 
 
 class LayerMetadata:
@@ -11,22 +11,19 @@ class LayerMetadata:
 
     def __init__(
         self,
-        crs: CRS,
-        resolution: float,
+        projection: Projection,
         time_range: Optional[tuple[datetime, datetime]],
         properties: dict[str, Any],
     ) -> None:
         """Create a new LayerMetadata instance."""
-        self.crs = crs
-        self.resolution = resolution
+        self.projection = projection
         self.time_range = time_range
         self.properties = properties
 
     def serialize(self) -> dict:
         """Serializes the metadata to a JSON-encodable dictionary."""
         return {
-            "crs": self.crs.to_string(),
-            "resolution": self.resolution,
+            "projection": self.projection.serialize(),
             "time_range": (
                 [self.time_range[0].isoformat(), self.time_range[1].isoformat()]
                 if self.time_range
@@ -39,8 +36,7 @@ class LayerMetadata:
     def deserialize(d: dict) -> "LayerMetadata":
         """Deserializes metadata from a JSON-decoded dictionary."""
         return LayerMetadata(
-            crs=CRS.from_string(d["crs"]),
-            resolution=d["resolution"],
+            projection=Projection.deserialize(d["projection"]),
             time_range=(
                 (
                     datetime.fromisoformat(d["time_range"][0]),
@@ -113,3 +109,36 @@ class TileStore:
             the layer, or None if it does not exist yet.
         """
         raise NotImplementedError
+
+
+class PrefixedTileStore(TileStore):
+    """Wraps another tile store by adding prefix to all layer IDs."""
+
+    def __init__(self, tile_store: TileStore, prefix: tuple[str, ...]):
+        self.tile_store = tile_store
+        self.prefix = prefix
+
+    def create_layer(
+        self, layer_id: tuple[str, ...], metadata: LayerMetadata
+    ) -> TileStoreLayer:
+        """Create a layer in the tile store (or get matching existing layer).
+
+        Args:
+            layer_id: the id of the layer to create
+            metadata: metadata about the layer
+
+        Returns:
+            a TileStoreLayer corresponding to the new or pre-existing layer
+        """
+        return self.tile_store.create_layer(self.prefix + layer_id, metadata)
+
+    def get_layer(self, layer_id: tuple[str, ...]) -> Optional[TileStoreLayer]:
+        """Get a layer in the tile store.
+
+        Args:
+            layer_id: the id of the layer to get
+
+        Returns:
+            the layer, or None if it does not exist yet.
+        """
+        return self.tile_store.get_layer(self.prefix + layer_id)

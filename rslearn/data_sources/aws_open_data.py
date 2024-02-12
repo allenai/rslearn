@@ -6,7 +6,7 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Generator, Optional
+from typing import Any, Generator
 
 import boto3
 import dateutil.parser
@@ -20,11 +20,19 @@ from rasterio.crs import CRS
 
 import rslearn.data_sources.utils
 import rslearn.utils.mgrs
-from rslearn.tile_stores import TileStore
-from rslearn.utils import WGS84_EPSG, GridIndex, STGeometry, daterange
+from rslearn.config import LayerConfig, RasterLayerConfig
+from rslearn.tile_stores import PrefixedTileStore, TileStore
+from rslearn.utils import (
+    WGS84_EPSG,
+    WGS84_PROJECTION,
+    GridIndex,
+    Projection,
+    STGeometry,
+    daterange,
+)
 
 from .data_source import DataSource, Item, QueryConfig
-from .raster_source import RasterOptions, ingest_from_rasters
+from .raster_source import get_needed_projections, ingest_raster
 
 
 class NaipItem(Item):
@@ -71,8 +79,8 @@ class Naip(DataSource):
 
     def __init__(
         self,
+        config: LayerConfig,
         index_cache_dir: str,
-        raster_options: Optional[RasterOptions] = RasterOptions(),
         use_rtree_index=False,
     ) -> None:
         """Initialize a new Naip instance.
@@ -80,8 +88,8 @@ class Naip(DataSource):
         Args:
             index_cache_dir: local directory to cache index shapefiles.
         """
+        self.config = config
         self.index_cache_dir = index_cache_dir
-        self.raster_options = raster_options
 
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
 
@@ -97,12 +105,14 @@ class Naip(DataSource):
             self.rtree_index = None
 
     @staticmethod
-    def from_config(config: dict[str, Any]) -> "Naip":
+    def from_config(config: LayerConfig) -> "Naip":
         """Creates a new Naip instance from a configuration dictionary."""
+        assert isinstance(config, RasterLayerConfig)
+        d = config.data_source.config_dict
         return Naip(
-            index_cache_dir=config["index_cache_dir"],
-            raster_options=RasterOptions.from_config(config.get("raster_options", {})),
-            use_rtree_index=config.get("use_rtree_index", False),
+            config=config,
+            index_cache_dir=d["index_cache_dir"],
+            use_rtree_index=d.get("use_rtree_index", False),
         )
 
     def _download_manifest(self) -> str:
@@ -182,7 +192,6 @@ class Naip(DataSource):
             with fiona.open(os.path.join(self.index_cache_dir, shp_fname)) as f:
                 src_crs = f.crs
                 dst_crs = fiona.crs.from_epsg(WGS84_EPSG)
-                wgs84_crs = CRS.from_epsg(WGS84_EPSG)
 
                 for feature in f:
                     geometry = fiona.transform.transform_geom(
@@ -228,7 +237,7 @@ class Naip(DataSource):
                         tzinfo=timezone.utc
                     )
 
-                    geometry = STGeometry(wgs84_crs, 1, shp, (time, time))
+                    geometry = STGeometry(WGS84_PROJECTION, shp, (time, time))
 
                     yield NaipItem(
                         name=blob_path.split("/")[-1].split(".tif")[0],
@@ -255,8 +264,9 @@ class Naip(DataSource):
         Returns:
             List of groups of items that should be retrieved for each geometry.
         """
-        wgs84_crs = CRS.from_epsg(WGS84_EPSG)
-        wgs84_geometries = [geometry.to_crs(wgs84_crs, 1) for geometry in geometries]
+        wgs84_geometries = [
+            geometry.to_projection(WGS84_PROJECTION) for geometry in geometries
+        ]
 
         items = [[] for _ in geometries]
         if self.rtree_index:
@@ -271,7 +281,7 @@ class Naip(DataSource):
             index = GridIndex(0.01)
             for idx, geometry in wgs84_geometries:
                 index.insert(geometry.bounds, idx)
-            for i, item in enumerate(self._read_index_shapefiles()):
+            for item in self._read_index_shapefiles():
                 results = index.query(item.geometry.shp.bounds)
                 for idx in results:
                     geometry = wgs84_geometries[idx]
@@ -306,25 +316,12 @@ class Naip(DataSource):
             geometries: a list of geometries needed for each item
         """
         for item, cur_geometries in zip(items, geometries):
-            # Get distinct CRS/resolution pairs.
-            projections = set()
-            for geometry in cur_geometries:
-                projections.add((geometry.crs, geometry.resolution))
-            projections = list(projections)
-
-            # Check if this item was already ingested for all the projections needed.
-            layer_prefix = (item.name,)
-            any_needed = False
-            for crs, resolution in projections:
-                ts_layer = tile_store.get_layer(
-                    layer_prefix + (crs.to_string(), str(resolution))
-                )
-                any_needed = (
-                    any_needed
-                    or ts_layer is None
-                    or not ts_layer.get_metadata().properties.get("completed")
-                )
-            if not any_needed:
+            bands = ["R", "G", "B", "IR"]
+            cur_tile_store = PrefixedTileStore(tile_store, (item.name,))
+            needed_projections = get_needed_projections(
+                cur_tile_store, bands, self.config.band_sets, cur_geometries
+            )
+            if not needed_projections:
                 continue
 
             buf = io.BytesIO()
@@ -332,11 +329,9 @@ class Naip(DataSource):
                 item.blob_path, buf, ExtraArgs={"RequestPayer": "requester"}
             )
             buf.seek(0)
-            raster = rasterio.open(buf)
-            rasters = [(raster, ["R", "G", "B", "IR"])]
-            ingest_from_rasters(
-                tile_store, layer_prefix, rasters, projections, self.raster_options
-            )
+            with rasterio.open(buf) as raster:
+                for projection in needed_projections:
+                    ingest_raster(cur_tile_store, raster, projection)
 
 
 class Sentinel2Modality(Enum):
@@ -429,10 +424,10 @@ class Sentinel2(DataSource):
 
     def __init__(
         self,
+        config: LayerConfig,
         modality: Sentinel2Modality,
         metadata_cache_dir: str,
         max_time_delta: timedelta = timedelta(days=30),
-        raster_options: Optional[RasterOptions] = RasterOptions(),
     ) -> None:
         """Initialize a new Sentinel2 instance.
 
@@ -444,28 +439,28 @@ class Sentinel2(DataSource):
                 number of available products, and defaults to 30 days.
             raster_options: common raster configuration options.
         """
+        self.config = config
         self.modality = modality
         self.metadata_cache_dir = metadata_cache_dir
         self.max_time_delta = max_time_delta
-        self.raster_options = raster_options
 
         bucket_name = self.bucket_names[modality]
         self.bucket = boto3.resource("s3").Bucket(bucket_name)
 
     @staticmethod
-    def from_config(config: dict[str, Any]) -> "Sentinel2":
+    def from_config(config: LayerConfig) -> "Sentinel2":
         """Creates a new Sentinel2 instance from a configuration dictionary."""
-        if "max_time_delta" in config:
-            max_time_delta = timedelta(
-                seconds=pytimeparse.parse(config["max_time_delta"])
-            )
+        assert isinstance(config, RasterLayerConfig)
+        d = config.data_source.config_dict
+        if "max_time_delta" in d:
+            max_time_delta = timedelta(seconds=pytimeparse.parse(d["max_time_delta"]))
         else:
             max_time_delta = timedelta(days=30)
         return Sentinel2(
-            Sentinel2Modality(config["modality"]),
-            metadata_cache_dir=config["metadata_cache_dir"],
+            config=config,
+            modality=Sentinel2Modality(d["modality"]),
+            metadata_cache_dir=d["metadata_cache_dir"],
             max_time_delta=max_time_delta,
-            raster_options=RasterOptions.from_config(config.get("raster_options", {})),
         )
 
     def _read_products(
@@ -521,7 +516,9 @@ class Sentinel2(DataSource):
                 crs = CRS.from_string(tile_geometry_dict["crs"]["properties"]["name"])
                 ts = dateutil.parser.isoparse(product["timestamp"])
                 geometry = STGeometry(
-                    crs, 1, shapely.geometry.shape(tile_geometry_dict), (ts, ts)
+                    Projection(crs, 1),
+                    shapely.geometry.shape(tile_geometry_dict),
+                    (ts, ts),
                 )
                 yield Sentinel2Item(
                     name=product["productName"],
@@ -546,8 +543,9 @@ class Sentinel2(DataSource):
         # To do so, we iterate over the geometries and figure out all the MGRS cells
         # that they intersect.
         needed_cell_days = set()
-        wgs84_crs = CRS.from_epsg(WGS84_EPSG)
-        wgs84_geometries = [geometry.to_crs(wgs84_crs, 1) for geometry in geometries]
+        wgs84_geometries = [
+            geometry.to_crs(WGS84_PROJECTION) for geometry in geometries
+        ]
         for wgs84_geometry in wgs84_geometries:
             if wgs84_geometry.time_range is None:
                 raise ValueError(
@@ -572,7 +570,7 @@ class Sentinel2(DataSource):
             items = []
             for cell_id in rslearn.utils.mgrs.for_each_cell(wgs84_geometry.shp.bounds):
                 for item in items_by_cell.get(cell_id, []):
-                    item_geom = item.geometry.to_crs(geometry.crs, geometry.resolution)
+                    item_geom = item.geometry.to_projection(geometry.projection)
                     if not geometry.shp.intersects(item_geom.shp):
                         continue
                     items.append(item)
@@ -602,37 +600,21 @@ class Sentinel2(DataSource):
             geometries: a list of geometries needed for each item
         """
         for item, cur_geometries in zip(items, geometries):
-            # Get distinct CRS/resolution pairs.
-            projections = set()
-            for geometry in cur_geometries:
-                projections.add((geometry.crs, geometry.resolution))
-            projections = list(projections)
-
-            # Check if this item was already ingested for all the projections needed.
-            layer_prefix = (item.name,)
-            any_needed = False
-            for crs, resolution in projections:
-                ts_layer = tile_store.get_layer(
-                    layer_prefix + (crs.to_string(), str(resolution))
-                )
-                any_needed = (
-                    any_needed
-                    or ts_layer is None
-                    or not ts_layer.get_metadata().properties.get("completed")
-                )
-            if not any_needed:
-                continue
-
-            rasters = []
             for fname, band_names in self.band_fnames[self.modality]:
+                cur_tile_store = PrefixedTileStore(
+                    tile_store, (item.name, "".join(band_names))
+                )
+                needed_projections = get_needed_projections(
+                    cur_tile_store, band_names, self.config.band_sets, cur_geometries
+                )
+                if not needed_projections:
+                    continue
+
                 buf = io.BytesIO()
                 self.bucket.download_fileobj(
                     item.blob_path + fname, buf, ExtraArgs={"RequestPayer": "requester"}
                 )
                 buf.seek(0)
-                raster = rasterio.open(buf)
-                rasters.append((raster, band_names))
-
-            ingest_from_rasters(
-                tile_store, layer_prefix, rasters, projections, self.raster_options
-            )
+                with rasterio.open(buf) as raster:
+                    for projection in needed_projections:
+                        ingest_raster(cur_tile_store, raster, projection)

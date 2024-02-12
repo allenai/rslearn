@@ -1,84 +1,31 @@
-import io
-from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
 import rasterio.io
 import rasterio.transform
-from PIL import Image
-from rasterio.crs import CRS
 
+from rslearn.config import BandSetConfig
 from rslearn.tile_stores import LayerMetadata, TileStore
-from rslearn.utils import is_same_resolution
+from rslearn.utils import Projection, STGeometry, is_same_resolution
+from rslearn.utils.raster_format import GeotiffRasterFormat
 
 TILE_SIZE = 512
-
-
-class RasterFormat(Enum):
-    GEOTIFF = "geotiff"
-    PNG = "png"
-    JPEG = "jpeg"
-
-
-class DType(Enum):
-    Native = "native"
-    Uint8 = "uint8"
-    Uint16 = "uint16"
-    Uint32 = "uint32"
-    Float32 = "float32"
-
-
-class RasterOptions:
-    def __init__(
-        self,
-        band_sets: Optional[list[list[str]]] = None,
-        format: RasterFormat = RasterFormat.GEOTIFF,
-        dtype: DType = DType.Native,
-        zoom_offset: int = 0,
-    ) -> None:
-        """Creates a new RasterOptions instance.
-
-        Args:
-            band_sets: a list of band sets, each of which is a list of band names that
-                should be stored together
-            format: the format to store tiles in
-            dtype: the pixel value type to store tiles in
-            zoom_offset: non-negative integer, store images at window resolution
-                divided by 2^(zoom_offset).
-        """
-        self.band_sets = band_sets
-        self.format = format
-        self.dtype = dtype
-        self.zoom_offset = zoom_offset
-
-    @staticmethod
-    def from_config(config: dict[str, Any]) -> "RasterOptions":
-        """Creates a new RasterOptions instance from a configuration dictionary."""
-        return RasterOptions(
-            band_sets=config.get("band_sets"),
-            format=RasterFormat(config.get("format", RasterFormat.GEOTIFF)),
-            dtype=DType(config.get("dtype", DType.Native)),
-            zoom_offset=config.get("zoom_offset", 0),
-        )
 
 
 class ArrayWithTransform:
     def __init__(
         self,
         array: npt.NDArray[Any],
-        bands: list[str],
         transform: rasterio.transform.Affine,
     ) -> None:
         """Create a new ArrayWithTransform instance.
 
         Args:
             array: the numpy array (C, H, W) storing the raster data.
-            bands: the names of the bands on the channel dimension.
             transform: the transform from pixel coordinates to projection coordinates.
         """
         self.array = array
-        self.bands = bands
         self.transform = transform
 
     def pixel_bounds(self) -> tuple[int, int, int, int]:
@@ -97,15 +44,14 @@ class ArrayWithTransform:
         end = (start[0] + self.array.shape[2], start[1] + self.array.shape[1])
         return (start[0], start[1], end[0], end[1])
 
-    def get_tile(self, band: str, tile: tuple[int, int]) -> npt.NDArray[Any]:
-        """Returns portion of image corresponding to a band and tile.
+    def get_tile(self, tile: tuple[int, int]) -> npt.NDArray[Any]:
+        """Returns portion of image corresponding to a tile.
 
         Args:
-            band: the name of the band to retrieve
             tile: the tile to retrieve
 
         Returns:
-            The portion of the image corresponding to the requested band and tile.
+            The portion of the image corresponding to the requested tile.
         """
         bounds = self.pixel_bounds()
         x1 = tile[0] * TILE_SIZE - bounds[0]
@@ -127,169 +73,160 @@ class ArrayWithTransform:
         if y2 > self.array.shape[1]:
             padding[1] = y2 - self.array.shape[1]
             y2 = self.array.shape[1]
-        band_idx = self.bands.index(band)
-        tile = self.array[band_idx, y1:y2, x1:x2]
-        return np.pad(tile, ((padding[0], padding[1]), (padding[2], padding[3])))
+        tile = self.array[:, y1:y2, x1:x2]
+        return np.pad(
+            tile, ((0, 0), (padding[0], padding[1]), (padding[2], padding[3]))
+        )
 
 
-def encode_data(
-    crs: CRS,
-    resolution: float,
-    tile: tuple[int, int],
-    image: npt.NDArray[Any],
-    raster_options: RasterOptions,
-) -> bytes:
-    if raster_options.dtype != DType.Native:
-        image = image.astype(raster_options.DType)
+def get_final_projection(projection: Projection, band_set: BandSetConfig) -> Projection:
+    """Gets the final projection based on window projection and band set config.
 
-    if raster_options.format == RasterFormat.GEOTIFF:
-        pass
-
-    if raster_options.format == RasterFormat.PNG:
-        buf = io.BytesIO()
-        Image.fromarray(image).save(buf, format="PNG")
-        return buf.getvalue()
-
-
-def ingest_from_rasters(
-    tile_store: TileStore,
-    layer_prefix: tuple[str, ...],
-    rasters: list[tuple[rasterio.io.DatasetReader, list[str]]],
-    projections: list[tuple[CRS, float]],
-    raster_options: RasterOptions,
-) -> None:
-    """Ingests in-memory rasterio datasets corresponding to an item into the tile store.
+    The band set config may apply a non-zero zoom offset that modifies the window's
+    projection.
 
     Args:
-        tile_store: the tile store to ingest into
-        layer_prefix: the prefix to store this item under in the TileStore. The CRS and
-            resolution will be appended to the prefix.
-        rasters: a list of (raster, band_names) tuples of rasters
-        projections: a list of (crs, resolution) tuples of projections in which the
-            item is needed
-        raster_options: configuration options
+        projection: the window's projection
+        band_set: band set configuration object
+
+    Returns:
+        updated projection with zoom offset applied
     """
-    for crs, resolution in projections:
-        resolution /= 2**raster_options.zoom_offset
+    if band_set.zoom_offset == 0:
+        return projection
+    return Projection(
+        projection.crs,
+        projection.resolution / 2**band_set.zoom_offset,
+    )
 
-        # Get the layer to use for this crs/resolution.
-        # If it is marked completed, then we don't need to do any ingestion.
-        # The caller should check this first though (to save time downloading the
-        # rasters).
-        layer_id = layer_prefix + (crs.to_string(), str(resolution))
-        ts_layer = tile_store.create_layer(
-            layer_id, LayerMetadata(crs, resolution, None, {})
-        )
-        if ts_layer.get_metadata().properties.get("completed"):
+
+def get_needed_projections(
+    tile_store: TileStore,
+    raster_bands: list[str],
+    band_sets: list[BandSetConfig],
+    geometries: list[STGeometry],
+) -> list[Projection]:
+    """Determines the projections of an item that are needed for a given raster file.
+
+    Projections that appear in geometries are skipped if a corresponding layer is
+    present in tile_store with metadata marked completed.
+
+    Args:
+        tile_store: TileStore prefixed with the item name and file name
+        raster_bands: list of bands contained in the raster file
+        band_sets: configured band sets
+        geometries: list of geometries for which the item is needed
+
+    Returns:
+        list of Projection objects for which the item has not been ingested yet
+    """
+    # Identify which band set configs are relevant to this raster.
+    raster_bands = set(raster_bands)
+    relevant_band_sets = []
+    for band_set in band_sets:
+        is_match = False
+        for band in band_set.bands:
+            if band not in raster_bands:
+                continue
+            is_match = True
+            break
+        if not is_match:
             continue
+        relevant_band_sets.append(band_set)
 
-        # Warp each raster to this CRS and resolution if needed.
-        warped_arrays: list[ArrayWithTransform] = []
-        for raster, band_names in rasters:
-            array = raster.read()
+    all_projections = {geometry.projection for geometry in geometries}
+    needed_projections = []
+    for projection in all_projections:
+        for band_set in relevant_band_sets:
+            final_projection = get_final_projection(projection, band_set)
+            ts_layer = tile_store.get_layer((str(final_projection),))
+            if ts_layer and ts_layer.get_metadata().properties.get("completed"):
+                continue
+            needed_projections.append(final_projection)
+    return needed_projections
 
-            pixel_size_x, pixel_size_y = raster.res
 
-            if (
-                raster.crs == crs
-                and is_same_resolution(pixel_size_x, resolution)
-                and is_same_resolution(pixel_size_y, resolution)
-            ):
-                # Include the top-left pixel index.
-                warped_arrays.append(
-                    ArrayWithTransform(array, band_names, raster.transform)
-                )
+def ingest_raster(
+    tile_store: TileStore,
+    raster: rasterio.io.DatasetReader,
+    projection: Projection,
+) -> None:
+    """Ingests an in-memory rasterio dataset into the tile store.
+
+    Args:
+        tile_store: the tile store to ingest into, prefixed with the item name and
+            raster band names
+        raster: the rasterio raster
+        projection: the projection to save the raster as
+    """
+    format = GeotiffRasterFormat()
+
+    # Get layer in tile store to save under.
+    ts_layer = tile_store.create_layer(
+        (str(projection),), LayerMetadata(projection, None, {})
+    )
+    if ts_layer.get_metadata().properties.get("completed"):
+        return
+
+    # Warp each raster to this projection if needed.
+    array = raster.read()
+
+    pixel_size_x, pixel_size_y = raster.res
+
+    if (
+        raster.crs == projection.crs
+        and is_same_resolution(pixel_size_x, projection.resolution)
+        and is_same_resolution(pixel_size_y, projection.resolution)
+    ):
+        # Include the top-left pixel index.
+        warped_array = ArrayWithTransform(array, raster.transform)
+
+    else:
+        # Compute the suggested target transform.
+        dst_transform, dst_width, dst_height = (
+            rasterio.warp.calculate_default_transform(
+                # Source info.
+                src_crs=raster.crs,
+                width=raster.width,
+                height=raster.height,
+                left=raster.bounds[0],
+                bottom=raster.bounds[1],
+                right=raster.bounds[2],
+                top=raster.bounds[3],
+                # Destination info.
+                dst_crs=projection.crs,
+                resolution=projection.resolution,
+            )
+        )
+        # Re-project the raster to the destination crs, resolution, and transform.
+        dst_array = np.zeros((array.shape[0], dst_height, dst_width), dtype=array.dtype)
+        rasterio.warp.reproject(
+            source=array,
+            src_crs=raster.crs,
+            src_transform=raster.transform,
+            destination=dst_array,
+            dst_crs=projection.crs,
+            dst_transform=dst_transform,
+        )
+        warped_array = ArrayWithTransform(dst_array, dst_transform)
+
+    # Collect the image data associated with non-zero tiles.
+    bounds = warped_array.pixel_bounds()
+    tile1 = (bounds[0] // TILE_SIZE, bounds[1] // TILE_SIZE)
+    tile2 = (
+        (bounds[2] + TILE_SIZE - 1) // TILE_SIZE,
+        (bounds[3] + TILE_SIZE - 1) // TILE_SIZE,
+    )
+    datas: list[tuple[int, int, bytes]] = []
+    for tile_col in range(tile1[0], tile2[0]):
+        for tile_row in range(tile1[1], tile2[1]):
+            tile = (tile_col, tile_row)
+            image = warped_array.get_tile(tile)
+            if np.count_nonzero(image) == 0:
                 continue
 
-            # Compute the suggested target transform.
-            dst_transform, dst_width, dst_height = (
-                rasterio.warp.calculate_default_transform(
-                    # Source info.
-                    src_crs=raster.crs,
-                    width=raster.width,
-                    height=raster.height,
-                    left=raster.bounds[0],
-                    bottom=raster.bounds[1],
-                    right=raster.bounds[2],
-                    top=raster.bounds[3],
-                    # Destination info.
-                    dst_crs=crs,
-                    resolution=resolution,
-                )
-            )
-            # Re-project the raster to the destination crs, resolution, and transform.
-            warped_array = np.zeros(
-                (array.shape[0], dst_height, dst_width), dtype=array.dtype
-            )
-            rasterio.warp.reproject(
-                source=array,
-                src_crs=raster.crs,
-                src_transform=raster.transform,
-                destination=warped_array,
-                dst_crs=crs,
-                dst_transform=dst_transform,
-            )
-            warped_arrays.append(
-                ArrayWithTransform(warped_array, band_names, dst_transform)
-            )
+            encoded_content = format.encode_image(projection, tile, image)
+            datas.append((tile[0], tile[1], encoded_content))
 
-        # Create dict to lookup from band -> ArrayWithTransform that has the band.
-        warped_array_by_band = {}
-        for warped_array in warped_arrays:
-            for band_name in warped_array.bands:
-                warped_array_by_band[band_name] = warped_array
-
-        # Get the union bounds of the warped arrays (left, top, right, bottom).
-        # We will use this to iterate over possible tiles.
-        union_bounds = None
-        for array in warped_arrays:
-            bounds = array.pixel_bounds()
-            if union_bounds is None:
-                union_bounds = bounds
-            else:
-                union_bounds = (
-                    min(union_bounds[0], bounds[0]),
-                    min(union_bounds[1], bounds[1]),
-                    max(union_bounds[2], bounds[2]),
-                    max(union_bounds[3], bounds[3]),
-                )
-
-        # Determine what the band sets are.
-        # If not specified in raster_options, it defaults to the all bands as provided
-        # by the data source.
-        band_sets: list[list[str]] = []
-        if raster_options.band_sets:
-            band_sets = raster_options.band_sets
-        else:
-            for _, band_names in rasters:
-                band_sets.append(band_names)
-
-        # Collect the image data associated with non-zero tiles.
-        tile1 = (union_bounds[0] // TILE_SIZE, union_bounds[1] // TILE_SIZE)
-        tile2 = (
-            (union_bounds[2] + TILE_SIZE - 1) // TILE_SIZE,
-            (union_bounds[3] + TILE_SIZE - 1) // TILE_SIZE,
-        )
-        datas: list[tuple[int, int, bytes]] = []
-        for tile_col in range(tile1[0], tile2[0]):
-            for tile_row in range(tile1[1], tile2[1]):
-                tile = (tile_col, tile_row)
-                for band_set in band_sets:
-                    image_bands = []
-                    any_nonzero = False
-                    for band in band_set:
-                        band_content = warped_array_by_band[band].get_tile(band, tile)
-                        image_bands.append(band_content)
-                        any_nonzero = any_nonzero or np.count_nonzero(band_content) > 0
-
-                    if not any_nonzero:
-                        continue
-
-                    image = np.stack(image_bands, axis=2)
-                    encoded_content = encode_data(
-                        crs, resolution, tile, image, raster_options
-                    )
-                    datas.append((tile[0], tile[1], encoded_content))
-
-        ts_layer.save_tiles(datas)
-        ts_layer.set_property("completed", True)
+    ts_layer.save_tiles(datas, extension=format.get_extension())
+    ts_layer.set_property("completed", True)

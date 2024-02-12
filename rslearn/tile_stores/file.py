@@ -6,7 +6,7 @@ from .tile_store import LayerMetadata, TileStore, TileStoreLayer
 
 
 class FileTileStoreLayer(TileStoreLayer):
-    def __init__(self, root_dir):
+    def __init__(self, root_dir: str):
         """Creates a new FileTileStoreLayer.
 
         The root directory is a subfolder of the FileTileStore's root directory.
@@ -16,26 +16,28 @@ class FileTileStoreLayer(TileStoreLayer):
         """
         self.root_dir = root_dir
 
-    def get_tile(self, x: int, y: int) -> Any:
+    def get_tile(self, x: int, y: int, extension: str) -> Any:
         """Get a tile from the store.
 
         Args:
             x: the x coordinate of the tile
             y: the y coordinate of the tile
+            extension: file extension
 
         Returns:
             the tile data, typically either raster or vector content
         """
-        return open(f"{self.root_dir}/{x}_{y}.png", "rb")
+        return open(f"{self.root_dir}/{x}_{y}.{extension}", "rb")
 
-    def save_tiles(self, data: list[tuple[int, int, Any]]) -> None:
+    def save_tiles(self, data: list[tuple[int, int, Any]], extension: str) -> None:
         """Save tiles to the store.
 
         Args:
             data: a list of (x, y, data) tuples to save
+            extension: file extension
         """
         for x, y, bytes in data:
-            with open(f"{self.root_dir}/{x}_{y}.png", "wb") as f:
+            with open(f"{self.root_dir}/{x}_{y}.{extension}", "wb") as f:
                 f.write(bytes)
 
     def get_metadata(self) -> LayerMetadata:

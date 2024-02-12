@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 import rasterio.warp
 import shapely
@@ -7,6 +7,51 @@ import shapely.wkt
 from rasterio.crs import CRS
 
 RESOLUTION_EPSILON = 1e-6
+
+
+def is_same_resolution(res1: float, res2: float) -> bool:
+    """Returns whether the two resolutions are the same."""
+    return (max(res1, res2) / min(res1, res2) - 1) < RESOLUTION_EPSILON
+
+
+class Projection:
+    def __init__(self, crs: CRS, resolution: float) -> None:
+        self.crs = crs
+        self.resolution = resolution
+
+    def __eq__(self, other: Any) -> bool:
+        """Returns whether this projection is the same as the other projection."""
+        if not isinstance(other, Projection):
+            return False
+        if self.crs != other.crs:
+            return False
+        if not is_same_resolution(self.resolution, other.resolution):
+            return False
+        return True
+
+    def __repr__(self) -> str:
+        return f"Projection(crs={self.crs}, resolution={self.resolution})"
+
+    def __str__(self) -> str:
+        return f"{self.crs}_{self.resolution}"
+
+    def __hash__(self) -> int:
+        return hash((self.crs, self.resolution))
+
+    def serialize(self) -> dict:
+        """Serializes the projection to a JSON-encodable dictionary."""
+        return {
+            "crs": self.crs.to_string(),
+            "resolution": self.resolution,
+        }
+
+    @staticmethod
+    def deserialize(d: dict) -> "Projection":
+        """Deserializes a projection from a JSON-decoded dictionary."""
+        return Projection(
+            crs=CRS.from_string(d["crs"]),
+            resolution=d["resolution"],
+        )
 
 
 class STGeometry:
@@ -18,8 +63,7 @@ class STGeometry:
 
     def __init__(
         self,
-        crs: CRS,
-        resolution: float,
+        projection: Projection,
         shp: shapely.Geometry,
         time_range: Optional[tuple[datetime, datetime]],
     ):
@@ -31,8 +75,7 @@ class STGeometry:
             shp: the shape in pixel coordinates
             time_range: optional start and end time (default unlimited)
         """
-        self.crs = crs
-        self.resolution = resolution
+        self.projection = projection
         self.shp = shp
         self.time_range = time_range
 
@@ -98,28 +141,27 @@ class STGeometry:
             return False
         return True
 
-    def to_crs(self, crs: CRS, resolution: float) -> "STGeometry":
-        """Transforms this geometry to the specified CRS and resolution."""
+    def to_projection(self, projection: Projection) -> "STGeometry":
+        """Transforms this geometry to the specified projection."""
         # Undo resolution.
-        shp = shapely.transform(self.shp, lambda arr: arr * self.resolution)
+        shp = shapely.transform(self.shp, lambda arr: arr * self.projection.resolution)
         # Change crs.
-        shp = rasterio.warp.transform_geom(self.crs, crs, shp)
+        shp = rasterio.warp.transform_geom(self.projection.crs, projection.crs, shp)
         shp = shapely.geometry.shape(shp)
         # Apply new resolution.
-        shp = shapely.transform(shp, lambda arr: arr / resolution)
-        return STGeometry(crs, resolution, shp, self.time_range)
+        shp = shapely.transform(shp, lambda arr: arr / projection.resolution)
+        return STGeometry(projection, shp, self.time_range)
 
     def __repr__(self) -> str:
         return (
-            f"STGeometry(crs={self.crs}, resolution={self.resolution}, "
-            + f"shp={self.shp}, time_range={self.time_range})"
+            f"STGeometry(projection={self.projection}, shp={self.shp}, "
+            + "time_range={self.time_range})"
         )
 
     def serialize(self) -> dict:
         """Serializes the geometry to a JSON-encodable dictionary."""
         return {
-            "crs": self.crs.to_string(),
-            "resolution": self.resolution,
+            "projection": self.projection.serialize(),
             "shp": self.shp.wkt,
             "time_range": (
                 [self.time_range[0].isoformat(), self.time_range[1].isoformat()]
@@ -132,8 +174,7 @@ class STGeometry:
     def deserialize(d: dict) -> "STGeometry":
         """Deserializes a geometry from a JSON-decoded dictionary."""
         return STGeometry(
-            crs=CRS.from_string(d["crs"]),
-            resolution=d["resolution"],
+            projection=Projection.deserialize(d["projection"]),
             shp=shapely.wkt.loads(d["shp"]),
             time_range=(
                 (
@@ -144,14 +185,3 @@ class STGeometry:
                 else None
             ),
         )
-
-    def has_same_projection(self, other: "STGeometry") -> bool:
-        """Returns whether the two geometries have the same projection."""
-        return self.crs == other.crs and is_same_resolution(
-            self.resolution, other.resolution
-        )
-
-
-def is_same_resolution(res1: float, res2: float) -> bool:
-    """Returns whether the two resolutions are the same."""
-    return (max(res1, res2) / min(res1, res2) - 1) < RESOLUTION_EPSILON

@@ -1,4 +1,5 @@
-from rslearn.data_sources import Item, QueryConfig, SpaceMode, TimeMode
+from rslearn.config import QueryConfig, SpaceMode, TimeMode
+from rslearn.data_sources import Item
 from rslearn.utils import STGeometry
 
 MOSAIC_MIN_ITEM_COVERAGE = 0.1
@@ -24,8 +25,8 @@ def match_candidate_items_to_window(
     item_shps = []
     for item in items:
         item_geom = item.geometry
-        if not item_geom.has_same_projection(geometry):
-            item_geom = item_geom.to_crs(geometry.crs, geometry.resolution)
+        if item_geom.projection != geometry.projection:
+            item_geom = item_geom.to_projection(geometry.projection)
         item_shps.append(item_geom.shp)
 
     # Use time mode to filter and order the items.

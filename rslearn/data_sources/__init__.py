@@ -1,32 +1,27 @@
 import importlib
-from typing import Any
 
-from .data_source import DataSource, Item, QueryConfig, SpaceMode, TimeMode
-from .raster_source import DType, RasterFormat, RasterOptions
+from rslearn.config import LayerConfig
+
+from .data_source import DataSource, Item
 
 
-def data_source_from_config(config: dict[str, Any]) -> DataSource:
+def data_source_from_config(config: LayerConfig) -> DataSource:
     """Loads a data source from config dict.
 
     Args:
         name: the class name of the data source
         kwargs: the arguments to pass to the data
     """
-    module_name = ".".join(config["name"].split(".")[:-1])
-    class_name = config["name"].split(".")[-1]
+    name = config.data_source.name
+    module_name = ".".join(name.split(".")[:-1])
+    class_name = name.split(".")[-1]
     module = importlib.import_module(module_name)
     class_ = getattr(module, class_name)
     return class_.from_config(config)
 
 
 __all__ = (
-    "DataSource",
     "Item",
-    "QueryConfig",
-    "SpaceMode",
-    "TimeMode",
-    "DType",
-    "RasterFormat",
-    "RasterOptions",
+    "DataSource",
     "data_source_from_config",
 )
