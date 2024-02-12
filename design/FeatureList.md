@@ -1,3 +1,8 @@
+This enumerates many features that we would like to ideally support. These may
+not be supported in the first version and we may decide to drop many features
+entirely in favor of simplicity.
+
+
 Adding Windows
 --------------
 
@@ -16,6 +21,48 @@ Adding Windows
 - Creating windows where the time range is specified in the shapefile via
   property names `--start_time_property` and `--end_time_property`.
 - Only creating windows that are disjoint from existing windows in the dataset.
+- Providing features which may have start/end time properties, and then
+  creating windows that correspond to items in a data source. So user can say
+  I want a NAIP image of Seattle in 2019-2021, but then the window ends up
+  being exactly the date of the NAIP image. This is probably something to
+  partially support via the Python library and not through CLI. This is useful
+  for then finding other images that match in time with the NAIP image. I
+  suppose it could be supported in a different way too.
+
+
+Preparing Datasets
+------------------
+
+Reminder: the prepare function looks up items in retrieved layers that are
+relevant to each spatiotemporal window in the dataset.
+
+- If the data source supports it, only matching windows with items that are in
+  the same projection. For example if we want to make sure we're not warping
+  Sentinel-2 images at all.
+- Finding up to N items that are all within the time range of the window.
+- Finding up to N items that are closest to the time range of the window.
+- Finding individual items that fully cover the spatial extent of the window,
+  or finding any item that intersects the extent, or finding groups of items
+  (mosaics) that fully cover the extent.
+- When finding a limited number of items within the window time range, users
+  should be able to order the items by attributes like cloud cover.
+- Finding at least M items and discarding windows where that minimum is not
+  satisfied.
+- Finding items that are some offset from the window time range (e.g.
+  historical images for context about how location has changed).
+
+
+Ingesting Datasets
+------------------
+
+- Choosing the format of image: at least GeoTIFF, PNG, JPEG.
+- Storing 16-bit, 32-bit, and floating point values without converting dtype
+  (only for GeoTIFF I think).
+- Normalizing large pixel values into 8-bit and potentially other dtypes via a
+  configurable linear mapping.
+- Should be easy to parallelize ingestion across many machines (e.g. ingest
+  different subset of windows on each machine and rsync the datasets together
+  to get final result).
 
 
 Vector Data Types
@@ -48,3 +95,15 @@ Vector Data Sources
 - OpenStreetMap. Users should specify a data type (polygon, point, etc), along
   with filters on tags or property functions that compute things like class IDs
   from tags.
+
+
+Annotation
+----------
+
+- For WebMercator windows, viewing images in supported data sources like tile
+  URL without ingesting the images.
+- Viewing both raster and vector layers in the dataset.
+- Configuring which layers show up in the annotation tool.
+- Configuring which sets of bands in each layer to display.
+- For retrieved layers where we retrieved multiple items or mosaics, toggling
+  between those different items.
