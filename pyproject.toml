@@ -19,3 +19,6 @@ build-backend = "setuptools.build_meta"
 
 [project.entry-points.console-scripts]
 rslearn = "bin.rslearn:main"
+
+[tool.isort]
+profile = "black"
