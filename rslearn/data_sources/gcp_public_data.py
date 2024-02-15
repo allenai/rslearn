@@ -10,6 +10,7 @@ import shapely
 from google.cloud import storage
 from rasterio.crs import CRS
 
+from rslearn.config import LayerConfig
 from rslearn.data_sources import DataSource, Item, QueryConfig
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.grid_index import GridIndex
@@ -18,15 +19,15 @@ from rslearn.utils.grid_index import GridIndex
 class Sentinel2Item(Item):
     """An item in the Sentinel2 data source."""
 
-    def __init__(self, shp, sensing_time, blob_path_tmpl):
+    def __init__(self, name: str, geometry: STGeometry, blob_path_tmpl):
         """Creates a new Sentinel2Item.
 
         Args:
-            shp: the extent of the image
-            sensing_time: the sensing time of the image
+            name: unique name of the item
+            geometry: the spatial and temporal extent of the item
             blob_path_tmpl: blob path for the image with band name placeholder
         """
-        super().__init__(shp, sensing_time)
+        super().__init__(name, geometry)
         self.blob_path_tmpl = blob_path_tmpl
 
     def serialize(self) -> dict:
@@ -39,8 +40,8 @@ class Sentinel2Item(Item):
         """Deserializes an item from a JSON-decoded dictionary."""
         item = super().deserialize(d)
         return Sentinel2Item(
-            shp=item.shp,
-            sensing_time=item.time,
+            name=item.name,
+            geometry=item.geometry,
             blob_path_tmpl=d["blob_path_tmpl"],
         )
 
@@ -59,7 +60,7 @@ class Sentinel2(DataSource):
 
     index_fname = "index.csv.gz"
 
-    def __init__(self, index_cache_fname: Optional[str] = None):
+    def __init__(self, config: LayerConfig, index_cache_fname: Optional[str] = None):
         """Initialize a new Sentinel2 instance.
 
         Args:

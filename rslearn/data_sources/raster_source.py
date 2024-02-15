@@ -1,14 +1,16 @@
-from typing import Any
+from datetime import datetime
+from typing import Any, Optional
 
+import affine
 import numpy as np
 import numpy.typing as npt
+import rasterio.enums
 import rasterio.io
 import rasterio.transform
 
 from rslearn.config import BandSetConfig
 from rslearn.tile_stores import LayerMetadata, TileStore
-from rslearn.utils import Projection, STGeometry, is_same_resolution
-from rslearn.utils.raster_format import GeotiffRasterFormat
+from rslearn.utils import Projection, STGeometry
 
 TILE_SIZE = 512
 
@@ -96,7 +98,8 @@ def get_final_projection(projection: Projection, band_set: BandSetConfig) -> Pro
         return projection
     return Projection(
         projection.crs,
-        projection.resolution / 2**band_set.zoom_offset,
+        projection.x_resolution / 2**band_set.zoom_offset,
+        projection.y_resolution / 2**band_set.zoom_offset,
     )
 
 
@@ -150,6 +153,7 @@ def ingest_raster(
     tile_store: TileStore,
     raster: rasterio.io.DatasetReader,
     projection: Projection,
+    time_range: Optional[tuple[datetime, datetime]],
 ) -> None:
     """Ingests an in-memory rasterio dataset into the tile store.
 
@@ -158,8 +162,8 @@ def ingest_raster(
             raster band names
         raster: the rasterio raster
         projection: the projection to save the raster as
+        time_range: time range of the raster
     """
-    format = GeotiffRasterFormat()
 
     # Get layer in tile store to save under.
     ts_layer = tile_store.create_layer(
@@ -171,18 +175,20 @@ def ingest_raster(
     # Warp each raster to this projection if needed.
     array = raster.read()
 
-    pixel_size_x, pixel_size_y = raster.res
+    needs_warping = True
+    if isinstance(raster.transform, affine.Affine):
+        raster_projection = Projection(
+            raster.crs, raster.transform.a, raster.transform.e
+        )
+        needs_warping = raster_projection != projection
 
-    if (
-        raster.crs == projection.crs
-        and is_same_resolution(pixel_size_x, projection.resolution)
-        and is_same_resolution(pixel_size_y, projection.resolution)
-    ):
+    if not needs_warping:
         # Include the top-left pixel index.
         warped_array = ArrayWithTransform(array, raster.transform)
 
     else:
         # Compute the suggested target transform.
+        # rasterio negates the y resolution itself so here we have to negate it.
         dst_transform, dst_width, dst_height = (
             rasterio.warp.calculate_default_transform(
                 # Source info.
@@ -195,9 +201,10 @@ def ingest_raster(
                 top=raster.bounds[3],
                 # Destination info.
                 dst_crs=projection.crs,
-                resolution=projection.resolution,
+                resolution=(projection.x_resolution, -projection.y_resolution),
             )
         )
+
         # Re-project the raster to the destination crs, resolution, and transform.
         dst_array = np.zeros((array.shape[0], dst_height, dst_width), dtype=array.dtype)
         rasterio.warp.reproject(
@@ -207,6 +214,7 @@ def ingest_raster(
             destination=dst_array,
             dst_crs=projection.crs,
             dst_transform=dst_transform,
+            resampling=rasterio.enums.Resampling.bilinear,
         )
         warped_array = ArrayWithTransform(dst_array, dst_transform)
 
@@ -214,19 +222,17 @@ def ingest_raster(
     bounds = warped_array.pixel_bounds()
     tile1 = (bounds[0] // TILE_SIZE, bounds[1] // TILE_SIZE)
     tile2 = (
-        (bounds[2] + TILE_SIZE - 1) // TILE_SIZE,
-        (bounds[3] + TILE_SIZE - 1) // TILE_SIZE,
+        bounds[2] // TILE_SIZE,
+        bounds[3] // TILE_SIZE,
     )
-    datas: list[tuple[int, int, bytes]] = []
-    for tile_col in range(tile1[0], tile2[0]):
-        for tile_row in range(tile1[1], tile2[1]):
+    datas: list[tuple[int, int, npt.NDArray[Any]]] = []
+    for tile_col in range(min(tile1[0], tile2[0]), max(tile1[0], tile2[0]) + 1):
+        for tile_row in range(min(tile1[1], tile2[1]), max(tile1[1], tile2[1]) + 1):
             tile = (tile_col, tile_row)
             image = warped_array.get_tile(tile)
             if np.count_nonzero(image) == 0:
                 continue
+            datas.append((tile[0], tile[1], image))
 
-            encoded_content = format.encode_image(projection, tile, image)
-            datas.append((tile[0], tile[1], encoded_content))
-
-    ts_layer.save_tiles(datas, extension=format.get_extension())
+    ts_layer.save_rasters(datas)
     ts_layer.set_property("completed", True)

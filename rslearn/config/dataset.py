@@ -210,3 +210,33 @@ def load_layer_config(config: dict[str, Any]) -> LayerConfig:
     elif layer_type == LayerType.VECTOR:
         return VectorLayerConfig.from_config(config)
     raise ValueError(f"Unknown layer type {layer_type}")
+
+
+class RasterFormatConfig:
+    """A configuration specifying a RasterFormat."""
+
+    def __init__(self, name: str, config_dict: dict[str, Any]) -> None:
+        self.name = name
+        self.config_dict = config_dict
+
+    @staticmethod
+    def from_config(config: dict[str, Any]) -> "RasterFormatConfig":
+        return RasterFormatConfig(
+            name=config["name"],
+            config_dict=config,
+        )
+
+
+class TileStoreConfig:
+    """A configuration specifying a TileStore."""
+
+    def __init__(self, name: str, config_dict: dict[str, Any]) -> None:
+        self.name = name
+        self.config_dict = config_dict
+
+    @staticmethod
+    def from_config(config: dict[str, Any]) -> "TileStoreConfig":
+        return TileStoreConfig(
+            name=config["name"],
+            config_dict=config,
+        )

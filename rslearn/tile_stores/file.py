@@ -2,11 +2,26 @@ import json
 import os
 from typing import Any, Optional
 
+import numpy.typing as npt
+
+from rslearn.config import RasterFormatConfig, TileStoreConfig
+from rslearn.utils import Projection
+from rslearn.utils.raster_format import (
+    GeotiffRasterFormat,
+    RasterFormat,
+    load_raster_format,
+)
+
 from .tile_store import LayerMetadata, TileStore, TileStoreLayer
 
 
 class FileTileStoreLayer(TileStoreLayer):
-    def __init__(self, root_dir: str):
+    def __init__(
+        self,
+        root_dir: str,
+        projection: Optional[Projection] = None,
+        default_raster_format: RasterFormat = GeotiffRasterFormat(),
+    ):
         """Creates a new FileTileStoreLayer.
 
         The root directory is a subfolder of the FileTileStore's root directory.
@@ -15,30 +30,48 @@ class FileTileStoreLayer(TileStoreLayer):
             root_dir: root directory for this layer
         """
         self.root_dir = root_dir
+        self.default_raster_format = default_raster_format
+        self.projection = projection
 
-    def get_tile(self, x: int, y: int, extension: str) -> Any:
-        """Get a tile from the store.
+        if not self.projection:
+            self.projection = self.get_metadata().projection
+
+    def get_raster(
+        self, x: int, y: int, format: Optional[RasterFormat] = None
+    ) -> npt.NDArray[Any]:
+        """Get a raster tile from the store.
 
         Args:
             x: the x coordinate of the tile
             y: the y coordinate of the tile
-            extension: file extension
+            format: the raster format to use
 
         Returns:
-            the tile data, typically either raster or vector content
+            the raster data
         """
-        return open(f"{self.root_dir}/{x}_{y}.{extension}", "rb")
+        if format is None:
+            format = self.default_raster_format
+        extension = format.get_extension()
+        with open(f"{self.root_dir}/{x}_{y}.{extension}", "rb") as f:
+            return format.decode_raster(f)
 
-    def save_tiles(self, data: list[tuple[int, int, Any]], extension: str) -> None:
+    def save_rasters(
+        self,
+        data: list[tuple[int, int, npt.NDArray[Any]]],
+        format: Optional[RasterFormat] = None,
+    ) -> None:
         """Save tiles to the store.
 
         Args:
-            data: a list of (x, y, data) tuples to save
-            extension: file extension
+            data: a list of (x, y, image) tuples to save
+            format: the raster format to use
         """
-        for x, y, bytes in data:
+        if format is None:
+            format = self.default_raster_format
+        extension = format.get_extension()
+        for x, y, image in data:
             with open(f"{self.root_dir}/{x}_{y}.{extension}", "wb") as f:
-                f.write(bytes)
+                format.encode_raster(f, self.projection, (x, y), image)
 
     def get_metadata(self) -> LayerMetadata:
         """Get the LayerMetadata associated with this layer."""
@@ -63,8 +96,11 @@ class FileTileStoreLayer(TileStoreLayer):
 
 
 class FileTileStore(TileStore):
-    def __init__(self, root_dir):
+    def __init__(
+        self, root_dir, default_raster_format: RasterFormat = GeotiffRasterFormat()
+    ):
         self.root_dir = root_dir
+        self.default_raster_format = default_raster_format
 
     def create_layer(
         self, layer_id: tuple[str, ...], metadata: LayerMetadata
@@ -79,7 +115,11 @@ class FileTileStore(TileStore):
             a TileStoreLayer corresponding to the new or pre-existing layer
         """
         layer_dir = os.path.join(self.root_dir, "_".join(layer_id))
-        layer = FileTileStoreLayer(layer_dir)
+        layer = FileTileStoreLayer(
+            layer_dir,
+            projection=metadata.projection,
+            default_raster_format=self.default_raster_format,
+        )
         if not os.path.exists(layer_dir):
             os.makedirs(layer_dir)
             layer.save_metadata(metadata)
@@ -98,3 +138,17 @@ class FileTileStore(TileStore):
         if not os.path.exists(layer_dir):
             return None
         return FileTileStoreLayer(layer_dir)
+
+    @staticmethod
+    def from_config(config: TileStoreConfig) -> "FileTileStore":
+        d = config.config_dict
+        if "default_raster_format" in d:
+            default_raster_format = load_raster_format(
+                RasterFormatConfig.from_config(d["default_raster_format"])
+            )
+        else:
+            default_raster_format = GeotiffRasterFormat()
+        return FileTileStore(
+            root_dir=d["root_dir"],
+            default_raster_format=default_raster_format,
+        )

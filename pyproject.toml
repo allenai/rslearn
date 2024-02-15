@@ -18,7 +18,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project.entry-points.console-scripts]
-rslearn = "bin.rslearn:main"
+rslearn = "rslearn.main:main"
 
 [tool.isort]
 profile = "black"

@@ -81,7 +81,7 @@ class Naip(DataSource):
         self,
         config: LayerConfig,
         index_cache_dir: str,
-        use_rtree_index=False,
+        use_rtree_index: bool = False,
     ) -> None:
         """Initialize a new Naip instance.
 
@@ -331,7 +331,9 @@ class Naip(DataSource):
             buf.seek(0)
             with rasterio.open(buf) as raster:
                 for projection in needed_projections:
-                    ingest_raster(cur_tile_store, raster, projection)
+                    ingest_raster(
+                        cur_tile_store, raster, projection, item.geometry.time_range
+                    )
 
 
 class Sentinel2Modality(Enum):
@@ -502,8 +504,9 @@ class Sentinel2(DataSource):
                     buf.seek(0)
                     products.append(json.load(buf))
 
-                with open(local_fname, "w") as f:
+                with open(local_fname + ".tmp", "w") as f:
                     json.dump(products, f)
+                os.rename(local_fname + ".tmp", local_fname)
 
             else:
                 with open(local_fname) as f:
@@ -516,7 +519,7 @@ class Sentinel2(DataSource):
                 crs = CRS.from_string(tile_geometry_dict["crs"]["properties"]["name"])
                 ts = dateutil.parser.isoparse(product["timestamp"])
                 geometry = STGeometry(
-                    Projection(crs, 1),
+                    Projection(crs, 1, 1),
                     shapely.geometry.shape(tile_geometry_dict),
                     (ts, ts),
                 )
@@ -544,7 +547,7 @@ class Sentinel2(DataSource):
         # that they intersect.
         needed_cell_days = set()
         wgs84_geometries = [
-            geometry.to_crs(WGS84_PROJECTION) for geometry in geometries
+            geometry.to_projection(WGS84_PROJECTION) for geometry in geometries
         ]
         for wgs84_geometry in wgs84_geometries:
             if wgs84_geometry.time_range is None:
@@ -617,4 +620,6 @@ class Sentinel2(DataSource):
                 buf.seek(0)
                 with rasterio.open(buf) as raster:
                     for projection in needed_projections:
-                        ingest_raster(cur_tile_store, raster, projection)
+                        ingest_raster(
+                            cur_tile_store, raster, projection, item.geometry.time_range
+                        )

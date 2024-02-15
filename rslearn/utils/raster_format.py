@@ -1,28 +1,36 @@
-import io
-from typing import Any
+from typing import Any, BinaryIO
 
 import affine
+import numpy as np
 import numpy.typing as npt
 import rasterio
 from PIL import Image
+
+from rslearn.config import RasterFormatConfig
 
 from .geometry import Projection
 
 
 class RasterFormat:
-    def encode_image(
-        self, projection: Projection, tile: tuple[int, int], image: npt.NDArray[Any]
-    ) -> bytes:
-        """Encodes an image of a tile to bytes.
+    def encode_raster(
+        self,
+        f: BinaryIO,
+        projection: Projection,
+        tile: tuple[int, int],
+        image: npt.NDArray[Any],
+    ) -> None:
+        """Encodes a raster tile.
 
         Args:
+            f: the file object to write the image bytes to
             projection: the projection of the image
             tile: the tile that the image corresponds to
             image: the numpy array image content
-
-        Returns:
-            encoded image bytes
         """
+        raise NotImplementedError
+
+    def decode_raster(self, f: BinaryIO) -> npt.NDArray[Any]:
+        """Decodes a raster tile."""
         raise NotImplementedError
 
     def get_extension(self):
@@ -31,31 +39,32 @@ class RasterFormat:
 
 
 class GeotiffRasterFormat(RasterFormat):
-    def encode_image(
-        self, projection: Projection, tile: tuple[int, int], image: npt.NDArray[Any]
-    ) -> bytes:
-        """Encodes an image of a tile to bytes.
+    def encode_raster(
+        self,
+        f: BinaryIO,
+        projection: Projection,
+        tile: tuple[int, int],
+        image: npt.NDArray[Any],
+    ) -> None:
+        """Encodes a raster tile.
 
         Args:
+            f: the file object to write the image bytes to
             projection: the projection of the image
             tile: the tile that the image corresponds to
             image: the numpy array image content
-
-        Returns:
-            encoded image bytes
         """
         crs = projection.crs
         transform = affine.Affine(
-            projection.resolution,
+            projection.x_resolution,
             0,
-            tile[0] * image.shape[2] * projection.resolution,
+            tile[0] * image.shape[2] * projection.x_resolution,
             0,
-            -projection.resolution,
-            tile[1] * image.shape[1] * -projection.resolution,
+            projection.y_resolution,
+            tile[1] * image.shape[1] * projection.y_resolution,
         )
-        buf = io.BytesIO()
         with rasterio.open(
-            buf,
+            f,
             "w",
             driver="GTiff",
             compress="lzw",
@@ -67,7 +76,11 @@ class GeotiffRasterFormat(RasterFormat):
             transform=transform,
         ) as dst:
             dst.write(image)
-        return buf.getvalue()
+
+    def decode_raster(self, f: BinaryIO) -> npt.NDArray[Any]:
+        """Decodes a raster tile."""
+        with rasterio.open(f) as src:
+            return src.read()
 
     def get_extension(self):
         return "tif"
@@ -81,28 +94,39 @@ class ImageRasterFormat(RasterFormat):
     def __init__(self, format: str):
         self.format = format
 
-    def encode_image(
-        self, projection: Projection, tile: tuple[int, int], image: npt.NDArray[Any]
-    ) -> bytes:
-        """Encodes an image of a tile to bytes.
+    def encode_raster(
+        self,
+        f: BinaryIO,
+        projection: Projection,
+        tile: tuple[int, int],
+        image: npt.NDArray[Any],
+    ) -> None:
+        """Encodes a raster tile.
 
         Args:
+            f: the file object to write the image bytes to
             projection: the projection of the image
             tile: the tile that the image corresponds to
             image: the numpy array image content
-
-        Returns:
-            encoded image bytes
         """
+        image = image.transpose(1, 2, 0)
+
         if self.format == RasterFormat.PNG:
-            buf = io.BytesIO()
-            Image.fromarray(image).save(buf, format="PNG")
-            return buf.getvalue()
+            Image.fromarray(image).save(f, format="PNG")
+
+        elif self.format == RasterFormat.JPEG:
+            Image.fromarray(image).save(f, format="JPEG")
+
+        else:
+            raise ValueError(f"unknown image format {self.format}")
+
+    def decode_raster(self, f: BinaryIO) -> npt.NDArray[Any]:
+        """Decodes a raster tile."""
+        if self.format == RasterFormat.PNG:
+            return np.array(Image.open(f, format="PNG")).transpose(2, 0, 1)
 
         if self.format == RasterFormat.JPEG:
-            buf = io.BytesIO()
-            Image.fromarray(image).save(buf, format="JPEG")
-            return buf.getvalue()
+            return np.array(Image.open(f, format="JPEG")).transpose(2, 0, 1)
 
         raise ValueError(f"unknown image format {self.format}")
 
@@ -119,3 +143,7 @@ registry = {
     "png": ImageRasterFormat,
     "jpeg": ImageRasterFormat,
 }
+
+
+def load_raster_format(config: RasterFormatConfig) -> RasterFormat:
+    return registry[config.name].from_config(config.name, config.config_dict)

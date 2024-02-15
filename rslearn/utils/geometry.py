@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+import numpy as np
 import rasterio.warp
 import shapely
 import shapely.wkt
@@ -15,9 +16,10 @@ def is_same_resolution(res1: float, res2: float) -> bool:
 
 
 class Projection:
-    def __init__(self, crs: CRS, resolution: float) -> None:
+    def __init__(self, crs: CRS, x_resolution: float, y_resolution: float) -> None:
         self.crs = crs
-        self.resolution = resolution
+        self.x_resolution = x_resolution
+        self.y_resolution = y_resolution
 
     def __eq__(self, other: Any) -> bool:
         """Returns whether this projection is the same as the other projection."""
@@ -25,24 +27,31 @@ class Projection:
             return False
         if self.crs != other.crs:
             return False
-        if not is_same_resolution(self.resolution, other.resolution):
+        if not is_same_resolution(self.x_resolution, other.x_resolution):
+            return False
+        if not is_same_resolution(self.y_resolution, other.y_resolution):
             return False
         return True
 
     def __repr__(self) -> str:
-        return f"Projection(crs={self.crs}, resolution={self.resolution})"
+        return (
+            f"Projection(crs={self.crs}, "
+            + f"x_resolution={self.x_resolution}, "
+            + f"y_resolution={self.y_resolution})"
+        )
 
     def __str__(self) -> str:
-        return f"{self.crs}_{self.resolution}"
+        return f"{self.crs}_{self.x_resolution}_{self.y_resolution}"
 
     def __hash__(self) -> int:
-        return hash((self.crs, self.resolution))
+        return hash((self.crs, self.x_resolution, self.y_resolution))
 
     def serialize(self) -> dict:
         """Serializes the projection to a JSON-encodable dictionary."""
         return {
             "crs": self.crs.to_string(),
-            "resolution": self.resolution,
+            "x_resolution": self.x_resolution,
+            "y_resolution": self.y_resolution,
         }
 
     @staticmethod
@@ -50,7 +59,8 @@ class Projection:
         """Deserializes a projection from a JSON-decoded dictionary."""
         return Projection(
             crs=CRS.from_string(d["crs"]),
-            resolution=d["resolution"],
+            x_resolution=d["x_resolution"],
+            y_resolution=d["y_resolution"],
         )
 
 
@@ -143,19 +153,51 @@ class STGeometry:
 
     def to_projection(self, projection: Projection) -> "STGeometry":
         """Transforms this geometry to the specified projection."""
+
+        def apply_resolution(array, x_resolution, y_resolution, forward=True):
+            if forward:
+                return np.stack(
+                    [
+                        array[:, 0] / x_resolution,
+                        array[:, 1] / y_resolution,
+                    ],
+                    axis=1,
+                )
+            else:
+                return np.stack(
+                    [
+                        array[:, 0] * x_resolution,
+                        array[:, 1] * y_resolution,
+                    ],
+                    axis=1,
+                )
+
         # Undo resolution.
-        shp = shapely.transform(self.shp, lambda arr: arr * self.projection.resolution)
+        shp = shapely.transform(
+            self.shp,
+            lambda array: apply_resolution(
+                array,
+                self.projection.x_resolution,
+                self.projection.y_resolution,
+                forward=False,
+            ),
+        )
         # Change crs.
         shp = rasterio.warp.transform_geom(self.projection.crs, projection.crs, shp)
         shp = shapely.geometry.shape(shp)
         # Apply new resolution.
-        shp = shapely.transform(shp, lambda arr: arr / projection.resolution)
+        shp = shapely.transform(
+            shp,
+            lambda array: apply_resolution(
+                array, projection.x_resolution, projection.y_resolution, forward=True
+            ),
+        )
         return STGeometry(projection, shp, self.time_range)
 
     def __repr__(self) -> str:
         return (
             f"STGeometry(projection={self.projection}, shp={self.shp}, "
-            + "time_range={self.time_range})"
+            + f"time_range={self.time_range})"
         )
 
     def serialize(self) -> dict:

@@ -3,7 +3,10 @@
 from datetime import datetime
 from typing import Any, Optional
 
+import numpy.typing as npt
+
 from rslearn.utils import Projection
+from rslearn.utils.raster_format import RasterFormat
 
 
 class LayerMetadata:
@@ -50,20 +53,48 @@ class LayerMetadata:
 
 
 class TileStoreLayer:
-    def get_tile(self, x: int, y: int) -> Any:
-        """Get a tile from the store.
+    def get_raster(
+        self, x: int, y: int, format: Optional[RasterFormat] = None
+    ) -> npt.NDArray[Any]:
+        """Get a raster tile from the store.
+
+        Args:
+            x: the x coordinate of the tile
+            y: the y coordinate of the tile
+            format: the raster format to use
+
+        Returns:
+            the raster data
+        """
+        raise NotImplementedError
+
+    def save_rasters(
+        self,
+        data: list[tuple[int, int, npt.NDArray[Any]]],
+        format: Optional[RasterFormat] = None,
+    ) -> None:
+        """Save tiles to the store.
+
+        Args:
+            data: a list of (x, y, data) tuples to save
+            format: the raster format to use
+        """
+        raise NotImplementedError
+
+    def get_vector(self, x: int, y: int) -> Any:
+        """Get a vector tile from the store.
 
         Args:
             x: the x coordinate of the tile
             y: the y coordinate of the tile
 
         Returns:
-            the tile data, typically either raster or vector content
+            the vector data
         """
         raise NotImplementedError
 
-    def save_tiles(self, data: list[tuple[int, int, Any]]) -> None:
-        """Save tiles to the store.
+    def save_vectors(self, data: list[tuple[int, int, Any]]) -> None:
+        """Save vector tiles to the store.
 
         Args:
             data: a list of (x, y, data) tuples to save

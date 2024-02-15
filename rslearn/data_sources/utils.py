@@ -5,6 +5,10 @@ from rslearn.utils import STGeometry
 MOSAIC_MIN_ITEM_COVERAGE = 0.1
 """Minimum fraction of area that item should cover when adding it to a mosaic group."""
 
+MOSAIC_REMAINDER_EPSILON = 0.01
+"""Fraction of original geometry area below which mosaic is considered to contain the
+entire geometry."""
+
 
 def match_candidate_items_to_window(
     geometry: STGeometry, items: list[Item], query_config: QueryConfig
@@ -22,13 +26,6 @@ def match_candidate_items_to_window(
     Returns:
         list of matched item groups.
     """
-    item_shps = []
-    for item in items:
-        item_geom = item.geometry
-        if item_geom.projection != geometry.projection:
-            item_geom = item_geom.to_projection(geometry.projection)
-        item_shps.append(item_geom.shp)
-
     # Use time mode to filter and order the items.
     if geometry.time_range:
         if query_config.time_mode == TimeMode.WITHIN:
@@ -60,6 +57,13 @@ def match_candidate_items_to_window(
             )
 
     # Now apply space mode.
+    item_shps = []
+    for item in items:
+        item_geom = item.geometry
+        if item_geom.projection != geometry.projection:
+            item_geom = item_geom.to_projection(geometry.projection)
+        item_shps.append(item_geom.shp)
+
     groups = []
 
     if query_config.space_mode == SpaceMode.CONTAINS:
@@ -104,7 +108,7 @@ def match_candidate_items_to_window(
             cur_remainder = cur_remainder - item_shp
             cur_group.append(item)
 
-            if cur_remainder.area <= 0:
+            if cur_remainder.area / geometry.shp.area < MOSAIC_REMAINDER_EPSILON:
                 cur_remainder = None
                 groups.append(cur_group)
                 cur_group = []

@@ -3,8 +3,8 @@ import os
 from typing import Optional
 
 import rslearn.data_sources
-from rslearn.config import load_layer_config
-from rslearn.tile_stores import FileTileStore, PrefixedTileStore, TileStore
+from rslearn.config import TileStoreConfig, load_layer_config
+from rslearn.tile_stores import PrefixedTileStore, TileStore, load_tile_store
 
 from .window import Window, WindowLayerData
 
@@ -49,6 +49,7 @@ class Dataset:
                 layer_name: load_layer_config(d)
                 for layer_name, d in config["layers"].items()
             }
+            self.tile_store_config = TileStoreConfig.from_config(config["tile_store"])
 
     def load_windows(
         self, groups: Optional[list[str]] = None, names: Optional[list[str]] = None
@@ -82,8 +83,7 @@ class Dataset:
         prepare_dataset_windows(self, windows)
 
     def get_tile_store(self) -> TileStore:
-        # For now, only support FileTileStore.
-        return FileTileStore(os.path.join(self.ds_root, "tiles"))
+        return load_tile_store(self.tile_store_config)
 
     def ingest(self) -> None:
         """Ingests items for retrieved layers."""

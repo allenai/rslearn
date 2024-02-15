@@ -5,8 +5,10 @@ from .dataset import (
     LayerConfig,
     LayerType,
     QueryConfig,
+    RasterFormatConfig,
     RasterLayerConfig,
     SpaceMode,
+    TileStoreConfig,
     TimeMode,
     VectorLayerConfig,
     load_layer_config,
@@ -24,4 +26,6 @@ __all__ = [
     "RasterLayerConfig",
     "VectorLayerConfig",
     "load_layer_config",
+    "RasterFormatConfig",
+    "TileStoreConfig",
 ]
