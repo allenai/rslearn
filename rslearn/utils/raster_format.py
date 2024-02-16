@@ -7,6 +7,7 @@ import rasterio
 from PIL import Image
 
 from rslearn.config import RasterFormatConfig
+from rslearn.const import TILE_SIZE
 
 from .geometry import Projection
 
@@ -16,7 +17,7 @@ class RasterFormat:
         self,
         f: BinaryIO,
         projection: Projection,
-        tile: tuple[int, int],
+        bounds: tuple[int, int, int, int],
         image: npt.NDArray[Any],
     ) -> None:
         """Encodes a raster tile.
@@ -24,7 +25,7 @@ class RasterFormat:
         Args:
             f: the file object to write the image bytes to
             projection: the projection of the image
-            tile: the tile that the image corresponds to
+            bounds: the bounds of the image in the projection
             image: the numpy array image content
         """
         raise NotImplementedError
@@ -43,7 +44,7 @@ class GeotiffRasterFormat(RasterFormat):
         self,
         f: BinaryIO,
         projection: Projection,
-        tile: tuple[int, int],
+        bounds: tuple[int, int, int, int],
         image: npt.NDArray[Any],
     ) -> None:
         """Encodes a raster tile.
@@ -51,30 +52,33 @@ class GeotiffRasterFormat(RasterFormat):
         Args:
             f: the file object to write the image bytes to
             projection: the projection of the image
-            tile: the tile that the image corresponds to
+            bounds: the bounds of the image in the projection
             image: the numpy array image content
         """
         crs = projection.crs
         transform = affine.Affine(
             projection.x_resolution,
             0,
-            tile[0] * image.shape[2] * projection.x_resolution,
+            bounds[0] * projection.x_resolution,
             0,
             projection.y_resolution,
-            tile[1] * image.shape[1] * projection.y_resolution,
+            bounds[1] * projection.y_resolution,
         )
-        with rasterio.open(
-            f,
-            "w",
-            driver="GTiff",
-            compress="lzw",
-            width=image.shape[2],
-            height=image.shape[1],
-            count=image.shape[0],
-            dtype=image.dtype.name,
-            crs=crs,
-            transform=transform,
-        ) as dst:
+        profile = {
+            "driver": "GTiff",
+            "compress": "lzw",
+            "width": image.shape[2],
+            "height": image.shape[1],
+            "count": image.shape[0],
+            "dtype": image.dtype.name,
+            "crs": crs,
+            "transform": transform,
+        }
+        if image.shape[2] > TILE_SIZE and image.shape[1] > TILE_SIZE:
+            profile["tiled"] = True
+            profile["blockxsize"] = TILE_SIZE
+            profile["blockysize"] = TILE_SIZE
+        with rasterio.open(f, "w", **profile) as dst:
             dst.write(image)
 
     def decode_raster(self, f: BinaryIO) -> npt.NDArray[Any]:
@@ -98,7 +102,7 @@ class ImageRasterFormat(RasterFormat):
         self,
         f: BinaryIO,
         projection: Projection,
-        tile: tuple[int, int],
+        bounds: tuple[int, int, int, int],
         image: npt.NDArray[Any],
     ) -> None:
         """Encodes a raster tile.
@@ -106,7 +110,7 @@ class ImageRasterFormat(RasterFormat):
         Args:
             f: the file object to write the image bytes to
             projection: the projection of the image
-            tile: the tile that the image corresponds to
+            bounds: the bounds of the image in the projection
             image: the numpy array image content
         """
         image = image.transpose(1, 2, 0)

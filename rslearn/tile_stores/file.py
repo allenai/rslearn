@@ -5,6 +5,7 @@ from typing import Any, Optional
 import numpy.typing as npt
 
 from rslearn.config import RasterFormatConfig, TileStoreConfig
+from rslearn.const import TILE_SIZE
 from rslearn.utils import Projection
 from rslearn.utils.raster_format import (
     GeotiffRasterFormat,
@@ -38,7 +39,7 @@ class FileTileStoreLayer(TileStoreLayer):
 
     def get_raster(
         self, x: int, y: int, format: Optional[RasterFormat] = None
-    ) -> npt.NDArray[Any]:
+    ) -> Optional[npt.NDArray[Any]]:
         """Get a raster tile from the store.
 
         Args:
@@ -52,7 +53,10 @@ class FileTileStoreLayer(TileStoreLayer):
         if format is None:
             format = self.default_raster_format
         extension = format.get_extension()
-        with open(f"{self.root_dir}/{x}_{y}.{extension}", "rb") as f:
+        fname = f"{self.root_dir}/{x}_{y}.{extension}"
+        if not os.path.exists(fname):
+            return None
+        with open(fname, "rb") as f:
             return format.decode_raster(f)
 
     def save_rasters(
@@ -70,8 +74,14 @@ class FileTileStoreLayer(TileStoreLayer):
             format = self.default_raster_format
         extension = format.get_extension()
         for x, y, image in data:
+            bounds = (
+                x * TILE_SIZE,
+                y * TILE_SIZE,
+                (x + 1) * TILE_SIZE,
+                (y + 1) * TILE_SIZE,
+            )
             with open(f"{self.root_dir}/{x}_{y}.{extension}", "wb") as f:
-                format.encode_raster(f, self.projection, (x, y), image)
+                format.encode_raster(f, self.projection, bounds, image)
 
     def get_metadata(self) -> LayerMetadata:
         """Get the LayerMetadata associated with this layer."""

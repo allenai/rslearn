@@ -9,10 +9,9 @@ import rasterio.io
 import rasterio.transform
 
 from rslearn.config import BandSetConfig
+from rslearn.const import TILE_SIZE
 from rslearn.tile_stores import LayerMetadata, TileStore
 from rslearn.utils import Projection, STGeometry
-
-TILE_SIZE = 512
 
 
 class ArrayWithTransform:
@@ -81,26 +80,37 @@ class ArrayWithTransform:
         )
 
 
-def get_final_projection(projection: Projection, band_set: BandSetConfig) -> Projection:
-    """Gets the final projection based on window projection and band set config.
+def get_final_projection_and_bounds(
+    projection: Projection,
+    bounds: Optional[tuple[int, int, int, int]],
+    band_set: BandSetConfig,
+) -> tuple[Projection, Optional[tuple[int, int, int, int]]]:
+    """Gets the final projection/bounds based on window projection and band set config.
 
     The band set config may apply a non-zero zoom offset that modifies the window's
     projection.
 
     Args:
         projection: the window's projection
+        bounds: the window's bounds (optional)
         band_set: band set configuration object
 
     Returns:
-        updated projection with zoom offset applied
+        tuple of updated projection and bounds with zoom offset applied
     """
     if band_set.zoom_offset == 0:
-        return projection
-    return Projection(
+        return projection, bounds
+    projection = Projection(
         projection.crs,
-        projection.x_resolution / 2**band_set.zoom_offset,
-        projection.y_resolution / 2**band_set.zoom_offset,
+        projection.x_resolution / (2**band_set.zoom_offset),
+        projection.y_resolution / (2**band_set.zoom_offset),
     )
+    if bounds:
+        if band_set.zoom_offset > 0:
+            bounds = tuple(x * (2**band_set.zoom_offset) for x in bounds)
+        else:
+            bounds = tuple(x // (2 ** (-band_set.zoom_offset)) for x in bounds)
+    return projection, bounds
 
 
 def get_needed_projections(
@@ -141,7 +151,9 @@ def get_needed_projections(
     needed_projections = []
     for projection in all_projections:
         for band_set in relevant_band_sets:
-            final_projection = get_final_projection(projection, band_set)
+            final_projection, _ = get_final_projection_and_bounds(
+                projection, None, band_set
+            )
             ts_layer = tile_store.get_layer((str(final_projection),))
             if ts_layer and ts_layer.get_metadata().properties.get("completed"):
                 continue

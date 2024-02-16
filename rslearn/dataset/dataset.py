@@ -4,8 +4,11 @@ from typing import Optional
 
 import rslearn.data_sources
 from rslearn.config import TileStoreConfig, load_layer_config
+from rslearn.data_sources import Item
+from rslearn.data_sources.raster_source import get_final_projection_and_bounds
 from rslearn.tile_stores import PrefixedTileStore, TileStore, load_tile_store
 
+from .materialize import Materializers
 from .window import Window, WindowLayerData
 
 
@@ -190,3 +193,72 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
             items=[item for item, _ in geometries_and_items],
             geometries=[geometries for _, geometries in geometries_and_items],
         )
+
+
+def is_window_ingested(dataset: Dataset, window: Window) -> bool:
+    tile_store = dataset.get_tile_store()
+    layer_datas = window.load_layer_datas()
+    for layer_name, layer_cfg in dataset.layers.items():
+        if layer_name not in layer_datas:
+            return False
+        layer_data = layer_datas[layer_name]
+        for group in layer_data.serialized_item_groups:
+            for serialized_item in group:
+                item = Item.deserialize(serialized_item)
+                for band_set in layer_cfg.band_sets:
+                    projection, _ = get_final_projection_and_bounds(
+                        window.projection, window.bounds, band_set
+                    )
+                    layer_id = (
+                        layer_name,
+                        item.name,
+                        "".join(band_set.bands),
+                        str(projection),
+                    )
+                    ts_layer = tile_store.get_layer(layer_id)
+                    if not ts_layer:
+                        return False
+                    if not ts_layer.get_metadata().properties.get("completed"):
+                        return False
+    return True
+
+
+def materialize_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
+    """Materialize items for retrieved layers in a dataset.
+
+    The portions of items corresponding to dataset windows are extracted from the tile
+    store and written to the window directory.
+
+    Args:
+        dataset: the dataset
+        windows: the windows to materialize
+    """
+    tile_store = dataset.get_tile_store()
+    for layer_name, layer_cfg in dataset.layers.items():
+        if not layer_cfg.data_source:
+            continue
+
+        for window in windows:
+            if not is_window_ingested(dataset, window):
+                continue
+            layer_datas = window.load_layer_datas()
+            if layer_name not in layer_datas:
+                continue
+            layer_data = layer_datas[layer_name]
+            item_groups = []
+            for serialized_group in layer_data.serialized_item_groups:
+                item_group = []
+                for serialized_item in serialized_group:
+                    item = Item.deserialize(serialized_item)
+                    item_group.append(item)
+                item_groups.append(item_group)
+
+            print(
+                "Materializing {} item groups in layer {}".format(
+                    len(item_groups), layer_name
+                )
+            )
+            materializer = Materializers["raster"]
+            materializer.materialize(
+                tile_store, window, layer_name, layer_cfg, item_groups
+            )

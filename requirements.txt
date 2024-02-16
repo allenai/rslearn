@@ -1,4 +1,5 @@
 boto3
+class_registry
 python-dateutil
 pytimeparse
 fiona

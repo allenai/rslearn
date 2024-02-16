@@ -55,7 +55,7 @@ class LayerMetadata:
 class TileStoreLayer:
     def get_raster(
         self, x: int, y: int, format: Optional[RasterFormat] = None
-    ) -> npt.NDArray[Any]:
+    ) -> Optional[npt.NDArray[Any]]:
         """Get a raster tile from the store.
 
         Args:

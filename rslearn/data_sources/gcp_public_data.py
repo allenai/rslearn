@@ -17,10 +17,11 @@ import tqdm
 from google.cloud import storage
 
 from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
+from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import WGS84_PROJECTION, STGeometry
+from rslearn.utils import STGeometry
 from rslearn.utils.rtree_index import RtreeIndex
 
 from .raster_source import get_needed_projections, ingest_raster

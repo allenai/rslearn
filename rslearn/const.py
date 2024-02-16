@@ -1,6 +1,7 @@
 from rasterio.crs import CRS
 
-from .geometry import Projection
+from rslearn.utils import Projection
 
 WGS84_EPSG = 4326
 WGS84_PROJECTION = Projection(CRS.from_epsg(WGS84_EPSG), 1, 1)
+TILE_SIZE = 512

@@ -11,6 +11,7 @@ from rslearn.dataset import (
     Dataset,
     Window,
     ingest_dataset_windows,
+    materialize_dataset_windows,
     prepare_dataset_windows,
 )
 
@@ -167,12 +168,39 @@ class IngestHandler:
 def dataset_ingest():
     parser = argparse.ArgumentParser(
         prog="rslearn dataset ingest",
-        description="rslearn dataset ignest: ingest items in retrieved data sources",
+        description="rslearn dataset ingest: ingest items in retrieved data sources",
     )
     add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
 
     fn = IngestHandler()
+    apply_on_windows_args(fn, args)
+
+
+class MaterializeHandler:
+    def __init__(self):
+        self.dataset = None
+
+    def set_dataset(self, dataset: Dataset):
+        self.dataset = dataset
+
+    def __call__(self, windows: list[Window]):
+        materialize_dataset_windows(self.dataset, windows)
+
+
+@register_handler("dataset", "materialize")
+def dataset_materialize():
+    parser = argparse.ArgumentParser(
+        prog="rslearn dataset materialize",
+        description=(
+            "rslearn dataset materialize: "
+            + "materialize data from retrieved data sources"
+        ),
+    )
+    add_apply_on_windows_args(parser)
+    args = parser.parse_args(args=sys.argv[3:])
+
+    fn = MaterializeHandler()
     apply_on_windows_args(fn, args)
 
 

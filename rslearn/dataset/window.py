@@ -42,7 +42,7 @@ class Window:
         group: str,
         name: str,
         projection: Projection,
-        bounds: tuple[float, float, float, float],
+        bounds: tuple[int, int, int, int],
         time_range: Optional[tuple[datetime, datetime]],
         options: dict[str, Any] = {},
     ) -> None:

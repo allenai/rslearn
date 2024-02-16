@@ -21,15 +21,9 @@ from rasterio.crs import CRS
 import rslearn.data_sources.utils
 import rslearn.utils.mgrs
 from rslearn.config import LayerConfig, RasterLayerConfig
+from rslearn.const import WGS84_EPSG, WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import (
-    WGS84_EPSG,
-    WGS84_PROJECTION,
-    GridIndex,
-    Projection,
-    STGeometry,
-    daterange,
-)
+from rslearn.utils import GridIndex, Projection, STGeometry, daterange
 
 from .data_source import DataSource, Item, QueryConfig
 from .raster_source import get_needed_projections, ingest_raster
