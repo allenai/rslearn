@@ -73,7 +73,7 @@ class Window:
         metadata = {
             "group": self.group,
             "name": self.name,
-            "crs": self.projection.serialize(),
+            "projection": self.projection.serialize(),
             "bounds": self.bounds,
             "time_range": (
                 [self.time_range[0].isoformat(), self.time_range[1].isoformat()]

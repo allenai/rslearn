@@ -25,14 +25,51 @@ def register_handler(category, command):
     return decorator
 
 
+def add_apply_on_windows_args(parser):
+    parser.add_argument(
+        "--root", type=str, required=True, help="Dataset root directory"
+    )
+    parser.add_argument(
+        "--group", type=str, default=None, help="Only prepare windows in this group"
+    )
+    parser.add_argument(
+        "--window", type=str, default=None, help="Only prepare this window"
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="Number of worker processes (default 0 to use main process only)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="Number of windows to process in each batch (default 1)",
+    )
+    parser.add_argument(
+        "--jobs-per-process",
+        type=int,
+        default=None,
+        help="Number of jobs to run in each worker process before restarting",
+    )
+    parser.add_argument(
+        "--use-initial-job",
+        type=bool,
+        default=True,
+        action=argparse.BooleanOptionalAction,
+    )
+
+
 def apply_on_windows(
     f: Callable[[list[Window]], None],
     dataset: Dataset,
     group: Optional[str] = None,
     window: Optional[str] = None,
     workers: int = 0,
-    batch_size: int = 128,
+    batch_size: int = 1,
     jobs_per_process: int = None,
+    use_initial_job: bool = True,
 ):
     print("Loading windows")
     groups = None
@@ -48,9 +85,10 @@ def apply_on_windows(
         f(windows)
         return
 
-    # Apply directly on first window to get any initialization out of the way.
-    f([windows[0]])
-    windows = windows[1:]
+    if use_initial_job:
+        # Apply directly on first window to get any initialization out of the way.
+        f([windows[0]])
+        windows = windows[1:]
 
     batches = []
     for i in range(0, len(windows), batch_size):
@@ -63,10 +101,29 @@ def apply_on_windows(
     p.close()
 
 
+def apply_on_windows_args(f: Callable[[list[Window]], None], args: argparse.Namespace):
+    dataset = Dataset(ds_root=args.root)
+    if hasattr(f, "set_dataset"):
+        f.set_dataset(dataset)
+    apply_on_windows(
+        f,
+        dataset,
+        args.group,
+        args.window,
+        args.workers,
+        args.batch_size,
+        args.jobs_per_process,
+        args.use_initial_job,
+    )
+
+
 class PrepareHandler:
-    def __init__(self, dataset: Dataset, force: bool):
-        self.dataset = dataset
+    def __init__(self, force: bool):
         self.force = force
+        self.dataset = None
+
+    def set_dataset(self, dataset: Dataset):
+        self.dataset = dataset
 
     def __call__(self, windows: list[Window]):
         prepare_dataset_windows(self.dataset, windows, self.force)
@@ -79,36 +136,24 @@ def dataset_prepare():
         description="rslearn dataset prepare: lookup items in retrieved data sources",
     )
     parser.add_argument(
-        "--root", type=str, required=True, help="Dataset root directory"
-    )
-    parser.add_argument(
-        "--group", type=str, default=None, help="Only prepare windows in this group"
-    )
-    parser.add_argument(
-        "--window", type=str, default=None, help="Only prepare this window"
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=0,
-        help="Number of worker processes (default 0 to use main process only)",
-    )
-    parser.add_argument(
         "--force",
         type=bool,
         default=False,
         action=argparse.BooleanOptionalAction,
         help="Prepare windows even if they were previously prepared",
     )
+    add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
 
-    dataset = Dataset(ds_root=args.root)
-    fn = PrepareHandler(dataset, args.force)
-    apply_on_windows(fn, dataset, args.group, args.window, args.workers)
+    fn = PrepareHandler(args.force)
+    apply_on_windows_args(fn, args)
 
 
 class IngestHandler:
-    def __init__(self, dataset: Dataset):
+    def __init__(self):
+        self.dataset = None
+
+    def set_dataset(self, dataset: Dataset):
         self.dataset = dataset
 
     def __call__(self, windows: list[Window]):
@@ -124,34 +169,11 @@ def dataset_ingest():
         prog="rslearn dataset ingest",
         description="rslearn dataset ignest: ingest items in retrieved data sources",
     )
-    parser.add_argument(
-        "--root", type=str, required=True, help="Dataset root directory"
-    )
-    parser.add_argument(
-        "--group", type=str, default=None, help="Only prepare windows in this group"
-    )
-    parser.add_argument(
-        "--window", type=str, default=None, help="Only prepare this window"
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=0,
-        help="Number of worker processes (default 0 to use main process only)",
-    )
+    add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
 
-    dataset = Dataset(ds_root=args.root)
-    fn = IngestHandler(dataset)
-    apply_on_windows(
-        fn,
-        dataset,
-        args.group,
-        args.window,
-        args.workers,
-        batch_size=1,
-        jobs_per_process=1,
-    )
+    fn = IngestHandler()
+    apply_on_windows_args(fn, args)
 
 
 def main():
