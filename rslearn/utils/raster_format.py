@@ -9,7 +9,7 @@ from PIL import Image
 from rslearn.config import RasterFormatConfig
 from rslearn.const import TILE_SIZE
 
-from .geometry import Projection
+from .geometry import PixelBounds, Projection
 
 
 class RasterFormat:
@@ -17,7 +17,7 @@ class RasterFormat:
         self,
         f: BinaryIO,
         projection: Projection,
-        bounds: tuple[int, int, int, int],
+        bounds: PixelBounds,
         image: npt.NDArray[Any],
     ) -> None:
         """Encodes a raster tile.
@@ -44,7 +44,7 @@ class GeotiffRasterFormat(RasterFormat):
         self,
         f: BinaryIO,
         projection: Projection,
-        bounds: tuple[int, int, int, int],
+        bounds: PixelBounds,
         image: npt.NDArray[Any],
     ) -> None:
         """Encodes a raster tile.
@@ -102,7 +102,7 @@ class ImageRasterFormat(RasterFormat):
         self,
         f: BinaryIO,
         projection: Projection,
-        bounds: tuple[int, int, int, int],
+        bounds: PixelBounds,
         image: npt.NDArray[Any],
     ) -> None:
         """Encodes a raster tile.

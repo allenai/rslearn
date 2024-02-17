@@ -101,8 +101,12 @@ class FileTileStoreLayer(TileStoreLayer):
 
     def save_metadata(self, metadata: LayerMetadata) -> None:
         """Save the LayerMetadata associated with this layer."""
-        with open(os.path.join(self.root_dir, "metadata.json"), "w") as f:
+        with open(os.path.join(self.root_dir, "metadata.json.tmp"), "w") as f:
             json.dump(metadata.serialize(), f)
+        os.rename(
+            os.path.join(self.root_dir, "metadata.json.tmp"),
+            os.path.join(self.root_dir, "metadata.json"),
+        )
 
 
 class FileTileStore(TileStore):
@@ -111,6 +115,12 @@ class FileTileStore(TileStore):
     ):
         self.root_dir = root_dir
         self.default_raster_format = default_raster_format
+
+    def _get_layer_dir(self, layer_id: tuple[str, ...]):
+        for part in layer_id:
+            if "/" in part or part.startswith("."):
+                raise ValueError(f"Invalid layer_id part {part}")
+        return os.path.join(self.root_dir, *layer_id)
 
     def create_layer(
         self, layer_id: tuple[str, ...], metadata: LayerMetadata
@@ -124,7 +134,7 @@ class FileTileStore(TileStore):
         Returns:
             a TileStoreLayer corresponding to the new or pre-existing layer
         """
-        layer_dir = os.path.join(self.root_dir, "_".join(layer_id))
+        layer_dir = self._get_layer_dir(layer_id)
         layer = FileTileStoreLayer(
             layer_dir,
             projection=metadata.projection,
@@ -144,10 +154,28 @@ class FileTileStore(TileStore):
         Returns:
             the layer, or None if it does not exist yet.
         """
-        layer_dir = os.path.join(self.root_dir, "_".join(layer_id))
+        layer_dir = self._get_layer_dir(layer_id)
         if not os.path.exists(layer_dir):
             return None
         return FileTileStoreLayer(layer_dir)
+
+    def list_layers(self, prefix: tuple[str, ...] = tuple()) -> list[str]:
+        """List options for next part of layer ID with the specified prefix.
+
+        Args:
+            prefix: the prefix to match
+
+        Returns:
+            available options for next part of the layer ID
+        """
+        layer_dir = self._get_layer_dir(prefix)
+        if not os.path.exists(layer_dir):
+            return []
+        return [
+            fname
+            for fname in os.listdir(layer_dir)
+            if os.path.isdir(os.path.join(layer_dir, fname))
+        ]
 
     @staticmethod
     def from_config(config: TileStoreConfig) -> "FileTileStore":

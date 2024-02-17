@@ -10,6 +10,9 @@ from rasterio.crs import CRS
 RESOLUTION_EPSILON = 1e-6
 
 
+PixelBounds = tuple[int, int, int, int]
+
+
 def is_same_resolution(res1: float, res2: float) -> bool:
     """Returns whether the two resolutions are the same."""
     return (max(res1, res2) / min(res1, res2) - 1) < RESOLUTION_EPSILON

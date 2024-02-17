@@ -4,6 +4,8 @@ from typing import Any, Optional
 
 import pytimeparse
 
+from rslearn.utils import PixelBounds, Projection
+
 
 class DType(Enum):
     UINT8 = "uint8"
@@ -20,6 +22,7 @@ class BandSetConfig:
         bands: Optional[list[str]] = None,
         format: str = "geotiff",
         zoom_offset: int = 0,
+        remap_config: Optional[dict[str, Any]] = None,
     ) -> None:
         """Creates a new BandSetConfig instance.
 
@@ -37,6 +40,7 @@ class BandSetConfig:
         self.format = format
         self.dtype = dtype
         self.zoom_offset = zoom_offset
+        self.remap_config = remap_config
 
     def serialize(self) -> dict[str, Any]:
         return {
@@ -44,6 +48,7 @@ class BandSetConfig:
             "format": self.format,
             "dtype": self.dtype,
             "zoom_offset": self.zoom_offset,
+            "remap": self.remap_config,
         }
 
     @staticmethod
@@ -55,7 +60,40 @@ class BandSetConfig:
             bands=config.get("bands"),
             format=config.get("format", "geotiff"),
             zoom_offset=config.get("zoom_offset", 0),
+            remap_config=config.get("remap"),
         )
+
+    def get_final_projection_and_bounds(
+        self,
+        projection: Projection,
+        bounds: Optional[PixelBounds],
+    ) -> tuple[Projection, Optional[PixelBounds]]:
+        """Gets the final projection/bounds based on band set config.
+
+        The band set config may apply a non-zero zoom offset that modifies the window's
+        projection.
+
+        Args:
+            projection: the window's projection
+            bounds: the window's bounds (optional)
+            band_set: band set configuration object
+
+        Returns:
+            tuple of updated projection and bounds with zoom offset applied
+        """
+        if self.zoom_offset == 0:
+            return projection, bounds
+        projection = Projection(
+            projection.crs,
+            projection.x_resolution / (2**self.zoom_offset),
+            projection.y_resolution / (2**self.zoom_offset),
+        )
+        if bounds:
+            if self.zoom_offset > 0:
+                bounds = tuple(x * (2**self.zoom_offset) for x in bounds)
+            else:
+                bounds = tuple(x // (2 ** (-self.zoom_offset)) for x in bounds)
+        return projection, bounds
 
 
 class SpaceMode(Enum):

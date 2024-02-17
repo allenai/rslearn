@@ -5,7 +5,6 @@ from typing import Optional
 import rslearn.data_sources
 from rslearn.config import TileStoreConfig, load_layer_config
 from rslearn.data_sources import Item
-from rslearn.data_sources.raster_source import get_final_projection_and_bounds
 from rslearn.tile_stores import PrefixedTileStore, TileStore, load_tile_store
 
 from .materialize import Materializers
@@ -53,6 +52,7 @@ class Dataset:
                 for layer_name, d in config["layers"].items()
             }
             self.tile_store_config = TileStoreConfig.from_config(config["tile_store"])
+            self.materializer_name = config.get("materialize")
 
     def load_windows(
         self, groups: Optional[list[str]] = None, names: Optional[list[str]] = None
@@ -206,20 +206,45 @@ def is_window_ingested(dataset: Dataset, window: Window) -> bool:
             for serialized_item in group:
                 item = Item.deserialize(serialized_item)
                 for band_set in layer_cfg.band_sets:
-                    projection, _ = get_final_projection_and_bounds(
-                        window.projection, window.bounds, band_set
+                    projection, _ = band_set.get_final_projection_and_bounds(
+                        window.projection, window.bounds
                     )
-                    layer_id = (
+                    layer_prefix = (
                         layer_name,
                         item.name,
-                        "".join(band_set.bands),
-                        str(projection),
                     )
-                    ts_layer = tile_store.get_layer(layer_id)
-                    if not ts_layer:
+                    # Make sure that layers exist containing each configured band.
+                    # And that those layers are marked completed.
+                    suffixes = tile_store.list_layers(layer_prefix)
+                    needed_suffixes = []
+                    needed_bands = {band for band in band_set.bands}
+                    for suffix in suffixes:
+                        cur_bands = suffix.split("_")
+                        is_needed = False
+                        for band in cur_bands:
+                            if band in needed_bands:
+                                is_needed = True
+                                needed_bands.remove(band)
+                        if not is_needed:
+                            continue
+                        needed_suffixes.append(suffix)
+                    if len(needed_bands) > 0:
                         return False
-                    if not ts_layer.get_metadata().properties.get("completed"):
-                        return False
+
+                    for suffix in needed_suffixes:
+                        layer_id = (
+                            layer_name,
+                            item.name,
+                            suffix,
+                            str(projection),
+                        )
+                        ts_layer = tile_store.get_layer(layer_id)
+                        if not ts_layer:
+                            print(item.name, band_set)
+                            return False
+                        if not ts_layer.get_metadata().properties.get("completed"):
+                            print(item.name, band_set)
+                            return False
     return True
 
 
@@ -240,9 +265,11 @@ def materialize_dataset_windows(dataset: Dataset, windows: list[Window]) -> None
 
         for window in windows:
             if not is_window_ingested(dataset, window):
+                print("not ingested")
                 continue
             layer_datas = window.load_layer_datas()
             if layer_name not in layer_datas:
+                print("not data")
                 continue
             layer_data = layer_datas[layer_name]
             item_groups = []
@@ -258,7 +285,11 @@ def materialize_dataset_windows(dataset: Dataset, windows: list[Window]) -> None
                     len(item_groups), layer_name
                 )
             )
-            materializer = Materializers["raster"]
+
+            if dataset.materializer_name:
+                materializer = Materializers[dataset.materializer_name]
+            else:
+                materializer = Materializers[layer_cfg.layer_type.value]
             materializer.materialize(
                 tile_store, window, layer_name, layer_cfg, item_groups
             )

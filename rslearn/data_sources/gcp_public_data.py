@@ -307,7 +307,7 @@ class Sentinel2(DataSource):
         for item, cur_geometries in zip(items, geometries):
             for suffix, band_names in self.bands:
                 cur_tile_store = PrefixedTileStore(
-                    tile_store, (item.name, "".join(band_names))
+                    tile_store, (item.name, "_".join(band_names))
                 )
                 needed_projections = get_needed_projections(
                     cur_tile_store, band_names, self.config.band_sets, cur_geometries

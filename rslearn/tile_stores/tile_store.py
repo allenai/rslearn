@@ -141,6 +141,17 @@ class TileStore:
         """
         raise NotImplementedError
 
+    def list_layers(self, prefix: tuple[str, ...] = tuple()) -> list[str]:
+        """List options for next part of layer ID with the specified prefix.
+
+        Args:
+            prefix: the prefix to match
+
+        Returns:
+            available options for next part of the layer ID
+        """
+        raise NotImplementedError
+
 
 class PrefixedTileStore(TileStore):
     """Wraps another tile store by adding prefix to all layer IDs."""
@@ -173,3 +184,14 @@ class PrefixedTileStore(TileStore):
             the layer, or None if it does not exist yet.
         """
         return self.tile_store.get_layer(self.prefix + layer_id)
+
+    def list_layers(self, prefix: tuple[str, ...] = tuple()) -> list[str]:
+        """List options for next part of layer ID with the specified prefix.
+
+        Args:
+            prefix: the prefix to match
+
+        Returns:
+            available options for next part of the layer ID
+        """
+        return self.tile_store.list_layers(self.prefix + prefix)
