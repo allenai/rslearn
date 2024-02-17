@@ -127,7 +127,6 @@ class RasterMaterializer(Materializer):
             remapper = None
             if band_cfg.remap_config:
                 remapper = load_remapper(band_cfg.remap_config)
-            print("remapper", remapper)
 
             raster_format = load_raster_format(RasterFormatConfig(band_cfg.format, {}))
 
@@ -153,7 +152,6 @@ class RasterMaterializer(Materializer):
                     dtype=band_cfg.dtype.value,
                 )
                 for item in group:
-                    print(band_cfg.bands, item.name)
                     # Identify which tile store layer(s) to read to get the configured
                     # bands.
                     needed_band_indexes = {}
@@ -189,7 +187,6 @@ class RasterMaterializer(Materializer):
                                 str(projection),
                             )
                         )
-                        print(suffix, src_indexes, dst_indexes)
                         read_raster_window_from_tiles(
                             dst, ts_layer, bounds, src_indexes, dst_indexes, remapper
                         )
