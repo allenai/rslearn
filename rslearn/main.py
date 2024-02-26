@@ -2,6 +2,7 @@
 
 import argparse
 import multiprocessing
+import random
 import sys
 from typing import Callable, Optional
 
@@ -85,6 +86,8 @@ def apply_on_windows(
     if workers == 0:
         f(windows)
         return
+
+    random.shuffle(windows)
 
     if use_initial_job:
         # Apply directly on first window to get any initialization out of the way.

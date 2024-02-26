@@ -6,7 +6,8 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Generator
+import random
+from typing import Any, Generator, Optional
 
 import boto3
 import dateutil.parser
@@ -338,21 +339,24 @@ class Sentinel2Modality(Enum):
 class Sentinel2Item(Item):
     """An item in the Sentinel2 data source."""
 
-    def __init__(self, name: str, geometry: STGeometry, blob_path: str):
+    def __init__(self, name: str, geometry: STGeometry, blob_path: str, cloud_cover: float):
         """Creates a new Sentinel2Item.
 
         Args:
             name: unique name of the item
             geometry: the spatial and temporal extent of the item
             blob_path: path in bucket, e.g. tiles/51/C/WM/2024/2/1/0/
+            cloud_cover: the scene's cloud cover
         """
         super().__init__(name, geometry)
         self.blob_path = blob_path
+        self.cloud_cover = cloud_cover
 
     def serialize(self) -> dict:
         """Serializes the item to a JSON-encodable dictionary."""
         d = super().serialize()
         d["blob_path"] = self.blob_path
+        d["cloud_cover"] = self.cloud_cover
         return d
 
     @staticmethod
@@ -365,6 +369,7 @@ class Sentinel2Item(Item):
             name=item.name,
             geometry=item.geometry,
             blob_path=d["blob_path"],
+            cloud_cover=d["cloud_cover"],
         )
 
 
@@ -424,6 +429,7 @@ class Sentinel2(DataSource):
         modality: Sentinel2Modality,
         metadata_cache_dir: str,
         max_time_delta: timedelta = timedelta(days=30),
+        sort_by: Optional[str] = None,
     ) -> None:
         """Initialize a new Sentinel2 instance.
 
@@ -434,11 +440,14 @@ class Sentinel2(DataSource):
                 query end time to look for products. This is required due to the large
                 number of available products, and defaults to 30 days.
             raster_options: common raster configuration options.
+            sort_by: can be "cloud_cover", default arbitrary order; only has effect for
+                SpaceMode.WITHIN.
         """
         self.config = config
         self.modality = modality
         self.metadata_cache_dir = metadata_cache_dir
         self.max_time_delta = max_time_delta
+        self.sort_by = sort_by
 
         bucket_name = self.bucket_names[modality]
         self.bucket = boto3.resource("s3").Bucket(bucket_name)
@@ -457,23 +466,24 @@ class Sentinel2(DataSource):
             modality=Sentinel2Modality(d["modality"]),
             metadata_cache_dir=d["metadata_cache_dir"],
             max_time_delta=max_time_delta,
+            sort_by=d.get("sort_by"),
         )
 
     def _read_products(
-        self, needed_cell_days: set[tuple[str, int, int, int]]
+        self, needed_cell_months: set[tuple[str, int, int, int]]
     ) -> Generator[Sentinel2Item, None, None]:
         """Read productInfo.json files and yield relevant Sentinel2Items.
 
         Args:
-            needed_cell_days: set of (mgrs grid cell, year, month, day) where we need
+            needed_cell_months: set of (mgrs grid cell, year, month) where we need
                 to search for images.
         """
-        for cell_id, year, month, day in tqdm.tqdm(
-            needed_cell_days, desc="Reading product infos"
+        for cell_id, year, month in tqdm.tqdm(
+            needed_cell_months, desc="Reading product infos"
         ):
             assert len(cell_id) == 5
             local_fname = os.path.join(
-                self.metadata_cache_dir, f"{cell_id}_{year}_{month}_{day}.json"
+                self.metadata_cache_dir, f"{cell_id}_{year}_{month}.json"
             )
 
             if not os.path.exists(local_fname):
@@ -482,7 +492,7 @@ class Sentinel2(DataSource):
                 cell_part3 = cell_id[3:5]
                 prefix = (
                     f"tiles/{cell_part1}/{cell_part2}/{cell_part3}/"
-                    + f"{year}/{month}/{day}/"
+                    + f"{year}/{month}/"
                 )
 
                 products = []
@@ -496,11 +506,19 @@ class Sentinel2(DataSource):
                         obj.key, buf, ExtraArgs={"RequestPayer": "requester"}
                     )
                     buf.seek(0)
-                    products.append(json.load(buf))
+                    product = json.load(buf)
+                    if "tileDataGeometry" not in product:
+                        print("warning: skipping product missing tileDataGeometry", product)
+                        continue
+                    if product["tileDataGeometry"]["type"] != "Polygon":
+                        print("warning: skipping product with non-polygon geometry", product)
+                        continue
+                    products.append(product)
 
-                with open(local_fname + ".tmp", "w") as f:
+                tmp_local_fname = local_fname + ".tmp." + str(random.randint(0, 10000))
+                with open(tmp_local_fname, "w") as f:
                     json.dump(products, f)
-                os.rename(local_fname + ".tmp", local_fname)
+                os.rename(tmp_local_fname, local_fname)
 
             else:
                 with open(local_fname) as f:
@@ -508,7 +526,6 @@ class Sentinel2(DataSource):
 
             for product in products:
                 tile_geometry_dict = product["tileDataGeometry"]
-                assert tile_geometry_dict["type"] == "Polygon"
                 assert tile_geometry_dict["crs"]["type"] == "name"
                 crs = CRS.from_string(tile_geometry_dict["crs"]["properties"]["name"])
                 ts = dateutil.parser.isoparse(product["timestamp"])
@@ -521,6 +538,7 @@ class Sentinel2(DataSource):
                     name=product["productName"],
                     geometry=geometry,
                     blob_path=product["path"] + "/",
+                    cloud_cover=product["cloudyPixelPercentage"],
                 )
 
     def get_items(
@@ -539,7 +557,7 @@ class Sentinel2(DataSource):
         # images.
         # To do so, we iterate over the geometries and figure out all the MGRS cells
         # that they intersect.
-        needed_cell_days = set()
+        needed_cell_months = set()
         wgs84_geometries = [
             geometry.to_projection(WGS84_PROJECTION) for geometry in geometries
         ]
@@ -553,10 +571,10 @@ class Sentinel2(DataSource):
                     wgs84_geometry.time_range[0] - self.max_time_delta,
                     wgs84_geometry.time_range[1] + self.max_time_delta,
                 ):
-                    needed_cell_days.add((cell_id, ts.year, ts.month, ts.day))
+                    needed_cell_months.add((cell_id, ts.year, ts.month))
 
         items_by_cell = {}
-        for item in self._read_products(needed_cell_days):
+        for item in self._read_products(needed_cell_months):
             cell_id = "".join(item.blob_path.split("/")[1:4])
             if cell_id not in items_by_cell:
                 items_by_cell[cell_id] = []
@@ -567,10 +585,20 @@ class Sentinel2(DataSource):
             items = []
             for cell_id in rslearn.utils.mgrs.for_each_cell(wgs84_geometry.shp.bounds):
                 for item in items_by_cell.get(cell_id, []):
-                    item_geom = item.geometry.to_projection(geometry.projection)
+                    try:
+                        item_geom = item.geometry.to_projection(geometry.projection)
+                    except ValueError as e:
+                        print(f"error re-projecting item {item.name}: {e}")
+                        continue
                     if not geometry.shp.intersects(item_geom.shp):
                         continue
                     items.append(item)
+
+            if self.sort_by == "cloud_cover":
+                items.sort(key=lambda item: item.cloud_cover)
+            elif self.sort_by is not None:
+                raise ValueError(f"invalid sort_by setting ({self.sort_by})")
+
             cur_groups = rslearn.data_sources.utils.match_candidate_items_to_window(
                 geometry, items, query_config
             )
@@ -608,9 +636,15 @@ class Sentinel2(DataSource):
                     continue
 
                 buf = io.BytesIO()
-                self.bucket.download_fileobj(
-                    item.blob_path + fname, buf, ExtraArgs={"RequestPayer": "requester"}
-                )
+                try:
+                    self.bucket.download_fileobj(
+                        item.blob_path + fname, buf, ExtraArgs={"RequestPayer": "requester"}
+                    )
+                except Exception as e:
+                    # TODO: sometimes for some reason object doesn't exist
+                    # we should probably investigate further why it happens
+                    # and then should create the layer here and mark it completed
+                    continue
                 buf.seek(0)
                 with rasterio.open(buf) as raster:
                     for projection in needed_projections:

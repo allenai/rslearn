@@ -101,11 +101,13 @@ class FileTileStoreLayer(TileStoreLayer):
 
     def save_metadata(self, metadata: LayerMetadata) -> None:
         """Save the LayerMetadata associated with this layer."""
-        with open(os.path.join(self.root_dir, "metadata.json.tmp"), "w") as f:
+        local_fname = os.path.join(self.root_dir, "metadata.json")
+        tmp_fname = local_fname + ".tmp." + str(os.getpid())
+        with open(tmp_fname, "w") as f:
             json.dump(metadata.serialize(), f)
         os.rename(
-            os.path.join(self.root_dir, "metadata.json.tmp"),
-            os.path.join(self.root_dir, "metadata.json"),
+            tmp_fname,
+            local_fname,
         )
 
 
@@ -140,8 +142,8 @@ class FileTileStore(TileStore):
             projection=metadata.projection,
             default_raster_format=self.default_raster_format,
         )
-        if not os.path.exists(layer_dir):
-            os.makedirs(layer_dir)
+        if not os.path.exists(os.path.join(layer_dir, "metadata.json")):
+            os.makedirs(layer_dir, exist_ok=True)
             layer.save_metadata(metadata)
         return layer
 
@@ -155,7 +157,7 @@ class FileTileStore(TileStore):
             the layer, or None if it does not exist yet.
         """
         layer_dir = self._get_layer_dir(layer_id)
-        if not os.path.exists(layer_dir):
+        if not os.path.exists(os.path.join(layer_dir, "metadata.json")):
             return None
         return FileTileStoreLayer(layer_dir)
 
