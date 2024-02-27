@@ -168,20 +168,22 @@ def ingest_raster(
     else:
         # Compute the suggested target transform.
         # rasterio negates the y resolution itself so here we have to negate it.
-        dst_transform, dst_width, dst_height = (
-            rasterio.warp.calculate_default_transform(
-                # Source info.
-                src_crs=raster.crs,
-                width=raster.width,
-                height=raster.height,
-                left=raster.bounds[0],
-                bottom=raster.bounds[1],
-                right=raster.bounds[2],
-                top=raster.bounds[3],
-                # Destination info.
-                dst_crs=projection.crs,
-                resolution=(projection.x_resolution, -projection.y_resolution),
-            )
+        (
+            dst_transform,
+            dst_width,
+            dst_height,
+        ) = rasterio.warp.calculate_default_transform(
+            # Source info.
+            src_crs=raster.crs,
+            width=raster.width,
+            height=raster.height,
+            left=raster.bounds[0],
+            bottom=raster.bounds[1],
+            right=raster.bounds[2],
+            top=raster.bounds[3],
+            # Destination info.
+            dst_crs=projection.crs,
+            resolution=(projection.x_resolution, -projection.y_resolution),
         )
 
         # Re-project the raster to the destination crs, resolution, and transform.

@@ -4,9 +4,9 @@ import glob
 import io
 import json
 import os
+import random
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-import random
 from typing import Any, Generator, Optional
 
 import boto3
@@ -339,7 +339,9 @@ class Sentinel2Modality(Enum):
 class Sentinel2Item(Item):
     """An item in the Sentinel2 data source."""
 
-    def __init__(self, name: str, geometry: STGeometry, blob_path: str, cloud_cover: float):
+    def __init__(
+        self, name: str, geometry: STGeometry, blob_path: str, cloud_cover: float
+    ):
         """Creates a new Sentinel2Item.
 
         Args:
@@ -508,10 +510,16 @@ class Sentinel2(DataSource):
                     buf.seek(0)
                     product = json.load(buf)
                     if "tileDataGeometry" not in product:
-                        print("warning: skipping product missing tileDataGeometry", product)
+                        print(
+                            "warning: skipping product missing tileDataGeometry",
+                            product,
+                        )
                         continue
                     if product["tileDataGeometry"]["type"] != "Polygon":
-                        print("warning: skipping product with non-polygon geometry", product)
+                        print(
+                            "warning: skipping product with non-polygon geometry",
+                            product,
+                        )
                         continue
                     products.append(product)
 
@@ -638,12 +646,17 @@ class Sentinel2(DataSource):
                 buf = io.BytesIO()
                 try:
                     self.bucket.download_fileobj(
-                        item.blob_path + fname, buf, ExtraArgs={"RequestPayer": "requester"}
+                        item.blob_path + fname,
+                        buf,
+                        ExtraArgs={"RequestPayer": "requester"},
                     )
                 except Exception as e:
                     # TODO: sometimes for some reason object doesn't exist
                     # we should probably investigate further why it happens
                     # and then should create the layer here and mark it completed
+                    print(
+                        f"warning: got error {e} downloading {item.blob_path + fname}"
+                    )
                     continue
                 buf.seek(0)
                 with rasterio.open(buf) as raster:
