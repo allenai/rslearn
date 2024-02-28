@@ -4,10 +4,9 @@ import glob
 import io
 import json
 import os
-import random
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Generator, Optional
+from typing import Any, BinaryIO, Generator, Optional
 
 import boto3
 import dateutil.parser
@@ -24,9 +23,15 @@ import rslearn.utils.mgrs
 from rslearn.config import LayerConfig, RasterLayerConfig
 from rslearn.const import WGS84_EPSG, WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import GridIndex, Projection, STGeometry, daterange
+from rslearn.utils import GridIndex, Projection, STGeometry, daterange, open_atomic
 
-from .data_source import DataSource, Item, QueryConfig
+from .data_source import (
+    DataSource,
+    Item,
+    ItemLookupDataSource,
+    QueryConfig,
+    RetrieveItemDataSource,
+)
 from .raster_source import get_needed_projections, ingest_raster
 
 
@@ -375,7 +380,7 @@ class Sentinel2Item(Item):
         )
 
 
-class Sentinel2(DataSource):
+class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
     """A data source for Sentinel-2 L1C and L2A imagery on AWS.
 
     Specifically, uses the sentinel-s2-l1c and sentinel-s2-l2a S3 buckets maintained by
@@ -523,10 +528,8 @@ class Sentinel2(DataSource):
                         continue
                     products.append(product)
 
-                tmp_local_fname = local_fname + ".tmp." + str(random.randint(0, 10000))
-                with open(tmp_local_fname, "w") as f:
+                with open_atomic(local_fname, "w") as f:
                     json.dump(products, f)
-                os.rename(tmp_local_fname, local_fname)
 
             else:
                 with open(local_fname) as f:
@@ -614,10 +617,41 @@ class Sentinel2(DataSource):
 
         return groups
 
+    def get_item_by_name(self, name: str) -> Item:
+        """Gets an item by name."""
+        # Product name is like:
+        #   S2B_MSIL1C_20240201T230819_N0510_R015_T51CWM_20240202T012755.
+        # We want to use _read_products so we need to extract:
+        # - cell_id: 51CWM
+        # - year: 2024
+        # - month: 2
+        parts = name.split("_")
+        assert parts[5][0] == "T"
+        cell_id = parts[5][1:]
+        assert len(parts[2]) == 15
+        year = int(parts[2][0:4])
+        month = int(parts[2][4:6])
+        for item in self._read_products({(cell_id, year, month)}):
+            if item.name == name:
+                return item
+        raise ValueError(f"item {name} not found")
+
     def deserialize_item(self, serialized_item: Any) -> Item:
         """Deserializes an item from JSON-decoded data."""
         assert isinstance(serialized_item, dict)
         return Sentinel2Item.deserialize(serialized_item)
+
+    def retrieve_item(self, item: Item) -> Generator[tuple[str, BinaryIO], None, None]:
+        """Retrieves the rasters corresponding to an item as file streams."""
+        for fname, _ in self.band_fnames[self.modality]:
+            buf = io.BytesIO()
+            self.bucket.download_fileobj(
+                item.blob_path + fname,
+                buf,
+                ExtraArgs={"RequestPayer": "requester"},
+            )
+            buf.seek(0)
+            yield (fname, buf)
 
     def ingest(
         self,

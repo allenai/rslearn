@@ -3,11 +3,10 @@
 import io
 import json
 import os
-import random
 import urllib.request
 import zipfile
 from datetime import timedelta
-from typing import Any, Generator, Optional
+from typing import Any, BinaryIO, Generator, Optional
 
 import boto3
 import dateutil.parser
@@ -23,7 +22,7 @@ import rslearn.utils.mgrs
 from rslearn.config import LayerConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import STGeometry
+from rslearn.utils import STGeometry, open_atomic
 
 from .data_source import DataSource, Item, QueryConfig
 from .raster_source import get_needed_projections, ingest_raster
@@ -203,10 +202,8 @@ class LandsatOliTirs(DataSource):
                         )
                     )
 
-                tmp_local_fname = local_fname + ".tmp." + str(random.randint(0, 10000))
-                with open(tmp_local_fname, "w") as f:
+                with open_atomic(local_fname, "w") as f:
                     json.dump([item.serialize() for item in items], f)
-                os.rename(tmp_local_fname, local_fname)
 
             else:
                 with open(local_fname) as f:
@@ -297,10 +294,41 @@ class LandsatOliTirs(DataSource):
 
         return groups
 
+    def get_item_by_name(self, name: str) -> Item:
+        """Gets an item by name."""
+        # Product name is like LC08_L1TP_046027_20230715_20230724_02_T1.
+        # We want to use _read_products so we need to extract:
+        # - year: 2023
+        # - path: 046
+        # - row: 027
+        parts = name.split("_")
+        assert len(parts[2]) == 6
+        assert len(parts[3]) == 8
+        year = int(parts[3][0:4])
+        path = parts[2][0:3]
+        row = parts[2][3:6]
+        for item in self._read_products({(year, path, row)}):
+            if item.name == name:
+                return item
+        raise ValueError(f"item {name} not found")
+
     def deserialize_item(self, serialized_item: Any) -> Item:
         """Deserializes an item from JSON-decoded data."""
         assert isinstance(serialized_item, dict)
         return LandsatOliTirsItem.deserialize(serialized_item)
+
+    def retrieve_item(self, item: Item) -> Generator[tuple[str, BinaryIO], None, None]:
+        """Retrieves the rasters corresponding to an item as file streams."""
+        for band in self.bands:
+            buf = io.BytesIO()
+            self.bucket.download_fileobj(
+                item.blob_path + f"{band}.TIF",
+                buf,
+                ExtraArgs={"RequestPayer": "requester"},
+            )
+            buf.seek(0)
+            fname = item.blob_path.split("/")[-1] + f"_{band}.TIF"
+            yield (fname, buf)
 
     def ingest(
         self,

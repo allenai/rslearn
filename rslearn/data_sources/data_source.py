@@ -1,6 +1,6 @@
 """Base classes for rslearn data sources."""
 
-from typing import Any
+from typing import Any, BinaryIO, Generator
 
 from rslearn.config import QueryConfig
 from rslearn.tile_stores import TileStore
@@ -74,4 +74,20 @@ class DataSource:
             items: the items to ingest
             geometries: a list of geometries needed for each item
         """
+        raise NotImplementedError
+
+
+class ItemLookupDataSource(DataSource):
+    """A data source that can look up items by name."""
+
+    def get_item_by_name(self, name: str) -> Item:
+        """Gets an item by name."""
+        raise NotImplementedError
+
+
+class RetrieveItemDataSource(DataSource):
+    """A data source that can retrieve items in their raw format."""
+
+    def retrieve_item(self, item: Item) -> Generator[tuple[str, BinaryIO], None, None]:
+        """Retrieves the rasters corresponding to an item as file streams."""
         raise NotImplementedError

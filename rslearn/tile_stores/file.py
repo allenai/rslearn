@@ -6,7 +6,7 @@ import numpy.typing as npt
 
 from rslearn.config import RasterFormatConfig, TileStoreConfig
 from rslearn.const import TILE_SIZE
-from rslearn.utils import Projection
+from rslearn.utils import Projection, open_atomic
 from rslearn.utils.raster_format import (
     GeotiffRasterFormat,
     RasterFormat,
@@ -80,7 +80,7 @@ class FileTileStoreLayer(TileStoreLayer):
                 (x + 1) * TILE_SIZE,
                 (y + 1) * TILE_SIZE,
             )
-            with open(f"{self.root_dir}/{x}_{y}.{extension}", "wb") as f:
+            with open_atomic(f"{self.root_dir}/{x}_{y}.{extension}", "wb") as f:
                 format.encode_raster(f, self.projection, bounds, image)
 
     def get_metadata(self) -> LayerMetadata:
@@ -102,13 +102,8 @@ class FileTileStoreLayer(TileStoreLayer):
     def save_metadata(self, metadata: LayerMetadata) -> None:
         """Save the LayerMetadata associated with this layer."""
         local_fname = os.path.join(self.root_dir, "metadata.json")
-        tmp_fname = local_fname + ".tmp." + str(os.getpid())
-        with open(tmp_fname, "w") as f:
+        with open_atomic(local_fname, "w") as f:
             json.dump(metadata.serialize(), f)
-        os.rename(
-            tmp_fname,
-            local_fname,
-        )
 
 
 class FileTileStore(TileStore):

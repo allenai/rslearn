@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 import shapely
 
-from rslearn.utils import Projection, STGeometry
+from rslearn.utils import Projection, STGeometry, open_atomic
 
 
 class WindowLayerData:
@@ -82,12 +82,8 @@ class Window:
             ),
             "options": self.options,
         }
-        with open(os.path.join(self.window_root, "metadata.json.tmp"), "w") as f:
+        with open_atomic(os.path.join(self.window_root, "metadata.json"), "w") as f:
             json.dump(metadata, f)
-        os.rename(
-            os.path.join(self.window_root, "metadata.json.tmp"),
-            os.path.join(self.window_root, "metadata.json"),
-        )
 
     def get_geometry(self) -> STGeometry:
         """Computes the STGeometry corresponding to this window."""
@@ -111,12 +107,8 @@ class Window:
     def save_layer_datas(self, layer_datas: dict[str, WindowLayerData]) -> None:
         """Save layer datas to items.json."""
         json_data = [layer_data.serialize() for layer_data in layer_datas.values()]
-        with open(os.path.join(self.window_root, "items.json.tmp"), "w") as f:
+        with open_atomic(os.path.join(self.window_root, "items.json"), "w") as f:
             json.dump(json_data, f)
-        os.rename(
-            os.path.join(self.window_root, "items.json.tmp"),
-            os.path.join(self.window_root, "items.json"),
-        )
 
     @staticmethod
     def load(window_root: str) -> "Window":

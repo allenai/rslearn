@@ -7,7 +7,7 @@ import json
 import os
 import xml.etree.ElementTree as ET
 from datetime import timedelta
-from typing import Any, Generator, Optional
+from typing import Any, BinaryIO, Generator, Optional
 
 import dateutil.parser
 import pytimeparse
@@ -16,12 +16,13 @@ import shapely
 import tqdm
 from google.cloud import storage
 
+import rslearn.utils.mgrs
 from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import STGeometry
+from rslearn.utils import STGeometry, open_atomic
 from rslearn.utils.rtree_index import RtreeIndex
 
 from .raster_source import get_needed_projections, ingest_raster
@@ -39,6 +40,7 @@ class Sentinel2Item(Item):
             name: unique name of the item
             geometry: the spatial and temporal extent of the item
             blob_prefix: blob path prefix for the images
+            cloud_cover: cloud cover percentage between 0-100
         """
         super().__init__(name, geometry)
         self.blob_prefix = blob_prefix
@@ -100,12 +102,14 @@ class Sentinel2(DataSource):
         index_cache_dir: str,
         max_time_delta: timedelta = timedelta(days=30),
         sort_by: Optional[str] = None,
+        use_rtree_index: bool = True,
     ):
         """Initialize a new Sentinel2 instance.
 
         Args:
             index_cache_dir: local directory to cache the index.csv.gz contents, as
-                well as individual product metadata files.
+                well as individual product metadata files. Defaults to None in which
+                case products are looked up from the cloud storage directly.
             max_time_delta: maximum time before a query start time or after a
                 query end time to look for products. This is required due to the large
                 number of available products, and defaults to 30 days.
@@ -119,11 +123,14 @@ class Sentinel2(DataSource):
 
         self.bucket = storage.Client().bucket(self.bucket_name)
 
-        rtree_fname = os.path.join(self.index_cache_dir, "rtree_index")
-        needs_building = not os.path.exists(rtree_fname + ".dat")
-        self.rtree_index = RtreeIndex(rtree_fname)
-        if needs_building:
-            self._build_index()
+        if use_rtree_index:
+            rtree_fname = os.path.join(self.index_cache_dir, "rtree_index")
+            needs_building = not os.path.exists(rtree_fname + ".dat")
+            self.rtree_index = RtreeIndex(rtree_fname)
+            if needs_building:
+                self._build_index()
+        else:
+            self.rtree_index = None
 
     @staticmethod
     def from_config(config: LayerConfig) -> "Sentinel2":
@@ -199,60 +206,114 @@ class Sentinel2(DataSource):
                 item.geometry.shp.bounds, json.dumps(item.serialize())
             )
 
-    def _get_detailed_geometry(self, item: Sentinel2Item) -> shapely.Geometry:
-        """Get the actual geometry of a Sentinel-2 scene.
+    def get_item_by_name(self, name: str) -> Item:
+        """Gets an item by name.
 
-        The item geometry is just bounding box from index file. This function instead
-        returns complete geometry loaded from individual product metadata
-        (MTD_MSIL1C.xml) file.
+        Reads the individual product metadata file (MTD_MSIL1C.xml) to get both the
+        expected blob path where images are stored as well as the detailed geometry of
+        the product (not just the bounding box).
 
         Args:
-            item: the item to get geometry for
+            name: the name of the item to get
 
         Returns:
-            the WGS84 shapely geometry
+            the item object
         """
-        local_xml_fname = os.path.join(self.index_cache_dir, item.name + ".xml")
+        parts = name.split("_")
+        assert len(parts[5]) == 6
+        assert parts[5][0] == "T"
+        cell_id = parts[5][1:]
+        base_url = f"tiles/{cell_id[0:2]}/{cell_id[2:3]}/{cell_id[3:5]}/{name}.SAFE/"
+
+        local_xml_fname = os.path.join(self.index_cache_dir, name + ".xml")
         if not os.path.exists(local_xml_fname):
-            base_url = item.blob_prefix.split("/GRANULE")[0]
-            metadata_blob_path = base_url + "/MTD_MSIL1C.xml"
+            metadata_blob_path = base_url + "MTD_MSIL1C.xml"
             blob = self.bucket.blob(metadata_blob_path)
             blob.download_to_filename(local_xml_fname)
 
         tree = ET.parse(local_xml_fname)
-        # Now get the EXT_POS_LIST tag which has flat list of polygon coordinates.
+
+        # The EXT_POS_LIST tag has flat list of polygon coordinates.
         elements = list(tree.iter("EXT_POS_LIST"))
         assert len(elements) == 1
         coords = elements[0].text.strip().split(" ")
         # Convert flat list of lat1 lon1 lat2 lon2 ...
         # into (lon1, lat1), (lon2, lat2), ...
+        # Then we can get the shapely geometry.
         coords = [
             [float(coords[i + 1]), float(coords[i])] for i in range(0, len(coords), 2)
         ]
-        # Make GeoJSON so we can later run shapely.geometry.shape on it.
-        geojson_geometry = {
-            "type": "Polygon",
-            "coordinates": [coords],
-        }
-        return shapely.geometry.shape(geojson_geometry)
+        shp = shapely.Polygon(coords)
 
-    def get_items(
-        self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
-        """Get a list of items in the data source intersecting the given geometries.
+        # Get blob prefix which is a subfolder of the base_url
+        elements = list(tree.iter("IMAGE_FILE"))
+        elements = [el for el in elements if el.text.endswith("_B01")]
+        assert len(elements) == 1
+        blob_prefix = base_url + elements[0].text.split("B01")[0]
+
+        elements = list(tree.iter("PRODUCT_START_TIME"))
+        assert len(elements) == 1
+        start_time = dateutil.parser.isoparse(elements[0].text)
+
+        elements = list(tree.iter("Cloud_Coverage_Assessment"))
+        assert len(elements) == 1
+        cloud_cover = float(elements[0].text)
+
+        return Sentinel2Item(
+            name,
+            STGeometry(WGS84_PROJECTION, shp, (start_time, start_time)),
+            blob_prefix,
+            cloud_cover,
+        )
+
+    def _read_products(
+        self, needed_cell_years: set[tuple[str, int]]
+    ) -> Generator[Sentinel2Item, None, None]:
+        """Read files and yield relevant Sentinel2Items.
 
         Args:
-            geometries: the spatiotemporal geometries
-            query_config: the query configuration
-
-        Returns:
-            List of groups of items that should be retrieved for each geometry.
+            needed_cell_years: set of (mgrs grid cell, year) where we need to search
+                for images.
         """
-        wgs84_geometries = [
-            geometry.to_projection(WGS84_PROJECTION) for geometry in geometries
-        ]
+        for cell_id, year in tqdm.tqdm(needed_cell_years, desc="Reading product infos"):
+            assert len(cell_id) == 5
+            local_fname = os.path.join(self.index_cache_dir, f"{cell_id}_{year}.json")
 
-        items = [[] for _ in geometries]
+            if not os.path.exists(local_fname):
+                cell_part1 = cell_id[0:2]
+                cell_part2 = cell_id[2:3]
+                cell_part3 = cell_id[3:5]
+
+                items = []
+
+                for product_prefix in ["S2A_MSIL1C", "S2B_MSIL1C"]:
+                    blob_prefix = (
+                        f"tiles/{cell_part1}/{cell_part2}/{cell_part3}/"
+                        + f"{product_prefix}_{year}"
+                    )
+                    blobs = self.bucket.list_blobs(prefix=blob_prefix, delimiter="/")
+                    for blob in blobs:
+                        if not blob.name.endswith(".SAFE_$folder$"):
+                            continue
+                        item_name = blob.name.split("/")[-1].split(".SAFE_$folder$")[0]
+                        item = self.get_item_by_name(item_name)
+                        items.append(item)
+
+                with open_atomic(local_fname, "w") as f:
+                    json.dump([item.serialize() for item in items], f)
+
+            else:
+                with open(local_fname) as f:
+                    items = [Sentinel2Item.deserialize(d) for d in json.load(f)]
+
+            for item in items:
+                yield item
+
+    def _get_candidate_items_index(
+        self, wgs84_geometries: list[STGeometry]
+    ) -> list[list[list[Item]]]:
+        """List relevant items using rtree index."""
+        candidates = [[] for _ in wgs84_geometries]
         for idx, geometry in enumerate(wgs84_geometries):
             time_range = None
             if geometry.time_range:
@@ -272,10 +333,66 @@ class Sentinel2(DataSource):
                 if not actual_shape.intersects(geometry.shp):
                     continue
                 item.geometry.shp = actual_shape
-                items[idx].append(item)
+                candidates[idx].append(item)
+        return candidates
+
+    def _get_candidate_items_direct(
+        self, wgs84_geometries: list[STGeometry]
+    ) -> list[list[list[Item]]]:
+        """Use _read_products to list relevant items."""
+        needed_cell_years = set()
+        for wgs84_geometry in wgs84_geometries:
+            if wgs84_geometry.time_range is None:
+                raise ValueError(
+                    "Sentinel2 on GCP requires geometry time ranges to be set"
+                )
+            for cell_id in rslearn.utils.mgrs.for_each_cell(wgs84_geometry.shp.bounds):
+                for year in range(
+                    (wgs84_geometry.time_range[0] - self.max_time_delta).year,
+                    (wgs84_geometry.time_range[1] + self.max_time_delta).year,
+                ):
+                    needed_cell_years.add((cell_id, year))
+
+        items_by_cell = {}
+        for item in self._read_products(needed_cell_years):
+            cell_id = "".join(item.blob_path.split("/")[1:4])
+            if cell_id not in items_by_cell:
+                items_by_cell[cell_id] = []
+            items_by_cell[cell_id].append(item)
+
+        candidates = [[] for _ in wgs84_geometries]
+        for idx, geometry in enumerate(wgs84_geometries):
+            for cell_id in rslearn.utils.mgrs.for_each_cell(geometry.shp.bounds):
+                for item in items_by_cell.get(cell_id, []):
+                    if not geometry.shp.intersects(item.geometry.shp):
+                        continue
+                    candidates[idx].append(item)
+
+        return candidates
+
+    def get_items(
+        self, geometries: list[STGeometry], query_config: QueryConfig
+    ) -> list[list[list[Item]]]:
+        """Get a list of items in the data source intersecting the given geometries.
+
+        Args:
+            geometries: the spatiotemporal geometries
+            query_config: the query configuration
+
+        Returns:
+            List of groups of items that should be retrieved for each geometry.
+        """
+        wgs84_geometries = [
+            geometry.to_projection(WGS84_PROJECTION) for geometry in geometries
+        ]
+
+        if self.rtree_index:
+            candidates = self._get_candidate_items_index(wgs84_geometries)
+        else:
+            candidates = self._get_candidate_items_direct(wgs84_geometries)
 
         groups = []
-        for geometry, item_list in zip(wgs84_geometries, items):
+        for geometry, item_list in zip(wgs84_geometries, candidates):
             if self.sort_by == "cloud_cover":
                 item_list.sort(key=lambda item: item.cloud_cover)
             elif self.sort_by is not None:
@@ -290,6 +407,19 @@ class Sentinel2(DataSource):
         """Deserializes an item from JSON-decoded data."""
         assert isinstance(serialized_item, dict)
         return Sentinel2Item.deserialize(serialized_item)
+
+    def retrieve_item(self, item: Item) -> Generator[tuple[str, BinaryIO], None, None]:
+        """Retrieves the rasters corresponding to an item as file streams."""
+        for suffix, _ in self.bands:
+            blob_path = item.blob_prefix + suffix
+            fname = blob_path.split("/")[-1]
+            buf = io.BytesIO()
+            blob = self.bucket.blob(item.blob_prefix + suffix)
+            if not blob.exists():
+                continue
+            blob.download_to_file(buf)
+            buf.seek(0)
+            yield (fname, buf)
 
     def ingest(
         self,
