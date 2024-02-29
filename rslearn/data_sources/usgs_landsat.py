@@ -1,24 +1,17 @@
 """Data source for Landsat data from USGS M2M API."""
 
-import csv
-import gzip
 import io
 import json
-import os
-import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, timezone
 import shutil
 import time
-from typing import Any, BinaryIO, Generator, Optional
 import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Any, BinaryIO, Generator, Optional
 
-import dateutil.parser
 import pytimeparse
 import rasterio
 import requests
 import shapely
-import tqdm
-from google.cloud import storage
 
 from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
@@ -26,13 +19,13 @@ from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry
-from rslearn.utils.rtree_index import RtreeIndex
 
 from .raster_source import get_needed_projections, ingest_raster
 
 
 class APIException(Exception):
     """Exception raised for M2M API errors."""
+
     pass
 
 
@@ -92,9 +85,12 @@ class M2MAPIClient:
         Returns:
             list of filter objects
         """
-        return self.request("dataset-filters", {
-            "datasetName": dataset_name,
-        })["data"]
+        return self.request(
+            "dataset-filters",
+            {
+                "datasetName": dataset_name,
+            },
+        )["data"]
 
     def scene_search(
         self,
@@ -166,13 +162,18 @@ class M2MAPIClient:
         Returns:
             full scene metadata
         """
-        return self.request("scene-metadata", {
-            "datasetName": dataset_name,
-            "entityId": entity_id,
-            "metadataType": "full",
-        })["data"]
+        return self.request(
+            "scene-metadata",
+            {
+                "datasetName": dataset_name,
+                "entityId": entity_id,
+                "metadataType": "full",
+            },
+        )["data"]
 
-    def get_downloadable_products(self, dataset_name: str, entity_id: str) -> list[dict[str, Any]]:
+    def get_downloadable_products(
+        self, dataset_name: str, entity_id: str
+    ) -> list[dict[str, Any]]:
         """Get the downloadable products for a given scene.
 
         Args:
@@ -199,17 +200,22 @@ class M2MAPIClient:
         """
         label = str(uuid.uuid4())
         data = {
-            "downloads": [{
-                "label": label,
-                "entityId": entity_id,
-                "productId": product_id,
-            }],
+            "downloads": [
+                {
+                    "label": label,
+                    "entityId": entity_id,
+                    "productId": product_id,
+                }
+            ],
         }
         response = self.request("download-request", data)["data"]
         while True:
-            response = self.request("download-retrieve", {
-                "label": label,
-            })["data"]
+            response = self.request(
+                "download-retrieve",
+                {
+                    "label": label,
+                },
+            )["data"]
             if len(response["available"]) > 0:
                 return response["available"][0]["url"]
             if len(response["requested"]) == 0:
@@ -224,7 +230,9 @@ class LandsatOliTirsItem(Item):
 
     dataset_name = "landsat_ot_c2_l1"
 
-    def __init__(self, name: str, geometry: STGeometry, entity_id: str, cloud_cover: float):
+    def __init__(
+        self, name: str, geometry: STGeometry, entity_id: str, cloud_cover: float
+    ):
         """Creates a new LandsatOliTirsItem.
 
         Args:
@@ -360,18 +368,20 @@ class LandsatOliTirs(DataSource):
             results = self.client.scene_search(**kwargs)
             items = []
             for result in results:
-                scene_metadata = self.client.get_scene_metadata(self.dataset_name, result["entityId"])
+                scene_metadata = self.client.get_scene_metadata(
+                    self.dataset_name, result["entityId"]
+                )
                 item = self._scene_metadata_to_item(scene_metadata)
                 items.append(item)
 
             if self.sort_by == "cloud_cover":
-                items.sort(key=lambda item: item.cloud_cover if item.cloud_cover >= 0 else 100)
+                items.sort(
+                    key=lambda item: item.cloud_cover if item.cloud_cover >= 0 else 100
+                )
             elif self.sort_by is not None:
                 raise ValueError(f"invalid sort_by setting ({self.sort_by})")
 
-            cur_groups = match_candidate_items_to_window(
-                geometry, items, query_config
-            )
+            cur_groups = match_candidate_items_to_window(geometry, items, query_config)
             groups.append(cur_groups)
         return groups
 
@@ -395,12 +405,14 @@ class LandsatOliTirs(DataSource):
                 "filterId": product_identifier_filter,
                 "operand": "=",
                 "value": name,
-            }
+            },
         )
         if len(results) != 1:
             raise APIException(f"expected one result but got {len(results)}")
 
-        scene_metadata = self.client.get_scene_metadata(self.dataset_name, results[0]["entityId"])
+        scene_metadata = self.client.get_scene_metadata(
+            self.dataset_name, results[0]["entityId"]
+        )
         return self._scene_metadata_to_item(scene_metadata)
 
     def deserialize_item(self, serialized_item: Any) -> Item:
@@ -418,7 +430,9 @@ class LandsatOliTirs(DataSource):
             dictionary mapping from band name to (fname, download URL)
         """
         assert isinstance(item, LandsatOliTirsItem)
-        options = self.client.get_downloadable_products(self.dataset_name, item.entity_id)
+        options = self.client.get_downloadable_products(
+            self.dataset_name, item.entity_id
+        )
         wanted_bands = {band for band in self.bands}
         download_urls = {}
         for option in options:
