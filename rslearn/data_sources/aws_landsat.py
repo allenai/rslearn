@@ -365,5 +365,9 @@ class LandsatOliTirs(DataSource):
                 with rasterio.open(buf) as raster:
                     for projection in needed_projections:
                         ingest_raster(
-                            cur_tile_store, raster, projection, item.geometry.time_range
+                            tile_store=cur_tile_store,
+                            raster=raster,
+                            projection=projection,
+                            time_range=item.geometry.time_range,
+                            layer_config=self.config,
                         )

@@ -8,9 +8,9 @@ import numpy.typing as npt
 from class_registry import ClassRegistry
 
 from rslearn.config import LayerConfig, RasterFormatConfig, RasterLayerConfig
-from rslearn.const import TILE_SIZE
 from rslearn.data_sources import Item
 from rslearn.tile_stores import TileStore, TileStoreLayer
+from rslearn.utils import LocalFileAPI, PixelBounds
 from rslearn.utils.raster_format import load_raster_format
 
 from .remap import Remapper, load_remapper
@@ -42,7 +42,7 @@ class Materializer:
 def read_raster_window_from_tiles(
     dst: npt.NDArray[Any],
     ts_layer: TileStoreLayer,
-    bounds: tuple[int, int, int, int],
+    bounds: PixelBounds,
     src_indexes: list[int],
     dst_indexes: list[int],
     remapper: Optional[Remapper] = None,
@@ -59,41 +59,31 @@ def read_raster_window_from_tiles(
         dst_indexes: corresponding destination band indexes for each source band index
         remapper: optional remapper to apply on the source pixel values
     """
-    # Load tiles one at a time.
-    start_tile = (bounds[0] // TILE_SIZE, bounds[1] // TILE_SIZE)
-    end_tile = ((bounds[2] - 1) // TILE_SIZE, (bounds[3] - 1) // TILE_SIZE)
-    for i in range(start_tile[0], end_tile[0] + 1):
-        for j in range(start_tile[1], end_tile[1] + 1):
-            src = ts_layer.get_raster(i, j)
-            if src is None:
-                continue
+    src_bounds = ts_layer.get_raster_bounds()
+    intersection = (
+        max(bounds[0], src_bounds[0]),
+        max(bounds[1], src_bounds[1]),
+        min(bounds[2], src_bounds[2]),
+        min(bounds[3], src_bounds[3]),
+    )
+    if intersection[2] <= intersection[0] or intersection[3] <= intersection[1]:
+        return
 
-            cur_col_off = TILE_SIZE * i
-            cur_row_off = TILE_SIZE * j
+    dst_col_offset = intersection[0] - bounds[0]
+    dst_row_offset = intersection[1] - bounds[1]
 
-            src_col_offset = max(bounds[0] - cur_col_off, 0)
-            src_row_offset = max(bounds[1] - cur_row_off, 0)
-            dst_col_offset = max(cur_col_off - bounds[0], 0)
-            dst_row_offset = max(cur_row_off - bounds[1], 0)
-            col_overlap = min(
-                src.shape[2] - src_col_offset, dst.shape[2] - dst_col_offset
-            )
-            row_overlap = min(
-                src.shape[1] - src_row_offset, dst.shape[1] - dst_row_offset
-            )
-            dst_crop = dst[
-                :,
-                dst_row_offset : dst_row_offset + row_overlap,
-                dst_col_offset : dst_col_offset + col_overlap,
-            ]
-            src_crop = src[
-                src_indexes,
-                src_row_offset : src_row_offset + row_overlap,
-                src_col_offset : src_col_offset + col_overlap,
-            ]
-            src_crop = remapper(src_crop, dst_crop.dtype) if remapper else src_crop
-            mask = dst_crop[dst_indexes, :, :].max(axis=0) == 0
-            dst_crop[dst_indexes, mask] = src_crop[:, mask]
+    src = ts_layer.read_raster(intersection)
+    src = src[src_indexes, :, :]
+    if remapper:
+        src = remapper(src, dst.dtype)
+
+    dst_crop = dst[
+        :,
+        dst_row_offset : dst_row_offset + src.shape[1],
+        dst_col_offset : dst_col_offset + src.shape[2],
+    ]
+    mask = dst_crop[dst_indexes, :, :].max(axis=0) == 0
+    dst_crop[dst_indexes, mask] = src[:, mask]
 
 
 @Materializers.register("raster")
@@ -138,14 +128,16 @@ class RasterMaterializer(Materializer):
 
                 # Create output directory and skip processing this group if it's
                 # already materialized.
-                out_dir = os.path.join(window.window_root, "layers", out_layer_name)
-                os.makedirs(out_dir, exist_ok=True)
-                out_fname = os.path.join(
-                    out_dir,
-                    "_".join(band_cfg.bands) + "." + raster_format.get_extension(),
+                out_dir = os.path.join(
+                    window.window_root,
+                    "layers",
+                    out_layer_name,
+                    "_".join(band_cfg.bands),
                 )
-                if os.path.exists(out_fname):
+                if os.path.exists(out_dir):
                     continue
+                tmp_out_dir = out_dir + ".tmp"
+                os.makedirs(tmp_out_dir, exist_ok=True)
 
                 dst = np.zeros(
                     (len(band_cfg.bands), bounds[3] - bounds[1], bounds[2] - bounds[0]),
@@ -191,5 +183,7 @@ class RasterMaterializer(Materializer):
                             dst, ts_layer, bounds, src_indexes, dst_indexes, remapper
                         )
 
-                with open(out_fname, "wb") as f:
-                    raster_format.encode_raster(f, projection, bounds, dst)
+                raster_format.encode_raster(
+                    LocalFileAPI(tmp_out_dir), projection, bounds, dst
+                )
+                os.rename(tmp_out_dir, out_dir)

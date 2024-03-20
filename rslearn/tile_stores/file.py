@@ -4,24 +4,29 @@ from typing import Any, Optional
 
 import numpy.typing as npt
 
-from rslearn.config import RasterFormatConfig, TileStoreConfig
-from rslearn.const import TILE_SIZE
-from rslearn.utils import Projection, open_atomic
+from rslearn.config import RasterFormatConfig, TileStoreConfig, VectorFormatConfig
+from rslearn.utils import Feature, LocalFileAPI, PixelBounds, Projection, open_atomic
 from rslearn.utils.raster_format import (
     GeotiffRasterFormat,
     RasterFormat,
     load_raster_format,
 )
+from rslearn.utils.vector_format import (
+    GeojsonVectorFormat,
+    VectorFormat,
+    load_vector_format,
+)
 
 from .tile_store import LayerMetadata, TileStore, TileStoreLayer
 
 
-class FileTileStoreLayer(TileStoreLayer):
+class FileTileStoreLayer(TileStoreLayer, LocalFileAPI):
     def __init__(
         self,
         root_dir: str,
         projection: Optional[Projection] = None,
-        default_raster_format: RasterFormat = GeotiffRasterFormat(),
+        raster_format: RasterFormat = GeotiffRasterFormat(),
+        vector_format: VectorFormat = GeojsonVectorFormat(),
     ):
         """Creates a new FileTileStoreLayer.
 
@@ -31,57 +36,59 @@ class FileTileStoreLayer(TileStoreLayer):
             root_dir: root directory for this layer
         """
         self.root_dir = root_dir
-        self.default_raster_format = default_raster_format
+        self.raster_format = raster_format
+        self.vector_format = vector_format
         self.projection = projection
 
         if not self.projection:
             self.projection = self.get_metadata().projection
 
-    def get_raster(
-        self, x: int, y: int, format: Optional[RasterFormat] = None
-    ) -> Optional[npt.NDArray[Any]]:
-        """Get a raster tile from the store.
+    def read_raster(self, bounds: PixelBounds) -> Optional[npt.NDArray[Any]]:
+        """Read raster data from the store.
 
         Args:
-            x: the x coordinate of the tile
-            y: the y coordinate of the tile
-            format: the raster format to use
+            bounds: the bounds within which to read
 
         Returns:
             the raster data
         """
-        if format is None:
-            format = self.default_raster_format
-        extension = format.get_extension()
-        fname = f"{self.root_dir}/{x}_{y}.{extension}"
-        if not os.path.exists(fname):
-            return None
-        with open(fname, "rb") as f:
-            return format.decode_raster(f)
+        return self.raster_format.decode_raster(self, bounds)
 
-    def save_rasters(
+    def write_raster(
         self,
-        data: list[tuple[int, int, npt.NDArray[Any]]],
-        format: Optional[RasterFormat] = None,
+        bounds: PixelBounds,
+        array: npt.NDArray[Any],
     ) -> None:
-        """Save tiles to the store.
+        """Write raster data to the store.
 
         Args:
-            data: a list of (x, y, image) tuples to save
-            format: the raster format to use
+            bounds: the bounds of the raster
+            array: the raster data
         """
-        if format is None:
-            format = self.default_raster_format
-        extension = format.get_extension()
-        for x, y, image in data:
-            bounds = (
-                x * TILE_SIZE,
-                y * TILE_SIZE,
-                (x + 1) * TILE_SIZE,
-                (y + 1) * TILE_SIZE,
-            )
-            with open_atomic(f"{self.root_dir}/{x}_{y}.{extension}", "wb") as f:
-                format.encode_raster(f, self.projection, bounds, image)
+        self.raster_format.encode_raster(self, self.projection, bounds, array)
+
+    def get_raster_bounds(self) -> PixelBounds:
+        """Gets the bounds of the raster data in the store."""
+        return self.raster_format.get_raster_bounds(self)
+
+    def read_vector(self, bounds: PixelBounds) -> list[Feature]:
+        """Read vector data from the store.
+
+        Args:
+            bounds: the bounds within which to read
+
+        Returns:
+            the vector data
+        """
+        return self.vector_format.decode_vector(self, bounds)
+
+    def write_vector(self, data: list[Feature]) -> None:
+        """Save vector tiles to the store.
+
+        Args:
+            data: the vector data
+        """
+        self.vector_format.encode_vector(self, self.projection, data)
 
     def get_metadata(self) -> LayerMetadata:
         """Get the LayerMetadata associated with this layer."""
@@ -108,10 +115,14 @@ class FileTileStoreLayer(TileStoreLayer):
 
 class FileTileStore(TileStore):
     def __init__(
-        self, root_dir, default_raster_format: RasterFormat = GeotiffRasterFormat()
+        self,
+        root_dir,
+        raster_format: RasterFormat = GeotiffRasterFormat(),
+        vector_format: VectorFormat = GeojsonVectorFormat(),
     ):
         self.root_dir = root_dir
-        self.default_raster_format = default_raster_format
+        self.raster_format = raster_format
+        self.vector_format = vector_format
 
     def _get_layer_dir(self, layer_id: tuple[str, ...]):
         for part in layer_id:
@@ -135,7 +146,8 @@ class FileTileStore(TileStore):
         layer = FileTileStoreLayer(
             layer_dir,
             projection=metadata.projection,
-            default_raster_format=self.default_raster_format,
+            raster_format=self.raster_format,
+            vector_format=self.vector_format,
         )
         if not os.path.exists(os.path.join(layer_dir, "metadata.json")):
             os.makedirs(layer_dir, exist_ok=True)
@@ -177,13 +189,13 @@ class FileTileStore(TileStore):
     @staticmethod
     def from_config(config: TileStoreConfig) -> "FileTileStore":
         d = config.config_dict
-        if "default_raster_format" in d:
-            default_raster_format = load_raster_format(
-                RasterFormatConfig.from_config(d["default_raster_format"])
+        kwargs = {"root_dir": d["root_dir"]}
+        if "raster_format" in d:
+            kwargs["raster_format"] = load_raster_format(
+                RasterFormatConfig.from_config(d["raster_format"])
             )
-        else:
-            default_raster_format = GeotiffRasterFormat()
-        return FileTileStore(
-            root_dir=d["root_dir"],
-            default_raster_format=default_raster_format,
-        )
+        if "vector_format" in d:
+            kwargs["vector_format"] = load_vector_format(
+                VectorFormatConfig.from_config(d["vector_format"])
+            )
+        return FileTileStore(**kwargs)

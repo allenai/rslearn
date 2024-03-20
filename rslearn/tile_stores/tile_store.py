@@ -5,8 +5,7 @@ from typing import Any, Optional
 
 import numpy.typing as npt
 
-from rslearn.utils import Projection
-from rslearn.utils.raster_format import RasterFormat
+from rslearn.utils import Feature, PixelBounds, Projection
 
 
 class LayerMetadata:
@@ -53,51 +52,46 @@ class LayerMetadata:
 
 
 class TileStoreLayer:
-    def get_raster(
-        self, x: int, y: int, format: Optional[RasterFormat] = None
-    ) -> Optional[npt.NDArray[Any]]:
-        """Get a raster tile from the store.
+    def read_raster(self, bounds: PixelBounds) -> Optional[npt.NDArray[Any]]:
+        """Read raster data from the store.
 
         Args:
-            x: the x coordinate of the tile
-            y: the y coordinate of the tile
-            format: the raster format to use
+            bounds: the bounds within which to read
 
         Returns:
             the raster data
         """
         raise NotImplementedError
 
-    def save_rasters(
+    def write_raster(
         self,
-        data: list[tuple[int, int, npt.NDArray[Any]]],
-        format: Optional[RasterFormat] = None,
+        bounds: PixelBounds,
+        array: npt.NDArray[Any],
     ) -> None:
-        """Save tiles to the store.
+        """Write raster data to the store.
 
         Args:
-            data: a list of (x, y, data) tuples to save
-            format: the raster format to use
+            bounds: the bounds of the raster
+            array: the raster data
         """
         raise NotImplementedError
 
-    def get_vector(self, x: int, y: int) -> Any:
-        """Get a vector tile from the store.
+    def read_vector(self, bounds: PixelBounds) -> list[Feature]:
+        """Read vector data from the store.
 
         Args:
-            x: the x coordinate of the tile
-            y: the y coordinate of the tile
+            bounds: the bounds within which to read
 
         Returns:
             the vector data
         """
         raise NotImplementedError
 
-    def save_vectors(self, data: list[tuple[int, int, Any]]) -> None:
+    def write_vector(self, data: list[Feature]) -> None:
         """Save vector tiles to the store.
 
         Args:
-            data: a list of (x, y, data) tuples to save
+            data: the vector data
         """
         raise NotImplementedError
 

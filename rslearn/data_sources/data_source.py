@@ -39,6 +39,12 @@ class Item:
             geometry=STGeometry.deserialize(d["geometry"]),
         )
 
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, Item) and self.name == other.name
+
+    def __hash__(self) -> int:
+        return hash(self.name)
+
 
 class DataSource:
     """A set of raster or vector files that can be retrieved."""

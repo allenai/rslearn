@@ -229,7 +229,9 @@ class Sentinel2(DataSource):
         if not os.path.exists(local_xml_fname):
             metadata_blob_path = base_url + "MTD_MSIL1C.xml"
             blob = self.bucket.blob(metadata_blob_path)
-            blob.download_to_filename(local_xml_fname)
+            tmp_local_xml_fname = local_xml_fname + ".tmp." + str(os.getpid())
+            blob.download_to_filename(tmp_local_xml_fname)
+            os.rename(tmp_local_xml_fname, local_xml_fname)
 
         tree = ET.parse(local_xml_fname)
 
@@ -329,10 +331,9 @@ class Sentinel2(DataSource):
                     continue
                 if not item.geometry.shp.intersects(geometry.shp):
                     continue
-                actual_shape = self._get_detailed_geometry(item)
-                if not actual_shape.intersects(geometry.shp):
+                item = self.get_item_by_name(item.name)
+                if not item.geometry.shp.intersects(geometry.shp):
                     continue
-                item.geometry.shp = actual_shape
                 candidates[idx].append(item)
         return candidates
 
@@ -454,5 +455,9 @@ class Sentinel2(DataSource):
                 with rasterio.open(buf) as raster:
                     for projection in needed_projections:
                         ingest_raster(
-                            cur_tile_store, raster, projection, item.geometry.time_range
+                            tile_store=cur_tile_store,
+                            raster=raster,
+                            projection=projection,
+                            time_range=item.geometry.time_range,
+                            layer_config=self.config,
                         )

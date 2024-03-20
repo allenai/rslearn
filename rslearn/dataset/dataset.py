@@ -240,10 +240,8 @@ def is_window_ingested(dataset: Dataset, window: Window) -> bool:
                         )
                         ts_layer = tile_store.get_layer(layer_id)
                         if not ts_layer:
-                            print(item.name, band_set)
                             return False
                         if not ts_layer.get_metadata().properties.get("completed"):
-                            print(item.name, band_set)
                             return False
     return True
 

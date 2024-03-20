@@ -3,6 +3,7 @@ from enum import Enum
 from typing import Any, Optional
 
 import pytimeparse
+from rasterio.enums import Resampling
 
 from rslearn.utils import PixelBounds, Projection
 
@@ -12,6 +13,14 @@ class DType(Enum):
     UINT16 = "uint16"
     UINT32 = "uint32"
     FLOAT32 = "float32"
+
+
+RESAMPLING_METHODS = {
+    "nearest": Resampling.nearest,
+    "bilinear": Resampling.bilinear,
+    "cubic": Resampling.cubic,
+    "cubic_spline": Resampling.cubic_spline,
+}
 
 
 class BandSetConfig:
@@ -204,7 +213,9 @@ class LayerType(Enum):
 
 
 class LayerConfig:
-    def __init__(self, layer_type: LayerType, data_source: Optional[DataSourceConfig]):
+    def __init__(
+        self, layer_type: LayerType, data_source: Optional[DataSourceConfig] = None
+    ):
         self.layer_type = layer_type
         self.data_source = data_source
 
@@ -219,26 +230,77 @@ class RasterLayerConfig(LayerConfig):
     def __init__(
         self,
         layer_type: LayerType,
-        data_source: DataSourceConfig,
         band_sets: list[BandSetConfig],
+        data_source: Optional[DataSourceConfig] = None,
+        resampling_method: Resampling = Resampling.bilinear,
     ):
         super().__init__(layer_type, data_source)
         self.band_sets = band_sets
+        self.resampling_method = resampling_method
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "RasterLayerConfig":
-        data_source = None
+        kwargs = {
+            "layer_type": LayerType(config["type"]),
+            "band_sets": [BandSetConfig.from_config(el) for el in config["band_sets"]],
+        }
         if "data_source" in config:
-            data_source = DataSourceConfig.from_config(config["data_source"])
-        return RasterLayerConfig(
-            layer_type=LayerType(config["type"]),
-            data_source=data_source,
-            band_sets=[BandSetConfig.from_config(el) for el in config["band_sets"]],
-        )
+            kwargs["data_source"] = DataSourceConfig.from_config(config["data_source"])
+        if "resampling_method" in config:
+            kwargs["resampling_method"] = RESAMPLING_METHODS[
+                config["resampling_method"]
+            ]
+        return RasterLayerConfig(**kwargs)
 
 
 class VectorLayerConfig(LayerConfig):
-    pass
+    def __init__(
+        self,
+        layer_type: LayerType,
+        data_source: DataSourceConfig,
+        zoom_offset: int = 0,
+    ):
+        super().__init__(layer_type, data_source)
+        self.zoom_offset = zoom_offset
+
+    @staticmethod
+    def from_config(config: dict[str, Any]) -> "VectorLayerConfig":
+        data_source = None
+        if "data_source" in config:
+            data_source = DataSourceConfig.from_config(config["data_source"])
+        return VectorLayerConfig(
+            layer_type=LayerType(config["type"]),
+            data_source=data_source,
+            zoom_offset=config.get("zoom_offset", 0),
+        )
+
+    def get_final_projection_and_bounds(
+        self,
+        projection: Projection,
+        bounds: Optional[PixelBounds],
+    ) -> tuple[Projection, Optional[PixelBounds]]:
+        """Gets the final projection/bounds based on zoom offset.
+
+        Args:
+            projection: the window's projection
+            bounds: the window's bounds (optional)
+
+        Returns:
+            tuple of updated projection and bounds with zoom offset applied
+        """
+        if self.zoom_offset == 0:
+            return projection, bounds
+        projection = Projection(
+            projection.crs,
+            projection.x_resolution / (2**self.zoom_offset),
+            projection.y_resolution / (2**self.zoom_offset),
+        )
+        if bounds:
+            if self.zoom_offset > 0:
+                bounds = tuple(x * (2**self.zoom_offset) for x in bounds)
+            else:
+                bounds = tuple(x // (2 ** (-self.zoom_offset)) for x in bounds)
+        return projection, bounds
 
 
 def load_layer_config(config: dict[str, Any]) -> LayerConfig:
@@ -260,6 +322,21 @@ class RasterFormatConfig:
     @staticmethod
     def from_config(config: dict[str, Any]) -> "RasterFormatConfig":
         return RasterFormatConfig(
+            name=config["name"],
+            config_dict=config,
+        )
+
+
+class VectorFormatConfig:
+    """A configuration specifying a VectorFormat."""
+
+    def __init__(self, name: str, config_dict: dict[str, Any]) -> None:
+        self.name = name
+        self.config_dict = config_dict
+
+    @staticmethod
+    def from_config(config: dict[str, Any]) -> "VectorFormatConfig":
+        return VectorFormatConfig(
             name=config["name"],
             config_dict=config,
         )

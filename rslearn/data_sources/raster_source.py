@@ -8,7 +8,7 @@ import rasterio.enums
 import rasterio.io
 import rasterio.transform
 
-from rslearn.config import BandSetConfig
+from rslearn.config import BandSetConfig, RasterLayerConfig
 from rslearn.const import TILE_SIZE
 from rslearn.tile_stores import LayerMetadata, TileStore
 from rslearn.utils import Projection, STGeometry
@@ -132,7 +132,8 @@ def ingest_raster(
     tile_store: TileStore,
     raster: rasterio.io.DatasetReader,
     projection: Projection,
-    time_range: Optional[tuple[datetime, datetime]],
+    time_range: Optional[tuple[datetime, datetime]] = None,
+    layer_config: Optional[RasterLayerConfig] = None,
 ) -> None:
     """Ingests an in-memory rasterio dataset into the tile store.
 
@@ -146,7 +147,7 @@ def ingest_raster(
 
     # Get layer in tile store to save under.
     ts_layer = tile_store.create_layer(
-        (str(projection),), LayerMetadata(projection, None, {})
+        (str(projection),), LayerMetadata(projection, time_range, {})
     )
     if ts_layer.get_metadata().properties.get("completed"):
         return
@@ -186,6 +187,10 @@ def ingest_raster(
             resolution=(projection.x_resolution, -projection.y_resolution),
         )
 
+        resampling_method = rasterio.enums.Resampling.bilinear
+        if layer_config:
+            resampling_method = layer_config.resampling_method
+
         # Re-project the raster to the destination crs, resolution, and transform.
         dst_array = np.zeros((array.shape[0], dst_height, dst_width), dtype=array.dtype)
         rasterio.warp.reproject(
@@ -195,25 +200,9 @@ def ingest_raster(
             destination=dst_array,
             dst_crs=projection.crs,
             dst_transform=dst_transform,
-            resampling=rasterio.enums.Resampling.bilinear,
+            resampling=resampling_method,
         )
         warped_array = ArrayWithTransform(dst_array, dst_transform)
 
-    # Collect the image data associated with non-zero tiles.
-    bounds = warped_array.pixel_bounds()
-    tile1 = (bounds[0] // TILE_SIZE, bounds[1] // TILE_SIZE)
-    tile2 = (
-        bounds[2] // TILE_SIZE,
-        bounds[3] // TILE_SIZE,
-    )
-    datas: list[tuple[int, int, npt.NDArray[Any]]] = []
-    for tile_col in range(min(tile1[0], tile2[0]), max(tile1[0], tile2[0]) + 1):
-        for tile_row in range(min(tile1[1], tile2[1]), max(tile1[1], tile2[1]) + 1):
-            tile = (tile_col, tile_row)
-            image = warped_array.get_tile(tile)
-            if np.count_nonzero(image) == 0:
-                continue
-            datas.append((tile[0], tile[1], image))
-
-    ts_layer.save_rasters(datas)
+    ts_layer.write_raster(warped_array.pixel_bounds(), warped_array.array)
     ts_layer.set_property("completed", True)

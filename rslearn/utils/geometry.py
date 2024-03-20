@@ -148,10 +148,17 @@ class STGeometry:
 
     def intersects(self, other: "STGeometry") -> bool:
         """Returns whether this box intersects the other box."""
+        # Check temporal.
         if not self.intersects_time_range(other.time_range):
             return False
+
+        # Check spatial.
+        # Need to reproject if projections don't match.
+        if other.projection != self.projection:
+            other = other.to_projection(self.projection)
         if not self.shp.intersects(other.shp):
             return False
+
         return True
 
     def to_projection(self, projection: Projection) -> "STGeometry":

@@ -1,3 +1,5 @@
+earthengine-api
 google-cloud-storage
 mgrs
+osmium
 rtree
