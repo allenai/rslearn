@@ -96,7 +96,8 @@ class GEE(DataSource):
         if not csv_blob.exists():
             # Export feature collection of image metadata to GCS.
             def image_to_feature(image):
-                return ee.Feature(image.geometry(), {"time": image.date().format()})
+                geometry = image.geometry().transform(proj="EPSG:4326")
+                return ee.Feature(geometry, {"time": image.date().format()})
 
             fc = self.get_collection().map(image_to_feature)
             task = ee.batch.Export.table.toCloudStorage(
@@ -105,7 +106,6 @@ class GEE(DataSource):
                 bucket=self.gcs_bucket_name,
                 fileNamePrefix=f"{self.collection_name}/index",
                 fileFormat="CSV",
-                crs="EPSG:4326",
             )
             task.start()
             print(
@@ -205,7 +205,7 @@ class GEE(DataSource):
             if not needed_projections:
                 continue
 
-            filtered = self.get_collection.filter(
+            filtered = self.get_collection().filter(
                 ee.Filter.eq("system:index", item.name)
             )
             image = filtered.first()
@@ -216,16 +216,14 @@ class GEE(DataSource):
             print("starting task to retrieve image {}".format(item.name))
             blob_path = f"{self.collection_name}/{item.name}/"
             task = ee.batch.Export.image.toCloudStorage(
-                **{
-                    "image": image,
-                    "description": item.name,
-                    "bucket": self.gcs_bucket_name,
-                    "fileNamePrefix": blob_path,
-                    "fileFormat": "GeoTIFF",
-                    "crs": projection["crs"],
-                    "crsTransform": projection["transform"],
-                    "maxPixels": 10000000000,
-                }
+                image=image,
+                description=item.name,
+                bucket=self.gcs_bucket_name,
+                fileNamePrefix=blob_path,
+                fileFormat="GeoTIFF",
+                crs=projection["crs"],
+                crsTransform=projection["transform"],
+                maxPixels=10000000000,
             )
             task.start()
             while True:
