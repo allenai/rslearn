@@ -1,5 +1,6 @@
 [project]
 name = "rslearn"
+version = "0.0.1"
 description = "A library for developing remote sensing datasets and models"
 authors = [
     {name = "Favyen Bastani", email = "favyenb@allenai.org"},
@@ -9,16 +10,20 @@ readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.9"
 
-dependencies = [
-# ...
-]
+dynamic = ["dependencies"]
 
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
-[project.entry-points.console-scripts]
+[project.entry-points.console_scripts]
 rslearn = "rslearn.main:main"
 
 [tool.isort]
 profile = "black"
+
+[tool.setuptools.packages.find]
+include = ["rslearn*"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
