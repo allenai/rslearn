@@ -7,11 +7,12 @@ import numpy as np
 import numpy.typing as npt
 from class_registry import ClassRegistry
 
-from rslearn.config import LayerConfig, RasterFormatConfig, RasterLayerConfig
+from rslearn.config import LayerConfig, RasterFormatConfig, RasterLayerConfig, VectorLayerConfig
 from rslearn.data_sources import Item
 from rslearn.tile_stores import TileStore, TileStoreLayer
-from rslearn.utils import LocalFileAPI, PixelBounds
+from rslearn.utils import LocalFileAPI, PixelBounds, Feature
 from rslearn.utils.raster_format import load_raster_format
+from rslearn.utils.vector_format import load_vector_format, GeojsonVectorFormat
 
 from .remap import Remapper, load_remapper
 from .window import Window
@@ -83,7 +84,8 @@ def read_raster_window_from_tiles(
         dst_col_offset : dst_col_offset + src.shape[2],
     ]
     mask = dst_crop[dst_indexes, :, :].max(axis=0) == 0
-    dst_crop[dst_indexes, mask] = src[:, mask]
+    for src_index, dst_index in enumerate(dst_indexes):
+        dst_crop[dst_index, mask] = src[src_index, mask]
 
 
 @Materializers.register("raster")
@@ -118,7 +120,7 @@ class RasterMaterializer(Materializer):
             if band_cfg.remap_config:
                 remapper = load_remapper(band_cfg.remap_config)
 
-            raster_format = load_raster_format(RasterFormatConfig(band_cfg.format, {}))
+            raster_format = load_raster_format(RasterFormatConfig(band_cfg.format["name"], band_cfg.format))
 
             for group_id, group in enumerate(item_groups):
                 if group_id == 0:
@@ -187,3 +189,58 @@ class RasterMaterializer(Materializer):
                     LocalFileAPI(tmp_out_dir), projection, bounds, dst
                 )
                 os.rename(tmp_out_dir, out_dir)
+
+
+@Materializers.register("vector")
+class VectorMaterializer(Materializer):
+    def materialize(
+        self,
+        tile_store: TileStore,
+        window: Window,
+        layer_name: str,
+        layer_cfg: LayerConfig,
+        item_groups: list[list[Item]],
+    ) -> None:
+        """Materialize portions of items corresponding to this window into the dataset.
+
+        Args:
+            tile_store: the tile store where the items have been ingested (unprefixed)
+            window: the window to materialize
+            layer_name: the layer to materialize
+            layer_cfg: the configuration of the layer to materialize
+            item_groups: the items associated with this window and layer
+        """
+        assert isinstance(layer_cfg, VectorLayerConfig)
+
+        projection, bounds = layer_cfg.get_final_projection_and_bounds(
+            window.projection, window.bounds
+        )
+        vector_format = load_vector_format(layer_cfg.format)
+
+        for group_id, group in enumerate(item_groups):
+            if group_id == 0:
+                out_layer_name = layer_name
+            else:
+                out_layer_name = f"{layer_name}.{group_id}"
+
+            # Create output directory and skip processing this group if it's
+            # already materialized.
+            out_dir = os.path.join(
+                window.window_root,
+                "layers",
+                out_layer_name,
+            )
+            if os.path.exists(out_dir):
+                continue
+            tmp_out_dir = out_dir + ".tmp"
+            os.makedirs(tmp_out_dir, exist_ok=True)
+
+            features: list[Feature] = []
+
+            for item in group:
+                ts_layer = tile_store.get_layer((layer_name, item.name, str(projection)))
+                cur_features = ts_layer.read_raster(bounds)
+                features.extend(cur_features)
+
+            vector_format.encode_vector(LocalFileAPI(tmp_out_dir), projection, features)
+            os.rename(tmp_out_dir, out_dir)

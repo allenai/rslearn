@@ -23,13 +23,43 @@ RESAMPLING_METHODS = {
 }
 
 
+class RasterFormatConfig:
+    """A configuration specifying a RasterFormat."""
+
+    def __init__(self, name: str, config_dict: dict[str, Any]) -> None:
+        self.name = name
+        self.config_dict = config_dict
+
+    @staticmethod
+    def from_config(config: dict[str, Any]) -> "RasterFormatConfig":
+        return RasterFormatConfig(
+            name=config["name"],
+            config_dict=config,
+        )
+
+
+class VectorFormatConfig:
+    """A configuration specifying a VectorFormat."""
+
+    def __init__(self, name: str, config_dict: dict[str, Any] = {}) -> None:
+        self.name = name
+        self.config_dict = config_dict
+
+    @staticmethod
+    def from_config(config: dict[str, Any]) -> "VectorFormatConfig":
+        return VectorFormatConfig(
+            name=config["name"],
+            config_dict=config,
+        )
+
+
 class BandSetConfig:
     def __init__(
         self,
         config_dict: dict[str, Any],
         dtype: DType,
         bands: Optional[list[str]] = None,
-        format: str = "geotiff",
+        format: Optional[dict[str, Any]] = None,
         zoom_offset: int = 0,
         remap_config: Optional[dict[str, Any]] = None,
     ) -> None:
@@ -39,7 +69,7 @@ class BandSetConfig:
             config_dict: the config dict used to configure this BandSetConfig
             band_sets: a list of band sets, each of which is a list of band names that
                 should be stored together
-            format: the format to store tiles in
+            format: the format to store tiles in, defaults to geotiff
             dtype: the pixel value type to store tiles in
             zoom_offset: non-negative integer, store images at window resolution
                 divided by 2^(zoom_offset).
@@ -50,6 +80,11 @@ class BandSetConfig:
         self.dtype = dtype
         self.zoom_offset = zoom_offset
         self.remap_config = remap_config
+
+        if not self.format:
+            self.format = {
+                "name": "geotiff",
+            }
 
     def serialize(self) -> dict[str, Any]:
         return {
@@ -257,22 +292,26 @@ class VectorLayerConfig(LayerConfig):
     def __init__(
         self,
         layer_type: LayerType,
-        data_source: DataSourceConfig,
+        data_source: Optional[DataSourceConfig] = None,
         zoom_offset: int = 0,
+        format: VectorFormatConfig = VectorFormatConfig("geojson"),
     ):
         super().__init__(layer_type, data_source)
         self.zoom_offset = zoom_offset
+        self.format = format
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "VectorLayerConfig":
-        data_source = None
+        kwargs = {
+            "layer_type": LayerType(config["type"])
+        }
         if "data_source" in config:
-            data_source = DataSourceConfig.from_config(config["data_source"])
-        return VectorLayerConfig(
-            layer_type=LayerType(config["type"]),
-            data_source=data_source,
-            zoom_offset=config.get("zoom_offset", 0),
-        )
+            kwargs["data_source"] = DataSourceConfig.from_config(config["data_source"])
+        if "zoom_offset" in config:
+            kwargs["zoom_offset"] = config["zoom_offset"]
+        if "format" in config:
+            kwargs["format"] = VectorFormatConfig.from_config(config["format"])
+        return VectorLayerConfig(**kwargs)
 
     def get_final_projection_and_bounds(
         self,
@@ -310,36 +349,6 @@ def load_layer_config(config: dict[str, Any]) -> LayerConfig:
     elif layer_type == LayerType.VECTOR:
         return VectorLayerConfig.from_config(config)
     raise ValueError(f"Unknown layer type {layer_type}")
-
-
-class RasterFormatConfig:
-    """A configuration specifying a RasterFormat."""
-
-    def __init__(self, name: str, config_dict: dict[str, Any]) -> None:
-        self.name = name
-        self.config_dict = config_dict
-
-    @staticmethod
-    def from_config(config: dict[str, Any]) -> "RasterFormatConfig":
-        return RasterFormatConfig(
-            name=config["name"],
-            config_dict=config,
-        )
-
-
-class VectorFormatConfig:
-    """A configuration specifying a VectorFormat."""
-
-    def __init__(self, name: str, config_dict: dict[str, Any]) -> None:
-        self.name = name
-        self.config_dict = config_dict
-
-    @staticmethod
-    def from_config(config: dict[str, Any]) -> "VectorFormatConfig":
-        return VectorFormatConfig(
-            name=config["name"],
-            config_dict=config,
-        )
 
 
 class TileStoreConfig:

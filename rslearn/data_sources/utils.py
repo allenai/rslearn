@@ -1,6 +1,6 @@
 from rslearn.config import QueryConfig, SpaceMode, TimeMode
 from rslearn.data_sources import Item
-from rslearn.utils import STGeometry
+from rslearn.utils import STGeometry, shp_intersects
 
 MOSAIC_MIN_ITEM_COVERAGE = 0.1
 """Minimum fraction of area that item should cover when adding it to a mosaic group."""
@@ -76,7 +76,7 @@ def match_candidate_items_to_window(
 
     elif query_config.space_mode == SpaceMode.INTERSECTS:
         for item, item_shp in zip(items, item_shps):
-            if not item_shp.intersects(geometry.shp):
+            if not shp_intersects(item_shp, geometry.shp):
                 continue
             groups.append([item])
             if len(groups) >= query_config.max_matches:
@@ -93,7 +93,7 @@ def match_candidate_items_to_window(
             if cur_remainder is None:
                 cur_remainder = geometry.shp
 
-            if not item_shp.intersects(cur_remainder):
+            if not shp_intersects(item_shp, cur_remainder):
                 continue
 
             # Check if the intersection area is too small.

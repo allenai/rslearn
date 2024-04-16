@@ -4,26 +4,28 @@ import csv
 import io
 import json
 import os
+import tempfile
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 import ee
 import rasterio
+import rasterio.merge
 import shapely
 import tqdm
 from google.cloud import storage
 
 import rslearn.data_sources.utils
 import rslearn.utils.mgrs
-from rslearn.config import LayerConfig, RasterLayerConfig
+from rslearn.config import LayerConfig, RasterLayerConfig, DType
 from rslearn.const import WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry
 from rslearn.utils.rtree_index import RtreeIndex
 
 from .data_source import DataSource, Item, QueryConfig
-from .raster_source import get_needed_projections, ingest_raster
+from .raster_source import get_needed_projections, ingest_raster, ArrayWithTransform
 
 
 class GEE(DataSource):
@@ -38,6 +40,7 @@ class GEE(DataSource):
         service_account_name: str,
         service_account_credentials: str,
         filters: Optional[list[tuple[str, Any]]] = None,
+        dtype: Optional[DType] = None,
     ) -> None:
         """Initialize a new GEE instance.
 
@@ -55,6 +58,7 @@ class GEE(DataSource):
         self.collection_name = collection_name
         self.gcs_bucket_name = gcs_bucket_name
         self.filters = filters
+        self.dtype = dtype
 
         self.bucket = storage.Client().bucket(self.gcs_bucket_name)
 
@@ -72,15 +76,18 @@ class GEE(DataSource):
     def from_config(config: LayerConfig) -> "GEE":
         """Creates a new GEE instance from a configuration dictionary."""
         d = config.data_source.config_dict
-        return GEE(
-            config=config,
-            collection_name=d["collection_name"],
-            gcs_bucket_name=d["gcs_bucket_name"],
-            index_fname=d["index_fname"],
-            service_account_name=d["service_account_name"],
-            service_account_credentials=d["service_account_credentials"],
-            filters=d.get("filters"),
-        )
+        kwargs = {
+            "config": config,
+            "collection_name": d["collection_name"],
+            "gcs_bucket_name": d["gcs_bucket_name"],
+            "index_fname": d["index_fname"],
+            "service_account_name": d["service_account_name"],
+            "service_account_credentials": d["service_account_credentials"],
+            "filters": d.get("filters"),
+        }
+        if "dtype" in d:
+            kwargs["dtype"] = DType(d["dtype"])
+        return GEE(**kwargs)
 
     def get_collection(self):
         """Returns the Earth Engine image collection for this data source."""
@@ -214,7 +221,7 @@ class GEE(DataSource):
             # Use the native projection of the image to obtain the raster.
             projection = image.select(bands[0]).projection().getInfo()
             print("starting task to retrieve image {}".format(item.name))
-            blob_path = f"{self.collection_name}/{item.name}/"
+            blob_path = f"{self.collection_name}/{item.name}.{os.getpid()}/"
             task = ee.batch.Export.image.toCloudStorage(
                 image=image,
                 description=item.name,
@@ -234,16 +241,51 @@ class GEE(DataSource):
                 assert status_dict["state"] == "COMPLETED"
                 break
 
-            buf = io.BytesIO()
-            blob = self.bucket.blob(blob_path)
-            blob.download_to_file(buf)
-            buf.seek(0)
-            with rasterio.open(buf) as raster:
-                for projection in needed_projections:
-                    ingest_raster(
-                        tile_store=cur_tile_store,
-                        raster=raster,
-                        projection=projection,
-                        time_range=item.geometry.time_range,
-                        layer_config=self.config,
-                    )
+            # See what files the export produced.
+            # If there are multiple, then we merge them into one file since that's the
+            # simplest way to handle it.
+            blobs = self.bucket.list_blobs(prefix=blob_path)
+            blobs = list(blobs)
+            raster = None
+
+            if len(blobs) == 1:
+                buf = io.BytesIO()
+                blobs[0].download_to_file(buf)
+                buf.seek(0)
+                raster = rasterio.open(buf)
+
+            else:
+                with tempfile.TemporaryDirectory() as tmp_dir_name:
+                    rasterio_datasets = []
+                    for blob in blobs:
+                        local_fname = os.path.join(tmp_dir_name, blob.name.split("/")[-1])
+                        blob.download_to_filename(local_fname)
+                        src = rasterio.open(local_fname)
+                        rasterio_datasets.append(src)
+
+                    merge_kwargs = {
+                        "datasets": rasterio_datasets,
+                    }
+                    if self.dtype:
+                        merge_kwargs["dtype"] = self.dtype.value
+                    array, transform = rasterio.merge.merge(**merge_kwargs)
+                    crs = rasterio_datasets[0].crs
+
+                    for ds in rasterio_datasets:
+                        ds.close()
+
+                raster = ArrayWithTransform(array, crs, transform)
+
+            for projection in needed_projections:
+                ingest_raster(
+                    tile_store=cur_tile_store,
+                    raster=raster,
+                    projection=projection,
+                    time_range=item.geometry.time_range,
+                    layer_config=self.config,
+                )
+
+            raster.close()
+
+            for blob in blobs:
+                blob.delete()

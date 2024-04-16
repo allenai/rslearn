@@ -68,7 +68,7 @@ class ImageTileRasterFormat(RasterFormat):
         bounds: PixelBounds,
         array: npt.NDArray[Any],
     ) -> None:
-        if self.format == "png":
+        if self.format in ["png", "jpeg"]:
             array = array.transpose(1, 2, 0)
             if array.shape[2] == 1:
                 array = array[:, :, 0]
@@ -98,8 +98,8 @@ class ImageTileRasterFormat(RasterFormat):
                 dst.write(array)
 
     def decode_tile(self, f: BinaryIO) -> npt.NDArray[Any]:
-        if self.format == "png":
-            array = np.array(Image.open(f, format=self.format.upper()))
+        if self.format in ["png", "jpeg"]:
+            array = np.array(Image.open(f, formats=[self.format.upper()]))
             if len(array.shape) == 2:
                 array = array[:, :, None]
             return array.transpose(2, 0, 1)
@@ -188,7 +188,7 @@ class ImageTileRasterFormat(RasterFormat):
                     src = self.decode_tile(f)
 
                 if dst is None:
-                    dst = np.array(
+                    dst = np.zeros(
                         (src.shape[0], bounds[3] - bounds[1], bounds[2] - bounds[0]),
                         dtype=src.dtype,
                     )
@@ -373,6 +373,73 @@ class GeotiffRasterFormat(RasterFormat):
         return GeotiffRasterFormat(
             block_size=config.get("block_size", 512),
         )
+
+
+@RasterFormats.register("single_image")
+class SingleImageRasterFormat(RasterFormat):
+    """A raster format that produces a single image called image.png/jpg.
+
+    Primarily for ease-of-use with external tools that don't support georeferenced
+    images and would rather have everything in pixel coordinate system.
+    """
+
+    def __init__(self, format: str = "png"):
+        self.format = format
+
+    def get_extension(self) -> str:
+        if self.format == "png":
+            return "png"
+        elif self.format == "jpeg":
+            return "jpg"
+        raise ValueError(f"unknown image format {self.format}")
+
+    def encode_raster(
+        self,
+        file_api: FileAPI,
+        projection: Projection,
+        bounds: PixelBounds,
+        array: npt.NDArray[Any],
+    ) -> None:
+        """Encodes raster data.
+
+        Args:
+            file_api: the file API to write to
+            projection: the projection of the raster data
+            bounds: the bounds of the raster data in the projection
+            array: the raster data
+        """
+        fname = "image." + self.get_extension()
+        with file_api.open(fname, "wb") as f:
+            array = array.transpose(1, 2, 0)
+            if array.shape[2] == 1:
+                array = array[:, :, 0]
+            Image.fromarray(array).save(f, format=self.format.upper())
+
+    def decode_raster(
+        self, file_api: FileAPI, bounds: PixelBounds
+    ) -> Optional[npt.NDArray[Any]]:
+        """Decodes raster data.
+
+        Args:
+            file_api: the file API to read from
+            bounds: the bounds of the raster to read
+
+        Returns:
+            the raster data, or None if no image content is found
+        """
+        fname = "image." + self.get_extension()
+        with file_api.open(fname, "rb") as f:
+            array = np.array(Image.open(f, formats=[self.format.upper()]))
+            if len(array.shape) == 2:
+                array = array[:, :, None]
+            return array.transpose(2, 0, 1)
+
+    @staticmethod
+    def from_config(name: str, config: dict[str, Any]) -> "SingleImageRasterFormat":
+        kwargs = {}
+        if "format" in config:
+            kwargs["format"] = config["format"]
+        return SingleImageRasterFormat(**kwargs)
 
 
 def load_raster_format(config: RasterFormatConfig) -> RasterFormat:

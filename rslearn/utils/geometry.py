@@ -18,6 +18,18 @@ def is_same_resolution(res1: float, res2: float) -> bool:
     return (max(res1, res2) / min(res1, res2) - 1) < RESOLUTION_EPSILON
 
 
+def shp_intersects(shp1: shapely.Geometry, shp2: shapely.Geometry):
+    """Returns whether the two shapes intersect.
+
+    Tries shp.intersects but falls back to shp.intersection which can be more
+    reliable.
+    """
+    try:
+        return shp1.intersects(shp2)
+    except shapely.GEOSException:
+        return shp1.intersection(shp2).area > 0
+
+
 class Projection:
     def __init__(self, crs: CRS, x_resolution: float, y_resolution: float) -> None:
         self.crs = crs

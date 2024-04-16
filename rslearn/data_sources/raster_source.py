@@ -1,9 +1,10 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import affine
 import numpy as np
 import numpy.typing as npt
+from rasterio.crs import CRS
 import rasterio.enums
 import rasterio.io
 import rasterio.transform
@@ -18,6 +19,7 @@ class ArrayWithTransform:
     def __init__(
         self,
         array: npt.NDArray[Any],
+        crs: CRS,
         transform: rasterio.transform.Affine,
     ) -> None:
         """Create a new ArrayWithTransform instance.
@@ -27,7 +29,37 @@ class ArrayWithTransform:
             transform: the transform from pixel coordinates to projection coordinates.
         """
         self.array = array
+        self.crs = crs
         self.transform = transform
+
+        # Store additional data matching rasterio.io.DatasetReader so we can use them
+        # interchangeably in ingest_raster.
+        self.width = self.array.shape[2]
+        self.height = self.array.shape[1]
+
+        # Left/top in projection units.
+        self.left = self.transform.c
+        self.top = self.transform.f
+
+        # Resolution in projection units per pixel.
+        self.x_resolution = self.transform.a
+        self.y_resolution = self.transform.e
+
+        # Right/bottom and bounds in projection units.
+        self.right = self.left + self.width * self.x_resolution
+        self.bottom = self.top + self.height * self.y_resolution
+        self.bounds = [
+            min(self.left, self.right),
+            min(self.top, self.bottom),
+            max(self.left, self.right),
+            max(self.top, self.bottom),
+        ]
+
+    def read(self) -> npt.NDArray[Any]:
+        return self.array
+
+    def close(self):
+        pass
 
     def pixel_bounds(self) -> tuple[int, int, int, int]:
         """Returns the bounds of the array in global pixel coordinates.
@@ -36,12 +68,7 @@ class ArrayWithTransform:
 
         The returned coordinates are (left, top, right, bottom).
         """
-        left = self.transform.c
-        top = self.transform.f
-        # Resolutions in projection units per pixel.
-        x_resolution = self.transform.a
-        y_resolution = self.transform.e
-        start = (int(left / x_resolution), int(top / y_resolution))
+        start = (int(self.left / self.x_resolution), int(self.top / self.y_resolution))
         end = (start[0] + self.array.shape[2], start[1] + self.array.shape[1])
         return (start[0], start[1], end[0], end[1])
 
@@ -130,7 +157,7 @@ def get_needed_projections(
 
 def ingest_raster(
     tile_store: TileStore,
-    raster: rasterio.io.DatasetReader,
+    raster: Union[rasterio.io.DatasetReader, ArrayWithTransform],
     projection: Projection,
     time_range: Optional[tuple[datetime, datetime]] = None,
     layer_config: Optional[RasterLayerConfig] = None,
@@ -164,7 +191,7 @@ def ingest_raster(
 
     if not needs_warping:
         # Include the top-left pixel index.
-        warped_array = ArrayWithTransform(array, raster.transform)
+        warped_array = ArrayWithTransform(array, raster.crs, raster.transform)
 
     else:
         # Compute the suggested target transform.
@@ -202,7 +229,7 @@ def ingest_raster(
             dst_transform=dst_transform,
             resampling=resampling_method,
         )
-        warped_array = ArrayWithTransform(dst_array, dst_transform)
+        warped_array = ArrayWithTransform(dst_array, projection.crs, dst_transform)
 
     ts_layer.write_raster(warped_array.pixel_bounds(), warped_array.array)
     ts_layer.set_property("completed", True)
