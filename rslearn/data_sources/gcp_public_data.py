@@ -146,6 +146,7 @@ class Sentinel2(DataSource):
             index_cache_dir=d["index_cache_dir"],
             max_time_delta=max_time_delta,
             sort_by=d.get("sort_by"),
+            use_rtree_index=d.get("use_rtree_index", True),
         )
 
     def _read_index(self, desc: str) -> Generator[dict[str, str], None, None]:

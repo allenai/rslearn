@@ -279,8 +279,8 @@ class Naip(DataSource):
                     items[idx].append(item)
         else:
             index = GridIndex(0.01)
-            for idx, geometry in wgs84_geometries:
-                index.insert(geometry.bounds, idx)
+            for idx, geometry in enumerate(wgs84_geometries):
+                index.insert(geometry.shp.bounds, idx)
             for item in self._read_index_shapefiles():
                 results = index.query(item.geometry.shp.bounds)
                 for idx in results:
@@ -317,7 +317,7 @@ class Naip(DataSource):
         """
         for item, cur_geometries in zip(items, geometries):
             bands = ["R", "G", "B", "IR"]
-            cur_tile_store = PrefixedTileStore(tile_store, (item.name,))
+            cur_tile_store = PrefixedTileStore(tile_store, (item.name, "_".join(bands)))
             needed_projections = get_needed_projections(
                 cur_tile_store, bands, self.config.band_sets, cur_geometries
             )
