@@ -4,10 +4,10 @@ from typing import Any, Optional, Union
 import affine
 import numpy as np
 import numpy.typing as npt
-from rasterio.crs import CRS
 import rasterio.enums
 import rasterio.io
 import rasterio.transform
+from rasterio.crs import CRS
 
 from rslearn.config import BandSetConfig, RasterLayerConfig
 from rslearn.const import TILE_SIZE

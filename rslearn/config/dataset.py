@@ -302,9 +302,7 @@ class VectorLayerConfig(LayerConfig):
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "VectorLayerConfig":
-        kwargs = {
-            "layer_type": LayerType(config["type"])
-        }
+        kwargs = {"layer_type": LayerType(config["type"])}
         if "data_source" in config:
             kwargs["data_source"] = DataSourceConfig.from_config(config["data_source"])
         if "zoom_offset" in config:

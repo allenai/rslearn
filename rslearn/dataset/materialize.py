@@ -7,12 +7,17 @@ import numpy as np
 import numpy.typing as npt
 from class_registry import ClassRegistry
 
-from rslearn.config import LayerConfig, RasterFormatConfig, RasterLayerConfig, VectorLayerConfig
+from rslearn.config import (
+    LayerConfig,
+    RasterFormatConfig,
+    RasterLayerConfig,
+    VectorLayerConfig,
+)
 from rslearn.data_sources import Item
 from rslearn.tile_stores import TileStore, TileStoreLayer
-from rslearn.utils import LocalFileAPI, PixelBounds, Feature
+from rslearn.utils import Feature, LocalFileAPI, PixelBounds
 from rslearn.utils.raster_format import load_raster_format
-from rslearn.utils.vector_format import load_vector_format, GeojsonVectorFormat
+from rslearn.utils.vector_format import load_vector_format
 
 from .remap import Remapper, load_remapper
 from .window import Window
@@ -120,7 +125,9 @@ class RasterMaterializer(Materializer):
             if band_cfg.remap_config:
                 remapper = load_remapper(band_cfg.remap_config)
 
-            raster_format = load_raster_format(RasterFormatConfig(band_cfg.format["name"], band_cfg.format))
+            raster_format = load_raster_format(
+                RasterFormatConfig(band_cfg.format["name"], band_cfg.format)
+            )
 
             for group_id, group in enumerate(item_groups):
                 if group_id == 0:
@@ -238,7 +245,9 @@ class VectorMaterializer(Materializer):
             features: list[Feature] = []
 
             for item in group:
-                ts_layer = tile_store.get_layer((layer_name, item.name, str(projection)))
+                ts_layer = tile_store.get_layer(
+                    (layer_name, item.name, str(projection))
+                )
                 cur_features = ts_layer.read_raster(bounds)
                 features.extend(cur_features)
 

@@ -4,10 +4,13 @@ import argparse
 import multiprocessing
 import random
 import sys
+from datetime import datetime, timezone
 from typing import Callable, Optional
 
 import tqdm
+from rasterio.crs import CRS
 
+from rslearn.const import WGS84_EPSG
 from rslearn.dataset import (
     Dataset,
     Window,
@@ -15,6 +18,8 @@ from rslearn.dataset import (
     materialize_dataset_windows,
     prepare_dataset_windows,
 )
+from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
+from rslearn.utils import Projection
 
 handler_registry = {}
 
@@ -25,6 +30,176 @@ def register_handler(category, command):
         return f
 
     return decorator
+
+
+def parse_time(time_str: str) -> datetime:
+    ts = datetime.fromisoformat(time_str)
+    if not ts.tzinfo:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts
+
+
+def parse_time_range(
+    start: Optional[str], end: Optional[str]
+) -> Optional[tuple[datetime, datetime]]:
+    if not start or not end:
+        return None
+    return (parse_time(start), parse_time(end))
+
+
+@register_handler("dataset", "add_windows")
+def add_windows():
+    parser = argparse.ArgumentParser(
+        prog="rslearn dataset add_windows",
+        description="rslearn dataset add_windows: add windows to a dataset",
+    )
+    parser.add_argument(
+        "--root", type=str, required=True, help="Dataset root directory"
+    )
+    parser.add_argument(
+        "--group", type=str, required=True, help="Add windows to this group"
+    )
+    parser.add_argument(
+        "--box",
+        type=str,
+        default=None,
+        help="Specify extent by bounding box (comma-separated coordinates x1,y1,x2,y2)",
+    )
+    parser.add_argument(
+        "--fname", type=str, default=None, help="Specify extent(s) by vector file"
+    )
+    parser.add_argument(
+        "--crs", type=str, default=None, help="The CRS of the output windows"
+    )
+    parser.add_argument(
+        "--resolution",
+        type=float,
+        default=None,
+        help="The resolution of the output windows",
+    )
+    parser.add_argument(
+        "--x_res", type=float, default=1, help="The X resolution of the output windows"
+    )
+    parser.add_argument(
+        "--y_res", type=float, default=-1, help="The Y resolution of the output windows"
+    )
+    parser.add_argument(
+        "--src_crs",
+        type=str,
+        default=None,
+        help="The CRS of the input extents (only if box is provided)",
+    )
+    parser.add_argument(
+        "--src_resolution",
+        type=float,
+        default=None,
+        help="The resolution of the input extents",
+    )
+    parser.add_argument(
+        "--src_x_res",
+        type=float,
+        default=1,
+        help="The X resolution of the input extents",
+    )
+    parser.add_argument(
+        "--src_y_res",
+        type=float,
+        default=1,
+        help="The Y resolution of the input extents",
+    )
+    parser.add_argument(
+        "--name",
+        type=str,
+        default=None,
+        help="Name of output window (or prefix of output windows)",
+    )
+    parser.add_argument(
+        "--grid_size",
+        type=int,
+        default=None,
+        help=(
+            "Instead of creating one window per input extent (default), "
+            + "create windows along a grid of this cell size",
+        ),
+    )
+    parser.add_argument(
+        "--window_size",
+        type=int,
+        default=None,
+        help=(
+            "Instead of creating windows the size of the input extents, "
+            + "create windows of this fixed size centered at each extent's center",
+        ),
+    )
+    parser.add_argument("--start", type=str, default=None, help="Optional start time")
+    parser.add_argument("--end", type=str, default=None, help="Optional end time")
+    parser.add_argument(
+        "--utm",
+        type=bool,
+        default=False,
+        help="Create windows in an appropriate UTM projection",
+        action=argparse.BooleanOptionalAction,
+    )
+    args = parser.parse_args(args=sys.argv[3:])
+
+    def parse_projection(crs_str, resolution, x_res, y_res, default_crs=None):
+        if not crs_str:
+            if default_crs:
+                crs = default_crs
+            else:
+                return None
+        else:
+            crs = CRS.from_string(crs_str)
+
+        if resolution:
+            return Projection(crs, resolution, -resolution)
+        else:
+            return Projection(crs, x_res, y_res)
+
+    # CRS for dst is not needed if we are auto-selecting a UTM projection.
+    # So here we make sure that parse_projection returns a non-null Projection with
+    # placeholder CRS.
+    dst_projection = parse_projection(
+        args.crs,
+        args.resolution,
+        args.x_res,
+        args.y_res,
+        default_crs=CRS.from_epsg(WGS84_EPSG),
+    )
+
+    kwargs = dict(
+        dataset=Dataset(ds_root=args.root),
+        group=args.group,
+        projection=dst_projection,
+        name=args.name,
+        grid_size=args.grid_size,
+        window_size=args.window_size,
+        time_range=parse_time_range(args.start, args.end),
+        use_utm=args.utm,
+    )
+
+    if args.box:
+        # Parse box.
+        box = [float(value) for value in args.box.split(",")]
+
+        windows = add_windows_from_box(
+            box=box,
+            src_projection=parse_projection(
+                args.src_crs, args.src_resolution, args.src_x_res, args.src_y_res
+            ),
+            **kwargs,
+        )
+
+    elif args.fname:
+        windows = add_windows_from_file(
+            fname=args.fname,
+            **kwargs,
+        )
+
+    else:
+        raise Exception("one of box or fname must be specified")
+
+    print(f"created {len(windows)} windows")
 
 
 def add_apply_on_windows_args(parser):
