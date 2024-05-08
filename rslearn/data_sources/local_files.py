@@ -139,12 +139,12 @@ class LocalFiles(DataSource):
             self.items.append(item)
 
     @staticmethod
-    def from_config(config: LayerConfig) -> "LocalFiles":
+    def from_config(config: LayerConfig, root_dir: str = ".") -> "LocalFiles":
         """Creates a new LocalFiles instance from a configuration dictionary."""
         d = config.data_source.config_dict
         return LocalFiles(
             config=config,
-            src_dir=d["src_dir"],
+            src_dir=os.path.join(root_dir, d["src_dir"]),
         )
 
     def get_items(

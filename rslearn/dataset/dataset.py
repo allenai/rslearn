@@ -86,7 +86,7 @@ class Dataset:
         prepare_dataset_windows(self, windows)
 
     def get_tile_store(self) -> TileStore:
-        return load_tile_store(self.tile_store_config)
+        return load_tile_store(self.tile_store_config, self.ds_root)
 
     def ingest(self) -> None:
         """Ingests items for retrieved layers."""
@@ -113,7 +113,9 @@ def prepare_dataset_windows(
         if not layer_cfg.data_source:
             continue
 
-        data_source = rslearn.data_sources.data_source_from_config(layer_cfg)
+        data_source = rslearn.data_sources.data_source_from_config(
+            layer_cfg, dataset.ds_root
+        )
 
         # Get windows that need to be prepared for this layer.
         needed_windows = []
@@ -167,7 +169,9 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
         if not layer_cfg.data_source:
             continue
 
-        data_source = rslearn.data_sources.data_source_from_config(layer_cfg)
+        data_source = rslearn.data_sources.data_source_from_config(
+            layer_cfg, dataset.ds_root
+        )
 
         geometries_by_item = {}
         for window in windows:

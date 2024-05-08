@@ -133,7 +133,7 @@ class Sentinel2(DataSource):
             self.rtree_index = None
 
     @staticmethod
-    def from_config(config: LayerConfig) -> "Sentinel2":
+    def from_config(config: LayerConfig, root_dir: str = ".") -> "Sentinel2":
         """Creates a new Sentinel2 instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict
@@ -143,7 +143,7 @@ class Sentinel2(DataSource):
             max_time_delta = timedelta(days=30)
         return Sentinel2(
             config=config,
-            index_cache_dir=d["index_cache_dir"],
+            index_cache_dir=os.path.join(d["index_cache_dir"]),
             max_time_delta=max_time_delta,
             sort_by=d.get("sort_by"),
             use_rtree_index=d.get("use_rtree_index", True),

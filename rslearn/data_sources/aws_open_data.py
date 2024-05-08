@@ -105,13 +105,13 @@ class Naip(DataSource):
             self.rtree_index = None
 
     @staticmethod
-    def from_config(config: LayerConfig) -> "Naip":
+    def from_config(config: LayerConfig, root_dir: str = ".") -> "Naip":
         """Creates a new Naip instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict
         return Naip(
             config=config,
-            index_cache_dir=d["index_cache_dir"],
+            index_cache_dir=os.path.join(root_dir, d["index_cache_dir"]),
             use_rtree_index=d.get("use_rtree_index", False),
         )
 
@@ -464,7 +464,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         self.bucket = boto3.resource("s3").Bucket(bucket_name)
 
     @staticmethod
-    def from_config(config: LayerConfig) -> "Sentinel2":
+    def from_config(config: LayerConfig, root_dir: str = ".") -> "Sentinel2":
         """Creates a new Sentinel2 instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict
@@ -475,7 +475,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         return Sentinel2(
             config=config,
             modality=Sentinel2Modality(d["modality"]),
-            metadata_cache_dir=d["metadata_cache_dir"],
+            metadata_cache_dir=os.path.join(d["metadata_cache_dir"]),
             max_time_delta=max_time_delta,
             sort_by=d.get("sort_by"),
         )

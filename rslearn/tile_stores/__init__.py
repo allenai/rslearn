@@ -8,9 +8,15 @@ registry = {
 }
 
 
-def load_tile_store(config: TileStoreConfig) -> TileStore:
-    """Load a tile store from a configuration."""
-    return registry[config.name].from_config(config)
+def load_tile_store(config: TileStoreConfig, root_dir: str) -> TileStore:
+    """Load a tile store from a configuration.
+
+    Args:
+        config: the tile store configuration.
+        root_dir: root directory from which paths in the config should be computed
+            (usually the dataset root).
+    """
+    return registry[config.name].from_config(config, root_dir)
 
 
 __all__ = (

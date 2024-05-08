@@ -353,6 +353,12 @@ class TileStoreConfig:
     """A configuration specifying a TileStore."""
 
     def __init__(self, name: str, config_dict: dict[str, Any]) -> None:
+        """Create a new TileStoreConfig.
+
+        Args:
+            name: the tile store implementation name to use
+            config_dict: configuration options
+        """
         self.name = name
         self.config_dict = config_dict
 

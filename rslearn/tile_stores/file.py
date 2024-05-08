@@ -187,9 +187,9 @@ class FileTileStore(TileStore):
         ]
 
     @staticmethod
-    def from_config(config: TileStoreConfig) -> "FileTileStore":
+    def from_config(config: TileStoreConfig, root_dir: str = ".") -> "FileTileStore":
         d = config.config_dict
-        kwargs = {"root_dir": d["root_dir"]}
+        kwargs = {"root_dir": os.path.join(root_dir, d["root_dir"])}
         if "raster_format" in d:
             kwargs["raster_format"] = load_raster_format(
                 RasterFormatConfig.from_config(d["raster_format"])
