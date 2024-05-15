@@ -121,7 +121,7 @@ class Sentinel2(DataSource):
         self.max_time_delta = max_time_delta
         self.sort_by = sort_by
 
-        self.bucket = storage.Client().bucket(self.bucket_name)
+        self.bucket = storage.Client.create_anonymous_client().bucket(self.bucket_name)
 
         if use_rtree_index:
             rtree_fname = os.path.join(self.index_cache_dir, "rtree_index")
@@ -357,7 +357,8 @@ class Sentinel2(DataSource):
 
         items_by_cell = {}
         for item in self._read_products(needed_cell_years):
-            cell_id = "".join(item.blob_path.split("/")[1:4])
+            cell_id = "".join(item.blob_prefix.split("/")[1:4])
+            assert len(cell_id) == 5
             if cell_id not in items_by_cell:
                 items_by_cell[cell_id] = []
             items_by_cell[cell_id].append(item)
