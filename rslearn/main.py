@@ -11,15 +11,16 @@ import tqdm
 from rasterio.crs import CRS
 
 from rslearn.const import WGS84_EPSG
+from rslearn.data_sources import Item, data_source_from_config
 from rslearn.dataset import (
     Dataset,
     Window,
-    ingest_dataset_windows,
     materialize_dataset_windows,
     prepare_dataset_windows,
 )
 from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
-from rslearn.utils import Projection
+from rslearn.tile_stores import PrefixedTileStore
+from rslearn.utils import Projection, STGeometry
 
 handler_registry = {}
 
@@ -245,7 +246,7 @@ def apply_on_windows(
     window: Optional[str] = None,
     workers: int = 0,
     batch_size: int = 1,
-    jobs_per_process: int = None,
+    jobs_per_process: Optional[int] = None,
     use_initial_job: bool = True,
 ):
     print("Loading windows")
@@ -258,20 +259,26 @@ def apply_on_windows(
     windows = dataset.load_windows(groups=groups, names=names)
     print(f"found {len(windows)} windows")
 
+    if hasattr(f, "get_jobs"):
+        jobs = f.get_jobs(windows)
+        print(f"got {len(jobs)} jobs")
+    else:
+        jobs = windows
+
     if workers == 0:
-        f(windows)
+        f(jobs)
         return
 
-    random.shuffle(windows)
+    random.shuffle(jobs)
 
     if use_initial_job:
         # Apply directly on first window to get any initialization out of the way.
-        f([windows[0]])
-        windows = windows[1:]
+        f([jobs[0]])
+        jobs = jobs[1:]
 
     batches = []
-    for i in range(0, len(windows), batch_size):
-        batches.append(windows[i : i + batch_size])
+    for i in range(0, len(jobs), batch_size):
+        batches.append(jobs[i : i + batch_size])
 
     p = multiprocessing.Pool(processes=workers, maxtasksperchild=jobs_per_process)
     outputs = p.imap_unordered(f, batches)
@@ -335,11 +342,73 @@ class IngestHandler:
     def set_dataset(self, dataset: Dataset):
         self.dataset = dataset
 
-    def __call__(self, windows: list[Window]):
+    def __call__(self, jobs: list[tuple[str, Item, list[STGeometry]]]):
         import gc
 
-        ingest_dataset_windows(self.dataset, windows)
+        tile_store = self.dataset.get_tile_store()
+
+        # Group jobs by layer name.
+        jobs_by_layer = {}
+        for layer_name, item, geometries in jobs:
+            if layer_name not in jobs_by_layer:
+                jobs_by_layer[layer_name] = []
+            jobs_by_layer[layer_name].append((item, geometries))
+        for layer_name, items_and_geometries in jobs_by_layer.items():
+            cur_tile_store = PrefixedTileStore(tile_store, (layer_name,))
+            layer_cfg = self.dataset.layers[layer_name]
+            data_source = data_source_from_config(layer_cfg, self.dataset.ds_root)
+
+            try:
+                data_source.ingest(
+                    tile_store=cur_tile_store,
+                    items=[item for item, _ in items_and_geometries],
+                    geometries=[geometries for _, geometries in items_and_geometries],
+                )
+            except Exception as e:
+                print(
+                    "warning: got error while ingesting "
+                    + f"{len(items_and_geometries)} items: {e}"
+                )
+
         gc.collect()
+
+    def get_jobs(
+        self, windows: list[Window]
+    ) -> list[tuple[str, Item, list[STGeometry]]]:
+        """Computes ingest jobs from window list.
+
+        Each ingest job is a tuple of the layer name, the item to ingest, and the
+        geometries of windows that require that item.
+
+        This makes sure that jobs are grouped by item rather than by window, which
+        makes sense because there's no reason to ingest the same item twice.
+        """
+        jobs: list[tuple[str, Item, list[STGeometry]]] = []
+        for layer_name, layer_cfg in self.dataset.layers.items():
+            if not layer_cfg.data_source:
+                continue
+
+            data_source = data_source_from_config(layer_cfg, self.dataset.ds_root)
+
+            geometries_by_item = {}
+            for window in windows:
+                layer_datas = window.load_layer_datas()
+                if layer_name not in layer_datas:
+                    continue
+                geometry = window.get_geometry()
+                layer_data = layer_datas[layer_name]
+                for group in layer_data.serialized_item_groups:
+                    for serialized_item in group:
+                        item = data_source.deserialize_item(serialized_item)
+                        if item not in geometries_by_item:
+                            geometries_by_item[item] = []
+                        geometries_by_item[item].append(geometry)
+
+            for item, geometries in geometries_by_item.items():
+                jobs.append((layer_name, item, geometries))
+
+        print(f"computed {len(jobs)} ingest jobs from {len(windows)} windows")
+        return jobs
 
 
 @register_handler("dataset", "ingest")
