@@ -97,9 +97,8 @@ class Naip(DataSource):
             from rslearn.utils.rtree_index import RtreeIndex
 
             rtree_fname = os.path.join(self.index_cache_dir, "rtree_index")
-            needs_building = not os.path.exists(rtree_fname + ".dat")
             self.rtree_index = RtreeIndex(rtree_fname)
-            if needs_building:
+            if not self.rtree_index.is_done():
                 self._build_index()
         else:
             self.rtree_index = None
@@ -246,11 +245,15 @@ class Naip(DataSource):
                     )
 
     def _build_index(self):
-        """Build the RtreeIndex from items in the data source."""
+        """Build the RtreeIndex from items in the data source.
+
+        Writes to a temporary file before moving to the final location.
+        """
         for item in self._read_index_shapefiles(desc="Building rtree index"):
             self.rtree_index.insert(
                 item.geometry.shp.bounds, json.dumps(item.serialize())
             )
+        self.rtree_index.mark_done()
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
@@ -475,7 +478,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         return Sentinel2(
             config=config,
             modality=Sentinel2Modality(d["modality"]),
-            metadata_cache_dir=os.path.join(d["metadata_cache_dir"]),
+            metadata_cache_dir=os.path.join(root_dir, d["metadata_cache_dir"]),
             max_time_delta=max_time_delta,
             sort_by=d.get("sort_by"),
         )

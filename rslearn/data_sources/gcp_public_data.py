@@ -23,7 +23,6 @@ from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry, open_atomic
-from rslearn.utils.rtree_index import RtreeIndex
 
 from .raster_source import get_needed_projections, ingest_raster
 
@@ -124,10 +123,11 @@ class Sentinel2(DataSource):
         self.bucket = storage.Client.create_anonymous_client().bucket(self.bucket_name)
 
         if use_rtree_index:
+            from rslearn.utils.rtree_index import RtreeIndex
+
             rtree_fname = os.path.join(self.index_cache_dir, "rtree_index")
-            needs_building = not os.path.exists(rtree_fname + ".dat")
             self.rtree_index = RtreeIndex(rtree_fname)
-            if needs_building:
+            if not self.rtree_index.is_done():
                 self._build_index()
         else:
             self.rtree_index = None
@@ -143,7 +143,7 @@ class Sentinel2(DataSource):
             max_time_delta = timedelta(days=30)
         return Sentinel2(
             config=config,
-            index_cache_dir=os.path.join(d["index_cache_dir"]),
+            index_cache_dir=os.path.join(root_dir, d["index_cache_dir"]),
             max_time_delta=max_time_delta,
             sort_by=d.get("sort_by"),
             use_rtree_index=d.get("use_rtree_index", True),
@@ -206,6 +206,7 @@ class Sentinel2(DataSource):
             self.rtree_index.insert(
                 item.geometry.shp.bounds, json.dumps(item.serialize())
             )
+        self.rtree_index.mark_done()
 
     def get_item_by_name(self, name: str) -> Item:
         """Gets an item by name.
