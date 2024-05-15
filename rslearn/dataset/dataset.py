@@ -133,11 +133,18 @@ def prepare_dataset_windows(
         for window in needed_windows:
             geometry = window.get_geometry()
 
+            # Apply temporal modifiers.
             time_offset = layer_cfg.data_source.time_offset
             if geometry.time_range and time_offset:
                 geometry.time_range = (
                     geometry.time_range[0] + time_offset,
                     geometry.time_range[1] + time_offset,
+                )
+            duration = layer_cfg.data_source.duration
+            if geometry.time_range and duration:
+                geometry.time_range = (
+                    geometry.time_range[0],
+                    geometry.time_range[0] + duration,
                 )
 
             geometries.append(geometry)

@@ -214,32 +214,38 @@ class DataSourceConfig:
         self,
         name: str,
         query_config: QueryConfig,
-        time_offset: Optional[timedelta],
         config_dict: dict[str, Any],
+        time_offset: Optional[timedelta] = None,
+        duration: Optional[timedelta] = None,
     ) -> None:
         self.name = name
         self.query_config = query_config
-        self.time_offset = time_offset
         self.config_dict = config_dict
+        self.time_offset = time_offset
+        self.duration = duration
 
     def serialize(self) -> dict[str, Any]:
         config_dict = self.config_dict.copy()
         config_dict["name"] = self.__annotations__name
-        config_dict["time_offset"] = str(self.time_offset)
         config_dict["query_config"] = self.query_config.serialize()
+        if self.time_offset:
+            config_dict["time_offset"] = str(self.time_offset)
+        if self.duration:
+            config_dict["duration"] = str(self.duration)
         return config_dict
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "DataSourceConfig":
-        time_offset = None
-        if "time_offset" in config:
-            time_offset = timedelta(seconds=pytimeparse.parse(config["time_offset"]))
-        return DataSourceConfig(
+        kwargs = dict(
             name=config["name"],
             query_config=QueryConfig.from_config(config.get("query_config", {})),
-            time_offset=time_offset,
             config_dict=config,
         )
+        if "time_offset" in config:
+            kwargs["time_offset"] = timedelta(seconds=pytimeparse.parse(config["time_offset"]))
+        if "duration" in config:
+            kwargs["duration"] = timedelta(seconds=pytimeparse.parse(config["duration"]))
+        return DataSourceConfig(**kwargs)
 
 
 class LayerType(Enum):
