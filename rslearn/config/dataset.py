@@ -242,9 +242,13 @@ class DataSourceConfig:
             config_dict=config,
         )
         if "time_offset" in config:
-            kwargs["time_offset"] = timedelta(seconds=pytimeparse.parse(config["time_offset"]))
+            kwargs["time_offset"] = timedelta(
+                seconds=pytimeparse.parse(config["time_offset"])
+            )
         if "duration" in config:
-            kwargs["duration"] = timedelta(seconds=pytimeparse.parse(config["duration"]))
+            kwargs["duration"] = timedelta(
+                seconds=pytimeparse.parse(config["duration"])
+            )
         return DataSourceConfig(**kwargs)
 
 
