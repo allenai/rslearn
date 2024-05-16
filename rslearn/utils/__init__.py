@@ -9,7 +9,7 @@ from .geometry import (
     is_same_resolution,
     shp_intersects,
 )
-from .get_utm_ups_projection import get_utm_ups_projection
+from .get_utm_ups_crs import get_utm_ups_crs
 from .grid_index import GridIndex
 from .time import daterange
 from .utils import open_atomic
@@ -23,7 +23,7 @@ __all__ = (
     "Projection",
     "STGeometry",
     "daterange",
-    "get_utm_ups_projection",
+    "get_utm_ups_crs",
     "is_same_resolution",
     "open_atomic",
     "shp_intersects",

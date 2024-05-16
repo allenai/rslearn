@@ -10,7 +10,7 @@ import shapely.geometry
 from rasterio.crs import CRS
 
 from rslearn.const import WGS84_PROJECTION
-from rslearn.utils import PixelBounds, Projection, STGeometry, get_utm_ups_projection
+from rslearn.utils import PixelBounds, Projection, STGeometry, get_utm_ups_crs
 
 from .dataset import Dataset
 from .window import Window
@@ -57,7 +57,7 @@ def add_windows_from_geometries(
             # Override the CRS in the specified projection with appropriate UTM CRS.
             wgs84_geom = geometry.to_projection(WGS84_PROJECTION)
             wgs84_point = wgs84_geom.shp.centroid
-            utm_crs = get_utm_ups_projection(wgs84_point.x, wgs84_point.y)
+            utm_crs = get_utm_ups_crs(wgs84_point.x, wgs84_point.y)
             cur_projection = Projection(
                 utm_crs, cur_projection.x_resolution, cur_projection.y_resolution
             )
