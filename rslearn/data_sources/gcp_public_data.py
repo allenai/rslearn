@@ -6,8 +6,9 @@ import io
 import json
 import os
 import xml.etree.ElementTree as ET
+from collections.abc import Generator
 from datetime import timedelta
-from typing import Any, BinaryIO, Generator, Optional
+from typing import Any, BinaryIO, Optional
 
 import dateutil.parser
 import pytimeparse
@@ -106,6 +107,7 @@ class Sentinel2(DataSource):
         """Initialize a new Sentinel2 instance.
 
         Args:
+            config: the LayerConfig of the layer containing this data source.
             index_cache_dir: local directory to cache the index.csv.gz contents, as
                 well as individual product metadata files. Defaults to None in which
                 case products are looked up from the cloud storage directly.
@@ -114,6 +116,8 @@ class Sentinel2(DataSource):
                 number of available products, and defaults to 30 days.
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
+            use_rtree_index: whether to create an rtree index to enable faster lookups
+                (default true)
         """
         self.config = config
         self.index_cache_dir = index_cache_dir
@@ -179,9 +183,7 @@ class Sentinel2(DataSource):
                         "gs://gcp-public-data-sentinel-2/"
                     )[1]
 
-                    blob_prefix = "{}/GRANULE/{}/IMG_DATA/{}_{}_".format(
-                        base_url, granule_id, tile_id, time_str
-                    )
+                    blob_prefix = f"{base_url}/GRANULE/{granule_id}/IMG_DATA/{tile_id}_{time_str}_"
 
                     # Extract the spatial and temporal bounds of the image.
                     bounds = (

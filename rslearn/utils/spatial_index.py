@@ -1,3 +1,5 @@
+"""Abstract SpatialIndex class."""
+
 from typing import Any
 
 

@@ -1,11 +1,13 @@
-from typing import Generator
+"""Utilities related to MGRS cells."""
+
+from collections.abc import Generator
 
 import numpy as np
 from mgrs import MGRS
 
 
 def for_each_cell(
-    bounds: tuple[float, float, float, float]
+    bounds: tuple[float, float, float, float],
 ) -> Generator[str, None, None]:
     """Yields each MGRS cell in the specified WGS84 bounds.
 

@@ -1,3 +1,5 @@
+"""Functions to add windows to an rslearn dataset."""
+
 import os
 from datetime import datetime
 from typing import Optional
@@ -23,7 +25,7 @@ def add_windows_from_geometries(
     grid_size: Optional[int] = None,
     window_size: Optional[int] = None,
     time_range: Optional[tuple[datetime, datetime]] = None,
-    use_utm: Optional[bool] = False,
+    use_utm: bool = False,
 ):
     """Create windows based on a list of STGeometry.
 
@@ -42,7 +44,7 @@ def add_windows_from_geometries(
         time_range: optional time range for the output windows, in case a geometry does
             not have a time range. If not specified, then the output window will not
             have a time range.
-        utm: override output projection with an appropriate UTM projection
+        use_utm: override output projection with an appropriate UTM projection
 
     Returns:
         list of newly created windows
@@ -155,7 +157,7 @@ def add_windows_from_box(
     grid_size: Optional[int] = None,
     window_size: Optional[int] = None,
     time_range: Optional[tuple[datetime, datetime]] = None,
-    use_utm: Optional[bool] = False,
+    use_utm: bool = False,
 ) -> list[Window]:
     """Create windows based on the specified box.
 
@@ -169,7 +171,7 @@ def add_windows_from_box(
         grid_size: see add_windows_from_geometries
         window_size: see add_windows_from_geometries
         time_range: see add_windows_from_geometries
-        utm: see add_windows_from_geometries
+        use_utm: see add_windows_from_geometries
 
     Returns:
         list of newly created windows
@@ -205,7 +207,7 @@ def add_windows_from_file(
     grid_size: Optional[int] = None,
     window_size: Optional[int] = None,
     time_range: Optional[tuple[datetime, datetime]] = None,
-    use_utm: Optional[bool] = False,
+    use_utm: bool = False,
 ) -> list[Window]:
     """Create windows based on the specified vector file.
 
@@ -218,7 +220,7 @@ def add_windows_from_file(
         grid_size: see add_windows_from_geometries
         window_size: see add_windows_from_geometries
         time_range: see add_windows_from_geometries
-        utm: see add_windows_from_geometries
+        use_utm: see add_windows_from_geometries
 
     Returns:
         list of newly created windows

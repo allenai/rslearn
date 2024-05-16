@@ -1,3 +1,5 @@
+"""Classes for storing configuration of a dataset."""
+
 from datetime import timedelta
 from enum import Enum
 from typing import Any, Optional
@@ -9,6 +11,7 @@ from rslearn.utils import PixelBounds, Projection
 
 
 class DType(Enum):
+    """Data type of a raster."""
     UINT8 = "uint8"
     UINT16 = "uint16"
     UINT32 = "uint32"
@@ -27,11 +30,22 @@ class RasterFormatConfig:
     """A configuration specifying a RasterFormat."""
 
     def __init__(self, name: str, config_dict: dict[str, Any]) -> None:
+        """Initialize a new RasterFormatConfig.
+
+        Args:
+            name: the name of the RasterFormat to use.
+            config_dict: configuration to pass to the RasterFormat.
+        """
         self.name = name
         self.config_dict = config_dict
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "RasterFormatConfig":
+        """Create a RasterFormatConfig from config dict.
+
+        Args:
+            config: the config dict for this RasterFormatConfig
+        """
         return RasterFormatConfig(
             name=config["name"],
             config_dict=config,
@@ -42,11 +56,22 @@ class VectorFormatConfig:
     """A configuration specifying a VectorFormat."""
 
     def __init__(self, name: str, config_dict: dict[str, Any] = {}) -> None:
+        """Initialize a new VectorFormatConfig.
+
+        Args:
+            name: the name of the VectorFormat to use.
+            config_dict: configuration to pass to the VectorFormat.
+        """
         self.name = name
         self.config_dict = config_dict
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "VectorFormatConfig":
+        """Create a VectorFormatConfig from config dict.
+
+        Args:
+            config: the config dict for this VectorFormatConfig
+        """
         return VectorFormatConfig(
             name=config["name"],
             config_dict=config,
@@ -54,6 +79,13 @@ class VectorFormatConfig:
 
 
 class BandSetConfig:
+    """A configuration for a band set in a raster layer.
+
+    Each band set specifies one or more bands that should be stored together.
+    It also specifies the storage format and dtype, the zoom offset, etc. for these
+    bands.
+    """
+
     def __init__(
         self,
         config_dict: dict[str, Any],
@@ -67,12 +99,12 @@ class BandSetConfig:
 
         Args:
             config_dict: the config dict used to configure this BandSetConfig
-            band_sets: a list of band sets, each of which is a list of band names that
-                should be stored together
-            format: the format to store tiles in, defaults to geotiff
             dtype: the pixel value type to store tiles in
+            bands: list of band names in this BandSetConfig
+            format: the format to store tiles in, defaults to geotiff
             zoom_offset: non-negative integer, store images at window resolution
                 divided by 2^(zoom_offset).
+            remap_config: config dict for Remapper to remap pixel values
         """
         self.config_dict = config_dict
         self.bands = bands
@@ -87,6 +119,7 @@ class BandSetConfig:
             }
 
     def serialize(self) -> dict[str, Any]:
+        """Serialize this BandSetConfig to a config dict, currently unused."""
         return {
             "bands": self.bands,
             "format": self.format,
@@ -97,7 +130,11 @@ class BandSetConfig:
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "BandSetConfig":
-        """Creates a new BandSetConfig instance from a configuration dictionary."""
+        """Create a BandSetConfig from config dict.
+
+        Args:
+            config: the config dict for this BandSetConfig
+        """
         return BandSetConfig(
             config_dict=config,
             dtype=DType(config["dtype"]),
@@ -141,6 +178,8 @@ class BandSetConfig:
 
 
 class SpaceMode(Enum):
+    """Spatial matching mode when looking up items corresponding to a window."""
+
     CONTAINS = 1
     """Items must contain the entire window."""
 
@@ -156,6 +195,8 @@ class SpaceMode(Enum):
 
 
 class TimeMode(Enum):
+    """Temporal  matching mode when looking up items corresponding to a window."""
+
     WITHIN = 1
     """Items must be within the window time range."""
 
@@ -194,6 +235,7 @@ class QueryConfig:
         self.max_matches = max_matches
 
     def serialize(self) -> dict[str, Any]:
+        """Serialize this QueryConfig to a config dict, currently unused."""
         return {
             "space_mode": str(self.space_mode),
             "time_mode": str(self.time_mode),
@@ -202,6 +244,11 @@ class QueryConfig:
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "QueryConfig":
+        """Create a QueryConfig from config dict.
+
+        Args:
+            config: the config dict for this QueryConfig
+        """
         return QueryConfig(
             space_mode=SpaceMode[config.get("space_mode", "MOSAIC")],
             time_mode=TimeMode[config.get("time_mode", "WITHIN")],
@@ -210,6 +257,8 @@ class QueryConfig:
 
 
 class DataSourceConfig:
+    """Configuration for a DataSource in a dataset layer."""
+
     def __init__(
         self,
         name: str,
@@ -218,6 +267,17 @@ class DataSourceConfig:
         time_offset: Optional[timedelta] = None,
         duration: Optional[timedelta] = None,
     ) -> None:
+        """Initializes a new DataSourceConfig.
+
+        Args:
+            name: the data source class name
+            query_config: the QueryConfig specifying how to match items with windows
+            config_dict: additional config passed to initialize the DataSource
+            time_offset: optional, add this timedelta to the window's time range before
+                matching
+            duration: optional, if window's time range is (t0, t1), then update to
+                (t0, t0 + duration)
+        """
         self.name = name
         self.query_config = query_config
         self.config_dict = config_dict
@@ -225,8 +285,9 @@ class DataSourceConfig:
         self.duration = duration
 
     def serialize(self) -> dict[str, Any]:
+        """Serialize this DataSourceConfig to a config dict, currently unused."""
         config_dict = self.config_dict.copy()
-        config_dict["name"] = self.__annotations__name
+        config_dict["name"] = self.name
         config_dict["query_config"] = self.query_config.serialize()
         if self.time_offset:
             config_dict["time_offset"] = str(self.time_offset)
@@ -236,6 +297,11 @@ class DataSourceConfig:
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "DataSourceConfig":
+        """Create a DataSourceConfig from config dict.
+
+        Args:
+            config: the config dict for this DataSourceConfig
+        """
         kwargs = dict(
             name=config["name"],
             query_config=QueryConfig.from_config(config.get("query_config", {})),
@@ -253,18 +319,29 @@ class DataSourceConfig:
 
 
 class LayerType(Enum):
+    """The layer type (raster or vector)."""
+
     RASTER = "raster"
     VECTOR = "vector"
 
 
 class LayerConfig:
+    """Configuration of a layer in a dataset."""
+
     def __init__(
         self, layer_type: LayerType, data_source: Optional[DataSourceConfig] = None
     ):
+        """Initialize a new LayerConfig.
+
+        Args:
+            layer_type: the LayerType (raster or vector)
+            data_source: optional DataSourceConfig if this layer is retrievable
+        """
         self.layer_type = layer_type
         self.data_source = data_source
 
     def serialize(self) -> dict[str, Any]:
+        """Serialize this LayerConfig to a config dict, currently unused."""
         return {
             "layer_type": str(self.layer_type),
             "data_source": self.data_source,
@@ -272,6 +349,8 @@ class LayerConfig:
 
 
 class RasterLayerConfig(LayerConfig):
+    """Configuration of a raster layer."""
+
     def __init__(
         self,
         layer_type: LayerType,
@@ -279,12 +358,25 @@ class RasterLayerConfig(LayerConfig):
         data_source: Optional[DataSourceConfig] = None,
         resampling_method: Resampling = Resampling.bilinear,
     ):
+        """Initialize a new RasterLayerConfig.
+
+        Args:
+            layer_type: the LayerType (must be raster)
+            band_sets: the bands to store in this layer
+            data_source: optional DataSourceConfig if this layer is retrievable
+            resampling_method: how to resample rasters (if needed), default bilinear resampling
+        """
         super().__init__(layer_type, data_source)
         self.band_sets = band_sets
         self.resampling_method = resampling_method
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "RasterLayerConfig":
+        """Create a RasterLayerConfig from config dict.
+
+        Args:
+            config: the config dict for this RasterLayerConfig
+        """
         kwargs = {
             "layer_type": LayerType(config["type"]),
             "band_sets": [BandSetConfig.from_config(el) for el in config["band_sets"]],
@@ -299,6 +391,8 @@ class RasterLayerConfig(LayerConfig):
 
 
 class VectorLayerConfig(LayerConfig):
+    """Configuration of a vector layer."""
+
     def __init__(
         self,
         layer_type: LayerType,
@@ -306,12 +400,25 @@ class VectorLayerConfig(LayerConfig):
         zoom_offset: int = 0,
         format: VectorFormatConfig = VectorFormatConfig("geojson"),
     ):
+        """Initialize a new VectorLayerConfig.
+
+        Args:
+            layer_type: the LayerType (must be vector)
+            data_source: optional DataSourceConfig if this layer is retrievable
+            zoom_offset: zoom offset at which to store the vector data
+            format: the VectorFormatConfig, default storing as GeoJSON
+        """
         super().__init__(layer_type, data_source)
         self.zoom_offset = zoom_offset
         self.format = format
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "VectorLayerConfig":
+        """Create a VectorLayerConfig from config dict.
+
+        Args:
+            config: the config dict for this VectorLayerConfig
+        """
         kwargs = {"layer_type": LayerType(config["type"])}
         if "data_source" in config:
             kwargs["data_source"] = DataSourceConfig.from_config(config["data_source"])
@@ -351,6 +458,7 @@ class VectorLayerConfig(LayerConfig):
 
 
 def load_layer_config(config: dict[str, Any]) -> LayerConfig:
+    """Load a LayerConfig from a config dict."""
     layer_type = LayerType(config.get("type"))
     if layer_type == LayerType.RASTER:
         return RasterLayerConfig.from_config(config)
@@ -374,6 +482,11 @@ class TileStoreConfig:
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "TileStoreConfig":
+        """Create a TileStoreConfig from config dict.
+
+        Args:
+            config: the config dict for this TileStoreConfig
+        """
         return TileStoreConfig(
             name=config["name"],
             config_dict=config,

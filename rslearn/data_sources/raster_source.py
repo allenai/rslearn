@@ -1,3 +1,5 @@
+"""Helper functions for raster data sources."""
+
 from datetime import datetime
 from typing import Any, Optional, Union
 
@@ -16,6 +18,8 @@ from rslearn.utils import Projection, STGeometry
 
 
 class ArrayWithTransform:
+    """Stores an array along with the transform associated with the array."""
+
     def __init__(
         self,
         array: npt.NDArray[Any],
@@ -26,6 +30,7 @@ class ArrayWithTransform:
 
         Args:
             array: the numpy array (C, H, W) storing the raster data.
+            crs: the CRS of the array
             transform: the transform from pixel coordinates to projection coordinates.
         """
         self.array = array
@@ -56,9 +61,20 @@ class ArrayWithTransform:
         ]
 
     def read(self) -> npt.NDArray[Any]:
+        """Reads the array.
+
+        This is to mimic the rasterio.DatasetReader API.
+
+        Returns:
+            the array
+        """
         return self.array
 
     def close(self):
+        """This is to mimic the rasterio.DatasetReader API.
+
+        The close function is a no-op.
+        """
         pass
 
     def pixel_bounds(self) -> tuple[int, int, int, int]:
@@ -170,8 +186,8 @@ def ingest_raster(
         raster: the rasterio raster
         projection: the projection to save the raster as
         time_range: time range of the raster
+        layer_config: the RasterLayerConfig of this layer
     """
-
     # Get layer in tile store to save under.
     ts_layer = tile_store.create_layer(
         (str(projection),), LayerMetadata(projection, time_range, {})

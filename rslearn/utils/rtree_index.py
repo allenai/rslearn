@@ -1,3 +1,5 @@
+"""RtreeIndex spatial index implementation."""
+
 import os
 from typing import Any, Optional
 
@@ -7,13 +9,10 @@ from rslearn.utils.spatial_index import SpatialIndex
 
 
 class RtreeIndex(SpatialIndex):
-    """An index of temporal geometries using a grid.
+    """An index of spatiotemporal geometries backed by an rtree index.
 
-    Each cell in the grid contains a list of geometries that intersect it.
+    Both in-memory and on-disk options are supported.
     """
-
-    extensions = [".dat", ".idx"]
-    """This index creates files with these extensions added to the passed filename."""
 
     def __init__(self, fname: Optional[str] = None):
         """Initialize a new RtreeIndex.

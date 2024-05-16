@@ -1,3 +1,5 @@
+"""Utilities for working with UTM/UPS projections."""
+
 import pyproj.aoi
 import pyproj.database
 from rasterio.crs import CRS
@@ -27,7 +29,6 @@ def get_utm_ups_projection(lon: float, lat: float) -> CRS:
     Returns:
         the rasterio CRS for the appropriate UTM or UPS projection
     """
-
     if lat > UPS_NORTH_THRESHOLD:
         return CRS.from_epsg(UPS_NORTH_EPSG)
     if lat < UPS_SOUTH_THRESHOLD:

@@ -1,6 +1,7 @@
 """Base classes for rslearn data sources."""
 
-from typing import Any, BinaryIO, Generator
+from collections.abc import Generator
+from typing import Any, BinaryIO
 
 from rslearn.config import QueryConfig
 from rslearn.tile_stores import TileStore
@@ -40,9 +41,18 @@ class Item:
         )
 
     def __eq__(self, other: Any) -> bool:
+        """Check equality.
+
+        Args:
+            other: the other Item
+
+        Returns:
+            whether this Item is the same as the other Item.
+        """
         return isinstance(other, Item) and self.name == other.name
 
     def __hash__(self) -> int:
+        """Returns a hash of this item."""
         return hash(self.name)
 
 

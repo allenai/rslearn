@@ -1,3 +1,5 @@
+"""Tile stores that store ingested raster and vector data before materialization."""
+
 from rslearn.config import TileStoreConfig
 
 from .file import FileTileStore

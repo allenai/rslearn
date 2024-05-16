@@ -4,9 +4,10 @@ import glob
 import io
 import json
 import os
+from collections.abc import Generator
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, BinaryIO, Generator, Optional
+from typing import Any, BinaryIO, Optional
 
 import boto3
 import dateutil.parser
@@ -86,7 +87,10 @@ class Naip(DataSource):
         """Initialize a new Naip instance.
 
         Args:
+            config: the LayerConfig of the layer containing this data source.
             index_cache_dir: local directory to cache index shapefiles.
+            use_rtree_index: whether to create an rtree index to enable faster lookups
+                (default false)
         """
         self.config = config
         self.index_cache_dir = index_cache_dir
@@ -209,9 +213,7 @@ class Naip(DataSource):
                     fname_parts = tif_fname.split(".tif")[0].split("_")
                     tile_id = fname_parts[1][0:5]
                     fname_prefix = "_".join(fname_parts[:-1])
-                    full_prefix = "{}/rgbir/{}/{}".format(
-                        base_dir, tile_id, fname_prefix
-                    )
+                    full_prefix = f"{base_dir}/rgbir/{tile_id}/{fname_prefix}"
 
                     if full_prefix not in tif_blob_path_dict:
                         print(
@@ -344,6 +346,8 @@ class Naip(DataSource):
 
 
 class Sentinel2Modality(Enum):
+    """Sentinel-2 modality, either L1C or L2A."""
+
     L1C = "L1C"
     L2A = "L2A"
 
@@ -448,12 +452,12 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         """Initialize a new Sentinel2 instance.
 
         Args:
+            config: the LayerConfig of the layer containing this data source.
             modality: L1C or L2A.
             metadata_cache_dir: local directory to cache product metadata files.
             max_time_delta: maximum time before a query start time or after a
                 query end time to look for products. This is required due to the large
                 number of available products, and defaults to 30 days.
-            raster_options: common raster configuration options.
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
         """

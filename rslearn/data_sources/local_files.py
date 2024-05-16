@@ -53,7 +53,15 @@ Importers = ClassRegistry()
 
 
 class Importer:
+    """An abstract class for importing data from local files."""
+
     def get_item(config: LayerConfig, fname: str) -> LocalFileItem:
+        """Get a LocalFileItem for this file that can then be ingested.
+
+        Args:
+            config: the configuration of the layer.
+            fname: the filename
+        """
         raise NotImplementedError
 
     def ingest_item(
@@ -62,12 +70,28 @@ class Importer:
         item: LocalFileItem,
         cur_geometries: list[STGeometry],
     ):
+        """Ingest the specified local file.
+
+        Args:
+            config: the configuration of the layer.
+            tile_store: the TileStore to ingest the data into.
+            item: the LocalFileItem
+            cur_geometries: the geometries where the item is needed.
+        """
         raise NotImplementedError
 
 
 @Importers.register("raster")
 class RasterImporter(Importer):
+    """An Importer for raster data."""
+
     def get_item(config: LayerConfig, fname: str) -> Item:
+        """Get a LocalFileItem for this file that can then be ingested.
+
+        Args:
+            config: the configuration of the layer.
+            fname: the filename
+        """
         # Get geometry from the raster file.
         # We assume files are readable with rasterio.
         with rasterio.open(fname) as src:
@@ -93,6 +117,14 @@ class RasterImporter(Importer):
         item: LocalFileItem,
         cur_geometries: list[STGeometry],
     ):
+        """Ingest the specified local file.
+
+        Args:
+            config: the configuration of the layer.
+            tile_store: the TileStore to ingest the data into.
+            item: the LocalFileItem
+            cur_geometries: the geometries where the item is needed.
+        """
         fname = item.fname
         with rasterio.open(fname) as src:
             bands = [f"B{idx+1}" for idx in range(src.count)]

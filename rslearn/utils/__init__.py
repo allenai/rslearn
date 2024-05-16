@@ -1,3 +1,5 @@
+"""rslearn utilities."""
+
 from .feature import Feature
 from .file_api import FileAPI, LocalFileAPI
 from .geometry import (

@@ -1,3 +1,5 @@
+"""rslearn windows."""
+
 import json
 import os
 from datetime import datetime
@@ -9,17 +11,35 @@ from rslearn.utils import Projection, STGeometry, open_atomic
 
 
 class WindowLayerData:
+    """Layer data for retrieved layers specifying relevant items in the data source.
+
+    This stores the outputs from dataset prepare for a given layer.
+    """
+
     def __init__(
         self,
         layer_name: str,
         serialized_item_groups: list[list[Any]],
         materialized: bool = False,
     ) -> None:
+        """Initialize a new WindowLayerData.
+
+        Args:
+            layer_name: the layer name
+            serialized_item_groups: the groups of items, where each item is serialized
+                so it is JSON-encodable.
+            materialized: whether the items have been materialized
+        """
         self.layer_name = layer_name
         self.serialized_item_groups = serialized_item_groups
         self.materialized = materialized
 
     def serialize(self) -> dict:
+        """Serialize a WindowLayerData is a JSON-encodable dict.
+
+        Returns:
+            the JSON-encodable dict
+        """
         return {
             "layer_name": self.layer_name,
             "serialized_item_groups": self.serialized_item_groups,
@@ -28,6 +48,14 @@ class WindowLayerData:
 
     @staticmethod
     def deserialize(d: dict) -> "WindowLayerData":
+        """Deserialize a WindowLayerData.
+
+        Args:
+            d: a JSON dict
+
+        Returns:
+            the WindowLayerData
+        """
         return WindowLayerData(
             layer_name=d["layer_name"],
             serialized_item_groups=d["serialized_item_groups"],
@@ -36,6 +64,8 @@ class WindowLayerData:
 
 
 class Window:
+    """A spatiotemporal window in an rslearn dataset."""
+
     def __init__(
         self,
         window_root: str,
@@ -69,6 +99,7 @@ class Window:
         self.options = options
 
     def save(self) -> None:
+        """Save the window metadata to its root directory."""
         os.makedirs(self.window_root, exist_ok=True)
         metadata = {
             "group": self.group,
@@ -112,7 +143,15 @@ class Window:
 
     @staticmethod
     def load(window_root: str) -> "Window":
-        with open(os.path.join(window_root, "metadata.json"), "r") as f:
+        """Load a Window from its root directory.
+
+        Args:
+            window_root: the root directory of the window
+
+        Returns:
+            the Window
+        """
+        with open(os.path.join(window_root, "metadata.json")) as f:
             metadata = json.load(f)
         return Window(
             window_root=window_root,

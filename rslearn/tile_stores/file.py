@@ -1,3 +1,5 @@
+"""FileTileStore TileStore implementation."""
+
 import json
 import os
 from typing import Any, Optional
@@ -21,6 +23,8 @@ from .tile_store import LayerMetadata, TileStore, TileStoreLayer
 
 
 class FileTileStoreLayer(TileStoreLayer, LocalFileAPI):
+    """A layer in a FileTileStore."""
+
     def __init__(
         self,
         root_dir: str,
@@ -34,6 +38,9 @@ class FileTileStoreLayer(TileStoreLayer, LocalFileAPI):
 
         Args:
             root_dir: root directory for this layer
+            projection: the projection of this layer
+            raster_format: the RasterFormat to use for reading/writing raster data
+            vector_format: the VectorFormat to use for reading/writing vector data
         """
         self.root_dir = root_dir
         self.raster_format = raster_format
@@ -92,7 +99,7 @@ class FileTileStoreLayer(TileStoreLayer, LocalFileAPI):
 
     def get_metadata(self) -> LayerMetadata:
         """Get the LayerMetadata associated with this layer."""
-        with open(os.path.join(self.root_dir, "metadata.json"), "r") as f:
+        with open(os.path.join(self.root_dir, "metadata.json")) as f:
             return LayerMetadata.deserialize(json.load(f))
 
     def set_property(self, key: str, value: Any) -> None:
@@ -114,17 +121,27 @@ class FileTileStoreLayer(TileStoreLayer, LocalFileAPI):
 
 
 class FileTileStore(TileStore):
+    """A TileStore that stores data on the local filesystem."""
+
     def __init__(
         self,
         root_dir,
         raster_format: RasterFormat = GeotiffRasterFormat(),
         vector_format: VectorFormat = GeojsonVectorFormat(),
     ):
+        """Initialize a new FileTileStore.
+
+        Args:
+            root_dir: the root directory to store data
+            raster_format: the RasterFormat (defaults to Geotiff)
+            vector_format: the VectorFormat (defaults to GeoJSON)
+        """
         self.root_dir = root_dir
         self.raster_format = raster_format
         self.vector_format = vector_format
 
     def _get_layer_dir(self, layer_id: tuple[str, ...]):
+        """Get the directory of the specified layer ID."""
         for part in layer_id:
             if "/" in part or part.startswith("."):
                 raise ValueError(f"Invalid layer_id part {part}")
@@ -188,6 +205,15 @@ class FileTileStore(TileStore):
 
     @staticmethod
     def from_config(config: TileStoreConfig, root_dir: str = ".") -> "FileTileStore":
+        """Initialize a FileTileStore from configuration.
+
+        Args:
+            config: the TileStoreConfig
+            root_dir: the dataset root directory
+
+        Returns:
+            the FileTileStore
+        """
         d = config.config_dict
         kwargs = {"root_dir": os.path.join(root_dir, d["root_dir"])}
         if "raster_format" in d:

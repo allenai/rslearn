@@ -5,8 +5,9 @@ import json
 import shutil
 import time
 import uuid
+from collections.abc import Generator
 from datetime import datetime, timedelta, timezone
-from typing import Any, BinaryIO, Generator, Optional
+from typing import Any, BinaryIO, Optional
 
 import pytimeparse
 import rasterio
@@ -30,10 +31,18 @@ class APIException(Exception):
 
 
 class M2MAPIClient:
+    """An API client for interacting with the USGS M2M API."""
+
     api_url = "https://m2m.cr.usgs.gov/api/api/json/stable/"
     pagination_size = 1000
 
     def __init__(self, username, password):
+        """Initialize a new M2MAPIClient.
+
+        Args:
+            username: the EROS username
+            password: the EROS password
+        """
         self.username = username
         self.password = password
         json_data = json.dumps({"username": self.username, "password": self.password})
@@ -71,9 +80,14 @@ class M2MAPIClient:
         self.request("logout")
 
     def __enter__(self):
+        """Enter function to provide with semantics."""
         return self
 
     def __exit__(self):
+        """Exit function to provide with semantics.
+
+        Logs out the API.
+        """
         self.close()
 
     def get_filters(self, dataset_name: str) -> list[dict[str, Any]]:
@@ -157,6 +171,7 @@ class M2MAPIClient:
         """Get detailed metadata for a scene.
 
         Args:
+            dataset_name: the dataset name in which to search
             entity_id: the entity ID of the scene
 
         Returns:
@@ -177,6 +192,7 @@ class M2MAPIClient:
         """Get the downloadable products for a given scene.
 
         Args:
+            dataset_name: the dataset name
             entity_id: the entity ID of the scene
 
         Returns:
@@ -238,6 +254,7 @@ class LandsatOliTirsItem(Item):
         Args:
             name: unique name of the item
             geometry: the spatial and temporal extent of the item
+            entity_id: the entity ID of this item
             cloud_cover: the cloud cover percentage
         """
         super().__init__(name, geometry)
@@ -293,6 +310,9 @@ class LandsatOliTirs(DataSource):
         """Initialize a new LandsatOliTirs instance.
 
         Args:
+            config: the LayerConfig of the layer containing this data source
+            username: EROS username
+            password: EROS password
             max_time_delta: maximum time before a query start time or after a
                 query end time to look for products. This is required due to the large
                 number of available products, and defaults to 30 days.

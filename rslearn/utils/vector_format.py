@@ -1,3 +1,5 @@
+"""Classes for writing vector data to a FileAPI."""
+
 import json
 from typing import Any
 
@@ -15,6 +17,11 @@ VectorFormats = ClassRegistry()
 
 
 class VectorFormat:
+    """An abstract class for writing vector data.
+
+    Implementations of VectorFormat should support reading and writing vector data in
+    a FileAPI. Vector data is a list of GeoJSON-like features.
+    """
     def encode_vector(
         self,
         file_api: FileAPI,
@@ -45,6 +52,12 @@ class VectorFormat:
 
 @VectorFormats.register("tile")
 class TileVectorFormat(VectorFormat):
+    """TileVectorFormat stores data in GeoJSON files corresponding to grid cells.
+
+    A tile size defines the grid size in pixels. One file is created for each grid cell
+    containing at least one feature. Features are written to all grid cells that they
+    intersect.
+    """
     def __init__(self, tile_size: int = 512):
         """Initialize a new TileVectorFormat instance.
 
@@ -143,6 +156,15 @@ class TileVectorFormat(VectorFormat):
 
     @staticmethod
     def from_config(name: str, config: dict[str, Any]) -> "TileVectorFormat":
+        """Create a TileVectorFormat from a config dict.
+
+        Args:
+            name: the name of this format
+            config: the config dict
+
+        Returns:
+            the TileVectorFormat
+        """
         return TileVectorFormat(
             tile_size=config.get("tile_size", 512),
         )
@@ -192,9 +214,27 @@ class GeojsonVectorFormat(VectorFormat):
 
     @staticmethod
     def from_config(name: str, config: dict[str, Any]) -> "GeojsonVectorFormat":
+        """Create a GeojsonVectorFormat from a config dict.
+
+        Args:
+            name: the name of this format
+            config: the config dict
+
+        Returns:
+            the GeojsonVectorFormat
+        """
         return GeojsonVectorFormat()
 
 
 def load_vector_format(config: VectorFormatConfig) -> VectorFormat:
+    """Loads a VectorFormat from a VectorFormatConfig.
+
+    Args:
+        config: the VectorFormatConfig configuration object specifying the
+            VectorFormat.
+
+    Returns:
+        the loaded VectorFormat implementation
+    """
     cls = VectorFormats.get_class(config.name)
     return cls.from_config(config.name, config.config_dict)

@@ -1,3 +1,5 @@
+"""GridIndex spatial index implementation."""
+
 import math
 from typing import Any, Callable
 

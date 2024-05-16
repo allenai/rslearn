@@ -1,3 +1,5 @@
+"""rslearn dataset class."""
+
 import json
 import os
 from typing import Optional
@@ -45,7 +47,7 @@ class Dataset:
         self.ds_root = ds_root
 
         # Load dataset configuration.
-        with open(os.path.join(ds_root, "config.json"), "r") as f:
+        with open(os.path.join(ds_root, "config.json")) as f:
             config = json.load(f)
             self.layers = {
                 layer_name: load_layer_config(d)
@@ -86,6 +88,11 @@ class Dataset:
         prepare_dataset_windows(self, windows)
 
     def get_tile_store(self) -> TileStore:
+        """Get the tile store associated with this dataset.
+
+        Returns:
+            the TileStore
+        """
         return load_tile_store(self.tile_store_config, self.ds_root)
 
     def ingest(self) -> None:
@@ -125,7 +132,7 @@ def prepare_dataset_windows(
                 continue
             needed_windows.append(window)
         print(
-            "Preparing {} windows for layer {}".format(len(needed_windows), layer_name)
+            f"Preparing {len(needed_windows)} windows for layer {layer_name}"
         )
 
         # Get STGeometry for each window.
@@ -195,7 +202,7 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
                     geometries_by_item[item].append(geometry)
 
         print(
-            "Ingesting {} items in layer {}".format(len(geometries_by_item), layer_name)
+            f"Ingesting {len(geometries_by_item)} items in layer {layer_name}"
         )
         cur_tile_store = PrefixedTileStore(tile_store, (layer_name,))
         geometries_and_items = list(geometries_by_item.items())
@@ -207,6 +214,15 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
 
 
 def is_window_ingested(dataset: Dataset, window: Window) -> bool:
+    """Check if a window is ingested.
+
+    Args:
+        dataset: the dataset
+        window: the window
+
+    Returns:
+        true if the window is ingested, false otherwise
+    """
     tile_store = dataset.get_tile_store()
     layer_datas = window.load_layer_datas()
     for layer_name, layer_cfg in dataset.layers.items():
@@ -290,9 +306,7 @@ def materialize_dataset_windows(dataset: Dataset, windows: list[Window]) -> None
                 item_groups.append(item_group)
 
             print(
-                "Materializing {} item groups in layer {}".format(
-                    len(item_groups), layer_name
-                )
+                f"Materializing {len(item_groups)} item groups in layer {layer_name}"
             )
 
             if dataset.materializer_name:

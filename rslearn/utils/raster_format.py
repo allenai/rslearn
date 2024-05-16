@@ -1,3 +1,5 @@
+"""Abstract RasterFormat class."""
+
 from typing import Any, BinaryIO, Optional
 
 import affine
@@ -17,6 +19,12 @@ RasterFormats = ClassRegistry()
 
 
 class RasterFormat:
+    """An abstract class for writing raster data.
+
+    Implementations of RasterFormat should support reading and writing raster data in
+    a FileAPI. Raster data is a CxHxW numpy array.
+    """
+
     def encode_raster(
         self,
         file_api: FileAPI,
@@ -51,6 +59,13 @@ class RasterFormat:
 
 @RasterFormats.register("image_tile")
 class ImageTileRasterFormat(RasterFormat):
+    """A RasterFormat that stores data in image tiles corresponding to grid cells.
+
+    A tile size defines the grid size in pixels. One file is created for each grid cell
+    that the raster intersects. The image format is configurable. The images are named
+    by their (possibly negative) column and row along the grid.
+    """
+
     def __init__(self, format: str, tile_size: int = 512):
         """Initialize a new ImageTileRasterFormat instance.
 
@@ -68,6 +83,14 @@ class ImageTileRasterFormat(RasterFormat):
         bounds: PixelBounds,
         array: npt.NDArray[Any],
     ) -> None:
+        """Encodes a single tile to a file.
+
+        Args:
+            f: the file object to write to
+            projection: the projection (used for GeoTIFF metadata)
+            bounds: the bounds in the projection (used for GeoTIFF metadata)
+            array: the raster data at this tile
+        """
         if self.format in ["png", "jpeg"]:
             array = array.transpose(1, 2, 0)
             if array.shape[2] == 1:
@@ -98,6 +121,11 @@ class ImageTileRasterFormat(RasterFormat):
                 dst.write(array)
 
     def decode_tile(self, f: BinaryIO) -> npt.NDArray[Any]:
+        """Decodes a single tile from a file.
+
+        Args:
+            f: the file object to read from
+        """
         if self.format in ["png", "jpeg"]:
             array = np.array(Image.open(f, formats=[self.format.upper()]))
             if len(array.shape) == 2:
@@ -218,6 +246,7 @@ class ImageTileRasterFormat(RasterFormat):
         return dst
 
     def get_extension(self) -> str:
+        """Returns the extension to use based on the configured image format."""
         if self.format == "png":
             return "png"
         elif self.format == "jpeg":
@@ -228,6 +257,12 @@ class ImageTileRasterFormat(RasterFormat):
 
     @staticmethod
     def from_config(name: str, config: dict[str, Any]) -> "ImageTileRasterFormat":
+        """Create a ImageTileRasterFormat from a config dict.
+
+        Args:
+            name: the name of this format
+            config: the config dict
+        """
         return ImageTileRasterFormat(
             format=config.get("format", "geotiff"),
             tile_size=config.get("tile_size", 512),
@@ -241,6 +276,11 @@ class GeotiffRasterFormat(RasterFormat):
     fname = "geotiff.tif"
 
     def __init__(self, block_size: int = 512):
+        """Initializes a GeotiffRasterFormat.
+
+        Args:
+            block_size: the block size to use in the output GeoTIFF
+        """
         self.block_size = block_size
 
     def encode_raster(
@@ -352,6 +392,14 @@ class GeotiffRasterFormat(RasterFormat):
                 return array
 
     def get_raster_bounds(self, file_api: FileAPI) -> PixelBounds:
+        """Returns the bounds of the stored raster.
+
+        Args:
+            file_api: the FileAPI where the raster data was written
+
+        Returns:
+            the PixelBounds of the raster
+        """
         with file_api.open(self.fname, "rb") as f:
             with rasterio.open(f) as src:
                 transform = src.transform
@@ -370,6 +418,15 @@ class GeotiffRasterFormat(RasterFormat):
 
     @staticmethod
     def from_config(name: str, config: dict[str, Any]) -> "GeotiffRasterFormat":
+        """Create a GeotiffRasterFormat from a config dict.
+
+        Args:
+            name: the name of this format
+            config: the config dict
+
+        Returns:
+            the GeotiffRasterFormat
+        """
         return GeotiffRasterFormat(
             block_size=config.get("block_size", 512),
         )
@@ -384,9 +441,19 @@ class SingleImageRasterFormat(RasterFormat):
     """
 
     def __init__(self, format: str = "png"):
+        """Initialize a SingleImageRasterFormat.
+
+        Args:
+            format: the format, either png or jpeg
+        """
         self.format = format
 
     def get_extension(self) -> str:
+        """Get the filename extension to use when storing the image.
+
+        Returns:
+            the string filename extension, e.g. png or jpg
+        """
         if self.format == "png":
             return "png"
         elif self.format == "jpeg":
@@ -436,6 +503,15 @@ class SingleImageRasterFormat(RasterFormat):
 
     @staticmethod
     def from_config(name: str, config: dict[str, Any]) -> "SingleImageRasterFormat":
+        """Create a SingleImageRasterFormat from a config dict.
+
+        Args:
+            name: the name of this format
+            config: the config dict
+
+        Returns:
+            the SingleImageRasterFormat
+        """
         kwargs = {}
         if "format" in config:
             kwargs["format"] = config["format"]
@@ -443,5 +519,14 @@ class SingleImageRasterFormat(RasterFormat):
 
 
 def load_raster_format(config: RasterFormatConfig) -> RasterFormat:
+    """Loads a RasterFormat from a RasterFormatConfig.
+
+    Args:
+        config: the RasterFormatConfig configuration object specifying the
+            RasterFormat.
+
+    Returns:
+        the loaded RasterFormat implementation
+    """
     cls = RasterFormats.get_class(config.name)
     return cls.from_config(config.name, config.config_dict)

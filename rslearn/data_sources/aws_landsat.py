@@ -5,8 +5,9 @@ import json
 import os
 import urllib.request
 import zipfile
+from collections.abc import Generator
 from datetime import timedelta
-from typing import Any, BinaryIO, Generator, Optional
+from typing import Any, BinaryIO, Optional
 
 import boto3
 import dateutil.parser
@@ -212,8 +213,7 @@ class LandsatOliTirs(DataSource):
                         for item_dict in json.load(f)
                     ]
 
-            for item in items:
-                yield item
+            yield from items
 
     def get_wrs2_polygons(self) -> list[tuple[shapely.Geometry, str, str]]:
         """Get polygons for each (path, row) in the WRS2 grid.

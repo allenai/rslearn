@@ -18,6 +18,8 @@ from rslearn.utils import Feature, GridIndex, STGeometry
 
 
 class FeatureType(Enum):
+    """OpenStreetMap feature type."""
+
     NODE = "node"
     WAY = "way"
     RELATION = "relation"
@@ -52,6 +54,14 @@ class Filter:
 
     @staticmethod
     def from_config(d: dict[str, Any]) -> "Filter":
+        """Creates a Filter from a config dict.
+
+        Args:
+            d: the config dict
+
+        Returns:
+            the Filter object
+        """
         kwargs = {}
         if "feature_types" in d:
             kwargs["feature_types"] = [FeatureType(el) for el in d["feature_types"]]
@@ -90,11 +100,15 @@ class Filter:
 
 
 class BoundsHandler(osmium.SimpleHandler):
+    """An osmium handler for computing the bounds of an input file."""
+
     def __init__(self):
+        """Initialize a new BoundsHandler."""
         osmium.SimpleHandler.__init__(self)
         self.bounds = (180, 90, -180, -90)
 
     def node(self, n):
+        """Handle nodes and update the computed bounds."""
         lon = n.location.lon
         lat = n.location.lat
         self.bounds = (
@@ -106,6 +120,8 @@ class BoundsHandler(osmium.SimpleHandler):
 
 
 class OsmHandler(osmium.SimpleHandler):
+    """An osmium handler for recording the vector data in an input file."""
+
     def __init__(
         self,
         categories: dict[str, Filter],
@@ -113,6 +129,17 @@ class OsmHandler(osmium.SimpleHandler):
         grid_size: float = 0.03,
         padding: float = 0.03,
     ):
+        """Initialize a new OsmHandler.
+
+        Args:
+            categories: a map from category name to a corresponding Filter. If an OSM
+                feature matches the filter, then it is converted to a vector Feature
+                under that category.
+            geometries: only consider features falling in these geometries.
+            grid_size: grid size of grid index created over the geometries
+            padding: padding added to the geometries so that enough points along OSM
+                features intersecting a geometry are retained.
+        """
         osmium.SimpleHandler.__init__(self)
 
         self.categories = categories
@@ -140,6 +167,7 @@ class OsmHandler(osmium.SimpleHandler):
         self.features = []
 
     def node(self, n):
+        """Handle nodes."""
         # Check if node is relevant to our geometries.
         lon = n.location.lon
         lat = n.location.lat
@@ -172,6 +200,7 @@ class OsmHandler(osmium.SimpleHandler):
         return coords
 
     def way(self, w):
+        """Handle ways."""
         # Collect nodes, skip if too few.
         node_ids = [member.ref for member in w.nodes]
         coords = self._get_way_coords(node_ids)
@@ -205,6 +234,7 @@ class OsmHandler(osmium.SimpleHandler):
             self.features.append(feat)
 
     def match_relation(self, r):
+        """Handle relations."""
         # Collect ways and distinguish exterior vs holes, skip if none found.
         exterior_ways = []
         interior_ways = []
@@ -367,8 +397,10 @@ class OpenStreetMap(DataSource):
 
         Args:
             config: the configuration of this layer.
-            pbf_fname: the PBF filename to read from. If it doesn't exist, the latest
-                planet PBF will be downloaded.
+            pbf_fnames: the PBF filenames to read from. If a single filename is
+                provided and it doesn't exist, the latest planet PBF will be downloaded
+                there.
+            bounds_fname: filename where the bounds of the PBF are cached.
             categories: dictionary of (category name, filter). Features that match the
                 filter will be emitted under the corresponding category.
         """
@@ -419,7 +451,7 @@ class OpenStreetMap(DataSource):
                 json.dump(pbf_bounds, f)
 
         else:
-            with open(self.bounds_fname, "r") as f:
+            with open(self.bounds_fname) as f:
                 pbf_bounds = json.load(f)
 
         return pbf_bounds

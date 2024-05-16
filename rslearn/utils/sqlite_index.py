@@ -1,3 +1,5 @@
+"""Contains a SpatialIndex implementation that uses an sqlite database."""
+
 import json
 import sqlite3
 from typing import Any
@@ -7,9 +9,10 @@ from rslearn.utils.spatial_index import SpatialIndex
 
 
 class SqliteIndex(SpatialIndex):
-    """An index of temporal geometries using a grid.
+    """An index of spatiotemporal geometries backed by an sqlite database.
 
-    Each cell in the grid contains a list of geometries that intersect it.
+    We do not use geospatial extensions. Actually, it looks like this is only partially
+    implemented so we should either complete it or remove this file.
     """
 
     def __init__(self, fname: str):

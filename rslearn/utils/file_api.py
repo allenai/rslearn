@@ -1,3 +1,5 @@
+"""Implementations of a simple file access interface."""
+
 import os
 from typing import BinaryIO
 
@@ -25,7 +27,12 @@ class FileAPI:
 class LocalFileAPI:
     """A FileAPI implementation that uses a local directory."""
 
-    def __init__(self, root_dir):
+    def __init__(self, root_dir: str):
+        """Initialize a new LocalFileAPI.
+
+        Args:
+            root_dir: the directory to store the files
+        """
         self.root_dir = root_dir
 
     def open(self, fname: str, mode: str) -> BinaryIO:

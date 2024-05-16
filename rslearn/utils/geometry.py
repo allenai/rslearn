@@ -1,3 +1,5 @@
+"""Spatiotemporal geometry utilities."""
+
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
@@ -31,7 +33,20 @@ def shp_intersects(shp1: shapely.Geometry, shp2: shapely.Geometry):
 
 
 class Projection:
+    """A projection specifies a CRS, x resolution, and y resolution.
+
+    The coordinate reference system (CRS) defines the meaning of the coordinates. The
+    resolutions specify the pixels per projection unit, and are used to map pixel
+    coordinates to CRS coordinates.
+    """
     def __init__(self, crs: CRS, x_resolution: float, y_resolution: float) -> None:
+        """Initialize a new Projection.
+
+        Args:
+            crs: the CRS
+            x_resolution: the x resolution
+            y_resolution: the y resolution
+        """
         self.crs = crs
         self.x_resolution = x_resolution
         self.y_resolution = y_resolution
@@ -49,6 +64,7 @@ class Projection:
         return True
 
     def __repr__(self) -> str:
+        """Returns a string representation of this projection."""
         return (
             f"Projection(crs={self.crs}, "
             + f"x_resolution={self.x_resolution}, "
@@ -56,9 +72,11 @@ class Projection:
         )
 
     def __str__(self) -> str:
+        """Returns a human-readable string summary of this projection."""
         return f"{self.crs}_{self.x_resolution}_{self.y_resolution}"
 
     def __hash__(self) -> int:
+        """Returns a hash of this projection."""
         return hash((self.crs, self.x_resolution, self.y_resolution))
 
     def serialize(self) -> dict:
@@ -95,8 +113,7 @@ class STGeometry:
         """Creates a new spatiotemporal geometry.
 
         Args:
-            crs: the CRS of the coordinate system
-            resolution: projection units per pixel
+            projection: the projection
             shp: the shape in pixel coordinates
             time_range: optional start and end time (default unlimited)
         """
@@ -217,6 +234,7 @@ class STGeometry:
         return STGeometry(projection, shp, self.time_range)
 
     def __repr__(self) -> str:
+        """Returns a string representation of this STGeometry."""
         return (
             f"STGeometry(projection={self.projection}, shp={self.shp}, "
             + f"time_range={self.time_range})"

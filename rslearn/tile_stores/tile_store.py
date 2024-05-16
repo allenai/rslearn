@@ -52,6 +52,11 @@ class LayerMetadata:
 
 
 class TileStoreLayer:
+    """An abstract class for a layer in a tile store.
+
+    The layer can store one or more raster and vector datas.
+    """
+
     def read_raster(self, bounds: PixelBounds) -> Optional[npt.NDArray[Any]]:
         """Read raster data from the store.
 
@@ -110,6 +115,11 @@ class TileStoreLayer:
 
 
 class TileStore:
+    """An abstract class for a tile store.
+
+    A tile store supports operations to read and write raster and vector data.
+    """
+
     def create_layer(
         self, layer_id: tuple[str, ...], metadata: LayerMetadata
     ) -> TileStoreLayer:
@@ -151,6 +161,12 @@ class PrefixedTileStore(TileStore):
     """Wraps another tile store by adding prefix to all layer IDs."""
 
     def __init__(self, tile_store: TileStore, prefix: tuple[str, ...]):
+        """Initialize a new PrefixedTileStore.
+
+        Args:
+            tile_store: the tile store to wrap
+            prefix: the prefix to add to the layer IDs
+        """
         self.tile_store = tile_store
         self.prefix = prefix
 

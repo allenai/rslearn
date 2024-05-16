@@ -26,6 +26,8 @@ Materializers = ClassRegistry()
 
 
 class Materializer:
+    """An abstract class that materializes data from a tile store."""
+
     def materialize(
         self,
         tile_store: TileStore,
@@ -39,6 +41,7 @@ class Materializer:
         Args:
             tile_store: the tile store where the items have been ingested (unprefixed)
             window: the window to materialize
+            layer_name: the name of the layer to materialize
             layer_cfg: the configuration of the layer to materialize
             item_groups: the items associated with this window and layer
         """
@@ -95,6 +98,8 @@ def read_raster_window_from_tiles(
 
 @Materializers.register("raster")
 class RasterMaterializer(Materializer):
+    """A Materializer for raster data."""
+
     def materialize(
         self,
         tile_store: TileStore,
@@ -108,6 +113,7 @@ class RasterMaterializer(Materializer):
         Args:
             tile_store: the tile store where the items have been ingested (unprefixed)
             window: the window to materialize
+            layer_name: name of the layer to materialize
             layer_cfg: the configuration of the layer to materialize
             item_groups: the items associated with this window and layer
         """
@@ -200,6 +206,8 @@ class RasterMaterializer(Materializer):
 
 @Materializers.register("vector")
 class VectorMaterializer(Materializer):
+    """A Materializer for vector data."""
+
     def materialize(
         self,
         tile_store: TileStore,

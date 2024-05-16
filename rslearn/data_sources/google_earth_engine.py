@@ -53,6 +53,8 @@ class GEE(DataSource):
             service_account_credentials: service account credentials filename
             filters: optional list of tuples (property_name, property_value) to filter
                 images (using ee.Filter.eq)
+            dtype: optional desired array data type. If the data obtained from GEE does
+                not match this type, then it is converted.
         """
         self.config = config
         self.collection_name = collection_name
@@ -220,7 +222,7 @@ class GEE(DataSource):
 
             # Use the native projection of the image to obtain the raster.
             projection = image.select(bands[0]).projection().getInfo()
-            print("starting task to retrieve image {}".format(item.name))
+            print(f"starting task to retrieve image {item.name}")
             blob_path = f"{self.collection_name}/{item.name}.{os.getpid()}/"
             task = ee.batch.Export.image.toCloudStorage(
                 image=image,

@@ -1,3 +1,5 @@
+"""rslearn dataset storage and operations."""
+
 from .dataset import (
     Dataset,
     ingest_dataset_windows,

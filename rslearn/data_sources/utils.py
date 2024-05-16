@@ -1,3 +1,5 @@
+"""Utilities shared by data sources."""
+
 from rslearn.config import QueryConfig, SpaceMode, TimeMode
 from rslearn.data_sources import Item
 from rslearn.utils import STGeometry, shp_intersects

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+"""Entrypoint for the rslearn command-line interface."""
 
 import argparse
 import multiprocessing
@@ -26,6 +26,8 @@ handler_registry = {}
 
 
 def register_handler(category, command):
+    """Register a new handler for a command."""
+
     def decorator(f):
         handler_registry[(category, command)] = f
         return f
@@ -34,6 +36,10 @@ def register_handler(category, command):
 
 
 def parse_time(time_str: str) -> datetime:
+    """Parse an ISO-formatted time string into datetime while ensuring timezone is set.
+
+    The timezone defaults to UTC.
+    """
     ts = datetime.fromisoformat(time_str)
     if not ts.tzinfo:
         ts = ts.replace(tzinfo=timezone.utc)
@@ -43,6 +49,7 @@ def parse_time(time_str: str) -> datetime:
 def parse_time_range(
     start: Optional[str], end: Optional[str]
 ) -> Optional[tuple[datetime, datetime]]:
+    """Parse a start and end time string into a time range tuple."""
     if not start or not end:
         return None
     return (parse_time(start), parse_time(end))
@@ -50,6 +57,7 @@ def parse_time_range(
 
 @register_handler("dataset", "add_windows")
 def add_windows():
+    """Handler for the rslearn dataset add_windows command."""
     parser = argparse.ArgumentParser(
         prog="rslearn dataset add_windows",
         description="rslearn dataset add_windows: add windows to a dataset",
@@ -203,7 +211,12 @@ def add_windows():
     print(f"created {len(windows)} windows")
 
 
-def add_apply_on_windows_args(parser):
+def add_apply_on_windows_args(parser: argparse.ArgumentParser):
+    """Add arguments for handlers that use the apply_on_windows helper.
+
+    Args:
+        parser: the argument parser
+    """
     parser.add_argument(
         "--root", type=str, required=True, help="Dataset root directory"
     )
@@ -249,6 +262,23 @@ def apply_on_windows(
     jobs_per_process: Optional[int] = None,
     use_initial_job: bool = True,
 ):
+    """A helper to apply a function on windows in a dataset.
+
+    Args:
+        f: the function to apply on lists of windows.
+        dataset: the dataset.
+        group: optional, only apply on windows in this group.
+        window: optional, only apply on windows with this name.
+        workers: the number of parallel workers to use, default 0 (main thread only).
+        batch_size: if workers > 0, the maximum number of windows to pass to the
+            function. If workers == 0, all windows are always passed.
+        jobs_per_process: optional, terminate processes after they have handled this
+            many jobs. This is useful if there is a memory leak in a dependency.
+        use_initial_job: if workers > 0, by default, an initial job is run on the first
+            batch in the main thread before spawning workers. This can handle things
+            like building indexes that should not be done in parallel. Set this false
+            to disable using the initial job.
+    """
     print("Loading windows")
     groups = None
     names = None
@@ -288,6 +318,7 @@ def apply_on_windows(
 
 
 def apply_on_windows_args(f: Callable[[list[Window]], None], args: argparse.Namespace):
+    """Call apply_on_windows with arguments passed via command-line interface."""
     dataset = Dataset(ds_root=args.root)
     if hasattr(f, "set_dataset"):
         f.set_dataset(dataset)
@@ -304,19 +335,32 @@ def apply_on_windows_args(f: Callable[[list[Window]], None], args: argparse.Name
 
 
 class PrepareHandler:
+    """apply_on_windows handler for the rslearn dataset prepare command."""
     def __init__(self, force: bool):
+        """Initialize a new PrepareHandler.
+
+        Args:
+            force: force prepare
+        """
         self.force = force
         self.dataset = None
 
     def set_dataset(self, dataset: Dataset):
+        """Captures the dataset from apply_on_windows_args.
+
+        Args:
+        dataset: the dataset to prepare.
+        """
         self.dataset = dataset
 
     def __call__(self, windows: list[Window]):
+        """Prepares the windows from apply_on_windows."""
         prepare_dataset_windows(self.dataset, windows, self.force)
 
 
 @register_handler("dataset", "prepare")
 def dataset_prepare():
+    """Handler for the rslearn dataset prepare command."""
     parser = argparse.ArgumentParser(
         prog="rslearn dataset prepare",
         description="rslearn dataset prepare: lookup items in retrieved data sources",
@@ -336,13 +380,28 @@ def dataset_prepare():
 
 
 class IngestHandler:
+    """apply_on_windows handler for the rslearn dataset ingest command."""
+
     def __init__(self):
+        """Initialize a new IngestHandler."""
         self.dataset = None
 
     def set_dataset(self, dataset: Dataset):
+        """Captures the dataset from apply_on_windows_args.
+
+        Args:
+        dataset: the dataset to ingest.
+        """
         self.dataset = dataset
 
     def __call__(self, jobs: list[tuple[str, Item, list[STGeometry]]]):
+        """Ingest the specified items.
+
+        The items are computed from list of windows via IngestHandler.get_jobs.
+
+        Args:
+            jobs: list of (layer_name, item, geometries) tuples to ingest.
+        """
         import gc
 
         tile_store = self.dataset.get_tile_store()
@@ -413,6 +472,7 @@ class IngestHandler:
 
 @register_handler("dataset", "ingest")
 def dataset_ingest():
+    """Handler for the rslearn dataset ingest command."""
     parser = argparse.ArgumentParser(
         prog="rslearn dataset ingest",
         description="rslearn dataset ingest: ingest items in retrieved data sources",
@@ -425,18 +485,28 @@ def dataset_ingest():
 
 
 class MaterializeHandler:
+    """apply_on_windows handler for the rslearn dataset materialize command."""
+
     def __init__(self):
+        """Initialize a MaterializeHandler."""
         self.dataset = None
 
     def set_dataset(self, dataset: Dataset):
+        """Captures the dataset from apply_on_windows_args.
+
+        Args:
+        dataset: the dataset to prepare.
+        """
         self.dataset = dataset
 
     def __call__(self, windows: list[Window]):
+        """Materializes the windows from apply_on_windows."""
         materialize_dataset_windows(self.dataset, windows)
 
 
 @register_handler("dataset", "materialize")
 def dataset_materialize():
+    """Handler for the rslearn dataset materialize command."""
     parser = argparse.ArgumentParser(
         prog="rslearn dataset materialize",
         description=(
@@ -452,6 +522,7 @@ def dataset_materialize():
 
 
 def main():
+    """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="rslearn")
     parser.add_argument(
         "category", help="Command category: dataset, annotate, or model"
