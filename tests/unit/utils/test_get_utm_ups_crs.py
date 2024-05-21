@@ -2,6 +2,7 @@ from rasterio.crs import CRS
 
 from rslearn.utils import get_utm_ups_crs
 
+
 def test_seattle():
     # Seattle is in UTM 10N which is EPSG:32610
     lon = -122.34

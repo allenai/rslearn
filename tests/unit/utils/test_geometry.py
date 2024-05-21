@@ -1,9 +1,9 @@
-from datetime import datetime
 import json
+from datetime import datetime
 
 import pytest
-from rasterio import CRS
 import shapely
+from rasterio import CRS
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.utils import Projection, STGeometry
