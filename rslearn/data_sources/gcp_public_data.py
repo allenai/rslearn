@@ -300,10 +300,19 @@ class Sentinel2(DataSource):
                         + f"{product_prefix}_{year}"
                     )
                     blobs = self.bucket.list_blobs(prefix=blob_prefix, delimiter="/")
-                    for blob in blobs:
-                        if not blob.name.endswith(".SAFE_$folder$"):
-                            continue
-                        item_name = blob.name.split("/")[-1].split(".SAFE_$folder$")[0]
+
+                    # Need to consume the iterator to obtain folder names.
+                    # See https://cloud.google.com/storage/docs/samples/storage-list-files-with-prefix#storage_list_files_with_prefix-python # noqa: E501
+                    # Previously we checked for .SAFE_$folder$ blobs here, but those do
+                    # not exist for some years like 2017.
+                    for _ in blobs:
+                        pass
+
+                    for prefix in blobs.prefixes:
+                        folder_name = prefix.split("/")[-2]
+                        expected_suffix = ".SAFE"
+                        assert folder_name.endswith(expected_suffix)
+                        item_name = folder_name.split(expected_suffix)[0]
                         item = self.get_item_by_name(item_name)
                         items.append(item)
 
@@ -356,7 +365,7 @@ class Sentinel2(DataSource):
             for cell_id in rslearn.utils.mgrs.for_each_cell(wgs84_geometry.shp.bounds):
                 for year in range(
                     (wgs84_geometry.time_range[0] - self.max_time_delta).year,
-                    (wgs84_geometry.time_range[1] + self.max_time_delta).year,
+                    (wgs84_geometry.time_range[1] + self.max_time_delta).year + 1,
                 ):
                     needed_cell_years.add((cell_id, year))
 
