@@ -107,3 +107,25 @@ Annotation
 - Configuring which sets of bands in each layer to display.
 - For retrieved layers where we retrieved multiple items or mosaics, toggling
   between those different items.
+
+
+Model Training
+--------------
+
+- Train over union of multiple datasets.
+- Input individual images, image time series, one image from each of many
+  modalities, and multi-modal time series.
+- Train on subsets of bands from a raster layer.
+- Train on subsets of categories or modalities in a vector layer.
+- Train with multiple targets where the model may need multiple heads.
+- Easily drop in different model architectures.
+- Specify various Lightning modules to use in training?
+- Easily use various pre-trained model weights (both built-in and custom).
+
+
+Model Inference
+---------------
+
+- Apply on subsets of the world in Kubernetes or Beaker jobs.
+- Set it up so that it's easy to integrate into InferD or Vertex AI.
+- Apply on custom GeoTIFF files.
