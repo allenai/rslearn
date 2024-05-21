@@ -1,7 +1,7 @@
 """Helper functions for raster data sources."""
 
 from datetime import datetime
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import affine
 import numpy as np
@@ -177,6 +177,7 @@ def ingest_raster(
     projection: Projection,
     time_range: Optional[tuple[datetime, datetime]] = None,
     layer_config: Optional[RasterLayerConfig] = None,
+    array_callback: Optional[Callable[[npt.NDArray[Any]], npt.NDArray[Any]]] = None,
 ) -> None:
     """Ingests an in-memory rasterio dataset into the tile store.
 
@@ -187,6 +188,7 @@ def ingest_raster(
         projection: the projection to save the raster as
         time_range: time range of the raster
         layer_config: the RasterLayerConfig of this layer
+        array_callback: callback function to apply on the array read from the raster
     """
     # Get layer in tile store to save under.
     ts_layer = tile_store.create_layer(
@@ -197,6 +199,8 @@ def ingest_raster(
 
     # Warp each raster to this projection if needed.
     array = raster.read()
+    if array_callback:
+        array = array_callback(array)
 
     needs_warping = True
     if isinstance(raster.transform, affine.Affine):

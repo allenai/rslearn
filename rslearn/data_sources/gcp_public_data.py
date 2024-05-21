@@ -25,6 +25,7 @@ from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry, open_atomic
 
+from .copernicus import get_harmonize_callback
 from .raster_source import get_needed_projections, ingest_raster
 
 
@@ -105,6 +106,7 @@ class Sentinel2(DataSource):
         max_time_delta: timedelta = timedelta(days=30),
         sort_by: Optional[str] = None,
         use_rtree_index: bool = True,
+        harmonize: bool = False,
     ):
         """Initialize a new Sentinel2 instance.
 
@@ -120,11 +122,14 @@ class Sentinel2(DataSource):
                 SpaceMode.WITHIN.
             use_rtree_index: whether to create an rtree index to enable faster lookups
                 (default true)
+            harmonize: harmonize pixel values across different processing baselines,
+                see https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
         """
         self.config = config
         self.index_cache_dir = index_cache_dir
         self.max_time_delta = max_time_delta
         self.sort_by = sort_by
+        self.harmonize = harmonize
 
         self.bucket = storage.Client.create_anonymous_client().bucket(self.bucket_name)
 
@@ -143,17 +148,17 @@ class Sentinel2(DataSource):
         """Creates a new Sentinel2 instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict
-        if "max_time_delta" in d:
-            max_time_delta = timedelta(seconds=pytimeparse.parse(d["max_time_delta"]))
-        else:
-            max_time_delta = timedelta(days=30)
-        return Sentinel2(
+        kwargs = dict(
             config=config,
             index_cache_dir=os.path.join(root_dir, d["index_cache_dir"]),
-            max_time_delta=max_time_delta,
-            sort_by=d.get("sort_by"),
-            use_rtree_index=d.get("use_rtree_index", True),
         )
+        if "max_time_delta" in d:
+            kwargs["max_time_delta"] = timedelta(seconds=pytimeparse.parse(d["max_time_delta"]))
+        simple_optionals = ["sort_by", "use_rtree_index", "harmonize"]
+        for k in simple_optionals:
+            if k in d:
+                kwargs[k] = d[k]
+        return Sentinel2(**kwargs)
 
     def _read_index(self, desc: str) -> Generator[dict[str, str], None, None]:
         """Read the index.csv.gz in the Cloud Storage bucket.
@@ -212,6 +217,31 @@ class Sentinel2(DataSource):
             )
         self.rtree_index.mark_done()
 
+    def _get_xml_by_name(self, name: str) -> ET.ElementTree:
+        """Gets the metadata XML of an item by its name.
+
+        Args:
+            name: the name of the item
+
+        Returns:
+            the parsed XML ElementTree
+        """
+        parts = name.split("_")
+        assert len(parts[5]) == 6
+        assert parts[5][0] == "T"
+        cell_id = parts[5][1:]
+        base_url = f"tiles/{cell_id[0:2]}/{cell_id[2:3]}/{cell_id[3:5]}/{name}.SAFE/"
+
+        local_xml_fname = os.path.join(self.index_cache_dir, name + ".xml")
+        if not os.path.exists(local_xml_fname):
+            metadata_blob_path = base_url + "MTD_MSIL1C.xml"
+            blob = self.bucket.blob(metadata_blob_path)
+            tmp_local_xml_fname = local_xml_fname + ".tmp." + str(os.getpid())
+            blob.download_to_filename(tmp_local_xml_fname)
+            os.rename(tmp_local_xml_fname, local_xml_fname)
+
+        return ET.parse(local_xml_fname)
+
     def get_item_by_name(self, name: str) -> Item:
         """Gets an item by name.
 
@@ -231,15 +261,7 @@ class Sentinel2(DataSource):
         cell_id = parts[5][1:]
         base_url = f"tiles/{cell_id[0:2]}/{cell_id[2:3]}/{cell_id[3:5]}/{name}.SAFE/"
 
-        local_xml_fname = os.path.join(self.index_cache_dir, name + ".xml")
-        if not os.path.exists(local_xml_fname):
-            metadata_blob_path = base_url + "MTD_MSIL1C.xml"
-            blob = self.bucket.blob(metadata_blob_path)
-            tmp_local_xml_fname = local_xml_fname + ".tmp." + str(os.getpid())
-            blob.download_to_filename(tmp_local_xml_fname)
-            os.rename(tmp_local_xml_fname, local_xml_fname)
-
-        tree = ET.parse(local_xml_fname)
+        tree = self._get_xml_by_name(name)
 
         # The EXT_POS_LIST tag has flat list of polygon coordinates.
         elements = list(tree.iter("EXT_POS_LIST"))
@@ -452,6 +474,10 @@ class Sentinel2(DataSource):
             geometries: a list of geometries needed for each item
         """
         for item, cur_geometries in zip(items, geometries):
+            harmonize_callback = None
+            if self.harmonize:
+                harmonize_callback = get_harmonize_callback(self._get_xml_by_name(item.name))
+
             for suffix, band_names in self.bands:
                 cur_tile_store = PrefixedTileStore(
                     tile_store, (item.name, "_".join(band_names))
@@ -476,4 +502,5 @@ class Sentinel2(DataSource):
                             projection=projection,
                             time_range=item.geometry.time_range,
                             layer_config=self.config,
+                            array_callback=harmonize_callback,
                         )

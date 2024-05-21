@@ -4,15 +4,17 @@ import glob
 import io
 import json
 import os
+import xml.etree.ElementTree as ET
 from collections.abc import Generator
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, BinaryIO, Optional
+from typing import Any, BinaryIO, Callable, Optional
 
 import boto3
 import dateutil.parser
 import fiona
 import fiona.transform
+import numpy.typing as npt
 import pytimeparse
 import rasterio
 import shapely
@@ -26,6 +28,7 @@ from rslearn.const import WGS84_EPSG, WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import GridIndex, Projection, STGeometry, daterange, open_atomic
 
+from .copernicus import get_harmonize_callback
 from .data_source import (
     DataSource,
     Item,
@@ -452,6 +455,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         metadata_cache_dir: str,
         max_time_delta: timedelta = timedelta(days=30),
         sort_by: Optional[str] = None,
+        harmonize: bool = False,
     ) -> None:
         """Initialize a new Sentinel2 instance.
 
@@ -464,12 +468,15 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
                 number of available products, and defaults to 30 days.
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
-        """
+            harmonize: harmonize pixel values across different processing baselines,
+                see https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
+        """ # noqa: E501
         self.config = config
         self.modality = modality
         self.metadata_cache_dir = metadata_cache_dir
         self.max_time_delta = max_time_delta
         self.sort_by = sort_by
+        self.harmonize = harmonize
 
         bucket_name = self.bucket_names[modality]
         self.bucket = boto3.resource("s3").Bucket(bucket_name)
@@ -479,17 +486,18 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         """Creates a new Sentinel2 instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict
-        if "max_time_delta" in d:
-            max_time_delta = timedelta(seconds=pytimeparse.parse(d["max_time_delta"]))
-        else:
-            max_time_delta = timedelta(days=30)
-        return Sentinel2(
+        kwargs = dict(
             config=config,
             modality=Sentinel2Modality(d["modality"]),
             metadata_cache_dir=os.path.join(root_dir, d["metadata_cache_dir"]),
-            max_time_delta=max_time_delta,
-            sort_by=d.get("sort_by"),
         )
+        if "max_time_delta" in d:
+            kwargs["max_time_delta"] = timedelta(seconds=pytimeparse.parse(d["max_time_delta"]))
+        simple_optionals = ["sort_by", "harmonize"]
+        for k in simple_optionals:
+            if k in d:
+                kwargs[k] = d[k]
+        return Sentinel2(**kwargs)
 
     def _read_products(
         self, needed_cell_months: set[tuple[str, int, int, int]]
@@ -668,6 +676,27 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
             buf.seek(0)
             yield (fname, buf)
 
+    def _get_harmonize_callback(self, item: Item) -> Optional[Callable[[npt.NDArray], npt.NDArray]]:
+        """Gets the harmonization callback for the given item.
+
+        Args:
+            item: the item
+
+        Returns:
+            None if no callback is needed, or the callback to subtract the new offset
+        """
+        if not self.harmonize:
+            return None
+        # Search metadata XML for the RADIO_ADD_OFFSET tag.
+        # This contains the per-band offset, but we assume all bands have the same offset.
+        ts = item.geometry.time_range[0]
+        metadata_fname = f"products/{ts.year}/{ts.month}/{ts.day}/{item.name}/metadata.xml"
+        buf = io.BytesIO()
+        self.bucket.download_fileobj(metadata_fname, buf, ExtraArgs={"RequestPayer": "requester"})
+        buf.seek(0)
+        tree = ET.ElementTree(ET.fromstring(buf.getvalue()))
+        return get_harmonize_callback(tree)
+
     def ingest(
         self,
         tile_store: TileStore,
@@ -682,6 +711,8 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
             geometries: a list of geometries needed for each item
         """
         for item, cur_geometries in zip(items, geometries):
+            harmonize_callback = self._get_harmonize_callback(item)
+
             for fname, band_names in self.band_fnames[self.modality]:
                 cur_tile_store = PrefixedTileStore(
                     tile_store, (item.name, "_".join(band_names))
@@ -716,4 +747,5 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
                             projection=projection,
                             time_range=item.geometry.time_range,
                             layer_config=self.config,
+                            array_callback=harmonize_callback,
                         )
