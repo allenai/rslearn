@@ -72,6 +72,8 @@ class Naip(DataSource):
 
     Specifically uses the naip-source requester pays bucket maintained by Esri. See
     https://registry.opendata.aws/naip/ for more information.
+
+    AWS credentials must be configured for use with boto3.
     """
 
     bucket_name = "naip-source"
@@ -400,6 +402,8 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
 
     See https://aws.amazon.com/marketplace/pp/prodview-2ostsvrguftb2 for details about
     the buckets.
+
+    AWS credentials must be configured for use with boto3.
     """
 
     bucket_names = {

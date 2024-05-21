@@ -73,6 +73,8 @@ class Sentinel2(DataSource):
     becoming available on Copernicus.
 
     See https://cloud.google.com/storage/docs/public-datasets/sentinel-2 for details.
+
+    The bucket is public and free so no credentials are needed.
     """
 
     bucket_name = "gcp-public-data-sentinel-2"
