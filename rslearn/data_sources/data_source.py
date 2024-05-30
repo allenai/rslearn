@@ -3,7 +3,7 @@
 from collections.abc import Generator
 from typing import Any, BinaryIO
 
-from rslearn.config import QueryConfig
+from rslearn.config import LayerConfig, QueryConfig
 from rslearn.tile_stores import TileStore
 from rslearn.utils import STGeometry
 
@@ -57,7 +57,10 @@ class Item:
 
 
 class DataSource:
-    """A set of raster or vector files that can be retrieved."""
+    """A set of raster or vector files that can be retrieved.
+
+    Data sources should support at least one of ingest and materialize.
+    """
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
@@ -89,6 +92,23 @@ class DataSource:
             tile_store: the tile store to ingest into
             items: the items to ingest
             geometries: a list of geometries needed for each item
+        """
+        raise NotImplementedError
+
+    def materialize(
+        self,
+        window: "Window",
+        item_groups: list[list[Item]],
+        layer_name: str,
+        layer_cfg: LayerConfig,
+    ) -> None:
+        """Materialize data for the window.
+
+        Args:
+            window: the window to materialize
+            item_groups: the items from get_items
+            layer_name: the name of this layer
+            layer_cfg: the config of this layer
         """
         raise NotImplementedError
 

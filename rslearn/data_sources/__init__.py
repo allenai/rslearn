@@ -14,7 +14,7 @@ import importlib
 
 from rslearn.config import LayerConfig
 
-from .data_source import DataSource, Item
+from .data_source import DataSource, Item, ItemLookupDataSource, RetrieveItemDataSource
 
 
 def data_source_from_config(config: LayerConfig, root_dir: str) -> DataSource:
@@ -33,7 +33,9 @@ def data_source_from_config(config: LayerConfig, root_dir: str) -> DataSource:
 
 
 __all__ = (
-    "Item",
     "DataSource",
+    "Item",
+    "ItemLookupDataSource",
+    "RetrieveItemDataSource",
     "data_source_from_config",
 )

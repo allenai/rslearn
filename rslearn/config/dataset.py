@@ -266,6 +266,7 @@ class DataSourceConfig:
         config_dict: dict[str, Any],
         time_offset: Optional[timedelta] = None,
         duration: Optional[timedelta] = None,
+        ingest: bool = True,
     ) -> None:
         """Initializes a new DataSourceConfig.
 
@@ -277,18 +278,22 @@ class DataSourceConfig:
                 matching
             duration: optional, if window's time range is (t0, t1), then update to
                 (t0, t0 + duration)
+            ingest: whether to ingest this layer or directly materialize it
+                (default true)
         """
         self.name = name
         self.query_config = query_config
         self.config_dict = config_dict
         self.time_offset = time_offset
         self.duration = duration
+        self.ingest = ingest
 
     def serialize(self) -> dict[str, Any]:
         """Serialize this DataSourceConfig to a config dict, currently unused."""
         config_dict = self.config_dict.copy()
         config_dict["name"] = self.name
         config_dict["query_config"] = self.query_config.serialize()
+        config_dict["ingest"] = self.ingest
         if self.time_offset:
             config_dict["time_offset"] = str(self.time_offset)
         if self.duration:
@@ -315,6 +320,8 @@ class DataSourceConfig:
             kwargs["duration"] = timedelta(
                 seconds=pytimeparse.parse(config["duration"])
             )
+        if "ingest" in config:
+            kwargs["ingest"] = config["ingest"]
         return DataSourceConfig(**kwargs)
 
 

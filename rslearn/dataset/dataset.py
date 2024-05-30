@@ -5,8 +5,8 @@ import os
 from typing import Optional
 
 import rslearn.data_sources
-from rslearn.config import TileStoreConfig, load_layer_config
-from rslearn.data_sources import Item
+from rslearn.config import LayerConfig, TileStoreConfig, load_layer_config
+from rslearn.data_sources import DataSource, Item
 from rslearn.tile_stores import PrefixedTileStore, TileStore, load_tile_store
 
 from .materialize import Materializers
@@ -182,6 +182,8 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
     for layer_name, layer_cfg in dataset.layers.items():
         if not layer_cfg.data_source:
             continue
+        if not layer_cfg.data_source.ingest:
+            continue
 
         data_source = rslearn.data_sources.data_source_from_config(
             layer_cfg, dataset.ds_root
@@ -213,12 +215,13 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
         )
 
 
-def is_window_ingested(dataset: Dataset, window: Window) -> bool:
+def is_window_ingested(dataset: Dataset, window: Window, check_layer_name: Optional[str] = None) -> bool:
     """Check if a window is ingested.
 
     Args:
         dataset: the dataset
         window: the window
+        check_layer_name: optional layer name to only check that layer is ingested
 
     Returns:
         true if the window is ingested, false otherwise
@@ -226,6 +229,8 @@ def is_window_ingested(dataset: Dataset, window: Window) -> bool:
     tile_store = dataset.get_tile_store()
     layer_datas = window.load_layer_datas()
     for layer_name, layer_cfg in dataset.layers.items():
+        if check_layer_name and check_layer_name != layer_name:
+            continue
         if layer_name not in layer_datas:
             return False
         layer_data = layer_datas[layer_name]
@@ -273,6 +278,52 @@ def is_window_ingested(dataset: Dataset, window: Window) -> bool:
     return True
 
 
+def materialize_window(window: Window, dataset: Dataset, data_source: DataSource, tile_store: TileStore, layer_name: str, layer_cfg: LayerConfig) -> None:
+    """Materialize a window.
+
+    Args:
+        window: the window
+        dataset: the dataset
+        data_source: the DataSource
+        tile_store: tile store of the dataset to materialize from
+        layer_name: the layer name
+        layer_cfg: the layer config
+    """
+    layer_datas = window.load_layer_datas()
+    if layer_name not in layer_datas:
+        print("not data")
+        return
+    layer_data = layer_datas[layer_name]
+    item_groups = []
+    for serialized_group in layer_data.serialized_item_groups:
+        item_group = []
+        for serialized_item in serialized_group:
+            item = Item.deserialize(serialized_item)
+            item_group.append(item)
+        item_groups.append(item_group)
+
+    if layer_cfg.data_source.ingest:
+        if not is_window_ingested(dataset, window, check_layer_name=layer_name):
+            print("not ingested")
+            return
+
+        print(
+            f"Materializing {len(item_groups)} item groups in layer {layer_name}"
+        )
+
+        if dataset.materializer_name:
+            materializer = Materializers[dataset.materializer_name]
+        else:
+            materializer = Materializers[layer_cfg.layer_type.value]
+        materializer.materialize(
+            tile_store, window, layer_name, layer_cfg, item_groups
+        )
+
+    else:
+        # This window is meant to be materialized directly from the data source.
+        data_source.materialize(window, item_groups, layer_name, layer_cfg)
+
+
 def materialize_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
     """Materialize items for retrieved layers in a dataset.
 
@@ -288,31 +339,9 @@ def materialize_dataset_windows(dataset: Dataset, windows: list[Window]) -> None
         if not layer_cfg.data_source:
             continue
 
+        data_source = rslearn.data_sources.data_source_from_config(
+            layer_cfg, dataset.ds_root
+        )
+
         for window in windows:
-            if not is_window_ingested(dataset, window):
-                print("not ingested")
-                continue
-            layer_datas = window.load_layer_datas()
-            if layer_name not in layer_datas:
-                print("not data")
-                continue
-            layer_data = layer_datas[layer_name]
-            item_groups = []
-            for serialized_group in layer_data.serialized_item_groups:
-                item_group = []
-                for serialized_item in serialized_group:
-                    item = Item.deserialize(serialized_item)
-                    item_group.append(item)
-                item_groups.append(item_group)
-
-            print(
-                f"Materializing {len(item_groups)} item groups in layer {layer_name}"
-            )
-
-            if dataset.materializer_name:
-                materializer = Materializers[dataset.materializer_name]
-            else:
-                materializer = Materializers[layer_cfg.layer_type.value]
-            materializer.materialize(
-                tile_store, window, layer_name, layer_cfg, item_groups
-            )
+            materialize_window(window, dataset, data_source, tile_store, layer_name, layer_cfg)

@@ -442,9 +442,12 @@ class IngestHandler:
         This makes sure that jobs are grouped by item rather than by window, which
         makes sense because there's no reason to ingest the same item twice.
         """
+        # TODO: avoid duplicating ingest_dataset_windows...
         jobs: list[tuple[str, Item, list[STGeometry]]] = []
         for layer_name, layer_cfg in self.dataset.layers.items():
             if not layer_cfg.data_source:
+                continue
+            if not layer_cfg.data_source.ingest:
                 continue
 
             data_source = data_source_from_config(layer_cfg, self.dataset.ds_root)
