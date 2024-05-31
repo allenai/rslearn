@@ -119,6 +119,16 @@ class RasterMaterializer(Materializer):
         """
         assert isinstance(layer_cfg, RasterLayerConfig)
 
+        out_layer_dirs = []
+        for group_id in range(len(item_groups)):
+            if group_id == 0:
+                out_layer_name = layer_name
+            else:
+                out_layer_name = f"{layer_name}.{group_id}"
+            out_layer_dir = os.path.join(window.window_root, "layers", out_layer_name)
+            out_layer_dirs.append(out_layer_dir)
+            os.makedirs(out_layer_dir + ".tmp", exist_ok=True)
+
         for band_cfg in layer_cfg.band_sets:
             # band_cfg could specify zoom_offset and maybe other parameters that affect
             # projection/bounds, so use the corrected projection/bounds.
@@ -136,22 +146,7 @@ class RasterMaterializer(Materializer):
             )
 
             for group_id, group in enumerate(item_groups):
-                if group_id == 0:
-                    out_layer_name = layer_name
-                else:
-                    out_layer_name = f"{layer_name}.{group_id}"
-
-                # Create output directory and skip processing this group if it's
-                # already materialized.
-                out_dir = os.path.join(
-                    window.window_root,
-                    "layers",
-                    out_layer_name,
-                    "_".join(band_cfg.bands),
-                )
-                if os.path.exists(out_dir):
-                    continue
-                tmp_out_dir = out_dir + ".tmp"
+                tmp_out_dir = os.path.join(out_layer_dirs[group_id], "_".join(band_cfg.bands)) + ".tmp"
                 os.makedirs(tmp_out_dir, exist_ok=True)
 
                 dst = np.zeros(
@@ -201,7 +196,9 @@ class RasterMaterializer(Materializer):
                 raster_format.encode_raster(
                     LocalFileAPI(tmp_out_dir), projection, bounds, dst
                 )
-                os.rename(tmp_out_dir, out_dir)
+
+        for out_layer_dir in out_layer_dirs:
+            os.rename(out_layer_dir + ".tmp", out_layer_dir)
 
 
 @Materializers.register("vector")
@@ -232,24 +229,17 @@ class VectorMaterializer(Materializer):
         )
         vector_format = load_vector_format(layer_cfg.format)
 
-        for group_id, group in enumerate(item_groups):
+        out_layer_dirs = []
+        for group_id in range(len(item_groups)):
             if group_id == 0:
                 out_layer_name = layer_name
             else:
                 out_layer_name = f"{layer_name}.{group_id}"
+            out_layer_dir = os.path.join(window.window_root, "layers", out_layer_name)
+            out_layer_dirs.append(out_layer_dir)
+            os.makedirs(out_layer_dir + ".tmp", exist_ok=True)
 
-            # Create output directory and skip processing this group if it's
-            # already materialized.
-            out_dir = os.path.join(
-                window.window_root,
-                "layers",
-                out_layer_name,
-            )
-            if os.path.exists(out_dir):
-                continue
-            tmp_out_dir = out_dir + ".tmp"
-            os.makedirs(tmp_out_dir, exist_ok=True)
-
+        for group_id, group in enumerate(item_groups):
             features: list[Feature] = []
 
             for item in group:
@@ -259,5 +249,8 @@ class VectorMaterializer(Materializer):
                 cur_features = ts_layer.read_raster(bounds)
                 features.extend(cur_features)
 
+            tmp_out_dir = out_layer_dirs[group_id] + ".tmp"
             vector_format.encode_vector(LocalFileAPI(tmp_out_dir), projection, features)
-            os.rename(tmp_out_dir, out_dir)
+
+        for out_layer_dir in out_layer_dirs:
+            os.rename(out_layer_dir + ".tmp", out_layer_dir)

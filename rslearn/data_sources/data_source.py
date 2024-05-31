@@ -4,6 +4,7 @@ from collections.abc import Generator
 from typing import Any, BinaryIO
 
 from rslearn.config import LayerConfig, QueryConfig
+from rslearn.dataset import Window
 from rslearn.tile_stores import TileStore
 from rslearn.utils import STGeometry
 
@@ -97,7 +98,7 @@ class DataSource:
 
     def materialize(
         self,
-        window: "Window",
+        window: Window,
         item_groups: list[list[Item]],
         layer_name: str,
         layer_cfg: LayerConfig,

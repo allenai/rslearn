@@ -1,5 +1,6 @@
 """Helper functions for raster data sources."""
 
+import os
 from datetime import datetime
 from typing import Any, Callable, Optional, Union
 
@@ -11,10 +12,12 @@ import rasterio.io
 import rasterio.transform
 from rasterio.crs import CRS
 
-from rslearn.config import BandSetConfig, RasterLayerConfig
+from rslearn.config import BandSetConfig, RasterFormatConfig, RasterLayerConfig
 from rslearn.const import TILE_SIZE
+from rslearn.dataset import Window
 from rslearn.tile_stores import LayerMetadata, TileStore
-from rslearn.utils import Projection, STGeometry
+from rslearn.utils import LocalFileAPI, Projection, STGeometry
+from rslearn.utils.raster_format import load_raster_format
 
 
 class ArrayWithTransform:
@@ -253,3 +256,58 @@ def ingest_raster(
 
     ts_layer.write_raster(warped_array.pixel_bounds(), warped_array.array)
     ts_layer.set_property("completed", True)
+
+def materialize_raster(
+    raster: Union[rasterio.io.DatasetReader, ArrayWithTransform],
+    window: Window,
+    layer_name: str,
+    band_cfg: BandSetConfig,
+):
+    """Materialize a given raster for a window.
+
+    Currently it is only supported for materializing one band set.
+
+    Args:
+        raster: the raster data
+        window: the window to materialize
+        layer_name: the layer
+        band_cfg: the band configuration
+    """
+    window_projection, window_bounds = band_cfg.get_final_projection_and_bounds(
+        window.projection, window.bounds
+    )
+
+    # Re-project to just extract the window.
+    array = raster.read()
+    window_width = window_bounds[2] - window_bounds[0]
+    window_height = window_bounds[3] - window_bounds[1]
+    dst_transform = rasterio.transform.Affine(
+        window_projection.x_resolution,
+        0,
+        window_bounds[0] * window_projection.x_resolution,
+        0,
+        window_projection.y_resolution,
+        window_bounds[1] * window_projection.y_resolution,
+    )
+    dst_array = np.zeros((array.shape[0], window_height, window_width), dtype=array.dtype)
+    rasterio.warp.reproject(
+        source=array,
+        src_crs=raster.crs,
+        src_transform=raster.transform,
+        destination=dst_array,
+        dst_crs=window_projection.crs,
+        dst_transform=dst_transform,
+        resampling=rasterio.enums.Resampling.bilinear,
+    )
+
+    # Write the array to layer directory.
+    layer_dir = os.path.join(window.window_root, "layers", layer_name)
+    tmp_out_dir = os.path.join(layer_dir + ".tmp", "_".join(band_cfg.bands))
+    os.makedirs(tmp_out_dir, exist_ok=True)
+    raster_format = load_raster_format(
+        RasterFormatConfig(band_cfg.format["name"], band_cfg.format)
+    )
+    raster_format.encode_raster(
+        LocalFileAPI(tmp_out_dir), window_projection, window_bounds, dst_array
+    )
+    os.rename(layer_dir + ".tmp", layer_dir)

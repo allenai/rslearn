@@ -1,7 +1,6 @@
 """Data source for xyz tiles."""
 
 import math
-import os
 import urllib.request
 from typing import Any, Callable, Optional
 
@@ -13,17 +12,12 @@ import shapely
 from PIL import Image
 from rasterio.crs import CRS
 
-from rslearn.config import (
-    LayerConfig,
-    QueryConfig,
-    RasterFormatConfig,
-    RasterLayerConfig,
-)
+from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
 from rslearn.dataset import Window
-from rslearn.utils import LocalFileAPI, PixelBounds, Projection, STGeometry
-from rslearn.utils.raster_format import load_raster_format
+from rslearn.utils import PixelBounds, Projection, STGeometry
 
 from .data_source import DataSource, Item
+from .raster_source import ArrayWithTransform, materialize_raster
 
 WEB_MERCATOR_EPSG = 3857
 WEB_MERCATOR_UNITS = 2 * math.pi * 6378137
@@ -232,9 +226,7 @@ class XyzTiles(DataSource):
         ]
         projected_raster = self.read_bounds(projected_bounds)
 
-        # Now we need to project it back to the desired projection.
-        window_width = window_bounds[2] - window_bounds[0]
-        window_height = window_bounds[3] - window_bounds[1]
+        # Attach the transform to the raster.
         src_transform = rasterio.transform.Affine(
             self.projection.x_resolution,
             0,
@@ -243,43 +235,6 @@ class XyzTiles(DataSource):
             self.projection.y_resolution,
             projected_bounds[1] * self.projection.y_resolution,
         )
-        dst_transform = rasterio.transform.Affine(
-            window_projection.x_resolution,
-            0,
-            window_bounds[0] * window_projection.x_resolution,
-            0,
-            window_projection.y_resolution,
-            window_bounds[1] * window_projection.y_resolution,
-        )
-        raster = np.zeros((projected_raster.shape[0], window_height, window_width), dtype=projected_raster.dtype)
-        rasterio.warp.reproject(
-            source=projected_raster,
-            src_crs=self.projection.crs,
-            src_transform=src_transform,
-            destination=raster,
-            dst_crs=window_projection.crs,
-            dst_transform=dst_transform,
-            resampling=rasterio.enums.Resampling.bilinear,
-        )
+        array_with_transform = ArrayWithTransform(projected_raster, self.projection.crs, src_transform)
 
-        # And then write the data to the window directory.
-        # TODO: this part shouldn't really go in the data source.
-        assert isinstance(layer_cfg, RasterLayerConfig)
-        out_dir = os.path.join(
-            window.window_root,
-            "layers",
-            layer_name,
-            "R_G_B",
-        )
-        if os.path.exists(out_dir):
-            return
-        tmp_out_dir = out_dir + ".tmp"
-        os.makedirs(tmp_out_dir, exist_ok=True)
-        band_cfg = layer_cfg.band_sets[0]
-        raster_format = load_raster_format(
-            RasterFormatConfig(band_cfg.format["name"], band_cfg.format)
-        )
-        raster_format.encode_raster(
-            LocalFileAPI(tmp_out_dir), window_projection, window_bounds, raster
-        )
-        os.rename(tmp_out_dir, out_dir)
+        materialize_raster(array_with_transform, window, layer_name, band_cfg)

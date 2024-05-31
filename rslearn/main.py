@@ -12,13 +12,9 @@ from rasterio.crs import CRS
 
 from rslearn.const import WGS84_EPSG
 from rslearn.data_sources import Item, data_source_from_config
-from rslearn.dataset import (
-    Dataset,
-    Window,
-    materialize_dataset_windows,
-    prepare_dataset_windows,
-)
+from rslearn.dataset import Dataset, Window
 from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
+from rslearn.dataset.manage import materialize_dataset_windows, prepare_dataset_windows
 from rslearn.tile_stores import PrefixedTileStore
 from rslearn.utils import Projection, STGeometry
 
