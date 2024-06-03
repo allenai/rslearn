@@ -38,10 +38,7 @@ class Feature:
         Returns:
             a new Feature in the target projection
         """
-        return Feature(
-            self.geometry.to_projection(projection),
-            self.properties,
-        )
+        return Feature(self.geometry.to_projection(projection), self.properties)
 
     @staticmethod
     def from_geojson(projection: Projection, d: dict[str, Any]):

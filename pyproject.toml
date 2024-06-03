@@ -19,9 +19,6 @@ build-backend = "setuptools.build_meta"
 [project.entry-points.console_scripts]
 rslearn = "rslearn.main:main"
 
-[tool.isort]
-profile = "black"
-
 [tool.setuptools.packages.find]
 include = ["rslearn*"]
 
@@ -31,18 +28,11 @@ dependencies = {file = ["requirements.txt"]}
 [tool.ruff]
 fix = true
 
-[tool.ruff.format]
-quote-style = "single"
-skip-magic-trailing-comma = true
-
 [tool.ruff.lint]
 extend-select = ["D", "I", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D"]
-
-[tool.ruff.lint.isort]
-split-on-trailing-comma = false
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

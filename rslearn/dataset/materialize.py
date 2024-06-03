@@ -146,7 +146,10 @@ class RasterMaterializer(Materializer):
             )
 
             for group_id, group in enumerate(item_groups):
-                tmp_out_dir = os.path.join(out_layer_dirs[group_id], "_".join(band_cfg.bands)) + ".tmp"
+                tmp_out_dir = (
+                    os.path.join(out_layer_dirs[group_id], "_".join(band_cfg.bands))
+                    + ".tmp"
+                )
                 os.makedirs(tmp_out_dir, exist_ok=True)
 
                 dst = np.zeros(
@@ -182,12 +185,7 @@ class RasterMaterializer(Materializer):
 
                     for suffix, src_indexes, dst_indexes in needed_suffixes_and_indexes:
                         ts_layer = tile_store.get_layer(
-                            (
-                                layer_name,
-                                item.name,
-                                suffix,
-                                str(projection),
-                            )
+                            (layer_name, item.name, suffix, str(projection))
                         )
                         read_raster_window_from_tiles(
                             dst, ts_layer, bounds, src_indexes, dst_indexes, remapper

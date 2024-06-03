@@ -81,19 +81,7 @@ class LandsatOliTirs(DataSource):
 
     bucket_name = "usgs-landsat"
     bucket_prefix = "collection02/level-1/standard/oli-tirs"
-    bands = [
-        "B1",
-        "B2",
-        "B3",
-        "B4",
-        "B5",
-        "B6",
-        "B7",
-        "B8",
-        "B9",
-        "B10",
-        "B11",
-    ]
+    bands = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11"]
 
     wrs2_url = "https://d9-wret.s3.us-west-2.amazonaws.com/assets/palladium/production/s3fs-public/atoms/files/WRS2_descending_0.zip"  # noqa
     """URL to download shapefile specifying polygon of each (path, row)."""
@@ -190,9 +178,7 @@ class LandsatOliTirs(DataSource):
 
                     blob_path = obj.key.split("MTL.json")[0]
                     geometry = STGeometry(
-                        WGS84_PROJECTION,
-                        shapely.Polygon(coordinates),
-                        [ts, ts],
+                        WGS84_PROJECTION, shapely.Polygon(coordinates), [ts, ts]
                     )
                     items.append(
                         LandsatOliTirsItem(

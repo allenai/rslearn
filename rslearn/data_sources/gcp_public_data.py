@@ -149,11 +149,12 @@ class Sentinel2(DataSource):
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict
         kwargs = dict(
-            config=config,
-            index_cache_dir=os.path.join(root_dir, d["index_cache_dir"]),
+            config=config, index_cache_dir=os.path.join(root_dir, d["index_cache_dir"])
         )
         if "max_time_delta" in d:
-            kwargs["max_time_delta"] = timedelta(seconds=pytimeparse.parse(d["max_time_delta"]))
+            kwargs["max_time_delta"] = timedelta(
+                seconds=pytimeparse.parse(d["max_time_delta"])
+            )
         simple_optionals = ["sort_by", "use_rtree_index", "harmonize"]
         for k in simple_optionals:
             if k in d:
@@ -476,7 +477,9 @@ class Sentinel2(DataSource):
         for item, cur_geometries in zip(items, geometries):
             harmonize_callback = None
             if self.harmonize:
-                harmonize_callback = get_harmonize_callback(self._get_xml_by_name(item.name))
+                harmonize_callback = get_harmonize_callback(
+                    self._get_xml_by_name(item.name)
+                )
 
             for suffix, band_names in self.bands:
                 cur_tile_store = PrefixedTileStore(

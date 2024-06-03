@@ -43,9 +43,7 @@ def prepare_dataset_windows(
             if layer_name in layer_datas and not force:
                 continue
             needed_windows.append(window)
-        print(
-            f"Preparing {len(needed_windows)} windows for layer {layer_name}"
-        )
+        print(f"Preparing {len(needed_windows)} windows for layer {layer_name}")
 
         # Get STGeometry for each window.
         geometries = []
@@ -115,9 +113,7 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
                         geometries_by_item[item] = []
                     geometries_by_item[item].append(geometry)
 
-        print(
-            f"Ingesting {len(geometries_by_item)} items in layer {layer_name}"
-        )
+        print(f"Ingesting {len(geometries_by_item)} items in layer {layer_name}")
         cur_tile_store = PrefixedTileStore(tile_store, (layer_name,))
         geometries_and_items = list(geometries_by_item.items())
         data_source.ingest(
@@ -127,7 +123,9 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
         )
 
 
-def is_window_ingested(dataset: Dataset, window: Window, check_layer_name: Optional[str] = None) -> bool:
+def is_window_ingested(
+    dataset: Dataset, window: Window, check_layer_name: Optional[str] = None
+) -> bool:
     """Check if a window is ingested.
 
     Args:
@@ -153,10 +151,7 @@ def is_window_ingested(dataset: Dataset, window: Window, check_layer_name: Optio
                     projection, _ = band_set.get_final_projection_and_bounds(
                         window.projection, window.bounds
                     )
-                    layer_prefix = (
-                        layer_name,
-                        item.name,
-                    )
+                    layer_prefix = (layer_name, item.name)
                     # Make sure that layers exist containing each configured band.
                     # And that those layers are marked completed.
                     suffixes = tile_store.list_layers(layer_prefix)
@@ -177,12 +172,7 @@ def is_window_ingested(dataset: Dataset, window: Window, check_layer_name: Optio
                         return False
 
                     for suffix in needed_suffixes:
-                        layer_id = (
-                            layer_name,
-                            item.name,
-                            suffix,
-                            str(projection),
-                        )
+                        layer_id = (layer_name, item.name, suffix, str(projection))
                         ts_layer = tile_store.get_layer(layer_id)
                         if not ts_layer:
                             return False
@@ -191,7 +181,14 @@ def is_window_ingested(dataset: Dataset, window: Window, check_layer_name: Optio
     return True
 
 
-def materialize_window(window: Window, dataset: Dataset, data_source: DataSource, tile_store: TileStore, layer_name: str, layer_cfg: LayerConfig) -> None:
+def materialize_window(
+    window: Window,
+    dataset: Dataset,
+    data_source: DataSource,
+    tile_store: TileStore,
+    layer_name: str,
+    layer_cfg: LayerConfig,
+) -> None:
     """Materialize a window.
 
     Args:
@@ -233,9 +230,7 @@ def materialize_window(window: Window, dataset: Dataset, data_source: DataSource
             materializer = Materializers[dataset.materializer_name]
         else:
             materializer = Materializers[layer_cfg.layer_type.value]
-        materializer.materialize(
-            tile_store, window, layer_name, layer_cfg, item_groups
-        )
+        materializer.materialize(tile_store, window, layer_name, layer_cfg, item_groups)
 
     else:
         # This window is meant to be materialized directly from the data source.
@@ -265,4 +260,6 @@ def materialize_dataset_windows(dataset: Dataset, windows: list[Window]) -> None
         )
 
         for window in windows:
-            materialize_window(window, dataset, data_source, tile_store, layer_name, layer_cfg)
+            materialize_window(
+                window, dataset, data_source, tile_store, layer_name, layer_cfg
+            )

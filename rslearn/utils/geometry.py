@@ -39,6 +39,7 @@ class Projection:
     resolutions specify the pixels per projection unit, and are used to map pixel
     coordinates to CRS coordinates.
     """
+
     def __init__(self, crs: CRS, x_resolution: float, y_resolution: float) -> None:
         """Initialize a new Projection.
 
@@ -196,19 +197,11 @@ class STGeometry:
         def apply_resolution(array, x_resolution, y_resolution, forward=True):
             if forward:
                 return np.stack(
-                    [
-                        array[:, 0] / x_resolution,
-                        array[:, 1] / y_resolution,
-                    ],
-                    axis=1,
+                    [array[:, 0] / x_resolution, array[:, 1] / y_resolution], axis=1
                 )
             else:
                 return np.stack(
-                    [
-                        array[:, 0] * x_resolution,
-                        array[:, 1] * y_resolution,
-                    ],
-                    axis=1,
+                    [array[:, 0] * x_resolution, array[:, 1] * y_resolution], axis=1
                 )
 
         # Undo resolution.

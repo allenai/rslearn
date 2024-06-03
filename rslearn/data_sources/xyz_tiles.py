@@ -2,6 +2,7 @@
 
 import math
 import urllib.request
+from datetime import datetime
 from typing import Any, Callable, Optional
 
 import numpy as np
@@ -18,12 +19,17 @@ from rslearn.utils import PixelBounds, Projection, STGeometry
 
 from .data_source import DataSource, Item
 from .raster_source import ArrayWithTransform, materialize_raster
+from .utils import match_candidate_items_to_window
 
 WEB_MERCATOR_EPSG = 3857
 WEB_MERCATOR_UNITS = 2 * math.pi * 6378137
 
 
-def read_from_tile_callback(bounds: PixelBounds, callback: Callable[[int, int], Optional[npt.NDArray[Any]]], tile_size: int = 256) -> npt.NDArray[Any]:
+def read_from_tile_callback(
+    bounds: PixelBounds,
+    callback: Callable[[int, int], Optional[npt.NDArray[Any]]],
+    tile_size: int = 256,
+) -> npt.NDArray[Any]:
     """Read raster data from tiles.
 
     We assume tile (0, 0) covers pixels from (0, 0) to (tile_size, tile_size), while
@@ -42,10 +48,10 @@ def read_from_tile_callback(bounds: PixelBounds, callback: Callable[[int, int], 
     width = bounds[2] - bounds[0]
     height = bounds[3] - bounds[1]
 
-    start_tile = (bounds[0]//tile_size, bounds[1]//tile_size)
-    end_tile = ((bounds[2]-1)//tile_size, (bounds[3]-1)//tile_size)
-    for tile_col in range(start_tile[0], end_tile[0]+1):
-        for tile_row in range(start_tile[1], end_tile[1]+1):
+    start_tile = (bounds[0] // tile_size, bounds[1] // tile_size)
+    end_tile = ((bounds[2] - 1) // tile_size, (bounds[3] - 1) // tile_size)
+    for tile_col in range(start_tile[0], end_tile[0] + 1):
+        for tile_row in range(start_tile[1], end_tile[1] + 1):
             cur_im = callback(tile_col, tile_row)
             if cur_im is None:
                 # Callback can return None if no image is available here.
@@ -68,9 +74,49 @@ def read_from_tile_callback(bounds: PixelBounds, callback: Callable[[int, int], 
             dst_row_offset = max(cur_row_off - bounds[1], 0)
             col_overlap = min(cur_im.shape[2] - src_col_offset, width - dst_col_offset)
             row_overlap = min(cur_im.shape[1] - src_row_offset, height - dst_row_offset)
-            data[:, dst_row_offset:dst_row_offset+row_overlap, dst_col_offset:dst_col_offset+col_overlap] = cur_im[:, src_row_offset:src_row_offset+row_overlap, src_col_offset:src_col_offset+col_overlap]
+            data[
+                :,
+                dst_row_offset : dst_row_offset + row_overlap,
+                dst_col_offset : dst_col_offset + col_overlap,
+            ] = cur_im[
+                :,
+                src_row_offset : src_row_offset + row_overlap,
+                src_col_offset : src_col_offset + col_overlap,
+            ]
 
     return data
+
+
+class XyzItem(Item):
+    """An item in the XyzTiles data source.
+
+    Each item represents one layer of tiles. Often there is only one itm in the data
+    source, but if there are multiple then they should correspond to different time
+    ranges.
+    """
+
+    def __init__(self, name: str, geometry: STGeometry, url_template: str):
+        """Creates a new XyzItem.
+
+        Args:
+            name: unique name of the item
+            geometry: the spatial and temporal extent of the item
+            url_template: the URL template for an xyz tile.
+        """
+        super().__init__(name, geometry)
+        self.url_template = url_template
+
+    def serialize(self) -> dict:
+        """Serializes the item to a JSON-encodable dictionary."""
+        d = super().serialize()
+        d["url_template"] = self.url_template
+        return d
+
+    @staticmethod
+    def deserialize(d: dict) -> Item:
+        """Deserializes an item from a JSON-decoded dictionary."""
+        item = super(XyzItem, XyzItem).deserialize(d)
+        return XyzItem(name=item.name, geometry=item.geometry, blob_path=d["blob_path"])
 
 
 class XyzTiles(DataSource):
@@ -82,12 +128,28 @@ class XyzTiles(DataSource):
 
     item_name = "xyz_tiles"
 
-    def __init__(self, url_template: str, zoom: int, crs: CRS = CRS.from_epsg(WEB_MERCATOR_EPSG), total_units: float = WEB_MERCATOR_UNITS, offset: float = WEB_MERCATOR_UNITS/2, tile_size: int = 256):
+    def __init__(
+        self,
+        url_templates: list[str],
+        time_ranges: list[tuple[datetime, datetime]],
+        zoom: int,
+        crs: CRS = CRS.from_epsg(WEB_MERCATOR_EPSG),
+        total_units: float = WEB_MERCATOR_UNITS,
+        offset: float = WEB_MERCATOR_UNITS / 2,
+        tile_size: int = 256,
+    ):
         """Initialize an XyzTiles instance.
 
+        It is configured with a list of URL templates and corresponding time ranges.
+        The URL template should have placeholders that allow accessing an arbitrary
+        grid cell of a global mosaic. Sources that have a single layer of the world can
+        be configured with a single URL template and arbitrary time range, but multiple
+        templates / time ranges is supported for sources that expose image time series.
+
         Args:
-            url_template: the image tile URL with "{x}" (column), "{y}" (row), and
+            url_templates: the image tile URLs with "{x}" (column), "{y}" (row), and
                 "{z}" (zoom) placeholders.
+            time_ranges: corresponding list of time ranges for each URL template.
             zoom: the zoom level. Currently a single zoom level must be used.
             crs: the CRS, defaults to WebMercator.
             total_units: the total projection units along each axis. Used to determine
@@ -95,7 +157,8 @@ class XyzTiles(DataSource):
             offset: offset added to projection units when converting to tile positions.
             tile_size: size in pixels of each tile. Tiles must be square.
         """
-        self.url_template = url_template
+        self.url_templates = url_templates
+        self.time_ranges = time_ranges
         self.zoom = zoom
         self.crs = crs
         self.total_units = total_units
@@ -110,18 +173,31 @@ class XyzTiles(DataSource):
         self.pixel_offset = int(self.offset / self.pixel_size)
         # Compute the extent in pixel coordinates as an STGeometry.
         # Note that pixel coordinates are prior to applying the offset.
-        shp = shapely.box(-self.total_pixels//2, -self.total_pixels//2, self.total_pixels//2, self.total_pixels//2)
+        shp = shapely.box(
+            -self.total_pixels // 2,
+            -self.total_pixels // 2,
+            self.total_pixels // 2,
+            self.total_pixels // 2,
+        )
         self.projection = Projection(self.crs, self.pixel_size, -self.pixel_size)
-        self.geometry = STGeometry(self.projection, shp, None)
-        self.item = Item(self.item_name, self.geometry)
+
+        self.items = []
+        for url_template, time_range in zip(self.url_templates, self.time_ranges):
+            geometry = STGeometry(self.projection, shp, time_range)
+            item = XyzItem(self.item_name, geometry, url_template)
+            self.items.append(item)
 
     @staticmethod
     def from_config(config: LayerConfig, root_dir: str = ".") -> "XyzTiles":
         """Creates a new XyzTiles instance from a configuration dictionary."""
         d = config.data_source.config_dict
+        time_ranges = []
+        for str1, str2 in d["time_ranges"]:
+            time1 = datetime.fromisoformat(str1)
+            time2 = datetime.fromisoformat(str2)
+            time_ranges.append((time1, time2))
         kwargs = dict(
-            url_template=d["url_template"],
-            zoom=d["zoom"],
+            url_templates=d["url_templates"], zoom=d["zoom"], time_ranges=time_ranges
         )
         if "crs" in d:
             kwargs["crs"] = CRS.from_string(d["crs"])
@@ -149,33 +225,41 @@ class XyzTiles(DataSource):
         Returns:
             List of groups of items that should be retrieved for each geometry.
         """
-        return [[[self.item]]] * len(geometries)
+        groups = []
+        for geometry in geometries:
+            cur_groups = match_candidate_items_to_window(
+                geometry, self.items, query_config
+            )
+            groups.append(cur_groups)
+        return groups
 
     def deserialize_item(self, serialized_item: Any) -> Item:
         """Deserializes an item from JSON-decoded data."""
         return Item.deserialize(serialized_item)
 
-    def read_tile(self, col: int, row: int) -> npt.NDArray[Any]:
+    def read_tile(self, url_template: str, col: int, row: int) -> npt.NDArray[Any]:
         """Read the tile at specified column and row.
 
         Args:
+            url_template: the URL template to use
             col: the tile column
             row: the tile row
 
         Returns:
             the raster data of this tile
         """
-        url = self.url_template
+        url = url_template
         url = url.replace("{x}", str(col))
         url = url.replace("{y}", str(row))
         url = url.replace("{z}", str(self.zoom))
         image = Image.open(urllib.request.urlopen(url))
         return np.array(image).transpose(2, 0, 1)
 
-    def read_bounds(self, bounds: PixelBounds) -> npt.NDArray[Any]:
+    def read_bounds(self, url_template: str, bounds: PixelBounds) -> npt.NDArray[Any]:
         """Reads the portion of the raster in the specified bounds.
 
         Args:
+            url_template: the URL template to read from
             bounds: the bounds to read
 
         Returns:
@@ -188,7 +272,11 @@ class XyzTiles(DataSource):
             bounds[2] + self.pixel_offset,
             bounds[3] + self.pixel_offset,
         )
-        return read_from_tile_callback(bounds, self.read_tile, self.tile_size)
+        return read_from_tile_callback(
+            bounds,
+            lambda col, row: self.read_tile(url_template, col, row),
+            self.tile_size,
+        )
 
     def materialize(
         self,
@@ -205,6 +293,10 @@ class XyzTiles(DataSource):
             layer_name: the name of this layer
             layer_cfg: the config of this layer
         """
+        assert len(item_groups) == 1 and len(item_groups[0]) == 1
+        item = item_groups[0][0]
+        assert isinstance(item, XyzItem)
+
         # Read a raster matching the bounds of the window's bounds projected onto the
         # projection of the xyz tiles.
         assert isinstance(layer_cfg, RasterLayerConfig)
@@ -213,9 +305,7 @@ class XyzTiles(DataSource):
             window.projection, window.bounds
         )
         window_geometry = STGeometry(
-            window_projection,
-            shapely.box(*window_bounds),
-            None,
+            window_projection, shapely.box(*window_bounds), None
         )
         projected_geometry = window_geometry.to_projection(self.projection)
         projected_bounds = [
@@ -224,7 +314,7 @@ class XyzTiles(DataSource):
             math.ceil(projected_geometry.shp.bounds[2]),
             math.ceil(projected_geometry.shp.bounds[3]),
         ]
-        projected_raster = self.read_bounds(projected_bounds)
+        projected_raster = self.read_bounds(item.url_template, projected_bounds)
 
         # Attach the transform to the raster.
         src_transform = rasterio.transform.Affine(
@@ -235,6 +325,8 @@ class XyzTiles(DataSource):
             self.projection.y_resolution,
             projected_bounds[1] * self.projection.y_resolution,
         )
-        array_with_transform = ArrayWithTransform(projected_raster, self.projection.crs, src_transform)
+        array_with_transform = ArrayWithTransform(
+            projected_raster, self.projection.crs, src_transform
+        )
 
         materialize_raster(array_with_transform, window, layer_name, band_cfg)

@@ -1,6 +1,5 @@
 """rslearn configuration."""
 
-
 from .dataset import (
     BandSetConfig,
     DataSourceConfig,

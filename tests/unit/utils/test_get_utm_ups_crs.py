@@ -10,6 +10,7 @@ def test_seattle():
     crs = get_utm_ups_crs(lon, lat)
     assert crs == CRS.from_epsg(32610)
 
+
 def test_antarctica():
     # South pole should use UPS South which is EPSG:5042 for (E, N) format.
     lon = -122.34

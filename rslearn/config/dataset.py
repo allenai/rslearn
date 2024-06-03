@@ -12,6 +12,7 @@ from rslearn.utils import PixelBounds, Projection
 
 class DType(Enum):
     """Data type of a raster."""
+
     UINT8 = "uint8"
     UINT16 = "uint16"
     UINT32 = "uint32"
@@ -46,10 +47,7 @@ class RasterFormatConfig:
         Args:
             config: the config dict for this RasterFormatConfig
         """
-        return RasterFormatConfig(
-            name=config["name"],
-            config_dict=config,
-        )
+        return RasterFormatConfig(name=config["name"], config_dict=config)
 
 
 class VectorFormatConfig:
@@ -72,10 +70,7 @@ class VectorFormatConfig:
         Args:
             config: the config dict for this VectorFormatConfig
         """
-        return VectorFormatConfig(
-            name=config["name"],
-            config_dict=config,
-        )
+        return VectorFormatConfig(name=config["name"], config_dict=config)
 
 
 class BandSetConfig:
@@ -114,9 +109,7 @@ class BandSetConfig:
         self.remap_config = remap_config
 
         if not self.format:
-            self.format = {
-                "name": "geotiff",
-            }
+            self.format = {"name": "geotiff"}
 
     def serialize(self) -> dict[str, Any]:
         """Serialize this BandSetConfig to a config dict, currently unused."""
@@ -145,9 +138,7 @@ class BandSetConfig:
         )
 
     def get_final_projection_and_bounds(
-        self,
-        projection: Projection,
-        bounds: Optional[PixelBounds],
+        self, projection: Projection, bounds: Optional[PixelBounds]
     ) -> tuple[Projection, Optional[PixelBounds]]:
         """Gets the final projection/bounds based on band set config.
 
@@ -349,10 +340,7 @@ class LayerConfig:
 
     def serialize(self) -> dict[str, Any]:
         """Serialize this LayerConfig to a config dict, currently unused."""
-        return {
-            "layer_type": str(self.layer_type),
-            "data_source": self.data_source,
-        }
+        return {"layer_type": str(self.layer_type), "data_source": self.data_source}
 
 
 class RasterLayerConfig(LayerConfig):
@@ -436,9 +424,7 @@ class VectorLayerConfig(LayerConfig):
         return VectorLayerConfig(**kwargs)
 
     def get_final_projection_and_bounds(
-        self,
-        projection: Projection,
-        bounds: Optional[PixelBounds],
+        self, projection: Projection, bounds: Optional[PixelBounds]
     ) -> tuple[Projection, Optional[PixelBounds]]:
         """Gets the final projection/bounds based on zoom offset.
 
@@ -494,7 +480,4 @@ class TileStoreConfig:
         Args:
             config: the config dict for this TileStoreConfig
         """
-        return TileStoreConfig(
-            name=config["name"],
-            config_dict=config,
-        )
+        return TileStoreConfig(name=config["name"], config_dict=config)

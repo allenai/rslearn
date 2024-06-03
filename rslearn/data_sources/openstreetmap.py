@@ -367,11 +367,7 @@ class OsmItem(Item):
     def deserialize(d: dict) -> Item:
         """Deserializes an item from a JSON-decoded dictionary."""
         item = super(OsmItem, OsmItem).deserialize(d)
-        return OsmItem(
-            name=item.name,
-            geometry=item.geometry,
-            fname=d["fname"],
-        )
+        return OsmItem(name=item.name, geometry=item.geometry, fname=d["fname"])
 
 
 class OpenStreetMap(DataSource):

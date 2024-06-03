@@ -10,6 +10,7 @@ from rslearn.utils import Projection, STGeometry
 
 WEB_MERCATOR_EPSG = 3857
 
+
 class TestProjection:
     def test_equals(self):
         crs = CRS.from_epsg(WEB_MERCATOR_EPSG)
@@ -38,7 +39,9 @@ class TestSTGeometry:
         return (datetime(2022, 1, 15), datetime(2022, 1, 16))
 
     @pytest.fixture(scope="class")
-    def geom(self, shp: shapely.Geometry, time_range: tuple[datetime, datetime]) -> STGeometry:
+    def geom(
+        self, shp: shapely.Geometry, time_range: tuple[datetime, datetime]
+    ) -> STGeometry:
         return STGeometry(WGS84_PROJECTION, shp, time_range)
 
     def test_contains_time(self, geom: STGeometry):
@@ -53,7 +56,7 @@ class TestSTGeometry:
 
         # Out of range, should be 12 hours.
         delta2 = geom.distance_to_time(datetime(2022, 1, 14, 12))
-        assert delta2.seconds == 12*3600
+        assert delta2.seconds == 12 * 3600
 
     def test_distance_to_time_range(self, geom: STGeometry):
         # Intersecting, should be zero.
@@ -64,7 +67,7 @@ class TestSTGeometry:
         # Non-intersecting, should be 12 hours.
         rng2 = (datetime(2022, 1, 16, 12), datetime(2022, 1, 16, 13))
         delta2 = geom.distance_to_time_range(rng2)
-        assert delta2.seconds == 12*3600
+        assert delta2.seconds == 12 * 3600
 
     def test_intersects_time_range(self, geom: STGeometry):
         rng1 = (datetime(2022, 1, 15, 12), datetime(2022, 1, 16, 12))
@@ -105,10 +108,12 @@ class TestSTGeometry:
         dst_proj = Projection(CRS.from_epsg(WEB_MERCATOR_EPSG), 10, -10)
         dst_geom = geom.to_projection(dst_proj)
         final_geom = dst_geom.to_projection(WGS84_PROJECTION)
+
         def is_same_shp(shp1, shp2):
             intersection = shp1.intersection(shp2).area
             union = shp1.union(shp2).area
             return abs(intersection - union) < 1e-3
+
         assert not is_same_shp(geom.shp, dst_geom.shp)
         assert is_same_shp(geom.shp, final_geom.shp)
 

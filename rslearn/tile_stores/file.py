@@ -61,11 +61,7 @@ class FileTileStoreLayer(TileStoreLayer, LocalFileAPI):
         """
         return self.raster_format.decode_raster(self, bounds)
 
-    def write_raster(
-        self,
-        bounds: PixelBounds,
-        array: npt.NDArray[Any],
-    ) -> None:
+    def write_raster(self, bounds: PixelBounds, array: npt.NDArray[Any]) -> None:
         """Write raster data to the store.
 
         Args:

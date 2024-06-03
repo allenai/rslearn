@@ -24,10 +24,7 @@ class ArrayWithTransform:
     """Stores an array along with the transform associated with the array."""
 
     def __init__(
-        self,
-        array: npt.NDArray[Any],
-        crs: CRS,
-        transform: rasterio.transform.Affine,
+        self, array: npt.NDArray[Any], crs: CRS, transform: rasterio.transform.Affine
     ) -> None:
         """Create a new ArrayWithTransform instance.
 
@@ -219,22 +216,20 @@ def ingest_raster(
     else:
         # Compute the suggested target transform.
         # rasterio negates the y resolution itself so here we have to negate it.
-        (
-            dst_transform,
-            dst_width,
-            dst_height,
-        ) = rasterio.warp.calculate_default_transform(
-            # Source info.
-            src_crs=raster.crs,
-            width=raster.width,
-            height=raster.height,
-            left=raster.bounds[0],
-            bottom=raster.bounds[1],
-            right=raster.bounds[2],
-            top=raster.bounds[3],
-            # Destination info.
-            dst_crs=projection.crs,
-            resolution=(projection.x_resolution, -projection.y_resolution),
+        (dst_transform, dst_width, dst_height) = (
+            rasterio.warp.calculate_default_transform(
+                # Source info.
+                src_crs=raster.crs,
+                width=raster.width,
+                height=raster.height,
+                left=raster.bounds[0],
+                bottom=raster.bounds[1],
+                right=raster.bounds[2],
+                top=raster.bounds[3],
+                # Destination info.
+                dst_crs=projection.crs,
+                resolution=(projection.x_resolution, -projection.y_resolution),
+            )
         )
 
         resampling_method = rasterio.enums.Resampling.bilinear
@@ -256,6 +251,7 @@ def ingest_raster(
 
     ts_layer.write_raster(warped_array.pixel_bounds(), warped_array.array)
     ts_layer.set_property("completed", True)
+
 
 def materialize_raster(
     raster: Union[rasterio.io.DatasetReader, ArrayWithTransform],
@@ -289,7 +285,9 @@ def materialize_raster(
         window_projection.y_resolution,
         window_bounds[1] * window_projection.y_resolution,
     )
-    dst_array = np.zeros((array.shape[0], window_height, window_width), dtype=array.dtype)
+    dst_array = np.zeros(
+        (array.shape[0], window_height, window_width), dtype=array.dtype
+    )
     rasterio.warp.reproject(
         source=array,
         src_crs=raster.crs,

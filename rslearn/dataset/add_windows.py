@@ -179,11 +179,7 @@ def add_windows_from_box(
     # Get box in target projection (re-projecting if src_projection is set).
     if not src_projection:
         src_projection = projection
-    geometry = STGeometry(
-        src_projection,
-        shapely.box(*box),
-        None,
-    )
+    geometry = STGeometry(src_projection, shapely.box(*box), None)
 
     return add_windows_from_geometries(
         dataset=dataset,
@@ -231,13 +227,7 @@ def add_windows_from_file(
         for feat in src:
             shp = shapely.geometry.shape(feat.geometry)
             crs = CRS.from_wkt(src.crs_wkt)
-            geometries.append(
-                STGeometry(
-                    Projection(crs, 1, 1),
-                    shp,
-                    None,
-                )
-            )
+            geometries.append(STGeometry(Projection(crs, 1, 1), shp, None))
 
     return add_windows_from_geometries(
         dataset=dataset,

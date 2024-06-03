@@ -196,10 +196,7 @@ def add_windows():
         )
 
     elif args.fname:
-        windows = add_windows_from_file(
-            fname=args.fname,
-            **kwargs,
-        )
+        windows = add_windows_from_file(fname=args.fname, **kwargs)
 
     else:
         raise Exception("one of box or fname must be specified")
@@ -332,6 +329,7 @@ def apply_on_windows_args(f: Callable[[list[Window]], None], args: argparse.Name
 
 class PrepareHandler:
     """apply_on_windows handler for the rslearn dataset prepare command."""
+
     def __init__(self, force: bool):
         """Initialize a new PrepareHandler.
 

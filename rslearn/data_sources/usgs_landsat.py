@@ -99,12 +99,7 @@ class M2MAPIClient:
         Returns:
             list of filter objects
         """
-        return self.request(
-            "dataset-filters",
-            {
-                "datasetName": dataset_name,
-            },
-        )["data"]
+        return self.request("dataset-filters", {"datasetName": dataset_name})["data"]
 
     def scene_search(
         self,
@@ -123,10 +118,7 @@ class M2MAPIClient:
             bbox: optional spatial filter
             metadata_filter: optional metadata filter dict
         """
-        base_data = {
-            "datasetName": dataset_name,
-            "sceneFilter": {},
-        }
+        base_data = {"datasetName": dataset_name, "sceneFilter": {}}
         if acquisition_time_range:
             base_data["sceneFilter"]["acquisitionFilter"] = {
                 "start": acquisition_time_range[0].isoformat(),
@@ -141,14 +133,8 @@ class M2MAPIClient:
         if bbox:
             base_data["sceneFilter"]["spatialFilter"] = {
                 "filterType": "mbr",
-                "lowerLeft": {
-                    "longitude": bbox[0],
-                    "latitude": bbox[1],
-                },
-                "upperRight": {
-                    "longitude": bbox[2],
-                    "latitude": bbox[3],
-                },
+                "lowerLeft": {"longitude": bbox[0], "latitude": bbox[1]},
+                "upperRight": {"longitude": bbox[2], "latitude": bbox[3]},
             }
         if metadata_filter:
             base_data["sceneFilter"]["metadataFilter"] = metadata_filter
@@ -198,10 +184,7 @@ class M2MAPIClient:
         Returns:
             list of downloadable products
         """
-        data = {
-            "datasetName": dataset_name,
-            "entityIds": [entity_id],
-        }
+        data = {"datasetName": dataset_name, "entityIds": [entity_id]}
         return self.request("download-options", data)["data"]
 
     def get_download_url(self, entity_id: str, product_id: str) -> str:
@@ -217,21 +200,12 @@ class M2MAPIClient:
         label = str(uuid.uuid4())
         data = {
             "downloads": [
-                {
-                    "label": label,
-                    "entityId": entity_id,
-                    "productId": product_id,
-                }
-            ],
+                {"label": label, "entityId": entity_id, "productId": product_id}
+            ]
         }
         response = self.request("download-request", data)["data"]
         while True:
-            response = self.request(
-                "download-retrieve",
-                {
-                    "label": label,
-                },
-            )["data"]
+            response = self.request("download-retrieve", {"label": label})["data"]
             if len(response["available"]) > 0:
                 return response["available"][0]["url"]
             if len(response["requested"]) == 0:
@@ -283,19 +257,7 @@ class LandsatOliTirsItem(Item):
 class LandsatOliTirs(DataSource):
     """A data source for Landsat data from the USGS M2M API."""
 
-    bands = [
-        "B1",
-        "B2",
-        "B3",
-        "B4",
-        "B5",
-        "B6",
-        "B7",
-        "B8",
-        "B9",
-        "B10",
-        "B11",
-    ]
+    bands = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11"]
 
     dataset_name = "landsat_ot_c2_l1"
 
@@ -379,10 +341,7 @@ class LandsatOliTirs(DataSource):
         for geometry in geometries:
             wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
             bounds = wgs84_geometry.shp.bounds
-            kwargs = {
-                "dataset_name": self.dataset_name,
-                "bbox": bounds,
-            }
+            kwargs = {"dataset_name": self.dataset_name, "bbox": bounds}
             if geometry.time_range is not None:
                 kwargs["acquisition_time_range"] = geometry.time_range
             results = self.client.scene_search(**kwargs)
@@ -468,8 +427,7 @@ class LandsatOliTirs(DataSource):
                 if band in download_urls:
                     continue
                 download_url = self.client.get_download_url(
-                    secondary_download["entityId"],
-                    secondary_download["id"],
+                    secondary_download["entityId"], secondary_download["id"]
                 )
                 download_urls[band] = (display_id, download_url)
         return download_urls

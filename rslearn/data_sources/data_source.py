@@ -28,18 +28,12 @@ class Item:
 
     def serialize(self) -> dict:
         """Serializes the item to a JSON-encodable dictionary."""
-        return {
-            "name": self.name,
-            "geometry": self.geometry.serialize(),
-        }
+        return {"name": self.name, "geometry": self.geometry.serialize()}
 
     @staticmethod
     def deserialize(d: dict) -> "Item":
         """Deserializes an item from a JSON-decoded dictionary."""
-        return Item(
-            name=d["name"],
-            geometry=STGeometry.deserialize(d["geometry"]),
-        )
+        return Item(name=d["name"], geometry=STGeometry.deserialize(d["geometry"]))
 
     def __eq__(self, other: Any) -> bool:
         """Check equality.

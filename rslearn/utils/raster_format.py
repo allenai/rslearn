@@ -427,9 +427,7 @@ class GeotiffRasterFormat(RasterFormat):
         Returns:
             the GeotiffRasterFormat
         """
-        return GeotiffRasterFormat(
-            block_size=config.get("block_size", 512),
-        )
+        return GeotiffRasterFormat(block_size=config.get("block_size", 512))
 
 
 @RasterFormats.register("single_image")

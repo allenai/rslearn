@@ -42,11 +42,7 @@ class LocalFileItem(Item):
     def deserialize(d: dict) -> Item:
         """Deserializes an item from a JSON-decoded dictionary."""
         item = super(LocalFileItem, LocalFileItem).deserialize(d)
-        return LocalFileItem(
-            name=item.name,
-            geometry=item.geometry,
-            fname=d["fname"],
-        )
+        return LocalFileItem(name=item.name, geometry=item.geometry, fname=d["fname"])
 
 
 Importers = ClassRegistry()
@@ -148,11 +144,7 @@ class RasterImporter(Importer):
 class LocalFiles(DataSource):
     """A data source for ingesting data from local files."""
 
-    def __init__(
-        self,
-        config: LayerConfig,
-        src_dir: str,
-    ) -> None:
+    def __init__(self, config: LayerConfig, src_dir: str) -> None:
         """Initialize a new LocalFiles instance.
 
         Args:
@@ -174,10 +166,7 @@ class LocalFiles(DataSource):
     def from_config(config: LayerConfig, root_dir: str = ".") -> "LocalFiles":
         """Creates a new LocalFiles instance from a configuration dictionary."""
         d = config.data_source.config_dict
-        return LocalFiles(
-            config=config,
-            src_dir=os.path.join(root_dir, d["src_dir"]),
-        )
+        return LocalFiles(config=config, src_dir=os.path.join(root_dir, d["src_dir"]))
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig

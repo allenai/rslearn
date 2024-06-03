@@ -64,9 +64,7 @@ class NaipItem(Item):
         """Deserializes an item from a JSON-decoded dictionary."""
         item = super(NaipItem, NaipItem).deserialize(d)
         return NaipItem(
-            name=item.name,
-            geometry=item.geometry,
-            blob_path=d["blob_path"],
+            name=item.name, geometry=item.geometry, blob_path=d["blob_path"]
         )
 
 
@@ -84,10 +82,7 @@ class Naip(DataSource):
     manifest_fname = "manifest.txt"
 
     def __init__(
-        self,
-        config: LayerConfig,
-        index_cache_dir: str,
-        use_rtree_index: bool = False,
+        self, config: LayerConfig, index_cache_dir: str, use_rtree_index: bool = False
     ) -> None:
         """Initialize a new Naip instance.
 
@@ -470,7 +465,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
                 SpaceMode.WITHIN.
             harmonize: harmonize pixel values across different processing baselines,
                 see https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
-        """ # noqa: E501
+        """  # noqa: E501
         self.config = config
         self.modality = modality
         self.metadata_cache_dir = metadata_cache_dir
@@ -492,7 +487,9 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
             metadata_cache_dir=os.path.join(root_dir, d["metadata_cache_dir"]),
         )
         if "max_time_delta" in d:
-            kwargs["max_time_delta"] = timedelta(seconds=pytimeparse.parse(d["max_time_delta"]))
+            kwargs["max_time_delta"] = timedelta(
+                seconds=pytimeparse.parse(d["max_time_delta"])
+            )
         simple_optionals = ["sort_by", "harmonize"]
         for k in simple_optionals:
             if k in d:
@@ -669,14 +666,14 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         for fname, _ in self.band_fnames[self.modality]:
             buf = io.BytesIO()
             self.bucket.download_fileobj(
-                item.blob_path + fname,
-                buf,
-                ExtraArgs={"RequestPayer": "requester"},
+                item.blob_path + fname, buf, ExtraArgs={"RequestPayer": "requester"}
             )
             buf.seek(0)
             yield (fname, buf)
 
-    def _get_harmonize_callback(self, item: Item) -> Optional[Callable[[npt.NDArray], npt.NDArray]]:
+    def _get_harmonize_callback(
+        self, item: Item
+    ) -> Optional[Callable[[npt.NDArray], npt.NDArray]]:
         """Gets the harmonization callback for the given item.
 
         Args:
@@ -690,9 +687,13 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         # Search metadata XML for the RADIO_ADD_OFFSET tag.
         # This contains the per-band offset, but we assume all bands have the same offset.
         ts = item.geometry.time_range[0]
-        metadata_fname = f"products/{ts.year}/{ts.month}/{ts.day}/{item.name}/metadata.xml"
+        metadata_fname = (
+            f"products/{ts.year}/{ts.month}/{ts.day}/{item.name}/metadata.xml"
+        )
         buf = io.BytesIO()
-        self.bucket.download_fileobj(metadata_fname, buf, ExtraArgs={"RequestPayer": "requester"})
+        self.bucket.download_fileobj(
+            metadata_fname, buf, ExtraArgs={"RequestPayer": "requester"}
+        )
         buf.seek(0)
         tree = ET.ElementTree(ET.fromstring(buf.getvalue()))
         return get_harmonize_callback(tree)

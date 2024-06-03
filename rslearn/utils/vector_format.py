@@ -22,11 +22,9 @@ class VectorFormat:
     Implementations of VectorFormat should support reading and writing vector data in
     a FileAPI. Vector data is a list of GeoJSON-like features.
     """
+
     def encode_vector(
-        self,
-        file_api: FileAPI,
-        projection: Projection,
-        features: list[Feature],
+        self, file_api: FileAPI, projection: Projection, features: list[Feature]
     ) -> None:
         """Encodes vector data.
 
@@ -58,6 +56,7 @@ class TileVectorFormat(VectorFormat):
     containing at least one feature. Features are written to all grid cells that they
     intersect.
     """
+
     def __init__(self, tile_size: int = 512):
         """Initialize a new TileVectorFormat instance.
 
@@ -67,10 +66,7 @@ class TileVectorFormat(VectorFormat):
         self.tile_size = tile_size
 
     def encode_vector(
-        self,
-        file_api: FileAPI,
-        projection: Projection,
-        features: list[Feature],
+        self, file_api: FileAPI, projection: Projection, features: list[Feature]
     ) -> None:
         """Encodes vector data.
 
@@ -165,9 +161,7 @@ class TileVectorFormat(VectorFormat):
         Returns:
             the TileVectorFormat
         """
-        return TileVectorFormat(
-            tile_size=config.get("tile_size", 512),
-        )
+        return TileVectorFormat(tile_size=config.get("tile_size", 512))
 
 
 @VectorFormats.register("geojson")
@@ -177,10 +171,7 @@ class GeojsonVectorFormat(VectorFormat):
     fname = "data.geojson"
 
     def encode_vector(
-        self,
-        file_api: FileAPI,
-        projection: Projection,
-        features: list[Feature],
+        self, file_api: FileAPI, projection: Projection, features: list[Feature]
     ) -> None:
         """Encodes vector data.
 
