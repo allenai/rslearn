@@ -146,9 +146,8 @@ class RasterMaterializer(Materializer):
             )
 
             for group_id, group in enumerate(item_groups):
-                tmp_out_dir = (
-                    os.path.join(out_layer_dirs[group_id], "_".join(band_cfg.bands))
-                    + ".tmp"
+                tmp_out_dir = os.path.join(
+                    out_layer_dirs[group_id] + ".tmp", "_".join(band_cfg.bands)
                 )
                 os.makedirs(tmp_out_dir, exist_ok=True)
 

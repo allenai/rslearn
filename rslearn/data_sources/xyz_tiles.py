@@ -116,7 +116,9 @@ class XyzItem(Item):
     def deserialize(d: dict) -> Item:
         """Deserializes an item from a JSON-decoded dictionary."""
         item = super(XyzItem, XyzItem).deserialize(d)
-        return XyzItem(name=item.name, geometry=item.geometry, blob_path=d["blob_path"])
+        return XyzItem(
+            name=item.name, geometry=item.geometry, url_template=d["url_template"]
+        )
 
 
 class XyzTiles(DataSource):
@@ -235,7 +237,7 @@ class XyzTiles(DataSource):
 
     def deserialize_item(self, serialized_item: Any) -> Item:
         """Deserializes an item from JSON-decoded data."""
-        return Item.deserialize(serialized_item)
+        return XyzItem.deserialize(serialized_item)
 
     def read_tile(self, url_template: str, col: int, row: int) -> npt.NDArray[Any]:
         """Read the tile at specified column and row.

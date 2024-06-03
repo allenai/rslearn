@@ -213,7 +213,7 @@ def materialize_window(
     for serialized_group in layer_data.serialized_item_groups:
         item_group = []
         for serialized_item in serialized_group:
-            item = Item.deserialize(serialized_item)
+            item = data_source.deserialize_item(serialized_item)
             item_group.append(item)
         item_groups.append(item_group)
 
