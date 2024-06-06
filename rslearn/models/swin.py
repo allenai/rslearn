@@ -142,7 +142,6 @@ class Swin(torch.nn.Module):
             targets: target dicts that are ignored unless
         """
         images = torch.stack([inp["image"] for inp in inputs], dim=0)
-        print([(img.min(), img.max()) for img in images])
 
         if self.output_layers:
             layer_features = []

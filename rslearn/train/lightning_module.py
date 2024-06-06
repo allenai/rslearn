@@ -111,8 +111,6 @@ class RslearnLightningModule(L.LightningModule):
             prog_bar=True,
         )
         self.log("train_loss", train_loss, batch_size=batch_size)
-        print("weight", self.model.encoder[0].model.features[0][0].weight[0, 0])
-        print("train_loss", train_loss)
         return train_loss
 
     def validation_step(

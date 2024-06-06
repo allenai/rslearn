@@ -102,15 +102,8 @@ class RegressionHead(torch.nn.Module):
         if targets:
             labels = torch.stack([target["value"] for target in targets])
             mask = torch.stack([target["valid"] for target in targets])
-            print(outputs, labels)
             if self.loss_mode == "mse":
                 loss = torch.mean(torch.square(outputs - labels) * mask)
-                print(
-                    logits[0],
-                    outputs[0],
-                    loss,
-                    torch.square(outputs[0] - labels[0]) * mask[0],
-                )
             elif self.loss_mode == "l1":
                 loss = torch.mean(torch.abs(outputs - labels) * mask)
             else:
