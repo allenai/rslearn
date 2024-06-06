@@ -521,9 +521,21 @@ def dataset_materialize():
     apply_on_windows_args(fn, args)
 
 
+class RslearnLightningCLI(LightningCLI):
+    """LightningCLI that links data.tasks to model.tasks."""
+
+    def add_arguments_to_parser(self, parser) -> None:
+        """Link data.tasks to model.tasks.
+
+        Args:
+            parser: the argument parser
+        """
+        parser.link_arguments("data.tasks", "model.tasks", apply_on="instantiate")
+
+
 def model_handler():
     """Handler for any rslearn model X commands."""
-    LightningCLI(
+    RslearnLightningCLI(
         model_class=RslearnLightningModule,
         datamodule_class=RslearnDataModule,
         args=sys.argv[2:],
