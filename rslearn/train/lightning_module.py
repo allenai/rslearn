@@ -1,13 +1,17 @@
 """Default LightningModule for rslearn."""
 
-from typing import Any
+import os
+from typing import Any, Optional
 
 import lightning as L
 import torch
 from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
+from PIL import Image
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchmetrics import MetricCollection
+
+from .tasks import Task
 
 
 class RslearnLightningModule(L.LightningModule):
@@ -21,19 +25,21 @@ class RslearnLightningModule(L.LightningModule):
         self,
         model: torch.nn.Module,
         metrics: dict[str, MetricCollection],
+        tasks: dict[str, Task],
         lr: float = 1e-3,
         plateau: bool = False,
         plateau_factor: float = 0.1,
         plateau_patience: int = 10,
         plateau_min_lr: float = 0,
         plateau_cooldown: int = 0,
+        visualize_dir: Optional[str] = None,
     ):
         """Initialize a new RslearnLightningModule.
 
         Args:
             model: the model
             metrics: the metrics for val/test
-            task: the task to train on
+            tasks: the tasks to train on
             lr: the initial learning rate
             plateau: whether to enable plateau scheduler (default false)
             plateau_factor: on plateau, factor to multiply learning rate by
@@ -42,16 +48,19 @@ class RslearnLightningModule(L.LightningModule):
             plateau_min_lr: minimum learning rate to reduce to
             plateau_cooldown: number of iterations after reducing learning rate before
                 resetting plateau scheduler
+            visualize_dir: during validation or testing, output visualizations to this
+                directory
         """
         super().__init__()
         self.model = model
-
+        self.tasks = tasks
         self.lr = lr
         self.plateau = plateau
         self.plateau_factor = plateau_factor
         self.plateau_patience = plateau_patience
         self.plateau_min_lr = plateau_min_lr
         self.plateau_cooldown = plateau_cooldown
+        self.visualize_dir = visualize_dir
 
         def clone_metrics(prefix: str) -> dict[str, MetricCollection]:
             return torch.nn.ModuleDict(
@@ -148,16 +157,30 @@ class RslearnLightningModule(L.LightningModule):
         inputs, targets = batch
         batch_size = len(inputs)
         outputs, loss_dict = self(inputs, targets)
-        val_loss = sum(loss_dict.values())
+        test_loss = sum(loss_dict.values())
         self.log_dict(
             {"test_" + k: v for k, v in loss_dict.items()}, batch_size=batch_size
         )
-        self.log("test_loss", val_loss, batch_size=batch_size)
+        self.log("test_loss", test_loss, batch_size=batch_size)
         for name, metric_collection in self.test_metrics.items():
-            cur_outputs = [output[name] for output in outputs]
+            cur_outputs = outputs[name]
             cur_targets = [target[name] for target in targets]
             metric_collection(cur_outputs, cur_targets)
             self.log_dict(metric_collection, batch_size=batch_size)
+
+        if self.visualize_dir:
+            for name, task in self.tasks.items():
+                cur_outputs = outputs[name]
+                cur_targets = [target[name] for target in targets]
+                for idx, (input_dict, output, target) in enumerate(
+                    zip(inputs, cur_outputs, cur_targets)
+                ):
+                    images = task.visualize(input_dict, output, target)
+                    for image_suffix, image in images.items():
+                        out_fname = os.path.join(
+                            self.visualize_dir, f"{batch_idx}_{idx}_{image_suffix}.png"
+                        )
+                        Image.fromarray(image).save(out_fname)
 
     def predict_step(
         self, batch: Any, batch_idx: int, dataloader_idx: int = 0

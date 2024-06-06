@@ -536,6 +536,24 @@ def model_fit():
     model_handler()
 
 
+@register_handler("model", "validate")
+def model_validate():
+    """Handler for rslearn model validate."""
+    model_handler()
+
+
+@register_handler("model", "test")
+def model_test():
+    """Handler for rslearn model test."""
+    model_handler()
+
+
+@register_handler("model", "predict")
+def model_predict():
+    """Handler for rslearn model predict."""
+    model_handler()
+
+
 def main():
     """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="rslearn")

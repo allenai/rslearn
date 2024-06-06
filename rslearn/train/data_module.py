@@ -111,6 +111,7 @@ class RslearnDataModule(L.LightningDataModule):
             "fit": ["train", "val"],
             "validate": ["val"],
             "test": ["test"],
+            "predict": ["test"],
         }
         self.datasets = {}
         for split in stage_to_splits[stage]:

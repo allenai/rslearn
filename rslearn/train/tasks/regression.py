@@ -2,17 +2,19 @@
 
 from typing import Any, Optional, Union
 
+import numpy as np
 import numpy.typing as npt
 import torch
 import torchmetrics
+from PIL import Image, ImageDraw
 from torchmetrics import Metric
 
 from rslearn.utils import Feature
 
-from .task import Task
+from .task import BasicTask
 
 
-class RegressionTask(Task):
+class RegressionTask(BasicTask):
     """A window regression task."""
 
     def __init__(
@@ -20,6 +22,8 @@ class RegressionTask(Task):
         property_name: str,
         filters: Optional[list[tuple[str, str]]],
         allow_invalid: bool = False,
+        scale_factor: float = 1,
+        **kwargs,
     ):
         """Initialize a new RegressionTask.
 
@@ -30,10 +34,14 @@ class RegressionTask(Task):
                 features with matching properties.
             allow_invalid: instead of throwing error when no regression label is found
                 at a window, simply mark the example invalid for this task
+            scale_factor: multiply the label value by this factor
+            kwargs: other arguments to pass to BasicTask
         """
+        super().__init__(**kwargs)
         self.property_name = property_name
         self.filters = filters
         self.allow_invalid = allow_invalid
+        self.scale_factor = scale_factor
 
         if not self.filters:
             self.filters = []
@@ -53,7 +61,7 @@ class RegressionTask(Task):
                     continue
             if self.property_name not in feat.properties:
                 continue
-            value = float(feat.properties[self.property_name]) / 400
+            value = float(feat.properties[self.property_name]) * self.scale_factor
             return {
                 "value": torch.tensor(value, dtype=torch.float32),
                 "valid": torch.tensor(1, dtype=torch.float32),
@@ -65,6 +73,33 @@ class RegressionTask(Task):
         return {
             "value": torch.tensor(0, dtype=torch.float32),
             "valid": torch.tensor(0, dtype=torch.float32),
+        }
+
+    def visualize(
+        self, input_dict: dict[str, Any], output: Any, target: Optional[Any]
+    ) -> dict[str, npt.NDArray[Any]]:
+        """Visualize the outputs and targets.
+
+        Args:
+            input_dict: the input
+            output: the prediction
+            target: the target label from get_target
+
+        Returns:
+            a dictionary mapping image name to visualization image
+        """
+        image = super().visualize(input_dict, output, target)["image"]
+        image = image.repeat(repeats=8, axis=0).repeat(repeats=8, axis=1)
+        image = Image.fromarray(image)
+        draw = ImageDraw.Draw(image)
+        target = target["value"] / self.scale_factor
+        output = output / self.scale_factor
+        text = f"Label: {target:.2f}\nOutput: {output:.2f}"
+        box = draw.textbbox(xy=(0, 0), text=text, font_size=12)
+        draw.rectangle(xy=box, fill=(0, 0, 0))
+        draw.text(xy=(0, 0), text=text, font_size=12, fill=(255, 255, 255))
+        return {
+            "image": np.array(image),
         }
 
 
@@ -96,7 +131,7 @@ class RegressionHead(torch.nn.Module):
         if len(logits.shape) == 2:
             assert logits.shape[1] == 1
             logits = logits[:, 0]
-        outputs = torch.nn.functional.sigmoid(logits)
+        outputs = logits
 
         loss = None
         if targets:
