@@ -8,6 +8,7 @@ import shapely
 from class_registry import ClassRegistry
 
 from rslearn.config import VectorFormatConfig
+from rslearn.const import WGS84_PROJECTION
 
 from .feature import Feature
 from .file_api import FileAPI
@@ -184,7 +185,8 @@ class GeojsonVectorFormat(VectorFormat):
             json.dump(
                 {
                     "type": "FeatureCollection",
-                    "features": [feat.to_geojson for feat in features],
+                    "features": [feat.to_geojson() for feat in features],
+                    "properties": projection.serialize(),
                 },
                 f,
             )
@@ -201,7 +203,11 @@ class GeojsonVectorFormat(VectorFormat):
         """
         with file_api.open(self.fname, "r") as f:
             fc = json.load(f)
-        return [Feature.from_geojson(feat) for feat in fc["features"]]
+        if "properties" in fc and "crs" in fc["properties"]:
+            projection = Projection.deserialize(fc["properties"])
+        else:
+            projection = WGS84_PROJECTION
+        return [Feature.from_geojson(projection, feat) for feat in fc["features"]]
 
     @staticmethod
     def from_config(name: str, config: dict[str, Any]) -> "GeojsonVectorFormat":

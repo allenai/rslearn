@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Callable, Optional
 
 import tqdm
+from lightning.pytorch.cli import LightningCLI
 from rasterio.crs import CRS
 
 from rslearn.const import WGS84_EPSG
@@ -16,6 +17,8 @@ from rslearn.dataset import Dataset, Window
 from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
 from rslearn.dataset.manage import materialize_dataset_windows, prepare_dataset_windows
 from rslearn.tile_stores import PrefixedTileStore
+from rslearn.train.data_module import RslearnDataModule
+from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.utils import Projection, STGeometry
 
 handler_registry = {}
@@ -516,6 +519,21 @@ def dataset_materialize():
 
     fn = MaterializeHandler()
     apply_on_windows_args(fn, args)
+
+
+def model_handler():
+    """Handler for any rslearn model X commands."""
+    LightningCLI(
+        model_class=RslearnLightningModule,
+        datamodule_class=RslearnDataModule,
+        args=sys.argv[2:],
+    )
+
+
+@register_handler("model", "fit")
+def model_fit():
+    """Handler for rslearn model fit."""
+    model_handler()
 
 
 def main():

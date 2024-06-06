@@ -8,3 +8,6 @@ pyproj
 rasterio
 shapely
 tqdm
+torch
+torchvision
+lightning[pytorch-extra]
