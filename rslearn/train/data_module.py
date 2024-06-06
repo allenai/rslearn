@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 from rslearn.train.tasks import Task
 
 from .dataset import DatasetConfig, ModelDataset, TaskConfig
+from .transforms import Sequential
 
 
 class SamplerFactory:
@@ -76,6 +77,11 @@ class RslearnDataModule(L.LightningDataModule):
         num_workers: int = 0,
         train_sampler: Optional[SamplerFactory] = None,
         val_sampler: Optional[SamplerFactory] = None,
+        test_sampler: Optional[SamplerFactory] = None,
+        transforms: list[torch.nn.Module] = [torch.nn.Identity()],
+        train_transforms: Optional[list[torch.nn.Module]] = None,
+        val_transforms: Optional[list[torch.nn.Module]] = None,
+        test_transforms: Optional[list[torch.nn.Module]] = None,
     ):
         """Initialize a new RslearnDataModule.
 
@@ -88,6 +94,11 @@ class RslearnDataModule(L.LightningDataModule):
                 process only
             train_sampler: SamplerFactor for training
             val_sampler: SamplerFactory for validation
+            test_sampler: SamplerFactory for testing
+            transforms: transforms to apply
+            train_transforms: transforms for training (overrides transforms if set)
+            val_transforms: transforms for validation (overrides transforms if set)
+            test_transforms: transforms for testing (overrides transforms if set)
         """
         super().__init__()
         self.tasks = tasks
@@ -95,11 +106,21 @@ class RslearnDataModule(L.LightningDataModule):
         self.dataset_config = dataset_config
         self.batch_size = batch_size
         self.num_workers = num_workers
+
         self.sampler_factories = {}
         if train_sampler:
             self.sampler_factories["train"] = train_sampler
         if val_sampler:
             self.sampler_factories["val"] = val_sampler
+        if test_sampler:
+            self.sampler_factories["test"] = test_sampler
+
+        transforms = Sequential(*transforms)
+        self.transforms = {
+            "train": Sequential(*train_transforms) if train_transforms else transforms,
+            "val": Sequential(*val_transforms) if val_transforms else transforms,
+            "test": Sequential(*test_transforms) if test_transforms else transforms,
+        }
 
     def setup(self, stage: str):
         """Set up datasets and samplers.
@@ -116,7 +137,11 @@ class RslearnDataModule(L.LightningDataModule):
         self.datasets = {}
         for split in stage_to_splits[stage]:
             self.datasets[split] = ModelDataset(
-                self.tasks, self.task_config, self.dataset_config, split
+                self.tasks,
+                self.task_config,
+                self.dataset_config,
+                split=split,
+                transforms=self.transforms[split],
             )
 
     def _get_dataloader(self, split) -> DataLoader[dict[str, torch.Tensor]]:

@@ -114,6 +114,7 @@ class ModelDataset(torch.utils.data.Dataset):
         task_config: TaskConfig,
         dataset_config: DatasetConfig,
         split: str,
+        transforms: torch.nn.Module,
     ):
         """Instantiate a new ModelDataset.
 
@@ -122,10 +123,12 @@ class ModelDataset(torch.utils.data.Dataset):
             task_config: specification of the inputs to read
             dataset_config: where and how to read the inputs
             split: usually 'train', 'val', or 'test'
+            transforms: transforms to apply
         """
         self.tasks = tasks
         self.task_config = task_config
         self.dataset_config = dataset_config
+        self.transforms = transforms
 
         # Convert patch size to (width, height) format if needed.
         if not dataset_config.patch_size:
@@ -288,9 +291,9 @@ class ModelDataset(torch.utils.data.Dataset):
                         os.path.join(layer_dir, "_".join(band_set.bands))
                     )
                     src = raster_format.decode_raster(file_api, bounds)
-                    image[dst_indexes, :, :] = (
-                        torch.as_tensor(src[src_indexes, :, :]).float() / 100 - 1
-                    )
+                    image[dst_indexes, :, :] = torch.as_tensor(
+                        src[src_indexes, :, :]
+                    ).float()
 
                 return image
 
@@ -322,4 +325,4 @@ class ModelDataset(torch.utils.data.Dataset):
         for name, task in self.tasks.items():
             target_dict[name] = task.get_target(target_dict[name])
 
-        return input_dict, target_dict
+        return self.transforms(input_dict, target_dict)
