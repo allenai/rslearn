@@ -7,7 +7,7 @@ import numpy.typing as npt
 import torch
 import torchmetrics
 from PIL import Image, ImageDraw
-from torchmetrics import Metric
+from torchmetrics import Metric, MetricCollection
 
 from rslearn.utils import Feature
 
@@ -23,6 +23,7 @@ class RegressionTask(BasicTask):
         filters: Optional[list[tuple[str, str]]],
         allow_invalid: bool = False,
         scale_factor: float = 1,
+        metric_mode: str = "mse",
         **kwargs,
     ):
         """Initialize a new RegressionTask.
@@ -35,6 +36,7 @@ class RegressionTask(BasicTask):
             allow_invalid: instead of throwing error when no regression label is found
                 at a window, simply mark the example invalid for this task
             scale_factor: multiply the label value by this factor
+            metric_mode: what metric to use, either mse or l1
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -42,19 +44,24 @@ class RegressionTask(BasicTask):
         self.filters = filters
         self.allow_invalid = allow_invalid
         self.scale_factor = scale_factor
+        self.metric_mode = metric_mode
 
         if not self.filters:
             self.filters = []
 
-    def get_target(self, data: Union[npt.NDArray[Any], list[Feature]]) -> Any:
-        """Extracts targets from vector data.
+    def process_inputs(
+        self, raw_inputs: dict[str, Union[npt.NDArray[Any], list[Feature]]]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Processes the data into targets.
 
         Args:
-            data: vector data to process
+            raw_inputs: raster or vector data to process
 
         Returns:
-            the label
+            tuple (input_dict, target_dict) containing the processed inputs and targets
+                that are compatible with both metrics and loss functions
         """
+        data = raw_inputs["targets"]
         for feat in data:
             for property_name, property_value in self.filters:
                 if feat.properties.get(property_name) != property_value:
@@ -62,7 +69,7 @@ class RegressionTask(BasicTask):
             if self.property_name not in feat.properties:
                 continue
             value = float(feat.properties[self.property_name]) * self.scale_factor
-            return {
+            return {}, {
                 "value": torch.tensor(value, dtype=torch.float32),
                 "valid": torch.tensor(1, dtype=torch.float32),
             }
@@ -70,29 +77,31 @@ class RegressionTask(BasicTask):
         if not self.allow_invalid:
             raise Exception("no feature found providing regression label")
 
-        return {
+        return {}, {
             "value": torch.tensor(0, dtype=torch.float32),
             "valid": torch.tensor(0, dtype=torch.float32),
         }
 
     def visualize(
-        self, input_dict: dict[str, Any], output: Any, target: Optional[Any]
+        self,
+        input_dict: dict[str, Any],
+        target_dict: Optional[dict[str, Any]],
+        output: Any,
     ) -> dict[str, npt.NDArray[Any]]:
         """Visualize the outputs and targets.
 
         Args:
-            input_dict: the input
+            input_dict: the input dict from process_inputs
+            target_dict: the target dict from process_inputs
             output: the prediction
-            target: the target label from get_target
 
         Returns:
             a dictionary mapping image name to visualization image
         """
-        image = super().visualize(input_dict, output, target)["image"]
-        image = image.repeat(repeats=8, axis=0).repeat(repeats=8, axis=1)
+        image = super().visualize(input_dict, target_dict, output)["image"]
         image = Image.fromarray(image)
         draw = ImageDraw.Draw(image)
-        target = target["value"] / self.scale_factor
+        target = target_dict["value"] / self.scale_factor
         output = output / self.scale_factor
         text = f"Label: {target:.2f}\nOutput: {output:.2f}"
         box = draw.textbbox(xy=(0, 0), text=text, font_size=12)
@@ -102,18 +111,29 @@ class RegressionTask(BasicTask):
             "image": np.array(image),
         }
 
+    def get_metrics(self) -> MetricCollection:
+        """Get the metrics for this task."""
+        if self.metric_mode == "mse":
+            metric = torchmetrics.MeanSquaredError()
+        elif self.metric_mode == "l1":
+            metric = torchmetrics.MeanAbsoluteError()
+        return MetricCollection([RegressionMetricWrapper(metric)])
+
 
 class RegressionHead(torch.nn.Module):
     """Head for regression task."""
 
-    def __init__(self, loss_mode: str = "mse"):
+    def __init__(self, loss_mode: str = "mse", use_sigmoid: bool = False):
         """Initialize a new RegressionHead.
 
         Args:
             loss_mode: the loss function to use, either "mse" or "l1".
+            use_sigmoid: whether to apply a sigmoid activation on the output. This
+                requires targets to be between 0-1.
         """
         super().__init__()
         self.loss_mode = loss_mode
+        self.use_sigmoid = use_sigmoid
 
     def forward(
         self, logits: torch.Tensor, targets: Optional[list[dict[str, Any]]] = None
@@ -131,7 +151,11 @@ class RegressionHead(torch.nn.Module):
         if len(logits.shape) == 2:
             assert logits.shape[1] == 1
             logits = logits[:, 0]
-        outputs = logits
+
+        if self.use_sigmoid:
+            outputs = torch.nn.functional.sigmoid(logits)
+        else:
+            outputs = logits
 
         loss = None
         if targets:
@@ -147,31 +171,28 @@ class RegressionHead(torch.nn.Module):
         return outputs, {"regress": loss}
 
 
-class RegressionMetric(Metric):
+class RegressionMetricWrapper(Metric):
     """Metric for regression task."""
 
-    def __init__(self, mode: str = "mse", **kwargs):
-        """Initialize a new RegressionMetric.
+    def __init__(self, metric: Metric, **kwargs):
+        """Initialize a new RegressionMetricWrapper.
 
         Args:
-            mode: either "mse" or "l1"
+            metric: the underlying torchmetric to apply, which should accept a flat
+                tensor of predicted values followed by a flat tensor of target values
             kwargs: other arguments to pass to super constructor
         """
         super().__init__(**kwargs)
-        if mode == "mse":
-            self.metric = torchmetrics.MeanSquaredError()
-        elif mode == "l1":
-            self.metric = torchmetrics.MeanAbsoluteError()
-        else:
-            assert False
+        self.metric = metric
 
-    def update(self, preds: torch.Tensor, targets: list[dict[str, Any]]) -> None:
+    def update(self, preds: list[Any], targets: list[dict[str, Any]]) -> None:
         """Update metric.
 
         Args:
             preds: the predictions
             targets: the targets
         """
+        preds = torch.stack(preds)
         labels = torch.stack([target["value"] for target in targets])
 
         # Sub-select the valid labels.

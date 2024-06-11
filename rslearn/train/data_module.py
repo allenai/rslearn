@@ -1,6 +1,6 @@
 """Default LightningDataModule for rslearn."""
 
-from typing import Any, Optional
+from typing import Any
 
 import lightning as L
 import torch
@@ -8,58 +8,7 @@ from torch.utils.data import DataLoader
 
 from rslearn.train.tasks import Task
 
-from .dataset import DatasetConfig, ModelDataset, TaskConfig
-from .transforms import Sequential
-
-
-class SamplerFactory:
-    """Factory to produce a Sampler.
-
-    This enables configuring a sampler without needing to pass the dataset.
-    """
-
-    def get_sampler(
-        self, dataset: torch.utils.data.Dataset
-    ) -> torch.utils.data.Sampler:
-        """Create a sampler for the given dataset.
-
-        Args:
-            dataset: the dataset
-
-        Returns:
-            a sampler
-        """
-        raise NotImplementedError
-
-
-class RandomSamplerFactory(SamplerFactory):
-    """A sampler factory for RandomSampler."""
-
-    def __init__(self, replacement: bool = False, num_samples: Optional[int] = None):
-        """Initialize a RandomSamplerFactory.
-
-        Args:
-            replacement: whether to pick with replacement, default false
-            num_samples: optional number of dataset samples to limit iteration to,
-                otherwise picks random samples equal to the dataset size
-        """
-        self.replacement = replacement
-        self.num_samples = num_samples
-
-    def get_sampler(
-        self, dataset: torch.utils.data.Dataset
-    ) -> torch.utils.data.Sampler:
-        """Create a sampler for the given dataset.
-
-        Args:
-            dataset: the dataset
-
-        Returns:
-            a RandomSampler
-        """
-        return torch.utils.data.RandomSampler(
-            dataset, replacement=self.replacement, num_samples=self.num_samples
-        )
+from .dataset import DataInput, ModelDataset, SplitConfig
 
 
 class RslearnDataModule(L.LightningDataModule):
@@ -70,56 +19,41 @@ class RslearnDataModule(L.LightningDataModule):
 
     def __init__(
         self,
-        tasks: dict[str, Task],
-        task_config: TaskConfig,
-        dataset_config: DatasetConfig,
+        root_dir: str,
+        inputs: dict[str, DataInput],
+        task: Task,
         batch_size: int = 1,
         num_workers: int = 0,
-        train_sampler: Optional[SamplerFactory] = None,
-        val_sampler: Optional[SamplerFactory] = None,
-        test_sampler: Optional[SamplerFactory] = None,
-        transforms: list[torch.nn.Module] = [torch.nn.Identity()],
-        train_transforms: Optional[list[torch.nn.Module]] = None,
-        val_transforms: Optional[list[torch.nn.Module]] = None,
-        test_transforms: Optional[list[torch.nn.Module]] = None,
+        default_config: SplitConfig = SplitConfig(),
+        train_config: SplitConfig = SplitConfig(),
+        val_config: SplitConfig = SplitConfig(),
+        test_config: SplitConfig = SplitConfig(),
     ):
         """Initialize a new RslearnDataModule.
 
         Args:
-            tasks: the Tasks to train on
-            task_config: specification of the data types of inputs and targets to read
-            dataset_config: which rslearn dataset(s) and layer(s) to read from
+            root_dir: the root directory of the dataset
+            inputs: what to read from the underlying dataset
+            task: the task to train on
             batch_size: the batch size
             num_workers: number of data loader worker processes, or 0 to use main
                 process only
-            train_sampler: SamplerFactor for training
-            val_sampler: SamplerFactory for validation
-            test_sampler: SamplerFactory for testing
-            transforms: transforms to apply
-            train_transforms: transforms for training (overrides transforms if set)
-            val_transforms: transforms for validation (overrides transforms if set)
-            test_transforms: transforms for testing (overrides transforms if set)
+            default_config: default split configuration
+            train_config: split config for train split
+            val_config: split config for val split
+            test_config: split config for test split
         """
         super().__init__()
-        self.tasks = tasks
-        self.task_config = task_config
-        self.dataset_config = dataset_config
+        self.root_dir = root_dir
+        self.inputs = inputs
+        self.task = task
         self.batch_size = batch_size
         self.num_workers = num_workers
 
-        self.sampler_factories = {}
-        if train_sampler:
-            self.sampler_factories["train"] = train_sampler
-        if val_sampler:
-            self.sampler_factories["val"] = val_sampler
-        if test_sampler:
-            self.sampler_factories["test"] = test_sampler
-
-        transforms = Sequential(*transforms)
-        self.transforms = {
-            "train": Sequential(*train_transforms) if train_transforms else transforms,
-            "val": Sequential(*val_transforms) if val_transforms else transforms,
-            "test": Sequential(*test_transforms) if test_transforms else transforms,
+        self.split_configs = {
+            "train": default_config.update(train_config),
+            "val": default_config.update(val_config),
+            "test": default_config.update(test_config),
         }
 
     def setup(self, stage: str):
@@ -137,11 +71,10 @@ class RslearnDataModule(L.LightningDataModule):
         self.datasets = {}
         for split in stage_to_splits[stage]:
             self.datasets[split] = ModelDataset(
-                self.tasks,
-                self.task_config,
-                self.dataset_config,
-                split=split,
-                transforms=self.transforms[split],
+                root_dir=self.root_dir,
+                split_config=self.split_configs[split],
+                inputs=self.inputs,
+                task=self.task,
             )
 
     def _get_dataloader(self, split) -> DataLoader[dict[str, torch.Tensor]]:
@@ -152,8 +85,9 @@ class RslearnDataModule(L.LightningDataModule):
             num_workers=self.num_workers,
             collate_fn=self.collate_fn,
         )
-        if split in self.sampler_factories:
-            kwargs["sampler"] = self.sampler_factories[split].get_sampler(dataset)
+        sampler_factory = self.split_configs[split].sampler
+        if sampler_factory:
+            kwargs["sampler"] = sampler_factory.get_sampler(dataset)
         return DataLoader(**kwargs)
 
     def train_dataloader(self) -> DataLoader[dict[str, torch.Tensor]]:

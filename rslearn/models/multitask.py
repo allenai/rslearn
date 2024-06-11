@@ -1,11 +1,11 @@
-"""MultiTask model for rslearn."""
+"""MultiTaskModel for rslearn."""
 
 from typing import Any, Optional
 
 import torch
 
 
-class MultiTask(torch.nn.Module):
+class MultiTaskModel(torch.nn.Module):
     """MultiTask model wrapper.
 
     MultiTask first passes its inputs through the sequential encoder models.
@@ -17,7 +17,7 @@ class MultiTask(torch.nn.Module):
     def __init__(
         self, encoder: list[torch.nn.Module], decoders: dict[str, list[torch.nn.Module]]
     ):
-        """Initialize a new MultiTask.
+        """Initialize a new MultiTaskModel.
 
         Args:
             encoder: modules to compute intermediate feature representations.
@@ -44,7 +44,7 @@ class MultiTask(torch.nn.Module):
             tuple (outputs, loss_dict) from the last module.
         """
         features = self.encoder(inputs)
-        outputs = {}
+        outputs = [{} for _ in inputs]
         losses = {}
         for name, decoder in self.decoders.items():
             cur = features
@@ -52,7 +52,8 @@ class MultiTask(torch.nn.Module):
                 cur = module(cur)
             cur_targets = [target[name] for target in targets]
             cur_output, cur_loss_dict = decoder[-1](cur, cur_targets)
-            outputs[name] = cur_output
+            for idx, entry in enumerate(cur_output):
+                outputs[idx][name] = entry
             for loss_name, loss_value in cur_loss_dict.items():
                 losses[f"{name}_{loss_name}"] = loss_value
         return outputs, losses

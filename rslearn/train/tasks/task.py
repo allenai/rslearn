@@ -5,6 +5,7 @@ from typing import Any, Optional, Union
 import numpy as np
 import numpy.typing as npt
 import torch
+from torchmetrics import MetricCollection
 
 from rslearn.utils import Feature
 
@@ -12,36 +13,45 @@ from rslearn.utils import Feature
 class Task:
     """Represents an ML task like object detection or segmentation.
 
-    A task specifies how raster or vector data should be processed into targets that
-    can be passed to models. It also specifies evaluation functions for computing
-    metrics comparing targets/outputs.
+    A task specifies how raster or vector data should be processed into inputs and
+    targets that can be passed to models. It also specifies evaluation functions for
+    computing metrics comparing targets/outputs.
     """
 
-    def get_target(self, data: Union[npt.NDArray[Any], list[Feature]]) -> Any:
+    def process_inputs(
+        self, raw_inputs: dict[str, Union[npt.NDArray[Any], list[Feature]]]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
 
         Args:
-            data: raster or vector data to process
+            raw_inputs: raster or vector data to process
 
         Returns:
-            the processed targets that are compatible with both metrics and loss
-                functions
+            tuple (input_dict, target_dict) containing the processed inputs and targets
+                that are compatible with both metrics and loss functions
         """
         raise NotImplementedError
 
     def visualize(
-        self, input_dict: dict[str, Any], output: Any, target: Optional[Any]
+        self,
+        input_dict: dict[str, Any],
+        target_dict: Optional[dict[str, Any]],
+        output: Any,
     ) -> dict[str, npt.NDArray[Any]]:
         """Visualize the outputs and targets.
 
         Args:
-            input_dict: the input
+            input_dict: the input dict from process_inputs
+            target_dict: the target dict from process_inputs
             output: the prediction
-            target: the target label from get_target
 
         Returns:
             a dictionary mapping image name to visualization image
         """
+        raise NotImplementedError
+
+    def get_metrics(self) -> MetricCollection:
+        """Get metrics for this task."""
         raise NotImplementedError
 
 
@@ -63,14 +73,17 @@ class BasicTask(Task):
         self.remap_values = remap_values
 
     def visualize(
-        self, input_dict: dict[str, Any], output: Any, target: Optional[Any]
+        self,
+        input_dict: dict[str, Any],
+        target_dict: Optional[dict[str, Any]],
+        output: Any,
     ) -> dict[str, npt.NDArray[Any]]:
         """Visualize the outputs and targets.
 
         Args:
-            input_dict: the input
+            input_dict: the input dict from process_inputs
+            target_dict: the target dict from process_inputs
             output: the prediction
-            target: the target label from get_target
 
         Returns:
             a dictionary mapping image name to visualization image

@@ -13,57 +13,101 @@ from rslearn.utils import LocalFileAPI
 from rslearn.utils.raster_format import load_raster_format
 from rslearn.utils.vector_format import load_vector_format
 
+from .transforms import Sequential
 
-class TaskInput:
-    """Specification of one input for a task."""
 
-    def __init__(self, name: str, data_type: str):
-        """Initialize a new TaskInput.
+class SamplerFactory:
+    """Factory to produce a Sampler.
+
+    This enables configuring a sampler without needing to pass the dataset.
+    """
+
+    def get_sampler(
+        self, dataset: torch.utils.data.Dataset
+    ) -> torch.utils.data.Sampler:
+        """Create a sampler for the given dataset.
 
         Args:
-            name: the name of this task.
-            data_type: the data type to read
+            dataset: the dataset
+
+        Returns:
+            a sampler
         """
-        self.name = name
-        self.data_type = data_type
+        raise NotImplementedError
 
 
-class TaskConfig:
-    """Specification of the inputs to read."""
+class RandomSamplerFactory(SamplerFactory):
+    """A sampler factory for RandomSampler."""
 
-    def __init__(self, inputs: list[TaskInput], targets: list[TaskInput]):
-        """Initialize a new TaskConfig.
+    def __init__(self, replacement: bool = False, num_samples: Optional[int] = None):
+        """Initialize a RandomSamplerFactory.
 
         Args:
-            inputs: list of TaskInput objects that provide the inputs for the model
-            targets: list of TaskInput objects that provide the targets for the model
+            replacement: whether to pick with replacement, default false
+            num_samples: optional number of dataset samples to limit iteration to,
+                otherwise picks random samples equal to the dataset size
         """
-        self.inputs = inputs
-        self.targets = targets
+        self.replacement = replacement
+        self.num_samples = num_samples
 
-
-class DatasetInput:
-    """Specification of how to read an input from a dataset."""
-
-    def __init__(self, layers: list[str], bands: Optional[list[str]] = None):
-        """Initialize a new DatasetInput.
+    def get_sampler(
+        self, dataset: torch.utils.data.Dataset
+    ) -> torch.utils.data.Sampler:
+        """Create a sampler for the given dataset.
 
         Args:
+            dataset: the dataset
+
+        Returns:
+            a RandomSampler
+        """
+        return torch.utils.data.RandomSampler(
+            dataset, replacement=self.replacement, num_samples=self.num_samples
+        )
+
+
+class DataInput:
+    """Specification of a piece of data from a window that is needed for training.
+
+    The DataInput includes which layer(s) the data can be obtained from for each window.
+    """
+
+    def __init__(
+        self,
+        data_type: str,
+        layers: list[str],
+        bands: Optional[list[str]] = None,
+        required: bool = True,
+        passthrough: bool = False,
+    ):
+        """Initialize a new DataInput.
+
+        Args:
+            data_type: either "raster" or "vector"
             layers: list of layer names that this input can be read from.
             bands: the bands to read, if this is a raster.
+            required: whether examples lacking one of these layers should be skipped
+            passthrough: whether to expose this to the model even if it isn't returned
+                by any task
         """
+        self.data_type = data_type
         self.layers = layers
         self.bands = bands
+        self.required = required
+        self.passthrough = passthrough
 
 
 class SplitConfig:
-    """Configuration of windows for train, val, and test."""
+    """Configuration that can be specified separately for train, val, and test."""
 
     def __init__(
         self,
         groups: Optional[list[str]] = None,
         tags: Optional[list[str]] = None,
         num_samples: Optional[int] = None,
+        transforms: Optional[list[torch.nn.Module]] = None,
+        sampler: Optional[SamplerFactory] = None,
+        patch_size: Optional[Union[int, tuple[int, int]]] = None,
     ):
         """Initialize a new SplitConfig.
 
@@ -71,75 +115,83 @@ class SplitConfig:
             groups: for this split, only read windows in one of these groups
             tags: todo
             num_samples: limit this split to this many examples
+            transforms: transforms to apply
+            sampler: SamplerFactory for this split
+            patch_size: an optional square size or (width, height) tuple. If set, read
+                crops of this size rather than entire windows.
         """
         self.groups = groups
         self.tags = tags
         self.num_samples = num_samples
+        self.transforms = transforms
+        self.sampler = sampler
+        self.patch_size = patch_size
+
+    def update(self, other: "SplitConfig") -> "SplitConfig":
+        """Override settings in this SplitConfig with those in another.
+
+        Returns:
+            the resulting SplitConfig combining the settings.
+        """
+        result = SplitConfig(
+            groups=self.groups,
+            tags=self.tags,
+            num_samples=self.num_samples,
+            transforms=self.transforms,
+            sampler=self.sampler,
+            patch_size=self.patch_size,
+        )
+        if other.groups:
+            result.groups = other.groups
+        if other.tags:
+            result.tags = other.tags
+        if other.num_samples:
+            result.num_samples = other.num_samples
+        if other.transforms:
+            result.transforms = other.transforms
+        if other.sampler:
+            result.sampler = other.sampler
+        if other.patch_size:
+            result.patch_size = other.patch_size
+        return result
 
 
-class DatasetConfig:
-    """Specification of how to read data from one dataset."""
+class ModelDataset(torch.utils.data.Dataset):
+    """The default pytorch dataset implementation for rslearn."""
 
     def __init__(
         self,
         root_dir: str,
-        inputs: dict[str, DatasetInput],
-        targets: dict[str, DatasetInput],
-        splits: dict[str, SplitConfig],
-        patch_size: Optional[Union[int, tuple[int, int]]] = None,
-    ):
-        """Initialize a new DatasetConfig.
-
-        Args:
-            root_dir: the root directory of the dataset
-            inputs: list of DatasetInput objects that provide the inputs for the model
-            targets: list of DatasetInput objects that provide the targets for the model
-            splits: configuration of train, val, and test splits
-            patch_size: an optional square size or (width, height) tuple. If set, read
-                crops of this size rather than entire windows.
-        """
-        self.root_dir = root_dir
-        self.inputs = inputs
-        self.targets = targets
-        self.splits = splits
-        self.patch_size = patch_size
-
-
-class ModelDataset(torch.utils.data.Dataset):
-    """The default pytorch dataset implemnetation for rslearn."""
-
-    def __init__(
-        self,
-        tasks: dict[str, Task],
-        task_config: TaskConfig,
-        dataset_config: DatasetConfig,
-        split: str,
-        transforms: torch.nn.Module,
+        split_config: SplitConfig,
+        inputs: dict[str, DataInput],
+        task: Task,
     ):
         """Instantiate a new ModelDataset.
 
         Args:
-            tasks: the tasks to train on
-            task_config: specification of the inputs to read
-            dataset_config: where and how to read the inputs
-            split: usually 'train', 'val', or 'test'
-            transforms: transforms to apply
+            root_dir: the root directory of the dataset
+            split_config: configuration specific to this split
+            inputs: data to read from the dataset for training
+            task: the task to train on
         """
-        self.tasks = tasks
-        self.task_config = task_config
-        self.dataset_config = dataset_config
-        self.transforms = transforms
+        self.split_config = split_config
+        self.inputs = inputs
+        self.task = task
+
+        if split_config.transforms:
+            self.transforms = Sequential(*split_config.transforms)
+        else:
+            self.transforms = torch.nn.Identity()
 
         # Convert patch size to (width, height) format if needed.
-        if not dataset_config.patch_size:
+        if not split_config.patch_size:
             self.patch_size = None
-        elif isinstance(dataset_config.patch_size, int):
-            self.patch_size = (dataset_config.patch_size, dataset_config.patch_size)
+        elif isinstance(split_config.patch_size, int):
+            self.patch_size = (split_config.patch_size, split_config.patch_size)
         else:
-            self.patch_size = dataset_config.patch_size
+            self.patch_size = split_config.patch_size
 
-        self.dataset = Dataset(dataset_config.root_dir)
-        split_config = dataset_config.splits[split]
+        self.dataset = Dataset(root_dir)
 
         if split_config.groups:
             windows = self.dataset.load_windows(groups=split_config.groups)
@@ -153,24 +205,19 @@ class ModelDataset(torch.utils.data.Dataset):
         # Eliminate windows that are missing either a requisite input layer, or missing
         # all target layers.
         def check_window(window: Window) -> bool:
-            def is_any_layer_available(layers):
-                for layer_name in dataset_input.layers:
+            def is_any_layer_available(data_input):
+                for layer_name in data_input.layers:
                     if os.path.exists(
                         os.path.join(window.window_root, "layers", layer_name)
                     ):
                         return True
                 return False
 
-            for dataset_input in self.dataset_config.inputs.values():
-                if not is_any_layer_available(dataset_input.layers):
+            for data_input in self.inputs.values():
+                if not data_input.required:
+                    continue
+                if not is_any_layer_available(data_input):
                     return False
-
-            any_target_available = False
-            for dataset_input in self.dataset_config.targets.values():
-                if is_any_layer_available(dataset_input.layers):
-                    any_target_available = True
-            if not any_target_available:
-                return False
 
             return True
 
@@ -231,10 +278,10 @@ class ModelDataset(torch.utils.data.Dataset):
             bounds = window.bounds
 
         # Read the inputs and targets.
-        def read_section(task_input: TaskInput, dataset_input: DatasetInput):
+        def read_input(data_input: DataInput):
             # First enumerate all options of individual layers to read.
             layer_options = []
-            for layer_name in dataset_input.layers:
+            for layer_name in data_input.layers:
                 if not os.path.exists(
                     os.path.join(window.window_root, "layers", layer_name)
                 ):
@@ -248,12 +295,12 @@ class ModelDataset(torch.utils.data.Dataset):
             layer_dir = os.path.join(window.window_root, "layers", layer)
             layer_config = self.dataset.layers[layer]
 
-            if task_input.data_type == "raster":
+            if data_input.data_type == "raster":
                 assert isinstance(layer_config, RasterLayerConfig)
 
                 # See what different sets of bands we need to read to get all the
                 # configured bands.
-                needed_bands = dataset_input.bands
+                needed_bands = data_input.bands
                 needed_band_indexes = {}
                 for i, band in enumerate(needed_bands):
                     needed_band_indexes[band] = i
@@ -297,7 +344,7 @@ class ModelDataset(torch.utils.data.Dataset):
 
                 return image
 
-            elif task_input.data_type == "vector":
+            elif data_input.data_type == "vector":
                 assert isinstance(layer_config, VectorLayerConfig)
                 vector_format = load_vector_format(layer_config.format)
                 file_api = LocalFileAPI(layer_dir)
@@ -305,24 +352,15 @@ class ModelDataset(torch.utils.data.Dataset):
                 return features
 
             else:
-                raise Exception(f"unknown data type {task_input.data_type}")
+                raise Exception(f"unknown data type {data_input.data_type}")
 
-        def load_dict(
-            task_inputs: list[TaskInput], dataset_inputs: dict[str, DatasetInput]
-        ):
-            task_inputs_by_name = {
-                task_input.name: task_input for task_input in task_inputs
-            }
-            d = {}
-            for name, dataset_input in dataset_inputs.items():
-                task_input = task_inputs_by_name[name]
-                d[name] = read_section(task_input, dataset_input)
-            return d
+        raw_inputs = {}
+        passthrough_inputs = {}
+        for name, data_input in self.inputs.items():
+            raw_inputs[name] = read_input(data_input)
+            if data_input.passthrough:
+                passthrough_inputs[name] = raw_inputs[name]
 
-        input_dict = load_dict(self.task_config.inputs, self.dataset_config.inputs)
-        target_dict = load_dict(self.task_config.targets, self.dataset_config.targets)
-
-        for name, task in self.tasks.items():
-            target_dict[name] = task.get_target(target_dict[name])
-
+        input_dict, target_dict = self.task.process_inputs(raw_inputs)
+        input_dict.update(passthrough_inputs)
         return self.transforms(input_dict, target_dict)

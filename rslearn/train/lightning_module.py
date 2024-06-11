@@ -9,7 +9,6 @@ from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
 from PIL import Image
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torchmetrics import MetricCollection
 
 from .tasks import Task
 
@@ -24,8 +23,7 @@ class RslearnLightningModule(L.LightningModule):
     def __init__(
         self,
         model: torch.nn.Module,
-        metrics: dict[str, MetricCollection],
-        tasks: dict[str, Task],
+        task: Task,
         lr: float = 1e-3,
         plateau: bool = False,
         plateau_factor: float = 0.1,
@@ -38,8 +36,7 @@ class RslearnLightningModule(L.LightningModule):
 
         Args:
             model: the model
-            metrics: the metrics for val/test
-            tasks: the tasks to train on
+            task: the task to train on
             lr: the initial learning rate
             plateau: whether to enable plateau scheduler (default false)
             plateau_factor: on plateau, factor to multiply learning rate by
@@ -53,7 +50,7 @@ class RslearnLightningModule(L.LightningModule):
         """
         super().__init__()
         self.model = model
-        self.tasks = tasks
+        self.task = task
         self.lr = lr
         self.plateau = plateau
         self.plateau_factor = plateau_factor
@@ -62,16 +59,9 @@ class RslearnLightningModule(L.LightningModule):
         self.plateau_cooldown = plateau_cooldown
         self.visualize_dir = visualize_dir
 
-        def clone_metrics(prefix: str) -> dict[str, MetricCollection]:
-            return torch.nn.ModuleDict(
-                {
-                    name: metric_collection.clone(prefix=prefix)
-                    for name, metric_collection in metrics.items()
-                }
-            )
-
-        self.val_metrics = clone_metrics(prefix="val_")
-        self.test_metrics = clone_metrics(prefix="test_")
+        metrics = self.task.get_metrics()
+        self.val_metrics = metrics.clone(prefix="val_")
+        self.test_metrics = metrics.clone(prefix="test_")
 
     def configure_optimizers(self) -> OptimizerLRSchedulerConfig:
         """Initialize the optimizer and learning rate scheduler.
@@ -140,11 +130,8 @@ class RslearnLightningModule(L.LightningModule):
             {"val_" + k: v for k, v in loss_dict.items()}, batch_size=batch_size
         )
         self.log("val_loss", val_loss, batch_size=batch_size, prog_bar=True)
-        for name, metric_collection in self.val_metrics.items():
-            cur_outputs = outputs[name]
-            cur_targets = [target[name] for target in targets]
-            metric_collection(cur_outputs, cur_targets)
-            self.log_dict(metric_collection, batch_size=batch_size)
+        self.val_metrics(outputs, targets)
+        self.log_dict(self.val_metrics, batch_size=batch_size)
 
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         """Compute the test loss and additional metrics.
@@ -162,25 +149,17 @@ class RslearnLightningModule(L.LightningModule):
             {"test_" + k: v for k, v in loss_dict.items()}, batch_size=batch_size
         )
         self.log("test_loss", test_loss, batch_size=batch_size)
-        for name, metric_collection in self.test_metrics.items():
-            cur_outputs = outputs[name]
-            cur_targets = [target[name] for target in targets]
-            metric_collection(cur_outputs, cur_targets)
-            self.log_dict(metric_collection, batch_size=batch_size)
+        self.test_metrics(outputs, targets)
+        self.log_dict(self.test_metrics, batch_size=batch_size)
 
         if self.visualize_dir:
-            for name, task in self.tasks.items():
-                cur_outputs = outputs[name]
-                cur_targets = [target[name] for target in targets]
-                for idx, (input_dict, output, target) in enumerate(
-                    zip(inputs, cur_outputs, cur_targets)
-                ):
-                    images = task.visualize(input_dict, output, target)
-                    for image_suffix, image in images.items():
-                        out_fname = os.path.join(
-                            self.visualize_dir, f"{batch_idx}_{idx}_{image_suffix}.png"
-                        )
-                        Image.fromarray(image).save(out_fname)
+            for idx, (inp, target, output) in enumerate(zip(inputs, targets, outputs)):
+                images = self.task.visualize(inp, target, output)
+                for image_suffix, image in images.items():
+                    out_fname = os.path.join(
+                        self.visualize_dir, f"{batch_idx}_{idx}_{image_suffix}.png"
+                    )
+                    Image.fromarray(image).save(out_fname)
 
     def predict_step(
         self, batch: Any, batch_idx: int, dataloader_idx: int = 0
