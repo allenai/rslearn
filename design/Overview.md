@@ -25,7 +25,7 @@ accessing rslearn as a Python library.
 Quick links:
 - [FeatureList](FeatureList.md) enumerates many features that rslearn should
   support.
-- [API](API.md) documents the structure of the Python library.
+- [Architecture](Architecture.md) documents the structure of the Python library.
 - [CLI](CLI.md) documents the command-line interface.
 - [Workflows](workflows/): detailed examples of how rslearn will be able to be
   used for specific tasks.
@@ -83,7 +83,8 @@ Dataset development with the rslearn CLI follows this workflow:
    items from the data source that match with windows in the dataset.
 4. `rslearn dataset materialize`: for each configured retrieved layer, download
    the relevant items and incorporate them into the dataset.
-5. `rslearn annotate siv`: launch an integrated annotation tool and label data.
+5. `rslearn annotate toolname`: launch an integrated annotation tool and label
+   data.
 
 
 Creating a Dataset
@@ -134,16 +135,21 @@ their new dataset. An example configuration file is:
       "band_sets": [{
         "bands": ["R", "G", "B"],
         "dtype": "uint8",
-        "format": "png"
+        "format": {"name": "single_image", "format": "png"},
+        "remap": {
+          "name": "linear",
+          "src": [0, 5000],
+          "dst": [0, 255]
+        }
       }, {
         "bands": ["B05"],
         "dtype": "uint16",
-        "format": "geotiff"
+        "format": {"name": "geotiff"}
       }],
       "data_source": {
         "name": "rslearn.data_sources.aws_open_data.Sentinel2",
         "modality": "L1C",
-        "metadata_cache_dir": "/mnt/data/cache/sentinel2_metadata/",
+        "metadata_cache_dir": "cache/sentinel2_metadata/",
         "max_time_delta": 90
       },
       "query_config": {
@@ -158,6 +164,10 @@ their new dataset. An example configuration file is:
         "Solar Farm",
       ],
     }
+  },
+  "tile_store": {
+     "name": "file",
+	 "root_dir": "tiles"
   }
 }
 ```
@@ -314,6 +324,13 @@ up re-projected item into pieces that correspond to each window in the dataset)
 are separated mainly because mosaic and band remixing, if enabled, are easier
 to do in a second phase after data has been split up into tiles.
 
+Data sources can opt to directly expose an interface to materialize portions of
+items, making ingestion unnecessary. This is useful if the data source has
+cloud-optimized GeoTIFFs or XYZ tiles that support random access. In this case
+the data source can be marked with `"ingest": false` and it will be directly
+materialized from the data source rather than materializing from the tile
+store.
+
 
 Materialize
 -----------
@@ -325,11 +342,9 @@ data will be saved under `window_root/layers/layer1/`. If the layer has
 multiple sub-layers due to setting `max_matches > 1`, then after the first
 sub-layer it is `window_root/layers/layer1.1/`, `layer1.2`, and so on.
 
-Vector data is stored directly as JSON while raster data is split up into tiles
-starting at `0_0.png` (extension may vary depending on specified storage
-format) corresponding to top-left `TILE_SIZE x TILE_SIZE` of the window, etc.
-This accelerates reading the raster data e.g. when training on input sizes that
-are much smaller than the window size.
+By default, vector data is stored as GeoJSON and raster data as GeoTIFF. The
+GeoTIFFs have a small block size to support random access in case the user is
+training on patches that are much smaller than the window sizes.
 
 
 Annotation
