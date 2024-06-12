@@ -167,7 +167,7 @@ their new dataset. An example configuration file is:
   },
   "tile_store": {
      "name": "file",
-	 "root_dir": "tiles"
+     "root_dir": "tiles"
   }
 }
 ```
