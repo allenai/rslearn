@@ -358,9 +358,9 @@ Models
 
 TODO
 
-6. `rslearn model create`: create a new model. The model configuration file
-   must be edited to specify options like which dataset(s) to use, which layers
-   in each dataset to input, which layers to serve as targets, the model
+6. `rslearn model create` (TODO): create a new model. The model configuration
+   file must be edited to specify options like which dataset(s) to use, which
+   layers in each dataset to input, which layers to serve as targets, the model
    architecture, etc.
-7. `rslearn model train`: train the model.
-8. `rslearn model apply`: apply the model on new spatiotemporal windows.
+7. `rslearn model fit`: train the model.
+8. `rslearn model test/predict`: apply the model on new spatiotemporal windows.
