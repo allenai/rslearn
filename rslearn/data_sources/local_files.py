@@ -4,15 +4,19 @@ import glob
 import os
 from typing import Any
 
+import fiona
 import rasterio
 import shapely
+import shapely.geometry
 from class_registry import ClassRegistry
+from rasterio.crs import CRS
 
 import rslearn.data_sources.utils
 import rslearn.utils.mgrs
-from rslearn.config import LayerConfig
-from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import Projection, STGeometry
+from rslearn.config import LayerConfig, VectorLayerConfig
+from rslearn.const import WGS84_PROJECTION
+from rslearn.tile_stores import LayerMetadata, PrefixedTileStore, TileStore
+from rslearn.utils import Feature, Projection, STGeometry
 
 from .data_source import DataSource, Item, QueryConfig
 from .raster_source import get_needed_projections, ingest_raster
@@ -139,6 +143,87 @@ class RasterImporter(Importer):
                     time_range=item.geometry.time_range,
                     layer_config=config,
                 )
+
+
+@Importers.register("vector")
+class VectorImporter(Importer):
+    """An Importer for vector data."""
+
+    def get_item(config: LayerConfig, fname: str) -> Item:
+        """Get a LocalFileItem for this file that can then be ingested.
+
+        Args:
+            config: the configuration of the layer.
+            fname: the filename
+        """
+        # Get the bounds of the features in the vector file, which we assume fiona can
+        # read.
+        with fiona.open(fname) as src:
+            crs = CRS.from_wkt(src.crs.to_wkt())
+            bounds = None
+            for feat in src:
+                shp = shapely.geometry.shape(feat.geometry)
+                cur_bounds = shp.bounds
+                if bounds is None:
+                    bounds = list(cur_bounds)
+                else:
+                    bounds[0] = min(bounds[0], cur_bounds[0])
+                    bounds[1] = min(bounds[1], cur_bounds[1])
+                    bounds[2] = max(bounds[2], cur_bounds[2])
+                    bounds[3] = max(bounds[3], cur_bounds[3])
+
+            projection = Projection(crs, 1, 1)
+            geometry = STGeometry(projection, shapely.box(*bounds), None)
+
+        return LocalFileItem(fname.split(".")[0].split("/")[-1], geometry, fname)
+
+    def ingest_item(
+        self,
+        config: LayerConfig,
+        tile_store: TileStore,
+        item: LocalFileItem,
+        cur_geometries: list[STGeometry],
+    ):
+        """Ingest the specified local file.
+
+        Args:
+            config: the configuration of the layer.
+            tile_store: the TileStore to ingest the data into.
+            item: the LocalFileItem
+            cur_geometries: the geometries where the item is needed.
+        """
+        assert isinstance(config, VectorLayerConfig)
+        fname = item.fname
+        # TODO: move converting fiona file to list[Feature] to utility function.
+        # TODO: don't assume WGS-84 projection here.
+        with fiona.open(fname) as src:
+            features = []
+            for feat in src:
+                features.append(
+                    Feature.from_geojson(
+                        WGS84_PROJECTION,
+                        {
+                            "type": "Feature",
+                            "geometry": dict(feat.geometry),
+                            "properties": dict(feat.properties),
+                        },
+                    )
+                )
+
+            projections = set()
+            for geometry in cur_geometries:
+                projection, _ = config.get_final_projection_and_bounds(
+                    geometry.projection, None
+                )
+                projections.add(projection)
+
+            for projection in projections:
+                cur_features = [feat.to_projection(projection) for feat in features]
+                layer = tile_store.create_layer(
+                    (str(projection),),
+                    LayerMetadata(projection, None, {}),
+                )
+                layer.write_vector(cur_features)
 
 
 class LocalFiles(DataSource):

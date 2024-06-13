@@ -121,6 +121,7 @@ class TileVectorFormat(VectorFormat):
             fc = {
                 "type": "FeatureCollection",
                 "features": [geojson_feat for geojson_feat in geojson_features],
+                "properties": projection.serialize(),
             }
             with file_api.open(f"{col}_{row}.geojson", "w") as f:
                 json.dump(fc, f)
@@ -148,7 +149,20 @@ class TileVectorFormat(VectorFormat):
                     continue
                 with file_api.open(fname, "r") as f:
                     fc = json.load(f)
-                features.extend([Feature.from_geojson(feat) for feat in fc["features"]])
+                if "properties" in fc and "crs" in fc["properties"]:
+                    projection = Projection.deserialize(fc["properties"])
+                else:
+                    projection = WGS84_PROJECTION
+
+                for feat in fc["features"]:
+                    shp = shapely.geometry.shape(feat["geometry"])
+                    shp = shapely.transform(
+                        shp,
+                        lambda array: array
+                        + np.array([[col * self.tile_size, row * self.tile_size]]),
+                    )
+                    feat["geometry"] = json.loads(shapely.to_geojson(shp))
+                    features.append(Feature.from_geojson(projection, feat))
         return features
 
     @staticmethod

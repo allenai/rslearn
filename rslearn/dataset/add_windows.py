@@ -7,6 +7,7 @@ from typing import Optional
 import fiona
 import shapely
 import shapely.geometry
+import tqdm
 from rasterio.crs import CRS
 
 from rslearn.const import WGS84_PROJECTION
@@ -51,7 +52,7 @@ def add_windows_from_geometries(
     """
     # Get list of axis-aligned boxes and associated projection to create.
     out_box_list: list[tuple[PixelBounds, Projection]] = []
-    for geometry in geometries:
+    for geometry in tqdm.tqdm(geometries):
         cur_projection = projection
         if use_utm:
             # Override the CRS in the specified projection with appropriate UTM CRS.

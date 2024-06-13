@@ -243,7 +243,7 @@ class VectorMaterializer(Materializer):
                 ts_layer = tile_store.get_layer(
                     (layer_name, item.name, str(projection))
                 )
-                cur_features = ts_layer.read_raster(bounds)
+                cur_features = ts_layer.read_vector(bounds)
                 features.extend(cur_features)
 
             tmp_out_dir = out_layer_dirs[group_id] + ".tmp"

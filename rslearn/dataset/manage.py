@@ -147,37 +147,39 @@ def is_window_ingested(
         for group in layer_data.serialized_item_groups:
             for serialized_item in group:
                 item = Item.deserialize(serialized_item)
-                for band_set in layer_cfg.band_sets:
-                    projection, _ = band_set.get_final_projection_and_bounds(
-                        window.projection, window.bounds
-                    )
-                    layer_prefix = (layer_name, item.name)
-                    # Make sure that layers exist containing each configured band.
-                    # And that those layers are marked completed.
-                    suffixes = tile_store.list_layers(layer_prefix)
-                    needed_suffixes = []
-                    needed_bands = {band for band in band_set.bands}
-                    for suffix in suffixes:
-                        cur_bands = suffix.split("_")
-                        is_needed = False
-                        for band in cur_bands:
-                            if band in needed_bands:
-                                is_needed = True
-                                needed_bands.remove(band)
-                        if not is_needed:
-                            continue
-                        needed_suffixes.append(suffix)
-                    if len(needed_bands) > 0:
-                        print(needed_bands, suffixes, layer_prefix)
-                        return False
 
-                    for suffix in needed_suffixes:
-                        layer_id = (layer_name, item.name, suffix, str(projection))
-                        ts_layer = tile_store.get_layer(layer_id)
-                        if not ts_layer:
+                if layer_cfg.layer_type == "raster":
+                    for band_set in layer_cfg.band_sets:
+                        projection, _ = band_set.get_final_projection_and_bounds(
+                            window.projection, window.bounds
+                        )
+                        layer_prefix = (layer_name, item.name)
+                        # Make sure that layers exist containing each configured band.
+                        # And that those layers are marked completed.
+                        suffixes = tile_store.list_layers(layer_prefix)
+                        needed_suffixes = []
+                        needed_bands = {band for band in band_set.bands}
+                        for suffix in suffixes:
+                            cur_bands = suffix.split("_")
+                            is_needed = False
+                            for band in cur_bands:
+                                if band in needed_bands:
+                                    is_needed = True
+                                    needed_bands.remove(band)
+                            if not is_needed:
+                                continue
+                            needed_suffixes.append(suffix)
+                        if len(needed_bands) > 0:
+                            print(needed_bands, suffixes, layer_prefix)
                             return False
-                        if not ts_layer.get_metadata().properties.get("completed"):
-                            return False
+
+                        for suffix in needed_suffixes:
+                            layer_id = (layer_name, item.name, suffix, str(projection))
+                            ts_layer = tile_store.get_layer(layer_id)
+                            if not ts_layer:
+                                return False
+                            if not ts_layer.get_metadata().properties.get("completed"):
+                                return False
     return True
 
 
