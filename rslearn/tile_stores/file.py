@@ -179,7 +179,11 @@ class FileTileStore(TileStore):
         layer_dir = self._get_layer_dir(layer_id)
         if not os.path.exists(os.path.join(layer_dir, "metadata.json")):
             return None
-        return FileTileStoreLayer(layer_dir)
+        return FileTileStoreLayer(
+            layer_dir,
+            raster_format=self.raster_format,
+            vector_format=self.vector_format,
+        )
 
     def list_layers(self, prefix: tuple[str, ...] = tuple()) -> list[str]:
         """List options for next part of layer ID with the specified prefix.
