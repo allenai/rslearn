@@ -85,9 +85,9 @@ class MultiTask(Task):
         """Get metrics for this task."""
         metrics = []
         for task_name, task in self.tasks.items():
-            cur_metrics = []
-            for metric in task.get_metrics().values():
-                cur_metrics.append(MetricWrapper(task_name, metric))
+            cur_metrics = {}
+            for metric_name, metric in task.get_metrics().items():
+                cur_metrics[metric_name] = MetricWrapper(task_name, metric)
             metrics.append(MetricCollection(cur_metrics, prefix=f"{task_name}/"))
         return MetricCollection(metrics)
 

@@ -117,7 +117,13 @@ class RegressionTask(BasicTask):
             metric = torchmetrics.MeanSquaredError()
         elif self.metric_mode == "l1":
             metric = torchmetrics.MeanAbsoluteError()
-        return MetricCollection([RegressionMetricWrapper(metric)])
+        return MetricCollection(
+            {
+                self.metric_mode: RegressionMetricWrapper(
+                    metric=metric, scale_factor=self.scale_factor
+                )
+            }
+        )
 
 
 class RegressionHead(torch.nn.Module):
@@ -174,16 +180,19 @@ class RegressionHead(torch.nn.Module):
 class RegressionMetricWrapper(Metric):
     """Metric for regression task."""
 
-    def __init__(self, metric: Metric, **kwargs):
+    def __init__(self, metric: Metric, scale_factor: float, **kwargs):
         """Initialize a new RegressionMetricWrapper.
 
         Args:
             metric: the underlying torchmetric to apply, which should accept a flat
                 tensor of predicted values followed by a flat tensor of target values
+            scale_factor: scale factor to undo so that metric is based on original
+                values
             kwargs: other arguments to pass to super constructor
         """
         super().__init__(**kwargs)
         self.metric = metric
+        self.scale_factor = scale_factor
 
     def update(self, preds: list[Any], targets: list[dict[str, Any]]) -> None:
         """Update metric.
@@ -197,8 +206,8 @@ class RegressionMetricWrapper(Metric):
 
         # Sub-select the valid labels.
         mask = torch.stack([target["valid"] > 0 for target in targets])
-        preds = preds[mask]
-        labels = labels[mask]
+        preds = preds[mask] / self.scale_factor
+        labels = labels[mask] / self.scale_factor
         if len(preds) == 0:
             return
 
