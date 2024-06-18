@@ -116,7 +116,11 @@ class ClassificationTask(BasicTask):
 
     def get_metrics(self) -> MetricCollection:
         """Get the metrics for this task."""
-        return MetricCollection([ClassificationMetric(num_classes=len(self.classes))])
+        metrics = {}
+        metrics["accuracy"] = ClassificationMetric(torchmetrics.classification.MulticlassAccuracy(
+            num_classes=len(self.classes),
+        ))
+        return MetricCollection(metrics)
 
 
 class ClassificationHead(torch.nn.Module):
@@ -152,14 +156,12 @@ class ClassificationHead(torch.nn.Module):
 
 
 class ClassificationMetric(Metric):
-    """Metric for regression task."""
+    """Metric for classification task."""
 
-    def __init__(self, num_classes: int):
+    def __init__(self, metric: Metric):
         """Initialize a new ClassificationMetric."""
         super().__init__()
-        self.metric = torchmetrics.classification.MulticlassAccuracy(
-            num_classes=num_classes
-        )
+        self.metric = metric
 
     def update(self, preds: list[Any], targets: list[dict[str, Any]]) -> None:
         """Update metric.
