@@ -530,7 +530,7 @@ class RslearnLightningCLI(LightningCLI):
         Args:
             parser: the argument parser
         """
-        parser.link_arguments("data.task", "model.task", apply_on="instantiate")
+        parser.link_arguments("data.init_args.task", "model.init_args.task", apply_on="instantiate")
 
 
 def model_handler():
@@ -539,6 +539,9 @@ def model_handler():
         model_class=RslearnLightningModule,
         datamodule_class=RslearnDataModule,
         args=sys.argv[2:],
+        subclass_mode_model=True,
+        subclass_mode_data=True,
+        save_config_kwargs={"overwrite": True},
     )
 
 
