@@ -3,3 +3,4 @@ google-cloud-storage
 mgrs
 osmium
 rtree
+satlaspretrain_models
