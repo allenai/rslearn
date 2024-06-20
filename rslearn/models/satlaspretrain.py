@@ -1,10 +1,9 @@
 """SatlasPretrain models."""
 
-from typing import Any, Optional
+from typing import Any
 
 import satlaspretrain_models
 import torch
-import torchvision
 
 
 class SatlasPretrain(torch.nn.Module):
@@ -25,7 +24,9 @@ class SatlasPretrain(torch.nn.Module):
         """
         super().__init__()
         weights_manager = satlaspretrain_models.Weights()
-        self.model = weights_manager.get_pretrained_model(model_identifier=model_identifier, fpn=fpn)
+        self.model = weights_manager.get_pretrained_model(
+            model_identifier=model_identifier, fpn=fpn
+        )
 
     def forward(
         self, inputs: list[dict[str, Any]], targets: list[dict[str, Any]] = None

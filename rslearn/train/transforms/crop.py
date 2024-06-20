@@ -24,7 +24,7 @@ class Crop(torch.nn.Module):
         Args:
             crop_size: the size to crop to, or a min/max range of crop sizes
             input_images: image inputs to operate on (default "image")
-            target_keys: image targets to operate on (default none)
+            target_images: image targets to operate on (default none)
             input_boxes: box inputs to operate on (default none)
             target_boxes: box targets to operate on (default none)
         """
@@ -47,16 +47,51 @@ class Crop(torch.nn.Module):
             dict of sampled choices
         """
         return {
-            "crop_size": torch.randint(low=self.crop_size[0], high=self.crop_size[1], generator=self.generator, size=())
+            "crop_size": torch.randint(
+                low=self.crop_size[0],
+                high=self.crop_size[1],
+                generator=self.generator,
+                size=(),
+            )
         }
 
-    def apply_state(self, state: dict[str, bool], d: dict[str, Any], image_keys: list[str], box_keys: list[str]):
+    def apply_state(
+        self,
+        state: dict[str, bool],
+        d: dict[str, Any],
+        image_keys: list[str],
+        box_keys: list[str],
+    ) -> None:
+        """Apply the sampled state on the specified dict.
+
+        Args:
+            state: the sampled state.
+            d: the dict to transform.
+            image_keys: image keys in the dict to transform.
+            box_keys: box keys in the dict to transform.
+        """
         crop_size = state["crop_size"]
         for k in image_keys:
             assert d[k].shape[-1] >= crop_size and d[k].shape[-2] >= crop_size
-            remove_from_left = torch.randint(low=0, high=d[k].shape[-1] - crop_size, generator=self.generator, size=())
-            remove_from_top = torch.randint(low=0, high=d[k].shape[-2] - crop_size, generator=self.generator, size=())
-            d[k] = torchvision.transforms.functional.crop(d[k], top=remove_from_top, left=remove_from_left, height=crop_size, width=crop_size)
+            remove_from_left = torch.randint(
+                low=0,
+                high=d[k].shape[-1] - crop_size,
+                generator=self.generator,
+                size=(),
+            )
+            remove_from_top = torch.randint(
+                low=0,
+                high=d[k].shape[-2] - crop_size,
+                generator=self.generator,
+                size=(),
+            )
+            d[k] = torchvision.transforms.functional.crop(
+                d[k],
+                top=remove_from_top,
+                left=remove_from_left,
+                height=crop_size,
+                width=crop_size,
+            )
 
     def forward(self, input_dict, target_dict):
         """Apply transform over the inputs and targets.

@@ -14,6 +14,16 @@ from .tasks import Task
 
 
 class FreezeConfig:
+    """Configuration for freezing model parameters.
+
+    This is used when initializing RslearnLightningModule to specify optional
+    parameters to freeze at the beginning of training, along with a number of epochs
+    after which to unfreeze parameters if desired.
+
+    TODO: this doesn't actually work right with Lightning. Like resuming from
+    checkpoint.
+    """
+
     def __init__(self, prefixes: list[str], epochs: Optional[int] = None):
         """Create a new FreezeConfig.
 
@@ -150,7 +160,13 @@ class RslearnLightningModule(L.LightningModule):
             on_step=False,
             on_epoch=True,
         )
-        self.log("train_loss", train_loss, batch_size=batch_size, on_step=False, on_epoch=True)
+        self.log(
+            "train_loss",
+            train_loss,
+            batch_size=batch_size,
+            on_step=False,
+            on_epoch=True,
+        )
         return train_loss
 
     def validation_step(
@@ -168,11 +184,23 @@ class RslearnLightningModule(L.LightningModule):
         outputs, loss_dict = self(inputs, targets)
         val_loss = sum(loss_dict.values())
         self.log_dict(
-            {"val_" + k: v for k, v in loss_dict.items()}, batch_size=batch_size, on_step=False, on_epoch=True
+            {"val_" + k: v for k, v in loss_dict.items()},
+            batch_size=batch_size,
+            on_step=False,
+            on_epoch=True,
         )
-        self.log("val_loss", val_loss, batch_size=batch_size, prog_bar=True, on_step=False, on_epoch=True)
+        self.log(
+            "val_loss",
+            val_loss,
+            batch_size=batch_size,
+            prog_bar=True,
+            on_step=False,
+            on_epoch=True,
+        )
         self.val_metrics(outputs, targets)
-        self.log_dict(self.val_metrics, batch_size=batch_size, on_step=False, on_epoch=True)
+        self.log_dict(
+            self.val_metrics, batch_size=batch_size, on_step=False, on_epoch=True
+        )
 
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         """Compute the test loss and additional metrics.
@@ -187,11 +215,18 @@ class RslearnLightningModule(L.LightningModule):
         outputs, loss_dict = self(inputs, targets)
         test_loss = sum(loss_dict.values())
         self.log_dict(
-            {"test_" + k: v for k, v in loss_dict.items()}, batch_size=batch_size, on_step=False, on_epoch=True
+            {"test_" + k: v for k, v in loss_dict.items()},
+            batch_size=batch_size,
+            on_step=False,
+            on_epoch=True,
         )
-        self.log("test_loss", test_loss, batch_size=batch_size, on_step=False, on_epoch=True)
+        self.log(
+            "test_loss", test_loss, batch_size=batch_size, on_step=False, on_epoch=True
+        )
         self.test_metrics(outputs, targets)
-        self.log_dict(self.test_metrics, batch_size=batch_size, on_step=False, on_epoch=True)
+        self.log_dict(
+            self.test_metrics, batch_size=batch_size, on_step=False, on_epoch=True
+        )
 
         if self.visualize_dir:
             for idx, (inp, target, output) in enumerate(zip(inputs, targets, outputs)):

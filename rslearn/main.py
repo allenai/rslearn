@@ -530,7 +530,9 @@ class RslearnLightningCLI(LightningCLI):
         Args:
             parser: the argument parser
         """
-        parser.link_arguments("data.init_args.task", "model.init_args.task", apply_on="instantiate")
+        parser.link_arguments(
+            "data.init_args.task", "model.init_args.task", apply_on="instantiate"
+        )
 
 
 def model_handler():

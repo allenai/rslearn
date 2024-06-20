@@ -12,7 +12,9 @@ class Normalize(torch.nn.Module):
         self,
         mean: Union[float, list[float]],
         std: Union[float, list[float]],
-        valid_range: Optional[Union[tuple[float, float], tuple[list[float], list[float]]]] = None,
+        valid_range: Optional[
+            Union[tuple[float, float], tuple[list[float], list[float]]]
+        ] = None,
         input_keys: list[str] = ["image"],
         target_keys: list[str] = [],
     ):

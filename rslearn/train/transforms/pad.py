@@ -28,7 +28,7 @@ class Pad(torch.nn.Module):
             mode: "center" (default) to apply padding equally on all sides, or
                 "topleft" to only apply it on the bottom and right.
             input_images: image inputs to operate on (default "image")
-            target_keys: image targets to operate on (default none)
+            target_images: image targets to operate on (default none)
             input_boxes: box inputs to operate on (default none)
             target_boxes: box targets to operate on (default none)
         """
@@ -52,10 +52,18 @@ class Pad(torch.nn.Module):
             dict of sampled choices
         """
         return {
-            "size": torch.randint(low=self.size[0], high=self.size[1], generator=self.generator, size=())
+            "size": torch.randint(
+                low=self.size[0], high=self.size[1], generator=self.generator, size=()
+            )
         }
 
-    def apply_state(self, state: dict[str, bool], d: dict[str, Any], image_keys: list[str], box_keys: list[str]):
+    def apply_state(
+        self,
+        state: dict[str, bool],
+        d: dict[str, Any],
+        image_keys: list[str],
+        box_keys: list[str],
+    ):
         """Apply the transform on one dict.
 
         Args:
@@ -69,7 +77,9 @@ class Pad(torch.nn.Module):
             horizontal_extra = size - d[k].shape[-1]
             vertical_extra = size - d[k].shape[-2]
 
-            def apply_padding(im: torch.Tensor, horizontal: bool, before: int, after: int) -> torch.Tensor:
+            def apply_padding(
+                im: torch.Tensor, horizontal: bool, before: int, after: int
+            ) -> torch.Tensor:
                 # Before/after must either be both non-negative or both negative.
                 # >=0 indicates padding while <0 indicates cropping.
                 assert (before < 0 and after < 0) or (before >= 0 and after >= 0)
@@ -83,9 +93,21 @@ class Pad(torch.nn.Module):
                 else:
                     # Cropping.
                     if horizontal:
-                        return torchvision.transforms.functional.crop(im, top=0, left=-before, height=im.shape[-2], width=im.shape[-1] + before + after)
+                        return torchvision.transforms.functional.crop(
+                            im,
+                            top=0,
+                            left=-before,
+                            height=im.shape[-2],
+                            width=im.shape[-1] + before + after,
+                        )
                     else:
-                        return torchvision.transforms.functional.crop(im, top=-before, left=0, height=im.shape[-2] + before + after, width=im.shape[-1])
+                        return torchvision.transforms.functional.crop(
+                            im,
+                            top=-before,
+                            left=0,
+                            height=im.shape[-2] + before + after,
+                            width=im.shape[-1],
+                        )
 
             if self.mode == "topleft":
                 horizontal_pad = (0, horizontal_extra)

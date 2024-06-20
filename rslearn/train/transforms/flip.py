@@ -23,7 +23,7 @@ class Flip(torch.nn.Module):
             horizontal: whether to randomly flip horizontally
             vertical: whether to randomly flip vertically
             input_images: image inputs to operate on (default "image")
-            target_keys: image targets to operate on (default none)
+            target_images: image targets to operate on (default none)
             input_boxes: box inputs to operate on (default none)
             target_boxes: box targets to operate on (default none)
         """
@@ -44,16 +44,34 @@ class Flip(torch.nn.Module):
         """
         horizontal = False
         if self.horizontal:
-            horizontal = torch.randint(low=0, high=2, generator=self.generator, size=()) == 0
+            horizontal = (
+                torch.randint(low=0, high=2, generator=self.generator, size=()) == 0
+            )
         vertical = False
         if self.vertical:
-            vertical = torch.randint(low=0, high=2, generator=self.generator, size=()) == 0
+            vertical = (
+                torch.randint(low=0, high=2, generator=self.generator, size=()) == 0
+            )
         return {
             "horizontal": horizontal,
             "vertical": vertical,
         }
 
-    def apply_state(self, state: dict[str, bool], d: dict[str, Any], image_keys: list[str], box_keys: list[str]):
+    def apply_state(
+        self,
+        state: dict[str, bool],
+        d: dict[str, Any],
+        image_keys: list[str],
+        box_keys: list[str],
+    ) -> None:
+        """Apply the sampled state on the specified dict.
+
+        Args:
+            state: the sampled state.
+            d: the dict to transform.
+            image_keys: image keys in the dict to transform.
+            box_keys: box keys in the dict to transform.
+        """
         for k in image_keys:
             if state["horizontal"]:
                 d[k] = torch.flip(d[k], dims=[-1])
