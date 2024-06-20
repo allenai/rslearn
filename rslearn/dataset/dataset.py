@@ -50,7 +50,7 @@ class Dataset:
             self.file_api = LocalFileAPI(ds_root)
 
         # Load dataset configuration.
-        with self.file_api.open("config.json", "rb") as f:
+        with self.file_api.open("config.json", "r") as f:
             config = json.load(f)
             self.layers = {
                 layer_name: load_layer_config(d)

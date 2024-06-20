@@ -191,10 +191,15 @@ class CallbackIO:
         """
         return self.buf
 
-    def __exit__(self):
+    def __exit__(self, type, value, traceback):
         """Exit the CallbackIO.
 
         Runs the callback function with the buffer state.
+
+        Args:
+            type: ignored
+            value: ignored
+            traceback: ignored
         """
         if self.callback:
             self.callback(self.buf.getvalue())
@@ -223,6 +228,7 @@ class S3FileAPI:
             bucket: the boto3 Bucket object.
         """
         self.prefix = prefix
+        self.bucket_name = bucket_name
 
         if bucket:
             self.bucket = bucket
@@ -286,10 +292,17 @@ class S3FileAPI:
         """
         return self.open(fname, mode)
 
-    def exists(self, fname: str) -> bool:
-        """Returns whether the filename exists or not."""
+    def exists(self, *args) -> bool:
+        """Returns whether the filename exists or not.
+
+        Args:
+            args: the path elements
+
+        Returns:
+            whether the file exists
+        """
         try:
-            self.bucket.Object(self.prefix + fname).load()
+            self.bucket.Object(self.prefix + self.join(*args)).load()
             return True
         except botocore.exceptions.ClientError as e:
             if e.response["Error"]["Code"] == "404":
@@ -305,11 +318,20 @@ class S3FileAPI:
         Returns:
             Another FileAPI rooted at the path.
         """
-        return S3FileAPI(prefix=self.prefix + self.join(*args), bucket=self.bucket)
+        return S3FileAPI(prefix=self._add_trailing_slash(self.prefix + self.join(*args)), bucket=self.bucket)
 
     def join(self, *args) -> str:
         """Join the specified path elements."""
-        return "/".join(args) + "/"
+        if args:
+            return "/".join(args)
+        else:
+            return ""
+
+    def _add_trailing_slash(self, path: str) -> str:
+        if path and path[-1] != "/":
+            return path + "/"
+        else:
+            return path
 
     def listdir(self, *args) -> list[str]:
         """List the path elements sharing the specified prefix.
@@ -320,10 +342,10 @@ class S3FileAPI:
         Returns:
             next path elements
         """
-        result = self.bucket.list_objects(
-            Prefix=self.prefix + self.join(*args), delimiter="/"
-        )
+        paginator = self.bucket.meta.client.get_paginator("list_objects")
+        response = paginator.paginate(Bucket=self.bucket_name, Prefix=self._add_trailing_slash(self.prefix + self.join(*args)), Delimiter="/")
         prefixes = []
-        for obj in result.get("CommonPrefixes"):
-            prefixes.append(obj.get("Prefix"))
+        for result in response:
+            for el in result.get("CommonPrefixes", []):
+                prefixes.append(el["Prefix"].split("/")[-2])
         return prefixes
