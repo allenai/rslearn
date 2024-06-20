@@ -1,18 +1,21 @@
 """Implementations of a simple file access interface."""
 
+import os
+from collections.abc import Generator
 from contextlib import contextmanager
 from io import BytesIO, StringIO
-import os
-from typing import Any, BinaryIO, Callable, Generator, Optional, TextIO, Union
+from typing import Any, BinaryIO, Callable, Optional, TextIO, Union
 
-import botocore
 import boto3
+import botocore
 
 
 class FileAPI:
     """A generic API for reading and writing binary data associated with filenames."""
 
-    def open(self, fname: str, mode: str) -> Generator[Union[BinaryIO, TextIO], None, None]:
+    def open(
+        self, fname: str, mode: str
+    ) -> Generator[Union[BinaryIO, TextIO], None, None]:
         """Open a file for reading or writing.
 
         Args:
@@ -24,7 +27,9 @@ class FileAPI:
         """
         raise NotImplementedError
 
-    def open_atomic(self, fname: str, mode: str) -> Generator[Union[BinaryIO, TextIO], None, None]:
+    def open_atomic(
+        self, fname: str, mode: str
+    ) -> Generator[Union[BinaryIO, TextIO], None, None]:
         """Open a file for atomic writing.
 
         Guarantees that overlapping calls to open_atomic will lead to one or the other
@@ -81,7 +86,9 @@ class LocalFileAPI:
         """
         self.root_dir = root_dir
 
-    def open(self, fname: str, mode: str) -> Generator[Union[BinaryIO, TextIO], None, None]:
+    def open(
+        self, fname: str, mode: str
+    ) -> Generator[Union[BinaryIO, TextIO], None, None]:
         """Open a file for reading or writing.
 
         Args:
@@ -94,13 +101,15 @@ class LocalFileAPI:
         return open(os.path.join(self.root_dir, fname), mode)
 
     @contextmanager
-    def open_atomic(self, fname: str, mode: str) -> Generator[Union[BinaryIO, TextIO], None, None]:
+    def open_atomic(
+        self, fname: str, mode: str
+    ) -> Generator[Union[BinaryIO, TextIO], None, None]:
         """Open a file for atomic writing.
 
         Will write to a temporary file, and rename it to the destination upon success.
 
         Args:
-            filepath: the file path to be opened
+            fname: the file path to be opened
             mode: either w or wb
 
         Returns:
@@ -109,7 +118,9 @@ class LocalFileAPI:
         tmpname = fname + ".tmp." + str(os.getpid())
         with open(os.path.join(self.root_dir, tmpname), mode) as file:
             yield file
-        os.rename(os.path.join(self.root_dir, tmpname), os.path.join(self.root_dir, fname))
+        os.rename(
+            os.path.join(self.root_dir, tmpname), os.path.join(self.root_dir, fname)
+        )
 
     def exists(self, *args) -> bool:
         """Returns whether the filename exists or not.
@@ -158,14 +169,33 @@ class CallbackIO:
     reading/writing the entire file.
     """
 
-    def __init__(self, callback: Optional[Callable[[bytes], None]] = None, buf: Union[BinaryIO, TextIO] = BytesIO()):
+    def __init__(
+        self,
+        callback: Optional[Callable[[bytes], None]] = None,
+        buf: Union[BinaryIO, TextIO] = BytesIO(),
+    ):
+        """Create a new CallbackIO.
+
+        Args:
+            callback: the callback to pass the buffer value to after the IO is closed.
+            buf: the buffer, can by BytesIO or TextIO, defaults to an empty BytesIO().
+        """
         self.callback = callback
         self.buf = buf
 
-    def __enter__(self):
+    def __enter__(self) -> Union[BinaryIO, TextIO]:
+        """Enter the CallbackIO.
+
+        Returns:
+            the buffer.
+        """
         return self.buf
 
     def __exit__(self):
+        """Exit the CallbackIO.
+
+        Runs the callback function with the buffer state.
+        """
         if self.callback:
             self.callback(self.buf.getvalue())
 
@@ -173,7 +203,15 @@ class CallbackIO:
 class S3FileAPI:
     """A FileAPI for S3-compatible object storage."""
 
-    def __init__(self, endpoint_url: Optional[str] = None, access_key_id: Optional[str] = None, secret_access_key: Optional[str] = None, bucket_name: Optional[str] = None, prefix: str = "", bucket: Optional[Any] = None):
+    def __init__(
+        self,
+        endpoint_url: Optional[str] = None,
+        access_key_id: Optional[str] = None,
+        secret_access_key: Optional[str] = None,
+        bucket_name: Optional[str] = None,
+        prefix: str = "",
+        bucket: Optional[Any] = None,
+    ):
         """Initialize a new S3FileAPI.
 
         Args:
@@ -189,7 +227,8 @@ class S3FileAPI:
         if bucket:
             self.bucket = bucket
         else:
-            s3 = boto3.resource("s3",
+            s3 = boto3.resource(
+                "s3",
                 endpoint_url=endpoint_url,
                 aws_access_key_id=access_key_id,
                 aws_secret_access_key=secret_access_key,
@@ -216,6 +255,7 @@ class S3FileAPI:
                 return CallbackIO(buf=StringIO(buf.getvalue().decode()))
 
         elif mode in ["wb", "w"]:
+
             def callback(value):
                 if mode == "w":
                     value = value.encode()
@@ -238,7 +278,7 @@ class S3FileAPI:
         Will write to a temporary file, and rename it to the destination upon success.
 
         Args:
-            filepath: the file path to be opened
+            fname: the file path to be opened
             mode: either w or wb
 
         Returns:
@@ -252,7 +292,7 @@ class S3FileAPI:
             self.bucket.Object(self.prefix + fname).load()
             return True
         except botocore.exceptions.ClientError as e:
-            if e.response['Error']['Code'] == "404":
+            if e.response["Error"]["Code"] == "404":
                 return False
             raise
 
@@ -280,7 +320,9 @@ class S3FileAPI:
         Returns:
             next path elements
         """
-        result = self.bucket.list_objects(Prefix=self.prefix + self.join(*args), delimiter="/")
+        result = self.bucket.list_objects(
+            Prefix=self.prefix + self.join(*args), delimiter="/"
+        )
         prefixes = []
         for obj in result.get("CommonPrefixes"):
             prefixes.append(obj.get("Prefix"))

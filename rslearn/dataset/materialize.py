@@ -1,6 +1,5 @@
 """Classes to implement dataset materialization."""
 
-import os
 from typing import Any, Optional
 
 import numpy as np
@@ -15,7 +14,7 @@ from rslearn.config import (
 )
 from rslearn.data_sources import Item
 from rslearn.tile_stores import TileStore, TileStoreLayer
-from rslearn.utils import Feature, LocalFileAPI, PixelBounds, FileAPI
+from rslearn.utils import Feature, FileAPI, PixelBounds
 from rslearn.utils.raster_format import load_raster_format
 from rslearn.utils.vector_format import load_vector_format
 
@@ -125,7 +124,9 @@ class RasterMaterializer(Materializer):
                 out_layer_name = layer_name
             else:
                 out_layer_name = f"{layer_name}.{group_id}"
-            out_layer_dir = window.file_api.get_folder(window.file_api.join("layers", out_layer_name))
+            out_layer_dir = window.file_api.get_folder(
+                window.file_api.join("layers", out_layer_name)
+            )
             out_layer_dirs.append(out_layer_dir)
 
         for band_cfg in layer_cfg.band_sets:
@@ -185,11 +186,14 @@ class RasterMaterializer(Materializer):
                         )
 
                 raster_format.encode_raster(
-                    out_layer_dirs[group_id].get_folder("_".join(band_cfg.bands)), projection, bounds, dst
+                    out_layer_dirs[group_id].get_folder("_".join(band_cfg.bands)),
+                    projection,
+                    bounds,
+                    dst,
                 )
 
         for out_layer_dir in out_layer_dirs:
-            with out_layer_dir.open("completed", "wb") as f:
+            with out_layer_dir.open("completed", "wb"):
                 pass
 
 
@@ -227,7 +231,9 @@ class VectorMaterializer(Materializer):
                 out_layer_name = layer_name
             else:
                 out_layer_name = f"{layer_name}.{group_id}"
-            out_layer_dir = window.file_api.get_folder(window.file_api.join("layers", out_layer_name))
+            out_layer_dir = window.file_api.get_folder(
+                window.file_api.join("layers", out_layer_name)
+            )
             out_layer_dirs.append(out_layer_dir)
 
         for group_id, group in enumerate(item_groups):
@@ -243,5 +249,5 @@ class VectorMaterializer(Materializer):
             vector_format.encode_vector(out_layer_dirs[group_id], projection, features)
 
         for out_layer_dir in out_layer_dirs:
-            with out_layer_dir.open("completed", "wb") as f:
+            with out_layer_dir.open("completed", "wb"):
                 pass
