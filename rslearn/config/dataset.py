@@ -128,14 +128,14 @@ class BandSetConfig:
         Args:
             config: the config dict for this BandSetConfig
         """
-        return BandSetConfig(
+        kwargs = dict(
             config_dict=config,
             dtype=DType(config["dtype"]),
-            bands=config.get("bands"),
-            format=config.get("format", "geotiff"),
-            zoom_offset=config.get("zoom_offset", 0),
-            remap_config=config.get("remap"),
         )
+        for k in ["bands", "format", "zoom_offset", "remap"]:
+            if k in config:
+                kwargs[k] = config[k]
+        return BandSetConfig(**kwargs)
 
     def get_final_projection_and_bounds(
         self, projection: Projection, bounds: Optional[PixelBounds]
