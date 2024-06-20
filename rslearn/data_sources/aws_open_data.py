@@ -26,7 +26,7 @@ import rslearn.utils.mgrs
 from rslearn.config import LayerConfig, RasterLayerConfig
 from rslearn.const import WGS84_EPSG, WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import GridIndex, Projection, STGeometry, daterange, open_atomic
+from rslearn.utils import GridIndex, Projection, STGeometry, daterange, open_atomic, FileAPI
 
 from .copernicus import get_harmonize_callback
 from .data_source import (
@@ -108,13 +108,13 @@ class Naip(DataSource):
             self.rtree_index = None
 
     @staticmethod
-    def from_config(config: LayerConfig, root_dir: str = ".") -> "Naip":
+    def from_config(config: LayerConfig) -> "Naip":
         """Creates a new Naip instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict
         return Naip(
             config=config,
-            index_cache_dir=os.path.join(root_dir, d["index_cache_dir"]),
+            index_cache_dir=d["index_cache_dir"],
             use_rtree_index=d.get("use_rtree_index", False),
         )
 
@@ -477,14 +477,14 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         self.bucket = boto3.resource("s3").Bucket(bucket_name)
 
     @staticmethod
-    def from_config(config: LayerConfig, root_dir: str = ".") -> "Sentinel2":
+    def from_config(config: LayerConfig) -> "Sentinel2":
         """Creates a new Sentinel2 instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict
         kwargs = dict(
             config=config,
             modality=Sentinel2Modality(d["modality"]),
-            metadata_cache_dir=os.path.join(root_dir, d["metadata_cache_dir"]),
+            metadata_cache_dir=d["metadata_cache_dir"],
         )
         if "max_time_delta" in d:
             kwargs["max_time_delta"] = timedelta(

@@ -19,7 +19,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import STGeometry
+from rslearn.utils import STGeometry, FileAPI
 
 from .raster_source import get_needed_projections, ingest_raster
 
@@ -288,7 +288,7 @@ class LandsatOliTirs(DataSource):
         self.client = M2MAPIClient(username, password)
 
     @staticmethod
-    def from_config(config: LayerConfig, root_dir: str = ".") -> "LandsatOliTirs":
+    def from_config(config: LayerConfig) -> "LandsatOliTirs":
         """Creates a new LandsatOliTirs instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict

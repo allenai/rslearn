@@ -6,6 +6,7 @@ from typing import Optional
 
 from rslearn.config import TileStoreConfig, load_layer_config
 from rslearn.tile_stores import TileStore, load_tile_store
+from rslearn.utils import FileAPI, LocalFileAPI
 
 from .window import Window
 
@@ -35,16 +36,20 @@ class Dataset:
     materialize.
     """
 
-    def __init__(self, ds_root: str) -> None:
+    def __init__(self, ds_root: Optional[str] = None, file_api: Optional[FileAPI] = None) -> None:
         """Initializes a new Dataset.
 
         Args:
-            ds_root: the root directory of the dataset
+            ds_root: the root directory of the dataset.
+            file_api: the FileAPI of the dataset.
         """
-        self.ds_root = ds_root
+        if file_api:
+            self.file_api = file_api
+        else:
+            self.file_api = LocalFileAPI(ds_root)
 
         # Load dataset configuration.
-        with open(os.path.join(ds_root, "config.json")) as f:
+        with self.file_api.open("config.json", "rb") as f:
             config = json.load(f)
             self.layers = {
                 layer_name: load_layer_config(d)
@@ -64,17 +69,17 @@ class Dataset:
         """
         windows = []
         if not groups:
-            groups = os.listdir(os.path.join(self.ds_root, "windows"))
+            groups = self.file_api.listdir("windows")
         for group in groups:
-            group_dir = os.path.join(self.ds_root, "windows", group)
+            group_dir = self.file_api.join("windows", group)
             if names:
                 cur_names = names
             else:
-                cur_names = os.listdir(group_dir)
+                cur_names = self.file_api.listdir(group_dir)
 
             for window_name in cur_names:
-                window_dir = os.path.join(group_dir, window_name)
-                window = Window.load(window_dir)
+                window_dir = self.file_api.join(group_dir, window_name)
+                window = Window.load(self.file_api.get_folder(window_dir))
                 windows.append(window)
 
         return windows
@@ -85,4 +90,4 @@ class Dataset:
         Returns:
             the TileStore
         """
-        return load_tile_store(self.tile_store_config, self.ds_root)
+        return load_tile_store(self.tile_store_config, self.file_api)

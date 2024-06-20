@@ -15,7 +15,7 @@ from rasterio.crs import CRS
 
 from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
 from rslearn.dataset import Window
-from rslearn.utils import PixelBounds, Projection, STGeometry
+from rslearn.utils import PixelBounds, Projection, STGeometry, FileAPI
 
 from .data_source import DataSource, Item
 from .raster_source import ArrayWithTransform, materialize_raster
@@ -190,7 +190,7 @@ class XyzTiles(DataSource):
             self.items.append(item)
 
     @staticmethod
-    def from_config(config: LayerConfig, root_dir: str = ".") -> "XyzTiles":
+    def from_config(config: LayerConfig) -> "XyzTiles":
         """Creates a new XyzTiles instance from a configuration dictionary."""
         d = config.data_source.config_dict
         time_ranges = []

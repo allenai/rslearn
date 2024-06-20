@@ -1,7 +1,7 @@
 """rslearn utilities."""
 
 from .feature import Feature
-from .file_api import FileAPI, LocalFileAPI
+from .file_api import FileAPI, LocalFileAPI, S3FileAPI
 from .geometry import (
     PixelBounds,
     Projection,
@@ -21,6 +21,7 @@ __all__ = (
     "LocalFileAPI",
     "PixelBounds",
     "Projection",
+    "S3FileAPI",
     "STGeometry",
     "daterange",
     "get_utm_ups_crs",

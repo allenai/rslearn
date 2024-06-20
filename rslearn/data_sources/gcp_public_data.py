@@ -23,7 +23,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import STGeometry, open_atomic
+from rslearn.utils import STGeometry, open_atomic, FileAPI
 
 from .copernicus import get_harmonize_callback
 from .raster_source import get_needed_projections, ingest_raster
@@ -144,12 +144,12 @@ class Sentinel2(DataSource):
             self.rtree_index = None
 
     @staticmethod
-    def from_config(config: LayerConfig, root_dir: str = ".") -> "Sentinel2":
+    def from_config(config: LayerConfig) -> "Sentinel2":
         """Creates a new Sentinel2 instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict
         kwargs = dict(
-            config=config, index_cache_dir=os.path.join(root_dir, d["index_cache_dir"])
+            config=config, index_cache_dir=d["index_cache_dir"]
         )
         if "max_time_delta" in d:
             kwargs["max_time_delta"] = timedelta(
