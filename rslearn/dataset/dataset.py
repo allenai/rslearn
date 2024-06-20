@@ -1,7 +1,6 @@
 """rslearn dataset class."""
 
 import json
-import os
 from typing import Optional
 
 from rslearn.config import TileStoreConfig, load_layer_config
@@ -36,7 +35,9 @@ class Dataset:
     materialize.
     """
 
-    def __init__(self, ds_root: Optional[str] = None, file_api: Optional[FileAPI] = None) -> None:
+    def __init__(
+        self, ds_root: Optional[str] = None, file_api: Optional[FileAPI] = None
+    ) -> None:
         """Initializes a new Dataset.
 
         Args:

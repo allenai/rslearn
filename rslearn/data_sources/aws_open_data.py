@@ -26,7 +26,13 @@ import rslearn.utils.mgrs
 from rslearn.config import LayerConfig, RasterLayerConfig
 from rslearn.const import WGS84_EPSG, WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import GridIndex, Projection, STGeometry, daterange, open_atomic, FileAPI
+from rslearn.utils import (
+    GridIndex,
+    Projection,
+    STGeometry,
+    daterange,
+    open_atomic,
+)
 
 from .copernicus import get_harmonize_callback
 from .data_source import (

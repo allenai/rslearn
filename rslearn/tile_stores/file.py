@@ -1,13 +1,12 @@
 """FileTileStore TileStore implementation."""
 
 import json
-import os
 from typing import Any, Optional
 
 import numpy.typing as npt
 
 from rslearn.config import RasterFormatConfig, TileStoreConfig, VectorFormatConfig
-from rslearn.utils import Feature, FileAPI, PixelBounds, Projection, open_atomic
+from rslearn.utils import Feature, FileAPI, PixelBounds, Projection
 from rslearn.utils.raster_format import (
     GeotiffRasterFormat,
     RasterFormat,

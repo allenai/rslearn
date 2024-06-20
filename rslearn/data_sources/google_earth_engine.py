@@ -21,7 +21,7 @@ import rslearn.utils.mgrs
 from rslearn.config import DType, LayerConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import STGeometry, FileAPI
+from rslearn.utils import STGeometry
 from rslearn.utils.rtree_index import RtreeIndex
 
 from .data_source import DataSource, Item, QueryConfig

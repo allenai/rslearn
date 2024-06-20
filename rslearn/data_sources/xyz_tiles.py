@@ -15,7 +15,7 @@ from rasterio.crs import CRS
 
 from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
 from rslearn.dataset import Window
-from rslearn.utils import PixelBounds, Projection, STGeometry, FileAPI
+from rslearn.utils import PixelBounds, Projection, STGeometry
 
 from .data_source import DataSource, Item
 from .raster_source import ArrayWithTransform, materialize_raster

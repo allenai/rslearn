@@ -19,7 +19,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import STGeometry, FileAPI
+from rslearn.utils import STGeometry
 
 from .raster_source import get_needed_projections, ingest_raster
 

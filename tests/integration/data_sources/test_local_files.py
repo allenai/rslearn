@@ -2,14 +2,18 @@ import json
 import os
 import pathlib
 
-import pytest
 import shapely
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
-from rslearn.dataset.manage import prepare_dataset_windows, ingest_dataset_windows, materialize_dataset_windows
-from rslearn.utils import Feature, STGeometry, LocalFileAPI
+from rslearn.dataset.manage import (
+    ingest_dataset_windows,
+    materialize_dataset_windows,
+    prepare_dataset_windows,
+)
+from rslearn.utils import Feature, LocalFileAPI, STGeometry
 from rslearn.utils.vector_format import load_vector_format
+
 
 class TestLocalFiles:
     """Tests the LocalFiles data source.
@@ -21,18 +25,24 @@ class TestLocalFiles:
     """
 
     def test_sample_dataset(self, tmp_path: pathlib.Path):
-        features = [Feature(
-            geometry=STGeometry(WGS84_PROJECTION, shapely.Point(5, 5), None),
-        ), Feature(
-            geometry=STGeometry(WGS84_PROJECTION, shapely.Point(6, 6), None),
-        )]
+        features = [
+            Feature(
+                geometry=STGeometry(WGS84_PROJECTION, shapely.Point(5, 5), None),
+            ),
+            Feature(
+                geometry=STGeometry(WGS84_PROJECTION, shapely.Point(6, 6), None),
+            ),
+        ]
         src_data_dir = os.path.join(tmp_path, "src_data")
         os.makedirs(src_data_dir)
         with open(os.path.join(src_data_dir, "data.geojson"), "w") as f:
-            json.dump({
-                "type": "FeatureCollection",
-                "features": [feat.to_geojson() for feat in features],
-            }, f)
+            json.dump(
+                {
+                    "type": "FeatureCollection",
+                    "features": [feat.to_geojson() for feat in features],
+                },
+                f,
+            )
 
         dataset_config = {
             "layers": {
@@ -54,7 +64,7 @@ class TestLocalFiles:
 
         ds_file_api = LocalFileAPI(str(tmp_path))
         Window(
-            file_api = Window.get_window_root(ds_file_api, "default", "default"),
+            file_api=Window.get_window_root(ds_file_api, "default", "default"),
             group="default",
             name="default",
             projection=WGS84_PROJECTION,
@@ -73,6 +83,8 @@ class TestLocalFiles:
         window = windows[0]
         layer_config = dataset.layers["local_file"]
         vector_format = load_vector_format(layer_config.format)
-        features = vector_format.decode_vector(window.file_api.get_folder("layers", "local_file"), window.bounds)
+        features = vector_format.decode_vector(
+            window.file_api.get_folder("layers", "local_file"), window.bounds
+        )
 
         assert len(features) == 2

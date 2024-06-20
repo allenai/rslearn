@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 import shapely
 
-from rslearn.utils import Projection, STGeometry, FileAPI
+from rslearn.utils import FileAPI, Projection, STGeometry
 
 
 class WindowLayerData:

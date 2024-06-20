@@ -14,7 +14,7 @@ from rslearn.config import LayerConfig, QueryConfig, VectorLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.tile_stores import LayerMetadata, TileStore
-from rslearn.utils import Feature, GridIndex, STGeometry, FileAPI
+from rslearn.utils import Feature, GridIndex, STGeometry
 
 
 class FeatureType(Enum):
