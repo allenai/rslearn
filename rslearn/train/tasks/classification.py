@@ -117,9 +117,11 @@ class ClassificationTask(BasicTask):
     def get_metrics(self) -> MetricCollection:
         """Get the metrics for this task."""
         metrics = {}
-        metrics["accuracy"] = ClassificationMetric(torchmetrics.classification.MulticlassAccuracy(
-            num_classes=len(self.classes),
-        ))
+        metrics["accuracy"] = ClassificationMetric(
+            torchmetrics.classification.MulticlassAccuracy(
+                num_classes=len(self.classes),
+            )
+        )
         return MetricCollection(metrics)
 
 
