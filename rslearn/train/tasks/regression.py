@@ -142,12 +142,16 @@ class RegressionHead(torch.nn.Module):
         self.use_sigmoid = use_sigmoid
 
     def forward(
-        self, logits: torch.Tensor, targets: Optional[list[dict[str, Any]]] = None
+        self,
+        logits: torch.Tensor,
+        inputs: list[dict[str, Any]],
+        targets: Optional[list[dict[str, Any]]] = None,
     ):
         """Compute the regression outputs and loss from logits and targets.
 
         Args:
             logits: tensor that is (BatchSize, 1) or (BatchSize) in shape.
+            inputs: original inputs (ignored).
             targets: should contain target key that stores the regression label.
 
         Returns:

@@ -1,7 +1,7 @@
 import json
 import os
-
 import random
+
 import shapely
 
 from rslearn.const import WGS84_PROJECTION

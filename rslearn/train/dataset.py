@@ -1,15 +1,16 @@
 """Default Dataset for rslearn."""
 
-import os
+import multiprocessing
 import random
 from typing import Any, Optional, Union
 
 import torch
+import tqdm
 
 from rslearn.config import RasterFormatConfig, RasterLayerConfig, VectorLayerConfig
 from rslearn.dataset import Dataset, Window
 from rslearn.train.tasks import Task
-from rslearn.utils import LocalFileAPI
+from rslearn.utils.mp import star_imap_unordered
 from rslearn.utils.raster_format import load_raster_format
 from rslearn.utils.vector_format import load_vector_format
 
@@ -156,24 +157,55 @@ class SplitConfig:
         return result
 
 
+def check_window(inputs: dict[str, DataInput], window: Window) -> bool:
+    """Verify that the window has the required layers based on the specified inputs.
+
+    Args:
+        inputs: the inputs to the dataset.
+        window: the window to check.
+
+    Returns:
+        the window if it has all the required inputs or None otherwise
+    """
+
+    # Make sure window has all the needed layers.
+    def is_any_layer_available(data_input):
+        for layer_name in data_input.layers:
+            if window.file_api.exists("layers", layer_name, "completed"):
+                return True
+        return False
+
+    for data_input in inputs.values():
+        if not data_input.required:
+            continue
+        if not is_any_layer_available(data_input):
+            print("uh oh", window.name, data_input.layers, window.file_api.prefix)
+            return None
+
+    return window
+
+
 class ModelDataset(torch.utils.data.Dataset):
     """The default pytorch dataset implementation for rslearn."""
 
     def __init__(
         self,
-        root_dir: str,
+        dataset: Dataset,
         split_config: SplitConfig,
         inputs: dict[str, DataInput],
         task: Task,
+        workers: int,
     ):
         """Instantiate a new ModelDataset.
 
         Args:
-            root_dir: the root directory of the dataset
+            dataset: underlying rslearn dataset to read data from
             split_config: configuration specific to this split
             inputs: data to read from the dataset for training
             task: the task to train on
+            workers: number of workers to use for initializing the dataset
         """
+        self.dataset = dataset
         self.split_config = split_config
         self.inputs = inputs
         self.task = task
@@ -191,12 +223,12 @@ class ModelDataset(torch.utils.data.Dataset):
         else:
             self.patch_size = split_config.patch_size
 
-        self.dataset = Dataset(root_dir)
-
         if split_config.groups:
-            windows = self.dataset.load_windows(groups=split_config.groups)
+            windows = self.dataset.load_windows(
+                groups=split_config.groups, show_progress=True, workers=workers
+            )
         else:
-            windows = self.dataset.load_windows()
+            windows = self.dataset.load_windows(workers=workers)
 
         if split_config.tags:
             # TODO: some kind of window tagging system, can filter by it
@@ -204,24 +236,27 @@ class ModelDataset(torch.utils.data.Dataset):
 
         # Eliminate windows that are missing either a requisite input layer, or missing
         # all target layers.
-        def check_window(window: Window) -> bool:
-            def is_any_layer_available(data_input):
-                for layer_name in data_input.layers:
-                    if os.path.exists(
-                        os.path.join(window.window_root, "layers", layer_name)
-                    ):
-                        return True
-                return False
-
-            for data_input in self.inputs.values():
-                if not data_input.required:
-                    continue
-                if not is_any_layer_available(data_input):
-                    return False
-
-            return True
-
-        windows = [window for window in windows if check_window(window)]
+        p = multiprocessing.Pool(workers)
+        outputs = star_imap_unordered(
+            p,
+            check_window,
+            [
+                dict(
+                    inputs=self.inputs,
+                    window=window,
+                )
+                for window in windows
+            ],
+        )
+        new_windows = []
+        for window in tqdm.tqdm(
+            outputs, total=len(windows), desc="Checking available layers in windows"
+        ):
+            if window is None:
+                continue
+            new_windows.append(window)
+        p.close()
+        windows = new_windows
 
         # Limit windows to num_samples if requested.
         if split_config.num_samples:
@@ -282,9 +317,7 @@ class ModelDataset(torch.utils.data.Dataset):
             # First enumerate all options of individual layers to read.
             layer_options = []
             for layer_name in data_input.layers:
-                if not os.path.exists(
-                    os.path.join(window.window_root, "layers", layer_name)
-                ):
+                if not window.file_api.exists("layers", layer_name, "completed"):
                     continue
                 layer_options.append(layer_name)
 
@@ -292,7 +325,7 @@ class ModelDataset(torch.utils.data.Dataset):
             # In the future we need to support different configuration for how to pick
             # the options, as well as picking multiple for series inputs.
             layer = random.choice(layer_options)
-            layer_dir = os.path.join(window.window_root, "layers", layer)
+            layer_dir = window.file_api.get_folder("layers", layer)
             layer_config = self.dataset.layers[layer]
 
             if data_input.data_type == "raster":
@@ -334,9 +367,7 @@ class ModelDataset(torch.utils.data.Dataset):
                     raster_format = load_raster_format(
                         RasterFormatConfig(band_set.format["name"], band_set.format)
                     )
-                    file_api = LocalFileAPI(
-                        os.path.join(layer_dir, "_".join(band_set.bands))
-                    )
+                    file_api = layer_dir.get_folder("_".join(band_set.bands))
                     src = raster_format.decode_raster(file_api, bounds)
                     image[dst_indexes, :, :] = torch.as_tensor(
                         src[src_indexes, :, :]
@@ -347,8 +378,7 @@ class ModelDataset(torch.utils.data.Dataset):
             elif data_input.data_type == "vector":
                 assert isinstance(layer_config, VectorLayerConfig)
                 vector_format = load_vector_format(layer_config.format)
-                file_api = LocalFileAPI(layer_dir)
-                features = vector_format.decode_vector(file_api, bounds)
+                features = vector_format.decode_vector(layer_dir, bounds)
                 return features
 
             else:

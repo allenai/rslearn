@@ -1,7 +1,7 @@
 """rslearn utilities."""
 
 from .feature import Feature
-from .file_api import FileAPI, LocalFileAPI, S3FileAPI
+from .file_api import FileAPI, LocalFileAPI, S3FileAPI, parse_file_api_string
 from .geometry import (
     PixelBounds,
     Projection,
@@ -28,4 +28,5 @@ __all__ = (
     "is_same_resolution",
     "open_atomic",
     "shp_intersects",
+    "parse_file_api_string",
 )

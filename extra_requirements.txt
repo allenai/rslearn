@@ -4,3 +4,4 @@ mgrs
 osmium
 rtree
 satlaspretrain_models
+wandb

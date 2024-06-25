@@ -1,11 +1,14 @@
 """rslearn dataset class."""
 
 import json
+import multiprocessing
 from typing import Optional
+
+import tqdm
 
 from rslearn.config import TileStoreConfig, load_layer_config
 from rslearn.tile_stores import TileStore, load_tile_store
-from rslearn.utils import FileAPI, LocalFileAPI
+from rslearn.utils import FileAPI, parse_file_api_string
 
 from .window import Window
 
@@ -47,7 +50,7 @@ class Dataset:
         if file_api:
             self.file_api = file_api
         else:
-            self.file_api = LocalFileAPI(ds_root)
+            self.file_api = parse_file_api_string(ds_root)
 
         # Load dataset configuration.
         with self.file_api.open("config.json", "r") as f:
@@ -60,15 +63,21 @@ class Dataset:
             self.materializer_name = config.get("materialize")
 
     def load_windows(
-        self, groups: Optional[list[str]] = None, names: Optional[list[str]] = None
+        self,
+        groups: Optional[list[str]] = None,
+        names: Optional[list[str]] = None,
+        show_progress: bool = False,
+        workers: int = 0,
     ) -> list[Window]:
         """Load the windows in the dataset.
 
         Args:
             groups: an optional list of groups to filter loading
             names: an optional list of window names to filter loading
+            show_progress: whether to show tqdm progress bar
+            workers: number of parallel workers, default 0 (use main thread only to load windows)
         """
-        windows = []
+        window_dirs = []
         if not groups:
             groups = self.file_api.listdir("windows")
         for group in groups:
@@ -79,9 +88,22 @@ class Dataset:
                 cur_names = self.file_api.listdir(group_dir)
 
             for window_name in cur_names:
-                window_dir = self.file_api.join(group_dir, window_name)
-                window = Window.load(self.file_api.get_folder(window_dir))
+                window_dir = self.file_api.get_folder(group_dir, window_name)
+                window_dirs.append(window_dir)
+
+        if workers == 0:
+            windows = [Window.load(window_dir) for window_dir in window_dirs]
+        else:
+            p = multiprocessing.Pool(workers)
+            outputs = p.imap_unordered(Window.load, window_dirs)
+            if show_progress:
+                outputs = tqdm.tqdm(
+                    outputs, total=len(window_dirs), desc="Loading windows"
+                )
+            windows = []
+            for window in outputs:
                 windows.append(window)
+            p.close()
 
         return windows
 

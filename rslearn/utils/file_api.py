@@ -1,5 +1,6 @@
 """Implementations of a simple file access interface."""
 
+import functools
 import os
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -8,6 +9,9 @@ from typing import Any, BinaryIO, Callable, Optional, TextIO, Union
 
 import boto3
 import botocore
+from class_registry import ClassRegistry
+
+FileAPIs = ClassRegistry()
 
 
 class FileAPI:
@@ -74,8 +78,13 @@ class FileAPI:
         """
         raise NotImplementedError
 
+    def to_str(self) -> str:
+        """Encode this FileAPI to a string."""
+        raise NotImplementedError
 
-class LocalFileAPI:
+
+@FileAPIs.register("file")
+class LocalFileAPI(FileAPI):
     """A FileAPI implementation that uses a local directory."""
 
     def __init__(self, root_dir: str):
@@ -161,6 +170,24 @@ class LocalFileAPI:
         """
         return os.listdir(os.path.join(self.root_dir, *args))
 
+    @staticmethod
+    def from_str(s: str) -> FileAPI:
+        """Parse the FileAPI string.
+
+        Args:
+            s: the string specifying this FileAPI.
+
+        Returns:
+            a FileAPI instance.
+        """
+        protocol, remainder = s.split("://", 1)
+        assert protocol == "file"
+        return LocalFileAPI(remainder)
+
+    def to_str(self) -> str:
+        """Encode this FileAPI to a string."""
+        return f"file://{self.root_dir}"
+
 
 class CallbackIO:
     """Provides enter/exit for accessing an IO with a callback upon exit.
@@ -205,17 +232,21 @@ class CallbackIO:
             self.callback(self.buf.getvalue())
 
 
-class S3FileAPI:
+BUCKET_CACHE = {}
+"""Cache for boto3.Bucket objects."""
+
+
+@FileAPIs.register("s3")
+class S3FileAPI(FileAPI):
     """A FileAPI for S3-compatible object storage."""
 
     def __init__(
         self,
-        endpoint_url: Optional[str] = None,
+        endpoint_url: str,
+        bucket_name: str,
         access_key_id: Optional[str] = None,
         secret_access_key: Optional[str] = None,
-        bucket_name: Optional[str] = None,
         prefix: str = "",
-        bucket: Optional[Any] = None,
     ):
         """Initialize a new S3FileAPI.
 
@@ -225,21 +256,47 @@ class S3FileAPI:
             secret_access_key: secret access key.
             bucket_name: the bucket name.
             prefix: optional prefix within the bucket to root this S3FileAPI.
-            bucket: the boto3 Bucket object.
         """
-        self.prefix = prefix
+        self.endpoint_url = endpoint_url
+        self.access_key_id = access_key_id
+        self.secret_access_key = secret_access_key
         self.bucket_name = bucket_name
+        self.prefix = prefix
 
-        if bucket:
-            self.bucket = bucket
-        else:
-            s3 = boto3.resource(
-                "s3",
-                endpoint_url=endpoint_url,
-                aws_access_key_id=access_key_id,
-                aws_secret_access_key=secret_access_key,
-            )
-            self.bucket = s3.Bucket(bucket_name)
+        if self.access_key_id is None:
+            self.access_key_id = os.environ["S3_ACCESS_KEY_ID"]
+        if self.secret_access_key is None:
+            self.secret_access_key = os.environ["S3_SECRET_ACCESS_KEY"]
+
+        self.bucket = S3FileAPI.get_bucket(
+            self.endpoint_url,
+            self.bucket_name,
+            self.access_key_id,
+            self.secret_access_key,
+        )
+
+    @staticmethod
+    @functools.cache
+    def get_bucket(
+        endpoint_url: str, bucket_name: str, access_key_id: str, secret_access_key: str
+    ) -> Any:
+        """Get bucket with the specified parameters.
+
+        The bucket is cached so we will reuse it for other prefixes in the same bucket.
+
+        Args:
+            endpoint_url: the endpoint URL of the S3-compatible bucket.
+            access_key_id: access key ID.
+            secret_access_key: secret access key.
+            bucket_name: the bucket name.
+        """
+        s3 = boto3.resource(
+            "s3",
+            endpoint_url=endpoint_url,
+            aws_access_key_id=access_key_id,
+            aws_secret_access_key=secret_access_key,
+        )
+        return s3.Bucket(bucket_name)
 
     def open(self, fname: str, mode: str) -> Generator[BinaryIO, None, None]:
         """Open a file for reading or writing.
@@ -318,7 +375,13 @@ class S3FileAPI:
         Returns:
             Another FileAPI rooted at the path.
         """
-        return S3FileAPI(prefix=self._add_trailing_slash(self.prefix + self.join(*args)), bucket=self.bucket)
+        return S3FileAPI(
+            prefix=self._add_trailing_slash(self.prefix + self.join(*args)),
+            endpoint_url=self.endpoint_url,
+            access_key_id=self.access_key_id,
+            secret_access_key=self.secret_access_key,
+            bucket_name=self.bucket_name,
+        )
 
     def join(self, *args) -> str:
         """Join the specified path elements."""
@@ -343,9 +406,74 @@ class S3FileAPI:
             next path elements
         """
         paginator = self.bucket.meta.client.get_paginator("list_objects")
-        response = paginator.paginate(Bucket=self.bucket_name, Prefix=self._add_trailing_slash(self.prefix + self.join(*args)), Delimiter="/")
+        response = paginator.paginate(
+            Bucket=self.bucket_name,
+            Prefix=self._add_trailing_slash(self.prefix + self.join(*args)),
+            Delimiter="/",
+        )
         prefixes = []
         for result in response:
             for el in result.get("CommonPrefixes", []):
                 prefixes.append(el["Prefix"].split("/")[-2])
         return prefixes
+
+    @staticmethod
+    def from_str(s: str) -> FileAPI:
+        """Parse the FileAPI string.
+
+        Args:
+            s: the string specifying this FileAPI.
+
+        Returns:
+            a FileAPI instance.
+        """
+        protocol, remainder = s.split("://", 1)
+        assert protocol == "s3"
+        bucket_name, remainder = remainder.split("/", 1)
+        prefix, query_args = remainder.split("?", 1)
+        kwargs = {}
+        for part in query_args.split("&"):
+            k, v = part.split("=", 1)
+            kwargs[k] = v
+        return S3FileAPI(
+            bucket_name=bucket_name,
+            prefix=prefix,
+            **kwargs,
+        )
+
+    def to_str(self) -> str:
+        """Encode this FileAPI to a string."""
+        return (
+            f"s3://{self.bucket_name}/{self.prefix}"
+            + f"?endpoint_url={self.endpoint_url}"
+            + f"&access_key_id={self.access_key_id}"
+            + f"&secret_access_key={self.secret_access_key}"
+        )
+
+    def __reduce__(self) -> tuple[Callable[[], "S3FileAPI"], tuple[str]]:
+        """Serialization function."""
+        return (S3FileAPI.from_str, (self.to_str(),))
+
+
+def parse_file_api_string(s: str) -> FileAPI:
+    """Parse a FileAPI string.
+
+    Specify a local filesystem:
+    file:///path/to/file/
+    (It can also just be "/path/to/file/" and default assumes LocalFileAPI.)
+
+    Specify an S3 bucket:
+    s3://bucket-name/path/prefix/?endpoint_url=https://...&...
+
+    Args:
+        s: string specifying the FileAPI.
+
+    Returns:
+        a FileAPI instance.
+    """
+    if "://" in s:
+        protocol, _ = s.split("://", 1)
+        cls = FileAPIs.get_class(protocol)
+        return cls.from_str(s)
+    else:
+        return LocalFileAPI(s)
