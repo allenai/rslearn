@@ -42,6 +42,13 @@ class SatlasPretrain(torch.nn.Module):
                 [16, 384],
                 [32, 768],
             ]
+        elif "Resnet" in model_identifier:
+            self.backbone_channels = [
+                [4, 256],
+                [8, 512],
+                [16, 1024],
+                [32, 2048],
+            ]
 
     def forward(
         self, inputs: list[dict[str, Any]], targets: list[dict[str, Any]] = None
