@@ -86,6 +86,7 @@ class RslearnDataModule(L.LightningDataModule):
                 task=self.task,
                 workers=self.num_workers,
             )
+            print(f"got {len(self.datasets[split])} examples in split {split}")
 
     def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:
         dataset = self.datasets[split]

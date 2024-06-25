@@ -104,7 +104,7 @@ class SplitConfig:
     def __init__(
         self,
         groups: Optional[list[str]] = None,
-        tags: Optional[list[str]] = None,
+        tags: Optional[dict[str, str]] = None,
         num_samples: Optional[int] = None,
         transforms: Optional[list[torch.nn.Module]] = None,
         sampler: Optional[SamplerFactory] = None,
@@ -114,7 +114,10 @@ class SplitConfig:
 
         Args:
             groups: for this split, only read windows in one of these groups
-            tags: todo
+            tags: only select windows that have options matching these tags. If key and
+                value are set, then window must have an option with the same key and
+                value. If value is empty, then only the existince of the key in the
+                window options is checked.
             num_samples: limit this split to this many examples
             transforms: transforms to apply
             sampler: SamplerFactory for this split
@@ -231,8 +234,16 @@ class ModelDataset(torch.utils.data.Dataset):
             windows = self.dataset.load_windows(workers=workers)
 
         if split_config.tags:
-            # TODO: some kind of window tagging system, can filter by it
-            pass
+            # Filter the window.options.
+            new_windows = []
+            for window in windows:
+                for k, v in split_config.tags.items():
+                    if k not in window.options:
+                        continue
+                    if v and window.options[k] != v:
+                        continue
+                    new_windows.append(window)
+            windows = new_windows
 
         # Eliminate windows that are missing either a requisite input layer, or missing
         # all target layers.
