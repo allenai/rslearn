@@ -28,6 +28,21 @@ class SatlasPretrain(torch.nn.Module):
             model_identifier=model_identifier, fpn=fpn
         )
 
+        if "SwinB" in model_identifier:
+            self.backbone_channels = [
+                [4, 128],
+                [8, 256],
+                [16, 512],
+                [32, 1024],
+            ]
+        elif "SwinT" in model_identifier:
+            self.backbone_channels = [
+                [4, 96],
+                [8, 192],
+                [16, 384],
+                [32, 768],
+            ]
+
     def forward(
         self, inputs: list[dict[str, Any]], targets: list[dict[str, Any]] = None
     ):
@@ -40,3 +55,17 @@ class SatlasPretrain(torch.nn.Module):
         """
         images = torch.stack([inp["image"] for inp in inputs], dim=0)
         return self.model(images)
+
+    def get_backbone_channels(self):
+        """Returns the output channels of this model when used as a backbone.
+
+        The output channels is a list of (downsample_factor, depth) that corresponds
+        to the feature maps that the backbone returns. For example, an element [2, 32]
+        indicates that the corresponding feature map is 1/2 the input resolution and
+        has 32 channels.
+
+        Returns:
+            the output channels of the backbone as a list of (downsample_factor, depth)
+            tuples.
+        """
+        return self.backbone_channels
