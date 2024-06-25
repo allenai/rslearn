@@ -87,7 +87,7 @@ class RslearnDataModule(L.LightningDataModule):
                 workers=self.num_workers,
             )
 
-    def _get_dataloader(self, split) -> DataLoader[dict[str, torch.Tensor]]:
+    def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:
         dataset = self.datasets[split]
         kwargs = dict(
             dataset=dataset,
@@ -98,6 +98,8 @@ class RslearnDataModule(L.LightningDataModule):
         sampler_factory = self.split_configs[split].sampler
         if sampler_factory:
             kwargs["sampler"] = sampler_factory.get_sampler(dataset)
+        if split == "train":
+            kwargs["shuffle"] = True
         return DataLoader(**kwargs)
 
     def train_dataloader(self) -> DataLoader[dict[str, torch.Tensor]]:
