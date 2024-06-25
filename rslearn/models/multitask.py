@@ -49,9 +49,9 @@ class MultiTaskModel(torch.nn.Module):
         for name, decoder in self.decoders.items():
             cur = features
             for module in decoder[:-1]:
-                cur = module(cur)
+                cur = module(cur, inputs)
             cur_targets = [target[name] for target in targets]
-            cur_output, cur_loss_dict = decoder[-1](cur, cur_targets)
+            cur_output, cur_loss_dict = decoder[-1](cur, inputs, cur_targets)
             for idx, entry in enumerate(cur_output):
                 outputs[idx][name] = entry
             for loss_name, loss_value in cur_loss_dict.items():

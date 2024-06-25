@@ -112,7 +112,7 @@ class LandsatOliTirs(DataSource):
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
 
     @staticmethod
-    def from_config(config: LayerConfig, root_dir: str = ".") -> "LandsatOliTirs":
+    def from_config(config: LayerConfig) -> "LandsatOliTirs":
         """Creates a new LandsatOliTirs instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict
@@ -122,7 +122,7 @@ class LandsatOliTirs(DataSource):
             max_time_delta = timedelta(days=30)
         return LandsatOliTirs(
             config=config,
-            metadata_cache_dir=os.path.join(root_dir, d["metadata_cache_dir"]),
+            metadata_cache_dir=d["metadata_cache_dir"],
             max_time_delta=max_time_delta,
             sort_by=d.get("sort_by"),
         )

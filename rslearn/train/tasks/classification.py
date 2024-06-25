@@ -129,12 +129,16 @@ class ClassificationHead(torch.nn.Module):
     """Head for classification task."""
 
     def forward(
-        self, logits: torch.Tensor, targets: Optional[list[dict[str, Any]]] = None
+        self,
+        logits: torch.Tensor,
+        inputs: list[dict[str, Any]],
+        targets: Optional[list[dict[str, Any]]] = None,
     ):
         """Compute the classification outputs and loss from logits and targets.
 
         Args:
             logits: tensor that is (BatchSize, NumClasses) in shape.
+            inputs: original inputs (ignored).
             targets: should contain class key that stores the class label.
 
         Returns:

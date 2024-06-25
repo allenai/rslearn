@@ -1,6 +1,5 @@
 """Functions to add windows to an rslearn dataset."""
 
-import os
 from datetime import datetime
 from typing import Optional
 
@@ -133,9 +132,7 @@ def add_windows_from_geometries(
                     f"_{time_range[0].isoformat()}_{time_range[1].isoformat()}"
                 )
         window = Window(
-            window_root=os.path.join(
-                dataset.ds_root, "windows", group, cur_window_name
-            ),
+            window_root=dataset.file_api.get_folder("windows", group, cur_window_name),
             group=group,
             name=cur_window_name,
             projection=cur_projection,

@@ -1,5 +1,7 @@
 """Simple pooling decoder."""
 
+from typing import Any
+
 import torch
 
 
@@ -55,11 +57,12 @@ class PoolingDecoder(torch.nn.Module):
 
         self.output_layer = torch.nn.Linear(prev_channels, out_channels)
 
-    def forward(self, features: list[torch.Tensor]):
+    def forward(self, features: list[torch.Tensor], inputs: list[dict[str, Any]]):
         """Compute flat output vector from multi-scale feature map.
 
         Args:
             features: list of feature maps at different resolutions.
+            inputs: original inputs (ignored).
 
         Returns:
             flat feature vector

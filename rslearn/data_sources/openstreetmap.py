@@ -416,7 +416,7 @@ class OpenStreetMap(DataSource):
         self.pbf_bounds = self._get_pbf_bounds()
 
     @staticmethod
-    def from_config(config: LayerConfig, root_dir: str = ".") -> "OpenStreetMap":
+    def from_config(config: LayerConfig) -> "OpenStreetMap":
         """Creates a new OpenStreetMap instance from a configuration dictionary."""
         assert isinstance(config, VectorLayerConfig)
         d = config.data_source.config_dict
@@ -426,8 +426,8 @@ class OpenStreetMap(DataSource):
         }
         return OpenStreetMap(
             config=config,
-            pbf_fnames=os.path.join(root_dir, d["pbf_fnames"]),
-            bounds_fname=os.path.join(root_dir, d["bounds_fname"]),
+            pbf_fnames=d["pbf_fnames"],
+            bounds_fname=d["bounds_fname"],
             categories=categories,
         )
 

@@ -12,7 +12,6 @@ from class_registry import ClassRegistry
 from rasterio.crs import CRS
 
 import rslearn.data_sources.utils
-import rslearn.utils.mgrs
 from rslearn.config import LayerConfig, VectorLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.tile_stores import LayerMetadata, PrefixedTileStore, TileStore
@@ -248,10 +247,10 @@ class LocalFiles(DataSource):
             self.items.append(item)
 
     @staticmethod
-    def from_config(config: LayerConfig, root_dir: str = ".") -> "LocalFiles":
+    def from_config(config: LayerConfig) -> "LocalFiles":
         """Creates a new LocalFiles instance from a configuration dictionary."""
         d = config.data_source.config_dict
-        return LocalFiles(config=config, src_dir=os.path.join(root_dir, d["src_dir"]))
+        return LocalFiles(config=config, src_dir=d["src_dir"])
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig

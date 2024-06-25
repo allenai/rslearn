@@ -1,13 +1,12 @@
 """FileTileStore TileStore implementation."""
 
 import json
-import os
 from typing import Any, Optional
 
 import numpy.typing as npt
 
 from rslearn.config import RasterFormatConfig, TileStoreConfig, VectorFormatConfig
-from rslearn.utils import Feature, LocalFileAPI, PixelBounds, Projection, open_atomic
+from rslearn.utils import Feature, FileAPI, PixelBounds, Projection
 from rslearn.utils.raster_format import (
     GeotiffRasterFormat,
     RasterFormat,
@@ -22,12 +21,12 @@ from rslearn.utils.vector_format import (
 from .tile_store import LayerMetadata, TileStore, TileStoreLayer
 
 
-class FileTileStoreLayer(TileStoreLayer, LocalFileAPI):
+class FileTileStoreLayer(TileStoreLayer):
     """A layer in a FileTileStore."""
 
     def __init__(
         self,
-        root_dir: str,
+        file_api: FileAPI,
         projection: Optional[Projection] = None,
         raster_format: RasterFormat = GeotiffRasterFormat(),
         vector_format: VectorFormat = GeojsonVectorFormat(),
@@ -37,12 +36,12 @@ class FileTileStoreLayer(TileStoreLayer, LocalFileAPI):
         The root directory is a subfolder of the FileTileStore's root directory.
 
         Args:
-            root_dir: root directory for this layer
+            file_api: FileAPI for this layer
             projection: the projection of this layer
             raster_format: the RasterFormat to use for reading/writing raster data
             vector_format: the VectorFormat to use for reading/writing vector data
         """
-        self.root_dir = root_dir
+        self.file_api = file_api
         self.raster_format = raster_format
         self.vector_format = vector_format
         self.projection = projection
@@ -59,7 +58,7 @@ class FileTileStoreLayer(TileStoreLayer, LocalFileAPI):
         Returns:
             the raster data
         """
-        return self.raster_format.decode_raster(self, bounds)
+        return self.raster_format.decode_raster(self.file_api, bounds)
 
     def write_raster(self, bounds: PixelBounds, array: npt.NDArray[Any]) -> None:
         """Write raster data to the store.
@@ -68,7 +67,7 @@ class FileTileStoreLayer(TileStoreLayer, LocalFileAPI):
             bounds: the bounds of the raster
             array: the raster data
         """
-        self.raster_format.encode_raster(self, self.projection, bounds, array)
+        self.raster_format.encode_raster(self.file_api, self.projection, bounds, array)
 
     def get_raster_bounds(self) -> PixelBounds:
         """Gets the bounds of the raster data in the store."""
@@ -83,7 +82,7 @@ class FileTileStoreLayer(TileStoreLayer, LocalFileAPI):
         Returns:
             the vector data
         """
-        return self.vector_format.decode_vector(self, bounds)
+        return self.vector_format.decode_vector(self.file_api, bounds)
 
     def write_vector(self, data: list[Feature]) -> None:
         """Save vector tiles to the store.
@@ -91,11 +90,11 @@ class FileTileStoreLayer(TileStoreLayer, LocalFileAPI):
         Args:
             data: the vector data
         """
-        self.vector_format.encode_vector(self, self.projection, data)
+        self.vector_format.encode_vector(self.file_api, self.projection, data)
 
     def get_metadata(self) -> LayerMetadata:
         """Get the LayerMetadata associated with this layer."""
-        with open(os.path.join(self.root_dir, "metadata.json")) as f:
+        with self.file_api.open("metadata.json", "r") as f:
             return LayerMetadata.deserialize(json.load(f))
 
     def set_property(self, key: str, value: Any) -> None:
@@ -111,8 +110,7 @@ class FileTileStoreLayer(TileStoreLayer, LocalFileAPI):
 
     def save_metadata(self, metadata: LayerMetadata) -> None:
         """Save the LayerMetadata associated with this layer."""
-        local_fname = os.path.join(self.root_dir, "metadata.json")
-        with open_atomic(local_fname, "w") as f:
+        with self.file_api.open_atomic("metadata.json", "w") as f:
             json.dump(metadata.serialize(), f)
 
 
@@ -121,27 +119,27 @@ class FileTileStore(TileStore):
 
     def __init__(
         self,
-        root_dir,
+        file_api: FileAPI,
         raster_format: RasterFormat = GeotiffRasterFormat(),
         vector_format: VectorFormat = GeojsonVectorFormat(),
     ):
         """Initialize a new FileTileStore.
 
         Args:
-            root_dir: the root directory to store data
+            file_api: the FileAPI to store data
             raster_format: the RasterFormat (defaults to Geotiff)
             vector_format: the VectorFormat (defaults to GeoJSON)
         """
-        self.root_dir = root_dir
+        self.file_api = file_api
         self.raster_format = raster_format
         self.vector_format = vector_format
 
-    def _get_layer_dir(self, layer_id: tuple[str, ...]):
-        """Get the directory of the specified layer ID."""
+    def _get_layer_dir(self, layer_id: tuple[str, ...]) -> FileAPI:
+        """Get the FileAPI of the specified layer ID."""
         for part in layer_id:
             if "/" in part or part.startswith("."):
                 raise ValueError(f"Invalid layer_id part {part}")
-        return os.path.join(self.root_dir, *layer_id)
+        return self.file_api.get_folder(self.file_api.join(*layer_id))
 
     def create_layer(
         self, layer_id: tuple[str, ...], metadata: LayerMetadata
@@ -162,8 +160,7 @@ class FileTileStore(TileStore):
             raster_format=self.raster_format,
             vector_format=self.vector_format,
         )
-        if not os.path.exists(os.path.join(layer_dir, "metadata.json")):
-            os.makedirs(layer_dir, exist_ok=True)
+        if not layer_dir.exists("metadata.json"):
             layer.save_metadata(metadata)
         return layer
 
@@ -177,7 +174,7 @@ class FileTileStore(TileStore):
             the layer, or None if it does not exist yet.
         """
         layer_dir = self._get_layer_dir(layer_id)
-        if not os.path.exists(os.path.join(layer_dir, "metadata.json")):
+        if not layer_dir.exists("metadata.json"):
             return None
         return FileTileStoreLayer(
             layer_dir,
@@ -195,27 +192,21 @@ class FileTileStore(TileStore):
             available options for next part of the layer ID
         """
         layer_dir = self._get_layer_dir(prefix)
-        if not os.path.exists(layer_dir):
-            return []
-        return [
-            fname
-            for fname in os.listdir(layer_dir)
-            if os.path.isdir(os.path.join(layer_dir, fname))
-        ]
+        return layer_dir.listdir()
 
     @staticmethod
-    def from_config(config: TileStoreConfig, root_dir: str = ".") -> "FileTileStore":
+    def from_config(config: TileStoreConfig, ds_file_api: FileAPI) -> "FileTileStore":
         """Initialize a FileTileStore from configuration.
 
         Args:
             config: the TileStoreConfig
-            root_dir: the dataset root directory
+            ds_file_api: the dataset FileAPI
 
         Returns:
             the FileTileStore
         """
         d = config.config_dict
-        kwargs = {"root_dir": os.path.join(root_dir, d["root_dir"])}
+        kwargs = {"file_api": ds_file_api.get_folder(d["root_dir"])}
         if "raster_format" in d:
             kwargs["raster_format"] = load_raster_format(
                 RasterFormatConfig.from_config(d["raster_format"])

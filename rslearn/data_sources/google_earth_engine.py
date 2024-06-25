@@ -75,14 +75,14 @@ class GEE(DataSource):
             self._build_index()
 
     @staticmethod
-    def from_config(config: LayerConfig, root_dir: str = ".") -> "GEE":
+    def from_config(config: LayerConfig) -> "GEE":
         """Creates a new GEE instance from a configuration dictionary."""
         d = config.data_source.config_dict
         kwargs = {
             "config": config,
             "collection_name": d["collection_name"],
             "gcs_bucket_name": d["gcs_bucket_name"],
-            "index_fname": os.path.join(root_dir, d["index_fname"]),
+            "index_fname": d["index_fname"],
             "service_account_name": d["service_account_name"],
             "service_account_credentials": d["service_account_credentials"],
             "filters": d.get("filters"),

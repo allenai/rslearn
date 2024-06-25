@@ -1,6 +1,5 @@
 """Classes to implement dataset materialization."""
 
-import os
 from typing import Any, Optional
 
 import numpy as np
@@ -15,7 +14,7 @@ from rslearn.config import (
 )
 from rslearn.data_sources import Item
 from rslearn.tile_stores import TileStore, TileStoreLayer
-from rslearn.utils import Feature, LocalFileAPI, PixelBounds
+from rslearn.utils import Feature, FileAPI, PixelBounds
 from rslearn.utils.raster_format import load_raster_format
 from rslearn.utils.vector_format import load_vector_format
 
@@ -119,15 +118,16 @@ class RasterMaterializer(Materializer):
         """
         assert isinstance(layer_cfg, RasterLayerConfig)
 
-        out_layer_dirs = []
+        out_layer_dirs: list[FileAPI] = []
         for group_id in range(len(item_groups)):
             if group_id == 0:
                 out_layer_name = layer_name
             else:
                 out_layer_name = f"{layer_name}.{group_id}"
-            out_layer_dir = os.path.join(window.window_root, "layers", out_layer_name)
+            out_layer_dir = window.file_api.get_folder(
+                window.file_api.join("layers", out_layer_name)
+            )
             out_layer_dirs.append(out_layer_dir)
-            os.makedirs(out_layer_dir + ".tmp", exist_ok=True)
 
         for band_cfg in layer_cfg.band_sets:
             # band_cfg could specify zoom_offset and maybe other parameters that affect
@@ -146,11 +146,6 @@ class RasterMaterializer(Materializer):
             )
 
             for group_id, group in enumerate(item_groups):
-                tmp_out_dir = os.path.join(
-                    out_layer_dirs[group_id] + ".tmp", "_".join(band_cfg.bands)
-                )
-                os.makedirs(tmp_out_dir, exist_ok=True)
-
                 dst = np.zeros(
                     (len(band_cfg.bands), bounds[3] - bounds[1], bounds[2] - bounds[0]),
                     dtype=band_cfg.dtype.value,
@@ -191,11 +186,15 @@ class RasterMaterializer(Materializer):
                         )
 
                 raster_format.encode_raster(
-                    LocalFileAPI(tmp_out_dir), projection, bounds, dst
+                    out_layer_dirs[group_id].get_folder("_".join(band_cfg.bands)),
+                    projection,
+                    bounds,
+                    dst,
                 )
 
         for out_layer_dir in out_layer_dirs:
-            os.rename(out_layer_dir + ".tmp", out_layer_dir)
+            with out_layer_dir.open("completed", "wb"):
+                pass
 
 
 @Materializers.register("vector")
@@ -226,15 +225,16 @@ class VectorMaterializer(Materializer):
         )
         vector_format = load_vector_format(layer_cfg.format)
 
-        out_layer_dirs = []
+        out_layer_dirs: list[FileAPI] = []
         for group_id in range(len(item_groups)):
             if group_id == 0:
                 out_layer_name = layer_name
             else:
                 out_layer_name = f"{layer_name}.{group_id}"
-            out_layer_dir = os.path.join(window.window_root, "layers", out_layer_name)
+            out_layer_dir = window.file_api.get_folder(
+                window.file_api.join("layers", out_layer_name)
+            )
             out_layer_dirs.append(out_layer_dir)
-            os.makedirs(out_layer_dir + ".tmp", exist_ok=True)
 
         for group_id, group in enumerate(item_groups):
             features: list[Feature] = []
@@ -246,8 +246,8 @@ class VectorMaterializer(Materializer):
                 cur_features = ts_layer.read_vector(bounds)
                 features.extend(cur_features)
 
-            tmp_out_dir = out_layer_dirs[group_id] + ".tmp"
-            vector_format.encode_vector(LocalFileAPI(tmp_out_dir), projection, features)
+            vector_format.encode_vector(out_layer_dirs[group_id], projection, features)
 
         for out_layer_dir in out_layer_dirs:
-            os.rename(out_layer_dir + ".tmp", out_layer_dir)
+            with out_layer_dir.open("completed", "wb"):
+                pass
