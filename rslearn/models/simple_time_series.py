@@ -148,9 +148,7 @@ class SimpleTimeSeries(torch.nn.Module):
         batched_images = images.reshape(
             n_batch * n_images, self.image_channels, n_height, n_width
         )
-        batched_inputs = [{
-            "image": image
-        } for image in batched_images]
+        batched_inputs = [{"image": image} for image in batched_images]
         all_features = [
             feat_map.reshape(
                 n_batch,
@@ -169,7 +167,7 @@ class SimpleTimeSeries(torch.nn.Module):
 
         # Now compute aggregation over each group.
         # We handle each element of the multi-scale feature map separately.
-        l = []
+        output_features = []
         for feature_idx in range(len(all_features)):
             aggregated_features = []
             for group in self.groups:
@@ -222,6 +220,6 @@ class SimpleTimeSeries(torch.nn.Module):
             # Finally at each scale we concatenate across groups.
             aggregated_features = torch.cat(aggregated_features, dim=1)
 
-            l.append(aggregated_features)
+            output_features.append(aggregated_features)
 
-        return l
+        return output_features

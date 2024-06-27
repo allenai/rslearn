@@ -71,7 +71,7 @@ class FileTileStoreLayer(TileStoreLayer):
 
     def get_raster_bounds(self) -> PixelBounds:
         """Gets the bounds of the raster data in the store."""
-        return self.raster_format.get_raster_bounds(self)
+        return self.raster_format.get_raster_bounds(self.file_api)
 
     def read_vector(self, bounds: PixelBounds) -> list[Feature]:
         """Read vector data from the store.

@@ -39,13 +39,15 @@ class Ssl4eoS12(torch.nn.Module):
         state_dict = state_dict["teacher"]
         prefix = "module.backbone."
         state_dict = {
-            k[len(prefix):]: v
-            for k, v in state_dict.items()
-            if k.startswith(prefix)
+            k[len(prefix) :]: v for k, v in state_dict.items() if k.startswith(prefix)
         }
-        missing_keys, unexpected_keys = self.model.load_state_dict(state_dict, strict=False)
+        missing_keys, unexpected_keys = self.model.load_state_dict(
+            state_dict, strict=False
+        )
         if missing_keys or unexpected_keys:
-            print(f"warning: got missing_keys={missing_keys}, unexpected_keys={unexpected_keys} when loading SSL4EO-S12 state dict")
+            print(
+                f"warning: got missing_keys={missing_keys}, unexpected_keys={unexpected_keys} when loading SSL4EO-S12 state dict"
+            )
 
     def get_backbone_channels(self):
         """Returns the output channels of this model when used as a backbone.
