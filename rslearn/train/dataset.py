@@ -182,7 +182,6 @@ def check_window(inputs: dict[str, DataInput], window: Window) -> bool:
         if not data_input.required:
             continue
         if not is_any_layer_available(data_input):
-            print("uh oh", window.name, data_input.layers, window.file_api.prefix)
             return None
 
     return window
