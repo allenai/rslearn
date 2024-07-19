@@ -88,7 +88,7 @@ class BandSetConfig:
         bands: Optional[list[str]] = None,
         format: Optional[dict[str, Any]] = None,
         zoom_offset: int = 0,
-        remap_config: Optional[dict[str, Any]] = None,
+        remap: Optional[dict[str, Any]] = None,
     ) -> None:
         """Creates a new BandSetConfig instance.
 
@@ -99,14 +99,14 @@ class BandSetConfig:
             format: the format to store tiles in, defaults to geotiff
             zoom_offset: non-negative integer, store images at window resolution
                 divided by 2^(zoom_offset).
-            remap_config: config dict for Remapper to remap pixel values
+            remap: config dict for Remapper to remap pixel values
         """
         self.config_dict = config_dict
         self.bands = bands
         self.format = format
         self.dtype = dtype
         self.zoom_offset = zoom_offset
-        self.remap_config = remap_config
+        self.remap = remap
 
         if not self.format:
             self.format = {"name": "geotiff"}
@@ -118,7 +118,7 @@ class BandSetConfig:
             "format": self.format,
             "dtype": self.dtype,
             "zoom_offset": self.zoom_offset,
-            "remap": self.remap_config,
+            "remap": self.remap,
         }
 
     @staticmethod
