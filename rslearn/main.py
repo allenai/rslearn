@@ -128,7 +128,7 @@ def add_windows():
         default=None,
         help=(
             "Instead of creating one window per input extent (default), "
-            + "create windows along a grid of this cell size",
+            + "create windows along a grid of this cell size"
         ),
     )
     parser.add_argument(
@@ -137,7 +137,7 @@ def add_windows():
         default=None,
         help=(
             "Instead of creating windows the size of the input extents, "
-            + "create windows of this fixed size centered at each extent's center",
+            + "create windows of this fixed size centered at each extent's center"
         ),
     )
     parser.add_argument("--start", type=str, default=None, help="Optional start time")
