@@ -23,9 +23,7 @@ class SamplerFactory:
     This enables configuring a sampler without needing to pass the dataset.
     """
 
-    def get_sampler(
-        self, dataset: torch.utils.data.Dataset
-    ) -> torch.utils.data.Sampler:
+    def get_sampler(self, dataset: "ModelDataset") -> torch.utils.data.Sampler:
         """Create a sampler for the given dataset.
 
         Args:
@@ -51,9 +49,7 @@ class RandomSamplerFactory(SamplerFactory):
         self.replacement = replacement
         self.num_samples = num_samples
 
-    def get_sampler(
-        self, dataset: torch.utils.data.Dataset
-    ) -> torch.utils.data.Sampler:
+    def get_sampler(self, dataset: "ModelDataset") -> torch.utils.data.Sampler:
         """Create a sampler for the given dataset.
 
         Args:
@@ -64,6 +60,38 @@ class RandomSamplerFactory(SamplerFactory):
         """
         return torch.utils.data.RandomSampler(
             dataset, replacement=self.replacement, num_samples=self.num_samples
+        )
+
+
+class WeightedRandomSamplerFactory(SamplerFactory):
+    """A sampler factory for WeightedRandomSampler."""
+
+    def __init__(self, option_key: str, num_samples: int, replacement: bool = True):
+        """Initialize a WeightedRandomSamplerFactory.
+
+        Args:
+            option_key: the key in the window option dict containing the weights
+            num_samples: number of examples to sample per epoch
+            replacement: whether to pick with replacement, default true
+        """
+        self.option_key = option_key
+        self.num_samples = num_samples
+        self.replacement = replacement
+
+    def get_sampler(self, dataset: "ModelDataset") -> torch.utils.data.Sampler:
+        """Create a sampler for the given dataset.
+
+        Args:
+            dataset: the dataset
+
+        Returns:
+            a RandomSampler
+        """
+        weights = []
+        for window in dataset.windows:
+            weights.append(window.options[self.option_key])
+        return torch.utils.data.WeightedRandomSampler(
+            weights, self.num_samples, replacement=self.replacement
         )
 
 

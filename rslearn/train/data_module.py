@@ -99,7 +99,7 @@ class RslearnDataModule(L.LightningDataModule):
         sampler_factory = self.split_configs[split].sampler
         if sampler_factory:
             kwargs["sampler"] = sampler_factory.get_sampler(dataset)
-        if split == "train":
+        elif split == "train":
             kwargs["shuffle"] = True
         return DataLoader(**kwargs)
 
