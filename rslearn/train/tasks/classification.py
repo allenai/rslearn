@@ -21,9 +21,11 @@ class ClassificationTask(BasicTask):
         self,
         property_name: str,
         classes: list[str],
-        filters: Optional[list[tuple[str, str]]],
+        filters: Optional[list[tuple[str, str]]] = None,
         read_class_id: bool = False,
         allow_invalid: bool = False,
+        skip_unknown_categories: bool = False,
+        **kwargs,
     ):
         """Initialize a new ClassificationTask.
 
@@ -37,12 +39,17 @@ class ClassificationTask(BasicTask):
                 name.
             allow_invalid: instead of throwing error when no regression label is found
                 at a window, simply mark the example invalid for this task
+            skip_unknown_categories: whether to skip examples with categories that are
+                not passed via classes, instead of throwing error
+            kwargs: other arguments to pass to BasicTask
         """
+        super().__init__(**kwargs)
         self.property_name = property_name
         self.classes = classes
         self.filters = filters
         self.read_class_id = read_class_id
         self.allow_invalid = allow_invalid
+        self.skip_unknown_categories = skip_unknown_categories
 
         if not self.filters:
             self.filters = []
@@ -67,10 +74,20 @@ class ClassificationTask(BasicTask):
             if self.property_name not in feat.properties:
                 continue
 
+            v = feat.properties[self.property_name]
             if self.read_class_id:
-                class_id = int(feat.properties[self.property_name])
+                class_id = int(v)
             else:
-                class_id = self.classes.index(feat.properties[self.property_name])
+                if v in self.classes:
+                    class_id = self.classes.index(v)
+                else:
+                    class_id = -1
+
+            if class_id < 0 or class_id >= len(self.classes):
+                # Throw error if unknown categories are not acceptable.
+                assert self.skip_unknown_categories
+                # Otherwise, skip this example.
+                continue
 
             return {}, {
                 "class": torch.tensor(class_id, dtype=torch.int64),
@@ -104,7 +121,7 @@ class ClassificationTask(BasicTask):
         image = super().visualize(input_dict, target_dict, output)["image"]
         image = Image.fromarray(image)
         draw = ImageDraw.Draw(image)
-        target_class = self.classes[target_dict["value"]]
+        target_class = self.classes[target_dict["class"]]
         output_class = self.classes[output.argmax()]
         text = f"Label: {target_class}\nOutput: {output_class}"
         box = draw.textbbox(xy=(0, 0), text=text, font_size=12)
