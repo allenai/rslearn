@@ -43,20 +43,6 @@ class MultiTaskModel(torch.nn.Module):
         Returns:
             tuple (outputs, loss_dict) from the last module.
         """
-        def extract_task_dict(d, task_name):
-            # In MultiTask we will assign the inputs/targets for individual tasks with
-            # task name prefix in the overall dicts.
-            # So here we have to undo that prefix.
-            # We retain the items that do not have the prefix since some might be
-            # global input that were passthrough.
-            prefix = task_name + "_"
-            new_dict = {}
-            for k, v in d.items():
-                if k.startswith(prefix):
-                    k = k[len(prefix):]
-                new_dict[k] = v
-            return new_dict
-
         features = self.encoder(inputs)
         outputs = [{} for _ in inputs]
         losses = {}
@@ -64,9 +50,8 @@ class MultiTaskModel(torch.nn.Module):
             cur = features
             for module in decoder[:-1]:
                 cur = module(cur, inputs)
-            cur_inputs = [extract_task_dict(inp, name) for inp in inputs]
-            cur_targets = [extract_task_dict(target, name) for target in targets]
-            cur_output, cur_loss_dict = decoder[-1](cur, cur_inputs, cur_targets)
+            cur_targets = [target[name] for target in targets]
+            cur_output, cur_loss_dict = decoder[-1](cur, inputs, cur_targets)
             for idx, entry in enumerate(cur_output):
                 outputs[idx][name] = entry
             for loss_name, loss_value in cur_loss_dict.items():

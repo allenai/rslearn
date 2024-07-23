@@ -4,8 +4,10 @@ from typing import Optional, Union
 
 import torch
 
+from .transform import Transform
 
-class Normalize(torch.nn.Module):
+
+class Normalize(Transform):
     """Normalize one or more input images with mean and standard deviation."""
 
     def __init__(
@@ -15,8 +17,7 @@ class Normalize(torch.nn.Module):
         valid_range: Optional[
             Union[tuple[float, float], tuple[list[float], list[float]]]
         ] = None,
-        input_keys: list[str] = ["image"],
-        target_keys: list[str] = [],
+        selectors: list[str] = ["image"],
     ):
         """Initialize a new Normalize.
 
@@ -26,8 +27,7 @@ class Normalize(torch.nn.Module):
             mean: a single value or one mean per channel
             std: a single value or one std per channel
             valid_range: optionally clip to a minimum and maximum value
-            input_keys: which inputs to operate on (default "image")
-            target_keys: which targets to operate on (default none)
+            selectors: image items to transform
         """
         super().__init__()
         self.mean = torch.tensor(mean)
@@ -40,8 +40,18 @@ class Normalize(torch.nn.Module):
             self.valid_min = None
             self.valid_max = None
 
-        self.input_keys = input_keys
-        self.target_keys = target_keys
+        self.selectors = selectors
+
+    def apply_image(self, image: torch.Tensor) -> torch.Tensor:
+        """Normalize the specified image.
+
+        Args:
+            image: the image to transform.
+        """
+        image = (image - self.mean) / self.std
+        if self.valid_min is not None:
+            image = torch.clamp(image, min=self.valid_min, max=self.valid_max)
+        return image
 
     def forward(self, input_dict, target_dict):
         """Apply normalization over the inputs and targets.
@@ -53,14 +63,5 @@ class Normalize(torch.nn.Module):
         Returns:
             normalized (input_dicts, target_dicts) tuple
         """
-        for key_list, d in [
-            (self.input_keys, input_dict),
-            (self.target_keys, target_dict),
-        ]:
-            for k in key_list:
-                d[k] = (d[k] - self.mean) / self.std
-
-                if self.valid_min is not None:
-                    d[k] = torch.clamp(d[k], min=self.valid_min, max=self.valid_max)
-
+        self.apply_fn(self.apply_image, input_dict, target_dict, self.selectors)
         return input_dict, target_dict

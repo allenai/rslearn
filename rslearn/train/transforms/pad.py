@@ -5,18 +5,18 @@ from typing import Any, Union
 import torch
 import torchvision
 
+from .transform import Transform
 
-class Pad(torch.nn.Module):
+
+class Pad(Transform):
     """Pad (or crop) inputs to a fixed size."""
 
     def __init__(
         self,
         size: Union[int, tuple[int, int]],
         mode: str = "topleft",
-        input_images: list[str] = ["image"],
-        target_images: list[str] = [],
-        input_boxes: list[str] = [],
-        target_boxes: list[str] = [],
+        image_selectors: list[str] = ["image"],
+        box_selectors: list[str] = [],
     ):
         """Initialize a new Crop.
 
@@ -27,10 +27,8 @@ class Pad(torch.nn.Module):
                 larger than this size, then it is cropped instead.
             mode: "center" (default) to apply padding equally on all sides, or
                 "topleft" to only apply it on the bottom and right.
-            input_images: image inputs to operate on (default "image")
-            target_images: image targets to operate on (default none)
-            input_boxes: box inputs to operate on (default none)
-            target_boxes: box targets to operate on (default none)
+            image_selectors: image items to transform.
+            box_selectors: boxes items to transform.
         """
         super().__init__()
         if isinstance(size, int):
@@ -39,10 +37,8 @@ class Pad(torch.nn.Module):
             self.size = size
 
         self.mode = mode
-        self.input_images = input_images
-        self.target_images = target_images
-        self.input_boxes = input_boxes
-        self.target_boxes = target_boxes
+        self.image_selectors = image_selectors
+        self.box_selectors = box_selectors
         self.generator = torch.Generator()
 
     def sample_state(self) -> dict[str, Any]:
@@ -57,70 +53,71 @@ class Pad(torch.nn.Module):
             )
         }
 
-    def apply_state(
-        self,
-        state: dict[str, bool],
-        d: dict[str, Any],
-        image_keys: list[str],
-        box_keys: list[str],
-    ):
-        """Apply the transform on one dict.
+    def apply_image(self, image: torch.Tensor, state: dict[str, bool]) -> torch.Tensor:
+        """Apply the sampled state on the specified image.
 
         Args:
-            state: the state from sample_state
-            d: the dict to apply the transform on.
-            image_keys: image keys in the dict to transform.
-            box_keys: bounding box keys in the dict to transform.
+            image: the image to transform.
+            state: the sampled state.
         """
         size = state["size"]
-        for k in image_keys:
-            horizontal_extra = size - d[k].shape[-1]
-            vertical_extra = size - d[k].shape[-2]
+        horizontal_extra = size - image.shape[-1]
+        vertical_extra = size - image.shape[-2]
 
-            def apply_padding(
-                im: torch.Tensor, horizontal: bool, before: int, after: int
-            ) -> torch.Tensor:
-                # Before/after must either be both non-negative or both negative.
-                # >=0 indicates padding while <0 indicates cropping.
-                assert (before < 0 and after < 0) or (before >= 0 and after >= 0)
-                if before > 0:
-                    # Padding.
-                    if horizontal:
-                        padding_tuple = (before, after)
-                    else:
-                        padding_tuple = (before, after, 0, 0)
-                    return torch.nn.functional.pad(im, padding_tuple)
+        def apply_padding(
+            im: torch.Tensor, horizontal: bool, before: int, after: int
+        ) -> torch.Tensor:
+            # Before/after must either be both non-negative or both negative.
+            # >=0 indicates padding while <0 indicates cropping.
+            assert (before < 0 and after < 0) or (before >= 0 and after >= 0)
+            if before > 0:
+                # Padding.
+                if horizontal:
+                    padding_tuple = (before, after)
                 else:
-                    # Cropping.
-                    if horizontal:
-                        return torchvision.transforms.functional.crop(
-                            im,
-                            top=0,
-                            left=-before,
-                            height=im.shape[-2],
-                            width=im.shape[-1] + before + after,
-                        )
-                    else:
-                        return torchvision.transforms.functional.crop(
-                            im,
-                            top=-before,
-                            left=0,
-                            height=im.shape[-2] + before + after,
-                            width=im.shape[-1],
-                        )
+                    padding_tuple = (before, after, 0, 0)
+                return torch.nn.functional.pad(im, padding_tuple)
+            else:
+                # Cropping.
+                if horizontal:
+                    return torchvision.transforms.functional.crop(
+                        im,
+                        top=0,
+                        left=-before,
+                        height=im.shape[-2],
+                        width=im.shape[-1] + before + after,
+                    )
+                else:
+                    return torchvision.transforms.functional.crop(
+                        im,
+                        top=-before,
+                        left=0,
+                        height=im.shape[-2] + before + after,
+                        width=im.shape[-1],
+                    )
 
-            if self.mode == "topleft":
-                horizontal_pad = (0, horizontal_extra)
-                vertical_pad = (0, vertical_extra)
+        if self.mode == "topleft":
+            horizontal_pad = (0, horizontal_extra)
+            vertical_pad = (0, vertical_extra)
 
-            elif self.mode == "center":
-                horizontal_half = horizontal_extra // 2
-                vertical_half = vertical_extra // 2
-                horizontal_pad = (horizontal_half, horizontal_extra - horizontal_half)
-                vertical_pad = (vertical_half, vertical_extra - vertical_half)
+        elif self.mode == "center":
+            horizontal_half = horizontal_extra // 2
+            vertical_half = vertical_extra // 2
+            horizontal_pad = (horizontal_half, horizontal_extra - horizontal_half)
+            vertical_pad = (vertical_half, vertical_extra - vertical_half)
 
-            d[k] = apply_padding(d[k], True, horizontal_pad[0], horizontal_pad[1])
-            d[k] = apply_padding(d[k], False, vertical_pad[0], vertical_pad[1])
+        image = apply_padding(image, True, horizontal_pad[0], horizontal_pad[1])
+        image = apply_padding(image, False, vertical_pad[0], vertical_pad[1])
+        return image
+
+    def apply_boxes(self, boxes: Any, state: dict[str, bool]) -> torch.Tensor:
+        """Apply the sampled state on the specified image.
+
+        Args:
+            boxes: the boxes to transform.
+            state: the sampled state.
+        """
+        raise NotImplementedError
 
     def forward(self, input_dict, target_dict):
         """Apply transform over the inputs and targets.
@@ -133,6 +130,10 @@ class Pad(torch.nn.Module):
             transformed (input_dicts, target_dicts) tuple
         """
         state = self.sample_state()
-        self.apply_state(state, input_dict, self.input_images, self.input_boxes)
-        self.apply_state(state, target_dict, self.target_images, self.target_boxes)
+        self.apply_fn(
+            self.apply_image, input_dict, target_dict, self.image_selectors, state=state
+        )
+        self.apply_fn(
+            self.apply_boxes, input_dict, target_dict, self.box_selectors, state=state
+        )
         return input_dict, target_dict

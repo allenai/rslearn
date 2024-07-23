@@ -5,17 +5,17 @@ from typing import Any, Union
 import torch
 import torchvision
 
+from .transform import Transform
 
-class Crop(torch.nn.Module):
+
+class Crop(Transform):
     """Crop inputs down to a smaller size."""
 
     def __init__(
         self,
         crop_size: Union[int, tuple[int, int]],
-        input_images: list[str] = ["image"],
-        target_images: list[str] = [],
-        input_boxes: list[str] = [],
-        target_boxes: list[str] = [],
+        image_selectors: list[str] = ["image"],
+        box_selectors: list[str] = [],
     ):
         """Initialize a new Crop.
 
@@ -23,10 +23,8 @@ class Crop(torch.nn.Module):
 
         Args:
             crop_size: the size to crop to, or a min/max range of crop sizes
-            input_images: image inputs to operate on (default "image")
-            target_images: image targets to operate on (default none)
-            input_boxes: box inputs to operate on (default none)
-            target_boxes: box targets to operate on (default none)
+            image_selectors: image items to transform.
+            box_selectors: boxes items to transform.
         """
         super().__init__()
         if isinstance(crop_size, int):
@@ -34,64 +32,74 @@ class Crop(torch.nn.Module):
         else:
             self.crop_size = crop_size
 
-        self.input_images = input_images
-        self.target_images = target_images
-        self.input_boxes = input_boxes
-        self.target_boxes = target_boxes
+        self.image_selectors = image_selectors
+        self.box_selectors = box_selectors
         self.generator = torch.Generator()
 
-    def sample_state(self) -> dict[str, Any]:
+    def sample_state(self, image_shape: tuple[int, int]) -> dict[str, Any]:
         """Randomly decide how to transform the input.
+
+        Args:
+            image_shape: the (height, width) of the images to transform. In case images
+                are at different resolutions, it should correspond to the lowest
+                resolution image.
 
         Returns:
             dict of sampled choices
         """
+        crop_size = torch.randint(
+            low=self.crop_size[0],
+            high=self.crop_size[1],
+            generator=self.generator,
+            size=(),
+        )
+        assert image_shape[0] >= crop_size and image_shape[1] >= crop_size
+        remove_from_left = torch.randint(
+            low=0,
+            high=image_shape[1] - crop_size,
+            generator=self.generator,
+            size=(),
+        )
+        remove_from_top = torch.randint(
+            low=0,
+            high=image_shape[0] - crop_size,
+            generator=self.generator,
+            size=(),
+        )
         return {
-            "crop_size": torch.randint(
-                low=self.crop_size[0],
-                high=self.crop_size[1],
-                generator=self.generator,
-                size=(),
-            )
+            "image_shape": image_shape,
+            "crop_size": crop_size,
+            "remove_from_left": remove_from_left,
+            "remove_from_top": remove_from_top,
         }
 
-    def apply_state(
-        self,
-        state: dict[str, bool],
-        d: dict[str, Any],
-        image_keys: list[str],
-        box_keys: list[str],
-    ) -> None:
-        """Apply the sampled state on the specified dict.
+    def apply_image(self, image: torch.Tensor, state: dict[str, bool]) -> torch.Tensor:
+        """Apply the sampled state on the specified image.
 
         Args:
+            image: the image to transform.
             state: the sampled state.
-            d: the dict to transform.
-            image_keys: image keys in the dict to transform.
-            box_keys: box keys in the dict to transform.
         """
-        crop_size = state["crop_size"]
-        for k in image_keys:
-            assert d[k].shape[-1] >= crop_size and d[k].shape[-2] >= crop_size
-            remove_from_left = torch.randint(
-                low=0,
-                high=d[k].shape[-1] - crop_size,
-                generator=self.generator,
-                size=(),
-            )
-            remove_from_top = torch.randint(
-                low=0,
-                high=d[k].shape[-2] - crop_size,
-                generator=self.generator,
-                size=(),
-            )
-            d[k] = torchvision.transforms.functional.crop(
-                d[k],
-                top=remove_from_top,
-                left=remove_from_left,
-                height=crop_size,
-                width=crop_size,
-            )
+        image_shape = state["image_shape"]
+        crop_size = state["crop_size"] * image.shape[-1] // image_shape[1]
+        remove_from_left = state["remove_from_left"] * image.shape[-1] // image_shape[1]
+        remove_from_top = state["remove_from_top"] * image.shape[-2] // image_shape[0]
+        return torchvision.transforms.functional.crop(
+            image,
+            top=remove_from_top,
+            left=remove_from_left,
+            height=crop_size,
+            width=crop_size,
+        )
+
+    def apply_boxes(self, boxes: Any, state: dict[str, bool]) -> torch.Tensor:
+        """Apply the sampled state on the specified image.
+
+        Args:
+            boxes: the boxes to transform.
+            state: the sampled state.
+        """
+        raise NotImplementedError
 
     def forward(self, input_dict, target_dict):
         """Apply transform over the inputs and targets.
@@ -103,7 +111,21 @@ class Crop(torch.nn.Module):
         Returns:
             transformed (input_dicts, target_dicts) tuple
         """
-        state = self.sample_state()
-        self.apply_state(state, input_dict, self.input_images, self.input_boxes)
-        self.apply_state(state, target_dict, self.target_images, self.target_boxes)
+        smallest_image_shape = None
+        for selector in self.image_selectors:
+            image = self.read_selector(input_dict, target_dict, selector)
+            if (
+                smallest_image_shape is None
+                or image.shape[-1] < smallest_image_shape[1]
+            ):
+                smallest_image_shape = image.shape[-2:]
+
+        state = self.sample_state(smallest_image_shape)
+
+        self.apply_fn(
+            self.apply_image, input_dict, target_dict, self.image_selectors, state=state
+        )
+        self.apply_fn(
+            self.apply_boxes, input_dict, target_dict, self.box_selectors, state=state
+        )
         return input_dict, target_dict

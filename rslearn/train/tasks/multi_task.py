@@ -48,10 +48,8 @@ class MultiTask(Task):
                 cur_raw_inputs[v] = raw_inputs[k]
 
             cur_input_dict, cur_target_dict = task.process_inputs(cur_raw_inputs)
-            for k, v in cur_input_dict.items():
-                input_dict[f"{task_name}_{k}"] = v
-            for k, v in cur_target_dict.items():
-                target_dict[f"{task_name}_{k}"] = v
+            input_dict[task_name] = cur_input_dict
+            target_dict[task_name] = cur_target_dict
 
         return input_dict, target_dict
 
@@ -76,9 +74,7 @@ class MultiTask(Task):
             cur_target_dict = None
             if target_dict:
                 cur_target_dict = target_dict[task_name]
-            cur_images = task.visualize(
-                input_dict[task_name], cur_target_dict, output[task_name]
-            )
+            cur_images = task.visualize(input_dict, cur_target_dict, output[task_name])
             for label, image in cur_images.items():
                 images[f"{task_name}_{label}"] = image
         return images
@@ -123,18 +119,9 @@ class MetricWrapper(Metric):
             preds: the predictions
             targets: the targets
         """
-        # Rename targets relevant to this task to exclude the prefix.
-        def extract_task_targets(d):
-            new_dict = {}
-            prefix = f"{self.task_name}_"
-            for k, v in d.items():
-                if k.startswith(prefix):
-                    k = k[len(prefix):]
-                new_dict[k] = v
-            return new_dict
         self.metric.update(
             [pred[self.task_name] for pred in preds],
-            [extract_task_targets(target) for target in targets],
+            [target[self.task_name] for target in targets],
         )
 
     def compute(self) -> Any:
