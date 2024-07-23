@@ -138,8 +138,8 @@ class RasterMaterializer(Materializer):
 
             # Also load remapper if set.
             remapper = None
-            if band_cfg.remap_config:
-                remapper = load_remapper(band_cfg.remap_config)
+            if band_cfg.remap:
+                remapper = load_remapper(band_cfg.remap)
 
             raster_format = load_raster_format(
                 RasterFormatConfig(band_cfg.format["name"], band_cfg.format)
