@@ -24,7 +24,9 @@ class FakeTask(Task):
         super().__init__()
 
     def process_inputs(
-        self, raw_inputs: dict[str, Union[npt.NDArray[Any], list[Feature]]]
+        self,
+        raw_inputs: dict[str, Union[npt.NDArray[Any], list[Feature]]],
+        load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         return {}, {}
 
@@ -116,5 +118,5 @@ class TestTransforms:
             workers=1,
             task=FakeTask(),
         )
-        input_dict, target_dict = model_dataset[0]
+        input_dict, _, _ = model_dataset[0]
         assert input_dict["image"].shape == (1, 4, 4)
