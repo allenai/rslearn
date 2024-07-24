@@ -31,6 +31,7 @@ class RslearnDataModule(L.LightningDataModule):
         train_config: SplitConfig = SplitConfig(),
         val_config: SplitConfig = SplitConfig(),
         test_config: SplitConfig = SplitConfig(),
+        predict_config: SplitConfig = SplitConfig(),
     ):
         """Initialize a new RslearnDataModule.
 
@@ -48,6 +49,7 @@ class RslearnDataModule(L.LightningDataModule):
             train_config: split config for train split
             val_config: split config for val split
             test_config: split config for test split
+            predict_config: split config for predict split
         """
         super().__init__()
         self.inputs = inputs
@@ -63,6 +65,7 @@ class RslearnDataModule(L.LightningDataModule):
             "train": default_config.update(train_config),
             "val": default_config.update(val_config),
             "test": default_config.update(test_config),
+            "predict": default_config.update(predict_config),
         }
 
     def setup(self, stage: str):
@@ -75,7 +78,7 @@ class RslearnDataModule(L.LightningDataModule):
             "fit": ["train", "val"],
             "validate": ["val"],
             "test": ["test"],
-            "predict": ["test"],
+            "predict": ["predict"],
         }
         self.datasets = {}
         for split in stage_to_splits[stage]:
@@ -138,6 +141,18 @@ class RslearnDataModule(L.LightningDataModule):
                 dataset or sampler, or if the dataset or sampler has length 0.
         """
         return self._get_dataloader("test")
+
+    def predict_dataloader(self) -> DataLoader[dict[str, torch.Tensor]]:
+        """Implement one or more PyTorch DataLoaders for testing.
+
+        Returns:
+            A collection of data loaders specifying predicting samples.
+
+        Raises:
+            MisconfigurationException: If :meth:`setup` does not define a
+                dataset or sampler, or if the dataset or sampler has length 0.
+        """
+        return self._get_dataloader("predict")
 
     def collate_fn(
         self, batch: list[tuple[dict[str, Any], dict[str, Any]]]

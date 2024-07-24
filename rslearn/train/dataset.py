@@ -108,6 +108,7 @@ class DataInput:
         bands: Optional[list[str]] = None,
         required: bool = True,
         passthrough: bool = False,
+        is_target: bool = False,
     ):
         """Initialize a new DataInput.
 
@@ -118,12 +119,15 @@ class DataInput:
             required: whether examples lacking one of these layers should be skipped
             passthrough: whether to expose this to the model even if it isn't returned
                 by any task
+            is_target: whether this DataInput represents a target for the task. Targets
+                are not read during prediction phase.
         """
         self.data_type = data_type
         self.layers = layers
         self.bands = bands
         self.required = required
         self.passthrough = passthrough
+        self.is_target = is_target
 
 
 class SplitConfig:
@@ -137,6 +141,8 @@ class SplitConfig:
         transforms: Optional[list[torch.nn.Module]] = None,
         sampler: Optional[SamplerFactory] = None,
         patch_size: Optional[Union[int, tuple[int, int]]] = None,
+        load_all_patches: Optional[bool] = None,
+        skip_targets: Optional[bool] = None,
     ):
         """Initialize a new SplitConfig.
 
@@ -151,6 +157,10 @@ class SplitConfig:
             sampler: SamplerFactory for this split
             patch_size: an optional square size or (width, height) tuple. If set, read
                 crops of this size rather than entire windows.
+            load_all_patches: with patch_size set, rather than sampling a random patch
+                for each window, read all patches as separate sequential items in the
+                dataset.
+            skip_targets: whether to skip targets when loading inputs
         """
         self.groups = groups
         self.tags = tags
@@ -158,6 +168,8 @@ class SplitConfig:
         self.transforms = transforms
         self.sampler = sampler
         self.patch_size = patch_size
+        self.load_all_patches = load_all_patches
+        self.skip_targets = skip_targets
 
     def update(self, other: "SplitConfig") -> "SplitConfig":
         """Override settings in this SplitConfig with those in another.
@@ -172,6 +184,8 @@ class SplitConfig:
             transforms=self.transforms,
             sampler=self.sampler,
             patch_size=self.patch_size,
+            load_all_patches=self.load_all_patches,
+            skip_targets=self.skip_targets,
         )
         if other.groups:
             result.groups = other.groups
@@ -185,7 +199,19 @@ class SplitConfig:
             result.sampler = other.sampler
         if other.patch_size:
             result.patch_size = other.patch_size
+        if other.load_all_patches is not None:
+            result.load_all_patches = other.load_all_patches
+        if other.skip_targets is not None:
+            result.skip_targets = other.skip_targets
         return result
+
+    def get_load_all_patches(self) -> bool:
+        """Returns whether loading all patches is enabled (default False)."""
+        return True if self.load_all_patches is True else False
+
+    def get_skip_targets(self) -> bool:
+        """Returns whether skip_targets is enabled (default False)."""
+        return True if self.skip_targets is True else False
 
 
 def check_window(inputs: dict[str, DataInput], window: Window) -> bool:
@@ -272,6 +298,12 @@ class ModelDataset(torch.utils.data.Dataset):
                     new_windows.append(window)
             windows = new_windows
 
+        # If targets are not needed, remove them from the inputs.
+        if split_config.get_skip_targets():
+            for k in list(self.inputs.keys()):
+                if self.inputs[k].is_target:
+                    del self.inputs[k]
+
         # Eliminate windows that are missing either a requisite input layer, or missing
         # all target layers.
         p = multiprocessing.Pool(workers)
@@ -303,6 +335,29 @@ class ModelDataset(torch.utils.data.Dataset):
 
         self.windows = windows
 
+        # If we're loading all patches, we need to include the patch details.
+        if split_config.get_load_all_patches():
+            patches = []
+            for window in self.windows:
+                cur_patches = []
+                for col in range(
+                    window.bounds[0], window.bounds[2], self.patch_size[0]
+                ):
+                    for row in range(
+                        window.bounds[1], window.bounds[3], self.patch_size[1]
+                    ):
+                        cur_patches.append(
+                            (
+                                col,
+                                row,
+                                col + self.patch_size[0],
+                                row + self.patch_size[1],
+                            )
+                        )
+                for i, patch_bounds in enumerate(cur_patches):
+                    patches.append((window, patch_bounds, (i, len(cur_patches))))
+            self.windows = patches
+
     def __len__(self) -> int:
         """Returns the dataset length."""
         return len(self.windows)
@@ -317,13 +372,11 @@ class ModelDataset(torch.utils.data.Dataset):
             a tuple (input_dict, target_dict)
         """
         window = self.windows[idx]
-        window_size = (
-            window.bounds[2] - window.bounds[0],
-            window.bounds[3] - window.bounds[1],
-        )
 
         # Select bounds to read.
-        if self.patch_size:
+        if self.split_config.get_load_all_patches():
+            window, bounds, (patch_idx, num_patches) = window
+        elif self.patch_size:
 
             def get_patch_range(n_patch, n_window):
                 if n_patch > n_window:
@@ -337,6 +390,10 @@ class ModelDataset(torch.utils.data.Dataset):
                     start = random.randint(0, n_window - n_patch)
                     return [start, start + n_patch]
 
+            window_size = (
+                window.bounds[2] - window.bounds[0],
+                window.bounds[3] - window.bounds[1],
+            )
             patch_ranges = [
                 get_patch_range(self.patch_size[0], window_size[0]),
                 get_patch_range(self.patch_size[1], window_size[1]),
@@ -429,6 +486,25 @@ class ModelDataset(torch.utils.data.Dataset):
             if data_input.passthrough:
                 passthrough_inputs[name] = raw_inputs[name]
 
-        input_dict, target_dict = self.task.process_inputs(raw_inputs)
+        input_dict, target_dict = self.task.process_inputs(
+            raw_inputs, load_targets=not self.split_config.get_skip_targets()
+        )
         input_dict.update(passthrough_inputs)
-        return self.transforms(input_dict, target_dict)
+        input_dict, target_dict = self.transforms(input_dict, target_dict)
+
+        metadata = {
+            "group": window.group,
+            "window_name": window.name,
+            "window_bounds": window.bounds,
+            "bounds": bounds,
+            "time_range": window.time_range,
+            "projection": window.projection,
+        }
+        if self.split_config.get_load_all_patches():
+            metadata["patch_idx"] = patch_idx
+            metadata["num_patches"] = num_patches
+        else:
+            metadata["patch_idx"] = 0
+            metadata["num_patches"] = 1
+
+        return input_dict, target_dict, metadata

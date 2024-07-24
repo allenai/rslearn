@@ -50,17 +50,23 @@ class RegressionTask(BasicTask):
             self.filters = []
 
     def process_inputs(
-        self, raw_inputs: dict[str, Union[npt.NDArray[Any], list[Feature]]]
+        self,
+        raw_inputs: dict[str, Union[npt.NDArray[Any], list[Feature]]],
+        load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
 
         Args:
             raw_inputs: raster or vector data to process
+            load_targets: whether to load the targets or only inputs
 
         Returns:
             tuple (input_dict, target_dict) containing the processed inputs and targets
                 that are compatible with both metrics and loss functions
         """
+        if not load_targets:
+            return {}, {}
+
         data = raw_inputs["targets"]
         for feat in data:
             for property_name, property_value in self.filters:

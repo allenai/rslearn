@@ -16,6 +16,7 @@ from rasterio.crs import CRS
 from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
 from rslearn.dataset import Window
 from rslearn.utils import PixelBounds, Projection, STGeometry
+from rslearn.utils.array import copy_spatial_array
 
 from .data_source import DataSource, Item
 from .raster_source import ArrayWithTransform, materialize_raster
@@ -68,21 +69,12 @@ def read_from_tile_callback(
             cur_col_off = tile_size * tile_col
             cur_row_off = tile_size * tile_row
 
-            src_col_offset = max(bounds[0] - cur_col_off, 0)
-            src_row_offset = max(bounds[1] - cur_row_off, 0)
-            dst_col_offset = max(cur_col_off - bounds[0], 0)
-            dst_row_offset = max(cur_row_off - bounds[1], 0)
-            col_overlap = min(cur_im.shape[2] - src_col_offset, width - dst_col_offset)
-            row_overlap = min(cur_im.shape[1] - src_row_offset, height - dst_row_offset)
-            data[
-                :,
-                dst_row_offset : dst_row_offset + row_overlap,
-                dst_col_offset : dst_col_offset + col_overlap,
-            ] = cur_im[
-                :,
-                src_row_offset : src_row_offset + row_overlap,
-                src_col_offset : src_col_offset + col_overlap,
-            ]
+            copy_spatial_array(
+                src=cur_im,
+                dst=data,
+                src_offset=(cur_col_off, cur_row_off),
+                dst_offset=(bounds[0], bounds[1]),
+            )
 
     return data
 

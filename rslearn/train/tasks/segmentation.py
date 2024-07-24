@@ -52,23 +52,41 @@ class SegmentationTask(BasicTask):
         self.colors = colors
 
     def process_inputs(
-        self, raw_inputs: dict[str, Union[npt.NDArray[Any], list[Feature]]]
+        self,
+        raw_inputs: dict[str, Union[npt.NDArray[Any], list[Feature]]],
+        load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
 
         Args:
             raw_inputs: raster or vector data to process
+            load_targets: whether to load the targets or only inputs
 
         Returns:
             tuple (input_dict, target_dict) containing the processed inputs and targets
                 that are compatible with both metrics and loss functions
         """
+        if not load_targets:
+            return {}, {}
+
         assert raw_inputs["targets"].shape[0] == 1
         labels = raw_inputs["targets"][0, :, :]
         return {}, {
             "classes": torch.tensor(labels, dtype=torch.int64),
             "valid": torch.ones(labels.shape, dtype=torch.float32),
         }
+
+    def process_output(self, raw_output: Any) -> Union[npt.NDArray[Any], list[Feature]]:
+        """Processes an output into raster or vector data.
+
+        Args:
+            raw_output: the output from prediction head.
+
+        Returns:
+            either raster or vector data.
+        """
+        classes = raw_output.cpu().numpy().argmax(axis=0).astype(np.uint8)
+        return classes[None, :, :]
 
     def visualize(
         self,

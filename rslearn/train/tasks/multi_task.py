@@ -27,12 +27,15 @@ class MultiTask(Task):
         self.input_mapping = input_mapping
 
     def process_inputs(
-        self, raw_inputs: dict[str, Union[npt.NDArray[Any], list[Feature]]]
+        self,
+        raw_inputs: dict[str, Union[npt.NDArray[Any], list[Feature]]],
+        load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
 
         Args:
             raw_inputs: raster or vector data to process
+            load_targets: whether to load the targets or only inputs
 
         Returns:
             tuple (input_dict, target_dict) containing the processed inputs and targets
@@ -47,11 +50,27 @@ class MultiTask(Task):
                     continue
                 cur_raw_inputs[v] = raw_inputs[k]
 
-            cur_input_dict, cur_target_dict = task.process_inputs(cur_raw_inputs)
+            cur_input_dict, cur_target_dict = task.process_inputs(
+                cur_raw_inputs, load_targets=load_targets
+            )
             input_dict[task_name] = cur_input_dict
             target_dict[task_name] = cur_target_dict
 
         return input_dict, target_dict
+
+    def process_output(self, raw_output: Any) -> Union[npt.NDArray[Any], list[Feature]]:
+        """Processes an output into raster or vector data.
+
+        Args:
+            raw_output: the output from prediction head.
+
+        Returns:
+            either raster or vector data.
+        """
+        processed_output = {}
+        for task_name, task in self.tasks.items():
+            processed_output[task_name] = task.process_output(raw_output[task_name])
+        return processed_output
 
     def visualize(
         self,
