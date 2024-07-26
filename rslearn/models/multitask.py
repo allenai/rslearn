@@ -8,7 +8,7 @@ import torch
 class MultiTaskModel(torch.nn.Module):
     """MultiTask model wrapper.
 
-    MultiTask first passes its inputs through the sequential encoder models.
+    MultiTaskModel first passes its inputs through the sequential encoder models.
 
     Then, it applies one sequential decoder for each configured task. It computes
     outputs and loss using the final module in the decoder.
@@ -33,7 +33,7 @@ class MultiTaskModel(torch.nn.Module):
         self,
         inputs: list[dict[str, Any]],
         targets: Optional[list[dict[str, Any]]] = None,
-    ):
+    ) -> tuple[list[dict[str, Any]], dict[str, torch.Tensor]]:
         """Apply the sequence of modules on the inputs.
 
         Args:

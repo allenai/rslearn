@@ -108,3 +108,21 @@ class Transform(torch.nn.Module):
             v = self.read_selector(input_dict, target_dict, selector)
             v = fn(v, **kwargs)
             self.write_selector(input_dict, target_dict, selector, v)
+
+
+class Identity(Transform):
+    """Identity transform."""
+
+    def forward(
+        self, input_dict: dict[str, Any], target_dict: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Simply returns the provided input_dict and target_dict.
+
+        Args:
+            input_dict: input dict.
+            target_dict: target_dict.
+
+        Returns:
+            unchanged (input_dict, target_dict)
+        """
+        return input_dict, target_dict

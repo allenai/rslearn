@@ -15,31 +15,6 @@ from rslearn.utils import FileAPI
 from .tasks import Task
 
 
-class FreezeConfig:
-    """Configuration for freezing model parameters.
-
-    This is used when initializing RslearnLightningModule to specify optional
-    parameters to freeze at the beginning of training, along with a number of epochs
-    after which to unfreeze parameters if desired.
-
-    TODO: this doesn't actually work right with Lightning. Like resuming from
-    checkpoint.
-    """
-
-    def __init__(self, prefixes: list[str], epochs: Optional[int] = None):
-        """Create a new FreezeConfig.
-
-        This configures the RslearnLightningModule to freeze certain parameters for a
-        certain number of epochs.
-
-        Args:
-            prefixes: freeze parameters with any of these prefixes.
-            epochs: how many epochs to freeze them for
-        """
-        self.prefixes = prefixes
-        self.epochs = epochs
-
-
 class RestoreConfig:
     """Configuration for restoring model parameters.
 
@@ -115,7 +90,6 @@ class RslearnLightningModule(L.LightningModule):
         plateau_min_lr: float = 0,
         plateau_cooldown: int = 0,
         visualize_dir: Optional[str] = None,
-        freeze_configs: list[FreezeConfig] = [],
         restore_config: Optional[RestoreConfig] = None,
         print_parameters: bool = False,
     ):
@@ -134,7 +108,6 @@ class RslearnLightningModule(L.LightningModule):
                 resetting plateau scheduler
             visualize_dir: during validation or testing, output visualizations to this
                 directory
-            freeze_configs: specification of configuration to freeze during training.
             restore_config: specification of configuration to restore parameters from
                 a non-Lightning checkpoint.
             print_parameters: whether to print the list of model parameters after model
@@ -150,7 +123,6 @@ class RslearnLightningModule(L.LightningModule):
         self.plateau_min_lr = plateau_min_lr
         self.plateau_cooldown = plateau_cooldown
         self.visualize_dir = visualize_dir
-        self.freeze_configs = freeze_configs
 
         if print_parameters:
             for name, param in self.named_parameters():
@@ -195,25 +167,6 @@ class RslearnLightningModule(L.LightningModule):
                 "monitor": "train_loss",
             }
         return d
-
-    def on_train_epoch_start(self) -> None:
-        """Freeze/unfreeze parameters as needed at beginning of each training epoch."""
-        self.epochs += 1
-
-        for name, param in self.named_parameters():
-            is_frozen = False
-            for freeze_config in self.freeze_configs:
-                if freeze_config.epochs and self.epochs > freeze_config.epochs:
-                    continue
-                for prefix in freeze_config.prefixes:
-                    if name.startswith(prefix):
-                        is_frozen = True
-            if is_frozen and param.requires_grad:
-                param.requires_grad = False
-                print(f"freeze parameter: {name}")
-            if not is_frozen and not param.requires_grad:
-                param.requires_grad = True
-                print(f"unfreeze parameter: {name}")
 
     def training_step(
         self, batch: Any, batch_idx: int, dataloader_idx: int = 0

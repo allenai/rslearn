@@ -7,6 +7,7 @@ from typing import Any, Optional, Union
 import torch
 import tqdm
 
+import rslearn.train.transforms.transform
 from rslearn.config import RasterFormatConfig, RasterLayerConfig, VectorLayerConfig
 from rslearn.dataset import Dataset, Window
 from rslearn.train.tasks import Task
@@ -269,7 +270,7 @@ class ModelDataset(torch.utils.data.Dataset):
         if split_config.transforms:
             self.transforms = Sequential(*split_config.transforms)
         else:
-            self.transforms = torch.nn.Identity()
+            self.transforms = rslearn.train.transforms.transform.Identity()
 
         # Convert patch size to (width, height) format if needed.
         if not split_config.patch_size:

@@ -192,14 +192,17 @@ class ClassificationMetric(Metric):
         super().__init__()
         self.metric = metric
 
-    def update(self, preds: list[Any], targets: list[dict[str, Any]]) -> None:
+    def update(
+        self, preds: Union[list[Any], torch.Tensor], targets: list[dict[str, Any]]
+    ) -> None:
         """Update metric.
 
         Args:
             preds: the predictions
             targets: the targets
         """
-        preds = torch.stack(preds)
+        if not isinstance(preds, torch.Tensor):
+            preds = torch.stack(preds)
         labels = torch.stack([target["class"] for target in targets])
 
         # Sub-select the valid labels.
