@@ -53,7 +53,7 @@ class SegmentationTask(BasicTask):
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, Union[npt.NDArray[Any], list[Feature]]],
+        raw_inputs: dict[str, Union[torch.Tensor, list[Feature]]],
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
@@ -70,9 +70,9 @@ class SegmentationTask(BasicTask):
             return {}, {}
 
         assert raw_inputs["targets"].shape[0] == 1
-        labels = raw_inputs["targets"][0, :, :]
+        labels = raw_inputs["targets"][0, :, :].long()
         return {}, {
-            "classes": torch.tensor(labels, dtype=torch.int64),
+            "classes": labels,
             "valid": torch.ones(labels.shape, dtype=torch.float32),
         }
 

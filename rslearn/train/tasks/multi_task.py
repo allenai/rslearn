@@ -28,7 +28,7 @@ class MultiTask(Task):
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, Union[npt.NDArray[Any], list[Feature]]],
+        raw_inputs: dict[str, Union[torch.Tensor, list[Feature]]],
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
