@@ -92,6 +92,7 @@ class RslearnLightningModule(L.LightningModule):
         visualize_dir: Optional[str] = None,
         restore_config: Optional[RestoreConfig] = None,
         print_parameters: bool = False,
+        print_model: bool = False,
     ):
         """Initialize a new RslearnLightningModule.
 
@@ -112,6 +113,7 @@ class RslearnLightningModule(L.LightningModule):
                 a non-Lightning checkpoint.
             print_parameters: whether to print the list of model parameters after model
                 initialization
+            print_model: whether to print the model after model initialization
         """
         super().__init__()
         self.model = model
@@ -127,6 +129,9 @@ class RslearnLightningModule(L.LightningModule):
         if print_parameters:
             for name, param in self.named_parameters():
                 print(name, param.shape)
+
+        if print_model:
+            print(self.model)
 
         if restore_config:
             state_dict = restore_config.get_state_dict()
