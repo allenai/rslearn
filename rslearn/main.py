@@ -10,7 +10,6 @@ from typing import Callable, Optional
 
 import tqdm
 import wandb
-from dotenv import load_dotenv
 from lightning.pytorch.cli import LightningCLI
 from rasterio.crs import CRS
 
@@ -609,7 +608,6 @@ def model_predict():
 
 def main():
     """CLI entrypoint."""
-    load_dotenv()
     parser = argparse.ArgumentParser(description="rslearn")
     parser.add_argument(
         "category", help="Command category: dataset, annotate, or model"
