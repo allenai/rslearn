@@ -3,6 +3,7 @@
 from typing import Any, Optional, Union
 
 import numpy.typing as npt
+import torch
 from torchmetrics import Metric, MetricCollection
 
 from rslearn.utils import Feature
