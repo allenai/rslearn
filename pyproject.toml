@@ -4,11 +4,13 @@ version = "0.0.1"
 description = "A library for developing remote sensing datasets and models"
 authors = [
     {name = "Favyen Bastani", email = "favyenb@allenai.org"},
+    {name = "Patrick Beukema", email = "patrickb@allenai.org"},
+    {name = "Henry Herzog", email = "henryh@allenai.org"},
     {name = "Piper Wolters", email = "piperw@allenai.org"},
 ]
 readme = "README.md"
 license = {file = "LICENSE"}
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 
 dynamic = ["dependencies"]
 
