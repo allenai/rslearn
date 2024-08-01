@@ -544,8 +544,8 @@ class RslearnLightningCLI(LightningCLI):
         parser.add_argument(
             "--wandb_resume",
             default=False,
+            type=bool,
             help="Whether to resume from specified wandb_run_id",
-            action=argparse.BooleanOptionalAction,
         )
 
     def before_instantiate_classes(self):
