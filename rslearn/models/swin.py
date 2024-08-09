@@ -1,6 +1,6 @@
 """Swin Transformer."""
 
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torchvision
@@ -26,7 +26,7 @@ class Swin(torch.nn.Module):
         arch: str = "swin_v2_b",
         pretrained: bool = False,
         input_channels: int = 3,
-        output_layers: Optional[list[int]] = None,
+        output_layers: list[int] | None = None,
         num_outputs: int = 1000,
     ):
         """Instantiate a new Swin instance.

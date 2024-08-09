@@ -8,7 +8,7 @@ import os
 import xml.etree.ElementTree as ET
 from collections.abc import Generator
 from datetime import timedelta
-from typing import Any, BinaryIO, Optional
+from typing import Any, BinaryIO
 
 import dateutil.parser
 import pytimeparse
@@ -104,7 +104,7 @@ class Sentinel2(DataSource):
         config: LayerConfig,
         index_cache_dir: str,
         max_time_delta: timedelta = timedelta(days=30),
-        sort_by: Optional[str] = None,
+        sort_by: str | None = None,
         use_rtree_index: bool = True,
         harmonize: bool = False,
     ):

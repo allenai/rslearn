@@ -1,7 +1,7 @@
 """FileTileStore TileStore implementation."""
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 import numpy.typing as npt
 
@@ -27,7 +27,7 @@ class FileTileStoreLayer(TileStoreLayer):
     def __init__(
         self,
         file_api: FileAPI,
-        projection: Optional[Projection] = None,
+        projection: Projection | None = None,
         raster_format: RasterFormat = GeotiffRasterFormat(),
         vector_format: VectorFormat = GeojsonVectorFormat(),
     ):
@@ -49,7 +49,7 @@ class FileTileStoreLayer(TileStoreLayer):
         if not self.projection:
             self.projection = self.get_metadata().projection
 
-    def read_raster(self, bounds: PixelBounds) -> Optional[npt.NDArray[Any]]:
+    def read_raster(self, bounds: PixelBounds) -> npt.NDArray[Any] | None:
         """Read raster data from the store.
 
         Args:
@@ -164,7 +164,7 @@ class FileTileStore(TileStore):
             layer.save_metadata(metadata)
         return layer
 
-    def get_layer(self, layer_id: tuple[str, ...]) -> Optional[TileStoreLayer]:
+    def get_layer(self, layer_id: tuple[str, ...]) -> TileStoreLayer | None:
         """Get a layer in the tile store.
 
         Args:

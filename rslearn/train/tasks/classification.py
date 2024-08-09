@@ -1,15 +1,16 @@
 """Classification task."""
 
-from typing import Any, Optional, Union
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
+import shapely
 import torch
 import torchmetrics.classification
 from PIL import Image, ImageDraw
 from torchmetrics import Metric, MetricCollection
 
-from rslearn.utils import Feature
+from rslearn.utils import Feature, STGeometry
 
 from .task import BasicTask
 
@@ -21,7 +22,7 @@ class ClassificationTask(BasicTask):
         self,
         property_name: str,
         classes: list[str],
-        filters: Optional[list[tuple[str, str]]] = None,
+        filters: list[tuple[str, str]] | None = None,
         read_class_id: bool = False,
         allow_invalid: bool = False,
         skip_unknown_categories: bool = False,
@@ -56,13 +57,15 @@ class ClassificationTask(BasicTask):
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, Union[torch.Tensor, list[Feature]]],
+        raw_inputs: dict[str, torch.Tensor | list[Feature]],
+        metadata: dict[str, Any],
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
 
         Args:
             raw_inputs: raster or vector data to process
+            metadata: metadata about the patch being read
             load_targets: whether to load the targets or only inputs
 
         Returns:
@@ -108,10 +111,37 @@ class ClassificationTask(BasicTask):
             "valid": torch.tensor(0, dtype=torch.float32),
         }
 
+    def process_output(
+        self, raw_output: Any, metadata: dict[str, Any]
+    ) -> npt.NDArray[Any] | list[Feature]:
+        """Processes an output into raster or vector data.
+
+        Args:
+            raw_output: the output from prediction head.
+            metadata: metadata about the patch being read
+
+        Returns:
+            either raster or vector data.
+        """
+        value = raw_output.cpu().numpy().argmax()
+        if not self.read_class_id:
+            value = self.classes[value]
+        feature = Feature(
+            STGeometry(
+                metadata["projection"],
+                shapely.Point(metadata["bounds"][0], metadata["bounds"][1]),
+                None,
+            ),
+            {
+                self.property_name: value,
+            },
+        )
+        return [feature]
+
     def visualize(
         self,
         input_dict: dict[str, Any],
-        target_dict: Optional[dict[str, Any]],
+        target_dict: dict[str, Any] | None,
         output: Any,
     ) -> dict[str, npt.NDArray[Any]]:
         """Visualize the outputs and targets.
@@ -155,7 +185,7 @@ class ClassificationHead(torch.nn.Module):
         self,
         logits: torch.Tensor,
         inputs: list[dict[str, Any]],
-        targets: Optional[list[dict[str, Any]]] = None,
+        targets: list[dict[str, Any]] | None = None,
     ):
         """Compute the classification outputs and loss from logits and targets.
 
@@ -193,7 +223,7 @@ class ClassificationMetric(Metric):
         self.metric = metric
 
     def update(
-        self, preds: Union[list[Any], torch.Tensor], targets: list[dict[str, Any]]
+        self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
     ) -> None:
         """Update metric.
 

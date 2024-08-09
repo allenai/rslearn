@@ -1,9 +1,7 @@
 """Functions to manage datasets."""
 
-from typing import Optional
-
 import rslearn.data_sources
-from rslearn.config import LayerConfig
+from rslearn.config import LayerConfig, LayerType
 from rslearn.data_sources import DataSource, Item
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 
@@ -119,7 +117,7 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
 
 
 def is_window_ingested(
-    dataset: Dataset, window: Window, check_layer_name: Optional[str] = None
+    dataset: Dataset, window: Window, check_layer_name: str | None = None
 ) -> bool:
     """Check if a window is ingested.
 
@@ -143,7 +141,7 @@ def is_window_ingested(
             for serialized_item in group:
                 item = Item.deserialize(serialized_item)
 
-                if layer_cfg.layer_type == "raster":
+                if layer_cfg.layer_type == LayerType.RASTER:
                     for band_set in layer_cfg.band_sets:
                         projection, _ = band_set.get_final_projection_and_bounds(
                             window.projection, window.bounds

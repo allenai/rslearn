@@ -1,6 +1,6 @@
 """Classes to implement dataset materialization."""
 
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -53,7 +53,7 @@ def read_raster_window_from_tiles(
     bounds: PixelBounds,
     src_indexes: list[int],
     dst_indexes: list[int],
-    remapper: Optional[Remapper] = None,
+    remapper: Remapper | None = None,
 ) -> None:
     """Read a window of raster data from tiles in a tile store.
 

@@ -1,14 +1,14 @@
 """Array util functions."""
 
-from typing import Any, Union
+from typing import Any
 
 import numpy.typing as npt
 import torch
 
 
 def copy_spatial_array(
-    src: Union[torch.Tensor, npt.NDArray[Any]],
-    dst: Union[torch.Tensor, npt.NDArray[Any]],
+    src: torch.Tensor | npt.NDArray[Any],
+    dst: torch.Tensor | npt.NDArray[Any],
     src_offset: tuple[int, int],
     dst_offset: tuple[int, int],
 ):

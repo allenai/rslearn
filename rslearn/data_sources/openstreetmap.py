@@ -4,7 +4,7 @@ import json
 import os
 import urllib.request
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 import osmium
 import shapely
@@ -30,10 +30,10 @@ class Filter:
 
     def __init__(
         self,
-        feature_types: Optional[list[FeatureType]] = None,
-        tag_conditions: Optional[dict[str, list[str]]] = None,
-        tag_properties: Optional[dict[str, str]] = None,
-        to_geometry: Optional[str] = None,
+        feature_types: list[FeatureType] | None = None,
+        tag_conditions: dict[str, list[str]] | None = None,
+        tag_properties: dict[str, str] | None = None,
+        to_geometry: str | None = None,
     ):
         """Create a new Filter instance.
 

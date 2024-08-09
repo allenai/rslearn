@@ -1,6 +1,6 @@
 """Pad transform."""
 
-from typing import Any, Union
+from typing import Any
 
 import torch
 import torchvision
@@ -13,7 +13,7 @@ class Pad(Transform):
 
     def __init__(
         self,
-        size: Union[int, tuple[int, int]],
+        size: int | tuple[int, int],
         mode: str = "topleft",
         image_selectors: list[str] = ["image"],
         box_selectors: list[str] = [],

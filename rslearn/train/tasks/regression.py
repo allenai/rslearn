@@ -1,6 +1,6 @@
 """Classification task."""
 
-from typing import Any, Optional, Union
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -20,7 +20,7 @@ class RegressionTask(BasicTask):
     def __init__(
         self,
         property_name: str,
-        filters: Optional[list[tuple[str, str]]],
+        filters: list[tuple[str, str]] | None,
         allow_invalid: bool = False,
         scale_factor: float = 1,
         metric_mode: str = "mse",
@@ -51,13 +51,15 @@ class RegressionTask(BasicTask):
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, Union[torch.Tensor, list[Feature]]],
+        raw_inputs: dict[str, torch.Tensor | list[Feature]],
+        metadata: dict[str, Any],
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
 
         Args:
             raw_inputs: raster or vector data to process
+            metadata: metadata about the patch being read
             load_targets: whether to load the targets or only inputs
 
         Returns:
@@ -91,7 +93,7 @@ class RegressionTask(BasicTask):
     def visualize(
         self,
         input_dict: dict[str, Any],
-        target_dict: Optional[dict[str, Any]],
+        target_dict: dict[str, Any] | None,
         output: Any,
     ) -> dict[str, npt.NDArray[Any]]:
         """Visualize the outputs and targets.
@@ -151,7 +153,7 @@ class RegressionHead(torch.nn.Module):
         self,
         logits: torch.Tensor,
         inputs: list[dict[str, Any]],
-        targets: Optional[list[dict[str, Any]]] = None,
+        targets: list[dict[str, Any]] | None = None,
     ):
         """Compute the regression outputs and loss from logits and targets.
 

@@ -1,6 +1,6 @@
 """Task for wrapping multiple tasks."""
 
-from typing import Any, Optional, Union
+from typing import Any
 
 import numpy.typing as npt
 import torch
@@ -29,13 +29,15 @@ class MultiTask(Task):
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, Union[torch.Tensor, list[Feature]]],
+        raw_inputs: dict[str, torch.Tensor | list[Feature]],
+        metadata: dict[str, Any],
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
 
         Args:
             raw_inputs: raster or vector data to process
+            metadata: metadata about the patch being read
             load_targets: whether to load the targets or only inputs
 
         Returns:
@@ -52,31 +54,36 @@ class MultiTask(Task):
                 cur_raw_inputs[v] = raw_inputs[k]
 
             cur_input_dict, cur_target_dict = task.process_inputs(
-                cur_raw_inputs, load_targets=load_targets
+                cur_raw_inputs, metadata=metadata, load_targets=load_targets
             )
             input_dict[task_name] = cur_input_dict
             target_dict[task_name] = cur_target_dict
 
         return input_dict, target_dict
 
-    def process_output(self, raw_output: Any) -> Union[npt.NDArray[Any], list[Feature]]:
+    def process_output(
+        self, raw_output: Any, metadata: dict[str, Any]
+    ) -> npt.NDArray[Any] | list[Feature]:
         """Processes an output into raster or vector data.
 
         Args:
             raw_output: the output from prediction head.
+            metadata: metadata about the patch being read
 
         Returns:
             either raster or vector data.
         """
         processed_output = {}
         for task_name, task in self.tasks.items():
-            processed_output[task_name] = task.process_output(raw_output[task_name])
+            processed_output[task_name] = task.process_output(
+                raw_output[task_name], metadata
+            )
         return processed_output
 
     def visualize(
         self,
         input_dict: dict[str, Any],
-        target_dict: Optional[dict[str, Any]],
+        target_dict: dict[str, Any] | None,
         output: dict[str, Any],
     ) -> dict[str, npt.NDArray[Any]]:
         """Visualize the outputs and targets.

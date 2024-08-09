@@ -2,13 +2,18 @@
 
 import multiprocessing
 import random
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import tqdm
 
 import rslearn.train.transforms.transform
-from rslearn.config import RasterFormatConfig, RasterLayerConfig, VectorLayerConfig
+from rslearn.config import (
+    DType,
+    RasterFormatConfig,
+    RasterLayerConfig,
+    VectorLayerConfig,
+)
 from rslearn.dataset import Dataset, Window
 from rslearn.train.tasks import Task
 from rslearn.utils.mp import star_imap_unordered
@@ -39,7 +44,7 @@ class SamplerFactory:
 class RandomSamplerFactory(SamplerFactory):
     """A sampler factory for RandomSampler."""
 
-    def __init__(self, replacement: bool = False, num_samples: Optional[int] = None):
+    def __init__(self, replacement: bool = False, num_samples: int | None = None):
         """Initialize a RandomSamplerFactory.
 
         Args:
@@ -106,10 +111,11 @@ class DataInput:
         self,
         data_type: str,
         layers: list[str],
-        bands: Optional[list[str]] = None,
+        bands: list[str] | None = None,
         required: bool = True,
         passthrough: bool = False,
         is_target: bool = False,
+        dtype: DType = DType.FLOAT32,
     ):
         """Initialize a new DataInput.
 
@@ -122,6 +128,7 @@ class DataInput:
                 by any task
             is_target: whether this DataInput represents a target for the task. Targets
                 are not read during prediction phase.
+            dtype: data type to load the raster as
         """
         self.data_type = data_type
         self.layers = layers
@@ -129,6 +136,7 @@ class DataInput:
         self.required = required
         self.passthrough = passthrough
         self.is_target = is_target
+        self.dtype = dtype
 
 
 class SplitConfig:
@@ -136,14 +144,14 @@ class SplitConfig:
 
     def __init__(
         self,
-        groups: Optional[list[str]] = None,
-        tags: Optional[dict[str, str]] = None,
-        num_samples: Optional[int] = None,
-        transforms: Optional[list[torch.nn.Module]] = None,
-        sampler: Optional[SamplerFactory] = None,
-        patch_size: Optional[Union[int, tuple[int, int]]] = None,
-        load_all_patches: Optional[bool] = None,
-        skip_targets: Optional[bool] = None,
+        groups: list[str] | None = None,
+        tags: dict[str, str] | None = None,
+        num_samples: int | None = None,
+        transforms: list[torch.nn.Module] | None = None,
+        sampler: SamplerFactory | None = None,
+        patch_size: int | tuple[int, int] | None = None,
+        load_all_patches: bool | None = None,
+        skip_targets: bool | None = None,
     ):
         """Initialize a new SplitConfig.
 
@@ -456,18 +464,37 @@ class ModelDataset(torch.utils.data.Dataset):
 
                 image = torch.zeros(
                     (len(needed_bands), bounds[3] - bounds[1], bounds[2] - bounds[0]),
-                    dtype=torch.float32,
+                    dtype=data_input.dtype.get_torch_dtype(),
                 )
 
                 for band_set, src_indexes, dst_indexes in needed_sets_and_indexes:
+                    _, final_bounds = band_set.get_final_projection_and_bounds(
+                        window.projection, bounds
+                    )
                     raster_format = load_raster_format(
                         RasterFormatConfig(band_set.format["name"], band_set.format)
                     )
                     file_api = layer_dir.get_folder("_".join(band_set.bands))
-                    src = raster_format.decode_raster(file_api, bounds)
+                    src = raster_format.decode_raster(file_api, final_bounds)
+
+                    # Resize to patch size if needed.
+                    # This is for band sets that are stored at a lower resolution.
+                    # Here we assume that it is a multiple.
+                    if src.shape[1:3] != image.shape[1:3]:
+                        if src.shape[1] < image.shape[1]:
+                            factor = image.shape[1] // src.shape[1]
+                            src = src.repeat(repeats=factor, axis=1).repeat(
+                                repeats=factor, axis=2
+                            )
+                        else:
+                            factor = src.shape[1] // image.shape[1]
+                            src = src[:, ::factor, ::factor]
+
                     image[dst_indexes, :, :] = torch.as_tensor(
-                        src[src_indexes, :, :]
-                    ).float()
+                        src[src_indexes, :, :].astype(
+                            data_input.dtype.get_numpy_dtype()
+                        )
+                    )
 
                 return image
 
@@ -487,12 +514,6 @@ class ModelDataset(torch.utils.data.Dataset):
             if data_input.passthrough:
                 passthrough_inputs[name] = raw_inputs[name]
 
-        input_dict, target_dict = self.task.process_inputs(
-            raw_inputs, load_targets=not self.split_config.get_skip_targets()
-        )
-        input_dict.update(passthrough_inputs)
-        input_dict, target_dict = self.transforms(input_dict, target_dict)
-
         metadata = {
             "group": window.group,
             "window_name": window.name,
@@ -507,5 +528,13 @@ class ModelDataset(torch.utils.data.Dataset):
         else:
             metadata["patch_idx"] = 0
             metadata["num_patches"] = 1
+
+        input_dict, target_dict = self.task.process_inputs(
+            raw_inputs,
+            metadata=metadata,
+            load_targets=not self.split_config.get_skip_targets(),
+        )
+        input_dict.update(passthrough_inputs)
+        input_dict, target_dict = self.transforms(input_dict, target_dict)
 
         return input_dict, target_dict, metadata

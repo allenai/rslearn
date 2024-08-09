@@ -1,6 +1,6 @@
 """Default LightningDataModule for rslearn."""
 
-from typing import Any, Optional
+from typing import Any
 
 import lightning as L
 import torch
@@ -23,8 +23,8 @@ class RslearnDataModule(L.LightningDataModule):
         self,
         inputs: dict[str, DataInput],
         task: Task,
-        root_dir: Optional[str] = None,
-        file_api: Optional[FileAPI] = None,
+        root_dir: str | None = None,
+        file_api: FileAPI | None = None,
         batch_size: int = 1,
         num_workers: int = 0,
         default_config: SplitConfig = SplitConfig(),

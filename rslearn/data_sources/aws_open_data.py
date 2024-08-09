@@ -5,10 +5,10 @@ import io
 import json
 import os
 import xml.etree.ElementTree as ET
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, BinaryIO, Callable, Optional
+from typing import Any, BinaryIO
 
 import boto3
 import dateutil.parser
@@ -455,7 +455,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         modality: Sentinel2Modality,
         metadata_cache_dir: str,
         max_time_delta: timedelta = timedelta(days=30),
-        sort_by: Optional[str] = None,
+        sort_by: str | None = None,
         harmonize: bool = False,
     ) -> None:
         """Initialize a new Sentinel2 instance.
@@ -679,7 +679,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
 
     def _get_harmonize_callback(
         self, item: Item
-    ) -> Optional[Callable[[npt.NDArray], npt.NDArray]]:
+    ) -> Callable[[npt.NDArray], npt.NDArray] | None:
         """Gets the harmonization callback for the given item.
 
         Args:

@@ -1,7 +1,7 @@
 """GeoJSON-like feature class."""
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 import shapely
 
@@ -11,7 +11,7 @@ from .geometry import Projection, STGeometry
 class Feature:
     """A GeoJSON-like feature that contains one vector geometry."""
 
-    def __init__(self, geometry: STGeometry, properties: Optional[dict[str, Any]] = {}):
+    def __init__(self, geometry: STGeometry, properties: dict[str, Any] | None = {}):
         """Initialize a new Feature.
 
         Args:
@@ -52,4 +52,4 @@ class Feature:
             a Feature representing the specified geometry
         """
         shp = shapely.geometry.shape(d["geometry"])
-        return Feature(STGeometry(projection, shp, None), d["properties"])
+        return Feature(STGeometry(projection, shp, None), d.get("properties", {}))

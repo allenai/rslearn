@@ -7,7 +7,7 @@ import os
 import tempfile
 import time
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 import ee
 import rasterio
@@ -39,8 +39,8 @@ class GEE(DataSource):
         index_fname: str,
         service_account_name: str,
         service_account_credentials: str,
-        filters: Optional[list[tuple[str, Any]]] = None,
-        dtype: Optional[DType] = None,
+        filters: list[tuple[str, Any]] | None = None,
+        dtype: DType | None = None,
     ) -> None:
         """Initialize a new GEE instance.
 

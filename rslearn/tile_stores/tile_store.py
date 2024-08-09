@@ -1,7 +1,7 @@
 """Base class for tile stores."""
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import numpy.typing as npt
 
@@ -14,7 +14,7 @@ class LayerMetadata:
     def __init__(
         self,
         projection: Projection,
-        time_range: Optional[tuple[datetime, datetime]],
+        time_range: tuple[datetime, datetime] | None,
         properties: dict[str, Any],
     ) -> None:
         """Create a new LayerMetadata instance."""
@@ -57,7 +57,7 @@ class TileStoreLayer:
     The layer can store one or more raster and vector datas.
     """
 
-    def read_raster(self, bounds: PixelBounds) -> Optional[npt.NDArray[Any]]:
+    def read_raster(self, bounds: PixelBounds) -> npt.NDArray[Any] | None:
         """Read raster data from the store.
 
         Args:
@@ -130,7 +130,7 @@ class TileStore:
         """
         raise NotImplementedError
 
-    def get_layer(self, layer_id: tuple[str, ...]) -> Optional[TileStoreLayer]:
+    def get_layer(self, layer_id: tuple[str, ...]) -> TileStoreLayer | None:
         """Get a layer in the tile store.
 
         Args:
@@ -180,7 +180,7 @@ class PrefixedTileStore(TileStore):
         """
         return self.tile_store.create_layer(self.prefix + layer_id, metadata)
 
-    def get_layer(self, layer_id: tuple[str, ...]) -> Optional[TileStoreLayer]:
+    def get_layer(self, layer_id: tuple[str, ...]) -> TileStoreLayer | None:
         """Get a layer in the tile store.
 
         Args:

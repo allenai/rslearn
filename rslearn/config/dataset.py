@@ -2,9 +2,12 @@
 
 from datetime import timedelta
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
+import numpy as np
+import numpy.typing as npt
 import pytimeparse
+import torch
 from rasterio.enums import Resampling
 
 from rslearn.utils import PixelBounds, Projection
@@ -16,7 +19,31 @@ class DType(Enum):
     UINT8 = "uint8"
     UINT16 = "uint16"
     UINT32 = "uint32"
+    INT32 = "int32"
     FLOAT32 = "float32"
+
+    def get_numpy_dtype(self) -> npt.DTypeLike:
+        """Returns numpy dtype object corresponding to this DType."""
+        if self == DType.UINT8:
+            return np.uint8
+        elif self == DType.UINT16:
+            return np.uint16
+        elif self == DType.UINT32:
+            return np.uint32
+        elif self == DType.INT32:
+            return np.int32
+        elif self == DType.FLOAT32:
+            return np.float32
+        raise ValueError(f"unable to handle numpy dtype {self}")
+
+    def get_torch_dtype(self) -> torch.dtype:
+        """Returns pytorch dtype object corresponding to this DType."""
+        if self == DType.INT32:
+            return torch.int32
+        elif self == DType.FLOAT32:
+            return torch.float32
+        else:
+            raise ValueError(f"unable to handle torch dtype {self}")
 
 
 RESAMPLING_METHODS = {
@@ -85,10 +112,10 @@ class BandSetConfig:
         self,
         config_dict: dict[str, Any],
         dtype: DType,
-        bands: Optional[list[str]] = None,
-        format: Optional[dict[str, Any]] = None,
+        bands: list[str] | None = None,
+        format: dict[str, Any] | None = None,
         zoom_offset: int = 0,
-        remap: Optional[dict[str, Any]] = None,
+        remap: dict[str, Any] | None = None,
     ) -> None:
         """Creates a new BandSetConfig instance.
 
@@ -138,8 +165,8 @@ class BandSetConfig:
         return BandSetConfig(**kwargs)
 
     def get_final_projection_and_bounds(
-        self, projection: Projection, bounds: Optional[PixelBounds]
-    ) -> tuple[Projection, Optional[PixelBounds]]:
+        self, projection: Projection, bounds: PixelBounds | None
+    ) -> tuple[Projection, PixelBounds | None]:
         """Gets the final projection/bounds based on band set config.
 
         The band set config may apply a non-zero zoom offset that modifies the window's
@@ -255,8 +282,8 @@ class DataSourceConfig:
         name: str,
         query_config: QueryConfig,
         config_dict: dict[str, Any],
-        time_offset: Optional[timedelta] = None,
-        duration: Optional[timedelta] = None,
+        time_offset: timedelta | None = None,
+        duration: timedelta | None = None,
         ingest: bool = True,
     ) -> None:
         """Initializes a new DataSourceConfig.
@@ -327,7 +354,7 @@ class LayerConfig:
     """Configuration of a layer in a dataset."""
 
     def __init__(
-        self, layer_type: LayerType, data_source: Optional[DataSourceConfig] = None
+        self, layer_type: LayerType, data_source: DataSourceConfig | None = None
     ):
         """Initialize a new LayerConfig.
 
@@ -350,7 +377,7 @@ class RasterLayerConfig(LayerConfig):
         self,
         layer_type: LayerType,
         band_sets: list[BandSetConfig],
-        data_source: Optional[DataSourceConfig] = None,
+        data_source: DataSourceConfig | None = None,
         resampling_method: Resampling = Resampling.bilinear,
     ):
         """Initialize a new RasterLayerConfig.
@@ -391,7 +418,7 @@ class VectorLayerConfig(LayerConfig):
     def __init__(
         self,
         layer_type: LayerType,
-        data_source: Optional[DataSourceConfig] = None,
+        data_source: DataSourceConfig | None = None,
         zoom_offset: int = 0,
         format: VectorFormatConfig = VectorFormatConfig("geojson"),
     ):
@@ -424,8 +451,8 @@ class VectorLayerConfig(LayerConfig):
         return VectorLayerConfig(**kwargs)
 
     def get_final_projection_and_bounds(
-        self, projection: Projection, bounds: Optional[PixelBounds]
-    ) -> tuple[Projection, Optional[PixelBounds]]:
+        self, projection: Projection, bounds: PixelBounds | None
+    ) -> tuple[Projection, PixelBounds | None]:
         """Gets the final projection/bounds based on zoom offset.
 
         Args:

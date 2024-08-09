@@ -75,7 +75,11 @@ class RslearnWriter(BasePredictionWriter):
             dataloader_idx: the index in the dataloader.
         """
         assert isinstance(pl_module, RslearnLightningModule)
-        outputs = [pl_module.task.process_output(output) for output in prediction]
+        metadatas = batch[2]
+        outputs = [
+            pl_module.task.process_output(output, metadata)
+            for output, metadata in zip(prediction, metadatas)
+        ]
 
         _, _, metadatas = batch
         for output, metadata in zip(outputs, metadatas):

@@ -1,7 +1,5 @@
 """Normalization transforms."""
 
-from typing import Optional, Union
-
 import torch
 
 from .transform import Transform
@@ -12,11 +10,11 @@ class Normalize(Transform):
 
     def __init__(
         self,
-        mean: Union[float, list[float]],
-        std: Union[float, list[float]],
-        valid_range: Optional[
-            Union[tuple[float, float], tuple[list[float], list[float]]]
-        ] = None,
+        mean: float | list[float],
+        std: float | list[float],
+        valid_range: tuple[float, float]
+        | tuple[list[float], list[float]]
+        | None = None,
         selectors: list[str] = ["image"],
     ):
         """Initialize a new Normalize.

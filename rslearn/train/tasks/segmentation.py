@@ -1,6 +1,6 @@
 """Segmentation task."""
 
-from typing import Any, Optional, Union
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -53,13 +53,15 @@ class SegmentationTask(BasicTask):
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, Union[torch.Tensor, list[Feature]]],
+        raw_inputs: dict[str, torch.Tensor | list[Feature]],
+        metadata: dict[str, Any],
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
 
         Args:
             raw_inputs: raster or vector data to process
+            metadata: metadata about the patch being read
             load_targets: whether to load the targets or only inputs
 
         Returns:
@@ -76,11 +78,14 @@ class SegmentationTask(BasicTask):
             "valid": torch.ones(labels.shape, dtype=torch.float32),
         }
 
-    def process_output(self, raw_output: Any) -> Union[npt.NDArray[Any], list[Feature]]:
+    def process_output(
+        self, raw_output: Any, metadata: dict[str, Any]
+    ) -> npt.NDArray[Any] | list[Feature]:
         """Processes an output into raster or vector data.
 
         Args:
             raw_output: the output from prediction head.
+            metadata: metadata about the patch being read
 
         Returns:
             either raster or vector data.
@@ -91,7 +96,7 @@ class SegmentationTask(BasicTask):
     def visualize(
         self,
         input_dict: dict[str, Any],
-        target_dict: Optional[dict[str, Any]],
+        target_dict: dict[str, Any] | None,
         output: Any,
     ) -> dict[str, npt.NDArray[Any]]:
         """Visualize the outputs and targets.
@@ -140,7 +145,7 @@ class SegmentationHead(torch.nn.Module):
         self,
         logits: torch.Tensor,
         inputs: list[dict[str, Any]],
-        targets: Optional[list[dict[str, Any]]] = None,
+        targets: list[dict[str, Any]] | None = None,
     ):
         """Compute the segmentation outputs from logits and targets.
 

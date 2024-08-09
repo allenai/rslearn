@@ -1,6 +1,6 @@
 """Training tasks."""
 
-from typing import Any, Optional, Union
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -20,13 +20,15 @@ class Task:
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, Union[torch.Tensor, list[Feature]]],
+        raw_inputs: dict[str, torch.Tensor | list[Feature]],
+        metadata: dict[str, Any],
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
 
         Args:
             raw_inputs: raster or vector data to process
+            metadata: metadata about the patch being read
             load_targets: whether to load the targets or only inputs
 
         Returns:
@@ -35,11 +37,14 @@ class Task:
         """
         raise NotImplementedError
 
-    def process_output(self, raw_output: Any) -> Union[npt.NDArray[Any], list[Feature]]:
+    def process_output(
+        self, raw_output: Any, metadata: dict[str, Any]
+    ) -> npt.NDArray[Any] | list[Feature]:
         """Processes an output into raster or vector data.
 
         Args:
             raw_output: the output from prediction head.
+            metadata: metadata about the patch being read
 
         Returns:
             either raster or vector data.
@@ -49,7 +54,7 @@ class Task:
     def visualize(
         self,
         input_dict: dict[str, Any],
-        target_dict: Optional[dict[str, Any]],
+        target_dict: dict[str, Any] | None,
         output: Any,
     ) -> dict[str, npt.NDArray[Any]]:
         """Visualize the outputs and targets.
@@ -75,7 +80,7 @@ class BasicTask(Task):
     def __init__(
         self,
         image_bands: tuple[int, ...] = (0, 1, 2),
-        remap_values: Optional[tuple[tuple[float, float], tuple[int, int]]] = None,
+        remap_values: tuple[tuple[float, float], tuple[int, int]] | None = None,
     ):
         """Initialize a new BasicTask.
 
@@ -89,7 +94,7 @@ class BasicTask(Task):
     def visualize(
         self,
         input_dict: dict[str, Any],
-        target_dict: Optional[dict[str, Any]],
+        target_dict: dict[str, Any] | None,
         output: Any,
     ) -> dict[str, npt.NDArray[Any]]:
         """Visualize the outputs and targets.

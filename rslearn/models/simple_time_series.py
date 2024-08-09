@@ -1,6 +1,6 @@
 """SimpleTimeSeries encoder."""
 
-from typing import Any, Optional
+from typing import Any
 
 import torch
 
@@ -22,8 +22,8 @@ class SimpleTimeSeries(torch.nn.Module):
         encoder: torch.nn.Module,
         image_channels: int,
         op: str = "max",
-        groups: Optional[list[list[int]]] = None,
-        num_layers: Optional[int] = None,
+        groups: list[list[int]] | None = None,
+        num_layers: int | None = None,
     ):
         """Create a new SimpleTimeSeries.
 

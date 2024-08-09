@@ -1,8 +1,9 @@
 """Helper functions for raster data sources."""
 
 import os
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, Optional, Union
+from typing import Any
 
 import affine
 import numpy as np
@@ -173,11 +174,11 @@ def get_needed_projections(
 
 def ingest_raster(
     tile_store: TileStore,
-    raster: Union[rasterio.io.DatasetReader, ArrayWithTransform],
+    raster: rasterio.io.DatasetReader | ArrayWithTransform,
     projection: Projection,
-    time_range: Optional[tuple[datetime, datetime]] = None,
-    layer_config: Optional[RasterLayerConfig] = None,
-    array_callback: Optional[Callable[[npt.NDArray[Any]], npt.NDArray[Any]]] = None,
+    time_range: tuple[datetime, datetime] | None = None,
+    layer_config: RasterLayerConfig | None = None,
+    array_callback: Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None = None,
 ) -> None:
     """Ingests an in-memory rasterio dataset into the tile store.
 
@@ -254,7 +255,7 @@ def ingest_raster(
 
 
 def materialize_raster(
-    raster: Union[rasterio.io.DatasetReader, ArrayWithTransform],
+    raster: rasterio.io.DatasetReader | ArrayWithTransform,
     window: Window,
     layer_name: str,
     band_cfg: BandSetConfig,

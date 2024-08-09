@@ -1,6 +1,6 @@
 """Crop transform."""
 
-from typing import Any, Union
+from typing import Any
 
 import torch
 import torchvision
@@ -13,7 +13,7 @@ class Crop(Transform):
 
     def __init__(
         self,
-        crop_size: Union[int, tuple[int, int]],
+        crop_size: int | tuple[int, int],
         image_selectors: list[str] = ["image"],
         box_selectors: list[str] = [],
     ):

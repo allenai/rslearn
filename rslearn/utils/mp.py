@@ -1,8 +1,8 @@
 """Multi-processing utilities."""
 
 import multiprocessing
-from collections.abc import Generator
-from typing import Any, Callable
+from collections.abc import Callable, Generator
+from typing import Any
 
 
 class StarImapUnorderedWrapper:

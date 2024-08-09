@@ -1,7 +1,7 @@
 """Data source for raster data in ESA Copernicus API."""
 
 import xml.etree.ElementTree as ET
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import numpy as np
 import numpy.typing as npt
@@ -9,7 +9,7 @@ import numpy.typing as npt
 
 def get_harmonize_callback(
     tree: ET.ElementTree,
-) -> Optional[Callable[[npt.NDArray], npt.NDArray]]:
+) -> Callable[[npt.NDArray], npt.NDArray] | None:
     """Gets the harmonization callback based on the metadata XML.
 
     Harmonization ensures that scenes before and after processing baseline 04.00

@@ -4,9 +4,9 @@ import argparse
 import multiprocessing
 import random
 import sys
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Optional
 
 import tqdm
 import wandb
@@ -48,8 +48,8 @@ def parse_time(time_str: str) -> datetime:
 
 
 def parse_time_range(
-    start: Optional[str], end: Optional[str]
-) -> Optional[tuple[datetime, datetime]]:
+    start: str | None, end: str | None
+) -> tuple[datetime, datetime] | None:
     """Parse a start and end time string into a time range tuple."""
     if not start or not end:
         return None
@@ -253,11 +253,11 @@ def add_apply_on_windows_args(parser: argparse.ArgumentParser):
 def apply_on_windows(
     f: Callable[[list[Window]], None],
     dataset: Dataset,
-    group: Optional[str] = None,
-    window: Optional[str] = None,
+    group: str | None = None,
+    window: str | None = None,
     workers: int = 0,
     batch_size: int = 1,
-    jobs_per_process: Optional[int] = None,
+    jobs_per_process: int | None = None,
     use_initial_job: bool = True,
 ):
     """A helper to apply a function on windows in a dataset.

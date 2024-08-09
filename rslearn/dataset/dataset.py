@@ -2,7 +2,6 @@
 
 import json
 import multiprocessing
-from typing import Optional
 
 import tqdm
 
@@ -39,7 +38,7 @@ class Dataset:
     """
 
     def __init__(
-        self, ds_root: Optional[str] = None, file_api: Optional[FileAPI] = None
+        self, ds_root: str | None = None, file_api: FileAPI | None = None
     ) -> None:
         """Initializes a new Dataset.
 
@@ -64,8 +63,8 @@ class Dataset:
 
     def load_windows(
         self,
-        groups: Optional[list[str]] = None,
-        names: Optional[list[str]] = None,
+        groups: list[str] | None = None,
+        names: list[str] | None = None,
         show_progress: bool = False,
         workers: int = 0,
     ) -> list[Window]:

@@ -2,10 +2,10 @@
 
 import functools
 import os
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from io import BytesIO, StringIO
-from typing import Any, BinaryIO, Callable, Optional, TextIO, Union
+from typing import Any, BinaryIO, TextIO
 
 import boto3
 import botocore
@@ -17,9 +17,7 @@ FileAPIs = ClassRegistry()
 class FileAPI:
     """A generic API for reading and writing binary data associated with filenames."""
 
-    def open(
-        self, fname: str, mode: str
-    ) -> Generator[Union[BinaryIO, TextIO], None, None]:
+    def open(self, fname: str, mode: str) -> Generator[BinaryIO | TextIO, None, None]:
         """Open a file for reading or writing.
 
         Args:
@@ -33,7 +31,7 @@ class FileAPI:
 
     def open_atomic(
         self, fname: str, mode: str
-    ) -> Generator[Union[BinaryIO, TextIO], None, None]:
+    ) -> Generator[BinaryIO | TextIO, None, None]:
         """Open a file for atomic writing.
 
         Guarantees that overlapping calls to open_atomic will lead to one or the other
@@ -95,9 +93,7 @@ class LocalFileAPI(FileAPI):
         """
         self.root_dir = root_dir
 
-    def open(
-        self, fname: str, mode: str
-    ) -> Generator[Union[BinaryIO, TextIO], None, None]:
+    def open(self, fname: str, mode: str) -> Generator[BinaryIO | TextIO, None, None]:
         """Open a file for reading or writing.
 
         Args:
@@ -112,7 +108,7 @@ class LocalFileAPI(FileAPI):
     @contextmanager
     def open_atomic(
         self, fname: str, mode: str
-    ) -> Generator[Union[BinaryIO, TextIO], None, None]:
+    ) -> Generator[BinaryIO | TextIO, None, None]:
         """Open a file for atomic writing.
 
         Will write to a temporary file, and rename it to the destination upon success.
@@ -198,8 +194,8 @@ class CallbackIO:
 
     def __init__(
         self,
-        callback: Optional[Callable[[bytes], None]] = None,
-        buf: Union[BinaryIO, TextIO] = BytesIO(),
+        callback: Callable[[bytes], None] | None = None,
+        buf: BinaryIO | TextIO = BytesIO(),
     ):
         """Create a new CallbackIO.
 
@@ -210,7 +206,7 @@ class CallbackIO:
         self.callback = callback
         self.buf = buf
 
-    def __enter__(self) -> Union[BinaryIO, TextIO]:
+    def __enter__(self) -> BinaryIO | TextIO:
         """Enter the CallbackIO.
 
         Returns:
@@ -244,8 +240,8 @@ class S3FileAPI(FileAPI):
         self,
         endpoint_url: str,
         bucket_name: str,
-        access_key_id: Optional[str] = None,
-        secret_access_key: Optional[str] = None,
+        access_key_id: str | None = None,
+        secret_access_key: str | None = None,
         prefix: str = "",
     ):
         """Initialize a new S3FileAPI.

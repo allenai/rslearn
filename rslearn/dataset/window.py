@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import shapely
 
@@ -72,7 +72,7 @@ class Window:
         name: str,
         projection: Projection,
         bounds: tuple[int, int, int, int],
-        time_range: Optional[tuple[datetime, datetime]],
+        time_range: tuple[datetime, datetime] | None,
         options: dict[str, Any] = {},
     ) -> None:
         """Creates a new Window instance.

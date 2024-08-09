@@ -1,7 +1,8 @@
 """GridIndex spatial index implementation."""
 
 import math
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from rslearn.utils.spatial_index import SpatialIndex
 

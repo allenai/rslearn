@@ -1,7 +1,5 @@
 """FreezeUnfreeze callback."""
 
-from typing import Optional
-
 import torch
 from lightning.pytorch import LightningModule
 from lightning.pytorch.callbacks import BaseFinetuning
@@ -12,7 +10,7 @@ class FreezeUnfreeze(BaseFinetuning):
     """Freezes a module and optionally unfreezes it after a number of epochs."""
 
     def __init__(
-        self, module_selector: list[str], unfreeze_at_epoch: Optional[int] = None
+        self, module_selector: list[str], unfreeze_at_epoch: int | None = None
     ):
         """Creates a new FreezeUnfreeze.
 

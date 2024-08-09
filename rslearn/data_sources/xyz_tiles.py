@@ -2,8 +2,9 @@
 
 import math
 import urllib.request
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -28,7 +29,7 @@ WEB_MERCATOR_UNITS = 2 * math.pi * 6378137
 
 def read_from_tile_callback(
     bounds: PixelBounds,
-    callback: Callable[[int, int], Optional[npt.NDArray[Any]]],
+    callback: Callable[[int, int], npt.NDArray[Any] | None],
     tile_size: int = 256,
 ) -> npt.NDArray[Any]:
     """Read raster data from tiles.

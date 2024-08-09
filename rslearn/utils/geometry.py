@@ -1,7 +1,7 @@
 """Spatiotemporal geometry utilities."""
 
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import rasterio.warp
@@ -109,7 +109,7 @@ class STGeometry:
         self,
         projection: Projection,
         shp: shapely.Geometry,
-        time_range: Optional[tuple[datetime, datetime]],
+        time_range: tuple[datetime, datetime] | None,
     ):
         """Creates a new spatiotemporal geometry.
 
@@ -146,7 +146,7 @@ class STGeometry:
         return timedelta()
 
     def distance_to_time_range(
-        self, time_range: Optional[tuple[datetime, datetime]]
+        self, time_range: tuple[datetime, datetime] | None
     ) -> timedelta:
         """Returns the distance from this geometry to the specified time range.
 
@@ -165,7 +165,7 @@ class STGeometry:
         return timedelta()
 
     def intersects_time_range(
-        self, time_range: Optional[tuple[datetime, datetime]]
+        self, time_range: tuple[datetime, datetime] | None
     ) -> timedelta:
         """Returns whether this geometry intersects the other time range."""
         if self.time_range is None or time_range is None:

@@ -1,6 +1,6 @@
 """Abstract RasterFormat class."""
 
-from typing import Any, BinaryIO, Optional
+from typing import Any, BinaryIO
 
 import affine
 import numpy as np
@@ -44,7 +44,7 @@ class RasterFormat:
 
     def decode_raster(
         self, file_api: FileAPI, bounds: PixelBounds
-    ) -> Optional[npt.NDArray[Any]]:
+    ) -> npt.NDArray[Any] | None:
         """Decodes raster data.
 
         Args:
@@ -188,7 +188,7 @@ class ImageTileRasterFormat(RasterFormat):
 
     def decode_raster(
         self, file_api: FileAPI, bounds: PixelBounds
-    ) -> Optional[npt.NDArray[Any]]:
+    ) -> npt.NDArray[Any] | None:
         """Decodes raster data.
 
         Args:
@@ -327,7 +327,7 @@ class GeotiffRasterFormat(RasterFormat):
 
     def decode_raster(
         self, file_api: FileAPI, bounds: PixelBounds
-    ) -> Optional[npt.NDArray[Any]]:
+    ) -> npt.NDArray[Any] | None:
         """Decodes raster data.
 
         Args:
@@ -482,7 +482,7 @@ class SingleImageRasterFormat(RasterFormat):
 
     def decode_raster(
         self, file_api: FileAPI, bounds: PixelBounds
-    ) -> Optional[npt.NDArray[Any]]:
+    ) -> npt.NDArray[Any] | None:
         """Decodes raster data.
 
         Args:

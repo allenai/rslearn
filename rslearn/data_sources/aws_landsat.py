@@ -7,7 +7,7 @@ import urllib.request
 import zipfile
 from collections.abc import Generator
 from datetime import timedelta
-from typing import Any, BinaryIO, Optional
+from typing import Any, BinaryIO
 
 import boto3
 import dateutil.parser
@@ -91,7 +91,7 @@ class LandsatOliTirs(DataSource):
         config: LayerConfig,
         metadata_cache_dir: str,
         max_time_delta: timedelta = timedelta(days=30),
-        sort_by: Optional[str] = None,
+        sort_by: str | None = None,
     ) -> None:
         """Initialize a new LandsatOliTirs instance.
 

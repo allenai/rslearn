@@ -1,7 +1,7 @@
 """RtreeIndex spatial index implementation."""
 
 import os
-from typing import Any, Optional
+from typing import Any
 
 from rtree import index
 
@@ -14,7 +14,7 @@ class RtreeIndex(SpatialIndex):
     Both in-memory and on-disk options are supported.
     """
 
-    def __init__(self, fname: Optional[str] = None):
+    def __init__(self, fname: str | None = None):
         """Initialize a new RtreeIndex.
 
         If fname is set, the index is persisted on disk, otherwise it is in-memory.

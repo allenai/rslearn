@@ -1,7 +1,7 @@
 """Default LightningModule for rslearn."""
 
 import os
-from typing import Any, Optional
+from typing import Any
 
 import lightning as L
 import torch
@@ -89,8 +89,8 @@ class RslearnLightningModule(L.LightningModule):
         plateau_patience: int = 10,
         plateau_min_lr: float = 0,
         plateau_cooldown: int = 0,
-        visualize_dir: Optional[str] = None,
-        restore_config: Optional[RestoreConfig] = None,
+        visualize_dir: str | None = None,
+        restore_config: RestoreConfig | None = None,
         print_parameters: bool = False,
         print_model: bool = False,
     ):

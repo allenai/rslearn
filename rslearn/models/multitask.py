@@ -1,6 +1,6 @@
 """MultiTaskModel for rslearn."""
 
-from typing import Any, Optional
+from typing import Any
 
 import torch
 
@@ -32,7 +32,7 @@ class MultiTaskModel(torch.nn.Module):
     def forward(
         self,
         inputs: list[dict[str, Any]],
-        targets: Optional[list[dict[str, Any]]] = None,
+        targets: list[dict[str, Any]] | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, torch.Tensor]]:
         """Apply the sequence of modules on the inputs.
 

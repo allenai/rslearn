@@ -7,7 +7,7 @@ import time
 import uuid
 from collections.abc import Generator
 from datetime import datetime, timedelta, timezone
-from typing import Any, BinaryIO, Optional
+from typing import Any, BinaryIO
 
 import pytimeparse
 import rasterio
@@ -51,8 +51,8 @@ class M2MAPIClient:
         self.auth_token = response.json()["data"]
 
     def request(
-        self, endpoint: str, data: Optional[dict[str, Any]] = None
-    ) -> Optional[dict[str, Any]]:
+        self, endpoint: str, data: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
         """Make a request to the API.
 
         Args:
@@ -104,10 +104,10 @@ class M2MAPIClient:
     def scene_search(
         self,
         dataset_name: str,
-        acquisition_time_range: Optional[tuple[datetime, datetime]] = None,
-        cloud_cover_range: Optional[tuple[int, int]] = None,
-        bbox: Optional[tuple[float, float, float, float]] = None,
-        metadata_filter: Optional[dict[str, Any]] = None,
+        acquisition_time_range: tuple[datetime, datetime] | None = None,
+        cloud_cover_range: tuple[int, int] | None = None,
+        bbox: tuple[float, float, float, float] | None = None,
+        metadata_filter: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Search for scenes matching the arguments.
 
@@ -267,7 +267,7 @@ class LandsatOliTirs(DataSource):
         username: str,
         password: str,
         max_time_delta: timedelta = timedelta(days=30),
-        sort_by: Optional[str] = None,
+        sort_by: str | None = None,
     ):
         """Initialize a new LandsatOliTirs instance.
 

@@ -1,7 +1,6 @@
 """Functions to add windows to an rslearn dataset."""
 
 from datetime import datetime
-from typing import Optional
 
 import fiona
 import shapely
@@ -21,10 +20,10 @@ def add_windows_from_geometries(
     group: str,
     geometries: list[STGeometry],
     projection: Projection,
-    name: Optional[str] = None,
-    grid_size: Optional[int] = None,
-    window_size: Optional[int] = None,
-    time_range: Optional[tuple[datetime, datetime]] = None,
+    name: str | None = None,
+    grid_size: int | None = None,
+    window_size: int | None = None,
+    time_range: tuple[datetime, datetime] | None = None,
     use_utm: bool = False,
 ):
     """Create windows based on a list of STGeometry.
@@ -150,11 +149,11 @@ def add_windows_from_box(
     group: str,
     box: tuple[float, float, float, float],
     projection: Projection,
-    src_projection: Optional[Projection] = None,
-    name: Optional[str] = None,
-    grid_size: Optional[int] = None,
-    window_size: Optional[int] = None,
-    time_range: Optional[tuple[datetime, datetime]] = None,
+    src_projection: Projection | None = None,
+    name: str | None = None,
+    grid_size: int | None = None,
+    window_size: int | None = None,
+    time_range: tuple[datetime, datetime] | None = None,
     use_utm: bool = False,
 ) -> list[Window]:
     """Create windows based on the specified box.
@@ -197,10 +196,10 @@ def add_windows_from_file(
     group: str,
     fname: str,
     projection: Projection,
-    name: Optional[str] = None,
-    grid_size: Optional[int] = None,
-    window_size: Optional[int] = None,
-    time_range: Optional[tuple[datetime, datetime]] = None,
+    name: str | None = None,
+    grid_size: int | None = None,
+    window_size: int | None = None,
+    time_range: tuple[datetime, datetime] | None = None,
     use_utm: bool = False,
 ) -> list[Window]:
     """Create windows based on the specified vector file.
