@@ -38,6 +38,7 @@ class SegmentationTask(BasicTask):
         self,
         num_classes: int,
         colors: list[tuple[int, int, int]] = DEFAULT_COLORS,
+        zero_is_invalid: bool = False,
         **kwargs,
     ):
         """Initialize a new SegmentationTask.
@@ -45,6 +46,7 @@ class SegmentationTask(BasicTask):
         Args:
             num_classes: the number of classes to predict
             colors: optional colors for each class
+            zero_is_invalid: whether pixels labeled class 0 should be marked invalid
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -73,9 +75,15 @@ class SegmentationTask(BasicTask):
 
         assert raw_inputs["targets"].shape[0] == 1
         labels = raw_inputs["targets"][0, :, :].long()
+
+        if self.zero_is_invalid:
+            valid = (labels > 0).float()
+        else:
+            valid = torch.ones(labels.shape, dtype=torch.float32)
+
         return {}, {
             "classes": labels,
-            "valid": torch.ones(labels.shape, dtype=torch.float32),
+            "valid": valid,
         }
 
     def process_output(
