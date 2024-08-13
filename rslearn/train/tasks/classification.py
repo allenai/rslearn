@@ -26,6 +26,7 @@ class ClassificationTask(BasicTask):
         read_class_id: bool = False,
         allow_invalid: bool = False,
         skip_unknown_categories: bool = False,
+        prob_property: str | None = None,
         **kwargs,
     ):
         """Initialize a new ClassificationTask.
@@ -42,6 +43,8 @@ class ClassificationTask(BasicTask):
                 at a window, simply mark the example invalid for this task
             skip_unknown_categories: whether to skip examples with categories that are
                 not passed via classes, instead of throwing error
+            prob_property: when predicting, write probabilities in addition to class ID
+                under this property name.
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -51,6 +54,7 @@ class ClassificationTask(BasicTask):
         self.read_class_id = read_class_id
         self.allow_invalid = allow_invalid
         self.skip_unknown_categories = skip_unknown_categories
+        self.prob_property = prob_property
 
         if not self.filters:
             self.filters = []
@@ -123,7 +127,8 @@ class ClassificationTask(BasicTask):
         Returns:
             either raster or vector data.
         """
-        value = raw_output.cpu().numpy().argmax()
+        probs = raw_output.cpu().numpy()
+        value = probs.argmax()
         if not self.read_class_id:
             value = self.classes[value]
         feature = Feature(
@@ -136,6 +141,8 @@ class ClassificationTask(BasicTask):
                 self.property_name: value,
             },
         )
+        if self.prob_property:
+            feature.properties[self.prob_property] = probs.tolist()
         return [feature]
 
     def visualize(
