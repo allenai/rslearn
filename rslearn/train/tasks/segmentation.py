@@ -52,6 +52,7 @@ class SegmentationTask(BasicTask):
         super().__init__(**kwargs)
         self.num_classes = num_classes
         self.colors = colors
+        self.zero_is_invalid = zero_is_invalid
 
     def process_inputs(
         self,
