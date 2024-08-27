@@ -5,10 +5,10 @@ from typing import Any
 import lightning as L
 import torch
 from torch.utils.data import DataLoader
+from upath import UPath
 
 from rslearn.dataset import Dataset
 from rslearn.train.tasks import Task
-from rslearn.utils import FileAPI, parse_file_api_string
 
 from .dataset import DataInput, ModelDataset, SplitConfig
 
@@ -23,8 +23,8 @@ class RslearnDataModule(L.LightningDataModule):
         self,
         inputs: dict[str, DataInput],
         task: Task,
-        root_dir: str | None = None,
-        file_api: FileAPI | None = None,
+        path: str,
+        path_options: dict[str, Any] = {},
         batch_size: int = 1,
         num_workers: int = 0,
         default_config: SplitConfig = SplitConfig(),
@@ -38,10 +38,8 @@ class RslearnDataModule(L.LightningDataModule):
         Args:
             inputs: what to read from the underlying dataset
             task: the task to train on
-            root_dir: the root directory of the dataset. One of root_dir or file_api
-                must be provided.
-            file_api: a FileAPI containing dataset root. One of root_dir or file_api
-                must be provided.
+            path: the dataset path.
+            path_options: additional options for path to pass to fsspec.
             batch_size: the batch size
             num_workers: number of data loader worker processes, or 0 to use main
                 process only
@@ -54,12 +52,9 @@ class RslearnDataModule(L.LightningDataModule):
         super().__init__()
         self.inputs = inputs
         self.task = task
+        self.path = UPath(path, **path_options)
         self.batch_size = batch_size
         self.num_workers = num_workers
-
-        if not file_api:
-            file_api = parse_file_api_string(root_dir)
-        self.file_api = file_api
 
         self.split_configs = {
             "train": default_config.update(train_config),
@@ -83,7 +78,7 @@ class RslearnDataModule(L.LightningDataModule):
         self.datasets = {}
         for split in stage_to_splits[stage]:
             self.datasets[split] = ModelDataset(
-                dataset=Dataset(file_api=self.file_api),
+                dataset=Dataset(path=self.path),
                 split_config=self.split_configs[split],
                 inputs=self.inputs,
                 task=self.task,

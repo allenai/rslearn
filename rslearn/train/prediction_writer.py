@@ -123,16 +123,19 @@ class RslearnWriter(BasePredictionWriter):
             # This is the last patch so it's time to write it.
             pending_output = self.pending_outputs[window_name]
             del self.pending_outputs[window_name]
-            layer_dir = self.dataset.file_api.get_folder(
-                "windows", metadata["group"], window_name, "layers", self.output_layer
+            layer_dir = (
+                self.dataset.path
+                / "windows"
+                / metadata["group"]
+                / window_name
+                / "layers"
+                / self.output_layer
             )
 
             if self.layer_config.layer_type == LayerType.RASTER:
-                layer_dir = layer_dir.get_folder(
-                    "_".join(self.layer_config.band_sets[0].bands)
-                )
+                band_dir = layer_dir / "_".join(self.layer_config.band_sets[0].bands)
                 self.format.encode_raster(
-                    layer_dir, metadata["projection"], window_bounds, pending_output
+                    band_dir, metadata["projection"], window_bounds, pending_output
                 )
 
             elif self.layer_config.layer_type == LayerType.VECTOR:

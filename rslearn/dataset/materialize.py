@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 from class_registry import ClassRegistry
+from upath import UPath
 
 from rslearn.config import (
     LayerConfig,
@@ -14,7 +15,7 @@ from rslearn.config import (
 )
 from rslearn.data_sources import Item
 from rslearn.tile_stores import TileStore, TileStoreLayer
-from rslearn.utils import Feature, FileAPI, PixelBounds
+from rslearn.utils import Feature, PixelBounds
 from rslearn.utils.raster_format import load_raster_format
 from rslearn.utils.vector_format import load_vector_format
 
@@ -118,15 +119,13 @@ class RasterMaterializer(Materializer):
         """
         assert isinstance(layer_cfg, RasterLayerConfig)
 
-        out_layer_dirs: list[FileAPI] = []
+        out_layer_dirs: list[UPath] = []
         for group_id in range(len(item_groups)):
             if group_id == 0:
                 out_layer_name = layer_name
             else:
                 out_layer_name = f"{layer_name}.{group_id}"
-            out_layer_dir = window.file_api.get_folder(
-                window.file_api.join("layers", out_layer_name)
-            )
+            out_layer_dir = window.path / "layers" / out_layer_name
             out_layer_dirs.append(out_layer_dir)
 
         for band_cfg in layer_cfg.band_sets:
@@ -186,14 +185,14 @@ class RasterMaterializer(Materializer):
                         )
 
                 raster_format.encode_raster(
-                    out_layer_dirs[group_id].get_folder("_".join(band_cfg.bands)),
+                    out_layer_dirs[group_id] / "_".join(band_cfg.bands),
                     projection,
                     bounds,
                     dst,
                 )
 
         for out_layer_dir in out_layer_dirs:
-            with out_layer_dir.open("completed", "wb"):
+            with (out_layer_dir / "completed").open("wb"):
                 pass
 
 
@@ -225,15 +224,13 @@ class VectorMaterializer(Materializer):
         )
         vector_format = load_vector_format(layer_cfg.format)
 
-        out_layer_dirs: list[FileAPI] = []
+        out_layer_dirs: list[UPath] = []
         for group_id in range(len(item_groups)):
             if group_id == 0:
                 out_layer_name = layer_name
             else:
                 out_layer_name = f"{layer_name}.{group_id}"
-            out_layer_dir = window.file_api.get_folder(
-                window.file_api.join("layers", out_layer_name)
-            )
+            out_layer_dir = window.path / "layers" / out_layer_name
             out_layer_dirs.append(out_layer_dir)
 
         for group_id, group in enumerate(item_groups):
@@ -249,5 +246,5 @@ class VectorMaterializer(Materializer):
             vector_format.encode_vector(out_layer_dirs[group_id], projection, features)
 
         for out_layer_dir in out_layer_dirs:
-            with out_layer_dir.open("completed", "wb"):
+            with (out_layer_dir / "completed").open("wb"):
                 pass

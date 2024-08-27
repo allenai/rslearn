@@ -8,11 +8,11 @@ import numpy.typing as npt
 import rasterio
 from class_registry import ClassRegistry
 from PIL import Image
+from upath import UPath
 
 from rslearn.config import RasterFormatConfig
 from rslearn.const import TILE_SIZE
 
-from .file_api import FileAPI
 from .geometry import PixelBounds, Projection
 
 RasterFormats = ClassRegistry()
@@ -22,12 +22,12 @@ class RasterFormat:
     """An abstract class for writing raster data.
 
     Implementations of RasterFormat should support reading and writing raster data in
-    a FileAPI. Raster data is a CxHxW numpy array.
+    a UPath. Raster data is a CxHxW numpy array.
     """
 
     def encode_raster(
         self,
-        file_api: FileAPI,
+        path: UPath,
         projection: Projection,
         bounds: PixelBounds,
         array: npt.NDArray[Any],
@@ -35,7 +35,7 @@ class RasterFormat:
         """Encodes raster data.
 
         Args:
-            file_api: the file API to write to
+            path: the directory to write to
             projection: the projection of the raster data
             bounds: the bounds of the raster data in the projection
             array: the raster data
@@ -43,12 +43,12 @@ class RasterFormat:
         raise NotImplementedError
 
     def decode_raster(
-        self, file_api: FileAPI, bounds: PixelBounds
+        self, path: UPath, bounds: PixelBounds
     ) -> npt.NDArray[Any] | None:
         """Decodes raster data.
 
         Args:
-            file_api: the file API to read from
+            path: the directory to read from
             bounds: the bounds of the raster to read
 
         Returns:
@@ -138,7 +138,7 @@ class ImageTileRasterFormat(RasterFormat):
 
     def encode_raster(
         self,
-        file_api: FileAPI,
+        path: UPath,
         projection: Projection,
         bounds: PixelBounds,
         array: npt.NDArray[Any],
@@ -146,7 +146,7 @@ class ImageTileRasterFormat(RasterFormat):
         """Encodes raster data.
 
         Args:
-            file_api: the file API to write to
+            path: the directory to write to
             projection: the projection of the raster data
             bounds: the bounds of the raster data in the projection
             array: the raster data (must be CHW)
@@ -166,6 +166,7 @@ class ImageTileRasterFormat(RasterFormat):
             array, ((0, 0), (padding[1], padding[3]), (padding[0], padding[2]))
         )
 
+        path.mkdir(parents=True, exist_ok=True)
         for col in range(start_tile[0], end_tile[0]):
             for row in range(start_tile[1], end_tile[1]):
                 i = col - start_tile[0]
@@ -183,16 +184,17 @@ class ImageTileRasterFormat(RasterFormat):
                     (col + 1) * self.tile_size,
                     (row + 1) * self.tile_size,
                 )
-                with file_api.open(f"{col}_{row}.{extension}", "wb") as f:
+                fname = path / f"{col}_{row}.{extension}"
+                with fname.open("wb") as f:
                     self.encode_tile(f, projection, cur_bounds, cur_array)
 
     def decode_raster(
-        self, file_api: FileAPI, bounds: PixelBounds
+        self, path: UPath, bounds: PixelBounds
     ) -> npt.NDArray[Any] | None:
         """Decodes raster data.
 
         Args:
-            file_api: the file API to read from
+            path: the directory to read from
             bounds: the bounds of the raster to read
 
         Returns:
@@ -209,10 +211,10 @@ class ImageTileRasterFormat(RasterFormat):
         dst = None
         for col in range(start_tile[0], end_tile[0]):
             for row in range(start_tile[1], end_tile[1]):
-                fname = f"{col}_{row}.{extension}"
-                if not file_api.exists(fname):
+                fname = path / f"{col}_{row}.{extension}"
+                if not fname.exists():
                     continue
-                with file_api.open(fname, "rb") as f:
+                with fname.open("rb") as f:
                     src = self.decode_tile(f)
 
                 if dst is None:
@@ -285,7 +287,7 @@ class GeotiffRasterFormat(RasterFormat):
 
     def encode_raster(
         self,
-        file_api: FileAPI,
+        path: UPath,
         projection: Projection,
         bounds: PixelBounds,
         array: npt.NDArray[Any],
@@ -293,7 +295,7 @@ class GeotiffRasterFormat(RasterFormat):
         """Encodes raster data.
 
         Args:
-            file_api: the file API to write to
+            path: the directory to write to
             projection: the projection of the raster data
             bounds: the bounds of the raster data in the projection
             array: the raster data
@@ -321,23 +323,25 @@ class GeotiffRasterFormat(RasterFormat):
             profile["tiled"] = True
             profile["blockxsize"] = TILE_SIZE
             profile["blockysize"] = TILE_SIZE
-        with file_api.open(self.fname, "wb") as f:
+
+        path.mkdir(parents=True, exist_ok=True)
+        with (path / self.fname).open("wb") as f:
             with rasterio.open(f, "w", **profile) as dst:
                 dst.write(array)
 
     def decode_raster(
-        self, file_api: FileAPI, bounds: PixelBounds
+        self, path: UPath, bounds: PixelBounds
     ) -> npt.NDArray[Any] | None:
         """Decodes raster data.
 
         Args:
-            file_api: the file API to read from
+            path: the directory to read from
             bounds: the bounds of the raster to read
 
         Returns:
             the raster data, or None if no image content is found
         """
-        with file_api.open(self.fname, "rb") as f:
+        with (path / self.fname).open("rb") as f:
             with rasterio.open(f) as src:
                 transform = src.transform
                 x_resolution = transform.a
@@ -391,16 +395,16 @@ class GeotiffRasterFormat(RasterFormat):
                 )
                 return array
 
-    def get_raster_bounds(self, file_api: FileAPI) -> PixelBounds:
+    def get_raster_bounds(self, path: UPath) -> PixelBounds:
         """Returns the bounds of the stored raster.
 
         Args:
-            file_api: the FileAPI where the raster data was written
+            path: the directory where the raster data was written
 
         Returns:
             the PixelBounds of the raster
         """
-        with file_api.open(self.fname, "rb") as f:
+        with (path / self.fname).open("rb") as f:
             with rasterio.open(f) as src:
                 transform = src.transform
                 x_resolution = transform.a
@@ -460,7 +464,7 @@ class SingleImageRasterFormat(RasterFormat):
 
     def encode_raster(
         self,
-        file_api: FileAPI,
+        path: UPath,
         projection: Projection,
         bounds: PixelBounds,
         array: npt.NDArray[Any],
@@ -468,32 +472,33 @@ class SingleImageRasterFormat(RasterFormat):
         """Encodes raster data.
 
         Args:
-            file_api: the file API to write to
+            path: the directory to write to
             projection: the projection of the raster data
             bounds: the bounds of the raster data in the projection
             array: the raster data
         """
-        fname = "image." + self.get_extension()
-        with file_api.open(fname, "wb") as f:
+        path.mkdir(parents=True, exist_ok=True)
+        fname = path / ("image." + self.get_extension())
+        with fname.open("wb") as f:
             array = array.transpose(1, 2, 0)
             if array.shape[2] == 1:
                 array = array[:, :, 0]
             Image.fromarray(array).save(f, format=self.format.upper())
 
     def decode_raster(
-        self, file_api: FileAPI, bounds: PixelBounds
+        self, path: UPath, bounds: PixelBounds
     ) -> npt.NDArray[Any] | None:
         """Decodes raster data.
 
         Args:
-            file_api: the file API to read from
+            path: the directory to read from
             bounds: the bounds of the raster to read
 
         Returns:
             the raster data, or None if no image content is found
         """
-        fname = "image." + self.get_extension()
-        with file_api.open(fname, "rb") as f:
+        fname = path / ("image." + self.get_extension())
+        with fname.open("rb") as f:
             array = np.array(Image.open(f, formats=[self.format.upper()]))
             if len(array.shape) == 2:
                 array = array[:, :, None]

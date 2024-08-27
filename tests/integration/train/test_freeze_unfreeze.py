@@ -28,7 +28,7 @@ def test_freeze_unfreeze(image_to_class_dataset: Dataset):
     target_data_input = DataInput("vector", ["label"])
     task = ClassificationTask("label", ["cls0", "cls1"], read_class_id=True)
     data_module = RslearnDataModule(
-        file_api=image_to_class_dataset.file_api,
+        path=image_to_class_dataset.path,
         inputs={
             "image": image_data_input,
             "targets": target_data_input,

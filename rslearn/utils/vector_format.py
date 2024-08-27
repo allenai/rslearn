@@ -1,4 +1,4 @@
-"""Classes for writing vector data to a FileAPI."""
+"""Classes for writing vector data to a UPath."""
 
 import json
 from typing import Any
@@ -6,12 +6,12 @@ from typing import Any
 import numpy as np
 import shapely
 from class_registry import ClassRegistry
+from upath import UPath
 
 from rslearn.config import VectorFormatConfig
 from rslearn.const import WGS84_PROJECTION
 
 from .feature import Feature
-from .file_api import FileAPI
 from .geometry import PixelBounds, Projection, STGeometry
 
 VectorFormats = ClassRegistry()
@@ -21,26 +21,26 @@ class VectorFormat:
     """An abstract class for writing vector data.
 
     Implementations of VectorFormat should support reading and writing vector data in
-    a FileAPI. Vector data is a list of GeoJSON-like features.
+    a UPath. Vector data is a list of GeoJSON-like features.
     """
 
     def encode_vector(
-        self, file_api: FileAPI, projection: Projection, features: list[Feature]
+        self, path: UPath, projection: Projection, features: list[Feature]
     ) -> None:
         """Encodes vector data.
 
         Args:
-            file_api: the file API to write to
+            path: the directory to write to
             projection: the projection of the raster data
             features: the vector data
         """
         raise NotImplementedError
 
-    def decode_vector(self, file_api: FileAPI, bounds: PixelBounds) -> list[Feature]:
+    def decode_vector(self, path: UPath, bounds: PixelBounds) -> list[Feature]:
         """Decodes vector data.
 
         Args:
-            file_api: the file API to read from
+            path: the directory to read from
             bounds: the bounds of the vector data to read
 
         Returns:
@@ -67,12 +67,12 @@ class TileVectorFormat(VectorFormat):
         self.tile_size = tile_size
 
     def encode_vector(
-        self, file_api: FileAPI, projection: Projection, features: list[Feature]
+        self, path: UPath, projection: Projection, features: list[Feature]
     ) -> None:
         """Encodes vector data.
 
         Args:
-            file_api: the file API to write to
+            path: the directory to write to
             projection: the projection of the raster data
             features: the vector data
         """
@@ -117,20 +117,21 @@ class TileVectorFormat(VectorFormat):
                         tile_data[tile] = []
                     tile_data[tile].append(cur_geojson)
 
+        path.mkdir(parents=True, exist_ok=True)
         for (col, row), geojson_features in tile_data.items():
             fc = {
                 "type": "FeatureCollection",
                 "features": [geojson_feat for geojson_feat in geojson_features],
                 "properties": projection.serialize(),
             }
-            with file_api.open(f"{col}_{row}.geojson", "w") as f:
+            with (path / f"{col}_{row}.geojson").open("w") as f:
                 json.dump(fc, f)
 
-    def decode_vector(self, file_api: FileAPI, bounds: PixelBounds) -> list[Feature]:
+    def decode_vector(self, path: UPath, bounds: PixelBounds) -> list[Feature]:
         """Decodes vector data.
 
         Args:
-            file_api: the file API to read from
+            path: the directory to read from
             bounds: the bounds of the vector data to read
 
         Returns:
@@ -144,10 +145,10 @@ class TileVectorFormat(VectorFormat):
         features = []
         for col in range(start_tile[0], end_tile[0]):
             for row in range(start_tile[1], end_tile[1]):
-                fname = f"{col}_{row}.geojson"
-                if not file_api.exists(fname):
+                cur_fname = path / f"{col}_{row}.geojson"
+                if not cur_fname.exists():
                     continue
-                with file_api.open(fname, "r") as f:
+                with cur_fname.open("r") as f:
                     fc = json.load(f)
                 if "properties" in fc and "crs" in fc["properties"]:
                     projection = Projection.deserialize(fc["properties"])
@@ -186,16 +187,17 @@ class GeojsonVectorFormat(VectorFormat):
     fname = "data.geojson"
 
     def encode_vector(
-        self, file_api: FileAPI, projection: Projection, features: list[Feature]
+        self, path: UPath, projection: Projection, features: list[Feature]
     ) -> None:
         """Encodes vector data.
 
         Args:
-            file_api: the file API to write to
+            path: the directory to write to
             projection: the projection of the raster data
             features: the vector data
         """
-        with file_api.open(self.fname, "w") as f:
+        path.mkdir(parents=True, exist_ok=True)
+        with (path / self.fname).open("w") as f:
             json.dump(
                 {
                     "type": "FeatureCollection",
@@ -205,17 +207,17 @@ class GeojsonVectorFormat(VectorFormat):
                 f,
             )
 
-    def decode_vector(self, file_api: FileAPI, bounds: PixelBounds) -> list[Feature]:
+    def decode_vector(self, path: UPath, bounds: PixelBounds) -> list[Feature]:
         """Decodes vector data.
 
         Args:
-            file_api: the file API to read from
+            path: the directory to read from
             bounds: the bounds of the vector data to read
 
         Returns:
             the vector data
         """
-        with file_api.open(self.fname, "r") as f:
+        with (path / self.fname).open("r") as f:
             fc = json.load(f)
         if "properties" in fc and "crs" in fc["properties"]:
             projection = Projection.deserialize(fc["properties"])
