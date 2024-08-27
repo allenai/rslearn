@@ -426,9 +426,17 @@ class S3FileAPI(FileAPI):
         protocol, remainder = s.split("://", 1)
         assert protocol == "s3"
         bucket_name, remainder = remainder.split("/", 1)
-        prefix, query_args = remainder.split("?", 1)
+        parts = remainder.split("?", 1)
+        if len(parts) == 1:
+            prefix = parts[0]
+            query_args = ""
+        else:
+            prefix = parts[0]
+            query_args = parts[1]
         kwargs = {}
         for part in query_args.split("&"):
+            if not part:
+                continue
             k, v = part.split("=", 1)
             kwargs[k] = v
         return S3FileAPI(
