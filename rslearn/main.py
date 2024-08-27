@@ -277,6 +277,9 @@ def apply_on_windows(
             like building indexes that should not be done in parallel. Set this false
             to disable using the initial job.
     """
+    if hasattr(f, "set_dataset"):
+        f.set_dataset(dataset)
+
     print("Loading windows")
     groups = None
     names = None
@@ -318,8 +321,6 @@ def apply_on_windows(
 def apply_on_windows_args(f: Callable[[list[Window]], None], args: argparse.Namespace):
     """Call apply_on_windows with arguments passed via command-line interface."""
     dataset = Dataset(ds_root=args.root)
-    if hasattr(f, "set_dataset"):
-        f.set_dataset(dataset)
     apply_on_windows(
         f,
         dataset,
