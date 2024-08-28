@@ -12,12 +12,13 @@ import rasterio.enums
 import rasterio.io
 import rasterio.transform
 from rasterio.crs import CRS
+from upath import UPath
 
 from rslearn.config import BandSetConfig, RasterFormatConfig, RasterLayerConfig
 from rslearn.const import TILE_SIZE
 from rslearn.dataset import Window
 from rslearn.tile_stores import LayerMetadata, TileStore
-from rslearn.utils import LocalFileAPI, Projection, STGeometry
+from rslearn.utils import Projection, STGeometry
 from rslearn.utils.raster_format import load_raster_format
 
 
@@ -307,6 +308,6 @@ def materialize_raster(
         RasterFormatConfig(band_cfg.format["name"], band_cfg.format)
     )
     raster_format.encode_raster(
-        LocalFileAPI(tmp_out_dir), window_projection, window_bounds, dst_array
+        UPath(tmp_out_dir), window_projection, window_bounds, dst_array
     )
     os.rename(layer_dir + ".tmp", layer_dir)

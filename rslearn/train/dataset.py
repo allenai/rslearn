@@ -237,7 +237,8 @@ def check_window(inputs: dict[str, DataInput], window: Window) -> bool:
     # Make sure window has all the needed layers.
     def is_any_layer_available(data_input):
         for layer_name in data_input.layers:
-            if window.file_api.exists("layers", layer_name, "completed"):
+            completed_fname = window.path / "layers" / layer_name / "completed"
+            if completed_fname.exists():
                 return True
         return False
 
@@ -421,7 +422,8 @@ class ModelDataset(torch.utils.data.Dataset):
             # First enumerate all options of individual layers to read.
             layer_options = []
             for layer_name in data_input.layers:
-                if not window.file_api.exists("layers", layer_name, "completed"):
+                completed_fname = window.path / "layers" / layer_name / "completed"
+                if not completed_fname.exists():
                     continue
                 layer_options.append(layer_name)
 
@@ -429,7 +431,7 @@ class ModelDataset(torch.utils.data.Dataset):
             # In the future we need to support different configuration for how to pick
             # the options, as well as picking multiple for series inputs.
             layer = random.choice(layer_options)
-            layer_dir = window.file_api.get_folder("layers", layer)
+            layer_dir = window.path / "layers" / layer
             layer_config = self.dataset.layers[layer]
 
             if data_input.data_type == "raster":
@@ -474,8 +476,8 @@ class ModelDataset(torch.utils.data.Dataset):
                     raster_format = load_raster_format(
                         RasterFormatConfig(band_set.format["name"], band_set.format)
                     )
-                    file_api = layer_dir.get_folder("_".join(band_set.bands))
-                    src = raster_format.decode_raster(file_api, final_bounds)
+                    cur_path = layer_dir / "_".join(band_set.bands)
+                    src = raster_format.decode_raster(cur_path, final_bounds)
 
                     # Resize to patch size if needed.
                     # This is for band sets that are stored at a lower resolution.

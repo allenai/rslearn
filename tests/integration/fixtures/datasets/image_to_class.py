@@ -1,33 +1,31 @@
 import json
 import os
 import random
+from collections.abc import Generator
 
 import numpy as np
 import pytest
 import shapely
+from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
-from rslearn.utils import Feature, S3FileAPI, STGeometry
+from rslearn.utils import Feature, STGeometry
 from rslearn.utils.raster_format import SingleImageRasterFormat
 from rslearn.utils.vector_format import GeojsonVectorFormat
 
 
 @pytest.fixture
-def image_to_class_dataset() -> Dataset:
+def image_to_class_dataset() -> Generator[Dataset, None, None]:
     """Create sample dataset with a raster input and target class.
 
     It consists of one window with one single-band image and a GeoJSON data with class
     ID property. The property could be used for regression too.
     """
     test_id = random.randint(10000, 99999)
-    ds_file_api = S3FileAPI(
-        endpoint_url=os.environ["TEST_S3_ENDPOINT_URL"],
-        access_key_id=os.environ["TEST_S3_ACCESS_KEY_ID"],
-        secret_access_key=os.environ["TEST_S3_SECRET_ACCESS_KEY"],
-        bucket_name=os.environ["TEST_S3_BUCKET_NAME"],
-        prefix=os.environ["TEST_S3_PREFIX"] + f"test_{test_id}/",
-    )
+    bucket_name = os.environ["TEST_BUCKET"]
+    prefix = os.environ["TEST_PREFIX"] + f"test_{test_id}/"
+    ds_path = UPath(f"gcs://{bucket_name}/{prefix}")
 
     dataset_config = {
         "layers": {
@@ -48,12 +46,13 @@ def image_to_class_dataset() -> Dataset:
             "root_dir": "tiles",
         },
     }
-    with ds_file_api.open("config.json", "w") as f:
+    ds_path.mkdir(parents=True, exist_ok=True)
+    with (ds_path / "config.json").open("w") as f:
         json.dump(dataset_config, f)
 
-    window_file_api = Window.get_window_root(ds_file_api, "default", "default")
+    window_path = Window.get_window_root(ds_path, "default", "default")
     window = Window(
-        file_api=window_file_api,
+        path=window_path,
         group="default",
         name="default",
         projection=WGS84_PROJECTION,
@@ -65,14 +64,14 @@ def image_to_class_dataset() -> Dataset:
     # Add image where pixel value is 4*col+row.
     image = np.arange(0, 4 * 4, dtype=np.uint8)
     image = image.reshape(1, 4, 4)
-    layer_file_api = window_file_api.get_folder("layers", "image")
+    layer_dir = window_path / "layers" / "image"
     SingleImageRasterFormat().encode_raster(
-        layer_file_api.get_folder("band"),
+        layer_dir / "band",
         window.projection,
         window.bounds,
         image,
     )
-    with layer_file_api.open("completed", "w") as f:
+    with (layer_dir / "completed").open("w") as f:
         pass
 
     # Add label.
@@ -82,17 +81,17 @@ def image_to_class_dataset() -> Dataset:
             "label": 1,
         },
     )
-    layer_file_api = window_file_api.get_folder("layers", "label")
+    layer_dir = window_path / "layers" / "label"
     GeojsonVectorFormat().encode_vector(
-        layer_file_api,
+        layer_dir,
         window.projection,
         [feature],
     )
-    with layer_file_api.open("completed", "w") as f:
+    with (layer_dir / "completed").open("w") as f:
         pass
 
-    dataset = Dataset(file_api=ds_file_api)
+    dataset = Dataset(ds_path)
     yield dataset
 
-    for obj in ds_file_api.bucket.objects.filter(Prefix=ds_file_api.prefix):
-        obj.delete()
+    for fname in ds_path.fs.find(ds_path.path):
+        ds_path.fs.delete(fname)

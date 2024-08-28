@@ -3,6 +3,7 @@ import os
 import pathlib
 
 import shapely
+from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
@@ -11,7 +12,7 @@ from rslearn.dataset.manage import (
     materialize_dataset_windows,
     prepare_dataset_windows,
 )
-from rslearn.utils import Feature, LocalFileAPI, STGeometry
+from rslearn.utils import Feature, STGeometry
 from rslearn.utils.vector_format import load_vector_format
 
 
@@ -62,9 +63,9 @@ class TestLocalFiles:
         with open(os.path.join(tmp_path, "config.json"), "w") as f:
             json.dump(dataset_config, f)
 
-        ds_file_api = LocalFileAPI(str(tmp_path))
+        ds_path = UPath(tmp_path)
         Window(
-            file_api=Window.get_window_root(ds_file_api, "default", "default"),
+            path=Window.get_window_root(ds_path, "default", "default"),
             group="default",
             name="default",
             projection=WGS84_PROJECTION,
@@ -72,7 +73,7 @@ class TestLocalFiles:
             time_range=None,
         ).save()
 
-        dataset = Dataset(file_api=ds_file_api)
+        dataset = Dataset(ds_path)
         windows = dataset.load_windows()
         prepare_dataset_windows(dataset, windows)
         ingest_dataset_windows(dataset, windows)
@@ -84,7 +85,7 @@ class TestLocalFiles:
         layer_config = dataset.layers["local_file"]
         vector_format = load_vector_format(layer_config.format)
         features = vector_format.decode_vector(
-            window.file_api.get_folder("layers", "local_file"), window.bounds
+            window.path / "layers" / "local_file", window.bounds
         )
 
         assert len(features) == 2

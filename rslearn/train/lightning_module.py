@@ -9,8 +9,7 @@ from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
 from PIL import Image
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-
-from rslearn.utils import FileAPI
+from upath import UPath
 
 from .tasks import Task
 
@@ -24,8 +23,8 @@ class RestoreConfig:
 
     def __init__(
         self,
-        restore_dir: FileAPI,
-        restore_fname: str,
+        restore_path: str,
+        restore_path_options: dict[str, Any] = {},
         selector: list[str] = [],
         ignore_prefixes: list[str] = [],
         remap_prefixes: list[tuple[str, str]] = [],
@@ -33,23 +32,23 @@ class RestoreConfig:
         """Create a new RestoreConfig.
 
         Args:
-            restore_dir: the FileAPI referencing directory to restore from.
-            restore_fname: the filename within restore_dir containing the weights.
+            restore_path: the filename to restore the file from.
+            restore_path_options: additional options for the restore_path to pass to
+                fsspec.
             selector: path in the torch dict containing the model parameters.
             ignore_prefixes: prefixes to restore.
             remap_prefixes: list of (old_prefix, new_prefix) to rename parameters
                 starting with old_prefix to start with new_prefix instead.
         """
-        self.restore_dir = restore_dir
-        self.restore_fname = restore_fname
+        self.restore_path = UPath(restore_path, **restore_path_options)
         self.selector = selector
         self.ignore_prefixes = ignore_prefixes
         self.remap_prefixes = remap_prefixes
 
     def get_state_dict(self) -> dict[str, Any]:
         """Returns the state dict configured in this RestoreConfig."""
-        print(f"loading state dict from {self.restore_fname}")
-        with self.restore_dir.open(self.restore_fname, "rb") as f:
+        print(f"loading state dict from {self.restore_path}")
+        with self.restore_path.open("rb") as f:
             state_dict = torch.load(f)
         for k in self.selector:
             state_dict = state_dict[k]

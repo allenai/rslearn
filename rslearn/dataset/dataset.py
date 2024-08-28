@@ -4,10 +4,10 @@ import json
 import multiprocessing
 
 import tqdm
+from upath import UPath
 
 from rslearn.config import TileStoreConfig, load_layer_config
 from rslearn.tile_stores import TileStore, load_tile_store
-from rslearn.utils import FileAPI, parse_file_api_string
 
 from .window import Window
 
@@ -37,22 +37,16 @@ class Dataset:
     materialize.
     """
 
-    def __init__(
-        self, ds_root: str | None = None, file_api: FileAPI | None = None
-    ) -> None:
+    def __init__(self, path: UPath) -> None:
         """Initializes a new Dataset.
 
         Args:
-            ds_root: the root directory of the dataset.
-            file_api: the FileAPI of the dataset.
+            path: the root directory of the dataset
         """
-        if file_api:
-            self.file_api = file_api
-        else:
-            self.file_api = parse_file_api_string(ds_root)
+        self.path = path
 
         # Load dataset configuration.
-        with self.file_api.open("config.json", "r") as f:
+        with (self.path / "config.json").open("r") as f:
             config = json.load(f)
             self.layers = {
                 layer_name: load_layer_config(d)
@@ -78,16 +72,20 @@ class Dataset:
         """
         window_dirs = []
         if not groups:
-            groups = self.file_api.listdir("windows")
+            groups = []
+            for p in (self.path / "windows").iterdir():
+                groups.append(p.name)
         for group in groups:
-            group_dir = self.file_api.join("windows", group)
+            group_dir = self.path / "windows" / group
             if names:
                 cur_names = names
             else:
-                cur_names = self.file_api.listdir(group_dir)
+                cur_names = []
+                for p in group_dir.iterdir():
+                    cur_names.append(p.name)
 
             for window_name in cur_names:
-                window_dir = self.file_api.get_folder(group_dir, window_name)
+                window_dir = group_dir / window_name
                 window_dirs.append(window_dir)
 
         if workers == 0:
@@ -112,4 +110,4 @@ class Dataset:
         Returns:
             the TileStore
         """
-        return load_tile_store(self.tile_store_config, self.file_api)
+        return load_tile_store(self.tile_store_config, self.path)
