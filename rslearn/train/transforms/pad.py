@@ -39,7 +39,6 @@ class Pad(Transform):
         self.mode = mode
         self.image_selectors = image_selectors
         self.box_selectors = box_selectors
-        self.generator = torch.Generator()
 
     def sample_state(self) -> dict[str, Any]:
         """Randomly decide how to transform the input.
@@ -47,11 +46,7 @@ class Pad(Transform):
         Returns:
             dict of sampled choices
         """
-        return {
-            "size": torch.randint(
-                low=self.size[0], high=self.size[1], generator=self.generator, size=()
-            )
-        }
+        return {"size": torch.randint(low=self.size[0], high=self.size[1], size=())}
 
     def apply_image(self, image: torch.Tensor, state: dict[str, bool]) -> torch.Tensor:
         """Apply the sampled state on the specified image.

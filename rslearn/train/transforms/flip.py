@@ -30,7 +30,6 @@ class Flip(Transform):
         self.vertical = vertical
         self.image_selectors = image_selectors
         self.box_selectors = box_selectors
-        self.generator = torch.Generator()
 
     def sample_state(self) -> dict[str, bool]:
         """Randomly decide how to transform the input.
@@ -40,14 +39,10 @@ class Flip(Transform):
         """
         horizontal = False
         if self.horizontal:
-            horizontal = (
-                torch.randint(low=0, high=2, generator=self.generator, size=()) == 0
-            )
+            horizontal = torch.randint(low=0, high=2, size=()) == 0
         vertical = False
         if self.vertical:
-            vertical = (
-                torch.randint(low=0, high=2, generator=self.generator, size=()) == 0
-            )
+            vertical = torch.randint(low=0, high=2, size=()) == 0
         return {
             "horizontal": horizontal,
             "vertical": vertical,
