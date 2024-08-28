@@ -13,6 +13,22 @@ from rslearn.train.tasks import Task
 from .dataset import DataInput, ModelDataset, SplitConfig
 
 
+def collate_fn(
+    batch: list[tuple[dict[str, Any], dict[str, Any]]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Collate batch of training examples.
+
+    We just make list of the inputs and another of the targets.
+
+    Args:
+        batch: list of input/target for each example
+
+    Returns:
+        a tuple (inputs, targets)
+    """
+    return tuple(zip(*batch))
+
+
 class RslearnDataModule(L.LightningDataModule):
     """Default rslearn LightningDataModule.
 
@@ -92,7 +108,8 @@ class RslearnDataModule(L.LightningDataModule):
             dataset=dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            collate_fn=self.collate_fn,
+            collate_fn=collate_fn,
+            persistent_workers=True,
         )
         sampler_factory = self.split_configs[split].sampler
         if sampler_factory:
@@ -148,18 +165,3 @@ class RslearnDataModule(L.LightningDataModule):
                 dataset or sampler, or if the dataset or sampler has length 0.
         """
         return self._get_dataloader("predict")
-
-    def collate_fn(
-        self, batch: list[tuple[dict[str, Any], dict[str, Any]]]
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Collate batch of training examples.
-
-        We just make list of the inputs and another of the targets.
-
-        Args:
-            batch: list of input/target for each example
-
-        Returns:
-            a tuple (inputs, targets)
-        """
-        return tuple(zip(*batch))
