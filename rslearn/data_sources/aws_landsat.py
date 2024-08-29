@@ -2,7 +2,7 @@
 
 import io
 import json
-import os
+import shutil
 import urllib.request
 import zipfile
 from collections.abc import Generator
@@ -17,13 +17,14 @@ import pytimeparse
 import rasterio
 import shapely
 import tqdm
+from upath import UPath
 
 import rslearn.data_sources.utils
 import rslearn.utils.mgrs
 from rslearn.config import LayerConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import STGeometry, open_atomic
+from rslearn.utils import STGeometry
 
 from .data_source import DataSource, Item, QueryConfig
 from .raster_source import get_needed_projections, ingest_raster
@@ -89,7 +90,7 @@ class LandsatOliTirs(DataSource):
     def __init__(
         self,
         config: LayerConfig,
-        metadata_cache_dir: str,
+        metadata_cache_dir: UPath,
         max_time_delta: timedelta = timedelta(days=30),
         sort_by: str | None = None,
     ) -> None:
@@ -97,7 +98,7 @@ class LandsatOliTirs(DataSource):
 
         Args:
             config: configuration of this layer
-            metadata_cache_dir: local directory to cache product metadata files.
+            metadata_cache_dir: directory to cache product metadata files.
             max_time_delta: maximum time before a query start time or after a
                 query end time to look for products. This is required due to the large
                 number of available products, and defaults to 30 days.
@@ -111,21 +112,29 @@ class LandsatOliTirs(DataSource):
 
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
 
+        self.metadata_cache_dir.mkdir(parents=True, exist_ok=True)
+
     @staticmethod
-    def from_config(config: LayerConfig) -> "LandsatOliTirs":
+    def from_config(config: LayerConfig, ds_path: UPath) -> "LandsatOliTirs":
         """Creates a new LandsatOliTirs instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict
-        if "max_time_delta" in d:
-            max_time_delta = timedelta(seconds=pytimeparse.parse(d["max_time_delta"]))
-        else:
-            max_time_delta = timedelta(days=30)
-        return LandsatOliTirs(
+        kwargs = dict(
             config=config,
-            metadata_cache_dir=d["metadata_cache_dir"],
-            max_time_delta=max_time_delta,
-            sort_by=d.get("sort_by"),
         )
+        if "max_time_delta" in d:
+            kwargs["max_time_delta"] = timedelta(
+                seconds=pytimeparse.parse(d["max_time_delta"])
+            )
+        if "sort_by" in d:
+            kwargs["sort_by"] = d["sort_by"]
+
+        if "://" in d["metadata_cache_dir"]:
+            kwargs["metadata_cache_dir"] = UPath(d["metadata_cache_dir"])
+        else:
+            kwargs["metadata_cache_dir"] = ds_path / d["metadata_cache_dir"]
+
+        return LandsatOliTirs(**kwargs)
 
     def _read_products(
         self, needed_year_pathrows: set[tuple[int, str, str]]
@@ -141,11 +150,9 @@ class LandsatOliTirs(DataSource):
         ):
             assert len(path) == 3
             assert len(row) == 3
-            local_fname = os.path.join(
-                self.metadata_cache_dir, f"{year}_{path}_{row}.json"
-            )
+            local_fname = self.metadata_cache_dir / f"{year}_{path}_{row}.json"
 
-            if not os.path.exists(local_fname):
+            if not local_fname.exists():
                 prefix = f"{self.bucket_prefix}/{year}/{path}/{row}/"
                 items = []
                 for obj in self.bucket.objects.filter(
@@ -189,11 +196,12 @@ class LandsatOliTirs(DataSource):
                         )
                     )
 
-                with open_atomic(local_fname, "w") as f:
-                    json.dump([item.serialize() for item in items], f)
+                with local_fname.fs.transaction:
+                    with local_fname.open("w") as f:
+                        json.dump([item.serialize() for item in items], f)
 
             else:
-                with open(local_fname) as f:
+                with local_fname.open() as f:
                     items = [
                         LandsatOliTirsItem.deserialize(item_dict)
                         for item_dict in json.load(f)
@@ -207,23 +215,28 @@ class LandsatOliTirs(DataSource):
         Returns:
             List of (polygon, path, row).
         """
-        local_fname = os.path.join(self.metadata_cache_dir, "WRS2_descending.shp")
-        if not os.path.exists(local_fname):
+        shp_fname = self.metadata_cache_dir / "WRS2_descending.shp"
+        if not shp_fname.exists():
             # Download and extract zip to cache dir.
-            zip_fname = os.path.join(self.metadata_cache_dir, "WRS2_descending_0.zip")
-            os.makedirs(self.metadata_cache_dir, exist_ok=True)
-            urllib.request.urlretrieve(self.wrs2_url, zip_fname)
-            with zipfile.ZipFile(zip_fname, "r") as zipf:
-                zipf.extractall(self.metadata_cache_dir)
+            zip_fname = self.metadata_cache_dir / "WRS2_descending_0.zip"
+            with urllib.request.urlopen(self.wrs2_url) as response:
+                with zip_fname.open("wb") as f:
+                    shutil.copyfileobj(response, f)
+            with zip_fname.open("rb") as f:
+                with zipfile.ZipFile(f, "r") as zipf:
+                    with zipf.open("WRS2_descending.shp") as memberf:
+                        with shp_fname.open("wb") as f:
+                            shutil.copyfileobj(memberf, f)
 
-        with fiona.open(local_fname) as src:
-            polygons = []
-            for feat in src:
-                shp = shapely.geometry.shape(feat["geometry"])
-                path = str(feat["properties"]["PATH"]).zfill(3)
-                row = str(feat["properties"]["ROW"]).zfill(3)
-                polygons.append((shp, path, row))
-            return polygons
+        with shp_fname.open("rb") as f:
+            with fiona.open(f) as src:
+                polygons = []
+                for feat in src:
+                    shp = shapely.geometry.shape(feat["geometry"])
+                    path = str(feat["properties"]["PATH"]).zfill(3)
+                    row = str(feat["properties"]["ROW"]).zfill(3)
+                    polygons.append((shp, path, row))
+                return polygons
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
