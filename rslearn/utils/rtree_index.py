@@ -1,9 +1,13 @@
 """RtreeIndex spatial index implementation."""
 
 import os
+import shutil
+from collections.abc import Callable
 from typing import Any
 
+import fsspec
 from rtree import index
+from upath import UPath
 
 from rslearn.utils.spatial_index import SpatialIndex
 
@@ -33,10 +37,7 @@ class RtreeIndex(SpatialIndex):
                 index
         """
         self.fname = fname
-        kwargs = {}
-        if self.fname and not self.is_done():
-            kwargs["properties"] = index.Property(overwrite=True)
-        self.index = index.Index(fname, **kwargs)
+        self.index = index.Index(fname)
         self.counter = 0
 
     def insert(self, box: tuple[float, float, float, float], data: Any) -> None:
@@ -61,13 +62,71 @@ class RtreeIndex(SpatialIndex):
         results = self.index.intersection(box, objects=True)
         return [r.object for r in results]
 
-    def is_done(self) -> bool:
-        """Returns whether mark_done was previously called for the on-disk index."""
-        assert self.fname is not None
-        return os.path.exists(self.fname + ".done")
 
-    def mark_done(self) -> None:
-        """Marks the on-disk index as done."""
-        assert self.fname is not None
-        with open(os.path.join(self.fname + ".done"), "w"):
+def get_cached_rtree(
+    cache_dir: UPath, tmp_dir: str, build_fn: Callable[[RtreeIndex], None]
+) -> RtreeIndex:
+    """Returns an RtreeIndex cached in cache_dir, creating it if needed.
+
+    The .dat and .idx files are cached in cache_dir. Since RtreeIndex expects local
+    filesystem, it is copied to a local temporary directory if needed. If the index
+    doesn't exist yet, then it is created using build_fn.
+
+    Args:
+        cache_dir: directory to cache the index files.
+        tmp_dir: temporary local directory to use in case cache_dir is on a remote
+            filesystem. The caller is responsible for cleaning this up when they don't
+            need the index anymore.
+        build_fn: function to build the index in case it doesn't exist yet.
+
+    Returns:
+        the RtreeIndex.
+    """
+    is_local_cache = isinstance(
+        cache_dir.fs, fsspec.implementations.local.LocalFileSystem
+    )
+    extensions = [".dat", ".idx"]
+    completed_fname = cache_dir / "rtree_index.done"
+
+    if not completed_fname.exists():
+        # Need to build the rtree index.
+        # After building, if the cache is non-local, we additionally need to copy it to
+        # the cache_dir.
+        if is_local_cache:
+            local_fname = (cache_dir / "rtree_index").path
+        else:
+            local_fname = os.path.join(tmp_dir, "rtree_index")
+
+        # Delete any local files that might be partially created.
+        for ext in extensions:
+            cur_fname = local_fname + ext
+            if os.path.exists(cur_fname):
+                os.unlink(cur_fname)
+
+        rtree_index = RtreeIndex(local_fname)
+        build_fn(rtree_index)
+        del rtree_index
+
+        if not is_local_cache:
+            for ext in extensions:
+                with open(local_fname + ext, "rb") as src:
+                    with (cache_dir / f"rtree_index{ext}").open("wb") as dst:
+                        shutil.copyfileobj(src, dst)
+
+        # Create the completed file to indicate index is ready in cache.
+        with completed_fname.open("w"):
             pass
+
+    else:
+        # Initialize the index from the cached version.
+        # If the cache is non-local, we need to retrieve it first.
+        if is_local_cache:
+            local_fname = (cache_dir / "rtree_index").path
+        else:
+            local_fname = os.path.join(tmp_dir, "rtree_index")
+            for ext in extensions:
+                with (cache_dir / f"rtree_index{ext}").open("rb") as src:
+                    with open(local_fname + ext, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+
+    return RtreeIndex(local_fname)

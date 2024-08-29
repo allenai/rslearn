@@ -114,7 +114,8 @@ class FileTileStoreLayer(TileStoreLayer):
         """Save the LayerMetadata associated with this layer."""
         self.path.mkdir(parents=True, exist_ok=True)
         with self.path.fs.transaction:
-            with (self.path / "metadata.json").open("w") as f:
+            metadata_path = self.path / "metadata.json"
+            with metadata_path.fs.open(metadata_path.path, "w") as f:
                 json.dump(metadata.serialize(), f)
 
 
