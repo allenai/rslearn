@@ -103,7 +103,8 @@ class Naip(DataSource):
             use_rtree_index: whether to create an rtree index to enable faster lookups
                 (default false)
             states: optional list of states (lowercase two-letter codes) to restrict
-                the search
+                the search. If use_rtree_index is enabled, the rtree will only be
+                populated with data from these states.
             years: optional list of years to restrict the search
         """
         self.config = config

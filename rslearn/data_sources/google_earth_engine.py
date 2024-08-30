@@ -15,6 +15,7 @@ import rasterio.merge
 import shapely
 import tqdm
 from google.cloud import storage
+from upath import UPath
 
 import rslearn.data_sources.utils
 import rslearn.utils.mgrs
@@ -22,7 +23,7 @@ from rslearn.config import DType, LayerConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry
-from rslearn.utils.rtree_index import RtreeIndex
+from rslearn.utils.rtree_index import get_cached_rtree
 
 from .data_source import DataSource, Item, QueryConfig
 from .raster_source import ArrayWithTransform, get_needed_projections, ingest_raster
@@ -36,7 +37,7 @@ class GEE(DataSource):
         config: LayerConfig,
         collection_name: str,
         gcs_bucket_name: str,
-        index_fname: str,
+        index_cache_dir: UPath,
         service_account_name: str,
         service_account_credentials: str,
         filters: list[tuple[str, Any]] | None = None,
@@ -48,7 +49,7 @@ class GEE(DataSource):
             config: configuration for this layer.
             collection_name: the Earth Engine collection to ingest images from
             gcs_bucket_name: the Cloud Storage bucket to export GEE images to
-            index_fname: rtree index filename
+            index_cache_dir: cache directory to store rtree index
             service_account_name: name of the service account to use for authentication
             service_account_credentials: service account credentials filename
             filters: optional list of tuples (property_name, property_value) to filter
@@ -59,6 +60,7 @@ class GEE(DataSource):
         self.config = config
         self.collection_name = collection_name
         self.gcs_bucket_name = gcs_bucket_name
+        self.index_cache_dir = index_cache_dir
         self.filters = filters
         self.dtype = dtype
 
@@ -69,26 +71,31 @@ class GEE(DataSource):
         )
         ee.Initialize(credentials)
 
-        index_needs_building = not os.path.exists(index_fname + ".dat")
-        self.rtree_index = RtreeIndex(index_fname)
-        if index_needs_building:
-            self._build_index()
+        self.rtree_tmp_dir = tempfile.TemporaryDirectory()
+        self.rtree_index = get_cached_rtree(
+            self.index_cache_dir, self.rtree_tmp_dir.name, self._build_index
+        )
 
     @staticmethod
-    def from_config(config: LayerConfig) -> "GEE":
+    def from_config(config: LayerConfig, ds_path: UPath) -> "GEE":
         """Creates a new GEE instance from a configuration dictionary."""
         d = config.data_source.config_dict
         kwargs = {
             "config": config,
             "collection_name": d["collection_name"],
             "gcs_bucket_name": d["gcs_bucket_name"],
-            "index_fname": d["index_fname"],
             "service_account_name": d["service_account_name"],
             "service_account_credentials": d["service_account_credentials"],
             "filters": d.get("filters"),
         }
         if "dtype" in d:
             kwargs["dtype"] = DType(d["dtype"])
+
+        if "://" in d["index_cache_dir"]:
+            kwargs["index_cache_dir"] = UPath(d["index_cache_dir"])
+        else:
+            kwargs["index_cache_dir"] = ds_path / d["index_cache_dir"]
+
         return GEE(**kwargs)
 
     def get_collection(self):
@@ -97,9 +104,9 @@ class GEE(DataSource):
         for k, v in self.filters:
             cur_filter = ee.Filter.eq(k, v)
             image_collection = image_collection.filter(cur_filter)
-            return image_collection
+        return image_collection
 
-    def _build_index(self):
+    def _build_index(self, rtree_index):
         csv_blob = self.bucket.blob(f"{self.collection_name}/index.csv")
 
         if not csv_blob.exists():
@@ -124,6 +131,7 @@ class GEE(DataSource):
             while True:
                 time.sleep(10)
                 status_dict = task.status()
+                print(status_dict)
                 if status_dict["state"] in ["UNSUBMITTED", "READY", "RUNNING"]:
                     continue
                 assert status_dict["state"] == "COMPLETED"
@@ -143,7 +151,7 @@ class GEE(DataSource):
                     )
                 geometry = STGeometry(WGS84_PROJECTION, shp, (ts, ts))
                 item = Item(row["system:index"], geometry)
-                self.rtree_index.insert(shp.bounds, json.dumps(item.serialize()))
+                rtree_index.insert(shp.bounds, json.dumps(item.serialize()))
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig

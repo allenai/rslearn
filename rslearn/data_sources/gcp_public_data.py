@@ -4,10 +4,10 @@ import csv
 import gzip
 import io
 import json
-import os
+import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Generator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, BinaryIO
 
 import dateutil.parser
@@ -16,6 +16,7 @@ import rasterio
 import shapely
 import tqdm
 from google.cloud import storage
+from upath import UPath
 
 import rslearn.utils.mgrs
 from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
@@ -23,7 +24,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import STGeometry, open_atomic
+from rslearn.utils import STGeometry
 
 from .copernicus import get_harmonize_callback
 from .raster_source import get_needed_projections, ingest_raster
@@ -102,11 +103,12 @@ class Sentinel2(DataSource):
     def __init__(
         self,
         config: LayerConfig,
-        index_cache_dir: str,
+        index_cache_dir: UPath,
         max_time_delta: timedelta = timedelta(days=30),
         sort_by: str | None = None,
         use_rtree_index: bool = True,
         harmonize: bool = False,
+        rtree_time_range: tuple[datetime, datetime] | None = None,
     ):
         """Initialize a new Sentinel2 instance.
 
@@ -124,6 +126,8 @@ class Sentinel2(DataSource):
                 (default true)
             harmonize: harmonize pixel values across different processing baselines,
                 see https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
+            rtree_time_range: only populate the rtree index with scenes within this
+                time range
         """
         self.config = config
         self.index_cache_dir = index_cache_dir
@@ -134,21 +138,34 @@ class Sentinel2(DataSource):
         self.bucket = storage.Client.create_anonymous_client().bucket(self.bucket_name)
 
         if use_rtree_index:
-            from rslearn.utils.rtree_index import RtreeIndex
+            from rslearn.utils.rtree_index import RtreeIndex, get_cached_rtree
 
-            rtree_fname = os.path.join(self.index_cache_dir, "rtree_index")
-            self.rtree_index = RtreeIndex(rtree_fname)
-            if not self.rtree_index.is_done():
-                self._build_index()
+            def build_fn(index: RtreeIndex):
+                """Build the RtreeIndex from items in the data source."""
+                for item in self._read_index(
+                    desc="Building rtree index", time_range=rtree_time_range
+                ):
+                    index.insert(item.geometry.shp.bounds, json.dumps(item.serialize()))
+
+            self.rtree_tmp_dir = tempfile.TemporaryDirectory()
+            self.rtree_index = get_cached_rtree(
+                self.index_cache_dir, self.rtree_tmp_dir.name, build_fn
+            )
         else:
             self.rtree_index = None
 
     @staticmethod
-    def from_config(config: LayerConfig) -> "Sentinel2":
+    def from_config(config: LayerConfig, ds_path: UPath) -> "Sentinel2":
         """Creates a new Sentinel2 instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict
-        kwargs = dict(config=config, index_cache_dir=d["index_cache_dir"])
+        kwargs = dict(config=config)
+
+        if "://" in d["index_cache_dir"]:
+            kwargs["index_cache_dir"] = UPath(d["index_cache_dir"])
+        else:
+            kwargs["index_cache_dir"] = ds_path / d["index_cache_dir"]
+
         if "max_time_delta" in d:
             kwargs["max_time_delta"] = timedelta(
                 seconds=pytimeparse.parse(d["max_time_delta"])
@@ -157,14 +174,21 @@ class Sentinel2(DataSource):
         for k in simple_optionals:
             if k in d:
                 kwargs[k] = d[k]
+
         return Sentinel2(**kwargs)
 
-    def _read_index(self, desc: str) -> Generator[dict[str, str], None, None]:
+    def _read_index(
+        self, desc: str, time_range: tuple[datetime, datetime] | None = None
+    ) -> Generator[dict[str, str], None, None]:
         """Read the index.csv.gz in the Cloud Storage bucket.
 
         The CSV only contains the bounding box of each image and not the exact
         geometry, which can be retrieved from individual product metadata
         (MTD_MSIL1C.xml) files.
+
+        Args:
+            desc: description to include with tqdm progress bar.
+            time_range: optional time_range to restrict the reading.
         """
         blob = self.bucket.blob(self.index_fname)
         with blob.open("rb") as blob_f:
@@ -184,6 +208,12 @@ class Sentinel2(DataSource):
                     tile_id = product_id_parts[5]
                     assert tile_id[0] == "T"
 
+                    sensing_time = dateutil.parser.isoparse(row["SENSING_TIME"])
+                    if time_range and (
+                        sensing_time < time_range[0] or sensing_time > time_range[1]
+                    ):
+                        continue
+
                     granule_id = row["GRANULE_ID"]
                     base_url = row["BASE_URL"].split(
                         "gs://gcp-public-data-sentinel-2/"
@@ -199,7 +229,6 @@ class Sentinel2(DataSource):
                         float(row["NORTH_LAT"]),
                     )
                     shp = shapely.box(*bounds)
-                    sensing_time = dateutil.parser.isoparse(row["SENSING_TIME"])
                     geometry = STGeometry(
                         WGS84_PROJECTION, shp, (sensing_time, sensing_time)
                     )
@@ -207,14 +236,6 @@ class Sentinel2(DataSource):
                     cloud_cover = float(row["CLOUD_COVER"])
 
                     yield Sentinel2Item(product_id, geometry, blob_prefix, cloud_cover)
-
-    def _build_index(self):
-        """Build the RtreeIndex from items in the data source."""
-        for item in self._read_index(desc="Building rtree index"):
-            self.rtree_index.insert(
-                item.geometry.shp.bounds, json.dumps(item.serialize())
-            )
-        self.rtree_index.mark_done()
 
     def _get_xml_by_name(self, name: str) -> ET.ElementTree:
         """Gets the metadata XML of an item by its name.
@@ -231,15 +252,16 @@ class Sentinel2(DataSource):
         cell_id = parts[5][1:]
         base_url = f"tiles/{cell_id[0:2]}/{cell_id[2:3]}/{cell_id[3:5]}/{name}.SAFE/"
 
-        local_xml_fname = os.path.join(self.index_cache_dir, name + ".xml")
-        if not os.path.exists(local_xml_fname):
+        cache_xml_fname = self.index_cache_dir / (name + ".xml")
+        if not cache_xml_fname.exists():
             metadata_blob_path = base_url + "MTD_MSIL1C.xml"
             blob = self.bucket.blob(metadata_blob_path)
-            tmp_local_xml_fname = local_xml_fname + ".tmp." + str(os.getpid())
-            blob.download_to_filename(tmp_local_xml_fname)
-            os.rename(tmp_local_xml_fname, local_xml_fname)
+            with cache_xml_fname.fs.transaction:
+                with cache_xml_fname.fs.open(cache_xml_fname.path, "wb") as f:
+                    blob.download_to_file(f)
 
-        return ET.parse(local_xml_fname)
+        with cache_xml_fname.open("rb") as f:
+            return ET.parse(f)
 
     def get_item_by_name(self, name: str) -> Item:
         """Gets an item by name.
@@ -306,9 +328,9 @@ class Sentinel2(DataSource):
         """
         for cell_id, year in tqdm.tqdm(needed_cell_years, desc="Reading product infos"):
             assert len(cell_id) == 5
-            local_fname = os.path.join(self.index_cache_dir, f"{cell_id}_{year}.json")
+            cache_fname = self.index_cache_dir / f"{cell_id}_{year}.json"
 
-            if not os.path.exists(local_fname):
+            if not cache_fname.exists():
                 cell_part1 = cell_id[0:2]
                 cell_part2 = cell_id[2:3]
                 cell_part3 = cell_id[3:5]
@@ -337,11 +359,12 @@ class Sentinel2(DataSource):
                         item = self.get_item_by_name(item_name)
                         items.append(item)
 
-                with open_atomic(local_fname, "w") as f:
-                    json.dump([item.serialize() for item in items], f)
+                with cache_fname.fs.transaction:
+                    with cache_fname.fs.open(cache_fname.path, "w") as f:
+                        json.dump([item.serialize() for item in items], f)
 
             else:
-                with open(local_fname) as f:
+                with cache_fname.open() as f:
                     items = [Sentinel2Item.deserialize(d) for d in json.load(f)]
 
             for item in items:
