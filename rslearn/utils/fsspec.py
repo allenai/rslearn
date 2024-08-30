@@ -36,8 +36,28 @@ def get_upath_local(
             path.fs.get(path.path, local_fname)
 
             for extra_path in extra_paths:
+                if not extra_path.exists():
+                    continue
                 extra_basename = os.path.basename(extra_path.name)
                 extra_local_fname = os.path.join(dir_name, extra_basename)
                 extra_path.fs.get(extra_path.path, extra_local_fname)
 
             yield local_fname
+
+
+def join_upath(path: UPath, suffix: str) -> UPath:
+    """Joins a UPath with a suffix that may be absolute or relative to the path.
+
+    Args:
+        path: the parent path
+        suffix: string suffix. It can include a protocol, in which it is treated as an
+            absolute path not relative to the parent. It can also be a
+            filesystem-specific absolute path, or a path relative to the parent.
+
+    Returns:
+        the joined path
+    """
+    if "://" in suffix:
+        return UPath(suffix)
+    else:
+        return path / suffix

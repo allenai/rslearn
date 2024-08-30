@@ -32,7 +32,7 @@ from rslearn.utils import (
     STGeometry,
     daterange,
 )
-from rslearn.utils.fsspec import get_upath_local
+from rslearn.utils.fsspec import get_upath_local, join_upath
 
 from .copernicus import get_harmonize_callback
 from .data_source import (
@@ -135,15 +135,10 @@ class Naip(DataSource):
         d = config.data_source.config_dict
         kwargs = dict(
             config=config,
+            index_cache_dir=join_upath(ds_path, d["index_cache_dir"]),
         )
         if "use_rtree_index" in d:
             kwargs["use_rtree_index"] = d["use_rtree_index"]
-
-        if "://" in d["index_cache_dir"]:
-            kwargs["index_cache_dir"] = UPath(d["index_cache_dir"])
-        else:
-            kwargs["index_cache_dir"] = ds_path / d["index_cache_dir"]
-
         return Naip(**kwargs)
 
     def _download_manifest(self) -> UPath:
@@ -519,12 +514,8 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         kwargs = dict(
             config=config,
             modality=Sentinel2Modality(d["modality"]),
+            metadata_cache_dir=join_upath(ds_path, d["metadata_cache_dir"]),
         )
-
-        if "://" in d["metadata_cache_dir"]:
-            kwargs["metadata_cache_dir"] = UPath(d["metadata_cache_dir"])
-        else:
-            kwargs["metadata_cache_dir"] = ds_path / d["metadata_cache_dir"]
 
         if "max_time_delta" in d:
             kwargs["max_time_delta"] = timedelta(

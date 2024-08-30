@@ -23,6 +23,7 @@ from rslearn.config import DType, LayerConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry
+from rslearn.utils.fsspec import join_upath
 from rslearn.utils.rtree_index import get_cached_rtree
 
 from .data_source import DataSource, Item, QueryConfig
@@ -87,14 +88,10 @@ class GEE(DataSource):
             "service_account_name": d["service_account_name"],
             "service_account_credentials": d["service_account_credentials"],
             "filters": d.get("filters"),
+            "index_cache_dir": join_upath(ds_path, d["index_cache_dir"]),
         }
         if "dtype" in d:
             kwargs["dtype"] = DType(d["dtype"])
-
-        if "://" in d["index_cache_dir"]:
-            kwargs["index_cache_dir"] = UPath(d["index_cache_dir"])
-        else:
-            kwargs["index_cache_dir"] = ds_path / d["index_cache_dir"]
 
         return GEE(**kwargs)
 

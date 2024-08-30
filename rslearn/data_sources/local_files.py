@@ -15,7 +15,7 @@ from rslearn.config import LayerConfig, VectorLayerConfig
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_PROJECTION
 from rslearn.tile_stores import LayerMetadata, PrefixedTileStore, TileStore
 from rslearn.utils import Feature, Projection, STGeometry
-from rslearn.utils.fsspec import get_upath_local
+from rslearn.utils.fsspec import get_upath_local, join_upath
 
 from .data_source import DataSource, Item, QueryConfig
 from .raster_source import get_needed_projections, ingest_raster
@@ -274,13 +274,7 @@ class LocalFiles(DataSource):
     def from_config(config: LayerConfig, ds_path: UPath) -> "LocalFiles":
         """Creates a new LocalFiles instance from a configuration dictionary."""
         d = config.data_source.config_dict
-
-        if "://" in d["src_dir"]:
-            src_dir = UPath(d["src_dir"])
-        else:
-            src_dir = ds_path / d["src_dir"]
-
-        return LocalFiles(config=config, src_dir=src_dir)
+        return LocalFiles(config=config, src_dir=join_upath(ds_path, d["src_dir"]))
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig

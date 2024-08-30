@@ -25,6 +25,7 @@ from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry
+from rslearn.utils.fsspec import join_upath
 
 from .copernicus import get_harmonize_callback
 from .raster_source import get_needed_projections, ingest_raster
@@ -159,12 +160,10 @@ class Sentinel2(DataSource):
         """Creates a new Sentinel2 instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict
-        kwargs = dict(config=config)
-
-        if "://" in d["index_cache_dir"]:
-            kwargs["index_cache_dir"] = UPath(d["index_cache_dir"])
-        else:
-            kwargs["index_cache_dir"] = ds_path / d["index_cache_dir"]
+        kwargs = dict(
+            config=config,
+            index_cache_dir=join_upath(ds_path, d["index_cache_dir"]),
+        )
 
         if "max_time_delta" in d:
             kwargs["max_time_delta"] = timedelta(

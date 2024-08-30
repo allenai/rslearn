@@ -1,6 +1,6 @@
 """Multi-processing utilities."""
 
-import multiprocessing
+import multiprocessing.pool
 from collections.abc import Callable, Generator
 from typing import Any
 
@@ -30,12 +30,14 @@ class StarImapUnorderedWrapper:
 
 
 def star_imap_unordered(
-    p: multiprocessing.Pool, fn: Callable[..., Any], kwargs_list: list[dict[str, Any]]
+    p: multiprocessing.pool.Pool,
+    fn: Callable[..., Any],
+    kwargs_list: list[dict[str, Any]],
 ) -> Generator[Any, None, None]:
     """Wrapper for Pool.imap_unordered that exposes kwargs to the function.
 
     Args:
-        p: the multiprocessing.Pool to use.
+        p: the multiprocessing.pool.Pool to use.
         fn: the function to call, which accepts keyword arguments.
         kwargs_list: list of kwargs dicts to pass to the function.
 

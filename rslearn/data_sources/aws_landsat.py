@@ -25,6 +25,7 @@ from rslearn.config import LayerConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry
+from rslearn.utils.fsspec import join_upath
 
 from .data_source import DataSource, Item, QueryConfig
 from .raster_source import get_needed_projections, ingest_raster
@@ -121,6 +122,7 @@ class LandsatOliTirs(DataSource):
         d = config.data_source.config_dict
         kwargs = dict(
             config=config,
+            metadata_cache_dir=join_upath(ds_path, d["metadata_cache_dir"]),
         )
         if "max_time_delta" in d:
             kwargs["max_time_delta"] = timedelta(
@@ -128,11 +130,6 @@ class LandsatOliTirs(DataSource):
             )
         if "sort_by" in d:
             kwargs["sort_by"] = d["sort_by"]
-
-        if "://" in d["metadata_cache_dir"]:
-            kwargs["metadata_cache_dir"] = UPath(d["metadata_cache_dir"])
-        else:
-            kwargs["metadata_cache_dir"] = ds_path / d["metadata_cache_dir"]
 
         return LandsatOliTirs(**kwargs)
 
