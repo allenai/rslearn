@@ -223,6 +223,7 @@ class XyzTiles(DataSource):
         """
         groups = []
         for geometry in geometries:
+            geometry = geometry.to_projection(self.projection)
             cur_groups = match_candidate_items_to_window(
                 geometry, self.items, query_config
             )
