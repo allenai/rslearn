@@ -301,7 +301,7 @@ def materialize_raster(
     )
 
     # Write the array to layer directory.
-    layer_dir = os.path.join(window.window_root, "layers", layer_name)
+    layer_dir = os.path.join(window.path, "layers", layer_name)
     tmp_out_dir = os.path.join(layer_dir + ".tmp", "_".join(band_cfg.bands))
     os.makedirs(tmp_out_dir, exist_ok=True)
     raster_format = load_raster_format(

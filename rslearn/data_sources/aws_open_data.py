@@ -1,9 +1,8 @@
 """Data source for raster data in Registry of Open Data on AWS."""
 
-import glob
 import io
 import json
-import os
+import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Generator
 from datetime import datetime, timedelta, timezone
@@ -20,19 +19,20 @@ import rasterio
 import shapely
 import tqdm
 from rasterio.crs import CRS
+from upath import UPath
 
 import rslearn.data_sources.utils
 import rslearn.utils.mgrs
 from rslearn.config import LayerConfig, RasterLayerConfig
-from rslearn.const import WGS84_EPSG, WGS84_PROJECTION
+from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_EPSG, WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import (
     GridIndex,
     Projection,
     STGeometry,
     daterange,
-    open_atomic,
 )
+from rslearn.utils.fsspec import get_upath_local, join_upath
 
 from .copernicus import get_harmonize_callback
 from .data_source import (
@@ -88,62 +88,80 @@ class Naip(DataSource):
     manifest_fname = "manifest.txt"
 
     def __init__(
-        self, config: LayerConfig, index_cache_dir: str, use_rtree_index: bool = False
+        self,
+        config: LayerConfig,
+        index_cache_dir: UPath,
+        use_rtree_index: bool = False,
+        states: list[str] | None = None,
+        years: list[int] | None = None,
     ) -> None:
         """Initialize a new Naip instance.
 
         Args:
             config: the LayerConfig of the layer containing this data source.
-            index_cache_dir: local directory to cache index shapefiles.
+            index_cache_dir: directory to cache index shapefiles.
             use_rtree_index: whether to create an rtree index to enable faster lookups
                 (default false)
+            states: optional list of states (lowercase two-letter codes) to restrict
+                the search. If use_rtree_index is enabled, the rtree will only be
+                populated with data from these states.
+            years: optional list of years to restrict the search
         """
         self.config = config
         self.index_cache_dir = index_cache_dir
+        self.states = states
+        self.years = years
 
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
 
         if use_rtree_index:
-            from rslearn.utils.rtree_index import RtreeIndex
+            from rslearn.utils.rtree_index import RtreeIndex, get_cached_rtree
 
-            rtree_fname = os.path.join(self.index_cache_dir, "rtree_index")
-            self.rtree_index = RtreeIndex(rtree_fname)
-            if not self.rtree_index.is_done():
-                self._build_index()
+            def build_fn(index: RtreeIndex):
+                for item in self._read_index_shapefiles(desc="Building rtree index"):
+                    index.insert(item.geometry.shp.bounds, json.dumps(item.serialize()))
+
+            self.rtree_tmp_dir = tempfile.TemporaryDirectory()
+            self.rtree_index = get_cached_rtree(
+                self.index_cache_dir, self.rtree_tmp_dir.name, build_fn
+            )
         else:
             self.rtree_index = None
 
     @staticmethod
-    def from_config(config: LayerConfig) -> "Naip":
+    def from_config(config: LayerConfig, ds_path: UPath) -> "Naip":
         """Creates a new Naip instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict
-        return Naip(
+        kwargs = dict(
             config=config,
-            index_cache_dir=d["index_cache_dir"],
-            use_rtree_index=d.get("use_rtree_index", False),
+            index_cache_dir=join_upath(ds_path, d["index_cache_dir"]),
         )
+        if "use_rtree_index" in d:
+            kwargs["use_rtree_index"] = d["use_rtree_index"]
+        return Naip(**kwargs)
 
-    def _download_manifest(self) -> str:
+    def _download_manifest(self) -> UPath:
         """Download the manifest that enumerates files in the bucket.
 
         Returns:
             The local filename where the manifest has been downloaded.
         """
-        local_fname = os.path.join(self.index_cache_dir, self.manifest_fname)
-        if not os.path.exists(local_fname):
-            self.bucket.download_file(
-                self.manifest_fname,
-                local_fname,
-                ExtraArgs={"RequestPayer": "requester"},
-            )
-        return local_fname
+        manifest_path = self.index_cache_dir / self.manifest_fname
+        if not manifest_path.exists():
+            with manifest_path.open("wb") as dst:
+                self.bucket.download_fileobj(
+                    self.manifest_fname,
+                    dst,
+                    ExtraArgs={"RequestPayer": "requester"},
+                )
+        return manifest_path
 
     def _download_index_shapefiles(self) -> None:
         """Download all index shapefiles that specify image extents."""
-        manifest_fname = self._download_manifest()
-        needed_files = []
-        with open(manifest_fname) as f:
+        manifest_path = self._download_manifest()
+        needed_files: list[tuple[str, UPath]] = []
+        with manifest_path.open() as f:
             for line in f:
                 blob_path = line.strip()
                 if not blob_path:
@@ -153,21 +171,30 @@ class Naip(DataSource):
 
                 # Data before 2012 doesn't seem to be present even though index files
                 # might exist?
+                # Also filter state/year here.
                 path_parts = blob_path.split("/")
-                if int(path_parts[1]) < 2012:
+                state_code = path_parts[0]
+                year = int(path_parts[1])
+                if year < 2012:
+                    continue
+                if self.states and state_code not in self.states:
+                    continue
+                if self.years and year not in self.years:
                     continue
 
-                local_fname = os.path.join(self.index_cache_dir, blob_path)
-                if os.path.exists(local_fname):
+                cache_path = self.index_cache_dir / blob_path
+                if cache_path.exists():
                     continue
-                needed_files.append((blob_path, local_fname))
-        for blob_path, local_fname in tqdm.tqdm(
+                needed_files.append((blob_path, cache_path))
+        for blob_path, cache_path in tqdm.tqdm(
             needed_files, desc="Downloading index files"
         ):
-            os.makedirs(os.path.dirname(local_fname), exist_ok=True)
-            self.bucket.download_file(
-                blob_path, local_fname, ExtraArgs={"RequestPayer": "requester"}
-            )
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            with cache_path.fs.transaction:
+                with cache_path.fs.open(cache_path.path, "wb") as dst:
+                    self.bucket.download_fileobj(
+                        blob_path, dst, ExtraArgs={"RequestPayer": "requester"}
+                    )
 
     def _read_index_shapefiles(self, desc=None) -> Generator[NaipItem, None, None]:
         """Read the index shapefiles and yield NaipItems corresponding to each image."""
@@ -180,8 +207,8 @@ class Naip(DataSource):
         # date).
         # So here we create dict from just the prefix (i.e. exclude the version date).
         tif_blob_path_dict = {}
-        manifest_fname = self._download_manifest()
-        with open(manifest_fname) as f:
+        manifest_path = self._download_manifest()
+        with manifest_path.open() as f:
             for line in f:
                 blob_path = line.strip()
                 if not blob_path:
@@ -192,76 +219,73 @@ class Naip(DataSource):
                 prefix = "_".join(parts[0:6])
                 tif_blob_path_dict[prefix] = blob_path
 
-        shape_files = glob.glob(
-            "**/*.shp", recursive=True, root_dir=self.index_cache_dir
-        )
+        shape_files = self.index_cache_dir.glob("**/*.shp")
         if desc:
             shape_files = tqdm.tqdm(shape_files, desc=desc)
         for shp_fname in shape_files:
-            with fiona.open(os.path.join(self.index_cache_dir, shp_fname)) as f:
-                src_crs = f.crs
-                dst_crs = fiona.crs.from_epsg(WGS84_EPSG)
+            # We copy the file to local since it needs to read all the auxiliary files
+            # of the shapefile.
+            prefix = ".".join(shp_fname.name.split(".")[:-1])
+            aux_files: list[UPath] = []
+            for ext in SHAPEFILE_AUX_EXTENSIONS:
+                aux_files.append(shp_fname.parent / (prefix + ext))
 
-                for feature in f:
-                    geometry = fiona.transform.transform_geom(
-                        src_crs, dst_crs, feature["geometry"]
-                    )
-                    shp = shapely.geometry.shape(geometry)
+            with get_upath_local(shp_fname, extra_paths=aux_files) as local_fname:
+                with fiona.open(local_fname) as f:
+                    src_crs = f.crs
+                    dst_crs = fiona.crs.from_epsg(WGS84_EPSG)
 
-                    # Properties specifies TIF filename like:
-                    # - m_4212362_sw_10_1_20140622_20140923.tif.
-                    # Index fname is like:
-                    # - ca/2014/100cm/index/naip_3_14_3_1_ca.shp.
-                    # So use that to reconstruct the prefix:
-                    # - ca/2014/100cm/index/rgbir/m_4212362_sw_10_1_20140622
-                    base_dir = os.path.dirname(os.path.dirname(shp_fname))
-                    tif_fname = feature["properties"]["FileName"]
-                    fname_parts = tif_fname.split(".tif")[0].split("_")
-                    tile_id = fname_parts[1][0:5]
-                    fname_prefix = "_".join(fname_parts[:-1])
-                    full_prefix = f"{base_dir}/rgbir/{tile_id}/{fname_prefix}"
-
-                    if full_prefix not in tif_blob_path_dict:
-                        print(
-                            f"warning: skipping file {tif_fname} seen in "
-                            + f"shapefile {shp_fname} but {full_prefix} does not exist "
-                            + "in manifest"
+                    for feature in f:
+                        geometry = fiona.transform.transform_geom(
+                            src_crs, dst_crs, feature["geometry"]
                         )
-                        continue
-                    blob_path = tif_blob_path_dict[full_prefix]
+                        shp = shapely.geometry.shape(geometry)
 
-                    # SrcImgDate is either string like "20180905" or int 20180905.
-                    # We make sure it is string here.
-                    # But it also could not exist in which case we need to fallback to
-                    # extracting it from filename.
-                    if "SrcImgDate" in feature["properties"]:
-                        src_img_date = feature["properties"]["SrcImgDate"]
-                        if isinstance(src_img_date, int):
-                            src_img_date = str(src_img_date)
-                    else:
-                        src_img_date = fname_parts[5]
-                    time = datetime.strptime(src_img_date, "%Y%m%d").replace(
-                        tzinfo=timezone.utc
-                    )
+                        # Properties specifies TIF filename like:
+                        # - m_4212362_sw_10_1_20140622_20140923.tif.
+                        # Index fname is like:
+                        # - ca/2014/100cm/index/naip_3_14_3_1_ca.shp.
+                        # So use that to reconstruct the prefix:
+                        # - ca/2014/100cm/index/rgbir/m_4212362_sw_10_1_20140622
+                        base_dir = "/".join(
+                            shp_fname.parent.parent.path.split("/")[-3:]
+                        )
+                        tif_fname = feature["properties"]["FileName"]
+                        fname_parts = tif_fname.split(".tif")[0].split("_")
+                        tile_id = fname_parts[1][0:5]
+                        fname_prefix = "_".join(fname_parts[:-1])
+                        full_prefix = f"{base_dir}/rgbir/{tile_id}/{fname_prefix}"
 
-                    geometry = STGeometry(WGS84_PROJECTION, shp, (time, time))
+                        if full_prefix not in tif_blob_path_dict:
+                            print(
+                                f"warning: skipping file {tif_fname} seen in "
+                                + f"shapefile {shp_fname} but {full_prefix} does not exist "
+                                + "in manifest"
+                            )
+                            continue
+                        blob_path = tif_blob_path_dict[full_prefix]
 
-                    yield NaipItem(
-                        name=blob_path.split("/")[-1].split(".tif")[0],
-                        geometry=geometry,
-                        blob_path=blob_path,
-                    )
+                        # SrcImgDate is either string like "20180905" or int 20180905.
+                        # We make sure it is string here.
+                        # But it also could not exist in which case we need to fallback to
+                        # extracting it from filename.
+                        if "SrcImgDate" in feature["properties"]:
+                            src_img_date = feature["properties"]["SrcImgDate"]
+                            if isinstance(src_img_date, int):
+                                src_img_date = str(src_img_date)
+                        else:
+                            src_img_date = fname_parts[5]
+                        time = datetime.strptime(src_img_date, "%Y%m%d").replace(
+                            tzinfo=timezone.utc
+                        )
 
-    def _build_index(self):
-        """Build the RtreeIndex from items in the data source.
+                        geometry = STGeometry(WGS84_PROJECTION, shp, (time, time))
 
-        Writes to a temporary file before moving to the final location.
-        """
-        for item in self._read_index_shapefiles(desc="Building rtree index"):
-            self.rtree_index.insert(
-                item.geometry.shp.bounds, json.dumps(item.serialize())
-            )
-        self.rtree_index.mark_done()
+                        yield NaipItem(
+                            name=blob_path.split("/")[-1].split(".tif")[0],
+                            geometry=geometry,
+                            blob_path=blob_path,
+                        )
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
@@ -453,7 +477,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         self,
         config: LayerConfig,
         modality: Sentinel2Modality,
-        metadata_cache_dir: str,
+        metadata_cache_dir: UPath,
         max_time_delta: timedelta = timedelta(days=30),
         sort_by: str | None = None,
         harmonize: bool = False,
@@ -463,7 +487,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         Args:
             config: the LayerConfig of the layer containing this data source.
             modality: L1C or L2A.
-            metadata_cache_dir: local directory to cache product metadata files.
+            metadata_cache_dir: directory to cache product metadata files.
             max_time_delta: maximum time before a query start time or after a
                 query end time to look for products. This is required due to the large
                 number of available products, and defaults to 30 days.
@@ -483,15 +507,16 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         self.bucket = boto3.resource("s3").Bucket(bucket_name)
 
     @staticmethod
-    def from_config(config: LayerConfig) -> "Sentinel2":
+    def from_config(config: LayerConfig, ds_path: UPath) -> "Sentinel2":
         """Creates a new Sentinel2 instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict
         kwargs = dict(
             config=config,
             modality=Sentinel2Modality(d["modality"]),
-            metadata_cache_dir=d["metadata_cache_dir"],
+            metadata_cache_dir=join_upath(ds_path, d["metadata_cache_dir"]),
         )
+
         if "max_time_delta" in d:
             kwargs["max_time_delta"] = timedelta(
                 seconds=pytimeparse.parse(d["max_time_delta"])
@@ -500,6 +525,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         for k in simple_optionals:
             if k in d:
                 kwargs[k] = d[k]
+
         return Sentinel2(**kwargs)
 
     def _read_products(
@@ -515,11 +541,9 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
             needed_cell_months, desc="Reading product infos"
         ):
             assert len(cell_id) == 5
-            local_fname = os.path.join(
-                self.metadata_cache_dir, f"{cell_id}_{year}_{month}.json"
-            )
+            cache_fname = self.metadata_cache_dir / f"{cell_id}_{year}_{month}.json"
 
-            if not os.path.exists(local_fname):
+            if not cache_fname.exists():
                 cell_part1 = cell_id[0:2]
                 cell_part2 = cell_id[2:3]
                 cell_part3 = cell_id[3:5]
@@ -554,11 +578,12 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
                         continue
                     products.append(product)
 
-                with open_atomic(local_fname, "w") as f:
-                    json.dump(products, f)
+                with cache_fname.fs.transaction:
+                    with cache_fname.fs.open(cache_fname.path, "w") as f:
+                        json.dump(products, f)
 
             else:
-                with open(local_fname) as f:
+                with cache_fname.open() as f:
                     products = json.load(f)
 
             for product in products:

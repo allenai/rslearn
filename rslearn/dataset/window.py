@@ -114,7 +114,8 @@ class Window:
             "options": self.options,
         }
         with self.path.fs.transaction:
-            with (self.path / "metadata.json").open("w") as f:
+            metadata_path = self.path / "metadata.json"
+            with metadata_path.fs.open(metadata_path.path, "w") as f:
                 json.dump(metadata, f)
 
     def get_geometry(self) -> STGeometry:
@@ -141,7 +142,7 @@ class Window:
         json_data = [layer_data.serialize() for layer_data in layer_datas.values()]
         items_fname = self.path / "items.json"
         with items_fname.fs.transaction:
-            with items_fname.open("w") as f:
+            with items_fname.fs.open(items_fname.path, "w") as f:
                 json.dump(json_data, f)
 
     @staticmethod

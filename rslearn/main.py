@@ -418,7 +418,7 @@ class IngestHandler:
         for layer_name, items_and_geometries in jobs_by_layer.items():
             cur_tile_store = PrefixedTileStore(tile_store, (layer_name,))
             layer_cfg = self.dataset.layers[layer_name]
-            data_source = data_source_from_config(layer_cfg)
+            data_source = data_source_from_config(layer_cfg, self.dataset.path)
 
             try:
                 data_source.ingest(
@@ -453,7 +453,7 @@ class IngestHandler:
             if not layer_cfg.data_source.ingest:
                 continue
 
-            data_source = data_source_from_config(layer_cfg)
+            data_source = data_source_from_config(layer_cfg, self.dataset.path)
 
             geometries_by_item = {}
             for window in windows:
