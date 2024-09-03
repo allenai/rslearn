@@ -12,6 +12,7 @@ import tqdm
 import wandb
 from lightning.pytorch.cli import LightningCLI
 from rasterio.crs import CRS
+from upath import UPath
 
 from rslearn.const import WGS84_EPSG
 from rslearn.data_sources import Item, data_source_from_config
@@ -178,7 +179,7 @@ def add_windows():
     )
 
     kwargs = dict(
-        dataset=Dataset(ds_root=args.root),
+        dataset=Dataset(UPath(args.root)),
         group=args.group,
         projection=dst_projection,
         name=args.name,
@@ -287,7 +288,9 @@ def apply_on_windows(
         groups = [group]
     if window:
         names = [window]
-    windows = dataset.load_windows(groups=groups, names=names)
+    windows = dataset.load_windows(
+        groups=groups, names=names, workers=workers, show_progress=True
+    )
     print(f"found {len(windows)} windows")
 
     if hasattr(f, "get_jobs"):
@@ -320,7 +323,7 @@ def apply_on_windows(
 
 def apply_on_windows_args(f: Callable[[list[Window]], None], args: argparse.Namespace):
     """Call apply_on_windows with arguments passed via command-line interface."""
-    dataset = Dataset(ds_root=args.root)
+    dataset = Dataset(UPath(args.root))
     apply_on_windows(
         f,
         dataset,
