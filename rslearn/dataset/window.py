@@ -8,6 +8,7 @@ import shapely
 from upath import UPath
 
 from rslearn.utils import Projection, STGeometry
+from rslearn.utils.fsspec import open_atomic
 
 
 class WindowLayerData:
@@ -113,10 +114,9 @@ class Window:
             ),
             "options": self.options,
         }
-        with self.path.fs.transaction:
-            metadata_path = self.path / "metadata.json"
-            with metadata_path.fs.open(metadata_path.path, "w") as f:
-                json.dump(metadata, f)
+        metadata_path = self.path / "metadata.json"
+        with open_atomic(metadata_path, "w") as f:
+            json.dump(metadata, f)
 
     def get_geometry(self) -> STGeometry:
         """Computes the STGeometry corresponding to this window."""
@@ -141,9 +141,8 @@ class Window:
         """Save layer datas to items.json."""
         json_data = [layer_data.serialize() for layer_data in layer_datas.values()]
         items_fname = self.path / "items.json"
-        with items_fname.fs.transaction:
-            with items_fname.fs.open(items_fname.path, "w") as f:
-                json.dump(json_data, f)
+        with open_atomic(items_fname, "w") as f:
+            json.dump(json_data, f)
 
     @staticmethod
     def load(path: UPath) -> "Window":

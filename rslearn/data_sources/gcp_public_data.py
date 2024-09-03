@@ -25,7 +25,7 @@ from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry
-from rslearn.utils.fsspec import join_upath
+from rslearn.utils.fsspec import join_upath, open_atomic
 
 from .copernicus import get_harmonize_callback
 from .raster_source import get_needed_projections, ingest_raster
@@ -255,9 +255,8 @@ class Sentinel2(DataSource):
         if not cache_xml_fname.exists():
             metadata_blob_path = base_url + "MTD_MSIL1C.xml"
             blob = self.bucket.blob(metadata_blob_path)
-            with cache_xml_fname.fs.transaction:
-                with cache_xml_fname.fs.open(cache_xml_fname.path, "wb") as f:
-                    blob.download_to_file(f)
+            with open_atomic(cache_xml_fname, "wb") as f:
+                blob.download_to_file(f)
 
         with cache_xml_fname.open("rb") as f:
             return ET.parse(f)
@@ -358,9 +357,8 @@ class Sentinel2(DataSource):
                         item = self.get_item_by_name(item_name)
                         items.append(item)
 
-                with cache_fname.fs.transaction:
-                    with cache_fname.fs.open(cache_fname.path, "w") as f:
-                        json.dump([item.serialize() for item in items], f)
+                with open_atomic(cache_fname, "w") as f:
+                    json.dump([item.serialize() for item in items], f)
 
             else:
                 with cache_fname.open() as f:
