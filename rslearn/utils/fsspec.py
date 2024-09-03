@@ -4,6 +4,7 @@ import os
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
+from typing import Any
 
 from fsspec.implementations.local import LocalFileSystem
 from upath import UPath
@@ -61,3 +62,28 @@ def join_upath(path: UPath, suffix: str) -> UPath:
         return UPath(suffix)
     else:
         return path / suffix
+
+
+@contextmanager
+def open_atomic(path: UPath, *args: list[Any], **kwargs: dict[str, Any]):
+    """Open a path for atomic writing.
+
+    If it is local filesystem, we will write to a temporary file, and rename it to the
+    destination upon success.
+
+    Otherwise, we assume it's object storage and none of that is needed.
+
+    Args:
+        path: the UPath to be opened
+        *args: any valid arguments for :code:`open`
+        **kwargs: any valid keyword arguments for :code:`open`
+    """
+    if isinstance(path.fs, LocalFileSystem):
+        tmppath = path.path + ".tmp." + str(os.getpid())
+        with open(tmppath, *args, **kwargs) as file:
+            yield file
+        os.rename(tmppath, path.path)
+
+    else:
+        with path.open(*args, **kwargs) as file:
+            yield file

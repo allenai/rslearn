@@ -32,7 +32,7 @@ from rslearn.utils import (
     STGeometry,
     daterange,
 )
-from rslearn.utils.fsspec import get_upath_local, join_upath
+from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 
 from .copernicus import get_harmonize_callback
 from .data_source import (
@@ -190,11 +190,10 @@ class Naip(DataSource):
             needed_files, desc="Downloading index files"
         ):
             cache_path.parent.mkdir(parents=True, exist_ok=True)
-            with cache_path.fs.transaction:
-                with cache_path.fs.open(cache_path.path, "wb") as dst:
-                    self.bucket.download_fileobj(
-                        blob_path, dst, ExtraArgs={"RequestPayer": "requester"}
-                    )
+            with open_atomic(cache_path, "wb") as dst:
+                self.bucket.download_fileobj(
+                    blob_path, dst, ExtraArgs={"RequestPayer": "requester"}
+                )
 
     def _read_index_shapefiles(self, desc=None) -> Generator[NaipItem, None, None]:
         """Read the index shapefiles and yield NaipItems corresponding to each image."""
@@ -578,9 +577,8 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
                         continue
                     products.append(product)
 
-                with cache_fname.fs.transaction:
-                    with cache_fname.fs.open(cache_fname.path, "w") as f:
-                        json.dump(products, f)
+                with open_atomic(cache_fname, "w") as f:
+                    json.dump(products, f)
 
             else:
                 with cache_fname.open() as f:

@@ -22,10 +22,10 @@ from upath import UPath
 import rslearn.data_sources.utils
 import rslearn.utils.mgrs
 from rslearn.config import LayerConfig, RasterLayerConfig
-from rslearn.const import WGS84_PROJECTION
+from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry
-from rslearn.utils.fsspec import join_upath
+from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 
 from .data_source import DataSource, Item, QueryConfig
 from .raster_source import get_needed_projections, ingest_raster
@@ -193,9 +193,8 @@ class LandsatOliTirs(DataSource):
                         )
                     )
 
-                with local_fname.fs.transaction:
-                    with local_fname.open("w") as f:
-                        json.dump([item.serialize() for item in items], f)
+                with open_atomic(local_fname, "w") as f:
+                    json.dump([item.serialize() for item in items], f)
 
             else:
                 with local_fname.open() as f:
@@ -212,21 +211,37 @@ class LandsatOliTirs(DataSource):
         Returns:
             List of (polygon, path, row).
         """
-        shp_fname = self.metadata_cache_dir / "WRS2_descending.shp"
+        prefix = "WRS2_descending"
+        shp_fname = self.metadata_cache_dir / f"{prefix}.shp"
         if not shp_fname.exists():
             # Download and extract zip to cache dir.
-            zip_fname = self.metadata_cache_dir / "WRS2_descending_0.zip"
+            zip_fname = self.metadata_cache_dir / f"{prefix}.zip"
             with urllib.request.urlopen(self.wrs2_url) as response:
                 with zip_fname.open("wb") as f:
                     shutil.copyfileobj(response, f)
             with zip_fname.open("rb") as f:
                 with zipfile.ZipFile(f, "r") as zipf:
-                    with zipf.open("WRS2_descending.shp") as memberf:
+                    member_names = zipf.namelist()
+                    for ext in SHAPEFILE_AUX_EXTENSIONS:
+                        cur_fname = "WRS2_descending" + ext
+                        if cur_fname not in member_names:
+                            continue
+                        with zipf.open(cur_fname) as memberf:
+                            with (self.metadata_cache_dir / (prefix + ext)).open(
+                                "wb"
+                            ) as f:
+                                shutil.copyfileobj(memberf, f)
+
+                    with zipf.open(f"{prefix}.shp") as memberf:
                         with shp_fname.open("wb") as f:
                             shutil.copyfileobj(memberf, f)
 
-        with shp_fname.open("rb") as f:
-            with fiona.open(f) as src:
+        aux_files: list[UPath] = []
+        for ext in SHAPEFILE_AUX_EXTENSIONS:
+            aux_files.append(self.metadata_cache_dir / (prefix + ext))
+
+        with get_upath_local(shp_fname, extra_paths=aux_files) as local_fname:
+            with fiona.open(local_fname) as src:
                 polygons = []
                 for feat in src:
                     shp = shapely.geometry.shape(feat["geometry"])

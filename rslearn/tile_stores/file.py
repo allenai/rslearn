@@ -8,6 +8,7 @@ from upath import UPath
 
 from rslearn.config import RasterFormatConfig, TileStoreConfig, VectorFormatConfig
 from rslearn.utils import Feature, PixelBounds, Projection
+from rslearn.utils.fsspec import open_atomic
 from rslearn.utils.raster_format import (
     GeotiffRasterFormat,
     RasterFormat,
@@ -113,10 +114,9 @@ class FileTileStoreLayer(TileStoreLayer):
     def save_metadata(self, metadata: LayerMetadata) -> None:
         """Save the LayerMetadata associated with this layer."""
         self.path.mkdir(parents=True, exist_ok=True)
-        with self.path.fs.transaction:
-            metadata_path = self.path / "metadata.json"
-            with metadata_path.fs.open(metadata_path.path, "w") as f:
-                json.dump(metadata.serialize(), f)
+        metadata_path = self.path / "metadata.json"
+        with open_atomic(metadata_path, "w") as f:
+            json.dump(metadata.serialize(), f)
 
 
 class FileTileStore(TileStore):
