@@ -281,7 +281,6 @@ def apply_on_windows(
     if hasattr(f, "set_dataset"):
         f.set_dataset(dataset)
 
-    print("Loading windows")
     groups = None
     names = None
     if group:
@@ -294,7 +293,7 @@ def apply_on_windows(
     print(f"found {len(windows)} windows")
 
     if hasattr(f, "get_jobs"):
-        jobs = f.get_jobs(windows)
+        jobs = f.get_jobs(windows, workers)
         print(f"got {len(jobs)} jobs")
     else:
         jobs = windows
@@ -382,6 +381,11 @@ def dataset_prepare():
     apply_on_windows_args(fn, args)
 
 
+def _load_window_layer_datas(window: Window):
+    # Helper for IngestHandler to use with multiprocessing.
+    return window, window.load_layer_datas()
+
+
 class IngestHandler:
     """apply_on_windows handler for the rslearn dataset ingest command."""
 
@@ -435,7 +439,7 @@ class IngestHandler:
         gc.collect()
 
     def get_jobs(
-        self, windows: list[Window]
+        self, windows: list[Window], workers: int
     ) -> list[tuple[str, Item, list[STGeometry]]]:
         """Computes ingest jobs from window list.
 
@@ -446,6 +450,17 @@ class IngestHandler:
         makes sense because there's no reason to ingest the same item twice.
         """
         # TODO: avoid duplicating ingest_dataset_windows...
+
+        # Load layer datas of each window.
+        p = multiprocessing.Pool(workers)
+        outputs = p.imap_unordered(_load_window_layer_datas, windows)
+        windows_and_layer_datas = []
+        for window, layer_datas in tqdm.tqdm(
+            outputs, total=len(windows), desc="Loading window layer datas"
+        ):
+            windows_and_layer_datas.append((window, layer_datas))
+        p.close()
+
         jobs: list[tuple[str, Item, list[STGeometry]]] = []
         for layer_name, layer_cfg in self.dataset.layers.items():
             if not layer_cfg.data_source:
@@ -456,8 +471,7 @@ class IngestHandler:
             data_source = data_source_from_config(layer_cfg, self.dataset.path)
 
             geometries_by_item = {}
-            for window in windows:
-                layer_datas = window.load_layer_datas()
+            for window, layer_datas in windows_and_layer_datas:
                 if layer_name not in layer_datas:
                     continue
                 geometry = window.get_geometry()
