@@ -3,6 +3,7 @@ import os
 import random
 
 import shapely
+from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
@@ -11,17 +12,17 @@ from rslearn.dataset.manage import (
     materialize_dataset_windows,
     prepare_dataset_windows,
 )
-from rslearn.utils import Feature, S3FileAPI, STGeometry
+from rslearn.utils import Feature, STGeometry
 from rslearn.utils.vector_format import load_vector_format
 
 
 class TestLocalFiles:
-    """Tests that dataset works with S3FileAPI using LocalFiles data source."""
+    """Tests that dataset works with S3 using LocalFiles data source."""
 
-    def cleanup(self, file_api: S3FileAPI):
-        """Delete everything in the specified S3FileAPI."""
-        for obj in file_api.bucket.objects.filter(Prefix=file_api.prefix):
-            obj.delete()
+    def cleanup(self, ds_path: UPath):
+        """Delete everything in the specified path."""
+        for fname in ds_path.fs.find(ds_path.path):
+            ds_path.fs.delete(fname)
 
     def test_dataset(self, tmp_path):
         features = [
@@ -44,13 +45,9 @@ class TestLocalFiles:
             )
 
         test_id = random.randint(10000, 99999)
-        ds_file_api = S3FileAPI(
-            endpoint_url=os.environ["TEST_S3_ENDPOINT_URL"],
-            access_key_id=os.environ["TEST_S3_ACCESS_KEY_ID"],
-            secret_access_key=os.environ["TEST_S3_SECRET_ACCESS_KEY"],
-            bucket_name=os.environ["TEST_S3_BUCKET_NAME"],
-            prefix=os.environ["TEST_S3_PREFIX"] + f"test_{test_id}/",
-        )
+        bucket_name = os.environ["TEST_BUCKET"]
+        prefix = os.environ["TEST_PREFIX"] + f"test_{test_id}/"
+        ds_path = UPath(f"gcs://{bucket_name}/{prefix}")
 
         dataset_config = {
             "layers": {
@@ -67,11 +64,12 @@ class TestLocalFiles:
                 "root_dir": "tiles",
             },
         }
-        with ds_file_api.open("config.json", "w") as f:
+        ds_path.mkdir(parents=True, exist_ok=True)
+        with (ds_path / "config.json").open("w") as f:
             json.dump(dataset_config, f)
 
         Window(
-            file_api=Window.get_window_root(ds_file_api, "default", "default"),
+            path=Window.get_window_root(ds_path, "default", "default"),
             group="default",
             name="default",
             projection=WGS84_PROJECTION,
@@ -79,7 +77,7 @@ class TestLocalFiles:
             time_range=None,
         ).save()
 
-        dataset = Dataset(file_api=ds_file_api)
+        dataset = Dataset(ds_path)
         windows = dataset.load_windows()
         prepare_dataset_windows(dataset, windows)
         ingest_dataset_windows(dataset, windows)
@@ -91,36 +89,9 @@ class TestLocalFiles:
         layer_config = dataset.layers["local_file"]
         vector_format = load_vector_format(layer_config.format)
         features = vector_format.decode_vector(
-            window.file_api.get_folder("layers", "local_file"), window.bounds
+            window.path / "layers" / "local_file", window.bounds
         )
 
         assert len(features) == 2
 
-        self.cleanup(ds_file_api)
-
-    def test_listdir(self):
-        """Make sure that listdir in S3FileAPI works properly.
-
-        It should return all the prefixes in the specified folder.
-        """
-        test_id = random.randint(10000, 99999)
-        file_api = S3FileAPI(
-            endpoint_url=os.environ["TEST_S3_ENDPOINT_URL"],
-            access_key_id=os.environ["TEST_S3_ACCESS_KEY_ID"],
-            secret_access_key=os.environ["TEST_S3_SECRET_ACCESS_KEY"],
-            bucket_name=os.environ["TEST_S3_BUCKET_NAME"],
-            prefix=os.environ["TEST_S3_PREFIX"] + f"test_{test_id}/",
-        )
-        with file_api.open("x/prefix1", "w"):
-            pass
-        with file_api.open("x/prefix2/suffix", "w"):
-            pass
-        with file_api.open("x/prefix1/suffix", "w"):
-            pass
-        with file_api.open("x/prefix3/suffix/suffix", "w"):
-            pass
-        prefixes = file_api.listdir("x")
-        prefixes.sort()
-        assert prefixes == ["prefix1", "prefix2", "prefix3"]
-
-        self.cleanup(file_api)
+        self.cleanup(ds_path)

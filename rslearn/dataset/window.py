@@ -5,8 +5,10 @@ from datetime import datetime
 from typing import Any
 
 import shapely
+from upath import UPath
 
-from rslearn.utils import FileAPI, Projection, STGeometry
+from rslearn.utils import Projection, STGeometry
+from rslearn.utils.fsspec import open_atomic
 
 
 class WindowLayerData:
@@ -67,7 +69,7 @@ class Window:
 
     def __init__(
         self,
-        file_api: FileAPI,
+        path: UPath,
         group: str,
         name: str,
         projection: Projection,
@@ -81,7 +83,7 @@ class Window:
         stored in metadata.json.
 
         Args:
-            file_api: the FileAPI rooted at this window
+            path: the directory of this window
             group: the group the window belongs to
             name: the unique name for this window
             projection: the projection of the window
@@ -89,7 +91,7 @@ class Window:
             time_range: optional time range of the window
             options: additional options (?)
         """
-        self.file_api = file_api
+        self.path = path
         self.group = group
         self.name = name
         self.projection = projection
@@ -99,6 +101,7 @@ class Window:
 
     def save(self) -> None:
         """Save the window metadata to its root directory."""
+        self.path.mkdir(parents=True, exist_ok=True)
         metadata = {
             "group": self.group,
             "name": self.name,
@@ -111,7 +114,8 @@ class Window:
             ),
             "options": self.options,
         }
-        with self.file_api.open_atomic("metadata.json", "w") as f:
+        metadata_path = self.path / "metadata.json"
+        with open_atomic(metadata_path, "w") as f:
             json.dump(metadata, f)
 
     def get_geometry(self) -> STGeometry:
@@ -124,9 +128,10 @@ class Window:
 
     def load_layer_datas(self) -> dict[str, WindowLayerData]:
         """Load layer datas describing items in retrieved layers from items.json."""
-        if not self.file_api.exists("items.json"):
+        items_fname = self.path / "items.json"
+        if not items_fname.exists():
             return {}
-        with self.file_api.open("items.json", "r") as f:
+        with items_fname.open("r") as f:
             layer_datas = [
                 WindowLayerData.deserialize(layer_data) for layer_data in json.load(f)
             ]
@@ -135,23 +140,25 @@ class Window:
     def save_layer_datas(self, layer_datas: dict[str, WindowLayerData]) -> None:
         """Save layer datas to items.json."""
         json_data = [layer_data.serialize() for layer_data in layer_datas.values()]
-        with self.file_api.open_atomic("items.json", "w") as f:
+        items_fname = self.path / "items.json"
+        with open_atomic(items_fname, "w") as f:
             json.dump(json_data, f)
 
     @staticmethod
-    def load(file_api: FileAPI) -> "Window":
-        """Load a Window from a FileAPI.
+    def load(path: UPath) -> "Window":
+        """Load a Window from a UPath.
 
         Args:
-            file_api: the FileAPI
+            path: the root directory of the window
 
         Returns:
             the Window
         """
-        with file_api.open("metadata.json", "r") as f:
+        metadata_fname = path / "metadata.json"
+        with metadata_fname.open("r") as f:
             metadata = json.load(f)
         return Window(
-            file_api=file_api,
+            path=path,
             group=metadata["group"],
             name=metadata["name"],
             projection=Projection.deserialize(metadata["projection"]),
@@ -168,14 +175,14 @@ class Window:
         )
 
     @staticmethod
-    def get_window_root(ds_file_api: FileAPI, group: str, name: str) -> FileAPI:
+    def get_window_root(ds_path: UPath, group: str, name: str) -> UPath:
         """Gets the root directory of a window.
 
         Args:
-            ds_file_api: the dataset FileAPI
+            ds_path: the dataset root directory
             group: the group of the window
             name: the name of the window
         Returns:
-            the FileAPI for the window
+            the path for the window
         """
-        return ds_file_api.get_folder(ds_file_api.join("windows", group, name))
+        return ds_path / "windows" / group / name

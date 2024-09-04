@@ -34,7 +34,6 @@ class Crop(Transform):
 
         self.image_selectors = image_selectors
         self.box_selectors = box_selectors
-        self.generator = torch.Generator()
 
     def sample_state(self, image_shape: tuple[int, int]) -> dict[str, Any]:
         """Randomly decide how to transform the input.
@@ -50,20 +49,17 @@ class Crop(Transform):
         crop_size = torch.randint(
             low=self.crop_size[0],
             high=self.crop_size[1],
-            generator=self.generator,
             size=(),
         )
         assert image_shape[0] >= crop_size and image_shape[1] >= crop_size
         remove_from_left = torch.randint(
             low=0,
             high=image_shape[1] - crop_size,
-            generator=self.generator,
             size=(),
         )
         remove_from_top = torch.randint(
             low=0,
             high=image_shape[0] - crop_size,
-            generator=self.generator,
             size=(),
         )
         return {

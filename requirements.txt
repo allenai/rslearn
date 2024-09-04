@@ -3,6 +3,7 @@ class_registry
 python-dateutil
 pytimeparse
 fiona
+fsspec[s3,gcs]
 Pillow
 pyproj
 rasterio
@@ -10,4 +11,5 @@ shapely
 tqdm
 torch
 torchvision
+universal_pathlib
 lightning[pytorch-extra]

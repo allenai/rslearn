@@ -13,6 +13,7 @@ import pytimeparse
 import rasterio
 import requests
 import shapely
+from upath import UPath
 
 from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
@@ -288,7 +289,7 @@ class LandsatOliTirs(DataSource):
         self.client = M2MAPIClient(username, password)
 
     @staticmethod
-    def from_config(config: LayerConfig) -> "LandsatOliTirs":
+    def from_config(config: LayerConfig, ds_path: UPath) -> "LandsatOliTirs":
         """Creates a new LandsatOliTirs instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
         d = config.data_source.config_dict

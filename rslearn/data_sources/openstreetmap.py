@@ -1,20 +1,22 @@
 """Data source for raster data on public Cloud Storage buckets."""
 
 import json
-import os
+import shutil
 import urllib.request
 from enum import Enum
 from typing import Any
 
 import osmium
 import shapely
+from upath import UPath
 
-import rslearn.utils.mgrs
 from rslearn.config import LayerConfig, QueryConfig, VectorLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
+from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import LayerMetadata, TileStore
 from rslearn.utils import Feature, GridIndex, STGeometry
+from rslearn.utils.fsspec import get_upath_local, join_upath
 
 
 class FeatureType(Enum):
@@ -346,28 +348,28 @@ class OsmHandler(osmium.SimpleHandler):
 class OsmItem(Item):
     """An item in the OpenStreetMap data source."""
 
-    def __init__(self, name: str, geometry: STGeometry, fname: str):
+    def __init__(self, name: str, geometry: STGeometry, path_uri: str):
         """Creates a new OsmItem.
 
         Args:
             name: unique name of the item
             geometry: the spatial and temporal extent of the item
-            fname: local pbf filename
+            path_uri: the path URI of the pbf
         """
         super().__init__(name, geometry)
-        self.fname = fname
+        self.path_uri = path_uri
 
     def serialize(self) -> dict:
         """Serializes the item to a JSON-encodable dictionary."""
         d = super().serialize()
-        d["fname"] = self.fname
+        d["path_uri"] = self.path_uri
         return d
 
     @staticmethod
     def deserialize(d: dict) -> Item:
         """Deserializes an item from a JSON-decoded dictionary."""
         item = super(OsmItem, OsmItem).deserialize(d)
-        return OsmItem(name=item.name, geometry=item.geometry, fname=d["fname"])
+        return OsmItem(name=item.name, geometry=item.geometry, path_uri=d["path_uri"])
 
 
 class OpenStreetMap(DataSource):
@@ -385,8 +387,8 @@ class OpenStreetMap(DataSource):
     def __init__(
         self,
         config: VectorLayerConfig,
-        pbf_fnames: list[str],
-        bounds_fname: str,
+        pbf_fnames: list[UPath],
+        bounds_fname: UPath,
         categories: dict[str, Filter],
     ):
         """Initialize a new Sentinel2 instance.
@@ -405,18 +407,20 @@ class OpenStreetMap(DataSource):
         self.bounds_fname = bounds_fname
         self.categories = categories
 
-        if len(self.pbf_fnames) == 1 and not os.path.exists(self.pbf_fnames[0]):
+        if len(self.pbf_fnames) == 1 and not self.pbf_fnames[0].exists():
             print(
                 "Downloading planet.osm.pbf from "
                 + f"{self.planet_pbf_url} to {self.pbf_fnames[0]}"
             )
-            urllib.request.urlretrieve(self.planet_pbf_url, self.pbf_fnames[0])
+            with urllib.request.urlopen(self.planet_pbf_url) as response:
+                with self.pbf_fnames[0].open("wb") as f:
+                    shutil.copyfileobj(response, f)
 
         # Detect bounds of each pbf file if needed.
         self.pbf_bounds = self._get_pbf_bounds()
 
     @staticmethod
-    def from_config(config: LayerConfig) -> "OpenStreetMap":
+    def from_config(config: LayerConfig, ds_path: UPath) -> "OpenStreetMap":
         """Creates a new OpenStreetMap instance from a configuration dictionary."""
         assert isinstance(config, VectorLayerConfig)
         d = config.data_source.config_dict
@@ -424,30 +428,30 @@ class OpenStreetMap(DataSource):
             category_name: Filter.from_config(filter_config_dict)
             for category_name, filter_config_dict in d["categories"].items()
         }
+        pbf_fnames = [join_upath(ds_path, pbf_fname) for pbf_fname in d["pbf_fnames"]]
+        bounds_fname = join_upath(ds_path, d["bounds_fname"])
         return OpenStreetMap(
             config=config,
-            pbf_fnames=d["pbf_fnames"],
-            bounds_fname=d["bounds_fname"],
+            pbf_fnames=pbf_fnames,
+            bounds_fname=bounds_fname,
             categories=categories,
         )
 
     def _get_pbf_bounds(self):
-        if len(self.pbf_fnames) == 1:
-            return None
-
-        if not os.path.exists(self.bounds_fname):
+        if not self.bounds_fname.exists():
             pbf_bounds = []
             for pbf_fname in self.pbf_fnames:
                 print(f"detecting bounds of {pbf_fname}")
                 handler = BoundsHandler()
-                handler.apply_file(pbf_fname)
+                with get_upath_local(pbf_fname) as local_fname:
+                    handler.apply_file(local_fname)
                 pbf_bounds.append(handler.bounds)
 
-            with open(self.bounds_fname, "w") as f:
+            with self.bounds_fname.open("w") as f:
                 json.dump(pbf_bounds, f)
 
         else:
-            with open(self.bounds_fname) as f:
+            with self.bounds_fname.open() as f:
                 pbf_bounds = json.load(f)
 
         return pbf_bounds
@@ -468,9 +472,9 @@ class OpenStreetMap(DataSource):
         for pbf_fname, bounds in zip(self.pbf_fnames, self.pbf_bounds):
             items.append(
                 OsmItem(
-                    os.path.basename(pbf_fname),
+                    pbf_fname.name,
                     STGeometry(WGS84_PROJECTION, shapely.box(*bounds), None),
-                    pbf_fname,
+                    pbf_fname.absolute().as_uri(),
                 )
             )
 
@@ -479,9 +483,7 @@ class OpenStreetMap(DataSource):
         ]
         groups = []
         for geometry in wgs84_geometries:
-            cur_groups = rslearn.data_sources.utils.match_candidate_items_to_window(
-                geometry, items, query_config
-            )
+            cur_groups = match_candidate_items_to_window(geometry, items, query_config)
             groups.append(cur_groups)
         return groups
 
@@ -510,7 +512,8 @@ class OpenStreetMap(DataSource):
                 + f"with {len(cur_geometries)} geometries"
             )
             handler = OsmHandler(self.categories, cur_geometries)
-            handler.apply_file(cur_item.fname)
+            with get_upath_local(UPath(cur_item.path_uri)) as local_fname:
+                handler.apply_file(local_fname)
 
             projections = set()
             for geometry in cur_geometries:

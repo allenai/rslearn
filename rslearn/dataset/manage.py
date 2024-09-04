@@ -29,7 +29,9 @@ def prepare_dataset_windows(
         if not layer_cfg.data_source:
             continue
 
-        data_source = rslearn.data_sources.data_source_from_config(layer_cfg)
+        data_source = rslearn.data_sources.data_source_from_config(
+            layer_cfg, dataset.path
+        )
 
         # Get windows that need to be prepared for this layer.
         needed_windows = []
@@ -90,7 +92,9 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
         if not layer_cfg.data_source.ingest:
             continue
 
-        data_source = rslearn.data_sources.data_source_from_config(layer_cfg)
+        data_source = rslearn.data_sources.data_source_from_config(
+            layer_cfg, dataset.path
+        )
 
         geometries_by_item = {}
         for window in windows:
@@ -195,7 +199,8 @@ def materialize_window(
         layer_cfg: the layer config
     """
     # Check if layer is materialized already.
-    if window.file_api.exists("layers", layer_name, "completed"):
+    completed_fname = window.path / "layers" / layer_name / "completed"
+    if completed_fname.exists():
         return
 
     layer_datas = window.load_layer_datas()
@@ -252,7 +257,9 @@ def materialize_dataset_windows(dataset: Dataset, windows: list[Window]) -> None
         if not layer_cfg.data_source:
             continue
 
-        data_source = rslearn.data_sources.data_source_from_config(layer_cfg)
+        data_source = rslearn.data_sources.data_source_from_config(
+            layer_cfg, dataset.path
+        )
 
         for window in windows:
             materialize_window(

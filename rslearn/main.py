@@ -12,6 +12,7 @@ import tqdm
 import wandb
 from lightning.pytorch.cli import LightningCLI
 from rasterio.crs import CRS
+from upath import UPath
 
 from rslearn.const import WGS84_EPSG
 from rslearn.data_sources import Item, data_source_from_config
@@ -178,7 +179,7 @@ def add_windows():
     )
 
     kwargs = dict(
-        dataset=Dataset(ds_root=args.root),
+        dataset=Dataset(UPath(args.root)),
         group=args.group,
         projection=dst_projection,
         name=args.name,
@@ -280,18 +281,19 @@ def apply_on_windows(
     if hasattr(f, "set_dataset"):
         f.set_dataset(dataset)
 
-    print("Loading windows")
     groups = None
     names = None
     if group:
         groups = [group]
     if window:
         names = [window]
-    windows = dataset.load_windows(groups=groups, names=names)
+    windows = dataset.load_windows(
+        groups=groups, names=names, workers=workers, show_progress=True
+    )
     print(f"found {len(windows)} windows")
 
     if hasattr(f, "get_jobs"):
-        jobs = f.get_jobs(windows)
+        jobs = f.get_jobs(windows, workers)
         print(f"got {len(jobs)} jobs")
     else:
         jobs = windows
@@ -320,7 +322,7 @@ def apply_on_windows(
 
 def apply_on_windows_args(f: Callable[[list[Window]], None], args: argparse.Namespace):
     """Call apply_on_windows with arguments passed via command-line interface."""
-    dataset = Dataset(ds_root=args.root)
+    dataset = Dataset(UPath(args.root))
     apply_on_windows(
         f,
         dataset,
@@ -379,6 +381,11 @@ def dataset_prepare():
     apply_on_windows_args(fn, args)
 
 
+def _load_window_layer_datas(window: Window):
+    # Helper for IngestHandler to use with multiprocessing.
+    return window, window.load_layer_datas()
+
+
 class IngestHandler:
     """apply_on_windows handler for the rslearn dataset ingest command."""
 
@@ -415,7 +422,7 @@ class IngestHandler:
         for layer_name, items_and_geometries in jobs_by_layer.items():
             cur_tile_store = PrefixedTileStore(tile_store, (layer_name,))
             layer_cfg = self.dataset.layers[layer_name]
-            data_source = data_source_from_config(layer_cfg)
+            data_source = data_source_from_config(layer_cfg, self.dataset.path)
 
             try:
                 data_source.ingest(
@@ -432,7 +439,7 @@ class IngestHandler:
         gc.collect()
 
     def get_jobs(
-        self, windows: list[Window]
+        self, windows: list[Window], workers: int
     ) -> list[tuple[str, Item, list[STGeometry]]]:
         """Computes ingest jobs from window list.
 
@@ -443,6 +450,17 @@ class IngestHandler:
         makes sense because there's no reason to ingest the same item twice.
         """
         # TODO: avoid duplicating ingest_dataset_windows...
+
+        # Load layer datas of each window.
+        p = multiprocessing.Pool(workers)
+        outputs = p.imap_unordered(_load_window_layer_datas, windows)
+        windows_and_layer_datas = []
+        for window, layer_datas in tqdm.tqdm(
+            outputs, total=len(windows), desc="Loading window layer datas"
+        ):
+            windows_and_layer_datas.append((window, layer_datas))
+        p.close()
+
         jobs: list[tuple[str, Item, list[STGeometry]]] = []
         for layer_name, layer_cfg in self.dataset.layers.items():
             if not layer_cfg.data_source:
@@ -450,11 +468,10 @@ class IngestHandler:
             if not layer_cfg.data_source.ingest:
                 continue
 
-            data_source = data_source_from_config(layer_cfg)
+            data_source = data_source_from_config(layer_cfg, self.dataset.path)
 
             geometries_by_item = {}
-            for window in windows:
-                layer_datas = window.load_layer_datas()
+            for window, layer_datas in windows_and_layer_datas:
                 if layer_name not in layer_datas:
                     continue
                 geometry = window.get_geometry()
@@ -625,4 +642,5 @@ def main():
 
 
 if __name__ == "__main__":
+    multiprocessing.set_start_method("forkserver")
     main()

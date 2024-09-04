@@ -64,8 +64,6 @@ utils
 
 - feature: a vector feature, to be used across rslearn for interacting with
   vector data.
-- file_api: an abstract interface that supports reading from and writing to
-  named files.
 - geometry: defines the Projection and STGeometry classes that are used across
   rslearn for representing spatiotemporal geometries (has shape in space and a
   time range) and reprojecting them to different projections.

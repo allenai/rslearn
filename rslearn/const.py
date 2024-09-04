@@ -18,3 +18,6 @@ WGS84_BOUNDS: PixelBounds = (-180, -90, 180, 90)
 
 TILE_SIZE = 512
 """Default tile size. TODO: remove this or move it elsewhere."""
+
+SHAPEFILE_AUX_EXTENSIONS = [".cpg", ".dbf", ".prj", ".sbn", ".sbx", ".shx", ".txt"]
+"""Extensions of potential auxiliary files to .shp file."""

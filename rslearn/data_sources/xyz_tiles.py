@@ -13,6 +13,7 @@ import rasterio.warp
 import shapely
 from PIL import Image
 from rasterio.crs import CRS
+from upath import UPath
 
 from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
 from rslearn.dataset import Window
@@ -183,7 +184,7 @@ class XyzTiles(DataSource):
             self.items.append(item)
 
     @staticmethod
-    def from_config(config: LayerConfig) -> "XyzTiles":
+    def from_config(config: LayerConfig, ds_path: UPath) -> "XyzTiles":
         """Creates a new XyzTiles instance from a configuration dictionary."""
         d = config.data_source.config_dict
         time_ranges = []
@@ -222,6 +223,7 @@ class XyzTiles(DataSource):
         """
         groups = []
         for geometry in geometries:
+            geometry = geometry.to_projection(self.projection)
             cur_groups = match_candidate_items_to_window(
                 geometry, self.items, query_config
             )
