@@ -200,6 +200,8 @@ class FileTileStore(TileStore):
             available options for next part of the layer ID
         """
         layer_dir = self._get_layer_dir(prefix)
+        if not layer_dir.is_dir():
+            return []
         layer_names = []
         for p in layer_dir.iterdir():
             layer_names.append(p.name)
