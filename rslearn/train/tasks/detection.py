@@ -1,22 +1,38 @@
-"""Classification task."""
+"""Detection task."""
 
 from typing import Any
 
 import numpy as np
 import numpy.typing as npt
-import shapely
 import torch
 import torchmetrics.classification
-from PIL import Image, ImageDraw
 from torchmetrics import Metric, MetricCollection
 
-from rslearn.utils import Feature, STGeometry
+from rslearn.utils import Feature
 
 from .task import BasicTask
 
+DEFAULT_COLORS = [
+    [255, 0, 0],
+    [0, 255, 0],
+    [0, 0, 255],
+    [255, 255, 0],
+    [0, 255, 255],
+    [255, 0, 255],
+    [0, 128, 0],
+    [255, 160, 122],
+    [139, 69, 19],
+    [128, 128, 128],
+    [255, 255, 255],
+    [143, 188, 143],
+    [95, 158, 160],
+    [255, 200, 0],
+    [128, 0, 0],
+]
 
-class ClassificationTask(BasicTask):
-    """A window classification task."""
+
+class DetectionTask(BasicTask):
+    """A point or bounding box detection task."""
 
     def __init__(
         self,
@@ -24,12 +40,14 @@ class ClassificationTask(BasicTask):
         classes: list[str],
         filters: list[tuple[str, str]] | None = None,
         read_class_id: bool = False,
-        allow_invalid: bool = False,
         skip_unknown_categories: bool = False,
-        prob_property: str | None = None,
+        skip_empty_examples: bool = False,
+        colors: list[tuple[int, int, int]] = DEFAULT_COLORS,
+        box_size: int | None = None,
+        clip_boxes: bool = True,
         **kwargs,
     ):
-        """Initialize a new ClassificationTask.
+        """Initialize a new SegmentationTask.
 
         Args:
             property_name: the property from which to extract the class name. The class
@@ -39,22 +57,25 @@ class ClassificationTask(BasicTask):
                 features with matching properties.
             read_class_id: whether to read an integer class ID instead of the class
                 name.
-            allow_invalid: instead of throwing error when no regression label is found
-                at a window, simply mark the example invalid for this task
             skip_unknown_categories: whether to skip examples with categories that are
                 not passed via classes, instead of throwing error
-            prob_property: when predicting, write probabilities in addition to class ID
-                under this property name.
-            kwargs: other arguments to pass to BasicTask
+            skip_empty_examples: whether to skip examples with zero labels.
+            colors: optional colors for each class
+            box_size: force all boxes to be this size, centered at the centroid of the
+                geometry. Required for Point geometries.
+            clip_boxes: whether to clip boxes to the image bounds.
+            kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
         self.property_name = property_name
         self.classes = classes
         self.filters = filters
         self.read_class_id = read_class_id
-        self.allow_invalid = allow_invalid
         self.skip_unknown_categories = skip_unknown_categories
-        self.prob_property = prob_property
+        self.skip_empty_examples = skip_empty_examples
+        self.colors = colors
+        self.box_size = box_size
+        self.clip_boxes = clip_boxes
 
         if not self.filters:
             self.filters = []
@@ -79,6 +100,10 @@ class ClassificationTask(BasicTask):
         if not load_targets:
             return {}, {}
 
+        boxes = []
+        class_labels = []
+        valid = 1
+
         data = raw_inputs["targets"]
         for feat in data:
             for property_name, property_value in self.filters:
@@ -102,17 +127,56 @@ class ClassificationTask(BasicTask):
                 # Otherwise, skip this example.
                 continue
 
-            return {}, {
-                "class": torch.tensor(class_id, dtype=torch.int64),
-                "valid": torch.tensor(1, dtype=torch.float32),
-            }
+            # Convert to relative coordinates for this patch.
+            shp = feat.geometry.shp
+            if self.box_size:
+                box = [
+                    int(shp.centroid.x) - self.box_size,
+                    int(shp.centroid.y) - self.box_size,
+                    int(shp.centroid.x) + self.box_size,
+                    int(shp.centroid.y) + self.box_size,
+                ]
+            else:
+                box = [int(val) for val in shp.bounds]
 
-        if not self.allow_invalid:
-            raise Exception("no feature found providing class label")
+            if box[0] >= metadata["bounds"][2] or box[2] <= metadata["bounds"][0]:
+                continue
+            if box[1] >= metadata["bounds"][3] or box[3] <= metadata["bounds"][1]:
+                continue
+
+            if self.clip_boxes:
+                box = [
+                    np.clip(box[0], metadata["bounds"][0], metadata["bounds"][2]),
+                    np.clip(box[1], metadata["bounds"][1], metadata["bounds"][3]),
+                    np.clip(box[2], metadata["bounds"][0], metadata["bounds"][2]),
+                    np.clip(box[3], metadata["bounds"][1], metadata["bounds"][3]),
+                ]
+
+            # Convert to relative coordinates.
+            box = [
+                box[0] - metadata["bounds"][0],
+                box[1] - metadata["bounds"][1],
+                box[2] - metadata["bounds"][0],
+                box[3] - metadata["bounds"][1],
+            ]
+
+            boxes.append(box)
+            class_labels.append(class_id)
+
+        if len(boxes) == 0:
+            boxes = torch.zeros((0, 4), dtype=torch.float32)
+            class_labels = torch.zeros((0,), dtype=torch.int64)
+        else:
+            boxes = torch.as_tensor(boxes, dtype=torch.float32)
+            class_labels = torch.as_tensor(class_labels, dtype=torch.int64)
+
+        if self.skip_empty_examples and len(boxes) == 0:
+            valid = 0
 
         return {}, {
-            "class": torch.tensor(0, dtype=torch.int64),
-            "valid": torch.tensor(0, dtype=torch.float32),
+            "valid": torch.tensor(valid, dtype=torch.int32),
+            "boxes": boxes,
+            "labels": class_labels,
         }
 
     def process_output(
@@ -127,23 +191,7 @@ class ClassificationTask(BasicTask):
         Returns:
             either raster or vector data.
         """
-        probs = raw_output.cpu().numpy()
-        value = probs.argmax()
-        if not self.read_class_id:
-            value = self.classes[value]
-        feature = Feature(
-            STGeometry(
-                metadata["projection"],
-                shapely.Point(metadata["bounds"][0], metadata["bounds"][1]),
-                None,
-            ),
-            {
-                self.property_name: value,
-            },
-        )
-        if self.prob_property:
-            feature.properties[self.prob_property] = probs.tolist()
-        return [feature]
+        raise NotImplementedError
 
     def visualize(
         self,
@@ -162,75 +210,44 @@ class ClassificationTask(BasicTask):
             a dictionary mapping image name to visualization image
         """
         image = super().visualize(input_dict, target_dict, output)["image"]
-        image = Image.fromarray(image)
-        draw = ImageDraw.Draw(image)
-        target_class = self.classes[target_dict["class"]]
-        output_class = self.classes[output.argmax()]
-        text = f"Label: {target_class}\nOutput: {output_class}"
-        box = draw.textbbox(xy=(0, 0), text=text, font_size=12)
-        draw.rectangle(xy=box, fill=(0, 0, 0))
-        draw.text(xy=(0, 0), text=text, font_size=12, fill=(255, 255, 255))
+        gt_classes = target_dict["classes"].cpu().numpy()
+        pred_classes = output.cpu().numpy().argmax(axis=0)
+        gt_vis = np.zeros((gt_classes.shape[0], gt_classes.shape[1], 3), dtype=np.uint8)
+        pred_vis = np.zeros(
+            (pred_classes.shape[0], pred_classes.shape[1], 3), dtype=np.uint8
+        )
+        for class_id in range(self.num_classes):
+            color = self.colors[class_id % len(self.colors)]
+            gt_vis[gt_classes == class_id] = color
+            pred_vis[pred_classes == class_id] = color
+
         return {
             "image": np.array(image),
+            "gt": gt_vis,
+            "pred": pred_vis,
         }
 
     def get_metrics(self) -> MetricCollection:
         """Get the metrics for this task."""
         metrics = {}
-        metrics["accuracy"] = ClassificationMetric(
-            torchmetrics.classification.MulticlassAccuracy(
-                num_classes=len(self.classes),
+        metrics["mAP"] = DetectionMetric(
+            torchmetrics.detection.mean_ap.MeanAveragePrecision(
+                backend="faster_coco_eval"
             )
         )
         return MetricCollection(metrics)
 
 
-class ClassificationHead(torch.nn.Module):
-    """Head for classification task."""
-
-    def forward(
-        self,
-        logits: torch.Tensor,
-        inputs: list[dict[str, Any]],
-        targets: list[dict[str, Any]] | None = None,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        """Compute the classification outputs and loss from logits and targets.
-
-        Args:
-            logits: tensor that is (BatchSize, NumClasses) in shape.
-            inputs: original inputs (ignored).
-            targets: should contain class key that stores the class label.
-
-        Returns:
-            tuple of outputs and loss dict
-        """
-        outputs = torch.nn.functional.softmax(logits, dim=1)
-
-        loss = None
-        if targets:
-            class_labels = torch.stack([target["class"] for target in targets], dim=0)
-            mask = torch.stack([target["valid"] for target in targets], dim=0)
-            loss = (
-                torch.nn.functional.cross_entropy(
-                    logits, class_labels, reduction="none"
-                )
-                * mask
-            )
-            loss = torch.mean(loss)
-
-        return outputs, {"cls": loss}
-
-
-class ClassificationMetric(Metric):
-    """Metric for classification task."""
+class DetectionMetric(Metric):
+    """Metric for detection task."""
 
     def __init__(self, metric: Metric):
-        """Initialize a new ClassificationMetric."""
+        """Initialize a new DetectionMetric."""
         super().__init__()
         self.metric = metric
 
     def update(
-        self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
+        self, preds: list[dict[str, Any]], targets: list[dict[str, Any]]
     ) -> None:
         """Update metric.
 
@@ -238,22 +255,18 @@ class ClassificationMetric(Metric):
             preds: the predictions
             targets: the targets
         """
-        if not isinstance(preds, torch.Tensor):
-            preds = torch.stack(preds)
-        labels = torch.stack([target["class"] for target in targets])
-
-        # Sub-select the valid labels.
-        mask = torch.stack([target["valid"] > 0 for target in targets])
-        preds = preds[mask]
-        labels = labels[mask]
-        if len(preds) == 0:
-            return
-
-        self.metric.update(preds, labels)
+        new_preds = []
+        new_targets = []
+        for pred, target in zip(preds, targets):
+            if not target["valid"]:
+                continue
+            new_preds.append(pred)
+            new_targets.append(target)
+        self.metric.update(new_preds, new_targets)
 
     def compute(self) -> Any:
         """Returns the computed metric."""
-        return self.metric.compute()
+        return self.metric.compute()["map"]
 
     def plot(self, *args: list[Any], **kwargs: dict[str, Any]) -> Any:
         """Returns a plot of the metric."""
