@@ -2,7 +2,11 @@
 
 import pyproj.aoi
 import pyproj.database
+import shapely
 from rasterio.crs import CRS
+
+from rslearn.const import WGS84_PROJECTION
+from rslearn.utils import Projection, STGeometry
 
 UPS_NORTH_EPSG = 5041
 """EPSG code for the UPS North CRS."""
@@ -47,3 +51,60 @@ def get_utm_ups_crs(lon: float, lat: float) -> CRS:
         raise ValueError(f"Could not find UTM zone for lon={lon}, lat={lat}")
     utm_crs = utm_crs_list[0]
     return CRS.from_epsg(utm_crs.code)
+
+
+def get_utm_zone_info(utm_crs: CRS) -> tuple[int, str]:
+    """Get UTM zone number (1 to 60) and S/N from CRS.
+
+    Args:
+        utm_crs: the UTM CRS.
+
+    Returns:
+        tuple of (utm_zone, "S" or "N")
+    """
+    assert utm_crs.is_epsg_code
+    epsg_code = utm_crs.to_epsg()
+    if epsg_code > 32600 and epsg_code <= 32660:
+        return (epsg_code - 32600, "N")
+    elif epsg_code > 32700 and epsg_code <= 32760:
+        return (epsg_code - 32700, "S")
+    raise ValueError(f"EPSG code {epsg_code} is not UTM")
+
+
+def get_wgs84_bounds(utm_crs: CRS) -> tuple[int, int, int, int]:
+    """Returns the bounding longitude and latitude of this UTM zone.
+
+    Args:
+        utm_crs: the UTM CRS.
+
+    Returns:
+        tuple (min_lon, min_lat, max_lon, max_lat)
+    """
+    utm_zone, hemisphere = get_utm_zone_info(utm_crs)
+    if hemisphere == "S":
+        min_lat = -80
+        max_lat = 0
+    elif hemisphere == "N":
+        min_lat = 0
+        max_lat = 84
+    # 1N/S is -180 to -174 and goes up from there
+    min_lon = -180 + 6 * (utm_zone - 1)
+    max_lon = -180 + 6 * utm_zone
+    return (min_lon, min_lat, max_lon, max_lat)
+
+
+def get_proj_bounds(utm_crs: CRS) -> tuple[float, float, float, float]:
+    """Returns projection bounds of a UTM zone.
+
+    Args:
+        utm_crs: the UTM CRS.
+
+    Returns:
+        tuple (min_x, min_y, max_x, max_y)
+    """
+    bounds = get_wgs84_bounds(utm_crs)
+    # Convert from WGS84 to the UTM zone.
+    dst_proj = Projection(utm_crs, 1, 1)
+    shp = shapely.box(*bounds)
+    result = STGeometry(WGS84_PROJECTION, shp, None).to_projection(dst_proj).shp
+    return result.bounds
