@@ -3,7 +3,6 @@ faster-coco-eval
 google-cloud-storage
 mgrs
 osmium
-pycocotools
 rtree
 satlaspretrain_models
 wandb
