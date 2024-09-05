@@ -1,5 +1,6 @@
 earthengine-api
 faster-coco-eval
+gcsfs
 google-cloud-storage
 mgrs
 osmium
