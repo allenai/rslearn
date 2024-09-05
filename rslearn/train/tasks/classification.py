@@ -193,7 +193,7 @@ class ClassificationHead(torch.nn.Module):
         logits: torch.Tensor,
         inputs: list[dict[str, Any]],
         targets: list[dict[str, Any]] | None = None,
-    ):
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """Compute the classification outputs and loss from logits and targets.
 
         Args:

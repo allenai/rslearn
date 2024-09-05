@@ -8,8 +8,11 @@ import torchvision
 
 
 class NoopTransform(torch.nn.Module):
+    """A placeholder transform used with torchvision detection model."""
+
     def __init__(self):
-        super(NoopTransform, self).__init__()
+        """Create a new NoopTransform."""
+        super().__init__()
 
         self.transform = (
             torchvision.models.detection.transform.GeneralizedRCNNTransform(
@@ -20,7 +23,22 @@ class NoopTransform(torch.nn.Module):
             )
         )
 
-    def forward(self, images, targets):
+    def forward(
+        self, images: list[torch.Tensor], targets: dict[str, torch.Tensor]
+    ) -> tuple[
+        torchvision.models.detection.image_list.ImageList, dict[str, torch.Tensor]
+    ]:
+        """Transform the specified images and targets.
+
+        Simply creates an ImageList object wrapping the provided images.
+
+        Args:
+            images: the images.
+            targets: the targets (unmodified).
+
+        Returns:
+            wrapped images and unmodified targets
+        """
         images = self.transform.batch_images(images, size_divisible=32)
         image_sizes = [(image.shape[1], image.shape[2]) for image in images]
         image_list = torchvision.models.detection.image_list.ImageList(
@@ -28,7 +46,21 @@ class NoopTransform(torch.nn.Module):
         )
         return image_list, targets
 
-    def postprocess(self, detections, image_sizes, orig_sizes):
+    def postprocess(
+        self, detections: dict[str, torch.Tensor], image_sizes, orig_sizes
+    ) -> dict[str, torch.Tensor]:
+        """Post-process the detections to reflect original image size.
+
+        Since we didn't transform the images, we don't need to do anything here.
+
+        Args:
+            detections: the raw detections
+            image_sizes: the transformed image sizes
+            orig_sizes: the original image sizes
+
+        Returns:
+            the post-processed detections (unmodified from the provided detections)
+        """
         return detections
 
 
@@ -47,6 +79,7 @@ class FasterRCNN(torch.nn.Module):
         num_classes: int,
         anchor_sizes: list[list[int]],
         instance_segmentation: bool = False,
+        box_score_thresh: float = 0.05,
     ):
         """Create a new FasterRCNN.
 
@@ -61,6 +94,8 @@ class FasterRCNN(torch.nn.Module):
             anchor_sizes: the anchor sizes to use for the different prediction heads.
             instance_segmentation: whether to predict segmentation mask in addition to
                 bounding box for each object instance.
+            box_score_thresh: during inference, only return bounding boxes with score
+                greater than this threshold.
         """
         super().__init__()
         featmap_names = [f"feat{i}" for i in range(len(downsample_factors))]
@@ -110,7 +145,6 @@ class FasterRCNN(torch.nn.Module):
         box_batch_size_per_image = 512
         box_positive_fraction = 0.25
         bbox_reg_weights = None
-        box_score_thresh = 0.05
         box_nms_thresh = 0.5
         box_detections_per_img = 100
         self.roi_heads = torchvision.models.detection.roi_heads.RoIHeads(
@@ -154,7 +188,30 @@ class FasterRCNN(torch.nn.Module):
         features: list[torch.Tensor],
         inputs: list[dict[str, Any]],
         targets: list[dict[str, Any]] | None = None,
-    ):
+    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+        """Compute the detection outputs and loss from features.
+
+        Args:
+            features: multi-scale feature maps.
+            inputs: original inputs, should cotnain image key for original image size.
+            targets: should contain class key that stores the class label.
+
+        Returns:
+            tuple of outputs and loss dict
+        """
+        # Fix target labels to be 1 size in case it's empty.
+        # For some reason this is needed.
+        if targets:
+            for i, target_dict in enumerate(targets):
+                if len(target_dict["labels"]) != 0:
+                    continue
+                targets[i] = dict(
+                    target_dict,
+                    labels=torch.zeros(
+                        (1,), dtype=torch.int64, device=target_dict["labels"].device
+                    ),
+                )
+
         image_list = [inp["image"] for inp in inputs]
         images, targets = self.noop_transform(image_list, targets)
 

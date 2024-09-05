@@ -44,6 +44,7 @@ class DetectionTask(BasicTask):
         skip_empty_examples: bool = False,
         colors: list[tuple[int, int, int]] = DEFAULT_COLORS,
         box_size: int | None = None,
+        clip_boxes: bool = True,
         **kwargs,
     ):
         """Initialize a new SegmentationTask.
@@ -62,6 +63,7 @@ class DetectionTask(BasicTask):
             colors: optional colors for each class
             box_size: force all boxes to be this size, centered at the centroid of the
                 geometry. Required for Point geometries.
+            clip_boxes: whether to clip boxes to the image bounds.
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -73,6 +75,7 @@ class DetectionTask(BasicTask):
         self.skip_empty_examples = skip_empty_examples
         self.colors = colors
         self.box_size = box_size
+        self.clip_boxes = clip_boxes
 
         if not self.filters:
             self.filters = []
@@ -135,6 +138,21 @@ class DetectionTask(BasicTask):
                 ]
             else:
                 box = [int(val) for val in shp.bounds]
+
+            if box[0] >= metadata["bounds"][2] or box[2] <= metadata["bounds"][0]:
+                continue
+            if box[1] >= metadata["bounds"][3] or box[3] <= metadata["bounds"][1]:
+                continue
+
+            if self.clip_boxes:
+                box = [
+                    np.clip(box[0], metadata["bounds"][0], metadata["bounds"][2]),
+                    np.clip(box[1], metadata["bounds"][1], metadata["bounds"][3]),
+                    np.clip(box[2], metadata["bounds"][0], metadata["bounds"][2]),
+                    np.clip(box[3], metadata["bounds"][1], metadata["bounds"][3]),
+                ]
+
+            # Convert to relative coordinates.
             box = [
                 box[0] - metadata["bounds"][0],
                 box[1] - metadata["bounds"][1],
@@ -147,7 +165,7 @@ class DetectionTask(BasicTask):
 
         if len(boxes) == 0:
             boxes = torch.zeros((0, 4), dtype=torch.float32)
-            class_labels = torch.zeros((1,), dtype=torch.int64)
+            class_labels = torch.zeros((0,), dtype=torch.int64)
         else:
             boxes = torch.as_tensor(boxes, dtype=torch.float32)
             class_labels = torch.as_tensor(class_labels, dtype=torch.int64)
@@ -213,7 +231,9 @@ class DetectionTask(BasicTask):
         """Get the metrics for this task."""
         metrics = {}
         metrics["mAP"] = DetectionMetric(
-            torchmetrics.detection.mean_ap.MeanAveragePrecision()
+            torchmetrics.detection.mean_ap.MeanAveragePrecision(
+                backend="faster_coco_eval"
+            )
         )
         return MetricCollection(metrics)
 
@@ -246,7 +266,7 @@ class DetectionMetric(Metric):
 
     def compute(self) -> Any:
         """Returns the computed metric."""
-        return self.metric.compute()
+        return self.metric.compute()["map"]
 
     def plot(self, *args: list[Any], **kwargs: dict[str, Any]) -> Any:
         """Returns a plot of the metric."""
