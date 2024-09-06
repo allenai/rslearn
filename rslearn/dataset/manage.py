@@ -3,7 +3,7 @@
 import rslearn.data_sources
 from rslearn.config import LayerConfig, LayerType
 from rslearn.data_sources import DataSource, Item
-from rslearn.tile_stores import PrefixedTileStore, TileStore, get_tile_store_for_layer
+from rslearn.tile_stores import TileStore, get_tile_store_for_layer
 
 from .dataset import Dataset
 from .materialize import Materializers
@@ -111,7 +111,7 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
                     geometries_by_item[item].append(geometry)
 
         print(f"Ingesting {len(geometries_by_item)} items in layer {layer_name}")
-        cur_tile_store = PrefixedTileStore(tile_store, (layer_name,))
+        cur_tile_store = get_tile_store_for_layer(tile_store, layer_name, layer_cfg)
         geometries_and_items = list(geometries_by_item.items())
         data_source.ingest(
             tile_store=cur_tile_store,
