@@ -27,6 +27,7 @@ class ClassificationTask(BasicTask):
         allow_invalid: bool = False,
         skip_unknown_categories: bool = False,
         prob_property: str | None = None,
+        metric_kwargs: dict[str, Any] = {},
         **kwargs,
     ):
         """Initialize a new ClassificationTask.
@@ -45,6 +46,8 @@ class ClassificationTask(BasicTask):
                 not passed via classes, instead of throwing error
             prob_property: when predicting, write probabilities in addition to class ID
                 under this property name.
+            metric_kwargs: additional arguments to pass to underlying metric, see
+                torchmetrics.classification.MulticlassAccuracy.
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -55,6 +58,7 @@ class ClassificationTask(BasicTask):
         self.allow_invalid = allow_invalid
         self.skip_unknown_categories = skip_unknown_categories
         self.prob_property = prob_property
+        self.metric_kwargs = metric_kwargs
 
         if not self.filters:
             self.filters = []
@@ -177,10 +181,10 @@ class ClassificationTask(BasicTask):
     def get_metrics(self) -> MetricCollection:
         """Get the metrics for this task."""
         metrics = {}
+        metric_kwargs = dict(num_classes=len(self.classes))
+        metric_kwargs.update(self.metric_kwargs)
         metrics["accuracy"] = ClassificationMetric(
-            torchmetrics.classification.MulticlassAccuracy(
-                num_classes=len(self.classes),
-            )
+            torchmetrics.classification.MulticlassAccuracy(**metric_kwargs)
         )
         return MetricCollection(metrics)
 
