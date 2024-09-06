@@ -214,6 +214,11 @@ class SegmentationMetric(Metric):
         """Returns the computed metric."""
         return self.metric.compute()
 
+    def reset(self) -> None:
+        """Reset metric."""
+        super().reset()
+        self.metric.reset()
+
     def plot(self, *args: list[Any], **kwargs: dict[str, Any]) -> Any:
         """Returns a plot of the metric."""
         return self.metric.plot(*args, **kwargs)

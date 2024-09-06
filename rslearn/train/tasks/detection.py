@@ -231,9 +231,7 @@ class DetectionTask(BasicTask):
         """Get the metrics for this task."""
         metrics = {}
         metrics["mAP"] = DetectionMetric(
-            torchmetrics.detection.mean_ap.MeanAveragePrecision(
-                backend="faster_coco_eval"
-            )
+            torchmetrics.detection.mean_ap.MeanAveragePrecision()
         )
         return MetricCollection(metrics)
 
@@ -267,6 +265,11 @@ class DetectionMetric(Metric):
     def compute(self) -> Any:
         """Returns the computed metric."""
         return self.metric.compute()["map"]
+
+    def reset(self) -> None:
+        """Reset metric."""
+        super().reset()
+        self.metric.reset()
 
     def plot(self, *args: list[Any], **kwargs: dict[str, Any]) -> Any:
         """Returns a plot of the metric."""

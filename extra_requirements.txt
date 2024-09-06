@@ -1,9 +1,9 @@
 earthengine-api
-faster-coco-eval
 gcsfs
 google-cloud-storage
 mgrs
 osmium
+pycocotools
 rtree
 satlaspretrain_models
 wandb
