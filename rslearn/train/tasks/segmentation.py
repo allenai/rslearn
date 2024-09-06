@@ -39,6 +39,7 @@ class SegmentationTask(BasicTask):
         num_classes: int,
         colors: list[tuple[int, int, int]] = DEFAULT_COLORS,
         zero_is_invalid: bool = False,
+        metric_kwargs: dict[str, Any] = {},
         **kwargs,
     ):
         """Initialize a new SegmentationTask.
@@ -47,12 +48,15 @@ class SegmentationTask(BasicTask):
             num_classes: the number of classes to predict
             colors: optional colors for each class
             zero_is_invalid: whether pixels labeled class 0 should be marked invalid
+            metric_kwargs: additional arguments to pass to underlying metric, see
+                torchmetrics.classification.MulticlassAccuracy.
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
         self.num_classes = num_classes
         self.colors = colors
         self.zero_is_invalid = zero_is_invalid
+        self.metric_kwargs = metric_kwargs
 
     def process_inputs(
         self,
@@ -139,10 +143,10 @@ class SegmentationTask(BasicTask):
     def get_metrics(self) -> MetricCollection:
         """Get the metrics for this task."""
         metrics = {}
+        metric_kwargs = dict(num_classes=self.num_classes)
+        metric_kwargs.update(self.metric_kwargs)
         metrics["accuracy"] = SegmentationMetric(
-            torchmetrics.classification.MulticlassAccuracy(
-                num_classes=self.num_classes,
-            )
+            torchmetrics.classification.MulticlassAccuracy(**metric_kwargs)
         )
         return MetricCollection(metrics)
 
@@ -213,6 +217,11 @@ class SegmentationMetric(Metric):
     def compute(self) -> Any:
         """Returns the computed metric."""
         return self.metric.compute()
+
+    def reset(self) -> None:
+        """Reset metric."""
+        super().reset()
+        self.metric.reset()
 
     def plot(self, *args: list[Any], **kwargs: dict[str, Any]) -> Any:
         """Returns a plot of the metric."""
