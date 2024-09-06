@@ -4,11 +4,12 @@ from typing import Any
 
 import numpy as np
 import numpy.typing as npt
+import shapely
 import torch
 import torchmetrics.classification
 from torchmetrics import Metric, MetricCollection
 
-from rslearn.utils import Feature
+from rslearn.utils import Feature, STGeometry
 
 from .task import BasicTask
 
@@ -45,6 +46,7 @@ class DetectionTask(BasicTask):
         colors: list[tuple[int, int, int]] = DEFAULT_COLORS,
         box_size: int | None = None,
         clip_boxes: bool = True,
+        score_threshold: float = 0.5,
         **kwargs,
     ):
         """Initialize a new SegmentationTask.
@@ -64,6 +66,7 @@ class DetectionTask(BasicTask):
             box_size: force all boxes to be this size, centered at the centroid of the
                 geometry. Required for Point geometries.
             clip_boxes: whether to clip boxes to the image bounds.
+            score_threshold: confidence threshold for visualization and prediction.
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -76,6 +79,7 @@ class DetectionTask(BasicTask):
         self.colors = colors
         self.box_size = box_size
         self.clip_boxes = clip_boxes
+        self.score_threshold = score_threshold
 
         if not self.filters:
             self.filters = []
@@ -191,7 +195,34 @@ class DetectionTask(BasicTask):
         Returns:
             either raster or vector data.
         """
-        raise NotImplementedError
+        # Apply confidence threshold.
+        wanted = raw_output["scores"].cpu().numpy() > self.score_threshold
+        boxes = raw_output["boxes"].cpu().numpy()[wanted]
+        class_ids = raw_output["labels"].cpu().numpy()[wanted]
+        scores = raw_output["scores"].cpu().numpy()[wanted]
+
+        features = []
+        for box, class_id, score in zip(boxes, class_ids, scores):
+            shp = shapely.box(
+                metadata["bounds"][0] + box[0],
+                metadata["bounds"][1] + box[1],
+                metadata["bounds"][0] + box[2],
+                metadata["bounds"][1] + box[3],
+            )
+            geom = STGeometry(metadata["projection"], shp, None)
+            properties = {
+                "score": score,
+            }
+
+            class_id = int(class_id)
+            if self.read_class_id:
+                properties[self.property_name] = class_id
+            else:
+                properties[self.property_name] = self.classes[class_id]
+
+            features.append(Feature(geom, properties))
+
+        return features
 
     def visualize(
         self,
@@ -210,21 +241,31 @@ class DetectionTask(BasicTask):
             a dictionary mapping image name to visualization image
         """
         image = super().visualize(input_dict, target_dict, output)["image"]
-        gt_classes = target_dict["classes"].cpu().numpy()
-        pred_classes = output.cpu().numpy().argmax(axis=0)
-        gt_vis = np.zeros((gt_classes.shape[0], gt_classes.shape[1], 3), dtype=np.uint8)
-        pred_vis = np.zeros(
-            (pred_classes.shape[0], pred_classes.shape[1], 3), dtype=np.uint8
-        )
-        for class_id in range(self.num_classes):
-            color = self.colors[class_id % len(self.colors)]
-            gt_vis[gt_classes == class_id] = color
-            pred_vis[pred_classes == class_id] = color
+
+        def draw_boxes(image: npt.NDArray[Any], d: dict[str, torch.Tensor]):
+            boxes = d["boxes"].cpu().numpy()
+            class_ids = d["labels"].cpu().numpy()
+            if "scores" in d:
+                wanted = d["scores"].cpu().numpy() > self.score_threshold
+                boxes = boxes[wanted]
+                class_ids = class_ids[wanted]
+
+            for box, class_id in zip(boxes, class_ids):
+                sx = int(np.clip(box[0], 0, image.shape[1]))
+                sy = int(np.clip(box[1], 0, image.shape[0]))
+                ex = int(np.clip(box[2], 0, image.shape[1]))
+                ey = int(np.clip(box[3], 0, image.shape[0]))
+                color = self.colors[class_id % len(self.colors)]
+                image[sy:ey, sx : sx + 2, :] = color
+                image[sy:ey, ex - 2 : ex, :] = color
+                image[sy : sy + 2, sx:ex, :] = color
+                image[ey - 2 : ey, sx:ex, :] = color
+
+            return image
 
         return {
-            "image": np.array(image),
-            "gt": gt_vis,
-            "pred": pred_vis,
+            "gt": draw_boxes(image.copy(), target_dict),
+            "pred": draw_boxes(image.copy(), output),
         }
 
     def get_metrics(self) -> MetricCollection:
