@@ -354,20 +354,29 @@ class LayerConfig:
     """Configuration of a layer in a dataset."""
 
     def __init__(
-        self, layer_type: LayerType, data_source: DataSourceConfig | None = None
+        self,
+        layer_type: LayerType,
+        data_source: DataSourceConfig | None = None,
+        alias: str | None = None,
     ):
         """Initialize a new LayerConfig.
 
         Args:
             layer_type: the LayerType (raster or vector)
             data_source: optional DataSourceConfig if this layer is retrievable
+            alias: alias for this layer to use in the tile store
         """
         self.layer_type = layer_type
         self.data_source = data_source
+        self.alias = alias
 
     def serialize(self) -> dict[str, Any]:
         """Serialize this LayerConfig to a config dict, currently unused."""
-        return {"layer_type": str(self.layer_type), "data_source": self.data_source}
+        return {
+            "layer_type": str(self.layer_type),
+            "data_source": self.data_source,
+            "alias": self.alias,
+        }
 
 
 class RasterLayerConfig(LayerConfig):
@@ -379,6 +388,7 @@ class RasterLayerConfig(LayerConfig):
         band_sets: list[BandSetConfig],
         data_source: DataSourceConfig | None = None,
         resampling_method: Resampling = Resampling.bilinear,
+        alias: str | None = None,
     ):
         """Initialize a new RasterLayerConfig.
 
@@ -387,8 +397,9 @@ class RasterLayerConfig(LayerConfig):
             band_sets: the bands to store in this layer
             data_source: optional DataSourceConfig if this layer is retrievable
             resampling_method: how to resample rasters (if needed), default bilinear resampling
+            alias: alias for this layer to use in the tile store
         """
-        super().__init__(layer_type, data_source)
+        super().__init__(layer_type, data_source, alias)
         self.band_sets = band_sets
         self.resampling_method = resampling_method
 
@@ -409,6 +420,8 @@ class RasterLayerConfig(LayerConfig):
             kwargs["resampling_method"] = RESAMPLING_METHODS[
                 config["resampling_method"]
             ]
+        if "alias" in config:
+            kwargs["alias"] = config["alias"]
         return RasterLayerConfig(**kwargs)
 
 
@@ -421,6 +434,7 @@ class VectorLayerConfig(LayerConfig):
         data_source: DataSourceConfig | None = None,
         zoom_offset: int = 0,
         format: VectorFormatConfig = VectorFormatConfig("geojson"),
+        alias: str | None = None,
     ):
         """Initialize a new VectorLayerConfig.
 
@@ -429,8 +443,9 @@ class VectorLayerConfig(LayerConfig):
             data_source: optional DataSourceConfig if this layer is retrievable
             zoom_offset: zoom offset at which to store the vector data
             format: the VectorFormatConfig, default storing as GeoJSON
+            alias: alias for this layer to use in the tile store
         """
-        super().__init__(layer_type, data_source)
+        super().__init__(layer_type, data_source, alias)
         self.zoom_offset = zoom_offset
         self.format = format
 
@@ -448,6 +463,8 @@ class VectorLayerConfig(LayerConfig):
             kwargs["zoom_offset"] = config["zoom_offset"]
         if "format" in config:
             kwargs["format"] = VectorFormatConfig.from_config(config["format"])
+        if "alias" in config:
+            kwargs["alias"] = config["alias"]
         return VectorLayerConfig(**kwargs)
 
     def get_final_projection_and_bounds(

@@ -5,7 +5,13 @@ from upath import UPath
 from rslearn.config import TileStoreConfig
 
 from .file import FileTileStore
-from .tile_store import LayerMetadata, PrefixedTileStore, TileStore, TileStoreLayer
+from .tile_store import (
+    LayerMetadata,
+    PrefixedTileStore,
+    TileStore,
+    TileStoreLayer,
+    get_tile_store_for_layer,
+)
 
 registry = {"file": FileTileStore}
 
@@ -27,4 +33,5 @@ __all__ = (
     "TileStore",
     "TileStoreLayer",
     "load_tile_store",
+    "get_tile_store_for_layer",
 )

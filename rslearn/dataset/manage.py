@@ -3,7 +3,7 @@
 import rslearn.data_sources
 from rslearn.config import LayerConfig, LayerType
 from rslearn.data_sources import DataSource, Item
-from rslearn.tile_stores import PrefixedTileStore, TileStore
+from rslearn.tile_stores import PrefixedTileStore, TileStore, get_tile_store_for_layer
 
 from .dataset import Dataset
 from .materialize import Materializers
@@ -171,8 +171,10 @@ def is_window_ingested(
                             return False
 
                         for suffix in needed_suffixes:
-                            layer_id = (layer_name, item.name, suffix, str(projection))
-                            ts_layer = tile_store.get_layer(layer_id)
+                            layer_id = (item.name, suffix, str(projection))
+                            ts_layer = get_tile_store_for_layer(
+                                tile_store, layer_name, layer_cfg
+                            ).get_layer(layer_id)
                             if not ts_layer:
                                 return False
                             if not ts_layer.get_metadata().properties.get("completed"):
