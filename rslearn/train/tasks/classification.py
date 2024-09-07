@@ -6,7 +6,7 @@ import numpy as np
 import numpy.typing as npt
 import shapely
 import torch
-import torchmetrics.classification
+from torchmetrics.classification import MulticlassAccuracy, MulticlassPrecision, MulticlassRecall, MulticlassF1Score
 from PIL import Image, ImageDraw
 from torchmetrics import Metric, MetricCollection
 
@@ -181,11 +181,16 @@ class ClassificationTask(BasicTask):
     def get_metrics(self) -> MetricCollection:
         """Get the metrics for this task."""
         metrics = {}
-        metric_kwargs = dict(num_classes=len(self.classes))
+        metric_kwargs = dict(num_classes=len(self.classes), average=None)  # Set average=None to get per-class metrics
         metric_kwargs.update(self.metric_kwargs)
-        metrics["accuracy"] = ClassificationMetric(
-            torchmetrics.classification.MulticlassAccuracy(**metric_kwargs)
-        )
+
+        # metrics["accuracy"] = ClassificationMetric(MulticlassAccuracy(**metric_kwargs))
+        # Loop over each class to generate precision, recall, and f1 metrics
+        for class_id, class_name in enumerate(self.classes):
+            metrics[f"{class_name}_recall"] = ClassificationMetric(MulticlassRecall(**metric_kwargs), class_id)
+            metrics[f"{class_name}_precision"] = ClassificationMetric(MulticlassPrecision(**metric_kwargs), class_id)
+            metrics[f"{class_name}_f1"] = ClassificationMetric(MulticlassF1Score(**metric_kwargs), class_id)
+
         return MetricCollection(metrics)
 
 
@@ -228,10 +233,11 @@ class ClassificationHead(torch.nn.Module):
 class ClassificationMetric(Metric):
     """Metric for classification task."""
 
-    def __init__(self, metric: Metric):
+    def __init__(self, metric: Metric, class_idx: int | None = None):
         """Initialize a new ClassificationMetric."""
         super().__init__()
         self.metric = metric
+        self.class_idx = class_idx  # optional
 
     def update(
         self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
@@ -257,7 +263,11 @@ class ClassificationMetric(Metric):
 
     def compute(self) -> Any:
         """Returns the computed metric."""
-        return self.metric.compute()
+        result = self.metric.compute()
+        if self.class_idx is None:
+            return result
+        else:
+            return result[self.class_idx]
 
     def reset(self) -> None:
         """Reset metric."""
