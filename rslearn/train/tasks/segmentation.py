@@ -145,8 +145,17 @@ class SegmentationTask(BasicTask):
         metrics = {}
         metric_kwargs = dict(num_classes=self.num_classes)
         metric_kwargs.update(self.metric_kwargs)
-        metrics["accuracy"] = SegmentationMetric(
-            torchmetrics.classification.MulticlassAccuracy(**metric_kwargs)
+        # metrics["accuracy"] = SegmentationMetric(
+        #     torchmetrics.classification.MulticlassAccuracy(**metric_kwargs)
+        # )
+        # Micro accuracy: calculates globally
+        metrics["micro_accuracy"] = SegmentationMetric(
+            torchmetrics.classification.MulticlassAccuracy(**metric_kwargs, average='micro')
+        )
+
+        # Macro accuracy: calculates per class and averages them
+        metrics["macro_accuracy"] = SegmentationMetric(
+            torchmetrics.classification.MulticlassAccuracy(**metric_kwargs, average='macro')
         )
         return MetricCollection(metrics)
 

@@ -3,6 +3,7 @@ import torch.nn as nn
 from sam2.build_sam import build_sam2
 from typing import Any, List, Dict, Optional
 from upath import UPath
+import gcsfs
 
 
 class SAM2Encoder(nn.Module):
@@ -57,7 +58,9 @@ class SAM2Encoder(nn.Module):
             raise ValueError(f"Invalid model identifier: {model_identifier}")
 
         # Build the model and remove unnecessary components
-        self.model = build_sam2(model_cfg, checkpoint_path)
+        fs = gcsfs.GCSFileSystem()
+        with fs.open(checkpoint_path, 'rb') as f:
+            self.model = build_sam2(model_cfg, f)
         self._remove_unused_modules()
 
         self.encoder = self.model.image_encoder.trunk
