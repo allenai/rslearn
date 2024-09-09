@@ -14,7 +14,7 @@ from rslearn.config import (
     VectorLayerConfig,
 )
 from rslearn.data_sources import Item
-from rslearn.tile_stores import TileStore, TileStoreLayer
+from rslearn.tile_stores import TileStore, TileStoreLayer, get_tile_store_for_layer
 from rslearn.utils import Feature, PixelBounds
 from rslearn.utils.raster_format import load_raster_format
 from rslearn.utils.vector_format import load_vector_format
@@ -177,9 +177,9 @@ class RasterMaterializer(Materializer):
                         continue
 
                     for suffix, src_indexes, dst_indexes in needed_suffixes_and_indexes:
-                        ts_layer = tile_store.get_layer(
-                            (layer_name, item.name, suffix, str(projection))
-                        )
+                        ts_layer = get_tile_store_for_layer(
+                            tile_store, layer_name, layer_cfg
+                        ).get_layer((item.name, suffix, str(projection)))
                         read_raster_window_from_tiles(
                             dst, ts_layer, bounds, src_indexes, dst_indexes, remapper
                         )
@@ -237,9 +237,9 @@ class VectorMaterializer(Materializer):
             features: list[Feature] = []
 
             for item in group:
-                ts_layer = tile_store.get_layer(
-                    (layer_name, item.name, str(projection))
-                )
+                ts_layer = get_tile_store_for_layer(
+                    tile_store, layer_name, layer_cfg
+                ).get_layer((item.name, str(projection)))
                 cur_features = ts_layer.read_vector(bounds)
                 features.extend(cur_features)
 

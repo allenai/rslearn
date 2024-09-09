@@ -136,6 +136,8 @@ class Sentinel2(DataSource):
         self.sort_by = sort_by
         self.harmonize = harmonize
 
+        self.index_cache_dir.mkdir(parents=True, exist_ok=True)
+
         self.bucket = storage.Client.create_anonymous_client().bucket(self.bucket_name)
 
         if use_rtree_index:

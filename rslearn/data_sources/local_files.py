@@ -208,6 +208,20 @@ class VectorImporter(Importer):
             cur_geometries: the geometries where the item is needed.
         """
         assert isinstance(config, VectorLayerConfig)
+
+        needed_projections = set()
+        for geometry in cur_geometries:
+            projection, _ = config.get_final_projection_and_bounds(
+                geometry.projection, None
+            )
+            ts_layer = tile_store.get_layer((str(projection),))
+            if ts_layer and ts_layer.get_metadata().properties.get("completed"):
+                continue
+            needed_projections.add(projection)
+
+        if not needed_projections:
+            return
+
         path = UPath(item.path_uri)
 
         aux_files: list[UPath] = []
@@ -233,20 +247,14 @@ class VectorImporter(Importer):
                         )
                     )
 
-                projections = set()
-                for geometry in cur_geometries:
-                    projection, _ = config.get_final_projection_and_bounds(
-                        geometry.projection, None
-                    )
-                    projections.add(projection)
-
-                for projection in projections:
+                for projection in needed_projections:
                     cur_features = [feat.to_projection(projection) for feat in features]
                     layer = tile_store.create_layer(
                         (str(projection),),
                         LayerMetadata(projection, None, {}),
                     )
                     layer.write_vector(cur_features)
+                    layer.set_property("completed", True)
 
 
 class LocalFiles(DataSource):
