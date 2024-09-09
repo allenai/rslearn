@@ -150,10 +150,13 @@ def is_window_ingested(
                         projection, _ = band_set.get_final_projection_and_bounds(
                             window.projection, window.bounds
                         )
-                        layer_prefix = (layer_name, item.name)
+                        cur_tile_store = get_tile_store_for_layer(
+                            tile_store, layer_name, layer_cfg
+                        )
+                        layer_prefix = (item.name,)
                         # Make sure that layers exist containing each configured band.
                         # And that those layers are marked completed.
-                        suffixes = tile_store.list_layers(layer_prefix)
+                        suffixes = cur_tile_store.list_layers(layer_prefix)
                         needed_suffixes = []
                         needed_bands = {band for band in band_set.bands}
                         for suffix in suffixes:
@@ -167,7 +170,6 @@ def is_window_ingested(
                                 continue
                             needed_suffixes.append(suffix)
                         if len(needed_bands) > 0:
-                            print(needed_bands, suffixes, layer_prefix)
                             return False
 
                         for suffix in needed_suffixes:
