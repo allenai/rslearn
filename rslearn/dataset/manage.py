@@ -3,7 +3,7 @@
 import rslearn.data_sources
 from rslearn.config import LayerConfig, LayerType
 from rslearn.data_sources import DataSource, Item
-from rslearn.tile_stores import PrefixedTileStore, TileStore
+from rslearn.tile_stores import TileStore, get_tile_store_for_layer
 
 from .dataset import Dataset
 from .materialize import Materializers
@@ -111,7 +111,7 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
                     geometries_by_item[item].append(geometry)
 
         print(f"Ingesting {len(geometries_by_item)} items in layer {layer_name}")
-        cur_tile_store = PrefixedTileStore(tile_store, (layer_name,))
+        cur_tile_store = get_tile_store_for_layer(tile_store, layer_name, layer_cfg)
         geometries_and_items = list(geometries_by_item.items())
         data_source.ingest(
             tile_store=cur_tile_store,
@@ -150,10 +150,13 @@ def is_window_ingested(
                         projection, _ = band_set.get_final_projection_and_bounds(
                             window.projection, window.bounds
                         )
-                        layer_prefix = (layer_name, item.name)
+                        cur_tile_store = get_tile_store_for_layer(
+                            tile_store, layer_name, layer_cfg
+                        )
+                        layer_prefix = (item.name,)
                         # Make sure that layers exist containing each configured band.
                         # And that those layers are marked completed.
-                        suffixes = tile_store.list_layers(layer_prefix)
+                        suffixes = cur_tile_store.list_layers(layer_prefix)
                         needed_suffixes = []
                         needed_bands = {band for band in band_set.bands}
                         for suffix in suffixes:
@@ -167,12 +170,13 @@ def is_window_ingested(
                                 continue
                             needed_suffixes.append(suffix)
                         if len(needed_bands) > 0:
-                            print(needed_bands, suffixes, layer_prefix)
                             return False
 
                         for suffix in needed_suffixes:
-                            layer_id = (layer_name, item.name, suffix, str(projection))
-                            ts_layer = tile_store.get_layer(layer_id)
+                            layer_id = (item.name, suffix, str(projection))
+                            ts_layer = get_tile_store_for_layer(
+                                tile_store, layer_name, layer_cfg
+                            ).get_layer(layer_id)
                             if not ts_layer:
                                 return False
                             if not ts_layer.get_metadata().properties.get("completed"):

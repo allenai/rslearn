@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy.typing as npt
 
+from rslearn.config import LayerConfig
 from rslearn.utils import Feature, PixelBounds, Projection
 
 
@@ -201,3 +202,23 @@ class PrefixedTileStore(TileStore):
             available options for next part of the layer ID
         """
         return self.tile_store.list_layers(self.prefix + prefix)
+
+
+def get_tile_store_for_layer(
+    tile_store: TileStore, layer_name: str, layer_config: LayerConfig
+) -> TileStore:
+    """Returns a tile store prefixed for the given layer.
+
+    Args:
+        tile_store: the base tile store.
+        layer_name: the name of the layer.
+        layer_config: the layer configuration, used to check if an alias is set.
+
+    Returns:
+        appropriately prefixed tile store.
+    """
+    if layer_config.alias:
+        layer_alias = layer_config.alias
+    else:
+        layer_alias = layer_name
+    return PrefixedTileStore(tile_store, (layer_alias,))

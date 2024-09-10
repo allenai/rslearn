@@ -14,12 +14,13 @@ from lightning.pytorch.cli import LightningCLI
 from rasterio.crs import CRS
 from upath import UPath
 
+from rslearn.config import LayerConfig
 from rslearn.const import WGS84_EPSG
 from rslearn.data_sources import Item, data_source_from_config
 from rslearn.dataset import Dataset, Window
 from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
 from rslearn.dataset.manage import materialize_dataset_windows, prepare_dataset_windows
-from rslearn.tile_stores import PrefixedTileStore
+from rslearn.tile_stores import get_tile_store_for_layer
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.utils import Projection, STGeometry
@@ -401,7 +402,7 @@ class IngestHandler:
         """
         self.dataset = dataset
 
-    def __call__(self, jobs: list[tuple[str, Item, list[STGeometry]]]):
+    def __call__(self, jobs: list[tuple[str, LayerConfig, Item, list[STGeometry]]]):
         """Ingest the specified items.
 
         The items are computed from list of windows via IngestHandler.get_jobs.
@@ -415,12 +416,15 @@ class IngestHandler:
 
         # Group jobs by layer name.
         jobs_by_layer = {}
-        for layer_name, item, geometries in jobs:
+        configs_by_layer = {}
+        for layer_name, layer_cfg, item, geometries in jobs:
             if layer_name not in jobs_by_layer:
                 jobs_by_layer[layer_name] = []
             jobs_by_layer[layer_name].append((item, geometries))
+            configs_by_layer[layer_name] = layer_cfg
+
         for layer_name, items_and_geometries in jobs_by_layer.items():
-            cur_tile_store = PrefixedTileStore(tile_store, (layer_name,))
+            cur_tile_store = get_tile_store_for_layer(tile_store, layer_name, layer_cfg)
             layer_cfg = self.dataset.layers[layer_name]
             data_source = data_source_from_config(layer_cfg, self.dataset.path)
 
@@ -440,7 +444,7 @@ class IngestHandler:
 
     def get_jobs(
         self, windows: list[Window], workers: int
-    ) -> list[tuple[str, Item, list[STGeometry]]]:
+    ) -> list[tuple[str, LayerConfig, Item, list[STGeometry]]]:
         """Computes ingest jobs from window list.
 
         Each ingest job is a tuple of the layer name, the item to ingest, and the
@@ -461,7 +465,7 @@ class IngestHandler:
             windows_and_layer_datas.append((window, layer_datas))
         p.close()
 
-        jobs: list[tuple[str, Item, list[STGeometry]]] = []
+        jobs: list[tuple[str, LayerConfig, Item, list[STGeometry]]] = []
         for layer_name, layer_cfg in self.dataset.layers.items():
             if not layer_cfg.data_source:
                 continue
@@ -484,7 +488,7 @@ class IngestHandler:
                         geometries_by_item[item].append(geometry)
 
             for item, geometries in geometries_by_item.items():
-                jobs.append((layer_name, item, geometries))
+                jobs.append((layer_name, layer_cfg, item, geometries))
 
         print(f"computed {len(jobs)} ingest jobs from {len(windows)} windows")
         return jobs
