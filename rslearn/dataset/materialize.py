@@ -119,6 +119,8 @@ class RasterMaterializer(Materializer):
         """
         assert isinstance(layer_cfg, RasterLayerConfig)
 
+        layer_tile_store = get_tile_store_for_layer(tile_store, layer_name, layer_cfg)
+
         out_layer_dirs: list[UPath] = []
         for group_id in range(len(item_groups)):
             if group_id == 0:
@@ -155,7 +157,7 @@ class RasterMaterializer(Materializer):
                     needed_band_indexes = {}
                     for i, band in enumerate(band_cfg.bands):
                         needed_band_indexes[band] = i
-                    suffixes = tile_store.list_layers((layer_name, item.name))
+                    suffixes = layer_tile_store.list_layers((item.name,))
                     needed_suffixes_and_indexes = []
                     for suffix in suffixes:
                         bands = suffix.split("_")
@@ -177,9 +179,9 @@ class RasterMaterializer(Materializer):
                         continue
 
                     for suffix, src_indexes, dst_indexes in needed_suffixes_and_indexes:
-                        ts_layer = get_tile_store_for_layer(
-                            tile_store, layer_name, layer_cfg
-                        ).get_layer((item.name, suffix, str(projection)))
+                        ts_layer = layer_tile_store.get_layer(
+                            (item.name, suffix, str(projection))
+                        )
                         read_raster_window_from_tiles(
                             dst, ts_layer, bounds, src_indexes, dst_indexes, remapper
                         )
