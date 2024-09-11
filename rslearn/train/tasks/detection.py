@@ -4,9 +4,12 @@ from typing import Any
 
 import numpy as np
 import numpy.typing as npt
+import scipy.optimize
+import scipy.spatial
 import shapely
 import torch
 import torchmetrics.classification
+import torchvision
 from torchmetrics import Metric, MetricCollection
 
 from rslearn.utils import Feature, STGeometry
@@ -46,6 +49,7 @@ class DetectionTask(BasicTask):
         colors: list[tuple[int, int, int]] = DEFAULT_COLORS,
         box_size: int | None = None,
         clip_boxes: bool = True,
+        exclude_by_center: bool = False,
         score_threshold: float = 0.5,
         **kwargs,
     ):
@@ -66,6 +70,8 @@ class DetectionTask(BasicTask):
             box_size: force all boxes to be this size, centered at the centroid of the
                 geometry. Required for Point geometries.
             clip_boxes: whether to clip boxes to the image bounds.
+            exclude_by_center: before optionally clipping boxes, exclude boxes if the
+                center is outside the image bounds.
             score_threshold: confidence threshold for visualization and prediction.
             kwargs: additional arguments to pass to BasicTask
         """
@@ -79,6 +85,7 @@ class DetectionTask(BasicTask):
         self.colors = colors
         self.box_size = box_size
         self.clip_boxes = clip_boxes
+        self.exclude_by_center = exclude_by_center
         self.score_threshold = score_threshold
 
         if not self.filters:
@@ -147,6 +154,20 @@ class DetectionTask(BasicTask):
                 continue
             if box[1] >= metadata["bounds"][3] or box[3] <= metadata["bounds"][1]:
                 continue
+
+            if self.exclude_by_center:
+                center_col = (box[0] + box[2]) // 2
+                center_row = (box[1] + box[3]) // 2
+                if (
+                    center_col <= metadata["bounds"][0]
+                    or center_col >= metadata["bounds"][2]
+                ):
+                    continue
+                if (
+                    center_row <= metadata["bounds"][1]
+                    or center_row >= metadata["bounds"][3]
+                ):
+                    continue
 
             if self.clip_boxes:
                 box = [
@@ -315,3 +336,170 @@ class DetectionMetric(Metric):
     def plot(self, *args: list[Any], **kwargs: dict[str, Any]) -> Any:
         """Returns a plot of the metric."""
         return self.metric.plot(*args, **kwargs)
+
+
+class F1Metric(Metric):
+    """F1 score for object detection."""
+
+    def __init__(
+        self,
+        num_classes: int,
+        cmp_mode: str = "iou",
+        cmp_threshold: float = 0.5,
+        score_thresholds: list[float] = [
+            0.05,
+            0.1,
+            0.2,
+            0.3,
+            0.4,
+            0.5,
+            0.6,
+            0.7,
+            0.8,
+            0.9,
+            0.95,
+        ],
+        flatten_classes: bool = False,
+    ):
+        """Create a new F1Metric.
+
+        Args:
+            num_classes: number of classes.
+            cmp_mode: how to compare boxes, either "iou" or "distance".
+            cmp_threshold: similarity threshold, i.e. min IoU or max distance to
+                consider two boxes as matching.
+            score_thresholds: list of score thresholds to check F1 score for. The final
+                metric is the best F1 across score thresholds.
+            flatten_classes: sum true positives, false positives, and false negatives
+                across classes and report combined F1 instead of computing F1 score for
+                each class and then reporting the average.
+        """
+        super().__init__()
+        self.num_classes = num_classes
+        self.cmp_mode = cmp_mode
+        self.cmp_threshold = cmp_threshold
+        self.score_thresholds = score_thresholds
+        self.flatten_classes = flatten_classes
+
+        for cls_idx in range(self.num_classes):
+            for thr_idx in range(len(self.score_thresholds)):
+                cur_prefix = self._get_state_prefix(cls_idx, thr_idx)
+                self.add_state(
+                    cur_prefix + "tp", default=torch.tensor(0), dist_reduce_fx="sum"
+                )
+                self.add_state(
+                    cur_prefix + "fp", default=torch.tensor(0), dist_reduce_fx="sum"
+                )
+                self.add_state(
+                    cur_prefix + "fn", default=torch.tensor(0), dist_reduce_fx="sum"
+                )
+
+    def _get_state_prefix(self, cls_idx: int, thr_idx: int) -> str:
+        if self.flatten_classes:
+            cls_idx = 0
+        return f"{cls_idx}_{thr_idx}_"
+
+    def _single_update(self, pred: dict[str, Any], target: dict[str, Any]) -> None:
+        for cls_idx in range(self.num_classes):
+            # Get ground truth boxes for this class.
+            gt_boxes = target["boxes"][target["labels"] == cls_idx]
+
+            for thr_idx, score_threshold in enumerate(self.score_thresholds):
+                # Get predicted boxes for this class under the current score threshold.
+                selector = (pred["scores"] >= score_threshold) & (
+                    pred["labels"] == cls_idx
+                )
+                pred_boxes = pred["boxes"][selector, :]
+
+                # Compute comparison scores.
+                if self.cmp_mode == "iou":
+                    ious = torchvision.ops.box_iou(gt_boxes, pred_boxes)
+                    cmp_result = ious >= self.cmp_threshold
+
+                elif self.cmp_mode == "distance":
+
+                    def get_centers(boxes: torch.Tensor) -> torch.Tensor:
+                        return torch.stack(
+                            [
+                                (boxes[:, 0] + boxes[:, 2]) / 2,
+                                (boxes[:, 1] + boxes[:, 3]) / 2,
+                            ],
+                            dim=1,
+                        )
+
+                    gt_centers = get_centers(gt_boxes)
+                    pred_centers = get_centers(pred_boxes)
+                    distances = scipy.spatial.distance_matrix(
+                        gt_centers.numpy(), pred_centers.numpy()
+                    )
+                    cmp_result = torch.tensor(distances) <= self.cmp_threshold
+
+                # Using Hungarian matching algorithm to assign lowest-cost gt-pred pairs.
+                rows, cols = scipy.optimize.linear_sum_assignment(
+                    1 - cmp_result.float()
+                )
+                matches = cmp_result[rows, cols]
+                tp = matches.count_nonzero()
+                fp = len(pred_boxes) - tp
+                fn = len(gt_boxes) - tp
+
+                cur_prefix = self._get_state_prefix(cls_idx, thr_idx)
+                setattr(self, cur_prefix + "tp", getattr(self, cur_prefix + "tp") + tp)
+                setattr(self, cur_prefix + "fp", getattr(self, cur_prefix + "fp") + fp)
+                setattr(self, cur_prefix + "fn", getattr(self, cur_prefix + "fn") + fn)
+
+    def update(
+        self, preds: list[dict[str, Any]], targets: list[dict[str, Any]]
+    ) -> None:
+        """Update metric.
+
+        Args:
+            preds: the predictions
+            targets: the targets
+        """
+        for pred, target in zip(preds, targets):
+            self._single_update(pred, target)
+
+    def compute(self) -> Any:
+        """Compute metric.
+
+        Returns:
+            the best F1 score across score thresholds and classes.
+        """
+        best_scores = []
+
+        if self.flatten_classes:
+            classes_to_check = 1
+        else:
+            classes_to_check = self.num_classes
+
+        for cls_idx in range(classes_to_check):
+            best_score = None
+
+            for thr_idx in range(len(self.score_thresholds)):
+                cur_prefix = self._get_state_prefix(cls_idx, thr_idx)
+                tp = getattr(self, cur_prefix + "tp")
+                fp = getattr(self, cur_prefix + "fp")
+                fn = getattr(self, cur_prefix + "fn")
+
+                if tp + fp == 0:
+                    precision = torch.tensor(0, dtype=torch.float32)
+                else:
+                    precision = tp / (tp + fp)
+
+                if tp + fn == 0:
+                    recall = torch.tensor(0, dtype=torch.float32)
+                else:
+                    recall = tp / (tp + fn)
+
+                if precision + recall < 0.001:
+                    f1 = torch.tensor(0, dtype=torch.float32)
+                else:
+                    f1 = 2 * precision * recall / (precision + recall)
+
+                if best_score is None or f1 > best_score:
+                    best_score = f1
+
+            best_scores.append(best_score)
+
+        return torch.mean(torch.stack(best_scores))
