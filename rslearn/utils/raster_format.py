@@ -1,5 +1,6 @@
 """Abstract RasterFormat class."""
 
+import json
 from typing import Any, BinaryIO
 
 import affine
@@ -484,6 +485,13 @@ class SingleImageRasterFormat(RasterFormat):
             if array.shape[2] == 1:
                 array = array[:, :, 0]
             Image.fromarray(array).save(f, format=self.format.upper())
+        with (path / "metadata.json").open("w") as f:
+            json.dump(
+                {
+                    "bounds": bounds,
+                },
+                f,
+            )
 
     def decode_raster(
         self, path: UPath, bounds: PixelBounds
@@ -497,12 +505,50 @@ class SingleImageRasterFormat(RasterFormat):
         Returns:
             the raster data, or None if no image content is found
         """
-        fname = path / ("image." + self.get_extension())
-        with fname.open("rb") as f:
+        image_fname = path / ("image." + self.get_extension())
+        metadata_fname = path / "metadata.json"
+        if metadata_fname.exists():
+            with metadata_fname.open() as f:
+                image_bounds = json.load(f)["bounds"]
+        else:
+            # Backwards compatibility -- assume that requested bounds matches the window bounds.
+            image_bounds = bounds
+
+        with image_fname.open("rb") as f:
             array = np.array(Image.open(f, formats=[self.format.upper()]))
-            if len(array.shape) == 2:
-                array = array[:, :, None]
-            return array.transpose(2, 0, 1)
+
+        if len(array.shape) == 2:
+            array = array[:, :, None]
+        array = array.transpose(2, 0, 1)
+
+        if bounds == image_bounds:
+            return array
+
+        # Need to extract relevant portion of image.
+        dst = np.zeros(
+            (array.shape[0], bounds[3] - bounds[1], bounds[2] - bounds[0]),
+            dtype=array.dtype,
+        )
+        src_col_offset = max(bounds[0] - image_bounds[0], 0)
+        src_row_offset = max(bounds[1] - image_bounds[1], 0)
+        dst_col_offset = max(image_bounds[0] - bounds[0], 0)
+        dst_row_offset = max(image_bounds[1] - bounds[1], 0)
+        col_overlap = min(
+            array.shape[2] - src_col_offset, dst.shape[2] - dst_col_offset
+        )
+        row_overlap = min(
+            array.shape[1] - src_row_offset, dst.shape[1] - dst_row_offset
+        )
+        dst[
+            :,
+            dst_row_offset : dst_row_offset + row_overlap,
+            dst_col_offset : dst_col_offset + col_overlap,
+        ] = array[
+            :,
+            src_row_offset : src_row_offset + row_overlap,
+            src_col_offset : src_col_offset + col_overlap,
+        ]
+        return dst
 
     @staticmethod
     def from_config(name: str, config: dict[str, Any]) -> "SingleImageRasterFormat":
