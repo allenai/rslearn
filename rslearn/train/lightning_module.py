@@ -234,7 +234,7 @@ class RslearnLightningModule(L.LightningModule):
             on_epoch=True,
         )
         self.val_metrics.update(outputs, targets)
-        self.log_dict(self.val_metrics, on_epoch=True)
+        self.log_dict(self.val_metrics, batch_size=batch_size, on_epoch=True)
 
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         """Compute the test loss and additional metrics.
@@ -244,7 +244,7 @@ class RslearnLightningModule(L.LightningModule):
             batch_idx: Integer displaying index of this batch.
             dataloader_idx: Index of the current dataloader.
         """
-        inputs, targets, _ = batch
+        inputs, targets, metadatas = batch
         batch_size = len(inputs)
         outputs, loss_dict = self(inputs, targets)
         test_loss = sum(loss_dict.values())
@@ -258,14 +258,17 @@ class RslearnLightningModule(L.LightningModule):
             "test_loss", test_loss, batch_size=batch_size, on_step=False, on_epoch=True
         )
         self.test_metrics.update(outputs, targets)
-        self.log_dict(self.test_metrics, on_epoch=True)
+        self.log_dict(self.test_metrics, batch_size=batch_size, on_epoch=True)
 
         if self.visualize_dir:
-            for idx, (inp, target, output) in enumerate(zip(inputs, targets, outputs)):
+            for idx, (inp, target, output, metadata) in enumerate(
+                zip(inputs, targets, outputs, metadatas)
+            ):
                 images = self.task.visualize(inp, target, output)
                 for image_suffix, image in images.items():
                     out_fname = os.path.join(
-                        self.visualize_dir, f"{batch_idx}_{idx}_{image_suffix}.png"
+                        self.visualize_dir,
+                        f"{metadata["window_name"]}_{metadata["bounds"][0]}_{metadata["bounds"][1]}_{image_suffix}.png",
                     )
                     Image.fromarray(image).save(out_fname)
 
