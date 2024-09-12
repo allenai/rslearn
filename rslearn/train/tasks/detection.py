@@ -4,11 +4,15 @@ from typing import Any
 
 import numpy as np
 import numpy.typing as npt
+import scipy.optimize
+import scipy.spatial
+import shapely
 import torch
 import torchmetrics.classification
+import torchvision
 from torchmetrics import Metric, MetricCollection
 
-from rslearn.utils import Feature
+from rslearn.utils import Feature, STGeometry
 
 from .task import BasicTask
 
@@ -45,6 +49,11 @@ class DetectionTask(BasicTask):
         colors: list[tuple[int, int, int]] = DEFAULT_COLORS,
         box_size: int | None = None,
         clip_boxes: bool = True,
+        exclude_by_center: bool = False,
+        score_threshold: float = 0.5,
+        enable_map_metric: bool = True,
+        enable_f1_metric: bool = False,
+        f1_metric_kwargs: dict[str, Any] = {},
         **kwargs,
     ):
         """Initialize a new SegmentationTask.
@@ -64,6 +73,12 @@ class DetectionTask(BasicTask):
             box_size: force all boxes to be this size, centered at the centroid of the
                 geometry. Required for Point geometries.
             clip_boxes: whether to clip boxes to the image bounds.
+            exclude_by_center: before optionally clipping boxes, exclude boxes if the
+                center is outside the image bounds.
+            score_threshold: confidence threshold for visualization and prediction.
+            enable_map_metric: whether to compute mAP (default true)
+            enable_f1_metric: whether to compute F1 (default false)
+            f1_metric_kwargs: extra arguments to pass to F1 metric.
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -76,6 +91,11 @@ class DetectionTask(BasicTask):
         self.colors = colors
         self.box_size = box_size
         self.clip_boxes = clip_boxes
+        self.exclude_by_center = exclude_by_center
+        self.score_threshold = score_threshold
+        self.enable_map_metric = enable_map_metric
+        self.enable_f1_metric = enable_f1_metric
+        self.f1_metric_kwargs = f1_metric_kwargs
 
         if not self.filters:
             self.filters = []
@@ -144,6 +164,20 @@ class DetectionTask(BasicTask):
             if box[1] >= metadata["bounds"][3] or box[3] <= metadata["bounds"][1]:
                 continue
 
+            if self.exclude_by_center:
+                center_col = (box[0] + box[2]) // 2
+                center_row = (box[1] + box[3]) // 2
+                if (
+                    center_col <= metadata["bounds"][0]
+                    or center_col >= metadata["bounds"][2]
+                ):
+                    continue
+                if (
+                    center_row <= metadata["bounds"][1]
+                    or center_row >= metadata["bounds"][3]
+                ):
+                    continue
+
             if self.clip_boxes:
                 box = [
                     np.clip(box[0], metadata["bounds"][0], metadata["bounds"][2]),
@@ -191,7 +225,34 @@ class DetectionTask(BasicTask):
         Returns:
             either raster or vector data.
         """
-        raise NotImplementedError
+        # Apply confidence threshold.
+        wanted = raw_output["scores"].cpu().numpy() > self.score_threshold
+        boxes = raw_output["boxes"].cpu().numpy()[wanted]
+        class_ids = raw_output["labels"].cpu().numpy()[wanted]
+        scores = raw_output["scores"].cpu().numpy()[wanted]
+
+        features = []
+        for box, class_id, score in zip(boxes, class_ids, scores):
+            shp = shapely.box(
+                metadata["bounds"][0] + box[0],
+                metadata["bounds"][1] + box[1],
+                metadata["bounds"][0] + box[2],
+                metadata["bounds"][1] + box[3],
+            )
+            geom = STGeometry(metadata["projection"], shp, None)
+            properties = {
+                "score": score,
+            }
+
+            class_id = int(class_id)
+            if self.read_class_id:
+                properties[self.property_name] = class_id
+            else:
+                properties[self.property_name] = self.classes[class_id]
+
+            features.append(Feature(geom, properties))
+
+        return features
 
     def visualize(
         self,
@@ -210,39 +271,63 @@ class DetectionTask(BasicTask):
             a dictionary mapping image name to visualization image
         """
         image = super().visualize(input_dict, target_dict, output)["image"]
-        gt_classes = target_dict["classes"].cpu().numpy()
-        pred_classes = output.cpu().numpy().argmax(axis=0)
-        gt_vis = np.zeros((gt_classes.shape[0], gt_classes.shape[1], 3), dtype=np.uint8)
-        pred_vis = np.zeros(
-            (pred_classes.shape[0], pred_classes.shape[1], 3), dtype=np.uint8
-        )
-        for class_id in range(self.num_classes):
-            color = self.colors[class_id % len(self.colors)]
-            gt_vis[gt_classes == class_id] = color
-            pred_vis[pred_classes == class_id] = color
+
+        def draw_boxes(image: npt.NDArray[Any], d: dict[str, torch.Tensor]):
+            boxes = d["boxes"].cpu().numpy()
+            class_ids = d["labels"].cpu().numpy()
+            if "scores" in d:
+                wanted = d["scores"].cpu().numpy() > self.score_threshold
+                boxes = boxes[wanted]
+                class_ids = class_ids[wanted]
+
+            for box, class_id in zip(boxes, class_ids):
+                sx = int(np.clip(box[0], 0, image.shape[1]))
+                sy = int(np.clip(box[1], 0, image.shape[0]))
+                ex = int(np.clip(box[2], 0, image.shape[1]))
+                ey = int(np.clip(box[3], 0, image.shape[0]))
+                color = self.colors[class_id % len(self.colors)]
+                image[sy:ey, sx : sx + 2, :] = color
+                image[sy:ey, ex - 2 : ex, :] = color
+                image[sy : sy + 2, sx:ex, :] = color
+                image[ey - 2 : ey, sx:ex, :] = color
+
+            return image
 
         return {
-            "image": np.array(image),
-            "gt": gt_vis,
-            "pred": pred_vis,
+            "gt": draw_boxes(image.copy(), target_dict),
+            "pred": draw_boxes(image.copy(), output),
         }
 
     def get_metrics(self) -> MetricCollection:
         """Get the metrics for this task."""
         metrics = {}
-        metrics["mAP"] = DetectionMetric(
-            torchmetrics.detection.mean_ap.MeanAveragePrecision()
-        )
+        if self.enable_map_metric:
+            metrics["mAP"] = DetectionMetric(
+                torchmetrics.detection.mean_ap.MeanAveragePrecision()
+            )
+        if self.enable_f1_metric:
+            kwargs = dict(
+                num_classes=len(self.classes),
+            )
+            kwargs.update(self.f1_metric_kwargs)
+            metrics["F1"] = DetectionMetric(F1Metric(**kwargs))
         return MetricCollection(metrics)
 
 
 class DetectionMetric(Metric):
     """Metric for detection task."""
 
-    def __init__(self, metric: Metric):
-        """Initialize a new DetectionMetric."""
+    def __init__(self, metric: Metric, output_key: str | None = None):
+        """Initialize a new DetectionMetric.
+
+        Args:
+            metric: the metric to wrap.
+            output_key: in case the metric returns a dict, return this element of the
+                dict. Leave None if metric returns scalar.
+        """
         super().__init__()
         self.metric = metric
+        self.output_key = output_key
 
     def update(
         self, preds: list[dict[str, Any]], targets: list[dict[str, Any]]
@@ -264,7 +349,10 @@ class DetectionMetric(Metric):
 
     def compute(self) -> Any:
         """Returns the computed metric."""
-        return self.metric.compute()["map"]
+        val = self.metric.compute()
+        if self.output_key:
+            val = val[self.output_key]
+        return val
 
     def reset(self) -> None:
         """Reset metric."""
@@ -274,3 +362,171 @@ class DetectionMetric(Metric):
     def plot(self, *args: list[Any], **kwargs: dict[str, Any]) -> Any:
         """Returns a plot of the metric."""
         return self.metric.plot(*args, **kwargs)
+
+
+class F1Metric(Metric):
+    """F1 score for object detection."""
+
+    def __init__(
+        self,
+        num_classes: int,
+        cmp_mode: str = "iou",
+        cmp_threshold: float = 0.5,
+        score_thresholds: list[float] = [
+            0.05,
+            0.1,
+            0.2,
+            0.3,
+            0.4,
+            0.5,
+            0.6,
+            0.7,
+            0.8,
+            0.9,
+            0.95,
+        ],
+        flatten_classes: bool = False,
+    ):
+        """Create a new F1Metric.
+
+        Args:
+            num_classes: number of classes.
+            cmp_mode: how to compare boxes, either "iou" or "distance".
+            cmp_threshold: similarity threshold, i.e. min IoU or max distance to
+                consider two boxes as matching.
+            score_thresholds: list of score thresholds to check F1 score for. The final
+                metric is the best F1 across score thresholds.
+            flatten_classes: sum true positives, false positives, and false negatives
+                across classes and report combined F1 instead of computing F1 score for
+                each class and then reporting the average.
+        """
+        super().__init__()
+        self.num_classes = num_classes
+        self.cmp_mode = cmp_mode
+        self.cmp_threshold = cmp_threshold
+        self.score_thresholds = score_thresholds
+        self.flatten_classes = flatten_classes
+
+        for cls_idx in range(self.num_classes):
+            for thr_idx in range(len(self.score_thresholds)):
+                cur_prefix = self._get_state_prefix(cls_idx, thr_idx)
+                self.add_state(
+                    cur_prefix + "tp", default=torch.tensor(0), dist_reduce_fx="sum"
+                )
+                self.add_state(
+                    cur_prefix + "fp", default=torch.tensor(0), dist_reduce_fx="sum"
+                )
+                self.add_state(
+                    cur_prefix + "fn", default=torch.tensor(0), dist_reduce_fx="sum"
+                )
+
+    def _get_state_prefix(self, cls_idx: int, thr_idx: int) -> str:
+        if self.flatten_classes:
+            cls_idx = 0
+        return f"{cls_idx}_{thr_idx}_"
+
+    def _single_update(self, pred: dict[str, Any], target: dict[str, Any]) -> None:
+        for cls_idx in range(self.num_classes):
+            # Get ground truth boxes for this class.
+            gt_boxes = target["boxes"][target["labels"] == cls_idx]
+
+            for thr_idx, score_threshold in enumerate(self.score_thresholds):
+                # Get predicted boxes for this class under the current score threshold.
+                selector = (pred["scores"] >= score_threshold) & (
+                    pred["labels"] == cls_idx
+                )
+                pred_boxes = pred["boxes"][selector, :]
+
+                # Compute comparison scores.
+                if self.cmp_mode == "iou":
+                    ious = torchvision.ops.box_iou(gt_boxes, pred_boxes)
+                    cmp_result = ious.cpu().numpy() >= self.cmp_threshold
+
+                elif self.cmp_mode == "distance":
+
+                    def get_centers(boxes: torch.Tensor) -> torch.Tensor:
+                        return torch.stack(
+                            [
+                                (boxes[:, 0] + boxes[:, 2]) / 2,
+                                (boxes[:, 1] + boxes[:, 3]) / 2,
+                            ],
+                            dim=1,
+                        )
+
+                    gt_centers = get_centers(gt_boxes)
+                    pred_centers = get_centers(pred_boxes)
+                    distances = scipy.spatial.distance_matrix(
+                        gt_centers.cpu().numpy(), pred_centers.cpu().numpy()
+                    )
+                    cmp_result = distances <= self.cmp_threshold
+
+                # Using Hungarian matching algorithm to assign lowest-cost gt-pred pairs.
+                rows, cols = scipy.optimize.linear_sum_assignment(
+                    1 - cmp_result.astype(np.float32)
+                )
+                matches = cmp_result[rows, cols]
+                tp = np.count_nonzero(matches)
+                fp = len(pred_boxes) - tp
+                fn = len(gt_boxes) - tp
+
+                cur_prefix = self._get_state_prefix(cls_idx, thr_idx)
+                setattr(self, cur_prefix + "tp", getattr(self, cur_prefix + "tp") + tp)
+                setattr(self, cur_prefix + "fp", getattr(self, cur_prefix + "fp") + fp)
+                setattr(self, cur_prefix + "fn", getattr(self, cur_prefix + "fn") + fn)
+
+    def update(
+        self, preds: list[dict[str, Any]], targets: list[dict[str, Any]]
+    ) -> None:
+        """Update metric.
+
+        Args:
+            preds: the predictions
+            targets: the targets
+        """
+        for pred, target in zip(preds, targets):
+            self._single_update(pred, target)
+
+    def compute(self) -> Any:
+        """Compute metric.
+
+        Returns:
+            the best F1 score across score thresholds and classes.
+        """
+        best_scores = []
+
+        if self.flatten_classes:
+            classes_to_check = 1
+        else:
+            classes_to_check = self.num_classes
+
+        for cls_idx in range(classes_to_check):
+            best_score = None
+
+            for thr_idx in range(len(self.score_thresholds)):
+                cur_prefix = self._get_state_prefix(cls_idx, thr_idx)
+                tp = getattr(self, cur_prefix + "tp")
+                fp = getattr(self, cur_prefix + "fp")
+                fn = getattr(self, cur_prefix + "fn")
+                device = tp.device
+
+                if tp + fp == 0:
+                    precision = torch.tensor(0, dtype=torch.float32, device=device)
+                else:
+                    precision = tp / (tp + fp)
+
+                if tp + fn == 0:
+                    recall = torch.tensor(0, dtype=torch.float32, device=device)
+                else:
+                    recall = tp / (tp + fn)
+
+                if precision + recall < 0.001:
+                    f1 = torch.tensor(0, dtype=torch.float32, device=device)
+                else:
+                    f1 = 2 * precision * recall / (precision + recall)
+
+                if best_score is None or f1 > best_score:
+                    best_score = f1
+
+            best_scores.append(best_score)
+
+        return torch.mean(torch.stack(best_scores))

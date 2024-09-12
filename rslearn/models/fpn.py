@@ -15,21 +15,22 @@ class Fpn(torch.nn.Module):
     later features, but comprehensive features at each resolution are desired.
     """
 
-    def __init__(self, prev_module: torch.nn.Module, out_channels: int = 128):
+    def __init__(
+        self, in_channels: list[int], out_channels: int = 128, prepend: bool = False
+    ):
         """Initialize a new Fpn instance.
 
         Args:
-            prev_module: the preceding module, used to determine the input channels
+            in_channels: the input channels for each feature map
             out_channels: output depth at each resolution
+            prepend: prepend the outputs of FPN rather than replacing the input
+                features
         """
         super().__init__()
-
-        backbone_channels = prev_module.get_backbone_channels()
-        in_channels_list = [ch[1] for ch in backbone_channels]
+        self.prepend = prepend
         self.fpn = torchvision.ops.FeaturePyramidNetwork(
-            in_channels_list=in_channels_list, out_channels=out_channels
+            in_channels_list=in_channels, out_channels=out_channels
         )
-        self.out_channels = [[ch[0], out_channels] for ch in backbone_channels]
 
     def forward(self, x: list[torch.Tensor]):
         """Compute outputs of the FPN.
@@ -48,17 +49,3 @@ class Fpn(torch.nn.Module):
             return output + x
         else:
             return output
-
-    def get_backbone_channels(self):
-        """Returns the output channels of this model when used as a backbone.
-
-        The output channels is a list of (downsample_factor, depth) that corresponds
-        to the feature maps that the backbone returns. For example, an element [2, 32]
-        indicates that the corresponding feature map is 1/2 the input resolution and
-        has 32 channels.
-
-        Returns:
-            the output channels of the backbone as a list of (downsample_factor, depth)
-            tuples.
-        """
-        return self.out_channels

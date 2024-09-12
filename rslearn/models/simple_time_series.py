@@ -170,7 +170,7 @@ class SimpleTimeSeries(torch.nn.Module):
         output_features = []
         for feature_idx in range(len(all_features)):
             aggregated_features = []
-            for group in self.groups:
+            for group in groups:
                 group_features = []
                 for image_idx in group:
                     group_features.append(

@@ -6,4 +6,5 @@ osmium
 pycocotools
 rtree
 satlaspretrain_models
+scipy
 wandb
