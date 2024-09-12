@@ -51,6 +51,9 @@ class DetectionTask(BasicTask):
         clip_boxes: bool = True,
         exclude_by_center: bool = False,
         score_threshold: float = 0.5,
+        enable_map_metric: bool = True,
+        enable_f1_metric: bool = False,
+        f1_metric_kwargs: dict[str, Any] = {},
         **kwargs,
     ):
         """Initialize a new SegmentationTask.
@@ -73,6 +76,9 @@ class DetectionTask(BasicTask):
             exclude_by_center: before optionally clipping boxes, exclude boxes if the
                 center is outside the image bounds.
             score_threshold: confidence threshold for visualization and prediction.
+            enable_map_metric: whether to compute mAP (default true)
+            enable_f1_metric: whether to compute F1 (default false)
+            f1_metric_kwargs: extra arguments to pass to F1 metric.
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -87,6 +93,9 @@ class DetectionTask(BasicTask):
         self.clip_boxes = clip_boxes
         self.exclude_by_center = exclude_by_center
         self.score_threshold = score_threshold
+        self.enable_map_metric = enable_map_metric
+        self.enable_f1_metric = enable_f1_metric
+        self.f1_metric_kwargs = f1_metric_kwargs
 
         if not self.filters:
             self.filters = []
@@ -292,19 +301,33 @@ class DetectionTask(BasicTask):
     def get_metrics(self) -> MetricCollection:
         """Get the metrics for this task."""
         metrics = {}
-        metrics["mAP"] = DetectionMetric(
-            torchmetrics.detection.mean_ap.MeanAveragePrecision()
-        )
+        if self.enable_map_metric:
+            metrics["mAP"] = DetectionMetric(
+                torchmetrics.detection.mean_ap.MeanAveragePrecision()
+            )
+        if self.enable_f1_metric:
+            kwargs = dict(
+                num_classes=len(self.classes),
+            )
+            kwargs.update(self.f1_metric_kwargs)
+            metrics["F1"] = DetectionMetric(F1Metric(**kwargs))
         return MetricCollection(metrics)
 
 
 class DetectionMetric(Metric):
     """Metric for detection task."""
 
-    def __init__(self, metric: Metric):
-        """Initialize a new DetectionMetric."""
+    def __init__(self, metric: Metric, output_key: str | None = None):
+        """Initialize a new DetectionMetric.
+
+        Args:
+            metric: the metric to wrap.
+            output_key: in case the metric returns a dict, return this element of the
+                dict. Leave None if metric returns scalar.
+        """
         super().__init__()
         self.metric = metric
+        self.output_key = output_key
 
     def update(
         self, preds: list[dict[str, Any]], targets: list[dict[str, Any]]
@@ -326,7 +349,10 @@ class DetectionMetric(Metric):
 
     def compute(self) -> Any:
         """Returns the computed metric."""
-        return self.metric.compute()["map"]
+        val = self.metric.compute()
+        if self.output_key:
+            val = val[self.output_key]
+        return val
 
     def reset(self) -> None:
         """Reset metric."""
@@ -414,7 +440,7 @@ class F1Metric(Metric):
                 # Compute comparison scores.
                 if self.cmp_mode == "iou":
                     ious = torchvision.ops.box_iou(gt_boxes, pred_boxes)
-                    cmp_result = ious >= self.cmp_threshold
+                    cmp_result = ious.cpu().numpy() >= self.cmp_threshold
 
                 elif self.cmp_mode == "distance":
 
@@ -430,16 +456,16 @@ class F1Metric(Metric):
                     gt_centers = get_centers(gt_boxes)
                     pred_centers = get_centers(pred_boxes)
                     distances = scipy.spatial.distance_matrix(
-                        gt_centers.numpy(), pred_centers.numpy()
+                        gt_centers.cpu().numpy(), pred_centers.cpu().numpy()
                     )
-                    cmp_result = torch.tensor(distances) <= self.cmp_threshold
+                    cmp_result = distances <= self.cmp_threshold
 
                 # Using Hungarian matching algorithm to assign lowest-cost gt-pred pairs.
                 rows, cols = scipy.optimize.linear_sum_assignment(
-                    1 - cmp_result.float()
+                    1 - cmp_result.astype(np.float32)
                 )
                 matches = cmp_result[rows, cols]
-                tp = matches.count_nonzero()
+                tp = np.count_nonzero(matches)
                 fp = len(pred_boxes) - tp
                 fn = len(gt_boxes) - tp
 
@@ -481,19 +507,20 @@ class F1Metric(Metric):
                 tp = getattr(self, cur_prefix + "tp")
                 fp = getattr(self, cur_prefix + "fp")
                 fn = getattr(self, cur_prefix + "fn")
+                device = tp.device
 
                 if tp + fp == 0:
-                    precision = torch.tensor(0, dtype=torch.float32)
+                    precision = torch.tensor(0, dtype=torch.float32, device=device)
                 else:
                     precision = tp / (tp + fp)
 
                 if tp + fn == 0:
-                    recall = torch.tensor(0, dtype=torch.float32)
+                    recall = torch.tensor(0, dtype=torch.float32, device=device)
                 else:
                     recall = tp / (tp + fn)
 
                 if precision + recall < 0.001:
-                    f1 = torch.tensor(0, dtype=torch.float32)
+                    f1 = torch.tensor(0, dtype=torch.float32, device=device)
                 else:
                     f1 = 2 * precision * recall / (precision + recall)
 
