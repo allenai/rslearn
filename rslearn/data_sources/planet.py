@@ -24,21 +24,11 @@ from rslearn.utils import STGeometry
 from .raster_source import get_needed_projections, ingest_raster
 
 
-class APIException(Exception):
-    """Exception raised for M2M API errors."""
-
-    pass
-
-
 class Planet(DataSource):
     """A data source for Planet Labs API.
 
     The API key should be set via environment variable (PL_API_KEY).
     """
-
-    bands = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11"]
-
-    dataset_name = "landsat_ot_c2_l1"
 
     def __init__(
         self,
@@ -49,7 +39,7 @@ class Planet(DataSource):
         use_permission_filter: bool = True,
         sort_by: str | None = None,
     ):
-        """Initialize a new LandsatOliTirs instance.
+        """Initialize a new Planet instance.
 
         Args:
             config: the LayerConfig of the layer containing this data source
@@ -69,6 +59,7 @@ class Planet(DataSource):
         self.item_type_id = item_type_id
         self.product_bundle = product_bundle
         self.range_filters = range_filters
+        self.use_permission_filter = use_permission_filter
         self.sort_by = sort_by
 
     @staticmethod
