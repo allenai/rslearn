@@ -1,7 +1,5 @@
 """Flip transform."""
 
-from typing import Any
-
 import torch
 
 from .transform import Transform
@@ -61,14 +59,36 @@ class Flip(Transform):
             image = torch.flip(image, dims=[-2])
         return image
 
-    def apply_boxes(self, boxes: Any, state: dict[str, bool]) -> torch.Tensor:
+    def apply_boxes(
+        self, boxes: dict[str, torch.Tensor], state: dict[str, bool]
+    ) -> dict[str, torch.Tensor]:
         """Apply the sampled state on the specified image.
 
         Args:
             boxes: the boxes to transform.
             state: the sampled state.
         """
-        raise NotImplementedError
+        if state["horizontal"]:
+            boxes["boxes"] = torch.stack(
+                [
+                    boxes["width"] - boxes["boxes"][:, 2],
+                    boxes["boxes"][:, 1],
+                    boxes["width"] - boxes["boxes"][:, 0],
+                    boxes["boxes"][:, 3],
+                ],
+                dim=1,
+            )
+        if state["vertical"]:
+            boxes["boxes"] = torch.stack(
+                [
+                    boxes["boxes"][:, 0],
+                    boxes["height"] - boxes["boxes"][:, 3],
+                    boxes["boxes"][:, 2],
+                    boxes["height"] - boxes["boxes"][:, 1],
+                ],
+                dim=1,
+            )
+        return boxes
 
     def forward(self, input_dict, target_dict):
         """Apply transform over the inputs and targets.

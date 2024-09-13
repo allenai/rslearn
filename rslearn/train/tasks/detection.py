@@ -211,6 +211,12 @@ class DetectionTask(BasicTask):
             "valid": torch.tensor(valid, dtype=torch.int32),
             "boxes": boxes,
             "labels": class_labels,
+            "width": torch.tensor(
+                metadata["bounds"][2] - metadata["bounds"][0], dtype=torch.float32
+            ),
+            "height": torch.tensor(
+                metadata["bounds"][3] - metadata["bounds"][1], dtype=torch.float32
+            ),
         }
 
     def process_output(
@@ -303,7 +309,8 @@ class DetectionTask(BasicTask):
         metrics = {}
         if self.enable_map_metric:
             metrics["mAP"] = DetectionMetric(
-                torchmetrics.detection.mean_ap.MeanAveragePrecision()
+                torchmetrics.detection.mean_ap.MeanAveragePrecision(),
+                output_key="map",
             )
         if self.enable_f1_metric:
             kwargs = dict(
