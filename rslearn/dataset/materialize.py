@@ -194,8 +194,7 @@ class RasterMaterializer(Materializer):
                 )
 
         for out_layer_dir in out_layer_dirs:
-            with (out_layer_dir / "completed").open("wb"):
-                pass
+            (out_layer_dir / "completed").touch()
 
 
 @Materializers.register("vector")
@@ -248,5 +247,4 @@ class VectorMaterializer(Materializer):
             vector_format.encode_vector(out_layer_dirs[group_id], projection, features)
 
         for out_layer_dir in out_layer_dirs:
-            with (out_layer_dir / "completed").open("wb"):
-                pass
+            (out_layer_dir / "completed").touch()
