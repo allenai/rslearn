@@ -145,6 +145,7 @@ class SplitConfig:
     def __init__(
         self,
         groups: list[str] | None = None,
+        names: list[str] | None = None,
         tags: dict[str, str] | None = None,
         num_samples: int | None = None,
         transforms: list[torch.nn.Module] | None = None,
@@ -157,6 +158,7 @@ class SplitConfig:
 
         Args:
             groups: for this split, only read windows in one of these groups
+            names: for this split, read windows with these specific names
             tags: only select windows that have options matching these tags. If key and
                 value are set, then window must have an option with the same key and
                 value. If value is empty, then only the existince of the key in the
@@ -172,6 +174,7 @@ class SplitConfig:
             skip_targets: whether to skip targets when loading inputs
         """
         self.groups = groups
+        self.names = names
         self.tags = tags
         self.num_samples = num_samples
         self.transforms = transforms
@@ -188,6 +191,7 @@ class SplitConfig:
         """
         result = SplitConfig(
             groups=self.groups,
+            names=self.names,
             tags=self.tags,
             num_samples=self.num_samples,
             transforms=self.transforms,
@@ -198,6 +202,8 @@ class SplitConfig:
         )
         if other.groups:
             result.groups = other.groups
+        if other.names:
+            result.names = other.names
         if other.tags:
             result.tags = other.tags
         if other.num_samples:
@@ -289,12 +295,19 @@ class ModelDataset(torch.utils.data.Dataset):
         else:
             self.patch_size = split_config.patch_size
 
-        if split_config.groups:
+        if split_config.names:
+            windows = self.dataset.load_windows(
+                groups=split_config.groups,
+                names=split_config.names,
+                show_progress=True,
+                workers=workers,
+            )
+        elif split_config.groups:
             windows = self.dataset.load_windows(
                 groups=split_config.groups, show_progress=True, workers=workers
             )
         else:
-            windows = self.dataset.load_windows(workers=workers)
+            windows = self.dataset.load_windows(show_progress=True, workers=workers)
 
         if split_config.tags:
             # Filter the window.options.
