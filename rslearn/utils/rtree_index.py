@@ -114,8 +114,7 @@ def get_cached_rtree(
                         shutil.copyfileobj(src, dst)
 
         # Create the completed file to indicate index is ready in cache.
-        with completed_fname.open("w"):
-            pass
+        completed_fname.touch()
 
     else:
         # Initialize the index from the cached version.
