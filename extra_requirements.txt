@@ -8,3 +8,4 @@ rtree
 satlaspretrain_models
 scipy
 wandb
+git+https://github.com/facebookresearch/segment-anything-2.git#egg=segment-anything-2
