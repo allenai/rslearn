@@ -71,8 +71,7 @@ def image_to_class_dataset() -> Generator[Dataset, None, None]:
         window.bounds,
         image,
     )
-    with (layer_dir / "completed").open("w") as f:
-        pass
+    (layer_dir / "completed").touch()
 
     # Add label.
     feature = Feature(
@@ -87,8 +86,7 @@ def image_to_class_dataset() -> Generator[Dataset, None, None]:
         window.projection,
         [feature],
     )
-    with (layer_dir / "completed").open("w") as f:
-        pass
+    (layer_dir / "completed").touch()
 
     dataset = Dataset(ds_path)
     yield dataset
