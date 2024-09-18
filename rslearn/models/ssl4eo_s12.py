@@ -1,3 +1,5 @@
+"""SSL4EO-S12 models."""
+
 from typing import Any
 
 import torch
