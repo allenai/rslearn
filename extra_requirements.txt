@@ -3,6 +3,7 @@ gcsfs
 google-cloud-storage
 mgrs
 osmium
+planet
 pycocotools
 rtree
 satlaspretrain_models

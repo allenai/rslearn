@@ -1,17 +1,18 @@
 """Data source for Planet Labs API."""
 
 import asyncio
-import io
 import json
+import pathlib
 import shutil
+import tempfile
 from collections.abc import Generator
 from datetime import datetime
 from typing import Any, BinaryIO
 
 import planet
 import rasterio
-import requests
 import shapely
+from fsspec.implementations.local import LocalFileSystem
 from upath import UPath
 
 from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
@@ -20,6 +21,7 @@ from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry
+from rslearn.utils.fsspec import join_upath
 
 from .raster_source import get_needed_projections, ingest_raster
 
@@ -34,17 +36,26 @@ class Planet(DataSource):
         self,
         config: LayerConfig,
         item_type_id: str,
-        product_bundle: str = "analytic_udm2",
+        cache_dir: UPath | None = None,
+        product_bundle: str = "analytic_sr_udm2",
+        asset_type_id: str = "ortho_analytic_sr",
         range_filters: dict[str, dict[str, Any]] = {},
         use_permission_filter: bool = True,
         sort_by: str | None = None,
+        bands: list[str] = ["b01", "b02", "b03", "b04"],
     ):
         """Initialize a new Planet instance.
 
         Args:
             config: the LayerConfig of the layer containing this data source
             item_type_id: the item type ID, like "PSScene" or "SkySatCollect".
-            product_bundle: the product bundle to download.
+            cache_dir: where to store ordered products, or None to just store it in
+                temporary directory before putting into tile store.
+            product_bundle: the product bundle to download, see
+                https://developers.planet.com/apis/orders/product-bundles-reference/.
+            asset_type_id: the asset type ID, see e.g.
+                https://developers.planet.com/docs/data/skysatcollect/
+                for a list of SkySatCollect assets.
             range_filters: specifications for range filters to apply, such as
                 {"cloud_cover": {"lte": 0.5}} to search for scenes with less than 50%
                 cloud cover. It is map from the property name to a kwargs dict to apply
@@ -54,13 +65,17 @@ class Planet(DataSource):
             sort_by: name of attribute returned by Planet API to sort by like
                 "-clear_percent" or "cloud_cover" (if it starts with minus sign then we
                 sort descending.)
+            bands: what to call the bands in the asset.
         """
         self.config = config
         self.item_type_id = item_type_id
+        self.cache_dir = cache_dir
         self.product_bundle = product_bundle
+        self.asset_type_id = asset_type_id
         self.range_filters = range_filters
         self.use_permission_filter = use_permission_filter
         self.sort_by = sort_by
+        self.bands = bands
 
     @staticmethod
     def from_config(config: LayerConfig, ds_path: UPath) -> "Planet":
@@ -71,8 +86,19 @@ class Planet(DataSource):
             config=config,
             item_type_id=d["item_type_id"],
         )
-        if "range_filters" in d:
-            kwargs["range_filters"] = d["range_filters"]
+        optional_keys = [
+            "product_bundle",
+            "asset_type_id",
+            "range_filters",
+            "use_permission_filter",
+            "sort_by",
+            "bands",
+        ]
+        for optional_key in optional_keys:
+            if optional_key in d:
+                kwargs[optional_key] = d[optional_key]
+        if "cache_dir" in d:
+            kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
         return Planet(**kwargs)
 
     async def _search_items(self, geometry: STGeometry):
@@ -97,7 +123,9 @@ class Planet(DataSource):
 
             return [
                 item
-                async for item in client.search([self.item_type_id, combined_filter])
+                async for item in client.search(
+                    [self.item_type_id], search_filter=combined_filter
+                )
             ]
 
     def get_items(
@@ -114,7 +142,7 @@ class Planet(DataSource):
         """
         groups = []
         for geometry in geometries:
-            planet_items = asyncio.run(self._search_items(geometry, query_config))
+            planet_items = asyncio.run(self._search_items(geometry))
 
             if self.sort_by:
                 if self.sort_by.startswith("-"):
@@ -125,7 +153,8 @@ class Planet(DataSource):
                     sort_by = self.sort_by
 
                 planet_items.sort(
-                    key=lambda planet_item: multiplier * item["properties"][sort_by]
+                    key=lambda planet_item: multiplier
+                    * planet_item["properties"][sort_by]
                 )
 
             items = []
@@ -175,8 +204,46 @@ class Planet(DataSource):
             client = session.client("orders")
             order = await client.create_order(request)
             await client.wait(order["id"])
+
             # await client.download_order(order["id"])
             return order
+
+    async def _download_asset(self, item: Item, tmp_dir: pathlib.Path) -> UPath:
+        """Activate asset and download it.
+
+        Args:
+            item: the item to download.
+            tmp_dir: temporary directory to download the asset to in case cache_dir is
+                either not set or remote.
+
+        Returns:
+            the path where the asset is downloaded.
+        """
+        async with planet.Session() as session:
+            client = session.client("data")
+            assets = await client.list_item_assets(self.item_type_id, item.name)
+            asset = assets[self.asset_type_id]
+            await client.activate_asset(asset)
+            # Wait up to two hours for asset to be ready.
+            await client.wait_asset(asset, max_attempts=1600, delay=5)
+
+            if self.cache_dir is None:
+                output_path = await client.download_asset(asset, directory=tmp_dir)
+                return UPath(output_path)
+
+            elif isinstance(self.cache_dir.fs, LocalFileSystem):
+                output_path = await client.download_asset(
+                    asset, directory=self.cache_dir.path
+                )
+                return UPath(output_path)
+
+            else:
+                output_path = await client.download_asset(asset, directory=tmp_dir)
+                wanted_path = self.cache_dir / output_path.name
+                with open(output_path, "rb") as src:
+                    with wanted_path.open("wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                return wanted_path
 
     def retrieve_item(self, item: Item) -> Generator[tuple[str, BinaryIO], None, None]:
         """Retrieves the rasters corresponding to an item as file streams.
@@ -203,9 +270,10 @@ class Planet(DataSource):
             geometries: a list of geometries needed for each item
         """
         for item, cur_geometries in zip(items, geometries):
-            download_urls = self._get_download_urls(item)
-            for band in self.bands:
-                band_names = [band]
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                asset_path = asyncio.run(self._download_asset(item, tmp_dir))
+
+                band_names = self.bands
                 cur_tile_store = PrefixedTileStore(
                     tile_store, (item.name, "_".join(band_names))
                 )
@@ -215,17 +283,13 @@ class Planet(DataSource):
                 if not needed_projections:
                     continue
 
-                buf = io.BytesIO()
-                with requests.get(download_urls[band][1], stream=True) as r:
-                    r.raise_for_status()
-                    shutil.copyfileobj(r.raw, buf)
-                buf.seek(0)
-                with rasterio.open(buf) as raster:
-                    for projection in needed_projections:
-                        ingest_raster(
-                            tile_store=cur_tile_store,
-                            raster=raster,
-                            projection=projection,
-                            time_range=item.geometry.time_range,
-                            layer_config=self.config,
-                        )
+                with asset_path.open("rb") as f:
+                    with rasterio.open(f) as raster:
+                        for projection in needed_projections:
+                            ingest_raster(
+                                tile_store=cur_tile_store,
+                                raster=raster,
+                                projection=projection,
+                                time_range=item.geometry.time_range,
+                                layer_config=self.config,
+                            )
