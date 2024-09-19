@@ -37,7 +37,6 @@ class Planet(DataSource):
         config: LayerConfig,
         item_type_id: str,
         cache_dir: UPath | None = None,
-        product_bundle: str = "analytic_sr_udm2",
         asset_type_id: str = "ortho_analytic_sr",
         range_filters: dict[str, dict[str, Any]] = {},
         use_permission_filter: bool = True,
@@ -49,10 +48,8 @@ class Planet(DataSource):
         Args:
             config: the LayerConfig of the layer containing this data source
             item_type_id: the item type ID, like "PSScene" or "SkySatCollect".
-            cache_dir: where to store ordered products, or None to just store it in
+            cache_dir: where to store downloaded assets, or None to just store it in
                 temporary directory before putting into tile store.
-            product_bundle: the product bundle to download, see
-                https://developers.planet.com/apis/orders/product-bundles-reference/.
             asset_type_id: the asset type ID, see e.g.
                 https://developers.planet.com/docs/data/skysatcollect/
                 for a list of SkySatCollect assets.
@@ -70,7 +67,6 @@ class Planet(DataSource):
         self.config = config
         self.item_type_id = item_type_id
         self.cache_dir = cache_dir
-        self.product_bundle = product_bundle
         self.asset_type_id = asset_type_id
         self.range_filters = range_filters
         self.use_permission_filter = use_permission_filter
@@ -87,7 +83,6 @@ class Planet(DataSource):
             item_type_id=d["item_type_id"],
         )
         optional_keys = [
-            "product_bundle",
             "asset_type_id",
             "range_filters",
             "use_permission_filter",
@@ -185,28 +180,6 @@ class Planet(DataSource):
         """Deserializes an item from JSON-decoded data."""
         assert isinstance(serialized_item, dict)
         return Item.deserialize(serialized_item)
-
-    async def _wait_for_order(self, item: Item) -> None:
-        """Make order and wait for download to be ready.
-
-        Args:
-            item: the item to order.
-        """
-        async with planet.Session() as session:
-            product = planet.order_request.product(
-                item_ids=[item.name],
-                product_bundle=self.product_bundle,
-                item_type=self.item_type_id,
-            )
-            request = planet.order_request.build_request(
-                name=f"rslearn_order_{item.name}", products=[product]
-            )
-            client = session.client("orders")
-            order = await client.create_order(request)
-            await client.wait(order["id"])
-
-            # await client.download_order(order["id"])
-            return order
 
     async def _download_asset(self, item: Item, tmp_dir: pathlib.Path) -> UPath:
         """Activate asset and download it.
