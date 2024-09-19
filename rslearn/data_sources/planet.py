@@ -244,8 +244,6 @@ class Planet(DataSource):
         """
         for item, cur_geometries in zip(items, geometries):
             with tempfile.TemporaryDirectory() as tmp_dir:
-                asset_path = asyncio.run(self._download_asset(item, tmp_dir))
-
                 band_names = self.bands
                 cur_tile_store = PrefixedTileStore(
                     tile_store, (item.name, "_".join(band_names))
@@ -256,6 +254,7 @@ class Planet(DataSource):
                 if not needed_projections:
                     continue
 
+                asset_path = asyncio.run(self._download_asset(item, tmp_dir))
                 with asset_path.open("rb") as f:
                     with rasterio.open(f) as raster:
                         for projection in needed_projections:
