@@ -319,6 +319,10 @@ class GeotiffRasterFormat(RasterFormat):
             "dtype": array.dtype.name,
             "crs": crs,
             "transform": transform,
+            # Configure rasterio to use BIGTIFF when needed to write large files.
+            # Without BIGTIFF it is up to 4 GB and trying to write larger files would
+            # result in an error.
+            "BIGTIFF": "IF_SAFER",
         }
         if array.shape[2] > TILE_SIZE and array.shape[1] > TILE_SIZE:
             profile["tiled"] = True
