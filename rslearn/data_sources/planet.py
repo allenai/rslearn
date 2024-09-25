@@ -200,6 +200,11 @@ class Planet(DataSource):
             # Wait up to two hours for asset to be ready.
             await client.wait_asset(asset, max_attempts=1600, delay=5)
 
+            # Need to refresh the asset so it has location attribute.
+            asset = await client.get_asset(
+                self.item_type_id, item.name, self.asset_type_id
+            )
+
             if self.cache_dir is None:
                 output_path = await client.download_asset(asset, directory=tmp_dir)
                 return UPath(output_path)
