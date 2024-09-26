@@ -16,6 +16,7 @@ class Normalize(Transform):
         | tuple[list[float], list[float]]
         | None = None,
         selectors: list[str] = ["image"],
+        bands: list[int] | None = None,
     ):
         """Initialize a new Normalize.
 
@@ -26,6 +27,7 @@ class Normalize(Transform):
             std: a single value or one std per channel
             valid_range: optionally clip to a minimum and maximum value
             selectors: image items to transform
+            bands: optionally restrict the normalization to these bands
         """
         super().__init__()
         self.mean = torch.tensor(mean)
@@ -39,6 +41,7 @@ class Normalize(Transform):
             self.valid_max = None
 
         self.selectors = selectors
+        self.bands = bands
 
     def apply_image(self, image: torch.Tensor) -> torch.Tensor:
         """Normalize the specified image.
@@ -46,9 +49,16 @@ class Normalize(Transform):
         Args:
             image: the image to transform.
         """
-        image = (image - self.mean) / self.std
-        if self.valid_min is not None:
-            image = torch.clamp(image, min=self.valid_min, max=self.valid_max)
+        if self.bands:
+            image[self.bands] = (image[self.bands] - self.mean) / self.std
+            if self.valid_min is not None:
+                image[self.bands] = torch.clamp(
+                    image[self.bands], min=self.valid_min, max=self.valid_max
+                )
+        else:
+            image = (image - self.mean) / self.std
+            if self.valid_min is not None:
+                image = torch.clamp(image, min=self.valid_min, max=self.valid_max)
         return image
 
     def forward(self, input_dict, target_dict):
