@@ -35,3 +35,7 @@ rslearn requires Python 3.10+.
     pip install -r extra_requirements.txt
 
 `extra_requirements.txt` contains requirements specific to individual data sources.
+You can also install as a library:
+
+    cd /path/to/rslearn
+    pip install .[extra]

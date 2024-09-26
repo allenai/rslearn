@@ -12,7 +12,7 @@ readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.10"
 
-dynamic = ["dependencies"]
+dynamic = ["dependencies", "optional-dependencies"]
 
 [build-system]
 requires = ["setuptools>=61"]
@@ -26,6 +26,7 @@ include = ["rslearn*"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
+optional-dependencies = {extra = { file = ["extra_requirements.txt"] }}
 
 [tool.ruff]
 fix = true
