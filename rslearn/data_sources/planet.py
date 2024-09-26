@@ -5,9 +5,8 @@ import json
 import pathlib
 import shutil
 import tempfile
-from collections.abc import Generator
 from datetime import datetime
-from typing import Any, BinaryIO
+from typing import Any
 
 import planet
 import rasterio
@@ -96,7 +95,7 @@ class Planet(DataSource):
             kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
         return Planet(**kwargs)
 
-    async def _search_items(self, geometry: STGeometry):
+    async def _search_items(self, geometry: STGeometry) -> list[dict[str, Any]]:
         wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
         geojson_data = json.loads(shapely.to_geojson(wgs84_geometry.shp))
 
@@ -122,6 +121,13 @@ class Planet(DataSource):
                     [self.item_type_id], search_filter=combined_filter
                 )
             ]
+
+    def _wrap_planet_item(self, planet_item: dict[str, Any]) -> Item:
+        """Convert a decoded Planet API item into an Item object."""
+        shp = shapely.geometry.shape(planet_item["geometry"])
+        ts = datetime.fromisoformat(planet_item["properties"]["acquired"])
+        item_geom = STGeometry(WGS84_PROJECTION, shp, (ts, ts))
+        return Item(planet_item["id"], item_geom)
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
@@ -154,16 +160,25 @@ class Planet(DataSource):
 
             items = []
             for planet_item in planet_items:
-                shp = shapely.geometry.shape(planet_item["geometry"])
-                ts = datetime.fromisoformat(planet_item["properties"]["acquired"])
-                item_geom = STGeometry(WGS84_PROJECTION, shp, (ts, ts))
-                item = Item(planet_item["id"], item_geom)
-                items.append(item)
+                items.append(self._wrap_planet_item(planet_item))
 
             cur_groups = match_candidate_items_to_window(geometry, items, query_config)
             groups.append(cur_groups)
 
         return groups
+
+    async def _get_item_by_name(self, name: str) -> dict[str, Any]:
+        async with planet.Session() as session:
+            client = session.client("data")
+            filter = planet.data_filter.string_in_filter("id", [name])
+            results = [
+                item
+                async for item in client.search(
+                    [self.item_type_id], search_filter=filter
+                )
+            ]
+            assert len(results) == 1
+            return results[0]
 
     def get_item_by_name(self, name: str) -> Item:
         """Gets an item by name.
@@ -174,7 +189,8 @@ class Planet(DataSource):
         Returns:
             the item
         """
-        raise NotImplementedError
+        planet_item = asyncio.run(self._get_item_by_name(name))
+        return self._wrap_planet_item(planet_item)
 
     def deserialize_item(self, serialized_item: Any) -> Item:
         """Deserializes an item from JSON-decoded data."""
@@ -222,17 +238,6 @@ class Planet(DataSource):
                     with wanted_path.open("wb") as dst:
                         shutil.copyfileobj(src, dst)
                 return wanted_path
-
-    def retrieve_item(self, item: Item) -> Generator[tuple[str, BinaryIO], None, None]:
-        """Retrieves the rasters corresponding to an item as file streams.
-
-        Args:
-            item: the item to retrieve.
-
-        Returns:
-            generator that yields the item name along with binary buffer of GeoTIFF.
-        """
-        raise NotImplementedError
 
     def ingest(
         self,
