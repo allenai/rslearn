@@ -4,6 +4,7 @@ import rslearn.data_sources
 from rslearn.config import LayerConfig, LayerType
 from rslearn.data_sources import DataSource, Item
 from rslearn.tile_stores import TileStore, get_tile_store_for_layer
+from rslearn.utils import logger
 
 from .dataset import Dataset
 from .materialize import Materializers
@@ -209,7 +210,11 @@ def materialize_window(
 
     layer_datas = window.load_layer_datas()
     if layer_name not in layer_datas:
-        print("not data")
+        logger.info(
+            "Not materializing layer %s in window %s because it is not prepared",
+            layer_name,
+            window.name,
+        )
         return
     layer_data = layer_datas[layer_name]
     item_groups = []
@@ -222,7 +227,11 @@ def materialize_window(
 
     if layer_cfg.data_source.ingest:
         if not is_window_ingested(dataset, window, check_layer_name=layer_name):
-            print("not ingested")
+            logger.info(
+                "Not materializing layer %s in window %s because it is not ingested",
+                layer_name,
+                window.name,
+            )
             return
 
         print(
