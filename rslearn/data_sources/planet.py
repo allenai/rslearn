@@ -107,6 +107,7 @@ class Planet(DataSource):
                     "acquired", gte=geometry.time_range[0], lte=geometry.time_range[1]
                 ),
                 planet.data_filter.geometry_filter(geojson_data),
+                planet.data_filter.asset_filter([self.asset_type_id]),
             ]
             if self.use_permission_filter:
                 filter_list.append(planet.data_filter.permission_filter())
