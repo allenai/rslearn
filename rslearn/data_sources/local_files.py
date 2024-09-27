@@ -11,7 +11,7 @@ from rasterio.crs import CRS
 from upath import UPath
 
 import rslearn.data_sources.utils
-from rslearn.config import LayerConfig, VectorLayerConfig
+from rslearn.config import LayerConfig, LayerType, VectorLayerConfig
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_PROJECTION
 from rslearn.tile_stores import LayerMetadata, PrefixedTileStore, TileStore
 from rslearn.utils import Feature, Projection, STGeometry
@@ -20,8 +20,125 @@ from rslearn.utils.fsspec import get_upath_local, join_upath
 from .data_source import DataSource, Item, QueryConfig
 from .raster_source import get_needed_projections, ingest_raster
 
+Importers = ClassRegistry()
 
-class LocalFileItem(Item):
+
+class Importer:
+    """An abstract class for importing data from local files."""
+
+    def list_items(self, config: LayerConfig, src_dir: UPath) -> list[Item]:
+        """Extract a list of Items from the source directory.
+
+        Args:
+            config: the configuration of the layer.
+            src_dir: the source directory.
+        """
+        raise NotImplementedError
+
+    def ingest_item(
+        self,
+        config: LayerConfig,
+        tile_store: TileStore,
+        item: Item,
+        cur_geometries: list[STGeometry],
+    ):
+        """Ingest the specified local file item.
+
+        Args:
+            config: the configuration of the layer.
+            tile_store: the TileStore to ingest the data into.
+            item: the Item to ingest
+            cur_geometries: the geometries where the item is needed.
+        """
+        raise NotImplementedError
+
+
+class RasterItemSpec:
+    """Representation of configuration that directly specifies the available items."""
+
+    def __init__(
+        self,
+        fnames: list[UPath],
+        bands: list[list[str]] | None = None,
+        name: str | None = None,
+    ):
+        """Create a new RasterItemSpec.
+
+        Args:
+            fnames: the list of image files in this item.
+            bands: the bands provided by each of the image files.
+            name: what the item should be named
+        """
+        self.fnames = fnames
+        self.bands = bands
+        self.name = name
+
+    @staticmethod
+    def from_config(src_dir: UPath, d: dict[str, Any]) -> "RasterItemSpec":
+        """Decode a dict into a RasterItemSpec.
+
+        Args:
+            src_dir: the source directory.
+            d: the configuration dict.
+
+        Returns:
+            the RasterItemSpec.
+        """
+        kwargs = dict(
+            fnames=[join_upath(src_dir, suffix) for suffix in d["fnames"]],
+            bands=d["bands"],
+        )
+        if "name" in d:
+            kwargs["name"] = d["name"]
+        return RasterItemSpec(**kwargs)
+
+    def serialize(self) -> dict[str, Any]:
+        """Serializes the RasterItemSpec to a JSON-encodable dictionary."""
+        return {
+            "fnames": [str(path) for path in self.fnames],
+            "bands": self.bands,
+            "name": self.name,
+        }
+
+    @staticmethod
+    def deserialize(d: dict[str, Any]) -> "RasterItemSpec":
+        """Deserializes a RasterItemSpec from a JSON-decoded dictionary."""
+        return RasterItemSpec(
+            fnames=[UPath(s) for s in d["fnames"]],
+            bands=d["bands"],
+            name=d["name"],
+        )
+
+
+class RasterItem(Item):
+    """An item corresponding to a local file."""
+
+    def __init__(self, name: str, geometry: STGeometry, spec: RasterItemSpec):
+        """Creates a new LocalFileItem.
+
+        Args:
+            name: unique name of the item
+            geometry: the spatial and temporal extent of the item
+            spec: the RasterItemSpec that specifies the filename(s) and bands.
+        """
+        super().__init__(name, geometry)
+        self.spec = spec
+
+    def serialize(self) -> dict:
+        """Serializes the item to a JSON-encodable dictionary."""
+        d = super().serialize()
+        d["spec"] = self.spec.serialize()
+        return d
+
+    @staticmethod
+    def deserialize(d: dict) -> Item:
+        """Deserializes an item from a JSON-decoded dictionary."""
+        item = super(RasterItem, RasterItem).deserialize(d)
+        spec = RasterItemSpec.deserialize(d["spec"])
+        return RasterItem(name=item.name, geometry=item.geometry, spec=spec)
+
+
+class VectorItem(Item):
     """An item corresponding to a local file."""
 
     def __init__(self, name: str, geometry: STGeometry, path_uri: str):
@@ -44,167 +161,166 @@ class LocalFileItem(Item):
     @staticmethod
     def deserialize(d: dict) -> Item:
         """Deserializes an item from a JSON-decoded dictionary."""
-        item = super(LocalFileItem, LocalFileItem).deserialize(d)
-        return LocalFileItem(
+        item = super(VectorItem, VectorItem).deserialize(d)
+        return VectorItem(
             name=item.name, geometry=item.geometry, path_uri=d["path_uri"]
         )
-
-
-Importers = ClassRegistry()
-
-
-class Importer:
-    """An abstract class for importing data from local files."""
-
-    def get_item(config: LayerConfig, path: UPath) -> LocalFileItem:
-        """Get a LocalFileItem for this file that can then be ingested.
-
-        Args:
-            config: the configuration of the layer.
-            path: the file path
-        """
-        raise NotImplementedError
-
-    def ingest_item(
-        config: LayerConfig,
-        tile_store: TileStore,
-        item: LocalFileItem,
-        cur_geometries: list[STGeometry],
-    ):
-        """Ingest the specified local file.
-
-        Args:
-            config: the configuration of the layer.
-            tile_store: the TileStore to ingest the data into.
-            item: the LocalFileItem
-            cur_geometries: the geometries where the item is needed.
-        """
-        raise NotImplementedError
 
 
 @Importers.register("raster")
 class RasterImporter(Importer):
     """An Importer for raster data."""
 
-    def get_item(config: LayerConfig, path: UPath) -> Item:
-        """Get a LocalFileItem for this file that can then be ingested.
+    def list_items(self, config: LayerConfig, src_dir: UPath) -> list[Item]:
+        """Extract a list of Items from the source directory.
 
         Args:
             config: the configuration of the layer.
-            path: the file path
+            src_dir: the source directory.
         """
-        # Get geometry from the raster file.
-        # We assume files are readable with rasterio.
-        with path.open("rb") as f:
-            with rasterio.open(f) as src:
-                crs = src.crs
-                left = src.transform.c
-                top = src.transform.f
-                # Resolutions in projection units per pixel.
-                x_resolution = src.transform.a
-                y_resolution = src.transform.e
-                start = (int(left / x_resolution), int(top / y_resolution))
-                shp = shapely.box(
-                    start[0], start[1], start[0] + src.width, start[1] + src.height
-                )
-                projection = Projection(crs, x_resolution, y_resolution)
-                geometry = STGeometry(projection, shp, None)
+        item_specs: list[RasterItemSpec] = []
+        # See if user has provided the item specs directly.
+        if "item_specs" in config.data_source.config_dict:
+            for spec_dict in config.data_source.config_dict["item_specs"]:
+                spec = RasterItemSpec.from_config(src_dir, spec_dict)
+                item_specs.append(spec)
+        else:
+            # Otherwise we need to list files and assume each one is separate.
+            # And we'll need to autodetect the bands later.
+            file_paths = src_dir.glob("**/*.*")
+            for path in file_paths:
+                spec = RasterItemSpec(fnames=[path], bands=None)
+                item_specs.append(spec)
 
-        return LocalFileItem(
-            path.name.split(".")[0], geometry, path.absolute().as_uri()
-        )
+        items: list[Item] = []
+        for spec in item_specs:
+            # Get geometry from the first raster file.
+            # We assume files are readable with rasterio.
+            with spec.fnames[0].open("rb") as f:
+                with rasterio.open(f) as src:
+                    crs = src.crs
+                    left = src.transform.c
+                    top = src.transform.f
+                    # Resolutions in projection units per pixel.
+                    x_resolution = src.transform.a
+                    y_resolution = src.transform.e
+                    start = (int(left / x_resolution), int(top / y_resolution))
+                    shp = shapely.box(
+                        start[0], start[1], start[0] + src.width, start[1] + src.height
+                    )
+                    projection = Projection(crs, x_resolution, y_resolution)
+                    geometry = STGeometry(projection, shp, None)
+
+            if spec.name:
+                item_name = spec.name
+            else:
+                item_name = spec.fnames[0].name.split(".")[0]
+
+            items.append(RasterItem(item_name, geometry, spec))
+
+        return items
 
     def ingest_item(
         self,
         config: LayerConfig,
         tile_store: TileStore,
-        item: LocalFileItem,
+        item: Item,
         cur_geometries: list[STGeometry],
     ):
-        """Ingest the specified local file.
+        """Ingest the specified local file item.
 
         Args:
             config: the configuration of the layer.
             tile_store: the TileStore to ingest the data into.
-            item: the LocalFileItem
+            item: the Item to ingest
             cur_geometries: the geometries where the item is needed.
         """
-        path = UPath(item.path_uri)
-        with path.open("rb") as f:
-            with rasterio.open(f) as src:
-                bands = [f"B{idx+1}" for idx in range(src.count)]
-                tile_store = PrefixedTileStore(tile_store, ("_".join(bands),))
-                needed_projections = get_needed_projections(
-                    tile_store, bands, config.band_sets, cur_geometries
-                )
-                if not needed_projections:
-                    return
-
-                for projection in needed_projections:
-                    ingest_raster(
-                        tile_store=tile_store,
-                        raster=src,
-                        projection=projection,
-                        time_range=item.geometry.time_range,
-                        layer_config=config,
+        assert isinstance(item, RasterItem)
+        for file_idx, fname in enumerate(item.spec.fnames):
+            with fname.open("rb") as f:
+                with rasterio.open(f) as src:
+                    if item.spec.bands:
+                        bands = item.spec.bands[file_idx]
+                    else:
+                        bands = [f"B{band_idx+1}" for band_idx in range(src.count)]
+                    cur_tile_store = PrefixedTileStore(tile_store, ("_".join(bands),))
+                    needed_projections = get_needed_projections(
+                        cur_tile_store, bands, config.band_sets, cur_geometries
                     )
+                    if not needed_projections:
+                        return
+
+                    for projection in needed_projections:
+                        ingest_raster(
+                            tile_store=cur_tile_store,
+                            raster=src,
+                            projection=projection,
+                            time_range=item.geometry.time_range,
+                            layer_config=config,
+                        )
 
 
 @Importers.register("vector")
 class VectorImporter(Importer):
     """An Importer for vector data."""
 
-    def get_item(config: LayerConfig, path: UPath) -> Item:
-        """Get a LocalFileItem for this file that can then be ingested.
+    def list_items(self, config: LayerConfig, src_dir: UPath) -> list[Item]:
+        """Extract a list of Items from the source directory.
 
         Args:
             config: the configuration of the layer.
-            path: the file path
+            src_dir: the source directory.
         """
-        # Get the bounds of the features in the vector file, which we assume fiona can
-        # read.
-        # For shapefile, to open it we need to copy all the aux files.
-        aux_files: list[UPath] = []
-        if path.name.split(".")[-1] == "shp":
-            prefix = ".".join(path.name.split(".")[:-1])
-            for ext in SHAPEFILE_AUX_EXTENSIONS:
-                aux_files.append(path.parent / (prefix + ext))
+        file_paths = src_dir.glob("**/*.*")
+        items: list[Item] = []
 
-        with get_upath_local(path, extra_paths=aux_files) as local_fname:
-            with fiona.open(local_fname) as src:
-                crs = CRS.from_wkt(src.crs.to_wkt())
-                bounds = None
-                for feat in src:
-                    shp = shapely.geometry.shape(feat.geometry)
-                    cur_bounds = shp.bounds
-                    if bounds is None:
-                        bounds = list(cur_bounds)
-                    else:
-                        bounds[0] = min(bounds[0], cur_bounds[0])
-                        bounds[1] = min(bounds[1], cur_bounds[1])
-                        bounds[2] = max(bounds[2], cur_bounds[2])
-                        bounds[3] = max(bounds[3], cur_bounds[3])
+        for path in file_paths:
+            # Get the bounds of the features in the vector file, which we assume fiona can
+            # read.
+            # For shapefile, to open it we need to copy all the aux files.
+            aux_files: list[UPath] = []
+            if path.name.split(".")[-1] == "shp":
+                prefix = ".".join(path.name.split(".")[:-1])
+                for ext in SHAPEFILE_AUX_EXTENSIONS:
+                    aux_files.append(path.parent / (prefix + ext))
 
-                projection = Projection(crs, 1, 1)
-                geometry = STGeometry(projection, shapely.box(*bounds), None)
+            with get_upath_local(path, extra_paths=aux_files) as local_fname:
+                with fiona.open(local_fname) as src:
+                    crs = CRS.from_wkt(src.crs.to_wkt())
+                    bounds = None
+                    for feat in src:
+                        shp = shapely.geometry.shape(feat.geometry)
+                        cur_bounds = shp.bounds
+                        if bounds is None:
+                            bounds = list(cur_bounds)
+                        else:
+                            bounds[0] = min(bounds[0], cur_bounds[0])
+                            bounds[1] = min(bounds[1], cur_bounds[1])
+                            bounds[2] = max(bounds[2], cur_bounds[2])
+                            bounds[3] = max(bounds[3], cur_bounds[3])
 
-        return LocalFileItem(
-            path.name.split(".")[0], geometry, path.absolute().as_uri()
-        )
+                    projection = Projection(crs, 1, 1)
+                    geometry = STGeometry(projection, shapely.box(*bounds), None)
+
+            items.append(
+                VectorItem(path.name.split(".")[0], geometry, path.absolute().as_uri())
+            )
+
+        return items
 
     def ingest_item(
         self,
         config: LayerConfig,
         tile_store: TileStore,
-        item: LocalFileItem,
+        item: Item,
         cur_geometries: list[STGeometry],
     ):
-        """Ingest the specified local file.
+        """Ingest the specified local file item.
 
         Args:
             config: the configuration of the layer.
             tile_store: the TileStore to ingest the data into.
-            item: the LocalFileItem
+            item: the Item to ingest
             cur_geometries: the geometries where the item is needed.
         """
         assert isinstance(config, VectorLayerConfig)
@@ -270,13 +386,8 @@ class LocalFiles(DataSource):
         self.config = config
         self.src_dir = src_dir
 
-        self.importer = Importers[config.layer_type.value]
-
-        file_paths = self.src_dir.glob("**/*.*")
-        self.items = []
-        for path in file_paths:
-            item = self.importer.get_item(path)
-            self.items.append(item)
+        self.importer: Importer = Importers[config.layer_type.value]
+        self.items = self.importer.list_items(config, src_dir)
 
     @staticmethod
     def from_config(config: LayerConfig, ds_path: UPath) -> "LocalFiles":
@@ -313,7 +424,10 @@ class LocalFiles(DataSource):
     def deserialize_item(self, serialized_item: Any) -> Item:
         """Deserializes an item from JSON-decoded data."""
         assert isinstance(serialized_item, dict)
-        return LocalFileItem.deserialize(serialized_item)
+        if self.config.layer_type == LayerType.RASTER:
+            return RasterItem.deserialize(serialized_item)
+        elif self.config.layer_type == LayerType.VECTOR:
+            return VectorItem.deserialize(serialized_item)
 
     def ingest(
         self,

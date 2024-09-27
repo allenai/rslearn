@@ -169,6 +169,7 @@ class RslearnLightningModule(L.LightningModule):
             d["lr_scheduler"] = {
                 "scheduler": scheduler,
                 "monitor": "train_loss",
+                "interval": "epoch",
             }
         return d
 
