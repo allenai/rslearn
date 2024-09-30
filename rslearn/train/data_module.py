@@ -10,7 +10,7 @@ from upath import UPath
 from rslearn.dataset import Dataset
 from rslearn.train.tasks import Task
 
-from .dataset import DataInput, ModelDataset, SplitConfig
+from .dataset import DataInput, ModelDataset, RetryDataset, SplitConfig
 
 
 def collate_fn(
@@ -93,13 +93,15 @@ class RslearnDataModule(L.LightningDataModule):
         }
         self.datasets = {}
         for split in stage_to_splits[stage]:
-            self.datasets[split] = ModelDataset(
+            dataset = ModelDataset(
                 dataset=Dataset(path=self.path),
                 split_config=self.split_configs[split],
                 inputs=self.inputs,
                 task=self.task,
                 workers=self.num_workers,
             )
+            dataset = RetryDataset(dataset)
+            self.datasets[split] = dataset
             print(f"got {len(self.datasets[split])} examples in split {split}")
 
     def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:

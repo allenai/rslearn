@@ -2,6 +2,7 @@
 
 import multiprocessing
 import random
+import time
 from typing import Any
 
 import torch
@@ -553,3 +554,47 @@ class ModelDataset(torch.utils.data.Dataset):
         input_dict, target_dict = self.transforms(input_dict, target_dict)
 
         return input_dict, target_dict, metadata
+
+
+class RetryDataset(torch.utils.data.Dataset):
+    """A dataset wrapper that retries getitem upon encountering error."""
+
+    def __init__(
+        self, dataset: torch.utils.data.Dataset, retries: int = 3, delay: float = 5
+    ):
+        """Create a new RetryDataset.
+
+        Args:
+            dataset: the dataset to wrap.
+            retries: the maximum number of tries before raising error.
+            delay: how many seconds to sleep before retrying
+        """
+        self.dataset = dataset
+        self.retries = retries
+        self.delay = delay
+
+    def __len__(self):
+        """Return length of the dataset."""
+        return len(self.dataset)
+
+    def __getitem__(self, idx: int) -> Any:
+        """Get item from the dataset.
+
+        The get operation is performed on the underlying dataset multiple times up to
+        the configured maximum number of retries.
+
+        Args:
+            idx: the item index.
+
+        Returns:
+            the item data.
+        """
+        for _ in range(self.retries):
+            try:
+                return self.dataset[idx]
+            except Exception as e:
+                print(f"warning: caught exception loading item {idx}: {e}")
+            time.sleep(self.delay)
+
+        # One last try -- but don't catch any more errors.
+        return self.dataset[idx]
