@@ -22,7 +22,6 @@ from rasterio.crs import CRS
 from upath import UPath
 
 import rslearn.data_sources.utils
-import rslearn.utils.mgrs
 from rslearn.config import LayerConfig, RasterLayerConfig
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_EPSG, WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
@@ -34,7 +33,7 @@ from rslearn.utils import (
 )
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 
-from .copernicus import get_harmonize_callback
+from .copernicus import get_harmonize_callback, get_sentinel2_tiles
 from .data_source import (
     DataSource,
     Item,
@@ -626,7 +625,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
                 raise ValueError(
                     "Sentinel2 on AWS requires geometry time ranges to be set"
                 )
-            for cell_id in rslearn.utils.mgrs.for_each_cell(wgs84_geometry.shp.bounds):
+            for cell_id in get_sentinel2_tiles(wgs84_geometry, self.metadata_cache_dir):
                 for ts in daterange(
                     wgs84_geometry.time_range[0] - self.max_time_delta,
                     wgs84_geometry.time_range[1] + self.max_time_delta,
@@ -643,7 +642,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         groups = []
         for geometry, wgs84_geometry in zip(geometries, wgs84_geometries):
             items = []
-            for cell_id in rslearn.utils.mgrs.for_each_cell(wgs84_geometry.shp.bounds):
+            for cell_id in get_sentinel2_tiles(wgs84_geometry, self.metadata_cache_dir):
                 for item in items_by_cell.get(cell_id, []):
                     try:
                         item_geom = item.geometry.to_projection(geometry.projection)

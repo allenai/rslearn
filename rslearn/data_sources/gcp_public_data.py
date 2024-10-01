@@ -18,7 +18,6 @@ import tqdm
 from google.cloud import storage
 from upath import UPath
 
-import rslearn.utils.mgrs
 from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
@@ -27,7 +26,7 @@ from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry
 from rslearn.utils.fsspec import join_upath, open_atomic
 
-from .copernicus import get_harmonize_callback
+from .copernicus import get_harmonize_callback, get_sentinel2_tiles
 from .raster_source import get_needed_projections, ingest_raster
 
 
@@ -405,7 +404,7 @@ class Sentinel2(DataSource):
                 raise ValueError(
                     "Sentinel2 on GCP requires geometry time ranges to be set"
                 )
-            for cell_id in rslearn.utils.mgrs.for_each_cell(wgs84_geometry.shp.bounds):
+            for cell_id in get_sentinel2_tiles(wgs84_geometry, self.index_cache_dir):
                 for year in range(
                     (wgs84_geometry.time_range[0] - self.max_time_delta).year,
                     (wgs84_geometry.time_range[1] + self.max_time_delta).year + 1,
@@ -422,7 +421,7 @@ class Sentinel2(DataSource):
 
         candidates = [[] for _ in wgs84_geometries]
         for idx, geometry in enumerate(wgs84_geometries):
-            for cell_id in rslearn.utils.mgrs.for_each_cell(geometry.shp.bounds):
+            for cell_id in get_sentinel2_tiles(geometry, self.index_cache_dir):
                 for item in items_by_cell.get(cell_id, []):
                     if not geometry.shp.intersects(item.geometry.shp):
                         continue
