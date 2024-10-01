@@ -19,6 +19,11 @@ def for_each_cell(
     # MGRS is at most 0.9-ish degrees (at equator) so we can iterate in 0.5
     # degree increments.
     mgrs_db = MGRS()
-    for lon in np.arange(bounds[0], bounds[2], 0.5):
-        for lat in np.arange(bounds[1], bounds[3], 0.5):
-            yield mgrs_db.toMGRS(lat, lon, MGRSPrecision=0)
+    seen = set()
+    for lon in np.arange(bounds[0], bounds[2], 0.05).tolist() + [bounds[2]]:
+        for lat in np.arange(bounds[1], bounds[3], 0.05).tolist() + [bounds[3]]:
+            cell_id = mgrs_db.toMGRS(lat, lon, MGRSPrecision=0)
+            if cell_id in seen:
+                continue
+            seen.add(cell_id)
+            yield cell_id
