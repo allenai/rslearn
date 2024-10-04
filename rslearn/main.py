@@ -1,6 +1,7 @@
 """Entrypoint for the rslearn command-line interface."""
 
 import argparse
+import logging
 import multiprocessing
 import random
 import sys
@@ -25,6 +26,7 @@ from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.utils import Projection, STGeometry
 
+logging.basicConfig()
 handler_registry = {}
 
 
