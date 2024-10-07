@@ -17,6 +17,7 @@ from rslearn.config import (
 )
 from rslearn.dataset import Dataset, Window
 from rslearn.train.tasks import Task
+from rslearn.utils import logger
 from rslearn.utils.mp import star_imap_unordered
 from rslearn.utils.raster_format import load_raster_format
 from rslearn.utils.vector_format import load_vector_format
@@ -253,6 +254,11 @@ def check_window(inputs: dict[str, DataInput], window: Window) -> bool:
         if not data_input.required:
             continue
         if not is_any_layer_available(data_input):
+            logger.debug(
+                "Skipping window %s since check for layers %s failed",
+                window.name,
+                data_input.layers,
+            )
             return None
 
     return window
