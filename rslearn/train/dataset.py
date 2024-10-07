@@ -1,6 +1,7 @@
 """Default Dataset for rslearn."""
 
 import multiprocessing
+import os
 import random
 import time
 from typing import Any
@@ -96,7 +97,7 @@ class WeightedRandomSamplerFactory(SamplerFactory):
             a RandomSampler
         """
         weights = []
-        for window in dataset.windows:
+        for window in dataset.get_windows():
             weights.append(window.options[self.option_key])
         return torch.utils.data.WeightedRandomSampler(
             weights, self.num_samples, replacement=self.replacement
@@ -401,6 +402,7 @@ class ModelDataset(torch.utils.data.Dataset):
         Returns:
             a tuple (input_dict, target_dict)
         """
+        logger.debug("__getitem__ start pid=%d item_idx=%d", os.getpid(), idx)
         window = self.windows[idx]
 
         # Select bounds to read.
@@ -559,7 +561,13 @@ class ModelDataset(torch.utils.data.Dataset):
         input_dict.update(passthrough_inputs)
         input_dict, target_dict = self.transforms(input_dict, target_dict)
 
+        logger.debug("__getitem__ finish pid=%d item_idx=%d", os.getpid(), idx)
+
         return input_dict, target_dict, metadata
+
+    def get_windows(self) -> list[Window]:
+        """Returns a list of windows in this dataset."""
+        return self.windows
 
 
 class RetryDataset(torch.utils.data.Dataset):
@@ -604,3 +612,7 @@ class RetryDataset(torch.utils.data.Dataset):
 
         # One last try -- but don't catch any more errors.
         return self.dataset[idx]
+
+    def get_windows(self) -> list[Window]:
+        """Returns a list of windows in this dataset."""
+        return self.dataset.get_windows()
