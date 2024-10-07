@@ -10,7 +10,7 @@ class FreezeUnfreeze(BaseFinetuning):
     """Freezes a module and optionally unfreezes it after a number of epochs."""
 
     def __init__(
-        self, module_selector: list[str], unfreeze_at_epoch: int | None = None
+        self, module_selector: list[str | int], unfreeze_at_epoch: int | None = None
     ):
         """Creates a new FreezeUnfreeze.
 
@@ -27,7 +27,10 @@ class FreezeUnfreeze(BaseFinetuning):
     def _get_target_module(self, pl_module: LightningModule) -> torch.nn.Module:
         target_module = pl_module
         for k in self.module_selector:
-            target_module = getattr(target_module, k)
+            if isinstance(k, int):
+                target_module = target_module[k]
+            else:
+                target_module = getattr(target_module, k)
         return target_module
 
     def freeze_before_training(self, pl_module: LightningModule):

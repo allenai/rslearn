@@ -240,14 +240,14 @@ class DetectionTask(BasicTask):
         features = []
         for box, class_id, score in zip(boxes, class_ids, scores):
             shp = shapely.box(
-                metadata["bounds"][0] + box[0],
-                metadata["bounds"][1] + box[1],
-                metadata["bounds"][0] + box[2],
-                metadata["bounds"][1] + box[3],
+                metadata["bounds"][0] + float(box[0]),
+                metadata["bounds"][1] + float(box[1]),
+                metadata["bounds"][0] + float(box[2]),
+                metadata["bounds"][1] + float(box[3]),
             )
             geom = STGeometry(metadata["projection"], shp, None)
             properties = {
-                "score": score,
+                "score": float(score),
             }
 
             class_id = int(class_id)

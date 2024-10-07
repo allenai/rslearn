@@ -52,6 +52,24 @@ def get_utm_ups_crs(lon: float, lat: float) -> CRS:
     return CRS.from_epsg(utm_crs.code)
 
 
+def get_utm_ups_projection(
+    lon: float, lat: float, x_resolution: float, y_resolution: float
+) -> Projection:
+    """Get the appropriate UTM or UPS Projection for a given lon/lat.
+
+    Args:
+        lon: longitude in degrees
+        lat: latitude in degrees
+        x_resolution: desired x resolution in meters per pixel
+        y_resolution: desired y resolution in meters per pixel
+
+    Returns:
+    the Projection object
+    """
+    crs = get_utm_ups_crs(lon, lat)
+    return Projection(crs, x_resolution, y_resolution)
+
+
 def get_utm_zone_info(utm_crs: CRS) -> tuple[int, str]:
     """Get UTM zone number (1 to 60) and S/N from CRS.
 

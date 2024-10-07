@@ -1,6 +1,5 @@
 """Helper functions for raster data sources."""
 
-import os
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -12,7 +11,6 @@ import rasterio.enums
 import rasterio.io
 import rasterio.transform
 from rasterio.crs import CRS
-from upath import UPath
 
 from rslearn.config import BandSetConfig, RasterFormatConfig, RasterLayerConfig
 from rslearn.const import TILE_SIZE
@@ -301,13 +299,11 @@ def materialize_raster(
     )
 
     # Write the array to layer directory.
-    layer_dir = os.path.join(window.path, "layers", layer_name)
-    tmp_out_dir = os.path.join(layer_dir + ".tmp", "_".join(band_cfg.bands))
-    os.makedirs(tmp_out_dir, exist_ok=True)
+    layer_dir = window.path / "layers" / layer_name
+    out_dir = layer_dir / "_".join(band_cfg.bands)
+    out_dir.mkdir(parents=True, exist_ok=True)
     raster_format = load_raster_format(
         RasterFormatConfig(band_cfg.format["name"], band_cfg.format)
     )
-    raster_format.encode_raster(
-        UPath(tmp_out_dir), window_projection, window_bounds, dst_array
-    )
-    os.rename(layer_dir + ".tmp", layer_dir)
+    raster_format.encode_raster(out_dir, window_projection, window_bounds, dst_array)
+    (layer_dir / "completed").touch()
