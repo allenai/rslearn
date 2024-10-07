@@ -148,13 +148,16 @@ class RslearnLightningModule(L.LightningModule):
         self.val_metrics = metrics.clone(prefix="val_")
         self.test_metrics = metrics.clone(prefix="test_")
 
+        self.schedulers = {}
+
     def configure_optimizers(self) -> OptimizerLRSchedulerConfig:
         """Initialize the optimizer and learning rate scheduler.
 
         Returns:
             Optimizer and learning rate scheduler.
         """
-        optimizer = AdamW(self.parameters(), lr=self.lr)
+        params = [p for p in self.parameters() if p.requires_grad]
+        optimizer = AdamW(params, lr=self.lr)
         d = dict(
             optimizer=optimizer,
         )
@@ -171,6 +174,7 @@ class RslearnLightningModule(L.LightningModule):
                 "monitor": "train_loss",
                 "interval": "epoch",
             }
+            self.schedulers["plateau"] = scheduler
         return d
 
     def training_step(

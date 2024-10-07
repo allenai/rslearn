@@ -62,4 +62,11 @@ class FreezeUnfreeze(BaseFinetuning):
         self.unfreeze_and_add_param_group(
             modules=self._get_target_module(pl_module),
             optimizer=optimizer,
+            initial_denom_lr=1,
         )
+
+        if "plateau" in pl_module.schedulers:
+            scheduler = pl_module.schedulers["plateau"]
+            while len(scheduler.min_lrs) < len(optimizer.param_groups):
+                print("appending to plateau scheduler min_lrs")
+                scheduler.min_lrs.append(scheduler.min_lrs[0])
