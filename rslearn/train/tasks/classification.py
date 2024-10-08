@@ -168,11 +168,11 @@ class ClassificationTask(BasicTask):
         """
         probs = raw_output.cpu().numpy()
         if len(self.classes) == 2 and self.positive_class_threshold != 0.5:
-            positive_class_prob = probs[self.positive_class_idx]
+            positive_class_prob = probs[self.positive_class_id]
             if positive_class_prob >= self.positive_class_threshold:
-                class_idx = self.positive_class_idx
+                class_idx = self.positive_class_id
             else:
-                class_idx = 1 - self.positive_class_idx
+                class_idx = 1 - self.positive_class_id
         else:
             # For multiclass classification or when using the default threshold
             class_idx = probs.argmax()
