@@ -607,7 +607,7 @@ class RetryDataset(torch.utils.data.Dataset):
             try:
                 return self.dataset[idx]
             except Exception as e:
-                print(f"warning: caught exception loading item {idx}: {e}")
+                logger.warning("warning: caught exception loading item %d: %s", idx, e)
             time.sleep(self.delay)
 
         # One last try -- but don't catch any more errors.
