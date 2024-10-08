@@ -1,5 +1,6 @@
 """Detection task."""
 
+import math
 from typing import Any
 
 import numpy as np
@@ -12,7 +13,7 @@ import torchmetrics.classification
 import torchvision
 from torchmetrics import Metric, MetricCollection
 
-from rslearn.utils import Feature, STGeometry
+from rslearn.utils import Feature, GridIndex, STGeometry
 
 from .task import BasicTask
 
@@ -34,6 +35,10 @@ DEFAULT_COLORS = [
     [128, 0, 0],
 ]
 
+# Defaults for distance-based NMS
+DEFAULT_GRID_SIZE = 64
+DEFAULT_DISTANCE_THRESHOLD = 10
+
 
 class DetectionTask(BasicTask):
     """A point or bounding box detection task."""
@@ -51,7 +56,8 @@ class DetectionTask(BasicTask):
         clip_boxes: bool = True,
         exclude_by_center: bool = False,
         score_threshold: float = 0.5,
-        nms_iou_threshold: float = 0.5,
+        enable_distance_nms: bool = False,
+        distance_nms_kwargs: dict[str, Any] = {},
         enable_map_metric: bool = True,
         enable_f1_metric: bool = False,
         f1_metric_kwargs: dict[str, Any] = {},
@@ -77,7 +83,8 @@ class DetectionTask(BasicTask):
             exclude_by_center: before optionally clipping boxes, exclude boxes if the
                 center is outside the image bounds.
             score_threshold: confidence threshold for visualization and prediction.
-            nms_iou_threshold: IoU threshold for non-maximum suppression (nms).
+            enable_distance_nms: whether to enable distance-based NMS (default false).
+            distance_nms_kwargs: arguments to pass to distance NMS.
             enable_map_metric: whether to compute mAP (default true)
             enable_f1_metric: whether to compute F1 (default false)
             f1_metric_kwargs: extra arguments to pass to F1 metric.
@@ -95,7 +102,8 @@ class DetectionTask(BasicTask):
         self.clip_boxes = clip_boxes
         self.exclude_by_center = exclude_by_center
         self.score_threshold = score_threshold
-        self.nms_iou_threshold = nms_iou_threshold
+        self.enable_distance_nms = enable_distance_nms
+        self.distance_nms_kwargs = distance_nms_kwargs
         self.enable_map_metric = enable_map_metric
         self.enable_f1_metric = enable_f1_metric
         self.f1_metric_kwargs = f1_metric_kwargs
@@ -222,6 +230,97 @@ class DetectionTask(BasicTask):
             ),
         }
 
+    def _distance_nms(
+        self,
+        boxes: np.ndarray,
+        scores: np.ndarray,
+        class_ids: np.ndarray,
+        grid_size: int,
+        distance_threshold: float,
+    ) -> np.ndarray:
+        """Perform per-class NMS on detected boxes based on center distance.
+
+        Args:
+            boxes: numpy array of shape (N, 4) containing bounding boxes.
+            scores: numpy array of shape (N,) containing scores.
+            class_ids: numpy array of shape (N,) containing class IDs.
+            grid_size: grid size for GridIndex.
+            distance_threshold: distance threshold for NMS.
+
+        Returns:
+            keep_indices: numpy array of indices of boxes to keep.
+        """
+        if len(boxes) == 0:
+            return np.array([], dtype=int)
+
+        keep_indices = []
+        for class_id in np.unique(class_ids):
+            idxs = np.where(class_ids == class_id)[0]
+            if len(idxs) == 0:
+                continue
+
+            class_boxes = boxes[idxs]
+            class_scores = scores[idxs]
+            class_indices = idxs
+
+            elim_inds = set()
+            # Create GridIndex for efficient spatial search
+            grid_index = GridIndex(cell_size=max(grid_size, distance_threshold))
+            for idx, box in zip(class_indices, class_boxes):
+                cx = (box[0] + box[2]) / 2
+                cy = (box[1] + box[3]) / 2
+                grid_index.insert((cx, cy, cx, cy), idx)
+
+            for idx, box, score in zip(class_indices, class_boxes, class_scores):
+                if idx in elim_inds:
+                    continue
+                # Define search area around the center of the box
+                cx = (box[0] + box[2]) / 2
+                cy = (box[1] + box[3]) / 2
+                rect = [
+                    cx - distance_threshold,
+                    cy - distance_threshold,
+                    cx + distance_threshold,
+                    cy + distance_threshold,
+                ]
+                # Search for neighboring boxes within the distance threshold
+                neighbor_indices = grid_index.search(rect)
+                for other_idx in neighbor_indices:
+                    if other_idx == idx or other_idx in elim_inds:
+                        continue
+                    other_score = scores[other_idx]
+                    if other_score > score or (
+                        other_score == score and other_idx < idx
+                    ):
+                        other_box = boxes[other_idx]
+                        distance = self._boxes_center_distance(box, other_box)
+                        if distance <= distance_threshold:
+                            elim_inds.add(idx)
+                            break
+
+            class_keep_indices = [idx for idx in class_indices if idx not in elim_inds]
+            keep_indices.extend(class_keep_indices)
+
+        return np.array(keep_indices, dtype=int)
+
+    def _boxes_center_distance(self, box1: np.ndarray, box2: np.ndarray) -> float:
+        """Compute the Euclidean distance between the centers of two boxes.
+
+        Args:
+            box1: numpy array of shape (4,) representing the first bounding box.
+            box2: numpy array of shape (4,) representing the second bounding box.
+
+        Returns:
+            distance: the Euclidean distance between the centers of the two boxes.
+        """
+        cx1 = (box1[0] + box1[2]) / 2
+        cy1 = (box1[1] + box1[3]) / 2
+        cx2 = (box2[0] + box2[2]) / 2
+        cy2 = (box2[1] + box2[3]) / 2
+        dx = cx1 - cx2
+        dy = cy1 - cy2
+        return math.sqrt(dx * dx + dy * dy)
+
     def process_output(
         self, raw_output: Any, metadata: dict[str, Any]
     ) -> npt.NDArray[Any] | list[Feature]:
@@ -239,6 +338,19 @@ class DetectionTask(BasicTask):
         boxes = raw_output["boxes"].cpu().numpy()[wanted]
         class_ids = raw_output["labels"].cpu().numpy()[wanted]
         scores = raw_output["scores"].cpu().numpy()[wanted]
+
+        # Apply distance-based NMS.
+        if self.enable_distance_nms:
+            grid_size = self.distance_nms_kwargs.get("grid_size", DEFAULT_GRID_SIZE)
+            distance_thresh = self.distance_nms_kwargs.get(
+                "distance_threshold", DEFAULT_DISTANCE_THRESHOLD
+            )
+            keep_indices = self.distance_nms(
+                boxes, scores, class_ids, grid_size, distance_thresh
+            )
+            boxes = boxes[keep_indices]
+            class_ids = class_ids[keep_indices]
+            scores = scores[keep_indices]
 
         features = []
         for box, class_id, score in zip(boxes, class_ids, scores):

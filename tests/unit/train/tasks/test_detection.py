@@ -53,3 +53,6 @@ def test_f1_metric():
     metric.update([pred_dict], [gt_dict])
     f1 = metric.compute()
     assert abs(f1 - 0) < EPSILON
+
+
+# def test_distance_nms():
