@@ -263,7 +263,6 @@ class DetectionTask(BasicTask):
             class_scores = scores[idxs]
             class_indices = idxs
 
-            elim_inds = set()
             # Create GridIndex for efficient spatial search
             grid_index = GridIndex(cell_size=max(grid_size, distance_threshold))
             for idx, box in zip(class_indices, class_boxes):
@@ -271,7 +270,14 @@ class DetectionTask(BasicTask):
                 cy = (box[1] + box[3]) / 2
                 grid_index.insert((cx, cy, cx, cy), idx)
 
-            for idx, box, score in zip(class_indices, class_boxes, class_scores):
+            # Process boxes in ascending order of scores
+            sorted_order = np.argsort(class_scores)
+            sorted_indices = class_indices[sorted_order]
+            sorted_boxes = class_boxes[sorted_order]
+            sorted_scores = class_scores[sorted_order]
+
+            elim_inds = set()
+            for idx, box, score in zip(sorted_indices, sorted_boxes, sorted_scores):
                 if idx in elim_inds:
                     continue
                 # Define search area around the center of the box
