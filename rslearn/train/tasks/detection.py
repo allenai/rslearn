@@ -340,32 +340,10 @@ class DetectionTask(BasicTask):
             either raster or vector data.
         """
         # Apply confidence threshold.
-        wanted = raw_output["scores"] > self.score_threshold
-        boxes = raw_output["boxes"][wanted]
-        class_ids = raw_output["labels"][wanted]
-        scores = raw_output["scores"][wanted]
-
-        # Apply NMS per class.
-        keep_indices = []
-        for class_id in range(len(self.classes)):
-            idxs = torch.nonzero(class_ids == class_id).view(-1)
-            if idxs.numel() == 0:
-                continue
-            cls_boxes = boxes[idxs]
-            cls_scores = scores[idxs]
-            nms_idxs = torchvision.ops.nms(
-                cls_boxes, cls_scores, self.nms_iou_threshold
-            )
-            keep_indices.append(idxs[nms_idxs])
-        if len(keep_indices) > 0:
-            keep_indices = torch.cat(keep_indices, dim=0)
-            boxes = boxes[keep_indices]
-            class_ids = class_ids[keep_indices]
-            scores = scores[keep_indices]
-
-        boxes = boxes.cpu().numpy()
-        class_ids = class_ids.cpu().numpy()
-        scores = scores.cpu().numpy()
+        wanted = raw_output["scores"].cpu().numpy() > self.score_threshold
+        boxes = raw_output["boxes"].cpu().numpy()[wanted]
+        class_ids = raw_output["labels"].cpu().numpy()[wanted]
+        scores = raw_output["scores"].cpu().numpy()[wanted]
 
         # Apply distance-based NMS.
         if self.enable_distance_nms:
