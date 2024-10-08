@@ -303,10 +303,16 @@ class ClassificationMetric(Metric):
     """Metric for classification task."""
 
     def __init__(self, metric: Metric, class_idx: int | None = None):
-        """Initialize a new ClassificationMetric."""
+        """Initialize a new ClassificationMetric.
+
+        Args:
+            metric: the metric to wrap
+            class_idx: optional class index to return metric value for. If set, the
+                metric should return a dict from class index to metric value.
+        """
         super().__init__()
         self.metric = metric
-        self.class_idx = class_idx  # optional
+        self.class_idx = class_idx
 
     def update(
         self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
