@@ -23,8 +23,8 @@ class FreezeUnfreeze(BaseFinetuning):
             unfreeze_at_epoch: optionally unfreeze the target module after this many
                 epochs.
             unfreeze_lr_factor: if unfreezing, how much lower to set the learning rate
-                of this module compared to the default learning rate, e.g. 10 to set it
-                10x lower. Default is 1 to use same learning rate.
+                of this module compared to the default learning rate after unfreezing,
+                e.g. 10 to set it 10x lower. Default is 1 to use same learning rate.
         """
         super().__init__()
         self.module_selector = module_selector
