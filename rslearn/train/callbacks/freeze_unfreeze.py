@@ -10,7 +10,10 @@ class FreezeUnfreeze(BaseFinetuning):
     """Freezes a module and optionally unfreezes it after a number of epochs."""
 
     def __init__(
-        self, module_selector: list[str | int], unfreeze_at_epoch: int | None = None
+        self,
+        module_selector: list[str | int],
+        unfreeze_at_epoch: int | None = None,
+        unfreeze_lr_factor: float = 1,
     ):
         """Creates a new FreezeUnfreeze.
 
@@ -19,10 +22,14 @@ class FreezeUnfreeze(BaseFinetuning):
                 example, the selector for backbone.encoder is ["backbone", "encoder"].
             unfreeze_at_epoch: optionally unfreeze the target module after this many
                 epochs.
+            unfreeze_lr_factor: if unfreezing, how much lower to set the learning rate
+                of this module compared to the default learning rate, e.g. 10 to set it
+                10x lower. Default is 1 to use same learning rate.
         """
         super().__init__()
         self.module_selector = module_selector
         self.unfreeze_at_epoch = unfreeze_at_epoch
+        self.unfreeze_lr_factor = unfreeze_lr_factor
 
     def _get_target_module(self, pl_module: LightningModule) -> torch.nn.Module:
         target_module = pl_module
@@ -62,7 +69,7 @@ class FreezeUnfreeze(BaseFinetuning):
         self.unfreeze_and_add_param_group(
             modules=self._get_target_module(pl_module),
             optimizer=optimizer,
-            initial_denom_lr=1,
+            initial_denom_lr=self.unfreeze_lr_factor,
         )
 
         if "plateau" in pl_module.schedulers:
