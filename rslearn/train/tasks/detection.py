@@ -264,7 +264,7 @@ class DetectionTask(BasicTask):
             class_indices = idxs
 
             # Create GridIndex for efficient spatial search
-            grid_index = GridIndex(cell_size=max(grid_size, distance_threshold))
+            grid_index = GridIndex(size=max(grid_size, distance_threshold))
             for idx, box in zip(class_indices, class_boxes):
                 cx = (box[0] + box[2]) / 2
                 cy = (box[1] + box[3]) / 2
@@ -290,7 +290,7 @@ class DetectionTask(BasicTask):
                     cy + distance_threshold,
                 ]
                 # Search for neighboring boxes within the distance threshold
-                neighbor_indices = grid_index.search(rect)
+                neighbor_indices = grid_index.query(rect)
                 for other_idx in neighbor_indices:
                     if other_idx == idx or other_idx in elim_inds:
                         continue

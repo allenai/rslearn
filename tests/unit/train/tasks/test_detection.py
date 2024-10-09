@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import torch
 
@@ -71,7 +73,7 @@ def test_distance_nms():
     grid_size = 10
     distance_threshold = 5
 
-    detection = DetectionTask()
+    detection = DetectionTask(None, None)
     keep_indices = detection._distance_nms(
         boxes.numpy(), scores.numpy(), class_ids.numpy(), grid_size, distance_threshold
     )
@@ -81,7 +83,7 @@ def test_distance_nms():
     assert np.array_equal(np.sort(keep_indices), np.sort(expected))
 
     # Test with a higher threshold where all boxes should be kept.
-    distance_threshold = 20  # Larger threshold to avoid suppression
+    distance_threshold = 2  # Smaller threshold to avoid suppression
     keep_indices = detection._distance_nms(
         boxes.numpy(), scores.numpy(), class_ids.numpy(), grid_size, distance_threshold
     )
@@ -150,14 +152,14 @@ def test_distance_nms():
     boxes = torch.tensor(
         [
             [10, 10, 20, 20],  # Box 0 center at (15, 15)
-            [20, 20, 30, 30],  # Box 1 center at (25, 25), distance = 14.142
+            [20, 20, 30, 30],  # Box 1 center at (25, 25)
         ],
         dtype=torch.float32,
     )
     scores = torch.tensor([0.9, 0.8], dtype=torch.float32)
     class_ids = torch.tensor([0, 0], dtype=torch.int32)
     grid_size = 10
-    distance_threshold = 14.142  # Exact distance between centers
+    distance_threshold = math.sqrt(200)  # Exact distance between centers
 
     keep_indices = detection._distance_nms(
         boxes.numpy(), scores.numpy(), class_ids.numpy(), grid_size, distance_threshold
