@@ -55,7 +55,7 @@ class TestLocalFiles:
                     "type": "vector",
                     "data_source": {
                         "name": "rslearn.data_sources.local_files.LocalFiles",
-                        "src_dir": src_data_dir,
+                        "src_dir": "file://" + src_data_dir,
                     },
                 },
             },

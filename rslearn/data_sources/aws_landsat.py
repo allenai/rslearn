@@ -245,6 +245,13 @@ class LandsatOliTirs(DataSource):
                 polygons = []
                 for feat in src:
                     shp = shapely.geometry.shape(feat["geometry"])
+
+                    # Need to buffer the shape because Landsat scenes include some
+                    # buffer beyond the polygon and this has caused us to not identify
+                    # scenes in the past.
+                    # 0.2 degree buffer seems sufficient.
+                    shp = shp.buffer(0.2)
+
                     path = str(feat["properties"]["PATH"]).zfill(3)
                     row = str(feat["properties"]["ROW"]).zfill(3)
                     polygons.append((shp, path, row))
