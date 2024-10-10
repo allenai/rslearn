@@ -53,6 +53,21 @@ class DetectionTask(BasicTask):
         score_threshold: float = 0.5,
         enable_map_metric: bool = True,
         enable_f1_metric: bool = False,
+        f1_metric_thresholds: list[list[float]] = [
+            [
+                0.05,
+                0.1,
+                0.2,
+                0.3,
+                0.4,
+                0.5,
+                0.6,
+                0.7,
+                0.8,
+                0.9,
+                0.95,
+            ]
+        ],
         f1_metric_kwargs: dict[str, Any] = {},
         **kwargs,
     ):
@@ -78,6 +93,11 @@ class DetectionTask(BasicTask):
             score_threshold: confidence threshold for visualization and prediction.
             enable_map_metric: whether to compute mAP (default true)
             enable_f1_metric: whether to compute F1 (default false)
+            f1_metric_thresholds: list of list of thresholds to apply for F1 metric.
+                Each inner list is used to initialize a separate F1 metric where the
+                best F1 across the thresholds within the inner list is computed. If
+                there are multiple inner lists, then multiple F1 scores will be
+                reported.
             f1_metric_kwargs: extra arguments to pass to F1 metric.
             kwargs: additional arguments to pass to BasicTask
         """
@@ -95,6 +115,7 @@ class DetectionTask(BasicTask):
         self.score_threshold = score_threshold
         self.enable_map_metric = enable_map_metric
         self.enable_f1_metric = enable_f1_metric
+        self.f1_metric_thresholds = f1_metric_thresholds
         self.f1_metric_kwargs = f1_metric_kwargs
 
         if not self.filters:
@@ -307,17 +328,40 @@ class DetectionTask(BasicTask):
     def get_metrics(self) -> MetricCollection:
         """Get the metrics for this task."""
         metrics = {}
+
         if self.enable_map_metric:
             metrics["mAP"] = DetectionMetric(
                 torchmetrics.detection.mean_ap.MeanAveragePrecision(),
                 output_key="map",
             )
+
         if self.enable_f1_metric:
             kwargs = dict(
                 num_classes=len(self.classes),
             )
             kwargs.update(self.f1_metric_kwargs)
-            metrics["F1"] = DetectionMetric(F1Metric(**kwargs))
+
+            for thresholds in self.f1_metric_thresholds:
+                if len(self.f1_metric_thresholds) == 1:
+                    suffix = ""
+                else:
+                    # Metric name can't contain "." so change to ",".
+                    suffix = "_" + str(thresholds[0]).replace(".", ",")
+
+                metrics["F1" + suffix] = DetectionMetric(
+                    F1Metric(score_thresholds=thresholds, **kwargs)
+                )
+                metrics["precision" + suffix] = DetectionMetric(
+                    F1Metric(
+                        score_thresholds=thresholds, metric_mode="precision", **kwargs
+                    )
+                )
+                metrics["recall" + suffix] = DetectionMetric(
+                    F1Metric(
+                        score_thresholds=thresholds, metric_mode="recall", **kwargs
+                    )
+                )
+
         return MetricCollection(metrics)
 
 
@@ -377,22 +421,11 @@ class F1Metric(Metric):
     def __init__(
         self,
         num_classes: int,
+        score_thresholds: list[float],
         cmp_mode: str = "iou",
         cmp_threshold: float = 0.5,
-        score_thresholds: list[float] = [
-            0.05,
-            0.1,
-            0.2,
-            0.3,
-            0.4,
-            0.5,
-            0.6,
-            0.7,
-            0.8,
-            0.9,
-            0.95,
-        ],
         flatten_classes: bool = False,
+        metric_mode: str = "f1",
     ):
         """Create a new F1Metric.
 
@@ -406,6 +439,8 @@ class F1Metric(Metric):
             flatten_classes: sum true positives, false positives, and false negatives
                 across classes and report combined F1 instead of computing F1 score for
                 each class and then reporting the average.
+            metric_mode: set to "precision" or "recall" to return that instead of F1
+                (default "f1")
         """
         super().__init__()
         self.num_classes = num_classes
@@ -413,6 +448,10 @@ class F1Metric(Metric):
         self.cmp_threshold = cmp_threshold
         self.score_thresholds = score_thresholds
         self.flatten_classes = flatten_classes
+        self.metric_mode = metric_mode
+
+        assert self.cmp_mode in ["iou", "distance"]
+        assert self.metric_mode in ["f1", "precision", "recall"]
 
         for cls_idx in range(self.num_classes):
             for thr_idx in range(len(self.score_thresholds)):
@@ -531,8 +570,15 @@ class F1Metric(Metric):
                 else:
                     f1 = 2 * precision * recall / (precision + recall)
 
-                if best_score is None or f1 > best_score:
-                    best_score = f1
+                if self.metric_mode == "f1":
+                    score = f1
+                elif self.metric_mode == "precision":
+                    score = precision
+                elif self.metric_mode == "recall":
+                    score = recall
+
+                if best_score is None or score > best_score:
+                    best_score = score
 
             best_scores.append(best_score)
 
