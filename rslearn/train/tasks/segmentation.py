@@ -200,7 +200,8 @@ class SegmentationMetric(Metric):
             preds: the predictions
             targets: the targets
         """
-        preds = torch.stack(preds)
+        if not isinstance(preds, torch.Tensor):
+            preds = torch.stack(preds)
         labels = torch.stack([target["classes"] for target in targets])
 
         # Sub-select the valid labels.
