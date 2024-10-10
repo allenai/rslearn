@@ -190,8 +190,8 @@ class SplitConfig:
         self.skip_targets = skip_targets
 
         if overlap_ratio is not None:
-            if not (0 <= overlap_ratio < 1):
-                raise ValueError("overlap_ratio must be between 0 and 1")
+            if not (0 < overlap_ratio < 1):
+                raise ValueError("overlap_ratio must be between 0 and 1 (exclusive)")
         self.overlap_ratio = overlap_ratio
 
     def update(self, other: "SplitConfig") -> "SplitConfig":

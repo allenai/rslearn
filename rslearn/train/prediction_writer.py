@@ -17,20 +17,20 @@ from rslearn.utils.vector_format import load_vector_format
 from .lightning_module import RslearnLightningModule
 
 
-class PredictionProcessor:
-    """Base class for post-processing predictions."""
+class PatchPredictionMerger:
+    """Base class for merging predictions from multiple patches."""
 
-    def process(
+    def merge(
         self, outputs: Sequence[Any], metadatas: Sequence[Any]
     ) -> tuple[Sequence[Any], Sequence[Any]]:
-        """Process the output and metadata.
+        """Merge the outputs and metadatas.
 
         Args:
             outputs: the outputs to process.
             metadatas: the metadatas to process.
 
         Returns:
-            the processed outputs and metadatas.
+            the merged outputs and metadatas.
         """
         raise NotImplementedError
 
@@ -58,12 +58,16 @@ class RslearnWriter(BasePredictionWriter):
             selector: keys to access the desired output in the output dict if needed.
         """
         super().__init__(write_interval="batch")
-        self.output_layer = output_layer
-        self.selector = selector
-
         self.path = UPath(path, **path_options)
         self.dataset = Dataset(self.path)
         self.layer_config = self.dataset.layers[self.output_layer]
+
+        # Check if we need to merge outputs from multiple patches
+        overlap_ratio = self.dataset.split_config.overlap_ratio
+        self.merge_outputs = overlap_ratio is not None and (0 < overlap_ratio < 1)
+
+        self.output_layer = output_layer
+        self.selector = selector
 
         if self.layer_config.layer_type == LayerType.RASTER:
             band_cfg = self.layer_config.band_sets[0]
@@ -79,6 +83,7 @@ class RslearnWriter(BasePredictionWriter):
         # This is used when windows are split up into patches, so the data from all the
         # patches of each window need to be reconstituted.
         self.pending_outputs = {}
+        self.pending_metadatas = {}
 
     def write_on_batch_end(
         self,
@@ -143,12 +148,24 @@ class RslearnWriter(BasePredictionWriter):
 
                 self.pending_outputs[window_name].extend(output)
 
+            # Accumulate metadata for merging
+            self.pending_metadatas[window_name] = metadata
             if metadata["patch_idx"] < metadata["num_patches"] - 1:
                 continue
 
-            # This is the last patch so it's time to write it.
+            # This is the last patch so it's time to merge outputs from overlapped patches if applicable
             pending_output = self.pending_outputs[window_name]
+            pending_metadata = self.pending_metadatas[window_name]
             del self.pending_outputs[window_name]
+            del self.pending_metadatas[window_name]
+
+            if self.merge_outputs:
+                prediction_merger = PatchPredictionMerger(
+                    pending_output, pending_metadata
+                )
+                pending_output, pending_metadata = prediction_merger.merge()
+
+            # This is the last patch so it's time to write it.
             layer_dir = (
                 self.dataset.path
                 / "windows"
