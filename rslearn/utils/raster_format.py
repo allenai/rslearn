@@ -441,7 +441,12 @@ class GeotiffRasterFormat(RasterFormat):
         Returns:
             the GeotiffRasterFormat
         """
-        return GeotiffRasterFormat(block_size=config.get("block_size", 512))
+        kwargs = {}
+        if "block_size" in config:
+            kwargs["block_size"] = config["block_size"]
+        if "always_enable_tiling" in config:
+            kwargs["always_enable_tiling"] = config["always_enable_tiling"]
+        return GeotiffRasterFormat(**kwargs)
 
 
 @RasterFormats.register("single_image")
