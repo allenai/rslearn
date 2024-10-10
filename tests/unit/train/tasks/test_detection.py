@@ -73,8 +73,8 @@ def test_distance_nms():
     grid_size = 10
     distance_threshold = 5
 
-    detection = DetectionTask(None, None)
-    keep_indices = detection._distance_nms(
+    detection_task = DetectionTask(None, None)
+    keep_indices = detection_task._distance_nms(
         boxes.numpy(), scores.numpy(), class_ids.numpy(), grid_size, distance_threshold
     )
 
@@ -83,8 +83,8 @@ def test_distance_nms():
     assert np.array_equal(np.sort(keep_indices), np.sort(expected))
 
     # Test with a higher threshold where all boxes should be kept.
-    distance_threshold = 2  # Smaller threshold to avoid suppression
-    keep_indices = detection._distance_nms(
+    distance_threshold = 1  # Smaller threshold to avoid suppression
+    keep_indices = detection_task._distance_nms(
         boxes.numpy(), scores.numpy(), class_ids.numpy(), grid_size, distance_threshold
     )
     # Expected: All boxes should be kept.
@@ -98,7 +98,7 @@ def test_distance_nms():
     grid_size = 10
     distance_threshold = 5
 
-    keep_indices = detection._distance_nms(
+    keep_indices = detection_task._distance_nms(
         boxes.numpy(), scores.numpy(), class_ids.numpy(), grid_size, distance_threshold
     )
     # Expected: No boxes, so the result should be an empty array.
@@ -120,7 +120,7 @@ def test_distance_nms():
     grid_size = 10
     distance_threshold = 5
 
-    keep_indices = detection._distance_nms(
+    keep_indices = detection_task._distance_nms(
         boxes.numpy(), scores.numpy(), class_ids.numpy(), grid_size, distance_threshold
     )
     # Expected: For Class 0, Box 0 kept (higher score); Box 1 suppressed.
@@ -141,7 +141,7 @@ def test_distance_nms():
     grid_size = 10
     distance_threshold = 5
 
-    keep_indices = detection._distance_nms(
+    keep_indices = detection_task._distance_nms(
         boxes.numpy(), scores.numpy(), class_ids.numpy(), grid_size, distance_threshold
     )
     # Expected: Box 0 kept because it has a lower index (tie-breaking).
@@ -161,7 +161,7 @@ def test_distance_nms():
     grid_size = 10
     distance_threshold = math.sqrt(200)  # Exact distance between centers
 
-    keep_indices = detection._distance_nms(
+    keep_indices = detection_task._distance_nms(
         boxes.numpy(), scores.numpy(), class_ids.numpy(), grid_size, distance_threshold
     )
     # Expected: Box 0 should be kept, Box 1 eliminated due to tie-breaking on distance.

@@ -17,6 +17,24 @@ from rslearn.utils.vector_format import load_vector_format
 from .lightning_module import RslearnLightningModule
 
 
+class PredictionProcessor:
+    """Base class for post-processing predictions."""
+
+    def process(
+        self, outputs: Sequence[Any], metadatas: Sequence[Any]
+    ) -> tuple[Sequence[Any], Sequence[Any]]:
+        """Process the output and metadata.
+
+        Args:
+            outputs: the outputs to process.
+            metadatas: the metadatas to process.
+
+        Returns:
+            the processed outputs and metadatas.
+        """
+        raise NotImplementedError
+
+
 class RslearnWriter(BasePredictionWriter):
     """A writer that writes predictions back into the rslearn dataset.
 
@@ -90,7 +108,6 @@ class RslearnWriter(BasePredictionWriter):
             for output, metadata in zip(prediction, metadatas)
         ]
 
-        _, _, metadatas = batch
         for output, metadata in zip(outputs, metadatas):
             for k in self.selector:
                 output = output[k]

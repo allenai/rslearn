@@ -154,6 +154,7 @@ class SplitConfig:
         transforms: list[torch.nn.Module] | None = None,
         sampler: SamplerFactory | None = None,
         patch_size: int | tuple[int, int] | None = None,
+        overlap_ratio: float | None = None,
         load_all_patches: bool | None = None,
         skip_targets: bool | None = None,
     ):
@@ -171,6 +172,8 @@ class SplitConfig:
             sampler: SamplerFactory for this split
             patch_size: an optional square size or (width, height) tuple. If set, read
                 crops of this size rather than entire windows.
+            overlap_ratio: an optional float between 0 and 1. If set, read patches with
+                this ratio of overlap.
             load_all_patches: with patch_size set, rather than sampling a random patch
                 for each window, read all patches as separate sequential items in the
                 dataset.
@@ -185,6 +188,11 @@ class SplitConfig:
         self.patch_size = patch_size
         self.load_all_patches = load_all_patches
         self.skip_targets = skip_targets
+
+        if overlap_ratio is not None:
+            if not (0 <= overlap_ratio < 1):
+                raise ValueError("overlap_ratio must be between 0 and 1")
+        self.overlap_ratio = overlap_ratio
 
     def update(self, other: "SplitConfig") -> "SplitConfig":
         """Override settings in this SplitConfig with those in another.
@@ -369,13 +377,22 @@ class ModelDataset(torch.utils.data.Dataset):
         # If we're loading all patches, we need to include the patch details.
         if split_config.get_load_all_patches():
             patches = []
+            overlap_size = int(
+                self.patch_size[0] * split_config.overlap_ratio
+                if split_config.overlap_ratio
+                else 0
+            )
             for window in self.windows:
                 cur_patches = []
                 for col in range(
-                    window.bounds[0], window.bounds[2], self.patch_size[0]
+                    window.bounds[0],
+                    window.bounds[2] - self.patch_size[0] + 1,
+                    self.patch_size[0] - overlap_size,
                 ):
                     for row in range(
-                        window.bounds[1], window.bounds[3], self.patch_size[1]
+                        window.bounds[1],
+                        window.bounds[3] - self.patch_size[1] + 1,
+                        self.patch_size[1] - overlap_size,
                     ):
                         cur_patches.append(
                             (
