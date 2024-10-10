@@ -345,7 +345,87 @@ And visualize the Sentinel-2 image and output in qgis:
 
 ### Defining Train and Validation Splits
 
-TODO
+We can visualize the logged metrics using Tensorboard:
+
+    tensorboard --logdir=lightning_logs/
+
+However, because our training and validation data are identical, the validation metrics
+are not meaningful.
+
+There are two suggested ways to split windows into different subsets:
+
+1. Assign windows to different groups.
+2. Use different key-value pairs in the windows' options dicts for different splits.
+
+We will use the second approach. The script below sets a "split" key in the options
+dict (which is stored in each window's `metadata.json` file) to "train" or "val"
+based on the SHA-256 hash of the window name.
+
+    import hashlib
+    import tqdm
+    from rslearn.dataset import Dataset, Window
+    from upath import UPath
+
+    ds_path = UPath("/path/to/dataset/")
+    dataset = Dataset(ds_path)
+    windows = dataset.load_windows(show_progress=True, workers=32)
+    for window in tqdm.tqdm(windows):
+        if hashlib.sha256(window.name.encode()).hexdigest()[0] in ["0", "1"]:
+            split = "val"
+        else:
+            split = "train"
+        if "split" in window.options and window.options["split"] == split:
+            continue
+        window.options["split"] = split
+        window.save()
+
+Now we can update the model configuration file to use these splits:
+
+    default_config:
+      transforms:
+        - class_path: rslearn.train.transforms.normalize.Normalize
+          init_args:
+            mean: 0
+            std: 255
+    train_config:
+      transforms:
+        - class_path: rslearn.train.transforms.normalize.Normalize
+          init_args:
+            mean: 0
+            std: 255
+        - class_path: rslearn.train.transforms.flip.Flip
+          init_args:
+            image_selectors: ["image", "target/classes", "target/valid"]
+      groups: ["default"]
+      tags:
+        split: train
+    val_config:
+      groups: ["default"]
+      tags:
+        split: val
+    test_config:
+      groups: ["default"]
+      tags:
+        split: val
+    predict_config:
+      groups: ["predict"]
+      load_all_patches: true
+      skip_targets: true
+      patch_size: 512
+
+The `tags` option that we are adding here tells rslearn to only load windows with a
+matching key and value in the window options.
+
+Previously when we run `model fit`, it should show the same number of windows for
+training and validation:
+
+    got 4752 examples in split train
+    got 4752 examples in split val
+
+With the updates, it should show different numbers like this:
+
+    got 4167 examples in split train
+    got 585 examples in split val
 
 
 ### Visualizing with `model test`
@@ -354,5 +434,10 @@ TODO
 
 
 ### Inputting Multiple Sentinel-2 Images
+
+TODO
+
+
+### Logging to Weights & Biases
 
 TODO
