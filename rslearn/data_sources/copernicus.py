@@ -14,7 +14,7 @@ import numpy.typing as npt
 from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
-from rslearn.utils import STGeometry
+from rslearn.utils.geometry import STGeometry, flatten_shape
 from rslearn.utils.grid_index import GridIndex
 
 SENTINEL2_TILE_URL = "https://sentiwiki.copernicus.eu/__attachments/1692737/S2A_OPER_GIP_TILPAR_MPC__20151209T095117_V20150622T000000_21000101T000000_B00.zip"
@@ -127,5 +127,14 @@ def get_sentinel2_tiles(geometry: STGeometry, cache_dir: UPath) -> list[str]:
         list of Sentinel-2 tile names that intersect the geometry.
     """
     tile_index = load_sentinel2_tile_index(cache_dir)
-    wgs84_bounds = geometry.to_projection(WGS84_PROJECTION).shp.bounds
-    return tile_index.query(wgs84_bounds)
+    wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
+    # If the shape is a collection, it could be cutting across prime meridian.
+    # So we query each component shape separately and collect the results to avoid
+    # issues.
+    # We assume the caller has already applied split_at_prime_meridian.
+    results = set()
+    for shp in flatten_shape(wgs84_geometry.shp):
+        for result in tile_index.query(shp.bounds):
+            print(shp, result)
+            results.add(result)
+    return results
