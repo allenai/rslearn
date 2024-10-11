@@ -188,11 +188,10 @@ class SplitConfig:
         self.patch_size = patch_size
         self.load_all_patches = load_all_patches
         self.skip_targets = skip_targets
-
-        if overlap_ratio is not None:
-            if not (0 < overlap_ratio < 1):
-                raise ValueError("overlap_ratio must be between 0 and 1 (exclusive)")
         self.overlap_ratio = overlap_ratio
+        if self.overlap_ratio is not None:
+            if not (0 < self.overlap_ratio < 1):
+                raise ValueError("overlap_ratio must be between 0 and 1 (exclusive)")
 
     def update(self, other: "SplitConfig") -> "SplitConfig":
         """Override settings in this SplitConfig with those in another.
@@ -208,6 +207,7 @@ class SplitConfig:
             transforms=self.transforms,
             sampler=self.sampler,
             patch_size=self.patch_size,
+            overlap_ratio=self.overlap_ratio,
             load_all_patches=self.load_all_patches,
             skip_targets=self.skip_targets,
         )
@@ -225,6 +225,8 @@ class SplitConfig:
             result.sampler = other.sampler
         if other.patch_size:
             result.patch_size = other.patch_size
+        if other.overlap_ratio is not None:
+            result.overlap_ratio = other.overlap_ratio
         if other.load_all_patches is not None:
             result.load_all_patches = other.load_all_patches
         if other.skip_targets is not None:

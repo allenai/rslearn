@@ -48,6 +48,8 @@ class RslearnWriter(BasePredictionWriter):
         output_layer: str,
         path_options: dict[str, Any] = {},
         selector: list[str] = [],
+        merger: type[PatchPredictionMerger] | None = None,
+        merger_args: dict[str, Any] | None = None,
     ):
         """Create a new RslearnWriter.
 
@@ -56,18 +58,23 @@ class RslearnWriter(BasePredictionWriter):
             output_layer: which layer to write the outputs under.
             path_options: additional options for path to pass to fsspec
             selector: keys to access the desired output in the output dict if needed.
+            merger: merger to use to merge outputs from overlapped patches.
+            merger_args: arguments to pass to the merger.
         """
         super().__init__(write_interval="batch")
+        self.output_layer = output_layer
+        self.selector = selector
         self.path = UPath(path, **path_options)
         self.dataset = Dataset(self.path)
         self.layer_config = self.dataset.layers[self.output_layer]
 
-        # Check if we need to merge outputs from multiple patches
-        overlap_ratio = self.dataset.split_config.overlap_ratio
-        self.merge_outputs = overlap_ratio is not None and (0 < overlap_ratio < 1)
-
-        self.output_layer = output_layer
-        self.selector = selector
+        # # Check if we need to apply a merger to the outputs
+        # overlap_ratio = self.dataset.split_config.overlap_ratio
+        # if overlap_ratio is not None and (0 < overlap_ratio < 1):
+        #     self.merger = merger
+        #     self.merger_args = merger_args
+        self.merger = merger
+        self.merger_args = merger_args
 
         if self.layer_config.layer_type == LayerType.RASTER:
             band_cfg = self.layer_config.band_sets[0]
@@ -83,7 +90,6 @@ class RslearnWriter(BasePredictionWriter):
         # This is used when windows are split up into patches, so the data from all the
         # patches of each window need to be reconstituted.
         self.pending_outputs = {}
-        self.pending_metadatas = {}
 
     def write_on_batch_end(
         self,
@@ -148,22 +154,16 @@ class RslearnWriter(BasePredictionWriter):
 
                 self.pending_outputs[window_name].extend(output)
 
-            # Accumulate metadata for merging
-            self.pending_metadatas[window_name] = metadata
             if metadata["patch_idx"] < metadata["num_patches"] - 1:
                 continue
 
-            # This is the last patch so it's time to merge outputs from overlapped patches if applicable
             pending_output = self.pending_outputs[window_name]
-            pending_metadata = self.pending_metadatas[window_name]
             del self.pending_outputs[window_name]
-            del self.pending_metadatas[window_name]
 
-            if self.merge_outputs:
-                prediction_merger = PatchPredictionMerger(
-                    pending_output, pending_metadata
-                )
-                pending_output, pending_metadata = prediction_merger.merge()
+            # This is the last patch so it's time to merge outputs from overlapped patches
+            if self.merger is not None:
+                prediction_merger = self.merger(**self.merger_args)
+                pending_output = prediction_merger.merge(pending_output)
 
             # This is the last patch so it's time to write it.
             layer_dir = (

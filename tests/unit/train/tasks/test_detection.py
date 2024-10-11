@@ -58,6 +58,7 @@ def test_f1_metric():
     assert abs(f1 - 0) < EPSILON
 
 
+# TODO: remove this test and move it to rslp tests.
 def test_distance_nms():
     # Test NMS with 3 boxes, single class.
     boxes = torch.tensor(
