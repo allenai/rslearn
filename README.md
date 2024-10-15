@@ -25,18 +25,11 @@ Quick links:
 Setup
 -----
 
-rslearn requires Python 3.10+.
+rslearn requires Python 3.10+ (Python 3.12 is recommended).
 
-    conda create -n rslearn python=3.12
-    conda activate rslearn
-    pip install -r requirements.txt
-    pip install -r extra_requirements.txt
-
-`extra_requirements.txt` contains requirements specific to individual data sources.
-You can also install as a library:
-
-    cd /path/to/rslearn
-    pip install .[extra]
+  git clone https://github.com/allenai/rslearn.git
+  cd rslearn
+  pip install .[extra]
 
 
 Quickstart
@@ -83,7 +76,8 @@ choosing the scenes with minimal cloud cover.
 Next, let's create our spatiotemporal windows. These will correspond to training
 examples.
 
-    rslearn dataset add_windows --root /path/to/dataset --group default --utm --resolution 10 --grid_size 128 --src_crs EPSG:4326 --box=-122.6901,47.2079,-121.4955,47.9403 --start 2024-06-01T00:00:00+00:00 --end 2024-08-01T00:00:00+00:00 --name seattle
+    export DATASET_PATH=/path/to/dataset
+    rslearn dataset add_windows --root $DATASET_PATH --group default --utm --resolution 10 --grid_size 128 --src_crs EPSG:4326 --box=-122.6901,47.2079,-121.4955,47.9403 --start 2024-06-01T00:00:00+00:00 --end 2024-08-01T00:00:00+00:00 --name seattle
 
 This creates windows along a 128x128 grid in the specified projection (i.e.,
 appropriate UTM zone for the location with 10 m/pixel resolution) covering the
@@ -91,9 +85,13 @@ specified bounding box, which is centered at Seattle.
 
 We can now obtain the Sentinel-2 images by running prepare, ingest, and materialize.
 
-    rslearn dataset prepare --root /path/to/dataset --workers 32 --batch-size 8
-    rslearn dataset ingest --root /path/to/dataset --workers 32 --no-use-initial-job --jobs-per-process 1
-    rslearn dataset materialize --root /path/to/dataset --workers 32 --no-use-initial-job
+* Prepare: lookup items (in this case, Sentinel-2 scenes) in the data source that match with the spatiotemporal windows we created.
+* Ingest: retrieve those items. This step populates the `tiles` directory within the dataset.
+* Materialize: crop/mosaic the items to align with the windows. This populates the `layers` folder in each window directory.
+
+    rslearn dataset prepare --root $DATASET_PATH --workers 32 --batch-size 8
+    rslearn dataset ingest --root $DATASET_PATH --workers 32 --no-use-initial-job --jobs-per-process 1
+    rslearn dataset materialize --root $DATASET_PATH --workers 32 --no-use-initial-job
 
 For ingestion, you may need to reduce the number of workers depending on the available
 memory on your system.
@@ -126,7 +124,7 @@ corresponds to downtown Seattle:
 It should be `seattle_54912_-527360`, so let's open it in qgis (or your favorite GIS
 software):
 
-    qgis /path/to/dataset/windows/default/seattle_54912_-527360/layers/sentinel2/R_G_B/geotiff.tif
+    qgis $DATASET_PATH/windows/default/seattle_54912_-527360/layers/sentinel2/R_G_B/geotiff.tif
 
 
 ### Adding Land Cover Labels
@@ -166,13 +164,13 @@ automate this process. Update the dataset `config.json` with a new layer:
 
 Repeat the materialize process so we populate the data for this new layer:
 
-    rslearn dataset prepare --root /path/to/dataset --workers 32 --batch-size 8
-    rslearn dataset ingest --root /path/to/dataset --workers 32 --no-use-initial-job --jobs-per-process 1
-    rslearn dataset materialize --root /path/to/dataset --workers 32 --no-use-initial-job
+    rslearn dataset prepare --root $DATASET_PATH --workers 32 --batch-size 8
+    rslearn dataset ingest --root $DATASET_PATH --workers 32 --no-use-initial-job --jobs-per-process 1
+    rslearn dataset materialize --root $DATASET_PATH --workers 32 --no-use-initial-job
 
 We can visualize both the GeoTIFFs together in qgis:
 
-    qgis /path/to/dataset/windows/default/seattle_54912_-527360/layers/*/*/geotiff.tif
+    qgis $DATASET_PATH/windows/default/seattle_54912_-527360/layers/*/*/geotiff.tif
 
 
 ### Training a Model
@@ -292,10 +290,10 @@ windows along a grid, we just create one big window. This is because we are just
 to run the prediction over the whole window rather than use different windows as
 different training examples.
 
-    rslearn dataset add_windows --root /path/to/dataset --group predict --utm --resolution 10 --src_crs EPSG:4326 --box=-122.712,45.477,-122.621,45.549 --start 2024-06-01T00:00:00+00:00 --end 2024-08-01T00:00:00+00:00 --name portland
-    rslearn dataset prepare --root /path/to/dataset --workers 32 --batch-size 8
-    rslearn dataset ingest --root /path/to/dataset --workers 32 --no-use-initial-job --jobs-per-process 1
-    rslearn dataset materialize --root /path/to/dataset --workers 32 --no-use-initial-job
+    rslearn dataset add_windows --root $DATASET_PATH --group predict --utm --resolution 10 --src_crs EPSG:4326 --box=-122.712,45.477,-122.621,45.549 --start 2024-06-01T00:00:00+00:00 --end 2024-08-01T00:00:00+00:00 --name portland
+    rslearn dataset prepare --root $DATASET_PATH --workers 32 --batch-size 8
+    rslearn dataset ingest --root $DATASET_PATH --workers 32 --no-use-initial-job --jobs-per-process 1
+    rslearn dataset materialize --root $DATASET_PATH --workers 32 --no-use-initial-job
 
 We also need to add an RslearnPredictionWriter to the trainer callbacks in the model
 configuration file, as it will handle writing the outputs from the model to a GeoTIFF.
@@ -340,7 +338,7 @@ Now we can apply the model:
 
 And visualize the Sentinel-2 image and output in qgis:
 
-    qgis /path/to/dataset/windows/predict/portland/layers/*/*/geotiff.tif
+    qgis $DATASET_PATH/windows/predict/portland/layers/*/*/geotiff.tif
 
 
 ### Defining Train and Validation Splits
