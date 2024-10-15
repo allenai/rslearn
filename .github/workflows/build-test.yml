@@ -3,7 +3,7 @@ name: Build, Test, and Publish Docker Image
 on: # TODO: Only run on pull request or push to main
   push:
     branches:
-      - henryh/setup-github_actions
+      - henryh/setup_github_actions
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
