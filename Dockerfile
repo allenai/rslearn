@@ -12,6 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY ./extra_requirements.txt /rslearn/extra_requirements.txt
 RUN pip install --no-cache-dir -r extra_requirements.txt
+COPY ./test_requirements.txt /rslearn/test_requirements.txt
+RUN pip install --no-cache-dir -r test_requirements.txt
 
 COPY ./ /rslearn
 RUN pip install --no-cache-dir  .
