@@ -428,14 +428,20 @@ With the updates, it should show different numbers like this:
 
 ### Visualizing with `model test`
 
-TODO
+Coming soon
 
 
 ### Inputting Multiple Sentinel-2 Images
 
-TODO
+Coming soon
 
 
 ### Logging to Weights & Biases
 
-TODO
+Coming soon
+
+
+Contact
+-------
+
+For questions and suggestions, please open an issue on GitHub.
