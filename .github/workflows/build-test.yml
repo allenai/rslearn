@@ -56,22 +56,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Docker Compose
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y docker-compose
-
       - name: Pull the latest image
         run: |
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
-    #   - name: Run tests with Docker Compose
-    #     run: |
-    #       docker-compose -f docker-compose.test.yml up --exit-code-from tests
-    #     env:
-    #       IMAGE_TAG: ${{ github.sha }}
+      - name: Run tests using Docker image
+        run: |
+          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} python -m pytest tests/
 
-    #   - name: Clean up
-    #     if: always()
-    #     run: |
-    #       docker-compose -f docker-compose.test.yml down
+      - name: Clean up
+        if: always()
+        run: |
+          docker image prune -f
