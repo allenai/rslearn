@@ -27,9 +27,9 @@ Setup
 
 rslearn requires Python 3.10+ (Python 3.12 is recommended).
 
-  git clone https://github.com/allenai/rslearn.git
-  cd rslearn
-  pip install .[extra]
+    git clone https://github.com/allenai/rslearn.git
+    cd rslearn
+    pip install .[extra]
 
 
 Example Usage
