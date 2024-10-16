@@ -593,6 +593,18 @@ class RslearnLightningCLI(LightningCLI):
         if c.wandb_resume:
             c.trainer.logger.init_args.id = c.wandb_run_id
 
+        # If there is a RslearnPredictionWriter, set its path.
+        prediction_writer_callback = None
+        if "callbacks" in c.trainer:
+            for existing_callback in c.trainer.callbacks:
+                if (
+                    existing_callback.class_path
+                    == "rslearn.train.prediction_writer.RslearnWriter"
+                ):
+                    prediction_writer_callback = existing_callback
+        if prediction_writer_callback:
+            prediction_writer_callback.init_args.path = c.data.init_args.path
+
 
 def model_handler():
     """Handler for any rslearn model X commands."""

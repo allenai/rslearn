@@ -48,8 +48,7 @@ class RslearnWriter(BasePredictionWriter):
         output_layer: str,
         path_options: dict[str, Any] = {},
         selector: list[str] = [],
-        merger: type[PatchPredictionMerger] | None = None,
-        merger_args: dict[str, Any] | None = None,
+        merger: PatchPredictionMerger | None = None,
     ):
         """Create a new RslearnWriter.
 
@@ -59,7 +58,6 @@ class RslearnWriter(BasePredictionWriter):
             path_options: additional options for path to pass to fsspec
             selector: keys to access the desired output in the output dict if needed.
             merger: merger to use to merge outputs from overlapped patches.
-            merger_args: arguments to pass to the merger.
         """
         super().__init__(write_interval="batch")
         self.output_layer = output_layer
@@ -67,14 +65,6 @@ class RslearnWriter(BasePredictionWriter):
         self.path = UPath(path, **path_options)
         self.dataset = Dataset(self.path)
         self.layer_config = self.dataset.layers[self.output_layer]
-
-        # # Check if we need to apply a merger to the outputs
-        # overlap_ratio = self.dataset.split_config.overlap_ratio
-        # if overlap_ratio is not None and (0 < overlap_ratio < 1):
-        #     self.merger = merger
-        #     self.merger_args = merger_args
-        self.merger = merger
-        self.merger_args = merger_args
 
         if self.layer_config.layer_type == LayerType.RASTER:
             band_cfg = self.layer_config.band_sets[0]
@@ -85,6 +75,8 @@ class RslearnWriter(BasePredictionWriter):
             self.format = load_vector_format(self.layer_config.format)
         else:
             raise ValueError(f"invalid layer type {self.layer_config.layer_type}")
+
+        self.merger = merger
 
         # Map from window name to pending data to write.
         # This is used when windows are split up into patches, so the data from all the
@@ -162,8 +154,7 @@ class RslearnWriter(BasePredictionWriter):
 
             # This is the last patch so it's time to merge outputs from overlapped patches
             if self.merger is not None:
-                prediction_merger = self.merger(**self.merger_args)
-                pending_output = prediction_merger.merge(pending_output)
+                pending_output = self.merger.merge(pending_output)
 
             # This is the last patch so it's time to write it.
             layer_dir = (
