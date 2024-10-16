@@ -60,7 +60,7 @@ jobs:
             GHCR_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build-push.outputs.digest }}"
             GHCR_IMAGE=`echo ${GHCR_IMAGE} | tr '[:upper:]' '[:lower:]'` # docker requires that all image names be lowercase
             echo "ghcr.io Docker image name is ${GHCR_IMAGE}"
-            echo "ghcr_image_name=\"${IMAGE}\"" >> $GITHUB_OUTPUT
+            echo "ghcr_image_name=\"${GHCR_IMAGE}\"" >> $GITHUB_OUTPUT
 
   test:
     needs: build
