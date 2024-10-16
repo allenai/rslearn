@@ -19,6 +19,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+        ghcr_docker_image: ${{ steps.image-names.outputs.ghcr_image_name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -50,8 +52,15 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Output image tag
-        run: echo "IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | head -n 1)" >> $GITHUB_OUTPUT
+
+      - name: Store Image Names
+        # We need the docker image name downstream in test & deploy. This saves the full docker image names to outputs
+        id: image-names
+        run: |-
+            GHCR_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build-push.outputs.digest }}"
+            GHCR_IMAGE=`echo ${GHCR_IMAGE} | tr '[:upper:]' '[:lower:]'` # docker requires that all image names be lowercase
+            echo "ghcr.io Docker image name is ${GHCR_IMAGE}"
+            echo "ghcr_image_name=\"${IMAGE}\"" >> $GITHUB_OUTPUT
 
   test:
     needs: build
@@ -66,11 +75,11 @@ jobs:
 
       - name: Pull the latest image
         run: |
-          docker pull ${{ needs.build.outputs.IMAGE_TAG }}
+          docker pull ${{ needs.build.outputs.ghcr_docker_image }}
 
       - name: Run tests using Docker image
         run: |
-          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} python -m pytest tests/
+          docker run --rm ${{ needs.build.outputs.ghcr_docker_image }} python -m pytest tests/
 
       - name: Clean up
         if: always()
