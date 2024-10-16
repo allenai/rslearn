@@ -6,7 +6,7 @@ import shapely
 from rasterio import CRS
 
 from rslearn.const import WGS84_PROJECTION
-from rslearn.utils import Projection, STGeometry
+from rslearn.utils.geometry import Projection, STGeometry, split_shape_at_prime_meridian
 
 WEB_MERCATOR_EPSG = 3857
 
@@ -122,3 +122,59 @@ class TestSTGeometry:
         new_geom = STGeometry.deserialize(json.loads(encoded))
         assert new_geom.shp == geom.shp
         assert new_geom.time_range == geom.time_range
+
+
+class TestSplitPrimeMeridian:
+    def test_point(self):
+        epsilon = 1e-6
+
+        p = split_shape_at_prime_meridian(shapely.Point(0, 0))
+        assert p.x == 0 and p.y == 0
+
+        p = split_shape_at_prime_meridian(shapely.Point(-180, 45))
+        assert abs(p.x - (-180 + epsilon)) < epsilon / 2 and p.y == 45
+
+        p = split_shape_at_prime_meridian(shapely.Point(180, 45))
+        assert abs(p.x - (180 - epsilon)) < epsilon / 2 and p.y == 45
+
+    def test_line(self):
+        line = shapely.LineString(
+            [
+                [175, 1],
+                [-175, 2],
+            ]
+        )
+        output = split_shape_at_prime_meridian(line)
+        # Should consist of two lines, one from (175, 1) to (180-ish, 1.5).
+        # And another from (-180-ish, 1.5) to (-175, 2).
+        epsilon = 1e-3
+        assert isinstance(output, shapely.MultiLineString)
+        assert len(output.geoms) == 2
+        assert (output.geoms[0].coords[0][0] - 175) < epsilon
+        assert (output.geoms[0].coords[0][1] - 1) < epsilon
+        assert (output.geoms[0].coords[1][0] - 180) < epsilon
+        assert (output.geoms[0].coords[1][1] - 1.5) < epsilon
+        assert (output.geoms[1].coords[0][0] + 180) < epsilon
+        assert (output.geoms[1].coords[0][1] - 1.5) < epsilon
+        assert (output.geoms[1].coords[1][0] + 175) < epsilon
+        assert (output.geoms[1].coords[1][1] - 2) < epsilon
+
+    def test_polygon(self):
+        polygon = shapely.Polygon(
+            [
+                [-179, 45],
+                [179, 45],
+                [179, 44],
+                [-179, 44],
+            ]
+        )
+        expected_area = 2
+        epsilon = 1e-3
+        assert (polygon.area - expected_area) > epsilon
+        output = split_shape_at_prime_meridian(polygon)
+        assert (output.area - expected_area) < epsilon
+        assert (output.bounds[0] + 180) < epsilon and (output.bounds[2] - 180) < epsilon
+
+        polygon = shapely.box(-1, -1, 1, 1)
+        output = split_shape_at_prime_meridian(polygon)
+        assert output == polygon
