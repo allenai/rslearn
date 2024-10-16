@@ -50,6 +50,7 @@ class RtreeIndex(SpatialIndex):
         self.counter += 1
         self.index.insert(id=self.counter, coordinates=box, obj=data)
 
+    # TODO: Make a named tuple for all the bounding box stuff
     def query(self, box: tuple[float, float, float, float]) -> list[Any]:
         """Query the index for objects intersecting a box.
 
@@ -61,6 +62,24 @@ class RtreeIndex(SpatialIndex):
         """
         results = self.index.intersection(box, objects=True)
         return [r.object for r in results]
+
+
+def delete_partially_created_local_files(fname: str):
+    """Delete partially created .dat and .idx files."""
+    extensions = [".dat", ".idx"]
+    for ext in extensions:
+        cur_fname = fname + ext
+        if os.path.exists(cur_fname):
+            os.unlink(cur_fname)
+
+
+def copy_cache_to_local_dir(cache_dir: UPath, tmp_dir: str, extension_suffix: str):
+    """Copy the rtree index files from cache_dir to a local temporary directory."""
+    extensions = [".dat", ".idx"]
+    for ext in extensions:
+        with (cache_dir / f"rtree_index{ext}").open("rb") as src:
+            with open(os.path.join(tmp_dir, f"rtree_index{ext}"), "wb") as dst:
+                shutil.copyfileobj(src, dst)
 
 
 def get_cached_rtree(
@@ -82,6 +101,7 @@ def get_cached_rtree(
     Returns:
         the RtreeIndex.
     """
+
     is_local_cache = isinstance(
         cache_dir.fs, fsspec.implementations.local.LocalFileSystem
     )
@@ -96,12 +116,8 @@ def get_cached_rtree(
             local_fname = (cache_dir / "rtree_index").path
         else:
             local_fname = os.path.join(tmp_dir, "rtree_index")
-
-        # Delete any local files that might be partially created.
-        for ext in extensions:
-            cur_fname = local_fname + ext
-            if os.path.exists(cur_fname):
-                os.unlink(cur_fname)
+        print(f"{local_fname=}")
+        delete_partially_created_local_files(local_fname)
 
         rtree_index = RtreeIndex(local_fname)
         build_fn(rtree_index)
