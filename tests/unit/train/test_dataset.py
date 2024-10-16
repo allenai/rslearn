@@ -89,3 +89,40 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset):
             point_coverage[(col, row)] = True
 
     assert all(point_coverage.values())
+
+    # Test with overlap_ratio=0.5 for 2x2 patches
+    split_config_with_overlap = SplitConfig(
+        patch_size=2,
+        load_all_patches=True,
+        overlap_ratio=0.5,
+    )
+    dataset_with_overlap = ModelDataset(
+        image_to_class_dataset,
+        split_config=split_config_with_overlap,
+        task=task,
+        workers=1,
+        inputs={
+            "image": image_data_input,
+            "targets": target_data_input,
+        },
+    )
+
+    point_coverage = {}
+    for col in range(4):
+        for row in range(4):
+            point_coverage[(col, row)] = False
+
+    # With overlap_ratio=0.5, there should be 16 windows given that overlap is 1 pixel.
+    assert len(dataset_with_overlap) == 16
+
+    for _, _, metadata in dataset:
+        bounds = metadata["bounds"]
+
+        for col, row in list(point_coverage.keys()):
+            if col < bounds[0] or col >= bounds[2]:
+                continue
+            if row < bounds[1] or row >= bounds[3]:
+                continue
+            point_coverage[(col, row)] = True
+
+    assert all(point_coverage.values())
