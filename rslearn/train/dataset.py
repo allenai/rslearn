@@ -388,12 +388,12 @@ class ModelDataset(torch.utils.data.Dataset):
                 cur_patches = []
                 for col in range(
                     window.bounds[0],
-                    window.bounds[2] - self.patch_size[0] + 1,
+                    window.bounds[2],
                     self.patch_size[0] - overlap_size,
                 ):
                     for row in range(
                         window.bounds[1],
-                        window.bounds[3] - self.patch_size[1] + 1,
+                        window.bounds[3],
                         self.patch_size[1] - overlap_size,
                     ):
                         cur_patches.append(
