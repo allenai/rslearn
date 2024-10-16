@@ -49,6 +49,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Output image tag
+        run: echo "IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | head -n 1)" >> $GITHUB_OUTPUT
+
   test:
     needs: build
     runs-on: ubuntu-latest
@@ -62,7 +66,7 @@ jobs:
 
       - name: Pull the latest image
         run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker pull ${{ needs.build.outputs.IMAGE_TAG }}
 
       - name: Run tests using Docker image
         run: |
