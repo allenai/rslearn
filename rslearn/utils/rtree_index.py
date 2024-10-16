@@ -116,7 +116,6 @@ def get_cached_rtree(
             local_fname = (cache_dir / "rtree_index").path
         else:
             local_fname = os.path.join(tmp_dir, "rtree_index")
-        print(f"{local_fname=}")
         delete_partially_created_local_files(local_fname)
 
         rtree_index = RtreeIndex(local_fname)
