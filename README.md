@@ -32,10 +32,10 @@ rslearn requires Python 3.10+ (Python 3.12 is recommended).
   pip install .[extra]
 
 
-Quickstart
-----------
+Example Usage
+-------------
 
-This is a quick example of building a remote sensing dataset, and then training a model
+This is an example of building a remote sensing dataset, and then training a model
 on that dataset, using rslearn. Specifically, we will train a model that inputs
 Sentinel-2 images and predicts land cover through a semantic segmentation task.
 
