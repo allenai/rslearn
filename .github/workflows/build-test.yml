@@ -62,7 +62,7 @@ jobs:
             echo "ghcr.io Docker image name is ${GHCR_IMAGE}"
             echo "ghcr_image_name=\"${GHCR_IMAGE}\"" >> $GITHUB_OUTPUT
 
-  test:
+  unit-test:
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -77,9 +77,13 @@ jobs:
         run: |
           docker pull ${{ needs.build.outputs.ghcr_docker_image }}
 
-      - name: Run tests using Docker image
+      - name: Run Unit Tests
         run: |
-          docker run --rm ${{ needs.build.outputs.ghcr_docker_image }} python -m pytest tests/
+          docker run --rm ${{ needs.build.outputs.ghcr_docker_image }} python -m pytest tests/ --ignore tests/integration/
+
+      - name: Run Integration Tests
+        run: |
+          docker run --rm ${{ needs.build.outputs.ghcr_docker_image }} python -m pytest tests/ --ignore tests/unit/
 
       - name: Clean up
         if: always()
