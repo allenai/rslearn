@@ -52,6 +52,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      - name: Set Environment Variables
+        run: |
+          echo "TEST_BUCKET=test-bucket" >> $GITHUB_ENV
+          echo "TEST_PREFIX=tests/"
 
       - name: Store Image Names
         # We need the docker image name downstream in test & deploy. This saves the full docker image names to outputs
@@ -62,7 +66,7 @@ jobs:
             echo "ghcr.io Docker image name is ${GHCR_IMAGE}"
             echo "ghcr_image_name=\"${GHCR_IMAGE}\"" >> $GITHUB_OUTPUT
 
-  unit-test:
+  test:
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -77,13 +81,19 @@ jobs:
         run: |
           docker pull ${{ needs.build.outputs.ghcr_docker_image }}
 
+      - name: Set Environment Variables
+        run: |
+          echo "TEST_BUCKET=test-bucket" >> $GITHUB_ENV
+          echo "TEST_PREFIX=tests/"
+
       - name: Run Unit Tests
         run: |
-          docker run --rm ${{ needs.build.outputs.ghcr_docker_image }} python -m pytest tests/ --ignore tests/integration/
+          docker run --rm ${{ needs.build.outputs.ghcr_docker_image }} python -m pytest -n auto tests/ --ignore tests/integration/ -vv
 
       - name: Run Integration Tests
         run: |
-          docker run --rm ${{ needs.build.outputs.ghcr_docker_image }} python -m pytest tests/ --ignore tests/unit/
+          docker compose up -d --wait --quiet-pull
+          docker run --rm ${{ needs.build.outputs.ghcr_docker_image }} python -m pytest tests/ --ignore tests/unit/ -vv
 
       - name: Clean up
         if: always()

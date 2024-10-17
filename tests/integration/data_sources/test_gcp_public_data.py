@@ -5,19 +5,14 @@ import random
 import pytest
 from upath import UPath
 
-from rslearn.config import (
-    BandSetConfig,
-    DType,
-    LayerType,
-    QueryConfig,
-    RasterLayerConfig,
-    SpaceMode,
-)
+from rslearn.config import (BandSetConfig, DType, LayerType, QueryConfig,
+                            RasterLayerConfig, SpaceMode)
 from rslearn.data_sources.gcp_public_data import Sentinel2
 from rslearn.tile_stores import FileTileStore
 from rslearn.utils import STGeometry
 
 
+# What functionality are we really testing here how does local vs gcs compare is it the ingestion Otherwise we can do in memory bucket but unsure
 class TestSentinel2:
     """Tests the Sentinel2 data source."""
 
