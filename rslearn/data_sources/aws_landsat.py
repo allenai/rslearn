@@ -115,15 +115,15 @@ class LandsatOliTirs(DataSource):
 
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
         self.metadata_cache_dir.mkdir(parents=True, exist_ok=True)
-        import fsspec
-        print(self.metadata_cache_dir.protocol)
-        fs = fsspec.filesystem(self.metadata_cache_dir.protocol)
+        import os
+
         # Assert that test-bucket-2 exists
         if self.metadata_cache_dir.protocol == "gs":
             from google.cloud import storage
 
             storage_client = storage.Client()
-            bucket_name = "test-bucket2"
+            bucket_name = os.environ.get("TEST_BUCKET", "test-bucket2")
+
 
             try:
                 bucket = storage_client.get_bucket(bucket_name)
