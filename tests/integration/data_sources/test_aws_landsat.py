@@ -50,7 +50,7 @@ class TestLandsatOliTirs:
         metadata_cache_dir = UPath(tmp_path) / "cache"
         self.run_simple_test(tile_store_dir, metadata_cache_dir, seattle2020)
 
-    def test_gcs(self, seattle2020: STGeometry, test_bucket_path: str):
+    def test_gcs(self, seattle2020: STGeometry, test_bucket: str):
         """Test ingesting to GCS.
 
         Main thing is to test metadata_cache_dir being on GCS.
@@ -58,15 +58,7 @@ class TestLandsatOliTirs:
         os.environ["STORAGE_EMULATOR_HOST"] = "http://localhost:4443"
         test_id = random.randint(10000, 99999)
         test_id_prefix = f"test_{test_id}/"
-        test_bucket = "test-bucket"
         test_path = UPath(f"gs://{test_bucket}/{test_id_prefix}")
         tile_store_dir = test_path / "tiles"
         metadata_cache_dir = test_path / "cache"
-        # write a file using fspech to each of the
-        #  directories so we can have the dire
-
-        # with fsspec.open(tile_store_dir / "test_file", "w") as f:
-        #     f.write("test")
-        # with fsspec.open(metadata_cache_dir / "test_file", "w") as f:
-        #     f.write("test")
         self.run_simple_test(tile_store_dir, metadata_cache_dir, seattle2020)
