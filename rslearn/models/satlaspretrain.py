@@ -25,7 +25,7 @@ class SatlasPretrain(torch.nn.Module):
         super().__init__()
         weights_manager = satlaspretrain_models.Weights()
         self.model = weights_manager.get_pretrained_model(
-            model_identifier=model_identifier, fpn=fpn
+            model_identifier=model_identifier, fpn=fpn, device="cpu"
         )
 
         if "SwinB" in model_identifier:
