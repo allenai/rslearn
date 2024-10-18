@@ -13,6 +13,7 @@ import boto3
 import dateutil.parser
 import fiona
 import fiona.transform
+import fsspec
 import pytimeparse
 import rasterio
 import shapely
@@ -113,6 +114,21 @@ class LandsatOliTirs(DataSource):
 
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
         self.metadata_cache_dir.mkdir(parents=True, exist_ok=True)
+        import fsspec
+        print(self.metadata_cache_dir.protocol)
+        fs = fsspec.filesystem(self.metadata_cache_dir.protocol)
+        # Assert that test-bucket-2 exists
+        if self.metadata_cache_dir.protocol == "gs":
+            from google.cloud import storage
+
+            storage_client = storage.Client()
+            bucket_name = "test-bucket2"
+
+            try:
+                bucket = storage_client.get_bucket(bucket_name)
+                print(f"Bucket {bucket_name} exists.")
+            except Exception as e:
+                raise AssertionError(f"Bucket {bucket_name} does not exist: {str(e)}")
 
     @staticmethod
     def from_config(config: LayerConfig, ds_path: UPath) -> "LandsatOliTirs":
@@ -210,11 +226,14 @@ class LandsatOliTirs(DataSource):
         Returns:
             List of (polygon, path, row).
         """
+        import os
+        os.environ["STORAGE_EMULATOR_HOST"] = "http://0.0.0.0:4443"
         prefix = "WRS2_descending"
         shp_fname = self.metadata_cache_dir / f"{prefix}.shp"
         if not shp_fname.exists():
             # Download and extract zip to cache dir.
             zip_fname = self.metadata_cache_dir / f"{prefix}.zip"
+            print(f"Downloading {self.wrs2_url} to {zip_fname}")
             with urllib.request.urlopen(self.wrs2_url) as response:
                 with zip_fname.open("wb") as f:
                     shutil.copyfileobj(response, f)

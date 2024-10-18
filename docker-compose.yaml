@@ -11,6 +11,8 @@ services:
     restart: unless-stopped
     ports:
       - "4443:4443"
+    environment:
+      - PUBLIC_HOST=localhost
     healthcheck:
       test:
         [

@@ -7,11 +7,9 @@ from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
-from rslearn.dataset.manage import (
-    ingest_dataset_windows,
-    materialize_dataset_windows,
-    prepare_dataset_windows,
-)
+from rslearn.dataset.manage import (ingest_dataset_windows,
+                                    materialize_dataset_windows,
+                                    prepare_dataset_windows)
 from rslearn.utils import Feature, STGeometry
 from rslearn.utils.vector_format import load_vector_format
 

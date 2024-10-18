@@ -4,13 +4,9 @@ import random
 
 from upath import UPath
 
-from rslearn.config import (
-    LayerType,
-    QueryConfig,
-    SpaceMode,
-    VectorLayerConfig,
-)
-from rslearn.data_sources.openstreetmap import FeatureType, Filter, OpenStreetMap
+from rslearn.config import LayerType, QueryConfig, SpaceMode, VectorLayerConfig
+from rslearn.data_sources.openstreetmap import (FeatureType, Filter,
+                                                OpenStreetMap)
 from rslearn.tile_stores import FileTileStore
 from rslearn.utils import STGeometry
 
