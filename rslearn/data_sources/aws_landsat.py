@@ -13,6 +13,7 @@ import boto3
 import dateutil.parser
 import fiona
 import fiona.transform
+import fsspec
 import pytimeparse
 import rasterio
 import shapely
@@ -112,7 +113,9 @@ class LandsatOliTirs(DataSource):
         self.sort_by = sort_by
 
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
-
+        # print(f"Metadata cache dir: {self.metadata_cache_dir}")
+        # fs = fsspec.filesystem(self.metadata_cache_dir.protocol)
+        # fs.makedirs(self.metadata_cache_dir, exist_ok=True)
         self.metadata_cache_dir.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
