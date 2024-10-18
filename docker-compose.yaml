@@ -1,0 +1,27 @@
+version: '3.9'
+
+services:
+  fake-gcs-server:
+    image: fsouza/fake-gcs-server:1.47.8
+    command:
+      - "-scheme"
+      - "http"
+    volumes:
+      - ./test-data/fakegcs:/data
+    restart: unless-stopped
+    ports:
+      - "4443:4443"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "nc -zv 127.0.0.1 4443"
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 120
+    environment:
+      - STORAGE_EMULATOR_HOST=http://fake-gcs-server:4443
+      - TEST_BUCKET=test-bucket  # Define the test bucket name
+volumes:
+  fake-gcs-data:
