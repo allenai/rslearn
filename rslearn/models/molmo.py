@@ -24,13 +24,13 @@ class Molmo(torch.nn.Module):
             model_name,
             trust_remote_code=True,
             torch_dtype="auto",
-            device_map="auto",
+            device_map="cpu",
         )
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             trust_remote_code=True,
             torch_dtype="auto",
-            device_map="auto",
+            device_map="cpu",
         )
         self.encoder = model.model.vision_backbone
 
