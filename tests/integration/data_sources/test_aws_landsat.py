@@ -50,7 +50,7 @@ class TestLandsatOliTirs:
         metadata_cache_dir = UPath(tmp_path) / "cache"
         self.run_simple_test(tile_store_dir, metadata_cache_dir, seattle2020)
 
-    def test_gcs(self, seattle2020: STGeometry, test_bucket: str):
+    def test_gcs(self, seattle2020: STGeometry, test_bucket_setup: str):
         """Test ingesting to GCS.
 
         Main thing is to test metadata_cache_dir being on GCS.
@@ -58,7 +58,7 @@ class TestLandsatOliTirs:
         print(f"storage emulator host: {os.environ.get('STORAGE_EMULATOR_HOST')}")
         test_id = random.randint(10000, 99999)
         test_id_prefix = f"test_{test_id}/"
-        test_path = UPath(f"gs://{test_bucket}/{test_id_prefix}")
+        test_path = UPath(f"gs://{test_bucket_setup}/{test_id_prefix}")
         tile_store_dir = test_path / "tiles"
         metadata_cache_dir = test_path / "cache"
         self.run_simple_test(tile_store_dir, metadata_cache_dir, seattle2020)

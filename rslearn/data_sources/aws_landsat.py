@@ -111,6 +111,7 @@ class LandsatOliTirs(DataSource):
         self.metadata_cache_dir = metadata_cache_dir
         self.max_time_delta = max_time_delta
         self.sort_by = sort_by
+        print(self.metadata_cache_dir)
 
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
         self.metadata_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -226,8 +227,6 @@ class LandsatOliTirs(DataSource):
         Returns:
             List of (polygon, path, row).
         """
-        import os
-        os.environ["STORAGE_EMULATOR_HOST"] = "http://0.0.0.0:4443"
         prefix = "WRS2_descending"
         shp_fname = self.metadata_cache_dir / f"{prefix}.shp"
         if not shp_fname.exists():
