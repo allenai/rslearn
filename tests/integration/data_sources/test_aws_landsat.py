@@ -61,15 +61,19 @@ class TestLandsatOliTirs:
         test_id_prefix = f"test_{test_id}/"
         test_path = UPath(f"gs://{test_bucket_setup}/{test_id_prefix}")
         tile_store_dir = test_path / "tiles"
+        # Is this necessary to make the tile store dir? no it is done in encode_raster
         tile_store_dir.mkdir(parents=True, exist_ok=True)
         metadata_cache_dir = test_path / "cache"
 
         # Assert that test-bucket-2 exists
         if metadata_cache_dir.protocol == "gs":
+            from google.auth.credentials import AnonymousCredentials
             from google.cloud import storage
 
-            storage_client = storage.Client()
-            bucket_name = os.environ.get("TEST_BUCKET", "test-bucket3")
+            storage_client = storage.Client(
+                project="test-project", credentials=AnonymousCredentials()
+            )
+            bucket_name = os.environ.get("TEST_BUCKET", "test-bucket7")
             try:
                 bucket = storage_client.get_bucket(bucket_name)
                 print(f"Bucket {bucket_name} exists.")
