@@ -1,4 +1,6 @@
+accelerate
 earthengine-api
+einops
 gcsfs
 google-cloud-storage
 mgrs
@@ -8,4 +10,5 @@ pycocotools
 rtree
 satlaspretrain_models
 scipy
+transformers
 wandb
