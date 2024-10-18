@@ -98,7 +98,7 @@ jobs:
       - name: Run Integration Tests
         run: |
           docker compose up -d --wait --quiet-pull
-          docker run --rm ${{ needs.build.outputs.ghcr_docker_image }} pytest tests/tests/integration/data_sources/test_aws_landsat.py
+          docker run --rm ${{ needs.build.outputs.ghcr_docker_image }} pytest tests/integration/data_sources/test_aws_landsat.py
 
       - name: Clean up
         if: always()
