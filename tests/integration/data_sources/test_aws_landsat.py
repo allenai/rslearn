@@ -55,7 +55,7 @@ class TestLandsatOliTirs:
 
         Main thing is to test metadata_cache_dir being on GCS.
         """
-        os.environ["STORAGE_EMULATOR_HOST"] = "http://localhost:4443"
+        print(f"storage emulator host: {os.environ.get('STORAGE_EMULATOR_HOST')}")
         test_id = random.randint(10000, 99999)
         test_id_prefix = f"test_{test_id}/"
         test_path = UPath(f"gs://{test_bucket}/{test_id_prefix}")

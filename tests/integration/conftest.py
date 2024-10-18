@@ -13,6 +13,11 @@ __all__ = [
 ]
 
 
+@pytest.fixture(scope="session", autouse=True)
+def set_storage_emulator_host():
+    os.environ.setdefault("STORAGE_EMULATOR_HOST", "http://localhost:4443")
+
+
 @pytest.fixture(scope="session")
 def test_bucket():
     return os.environ.get("TEST_BUCKET", "test-bucket1")
@@ -26,7 +31,7 @@ def test_prefix():
 @pytest.fixture(scope="session")
 def test_bucket_path(test_bucket, test_prefix):
     """For local testing we can use a real GCS bucket, but for CI we need to use a fake one."""
-    host_prefix = os.environ.get("STORAGE_EMULATOR_HOST", "gcs://")
+    host_prefix = os.environ.get("STORAGE_EMULATOR_HOST")
     if host_prefix == "gcs://":
         # We're using a real GCS bucket
         return f"{host_prefix}{test_bucket}/{test_prefix}"
