@@ -94,7 +94,7 @@ jobs:
           docker run --rm ${{ needs.build.outputs.ghcr_docker_image }} pytest -n auto tests/ --ignore tests/integration/ -vv
       - name: Build docker images
         run: |
-          COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1 docker compose -f docker-compose.yaml build
+          ls -la && COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1 docker compose -f docker-compose.yaml build
       - name: Run Integration Tests
         run: |
           docker compose docker up -d --wait --quiet-pull
