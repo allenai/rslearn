@@ -115,21 +115,6 @@ class LandsatOliTirs(DataSource):
 
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
         self.metadata_cache_dir.mkdir(parents=True, exist_ok=True)
-        import os
-
-        # Assert that test-bucket-2 exists
-        if self.metadata_cache_dir.protocol == "gs":
-            from google.cloud import storage
-
-            storage_client = storage.Client()
-            bucket_name = os.environ.get("TEST_BUCKET", "test-bucket2")
-
-
-            try:
-                bucket = storage_client.get_bucket(bucket_name)
-                print(f"Bucket {bucket_name} exists.")
-            except Exception as e:
-                raise AssertionError(f"Bucket {bucket_name} does not exist: {str(e)}")
 
     @staticmethod
     def from_config(config: LayerConfig, ds_path: UPath) -> "LandsatOliTirs":
