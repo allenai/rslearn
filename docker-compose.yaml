@@ -6,6 +6,10 @@ services:
     command:
       - "-scheme"
       - "http"
+      - "-backend"
+      - "memory"
+      - "-public-host"
+      - "localhost:4443"
     volumes:
       - ./test-data/fakegcs:/data
     restart: unless-stopped
