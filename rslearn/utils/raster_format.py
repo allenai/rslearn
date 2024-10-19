@@ -339,9 +339,6 @@ class GeotiffRasterFormat(RasterFormat):
             profile["blockysize"] = self.block_size
 
         path.mkdir(parents=True, exist_ok=True)
-        print(path)
-        print(path.fs.protocol)
-        print(path.fs._location)
         path_to_write = path / self.fname
         parent_file = path_to_write.parent
         parent_file.mkdir(parents=True, exist_ok=True)
