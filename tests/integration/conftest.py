@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,11 @@ __all__ = [
 @pytest.fixture(scope="session", autouse=True)
 def set_storage_emulator_host():
     os.environ.setdefault("STORAGE_EMULATOR_HOST", "http://localhost:4443")
+    import unittest.mock
+
+    # unittest.mock.patch.dict(os.environ, {
+    #     "GOOGLE_APPLICATION_CREDENTIALS": "tests/fake-gcs_service-account.json"
+    # }).start()
 
 
 @pytest.fixture(scope="session")

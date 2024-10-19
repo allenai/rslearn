@@ -1,4 +1,4 @@
-name: Build, Test, and Publish Docker Image
+name: Build, Test, and Publish Docker Image RSLEARN
 
 on: # TODO: Only run on pull request or push to main
   push:
@@ -99,6 +99,8 @@ jobs:
       - name: Run Integration Tests
         run: |
           docker compose up -d --wait --quiet-pull
+          sleep 10
+          curl http://0.0.0.0:4443/storage/v1/b/test-bucket
           docker run --rm \
             -e TEST_BUCKET=${{ env.TEST_BUCKET }} \
             -e TEST_PREFIX=${{ env.TEST_PREFIX }} \
