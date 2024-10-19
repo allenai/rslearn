@@ -2,6 +2,7 @@ import os
 import pathlib
 import random
 
+from google.cloud import storage
 from upath import UPath
 
 from rslearn.config import (BandSetConfig, DType, LayerType, QueryConfig,
@@ -67,15 +68,13 @@ class TestLandsatOliTirs:
 
         # Create the bucket if it doesn't exist
         if metadata_cache_dir.protocol == "gs":
-            from google.auth.credentials import AnonymousCredentials
-            from google.cloud import storage
 
             storage_client = storage.Client(
-                project="test-project", credentials=AnonymousCredentials()
+                project="test-project",
             )
             bucket_name = os.environ.get("TEST_BUCKET", "test-bucket7")
             try:
-                bucket = storage_client.get_bucket(bucket_name)
+                storage_client.get_bucket(bucket_name)
                 print(f"Bucket {bucket_name} exists.")
             except Exception as e:
                 raise AssertionError(f"Bucket {bucket_name} does not exist: {str(e)}")
