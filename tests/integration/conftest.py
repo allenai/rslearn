@@ -20,7 +20,9 @@ def set_storage_emulator_host():
 
 @pytest.fixture(scope="session")
 def test_bucket():
-    return os.environ.get("TEST_BUCKET", "test-bucket7")
+    test_bucket = os.environ.get("TEST_BUCKET", "test-bucket7")
+    print(f"test_bucket: {test_bucket}")
+    return test_bucket
 
 
 @pytest.fixture(scope="session")

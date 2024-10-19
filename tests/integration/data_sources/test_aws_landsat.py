@@ -65,7 +65,7 @@ class TestLandsatOliTirs:
         tile_store_dir.mkdir(parents=True, exist_ok=True)
         metadata_cache_dir = test_path / "cache"
 
-        # Assert that test-bucket-2 exists
+        # Create the bucket if it doesn't exist
         if metadata_cache_dir.protocol == "gs":
             from google.auth.credentials import AnonymousCredentials
             from google.cloud import storage
