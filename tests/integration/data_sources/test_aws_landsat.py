@@ -51,7 +51,7 @@ class TestLandsatOliTirs:
         metadata_cache_dir = UPath(tmp_path) / "cache"
         self.run_simple_test(tile_store_dir, metadata_cache_dir, seattle2020)
 
-    def test_gcs(self, seattle2020: STGeometry, test_bucket_setup: str):
+    def test_gcs(self, seattle2020: STGeometry, test_bucket: str):
         """Test ingesting to GCS.
 
         Main thing is to test metadata_cache_dir being on GCS.
@@ -60,7 +60,7 @@ class TestLandsatOliTirs:
 
         test_id = random.randint(10000, 99999)
         test_id_prefix = f"test_{test_id}/"
-        test_path = UPath(f"gs://{test_bucket_setup}/{test_id_prefix}")
+        test_path = UPath(f"gs://{test_bucket}/{test_id_prefix}")
         tile_store_dir = test_path / "tiles"
         # Is this necessary to make the tile store dir? no it is done in encode_raster
         tile_store_dir.mkdir(parents=True, exist_ok=True)
@@ -71,11 +71,11 @@ class TestLandsatOliTirs:
 
             storage_client = storage.Client(
                 project="test-project",
+                credentials=None
             )
-            bucket_name = os.environ.get("TEST_BUCKET", "test-bucket7")
             try:
-                storage_client.get_bucket(bucket_name)
-                print(f"Bucket {bucket_name} exists.")
+                storage_client.get_bucket(test_bucket)
+                print(f"Bucket {test_bucket} exists.")
             except Exception as e:
-                raise AssertionError(f"Bucket {bucket_name} does not exist: {str(e)}")
+                raise AssertionError(f"Bucket {test_bucket} does not exist: {str(e)}")
         self.run_simple_test(tile_store_dir, metadata_cache_dir, seattle2020)
