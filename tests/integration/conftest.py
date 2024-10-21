@@ -14,9 +14,9 @@ __all__ = [
 ]
 
 
-@pytest.fixture(scope="session", autouse=True)
-def set_storage_emulator_host():
-    os.environ.setdefault("STORAGE_EMULATOR_HOST", "http://localhost:4443")
+# @pytest.fixture(scope="session", autouse=True)
+# def set_storage_emulator_host():
+#     os.environ.setdefault("STORAGE_EMULATOR_HOST", "http://localhost:4443")
 
 
 @pytest.fixture(scope="session")

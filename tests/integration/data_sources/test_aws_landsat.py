@@ -56,7 +56,6 @@ class TestLandsatOliTirs:
 
         Main thing is to test metadata_cache_dir being on GCS.
         """
-        print(f"storage emulator host: {os.environ.get('STORAGE_EMULATOR_HOST')}")
 
         test_id = random.randint(10000, 99999)
         test_id_prefix = f"test_{test_id}/"
