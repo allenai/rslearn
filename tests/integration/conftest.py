@@ -14,13 +14,15 @@ __all__ = [
 ]
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="session", autouse=True)
 def test_bucket():
-    test_bucket = os.environ.get("TEST_BUCKET", "test-bucket-rslearn")
+    os.environ.setdefault("TEST_BUCKET", "test-bucket-rslearn")
+    test_bucket = os.environ["TEST_BUCKET"]
     print(f"test_bucket: {test_bucket}")
     return test_bucket
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="session", autouse=True)
 def test_prefix():
-    return os.environ.get("TEST_PREFIX", "tests/")
+    os.environ.setdefault("TEST_PREFIX", "tests/")
+    return os.environ["TEST_PREFIX"]
