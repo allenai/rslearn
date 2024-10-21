@@ -43,10 +43,6 @@ jobs:
             type=sha,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Authenticate into gcp
-        uses: "google-github-actions/auth@v2"
-        with:
-          credentials_json: ${{secrets.GOOGLE_CREDENTIALS }}
       - name: Build and push Docker image
         id: build-push
         uses: docker/build-push-action@v6
@@ -99,12 +95,16 @@ jobs:
           docker run --rm ${{ needs.build.outputs.ghcr_docker_image }} pytest -n auto tests/ --ignore tests/integration/ -vv
       - name: Build docker images
         run: |
-          ls -la && COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1 docker compose -f docker-compose.yaml build
+          COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1 docker compose -f docker-compose.yaml build
+
+      - name: Authenticate into gcp
+        uses: "google-github-actions/auth@v2"
+        with:
+          credentials_json: ${{secrets.GOOGLE_CREDENTIALS }}
+
       - name: Run Integration Tests
         run: |
           docker compose up -d --wait --quiet-pull
-          sleep 10
-          curl http://0.0.0.0:4443/storage/v1/b/test-bucket
           docker run --rm \
             -e TEST_BUCKET=${{ env.TEST_BUCKET }} \
             -e TEST_PREFIX=${{ env.TEST_PREFIX }} \
