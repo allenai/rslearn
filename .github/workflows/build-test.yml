@@ -116,7 +116,7 @@ jobs:
             -e AWS_DEFAULT_REGION=${{ secrets.AWS_DEFAULT_REGION }} \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
-            pytest tests/integration/data_sources/test_aws_landsat.py -k test_gcs
+            pytest tests/integration/data_sources/
 
       - name: Clean up
         if: always()

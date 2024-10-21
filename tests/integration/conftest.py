@@ -14,14 +14,9 @@ __all__ = [
 ]
 
 
-# @pytest.fixture(scope="session", autouse=True)
-# def set_storage_emulator_host():
-#     os.environ.setdefault("STORAGE_EMULATOR_HOST", "http://localhost:4443")
-
-
 @pytest.fixture(scope="session")
 def test_bucket():
-    test_bucket = os.environ.get("TEST_BUCKET", "test-bucket7")
+    test_bucket = os.environ.get("TEST_BUCKET", "test-bucket-rslearn")
     print(f"test_bucket: {test_bucket}")
     return test_bucket
 
