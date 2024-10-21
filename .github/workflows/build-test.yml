@@ -101,7 +101,7 @@ jobs:
         run: |
           echo "Docker Image: ${{ needs.build.outputs.ghcr_docker_image }}"
 
-      - name: Run Integration Tests
+      - name: Run Data Sources Integration Tests
         # Try running these tests in parallel
         run: |
           docker run --rm \
@@ -113,10 +113,18 @@ jobs:
             -e AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
             -e AWS_DEFAULT_REGION=${{ secrets.AWS_DEFAULT_REGION }} \
             -e TEST_SERVICE_ACCOUNT_NAME=${{ secrets.TEST_SERVICE_ACCOUNT_NAME }} \
+            -e TEST_XYZ_TILES_TEMPLATE=${{ secrets.TEST_XYZ_TILES_TEMPLATE }} \
             -e IS_CI=${{ env.IS_CI }} \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
             pytest tests/integration/data_sources/
+
+      - name: Run All other Integration Tests
+        run: |
+          docker run --rm \
+            --network host \
+            ${{ needs.build.outputs.ghcr_docker_image }} \
+            pytest tests/integration/ --ignore tests/integration/data_sources/ -vv
       # Add Job to clean up test bucket
       - name: Clean up
         if: always()
