@@ -68,7 +68,7 @@ class TestLandsatOliTirs:
 
         # Create the bucket if it doesn't exist
         if metadata_cache_dir.protocol == "gs":
-            storage_client = storage.Client.create_anonymous_client()
+            storage_client = storage.Client()
             try:
                 storage_client.get_bucket(test_bucket)
                 print(f"Bucket {test_bucket} exists.")
