@@ -1,0 +1,33 @@
+name: Lint (type checking, security, code quality, ruff)
+
+on:
+  push:
+    branches:
+      - "henryh/add-linting-workflows"
+  pull_request:
+    branches:
+      - "master"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linting:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.10.10
+          pip-version: 24
+
+      - name: Linting
+        run: |
+          pip install pre-commit interrogate
+          pre-commit run --all-files
