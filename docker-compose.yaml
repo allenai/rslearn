@@ -7,7 +7,7 @@ services:
       - "-backend"
       - "memory"
       - "-public-host"
-      - "0.0.0.0:4443"
+      - "localhost:4443"
     volumes:
       - ./test-data/fakegcs:/data
     restart: unless-stopped
@@ -17,8 +17,10 @@ services:
       test:
         [
           "CMD-SHELL",
-          "curl -f http://localhost:4443/ || exit 1"
+          "nc -zv 127.0.0.1 4443"
         ]
       interval: 2s
       timeout: 2s
       retries: 120
+volumes:
+  fake-gcs-data:
