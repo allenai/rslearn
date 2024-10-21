@@ -61,11 +61,9 @@ class TestLandsatOliTirs:
         test_id_prefix = f"test_{test_id}/"
         test_path = UPath(f"gs://{test_bucket}/{test_id_prefix}")
         tile_store_dir = test_path / "tiles"
-        # Is this necessary to make the tile store dir? no it is done in encode_raster
         print(f"test_path: {test_path}")
         print(f"test_bucket: {test_bucket}")
         print(f"tile_store_dir: {tile_store_dir}")
-        tile_store_dir.mkdir(parents=True, exist_ok=True)
         metadata_cache_dir = test_path / "cache"
 
         # Create the bucket if it doesn't exist
