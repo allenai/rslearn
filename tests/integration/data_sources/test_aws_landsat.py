@@ -62,11 +62,4 @@ class TestLandsatOliTirs:
         test_path = UPath(f"gs://{test_bucket}/{test_id_prefix}")
         tile_store_dir = test_path / "tiles"
         metadata_cache_dir = test_path / "cache"
-        if metadata_cache_dir.protocol == "gs":
-            storage_client = storage.Client()
-            try:
-                storage_client.get_bucket(test_bucket)
-                print(f"Bucket {test_bucket} exists.")
-            except Exception as e:
-                raise AssertionError(f"Bucket {test_bucket} does not exist: {str(e)}")
         self.run_simple_test(tile_store_dir, metadata_cache_dir, seattle2020)
