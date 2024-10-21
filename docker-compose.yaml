@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   fake-gcs-server:
     image: fsouza/fake-gcs-server:1.47.8
