@@ -1,10 +1,80 @@
+exclude_types: ["*.geojson"]
+ci:
+  autofix_prs: false
+  autoupdate_branch: ""
+  autoupdate_commit_msg: "[pre-commit.ci] pre-commit autoupdate"
+  autoupdate_schedule: weekly
+  skip: [end-of-file-fixer, equirements-txt-fixer]
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-json
+      - id: mixed-line-ending
+      - id: requirements-txt-fixer
+      - id: pretty-format-json
+        args: ["--autofix"]
+      - id: check-case-conflict
+      - id: check-docstring-first
+      - id: check-added-large-files
+        exclude: wheels/*
+      - id: check-ast
+      - id: check-byte-order-marker
+      - id: check-executables-have-shebangs
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: debug-statements
+      - id: detect-aws-credentials
+        args: [--allow-missing-credentials]
+      - id: detect-private-key
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.1.1
+    hooks:
+      - id: mypy
+        args: [
+            --install-types,
+            --ignore-missing-imports,
+            --disallow-untyped-defs,
+            --ignore-missing-imports,
+            --non-interactive,
+            # --no-namespace-packages,
+            --namespace-packages,
+          ]
+        additional_dependencies:
+          - "pydantic>=2.7.1,<3"
+          - "types-protobuf"
+        exclude: ./.*_pb2_.*.py
+  - repo: https://github.com/PyCQA/bandit
+    rev: "1.7.5"
+    hooks:
+      - id: bandit
+        exclude: ^tests/
+        args:
+          - -s
+          - B101,B311,B324,B108,B104
+  - repo: local
+    hooks:
+      - id: interrogate
+        name: interrogate
+        language: system
+        entry: interrogate
+        types: [python]
+        args:
+          [
+            --ignore-init-method,
+            --ignore-init-module,
+            -p,
+            -vv,
+            rslearn,
+            --fail-under=80,
+          ]
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    # Ruff version.
     rev: v0.4.4
     hooks:
-      # Run the linter.
       - id: ruff
         args: [ --fix ]
-      # Run the formatter.
       - id: ruff-format
