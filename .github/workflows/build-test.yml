@@ -87,7 +87,6 @@ jobs:
       - name: Set Environment Variables
         run: |
           echo "TEST_BUCKET=test-bucket" >> $GITHUB_ENV
-          echo "TEST_PREFIX=tests/" >> $GITHUB_ENV
           echo "STORAGE_EMULATOR_HOST=http://localhost:4443" >> $GITHUB_ENV
 
       - name: Run Unit Tests
@@ -111,7 +110,6 @@ jobs:
           sleep 20 && \
           docker run --rm \
             -e TEST_BUCKET=${{ env.TEST_BUCKET }} \
-            -e TEST_PREFIX=${{ env.TEST_PREFIX }} \
             -e STORAGE_EMULATOR_HOST=${{ env.STORAGE_EMULATOR_HOST }} \
             -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-credentials.json \
             -e AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
