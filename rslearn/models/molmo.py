@@ -41,7 +41,7 @@ class Molmo(torch.nn.Module):
 
         Inputs:
             inputs: input dicts that must include "image" key containing the image to
-                process.
+                process. The images should have values 0-255.
             targets: ignored
         """
         device = inputs[0]["image"].device
