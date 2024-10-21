@@ -20,6 +20,7 @@ class TestOpenStreetMap:
             LayerType.VECTOR,
         )
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
+        # Is there a smaller area we can use?
         data_source = OpenStreetMap(
             config=layer_config,
             pbf_fnames=[

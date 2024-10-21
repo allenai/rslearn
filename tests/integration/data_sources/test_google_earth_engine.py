@@ -4,14 +4,8 @@ import random
 
 from upath import UPath
 
-from rslearn.config import (
-    BandSetConfig,
-    DType,
-    LayerType,
-    QueryConfig,
-    RasterLayerConfig,
-    SpaceMode,
-)
+from rslearn.config import (BandSetConfig, DType, LayerType, QueryConfig,
+                            RasterLayerConfig, SpaceMode)
 from rslearn.data_sources.google_earth_engine import GEE
 from rslearn.tile_stores import FileTileStore
 from rslearn.utils import STGeometry
@@ -35,10 +29,10 @@ class TestGEE:
         data_source = GEE(
             config=layer_config,
             collection_name="COPERNICUS/S1_GRD",
-            gcs_bucket_name=os.environ["TEST_GEE_BUCKET"],
-            service_account_name=os.environ["TEST_GEE_SERVICE_ACCOUNT_NAME"],
+            gcs_bucket_name=os.environ["TEST_BUCKET"],
+            service_account_name=os.environ["TEST_SERVICE_ACCOUNT_NAME"],
             service_account_credentials=os.environ[
-                "TEST_GEE_SERVICE_ACCOUNT_CREDENTIALS"
+                "GOOGLE_APPLICATION_CREDENTIALS"
             ],
             filters=[
                 ("transmitterReceiverPolarisation", ["VV", "VH"]),
