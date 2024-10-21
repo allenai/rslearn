@@ -17,10 +17,8 @@ services:
       test:
         [
           "CMD-SHELL",
-          "nc -zv 127.0.0.1 4443"
+          "curl -f http://localhost:4443/ || exit 1"
         ]
       interval: 2s
       timeout: 2s
       retries: 120
-volumes:
-  fake-gcs-data:
