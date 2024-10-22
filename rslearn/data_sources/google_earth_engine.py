@@ -272,7 +272,7 @@ class GEE(DataSource):
                         src = rasterio.open(local_fname)
                         rasterio_datasets.append(src)
 
-                    merge_kwargs = {"datasets": rasterio_datasets}
+                    merge_kwargs = {"sources": rasterio_datasets}
                     if self.dtype:
                         merge_kwargs["dtype"] = self.dtype.value
                     array, transform = rasterio.merge.merge(**merge_kwargs)

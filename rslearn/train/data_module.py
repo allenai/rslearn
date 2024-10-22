@@ -106,12 +106,13 @@ class RslearnDataModule(L.LightningDataModule):
 
     def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:
         dataset = self.datasets[split]
+        persistent_workers = self.num_workers > 0
         kwargs = dict(
             dataset=dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             collate_fn=collate_fn,
-            persistent_workers=True,
+            persistent_workers=persistent_workers,
         )
         sampler_factory = self.split_configs[split].sampler
         if sampler_factory:
