@@ -1,6 +1,6 @@
 """Utilities shared by data sources."""
 
-from typing import TypeVar
+from typing import Generic, TypeVar
 
 from rslearn.config import QueryConfig, SpaceMode, TimeMode
 from rslearn.data_sources import Item
@@ -17,8 +17,8 @@ ItemType = TypeVar("ItemType", bound="Item")
 
 
 def match_candidate_items_to_window(
-    geometry: STGeometry, items: list[ItemType], query_config: QueryConfig
-) -> list[list[Item]]:
+    geometry: STGeometry, items: list[Generic[ItemType]], query_config: QueryConfig
+) -> list[list[Generic[ItemType]]]:
     """Match candidate items to a window based on the query configuration.
 
     Candidate items should be collected that intersect with the window's spatial

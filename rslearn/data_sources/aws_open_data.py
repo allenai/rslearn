@@ -108,7 +108,7 @@ class Naip(DataSource):
         self.years = years
 
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
-
+        self.rtree_index: Any | None = None
         if use_rtree_index:
             from rslearn.utils.rtree_index import RtreeIndex, get_cached_rtree
 
@@ -120,8 +120,6 @@ class Naip(DataSource):
             self.rtree_index = get_cached_rtree(
                 self.index_cache_dir, self.rtree_tmp_dir.name, build_fn
             )
-        else:
-            self.rtree_index = None
 
     @staticmethod
     def from_config(config: LayerConfig, ds_path: UPath) -> "Naip":

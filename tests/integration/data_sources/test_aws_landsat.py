@@ -35,7 +35,7 @@ class TestLandsatOliTirs:
             config=layer_config, metadata_cache_dir=metadata_cache_dir
         )
         print("get items")
-        item_groups = data_source.get_items([seattle2020], query_config)[0]
+        item_groups = data_source.get_items([seattle2020], query_config)[0]  # type: ignore
         item = item_groups[0][0]
         tile_store = FileTileStore(tile_store_dir)
         print("ingest")

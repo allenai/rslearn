@@ -1,7 +1,7 @@
 """Base classes for rslearn data sources."""
 
 from collections.abc import Generator
-from typing import Any, BinaryIO, TypeVar
+from typing import Any, BinaryIO, Generic, TypeVar
 
 from rslearn.config import LayerConfig, QueryConfig
 from rslearn.dataset import Window
@@ -62,7 +62,7 @@ class DataSource:
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[ItemType]]]:
+    ) -> list[list[list[Generic[ItemType]]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -74,14 +74,14 @@ class DataSource:
         """
         raise NotImplementedError
 
-    def deserialize_item(self, serialized_item: Any) -> ItemType:
+    def deserialize_item(self, serialized_item: Any) -> Generic[ItemType]:
         """Deserializes an item from JSON-decoded data."""
         raise NotImplementedError
 
     def ingest(
         self,
         tile_store: TileStore,
-        items: list[ItemType],
+        items: list[Generic[ItemType]],
         geometries: list[list[STGeometry]],
     ) -> None:
         """Ingest items into the given tile store.
@@ -96,7 +96,7 @@ class DataSource:
     def materialize(
         self,
         window: Window,
-        item_groups: list[list[ItemType]],
+        item_groups: list[list[Generic[ItemType]]],
         layer_name: str,
         layer_cfg: LayerConfig,
     ) -> None:
@@ -114,7 +114,7 @@ class DataSource:
 class ItemLookupDataSource(DataSource):
     """A data source that can look up items by name."""
 
-    def get_item_by_name(self, name: str) -> Item:
+    def get_item_by_name(self, name: str) -> Generic[ItemType]:
         """Gets an item by name."""
         raise NotImplementedError
 
@@ -123,7 +123,7 @@ class RetrieveItemDataSource(DataSource):
     """A data source that can retrieve items in their raw format."""
 
     def retrieve_item(
-        self, item: ItemType
+        self, item: Generic[ItemType]
     ) -> Generator[tuple[str, BinaryIO], None, None]:
         """Retrieves the rasters corresponding to an item as file streams."""
         raise NotImplementedError

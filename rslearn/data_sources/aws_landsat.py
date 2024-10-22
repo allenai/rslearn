@@ -36,7 +36,7 @@ class LandsatOliTirsItem(Item):
 
     def __init__(
         self, name: str, geometry: STGeometry, blob_path: str, cloud_cover: float
-    ):
+    ) -> None:
         """Creates a new LandsatOliTirsItem.
 
         Args:
@@ -309,14 +309,16 @@ class LandsatOliTirs(DataSource):
             elif self.sort_by is not None:
                 raise ValueError(f"invalid sort_by setting ({self.sort_by})")
 
-            cur_groups = rslearn.data_sources.utils.match_candidate_items_to_window(
-                geometry, cur_items, query_config
+            cur_groups: list[list[LandsatOliTirsItem]] = (
+                rslearn.data_sources.utils.match_candidate_items_to_window(
+                    geometry, cur_items, query_config
+                )
             )
             groups.append(cur_groups)
 
         return groups
 
-    def get_item_by_name(self, name: str) -> Item:
+    def get_item_by_name(self, name: str) -> LandsatOliTirsItem:
         """Gets an item by name."""
         # Product name is like LC08_L1TP_046027_20230715_20230724_02_T1.
         # We want to use _read_products so we need to extract:
@@ -334,7 +336,7 @@ class LandsatOliTirs(DataSource):
                 return item
         raise ValueError(f"item {name} not found")
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: Any) -> LandsatOliTirsItem:
         """Deserializes an item from JSON-decoded data."""
         assert isinstance(serialized_item, dict)
         return LandsatOliTirsItem.deserialize(serialized_item)
