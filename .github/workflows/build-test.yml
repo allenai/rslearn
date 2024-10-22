@@ -104,6 +104,10 @@ jobs:
       - name: Run All other Integration Tests
         run: |
           docker run --rm \
+            -e TEST_BUCKET=${{ env.TEST_BUCKET }} \
+            -v ${{env.GOOGLE_GHA_CREDS_PATH}}:/tmp/gcp-credentials.json:ro \
+            -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-credentials.json \
+            -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
             pytest tests/integration/ --ignore tests/integration/data_sources/ -vv
