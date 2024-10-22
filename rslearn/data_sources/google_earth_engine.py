@@ -19,7 +19,7 @@ from upath import UPath
 
 import rslearn.data_sources.utils
 import rslearn.utils.mgrs
-from rslearn.config import DType, LayerConfig, RasterLayerConfig
+from rslearn.config import DType, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry
@@ -35,7 +35,7 @@ class GEE(DataSource):
 
     def __init__(
         self,
-        config: LayerConfig,
+        config: RasterLayerConfig,
         collection_name: str,
         gcs_bucket_name: str,
         index_cache_dir: UPath,
@@ -78,8 +78,10 @@ class GEE(DataSource):
         )
 
     @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "GEE":
+    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "GEE":
         """Creates a new GEE instance from a configuration dictionary."""
+        if config.data_source is None:
+            raise ValueError("data_source is required in config")
         d = config.data_source.config_dict
         kwargs = {
             "config": config,
@@ -98,6 +100,9 @@ class GEE(DataSource):
     def get_collection(self) -> ee.ImageCollection:
         """Returns the Earth Engine image collection for this data source."""
         image_collection = ee.ImageCollection(self.collection_name)
+        if self.filters is None:
+            return image_collection
+
         for k, v in self.filters:
             cur_filter = ee.Filter.eq(k, v)
             image_collection = image_collection.filter(cur_filter)
@@ -176,7 +181,7 @@ class GEE(DataSource):
                     continue
                 cur_items.append(item)
 
-            cur_items.sort(key=lambda item: item.geometry.time_range[0])
+            cur_items.sort(key=lambda item: item.geometry.time_range[0])  # type: ignore
 
             cur_groups = rslearn.data_sources.utils.match_candidate_items_to_window(
                 geometry, cur_items, query_config
@@ -203,9 +208,10 @@ class GEE(DataSource):
             items: the items to ingest
             geometries: a list of geometries needed for each item
         """
-        assert isinstance(self.config, RasterLayerConfig)
         bands = []
         for band_set in self.config.band_sets:
+            if band_set.bands is None:
+                continue
             for band in band_set.bands:
                 if band in bands:
                     continue
@@ -272,7 +278,7 @@ class GEE(DataSource):
                         src = rasterio.open(local_fname)
                         rasterio_datasets.append(src)
 
-                    merge_kwargs = {"sources": rasterio_datasets}
+                    merge_kwargs: dict[str, Any] = {"sources": rasterio_datasets}
                     if self.dtype:
                         merge_kwargs["dtype"] = self.dtype.value
                     array, transform = rasterio.merge.merge(**merge_kwargs)
