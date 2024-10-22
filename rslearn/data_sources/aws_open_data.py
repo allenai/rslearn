@@ -416,6 +416,7 @@ class Sentinel2Item(Item):
         )
 
 
+# TODO: Distinguish between AWS and GCP data sources in class names.
 class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
     """A data source for Sentinel-2 L1C and L2A imagery on AWS.
 
