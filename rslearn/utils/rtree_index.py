@@ -18,7 +18,7 @@ class RtreeIndex(SpatialIndex):
     Both in-memory and on-disk options are supported.
     """
 
-    def __init__(self, fname: str | None = None):
+    def __init__(self, fname: str | None = None) -> None:
         """Initialize a new RtreeIndex.
 
         If fname is set, the index is persisted on disk, otherwise it is in-memory.
@@ -64,7 +64,7 @@ class RtreeIndex(SpatialIndex):
         return [r.object for r in results]
 
 
-def delete_partially_created_local_files(fname: str):
+def delete_partially_created_local_files(fname: str) -> None:
     """Delete partially created .dat and .idx files."""
     extensions = [".dat", ".idx"]
     for ext in extensions:
@@ -73,7 +73,9 @@ def delete_partially_created_local_files(fname: str):
             os.unlink(cur_fname)
 
 
-def copy_cache_to_local_dir(cache_dir: UPath, tmp_dir: str, extension_suffix: str):
+def copy_cache_to_local_dir(
+    cache_dir: UPath, tmp_dir: str, extension_suffix: str
+) -> None:
     """Copy the rtree index files from cache_dir to a local temporary directory."""
     extensions = [".dat", ".idx"]
     for ext in extensions:
@@ -101,7 +103,6 @@ def get_cached_rtree(
     Returns:
         the RtreeIndex.
     """
-
     is_local_cache = isinstance(
         cache_dir.fs, fsspec.implementations.local.LocalFileSystem
     )

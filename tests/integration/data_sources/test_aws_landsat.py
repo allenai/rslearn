@@ -2,11 +2,16 @@ import os
 import pathlib
 import random
 
-from google.cloud import storage
 from upath import UPath
 
-from rslearn.config import (BandSetConfig, DType, LayerType, QueryConfig,
-                            RasterLayerConfig, SpaceMode)
+from rslearn.config import (
+    BandSetConfig,
+    DType,
+    LayerType,
+    QueryConfig,
+    RasterLayerConfig,
+    SpaceMode,
+)
 from rslearn.data_sources.aws_landsat import LandsatOliTirs
 from rslearn.tile_stores import FileTileStore
 from rslearn.utils import STGeometry
@@ -19,7 +24,7 @@ class TestLandsatOliTirs:
 
     def run_simple_test(
         self, tile_store_dir: UPath, metadata_cache_dir: UPath, seattle2020: STGeometry
-    ):
+    ) -> None:
         """Apply test where we ingest an item corresponding to seattle2020."""
         layer_config = RasterLayerConfig(
             LayerType.RASTER,
@@ -44,14 +49,14 @@ class TestLandsatOliTirs:
         )
         assert expected_path.exists()
 
-    def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry):
+    def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         """Test ingesting to local filesystem."""
         tile_store_dir = UPath(tmp_path) / "tiles"
         tile_store_dir.mkdir(parents=True, exist_ok=True)
         metadata_cache_dir = UPath(tmp_path) / "cache"
         self.run_simple_test(tile_store_dir, metadata_cache_dir, seattle2020)
 
-    def test_gcs(self, seattle2020: STGeometry):
+    def test_gcs(self, seattle2020: STGeometry) -> None:
         """Test ingesting to GCS.
 
         Main thing is to test metadata_cache_dir being on GCS.

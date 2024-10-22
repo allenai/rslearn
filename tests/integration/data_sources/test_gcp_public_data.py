@@ -1,12 +1,19 @@
 import os
 import pathlib
 import random
+from typing import Any
 
 import pytest
 from upath import UPath
 
-from rslearn.config import (BandSetConfig, DType, LayerType, QueryConfig,
-                            RasterLayerConfig, SpaceMode)
+from rslearn.config import (
+    BandSetConfig,
+    DType,
+    LayerType,
+    QueryConfig,
+    RasterLayerConfig,
+    SpaceMode,
+)
 from rslearn.data_sources.gcp_public_data import Sentinel2
 from rslearn.tile_stores import FileTileStore
 from rslearn.utils import STGeometry
@@ -18,7 +25,9 @@ class TestSentinel2:
 
     TEST_BAND = "B04"
 
-    def run_simple_test(self, tile_store_dir: UPath, seattle2020: STGeometry, **kwargs):
+    def run_simple_test(
+        self, tile_store_dir: UPath, seattle2020: STGeometry, **kwargs: Any
+    ) -> None:
         """Apply test where we ingest an item corresponding to seattle2020."""
         layer_config = RasterLayerConfig(
             LayerType.RASTER,
@@ -46,7 +55,7 @@ class TestSentinel2:
     @pytest.mark.parametrize("use_rtree_index", [False, True])
     def test_local(
         self, tmp_path: pathlib.Path, seattle2020: STGeometry, use_rtree_index: bool
-    ):
+    ) -> None:
         """Test ingesting to local filesystem."""
         tile_store_dir = UPath(tmp_path) / "tiles"
         tile_store_dir.mkdir(parents=True, exist_ok=True)
@@ -60,7 +69,7 @@ class TestSentinel2:
         )
 
     @pytest.mark.parametrize("use_rtree_index", [False, True])
-    def test_gcs(self, seattle2020: STGeometry, use_rtree_index: bool):
+    def test_gcs(self, seattle2020: STGeometry, use_rtree_index: bool) -> None:
         """Test ingesting to GCS.
 
         Main thing is to test index_cache_dir being on GCS.

@@ -13,14 +13,14 @@ class GridIndex(SpatialIndex):
     Each cell in the grid contains a list of geometries that intersect it.
     """
 
-    def __init__(self, size):
+    def __init__(self, size: float) -> None:
         """Initialize a new GridIndex.
 
         Args:
             size: the size of the grid cells
         """
         self.size = size
-        self.grid = {}
+        self.grid: dict = {}
         self.items = []
 
     def insert(self, box: tuple[float, float, float, float], data: Any) -> None:

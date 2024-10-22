@@ -1,11 +1,18 @@
 import os
 import pathlib
 import random
+from typing import Any
 
 from upath import UPath
 
-from rslearn.config import (BandSetConfig, DType, LayerType, QueryConfig,
-                            RasterLayerConfig, SpaceMode)
+from rslearn.config import (
+    BandSetConfig,
+    DType,
+    LayerType,
+    QueryConfig,
+    RasterLayerConfig,
+    SpaceMode,
+)
 from rslearn.data_sources.google_earth_engine import GEE
 from rslearn.tile_stores import FileTileStore
 from rslearn.utils import STGeometry
@@ -16,7 +23,9 @@ class TestGEE:
 
     TEST_BAND = "VV"
 
-    def run_simple_test(self, tile_store_dir: UPath, seattle2020: STGeometry, **kwargs):
+    def run_simple_test(
+        self, tile_store_dir: UPath, seattle2020: STGeometry, **kwargs: Any
+    ) -> None:
         """Apply test where we ingest an item corresponding to seattle2020.
 
         Here we use Sentinel-1.
@@ -31,9 +40,7 @@ class TestGEE:
             collection_name="COPERNICUS/S1_GRD",
             gcs_bucket_name=os.environ["TEST_BUCKET"],
             service_account_name=os.environ["TEST_SERVICE_ACCOUNT_NAME"],
-            service_account_credentials=os.environ[
-                "GOOGLE_APPLICATION_CREDENTIALS"
-            ],
+            service_account_credentials=os.environ["GOOGLE_APPLICATION_CREDENTIALS"],
             filters=[
                 ("transmitterReceiverPolarisation", ["VV", "VH"]),
                 ("instrumentMode", "IW"),
@@ -59,7 +66,7 @@ class TestGEE:
         )
         assert expected_path.exists()
 
-    def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry):
+    def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         """Test ingesting to local filesystem."""
         tile_store_dir = UPath(tmp_path) / "tiles"
         tile_store_dir.mkdir(parents=True, exist_ok=True)
@@ -71,7 +78,7 @@ class TestGEE:
             index_cache_dir=index_cache_dir,
         )
 
-    def test_gcs(self, seattle2020: STGeometry):
+    def test_gcs(self, seattle2020: STGeometry) -> None:
         """Test ingesting to GCS.
 
         Main thing is to test index_cache_dir being on GCS.

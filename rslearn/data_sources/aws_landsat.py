@@ -13,7 +13,6 @@ import boto3
 import dateutil.parser
 import fiona
 import fiona.transform
-import fsspec
 import pytimeparse
 import rasterio
 import shapely

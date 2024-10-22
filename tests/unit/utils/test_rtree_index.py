@@ -46,6 +46,7 @@ def test_local_cache(tmp_path: pathlib.Path):
 
     def build_rtree1(index: RtreeIndex):
         index.insert(box, "a")
+
     with tempfile.TemporaryDirectory() as cache_dir:
         cached_dir_upath = UPath(cache_dir)
         index = get_cached_rtree(cached_dir_upath, tmp_path, build_rtree1)
