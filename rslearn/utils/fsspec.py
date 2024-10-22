@@ -65,7 +65,7 @@ def join_upath(path: UPath, suffix: str) -> UPath:
 
 
 @contextmanager
-def open_atomic(path: UPath, *args: list, **kwargs: dict[str, Any]) -> Generator:
+def open_atomic(path: UPath, *args: Any, **kwargs: Any) -> Generator[Any, None, None]:
     """Open a path for atomic writing.
 
     If it is local filesystem, we will write to a temporary file, and rename it to the

@@ -58,7 +58,7 @@ class LandsatOliTirsItem(Item):
         return d
 
     @staticmethod
-    def deserialize(d: dict) -> Item:
+    def deserialize(d: dict) -> "LandsatOliTirsItem":
         """Deserializes an item from a JSON-decoded dictionary."""
         if "name" not in d:
             d["name"] = d["blob_path"].split("/")[-1].split(".tif")[0]
@@ -263,7 +263,7 @@ class LandsatOliTirs(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[list[LandsatOliTirsItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -339,7 +339,9 @@ class LandsatOliTirs(DataSource):
         assert isinstance(serialized_item, dict)
         return LandsatOliTirsItem.deserialize(serialized_item)
 
-    def retrieve_item(self, item: Item) -> Generator[tuple[str, BinaryIO], None, None]:
+    def retrieve_item(
+        self, item: LandsatOliTirsItem
+    ) -> Generator[tuple[str, BinaryIO], None, None]:
         """Retrieves the rasters corresponding to an item as file streams."""
         for band in self.bands:
             buf = io.BytesIO()
@@ -355,7 +357,7 @@ class LandsatOliTirs(DataSource):
     def ingest(
         self,
         tile_store: TileStore,
-        items: list[Item],
+        items: list[LandsatOliTirsItem],
         geometries: list[list[STGeometry]],
     ) -> None:
         """Ingest items into the given tile store.
@@ -372,7 +374,10 @@ class LandsatOliTirs(DataSource):
                     tile_store, (item.name, "_".join(band_names))
                 )
                 needed_projections = get_needed_projections(
-                    cur_tile_store, band_names, self.config.band_sets, cur_geometries
+                    cur_tile_store,
+                    band_names,
+                    self.config.band_sets,
+                    cur_geometries,  # type: ignore
                 )
                 if not needed_projections:
                     continue

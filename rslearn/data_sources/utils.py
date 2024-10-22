@@ -1,5 +1,7 @@
 """Utilities shared by data sources."""
 
+from typing import TypeVar
+
 from rslearn.config import QueryConfig, SpaceMode, TimeMode
 from rslearn.data_sources import Item
 from rslearn.utils import STGeometry, shp_intersects
@@ -11,9 +13,11 @@ MOSAIC_REMAINDER_EPSILON = 0.01
 """Fraction of original geometry area below which mosaic is considered to contain the
 entire geometry."""
 
+ItemType = TypeVar("ItemType", bound=Item)
+
 
 def match_candidate_items_to_window(
-    geometry: STGeometry, items: list[Item], query_config: QueryConfig
+    geometry: STGeometry, items: list[ItemType], query_config: QueryConfig
 ) -> list[list[Item]]:
     """Match candidate items to a window based on the query configuration.
 

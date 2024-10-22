@@ -1,12 +1,14 @@
 """Base classes for rslearn data sources."""
 
 from collections.abc import Generator
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, TypeVar
 
 from rslearn.config import LayerConfig, QueryConfig
 from rslearn.dataset import Window
 from rslearn.tile_stores import TileStore
 from rslearn.utils import STGeometry
+
+ItemType = TypeVar("ItemType", bound="Item")
 
 
 class Item:
@@ -59,7 +61,7 @@ class DataSource:
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[list[ItemType]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -71,14 +73,14 @@ class DataSource:
         """
         raise NotImplementedError
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: Any) -> ItemType:
         """Deserializes an item from JSON-decoded data."""
         raise NotImplementedError
 
     def ingest(
         self,
         tile_store: TileStore,
-        items: list[Item],
+        items: list[ItemType],
         geometries: list[list[STGeometry]],
     ) -> None:
         """Ingest items into the given tile store.
@@ -93,7 +95,7 @@ class DataSource:
     def materialize(
         self,
         window: Window,
-        item_groups: list[list[Item]],
+        item_groups: list[list[ItemType]],
         layer_name: str,
         layer_cfg: LayerConfig,
     ) -> None:
@@ -119,6 +121,8 @@ class ItemLookupDataSource(DataSource):
 class RetrieveItemDataSource(DataSource):
     """A data source that can retrieve items in their raw format."""
 
-    def retrieve_item(self, item: Item) -> Generator[tuple[str, BinaryIO], None, None]:
+    def retrieve_item(
+        self, item: ItemType
+    ) -> Generator[tuple[str, BinaryIO], None, None]:
         """Retrieves the rasters corresponding to an item as file streams."""
         raise NotImplementedError
