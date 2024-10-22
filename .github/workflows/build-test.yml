@@ -101,6 +101,13 @@ jobs:
         run: |
           echo "Docker Image: ${{ needs.build.outputs.ghcr_docker_image }}"
 
+      - name: Run All other Integration Tests
+        run: |
+          docker run --rm \
+            --network host \
+            ${{ needs.build.outputs.ghcr_docker_image }} \
+            pytest tests/integration/ --ignore tests/integration/data_sources/ -vv
+
       - name: Run Data Sources Integration Tests
         # Try running these tests in parallel
         run: |
@@ -119,14 +126,8 @@ jobs:
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
-            pytest tests/integration/data_sources/
+            pytest tests/integration/data_sources/test_google_earth_engine.py
 
-      - name: Run All other Integration Tests
-        run: |
-          docker run --rm \
-            --network host \
-            ${{ needs.build.outputs.ghcr_docker_image }} \
-            pytest tests/integration/ --ignore tests/integration/data_sources/ -vv
       # Add Job to clean up test bucket
       - name: Clean up
         if: always()
