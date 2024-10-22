@@ -473,7 +473,13 @@ class ModelDataset(torch.utils.data.Dataset):
             # the options, as well as picking multiple for series inputs.
             layer = random.choice(layer_options)
             layer_dir = window.path / "layers" / layer
-            layer_config = self.dataset.layers[layer]
+
+            # The model config may reference a specific group within a layer, like
+            # "image.2" in a dataset that has a layer "image" with max_matches > 1.
+            # So we need to split off the period. Layer names should not contain
+            # period.
+            layer_ds_key = layer.split(".")[0]
+            layer_config = self.dataset.layers[layer_ds_key]
 
             if data_input.data_type == "raster":
                 assert isinstance(layer_config, RasterLayerConfig)
