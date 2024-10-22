@@ -48,7 +48,7 @@ class Dataset:
         # Load dataset configuration.
         with (self.path / "config.json").open("r") as f:
             config = json.load(f)
-            self.layers = {
+            self.layers: dict = {
                 layer_name: load_layer_config(d)
                 for layer_name, d in config["layers"].items()
             }

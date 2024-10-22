@@ -4,14 +4,8 @@ import pathlib
 import pytest
 from upath import UPath
 
-from rslearn.config import (
-    BandSetConfig,
-    DType,
-    LayerType,
-    QueryConfig,
-    RasterLayerConfig,
-    SpaceMode,
-)
+from rslearn.config import (BandSetConfig, DType, LayerType, QueryConfig,
+                            RasterLayerConfig, SpaceMode)
 from rslearn.data_sources.planet import Planet
 from rslearn.tile_stores import FileTileStore
 from rslearn.utils import STGeometry
@@ -25,7 +19,7 @@ class TestPlanet:
 
     TEST_BANDS = ["b01", "b02", "b03", "b04", "b05", "b06", "b07", "b08"]
 
-    def test_simple(self, tmp_path: pathlib.Path, seattle2020: STGeometry):
+    def test_simple(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         """Apply test where we ingest an item corresponding to seattle2020."""
         tile_store_dir = UPath(tmp_path)
         layer_config = RasterLayerConfig(
