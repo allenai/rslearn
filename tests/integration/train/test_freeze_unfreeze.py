@@ -53,6 +53,7 @@ class LMWithCustomPlateau(RslearnLightningModule):
 def get_itc_modules(
     image_to_class_dataset: Dataset, pl_module_kwargs: dict[str, Any] = {}
 ) -> tuple[LMWithCustomPlateau, RslearnDataModule]:
+    """Get the LightningModule and DataModule for the image to class task."""
     image_data_input = DataInput("raster", ["image"], bands=["band"], passthrough=True)
     target_data_input = DataInput("vector", ["label"])
     task = ClassificationTask("label", ["cls0", "cls1"], read_class_id=True)
@@ -63,7 +64,7 @@ def get_itc_modules(
             "targets": target_data_input,
         },
         task=task,
-        num_workers=1,
+        num_workers=0,
     )
     model = SingleTaskModel(
         encoder=[
@@ -85,8 +86,8 @@ def get_itc_modules(
 
 
 def test_freeze_unfreeze(image_to_class_dataset: Dataset):
-    # Test the FreezeUnfreeze callback by making sure the weights don't change in the
-    # first epoch but then unfreeze and do change in the second epoch.
+    """Test the FreezeUnfreeze callback by making sure the weights don't change in the
+    first epoch but then unfreeze and do change in the second epoch."""
     pl_module, data_module = get_itc_modules(image_to_class_dataset)
     freeze_unfreeze = FreezeUnfreeze(
         module_selector=["model", "encoder"],
@@ -106,7 +107,7 @@ def test_freeze_unfreeze(image_to_class_dataset: Dataset):
 
 
 def test_unfreeze_lr_factor(image_to_class_dataset: Dataset):
-    # Make sure learning rate is set correctly after unfreezing.
+    """Make sure learning rate is set correctly after unfreezing."""
     plateau_factor = 0.5
     unfreeze_lr_factor = 3
 
