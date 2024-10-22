@@ -64,7 +64,6 @@ def get_itc_modules(
             "targets": target_data_input,
         },
         task=task,
-        num_workers=0,
     )
     model = SingleTaskModel(
         encoder=[
