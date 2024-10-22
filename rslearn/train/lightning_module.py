@@ -141,8 +141,8 @@ class RslearnLightningModule(L.LightningModule):
 
         self.schedulers = {}
 
-    def on_train_start(self) -> None:
-        """Called when the train begins."""
+    def on_fit_start(self) -> None:
+        """Called when the fit begins."""
         if self.restore_config:
             state_dict = self.restore_config.get_state_dict()
             missing_keys, unexpected_keys = self.model.load_state_dict(
