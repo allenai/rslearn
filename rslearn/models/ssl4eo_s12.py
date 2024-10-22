@@ -73,7 +73,9 @@ class Ssl4eoS12(torch.nn.Module):
         return [all_out_channels[idx] for idx in self.output_layers]
 
     def forward(
-        self, inputs: list[dict[str, Any]], targets: list[dict[str, Any]] = None
+        self,
+        inputs: list[dict[str, Any]],
+        targets: list[dict[str, Any]] | None = None,
     ) -> list[torch.Tensor]:
         """Compute outputs from the backbone.
 

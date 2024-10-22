@@ -8,17 +8,18 @@ import sys
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import tqdm
 import wandb
-from lightning.pytorch.cli import LightningCLI
+from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
 from rasterio.crs import CRS
 from upath import UPath
 
 from rslearn.config import LayerConfig
 from rslearn.const import WGS84_EPSG
 from rslearn.data_sources import Item, data_source_from_config
-from rslearn.dataset import Dataset, Window
+from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
 from rslearn.dataset.manage import materialize_dataset_windows, prepare_dataset_windows
 from rslearn.tile_stores import get_tile_store_for_layer
@@ -30,10 +31,10 @@ logging.basicConfig()
 handler_registry = {}
 
 
-def register_handler(category, command):
+def register_handler(category: Any, command: str) -> Callable:
     """Register a new handler for a command."""
 
-    def decorator(f):
+    def decorator(f: Callable) -> Callable:
         handler_registry[(category, command)] = f
         return f
 
@@ -61,7 +62,7 @@ def parse_time_range(
 
 
 @register_handler("dataset", "add_windows")
-def add_windows():
+def add_windows() -> None:
     """Handler for the rslearn dataset add_windows command."""
     parser = argparse.ArgumentParser(
         prog="rslearn dataset add_windows",
@@ -156,7 +157,13 @@ def add_windows():
     )
     args = parser.parse_args(args=sys.argv[3:])
 
-    def parse_projection(crs_str, resolution, x_res, y_res, default_crs=None):
+    def parse_projection(
+        crs_str: str | None,
+        resolution: float | None,
+        x_res: float,
+        y_res: float,
+        default_crs: CRS | None = None,
+    ) -> Projection | None:
         if not crs_str:
             if default_crs:
                 crs = default_crs
@@ -197,7 +204,8 @@ def add_windows():
         box = [float(value) for value in args.box.split(",")]
 
         windows = add_windows_from_box(
-            box=box,
+            # TODO: we should have an object for box
+            box=box,  # type: ignore
             src_projection=parse_projection(
                 args.src_crs, args.src_resolution, args.src_x_res, args.src_y_res
             ),
@@ -213,7 +221,7 @@ def add_windows():
     print(f"created {len(windows)} windows")
 
 
-def add_apply_on_windows_args(parser: argparse.ArgumentParser):
+def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments for handlers that use the apply_on_windows helper.
 
     Args:
@@ -263,7 +271,7 @@ def apply_on_windows(
     batch_size: int = 1,
     jobs_per_process: int | None = None,
     use_initial_job: bool = True,
-):
+) -> None:
     """A helper to apply a function on windows in a dataset.
 
     Args:
@@ -323,7 +331,9 @@ def apply_on_windows(
     p.close()
 
 
-def apply_on_windows_args(f: Callable[[list[Window]], None], args: argparse.Namespace):
+def apply_on_windows_args(
+    f: Callable[[list[Window]], None], args: argparse.Namespace
+) -> None:
     """Call apply_on_windows with arguments passed via command-line interface."""
     dataset = Dataset(UPath(args.root))
     apply_on_windows(
@@ -341,16 +351,16 @@ def apply_on_windows_args(f: Callable[[list[Window]], None], args: argparse.Name
 class PrepareHandler:
     """apply_on_windows handler for the rslearn dataset prepare command."""
 
-    def __init__(self, force: bool):
+    def __init__(self, force: bool) -> None:
         """Initialize a new PrepareHandler.
 
         Args:
             force: force prepare
         """
         self.force = force
-        self.dataset = None
+        self.dataset: Dataset | None = None
 
-    def set_dataset(self, dataset: Dataset):
+    def set_dataset(self, dataset: Dataset) -> None:
         """Captures the dataset from apply_on_windows_args.
 
         Args:
@@ -358,13 +368,15 @@ class PrepareHandler:
         """
         self.dataset = dataset
 
-    def __call__(self, windows: list[Window]):
+    def __call__(self, windows: list[Window]) -> None:
         """Prepares the windows from apply_on_windows."""
+        if self.dataset is None:
+            raise ValueError("dataset not set")
         prepare_dataset_windows(self.dataset, windows, self.force)
 
 
 @register_handler("dataset", "prepare")
-def dataset_prepare():
+def dataset_prepare() -> None:
     """Handler for the rslearn dataset prepare command."""
     parser = argparse.ArgumentParser(
         prog="rslearn dataset prepare",
@@ -384,7 +396,9 @@ def dataset_prepare():
     apply_on_windows_args(fn, args)
 
 
-def _load_window_layer_datas(window: Window):
+def _load_window_layer_datas(
+    window: Window,
+) -> tuple[Window, dict[str, WindowLayerData]]:
     # Helper for IngestHandler to use with multiprocessing.
     return window, window.load_layer_datas()
 
@@ -392,11 +406,11 @@ def _load_window_layer_datas(window: Window):
 class IngestHandler:
     """apply_on_windows handler for the rslearn dataset ingest command."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize a new IngestHandler."""
-        self.dataset = None
+        self.dataset: Dataset | None = None
 
-    def set_dataset(self, dataset: Dataset):
+    def set_dataset(self, dataset: Dataset) -> None:
         """Captures the dataset from apply_on_windows_args.
 
         Args:
@@ -404,7 +418,9 @@ class IngestHandler:
         """
         self.dataset = dataset
 
-    def __call__(self, jobs: list[tuple[str, LayerConfig, Item, list[STGeometry]]]):
+    def __call__(
+        self, jobs: list[tuple[str, LayerConfig, Item, list[STGeometry]]]
+    ) -> None:
         """Ingest the specified items.
 
         The items are computed from list of windows via IngestHandler.get_jobs.
@@ -414,11 +430,13 @@ class IngestHandler:
         """
         import gc
 
+        if self.dataset is None:
+            raise ValueError("dataset not set")
         tile_store = self.dataset.get_tile_store()
 
         # Group jobs by layer name.
-        jobs_by_layer = {}
-        configs_by_layer = {}
+        jobs_by_layer: dict = {}
+        configs_by_layer: dict = {}
         for layer_name, layer_cfg, item, geometries in jobs:
             if layer_name not in jobs_by_layer:
                 jobs_by_layer[layer_name] = []
@@ -455,6 +473,8 @@ class IngestHandler:
         This makes sure that jobs are grouped by item rather than by window, which
         makes sense because there's no reason to ingest the same item twice.
         """
+        if self.dataset is None:
+            raise ValueError("dataset not set")
         # TODO: avoid duplicating ingest_dataset_windows...
 
         # Load layer datas of each window.
@@ -476,7 +496,7 @@ class IngestHandler:
 
             data_source = data_source_from_config(layer_cfg, self.dataset.path)
 
-            geometries_by_item = {}
+            geometries_by_item: dict = {}
             for window, layer_datas in windows_and_layer_datas:
                 if layer_name not in layer_datas:
                     continue
@@ -497,7 +517,7 @@ class IngestHandler:
 
 
 @register_handler("dataset", "ingest")
-def dataset_ingest():
+def dataset_ingest() -> None:
     """Handler for the rslearn dataset ingest command."""
     parser = argparse.ArgumentParser(
         prog="rslearn dataset ingest",
@@ -513,11 +533,11 @@ def dataset_ingest():
 class MaterializeHandler:
     """apply_on_windows handler for the rslearn dataset materialize command."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize a MaterializeHandler."""
-        self.dataset = None
+        self.dataset: Dataset | None = None
 
-    def set_dataset(self, dataset: Dataset):
+    def set_dataset(self, dataset: Dataset) -> None:
         """Captures the dataset from apply_on_windows_args.
 
         Args:
@@ -525,13 +545,15 @@ class MaterializeHandler:
         """
         self.dataset = dataset
 
-    def __call__(self, windows: list[Window]):
+    def __call__(self, windows: list[Window]) -> None:
         """Materializes the windows from apply_on_windows."""
+        if self.dataset is None:
+            raise ValueError("dataset not set")
         materialize_dataset_windows(self.dataset, windows)
 
 
 @register_handler("dataset", "materialize")
-def dataset_materialize():
+def dataset_materialize() -> None:
     """Handler for the rslearn dataset materialize command."""
     parser = argparse.ArgumentParser(
         prog="rslearn dataset materialize",
@@ -550,7 +572,7 @@ def dataset_materialize():
 class RslearnLightningCLI(LightningCLI):
     """LightningCLI that links data.tasks to model.tasks."""
 
-    def add_arguments_to_parser(self, parser) -> None:
+    def add_arguments_to_parser(self, parser: LightningArgumentParser) -> None:
         """Link data.tasks to model.tasks.
 
         Args:
@@ -572,7 +594,7 @@ class RslearnLightningCLI(LightningCLI):
             help="Whether to resume from specified wandb_run_id",
         )
 
-    def before_instantiate_classes(self):
+    def before_instantiate_classes(self) -> None:
         """Called before Lightning class initialization.
 
         Sets up wandb_run_id / wandb_resume arguments.
@@ -606,7 +628,7 @@ class RslearnLightningCLI(LightningCLI):
             prediction_writer_callback.init_args.path = c.data.init_args.path
 
 
-def model_handler():
+def model_handler() -> None:
     """Handler for any rslearn model X commands."""
     RslearnLightningCLI(
         model_class=RslearnLightningModule,
@@ -619,30 +641,30 @@ def model_handler():
 
 
 @register_handler("model", "fit")
-def model_fit():
+def model_fit() -> None:
     """Handler for rslearn model fit."""
     model_handler()
 
 
 @register_handler("model", "validate")
-def model_validate():
+def model_validate() -> None:
     """Handler for rslearn model validate."""
     model_handler()
 
 
 @register_handler("model", "test")
-def model_test():
+def model_test() -> None:
     """Handler for rslearn model test."""
     model_handler()
 
 
 @register_handler("model", "predict")
-def model_predict():
+def model_predict() -> None:
     """Handler for rslearn model predict."""
     model_handler()
 
 
-def main():
+def main() -> None:
     """CLI entrypoint."""
     parser = argparse.ArgumentParser(description="rslearn")
     parser.add_argument(

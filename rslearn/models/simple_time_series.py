@@ -24,7 +24,7 @@ class SimpleTimeSeries(torch.nn.Module):
         op: str = "max",
         groups: list[list[int]] | None = None,
         num_layers: int | None = None,
-    ):
+    ) -> None:
         """Create a new SimpleTimeSeries.
 
         Args:
@@ -56,6 +56,8 @@ class SimpleTimeSeries(torch.nn.Module):
             self.num_groups = 1
 
         if self.op == "convrnn":
+            if num_layers is None:
+                raise ValueError("num_layers must be specified for convrnn op")
             rnn_kernel_size = 3
             self.rnn_layers = []
             for _, count in out_channels:

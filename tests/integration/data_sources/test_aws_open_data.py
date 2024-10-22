@@ -37,6 +37,7 @@ class TestNaip:
         data_source = Naip(config=layer_config, states=["wa"], years=[2019], **kwargs)
 
         # Expand time range since NAIP isn't available very frequently.
+        assert seattle2020.time_range is not None
         seattle2020.time_range = (
             seattle2020.time_range[0] - timedelta(days=500),
             seattle2020.time_range[1] + timedelta(days=500),
