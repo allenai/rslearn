@@ -16,7 +16,8 @@ from upath import UPath
 
 from rslearn.config import LayerConfig
 
-from .data_source import DataSource, Item, ItemLookupDataSource, RetrieveItemDataSource
+from .data_source import (DataSource, Item, ItemLookupDataSource, ItemType,
+                          RetrieveItemDataSource)
 
 
 def data_source_from_config(config: LayerConfig, ds_path: UPath) -> DataSource:
@@ -40,4 +41,5 @@ __all__ = (
     "ItemLookupDataSource",
     "RetrieveItemDataSource",
     "data_source_from_config",
+    "ItemType",
 )

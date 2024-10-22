@@ -1,9 +1,7 @@
 """Utilities shared by data sources."""
 
-from typing import TypeVar
-
 from rslearn.config import QueryConfig, SpaceMode, TimeMode
-from rslearn.data_sources import Item
+from rslearn.data_sources import Item, ItemType
 from rslearn.utils import STGeometry, shp_intersects
 
 MOSAIC_MIN_ITEM_COVERAGE = 0.1
@@ -12,8 +10,6 @@ MOSAIC_MIN_ITEM_COVERAGE = 0.1
 MOSAIC_REMAINDER_EPSILON = 0.01
 """Fraction of original geometry area below which mosaic is considered to contain the
 entire geometry."""
-
-ItemType = TypeVar("ItemType", bound=Item)
 
 
 def match_candidate_items_to_window(
