@@ -6,7 +6,7 @@ import shutil
 import urllib.request
 import zipfile
 from collections.abc import Generator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, BinaryIO
 
 import boto3
@@ -119,6 +119,8 @@ class LandsatOliTirs(DataSource):
     def from_config(config: LayerConfig, ds_path: UPath) -> "LandsatOliTirs":
         """Creates a new LandsatOliTirs instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
+        if config.data_source is None:
+            raise ValueError(f"data_source is required for config dict {config}")
         d = config.data_source.config_dict
         kwargs = dict(
             config=config,
@@ -181,8 +183,9 @@ class LandsatOliTirs(DataSource):
                     ts = dateutil.parser.isoparse(date_str + "T" + time_str)
 
                     blob_path = obj.key.split("MTL.json")[0]
+                    time_range: tuple[datetime, datetime] = (ts, ts)
                     geometry = STGeometry(
-                        WGS84_PROJECTION, shapely.Polygon(coordinates), [ts, ts]
+                        WGS84_PROJECTION, shapely.Polygon(coordinates), time_range
                     )
                     items.append(
                         LandsatOliTirsItem(

@@ -4,8 +4,14 @@ import pathlib
 import pytest
 from upath import UPath
 
-from rslearn.config import (BandSetConfig, DType, LayerType, QueryConfig,
-                            RasterLayerConfig, SpaceMode)
+from rslearn.config import (
+    BandSetConfig,
+    DType,
+    LayerType,
+    QueryConfig,
+    RasterLayerConfig,
+    SpaceMode,
+)
 from rslearn.data_sources.planet import Planet
 from rslearn.tile_stores import FileTileStore
 from rslearn.utils import STGeometry
