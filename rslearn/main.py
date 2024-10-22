@@ -8,7 +8,7 @@ import sys
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import tqdm
 import wandb
@@ -18,12 +18,10 @@ from upath import UPath
 
 from rslearn.config import LayerConfig
 from rslearn.const import WGS84_EPSG
-from rslearn.data_sources import Item, ItemType, data_source_from_config
+from rslearn.data_sources import Item, data_source_from_config
 from rslearn.dataset import Dataset, Window, WindowLayerData
-from rslearn.dataset.add_windows import (add_windows_from_box,
-                                         add_windows_from_file)
-from rslearn.dataset.manage import (materialize_dataset_windows,
-                                    prepare_dataset_windows)
+from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
+from rslearn.dataset.manage import materialize_dataset_windows, prepare_dataset_windows
 from rslearn.tile_stores import get_tile_store_for_layer
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
@@ -31,6 +29,8 @@ from rslearn.utils import Projection, STGeometry
 
 logging.basicConfig()
 handler_registry = {}
+
+ItemType = TypeVar("ItemType", bound="Item")
 
 
 def register_handler(category: Any, command: str) -> Callable:
@@ -506,7 +506,9 @@ class IngestHandler:
                 layer_data = layer_datas[layer_name]
                 for group in layer_data.serialized_item_groups:
                     for serialized_item in group:
-                        item: ItemType = data_source.deserialize_item(serialized_item)
+                        item = data_source.deserialize_item(  # type: ignore
+                            serialized_item
+                        )
                         if item not in geometries_by_item:
                             geometries_by_item[item] = []
                         geometries_by_item[item].append(geometry)

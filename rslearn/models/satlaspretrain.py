@@ -13,7 +13,7 @@ class SatlasPretrain(torch.nn.Module):
         self,
         model_identifier: str,
         fpn: bool = False,
-    ):
+    ) -> None:
         """Instantiate a new SatlasPretrain instance.
 
         Args:
@@ -52,7 +52,7 @@ class SatlasPretrain(torch.nn.Module):
 
     def forward(
         self, inputs: list[dict[str, Any]], targets: list[dict[str, Any]] = None
-    ):
+    ) -> list[torch.Tensor]:
         """Compute feature maps from the SatlasPretrain backbone.
 
         Inputs:
@@ -63,7 +63,7 @@ class SatlasPretrain(torch.nn.Module):
         images = torch.stack([inp["image"] for inp in inputs], dim=0)
         return self.model(images)
 
-    def get_backbone_channels(self):
+    def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.
 
         The output channels is a list of (downsample_factor, depth) that corresponds

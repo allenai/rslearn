@@ -8,8 +8,6 @@ from rslearn.dataset import Window
 from rslearn.tile_stores import TileStore
 from rslearn.utils import STGeometry
 
-ItemType = TypeVar("ItemType", bound="Item")
-
 
 class Item:
     """An item in a data source.
@@ -51,6 +49,9 @@ class Item:
     def __hash__(self) -> int:
         """Returns a hash of this item."""
         return hash(self.name)
+
+
+ItemType = TypeVar("ItemType", bound="Item")
 
 
 class DataSource:

@@ -26,12 +26,7 @@ import rslearn.utils.mgrs
 from rslearn.config import LayerConfig, RasterLayerConfig
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_EPSG, WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import (
-    GridIndex,
-    Projection,
-    STGeometry,
-    daterange,
-)
+from rslearn.utils import GridIndex, Projection, STGeometry, daterange
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 
 from .copernicus import get_harmonize_callback
@@ -195,7 +190,9 @@ class Naip(DataSource):
                     blob_path, dst, ExtraArgs={"RequestPayer": "requester"}
                 )
 
-    def _read_index_shapefiles(self, desc=None) -> Generator[NaipItem, None, None]:
+    def _read_index_shapefiles(
+        self, desc: str | None = None
+    ) -> Generator[NaipItem, None, None]:
         """Read the index shapefiles and yield NaipItems corresponding to each image."""
         self._download_index_shapefiles()
 

@@ -143,7 +143,7 @@ class Sentinel2(DataSource):
         if use_rtree_index:
             from rslearn.utils.rtree_index import RtreeIndex, get_cached_rtree
 
-            def build_fn(index: RtreeIndex):
+            def build_fn(index: RtreeIndex) -> None:
                 """Build the RtreeIndex from items in the data source."""
                 for item in self._read_index(
                     desc="Building rtree index", time_range=rtree_time_range

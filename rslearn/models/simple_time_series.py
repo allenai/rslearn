@@ -113,7 +113,7 @@ class SimpleTimeSeries(torch.nn.Module):
         else:
             assert self.op in ["max", "mean"]
 
-    def get_backbone_channels(self):
+    def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.
 
         The output channels is a list of (downsample_factor, depth) that corresponds
@@ -132,7 +132,7 @@ class SimpleTimeSeries(torch.nn.Module):
 
     def forward(
         self, inputs: list[dict[str, Any]], targets: list[dict[str, Any]] = None
-    ):
+    ) -> list[torch.Tensor]:
         """Compute outputs from the backbone.
 
         Inputs:

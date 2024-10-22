@@ -24,7 +24,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry
 from rslearn.utils.fsspec import join_upath
-from rslearn.utils.rtree_index import get_cached_rtree
+from rslearn.utils.rtree_index import RtreeIndex, get_cached_rtree
 
 from .data_source import DataSource, Item, QueryConfig
 from .raster_source import ArrayWithTransform, get_needed_projections, ingest_raster
@@ -103,12 +103,12 @@ class GEE(DataSource):
             image_collection = image_collection.filter(cur_filter)
         return image_collection
 
-    def _build_index(self, rtree_index):
+    def _build_index(self, rtree_index: RtreeIndex) -> None:
         csv_blob = self.bucket.blob(f"{self.collection_name}/index.csv")
 
         if not csv_blob.exists():
             # Export feature collection of image metadata to GCS.
-            def image_to_feature(image):
+            def image_to_feature(image) -> ee.Feature:
                 geometry = image.geometry().transform(proj="EPSG:4326")
                 return ee.Feature(geometry, {"time": image.date().format()})
 
