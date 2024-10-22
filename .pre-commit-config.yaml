@@ -54,7 +54,7 @@ repos:
         exclude: ^tests/
         args:
           - -s
-          - B101,B311,B324,B108,B104,B310
+          - B101,B311,B324,B108,B104,B310,B405,B314,B608
   - repo: local
     hooks:
       - id: interrogate

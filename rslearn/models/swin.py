@@ -105,6 +105,7 @@ class Swin(torch.nn.Module):
 
         if self.arch in ["swin_b", "swin_v2_b"]:
             all_out_channels = [
+                (4, 128),
                 [4, 128],
                 [4, 128],
                 [8, 256],

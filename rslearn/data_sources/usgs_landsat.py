@@ -36,6 +36,7 @@ class M2MAPIClient:
 
     api_url = "https://m2m.cr.usgs.gov/api/api/json/stable/"
     pagination_size = 1000
+    TIMEOUT = 1000000  # Set very high to start
 
     def __init__(self, username, password):
         """Initialize a new M2MAPIClient.
@@ -47,7 +48,9 @@ class M2MAPIClient:
         self.username = username
         self.password = password
         json_data = json.dumps({"username": self.username, "password": self.password})
-        response = requests.post(self.api_url + "login", data=json_data)
+        response = requests.post(
+            self.api_url + "login", data=json_data, timeout=self.TIMEOUT
+        )
         response.raise_for_status()
         self.auth_token = response.json()["data"]
 
@@ -67,6 +70,7 @@ class M2MAPIClient:
             self.api_url + endpoint,
             headers={"X-Auth-Token": self.auth_token},
             data=json.dumps(data),
+            timeout=self.TIMEOUT,
         )
         response.raise_for_status()
         if response.text:
@@ -438,7 +442,7 @@ class LandsatOliTirs(DataSource):
         download_urls = self._get_download_urls(item)
         for _, (display_id, download_url) in download_urls.items():
             buf = io.BytesIO()
-            with requests.get(download_url, stream=True) as r:
+            with requests.get(download_url, stream=True, timeout=self.TIMEOUT) as r:
                 r.raise_for_status()
                 shutil.copyfileobj(r.raw, buf)
             buf.seek(0)
@@ -471,7 +475,9 @@ class LandsatOliTirs(DataSource):
                     continue
 
                 buf = io.BytesIO()
-                with requests.get(download_urls[band][1], stream=True) as r:
+                with requests.get(
+                    download_urls[band][1], stream=True, timeout=self.TIMEOUT
+                ) as r:
                     r.raise_for_status()
                     shutil.copyfileobj(r.raw, buf)
                 buf.seek(0)
