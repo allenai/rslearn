@@ -21,7 +21,7 @@ from upath import UPath
 
 import rslearn.data_sources.utils
 import rslearn.utils.mgrs
-from rslearn.config import LayerConfig, RasterLayerConfig
+from rslearn.config import RasterLayerConfig
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry
@@ -90,7 +90,7 @@ class LandsatOliTirs(DataSource):
 
     def __init__(
         self,
-        config: LayerConfig,
+        config: RasterLayerConfig,
         metadata_cache_dir: UPath,
         max_time_delta: timedelta = timedelta(days=30),
         sort_by: str | None = None,
@@ -116,9 +116,8 @@ class LandsatOliTirs(DataSource):
         self.metadata_cache_dir.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "LandsatOliTirs":
+    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "LandsatOliTirs":
         """Creates a new LandsatOliTirs instance from a configuration dictionary."""
-        assert isinstance(config, RasterLayerConfig)
         if config.data_source is None:
             raise ValueError(f"data_source is required for config dict {config}")
         d = config.data_source.config_dict
