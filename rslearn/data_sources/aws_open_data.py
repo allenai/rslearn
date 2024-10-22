@@ -125,6 +125,8 @@ class Naip(DataSource):
     def from_config(config: LayerConfig, ds_path: UPath) -> "Naip":
         """Creates a new Naip instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
+        if config.data_source is None:
+            raise ValueError(f"data_source is required for config dict {config}")
         d = config.data_source.config_dict
         kwargs = dict(
             config=config,
