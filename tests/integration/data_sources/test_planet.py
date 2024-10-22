@@ -4,13 +4,20 @@ import pathlib
 import pytest
 from upath import UPath
 
-from rslearn.config import (BandSetConfig, DType, LayerType, QueryConfig,
-                            RasterLayerConfig, SpaceMode)
+from rslearn.config import (
+    BandSetConfig,
+    DType,
+    LayerType,
+    QueryConfig,
+    RasterLayerConfig,
+    SpaceMode,
+)
 from rslearn.data_sources.planet import Planet
 from rslearn.tile_stores import FileTileStore
 from rslearn.utils import STGeometry
 
-RUNNING_IN_CI = os.environ.get('CI', 'false').lower() == 'true'
+RUNNING_IN_CI = os.environ.get("CI", "false").lower() == "true"
+
 
 @pytest.mark.skipif(RUNNING_IN_CI, reason="Skipping in CI environment")
 class TestPlanet:

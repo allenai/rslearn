@@ -88,7 +88,7 @@ jobs:
         run: |
           echo "TEST_BUCKET=test-bucket-rslearn" >> $GITHUB_ENV
           echo "GCSFS_DEFAULT_PROJECT=skylight-proto-1" >> $GITHUB_ENV
-          echo "IS_CI=true" >> $GITHUB_ENV
+
       - name: Run Unit Tests
         run: |
           docker run --rm ${{ needs.build.outputs.ghcr_docker_image }} pytest -n auto tests/ --ignore tests/integration/ -vv
@@ -116,7 +116,7 @@ jobs:
             -e TEST_XYZ_TILES_TEMPLATE="${{ secrets.TEST_XYZ_TILES_TEMPLATE }}" \
             -e TEST_USGS_LANDSAT_USERNAME="${{ secrets.TEST_USGS_LANDSAT_USERNAME }}" \
             -e TEST_USGS_LANDSAT_PASSWORD="${{ secrets.TEST_USGS_LANDSAT_PASSWORD }}" \
-            -e IS_CI=${{ env.IS_CI }} \
+            -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
             pytest tests/integration/data_sources/
