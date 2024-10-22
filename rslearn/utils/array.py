@@ -11,7 +11,7 @@ def copy_spatial_array(
     dst: torch.Tensor | npt.NDArray[Any],
     src_offset: tuple[int, int],
     dst_offset: tuple[int, int],
-):
+) -> None:
     """Copy image content from a source array onto a destination array.
 
     The source and destination might be in the same coordinate system. Only the portion
@@ -59,4 +59,4 @@ def copy_spatial_array(
             src_col_offset : src_col_offset + col_overlap,
         ]
     else:
-        assert False
+        raise ValueError(f"Unsupported src shape: {src.shape}")
