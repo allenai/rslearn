@@ -290,29 +290,36 @@ class Sentinel2(DataSource):
         assert len(elements) == 1
         if elements[0].text is None:
             raise ValueError(f"EXT_POS_LIST is empty for {name}")
-        coords = elements[0].text.strip().split(" ")
+        coords_text = elements[0].text.strip().split(" ")
         # Convert flat list of lat1 lon1 lat2 lon2 ...
         # into (lon1, lat1), (lon2, lat2), ...
         # Then we can get the shapely geometry.
         coords = [
-            [float(coords[i + 1]), float(coords[i])] for i in range(0, len(coords), 2)
+            [float(coords_text[i + 1]), float(coords_text[i])]
+            for i in range(0, len(coords_text), 2)
         ]
         shp = shapely.Polygon(coords)
 
         # Get blob prefix which is a subfolder of the base_url
         elements = list(tree.iter("IMAGE_FILE"))
-        if any(el.text is None for el in elements):
-            raise ValueError(f"IMAGE_FILE is empty for {name}")
-        elements = [el for el in elements if el.text.endswith("_B01")]
+        elements = [
+            el for el in elements if el.text is not None and el.text.endswith("_B01")
+        ]
         assert len(elements) == 1
+        if elements[0].text is None:
+            raise ValueError(f"IMAGE_FILE is empty for {name}")
         blob_prefix = base_url + elements[0].text.split("B01")[0]
 
         elements = list(tree.iter("PRODUCT_START_TIME"))
         assert len(elements) == 1
+        if elements[0].text is None:
+            raise ValueError(f"PRODUCT_START_TIME is empty for {name}")
         start_time = dateutil.parser.isoparse(elements[0].text)
 
         elements = list(tree.iter("Cloud_Coverage_Assessment"))
         assert len(elements) == 1
+        if elements[0].text is None:
+            raise ValueError(f"Cloud_Coverage_Assessment is empty for {name}")
         cloud_cover = float(elements[0].text)
 
         return Sentinel2Item(
@@ -376,9 +383,9 @@ class Sentinel2(DataSource):
 
     def _get_candidate_items_index(
         self, wgs84_geometries: list[STGeometry]
-    ) -> list[list[list[Sentinel2Item]]]:
+    ) -> list[list[Sentinel2Item]]:
         """List relevant items using rtree index."""
-        candidates = [[] for _ in wgs84_geometries]
+        candidates: list[list[Sentinel2Item]] = [[] for _ in wgs84_geometries]
         for idx, geometry in enumerate(wgs84_geometries):
             time_range = None
             if geometry.time_range:
@@ -386,7 +393,8 @@ class Sentinel2(DataSource):
                     geometry.time_range[0] - self.max_time_delta,
                     geometry.time_range[1] + self.max_time_delta,
                 )
-
+            if self.rtree_index is None:
+                raise ValueError("rtree_index is required")
             encoded_items = self.rtree_index.query(geometry.shp.bounds)
             for encoded_item in encoded_items:
                 item = Sentinel2Item.deserialize(json.loads(encoded_item))
@@ -402,7 +410,7 @@ class Sentinel2(DataSource):
 
     def _get_candidate_items_direct(
         self, wgs84_geometries: list[STGeometry]
-    ) -> list[list[list[Sentinel2Item]]]:
+    ) -> list[list[Sentinel2Item]]:
         """Use _read_products to list relevant items."""
         needed_cell_years = set()
         for wgs84_geometry in wgs84_geometries:
@@ -417,7 +425,7 @@ class Sentinel2(DataSource):
                 ):
                     needed_cell_years.add((cell_id, year))
 
-        items_by_cell = {}
+        items_by_cell: dict[str, list[Sentinel2Item]] = {}
         for item in self._read_products(needed_cell_years):
             cell_id = "".join(item.blob_prefix.split("/")[1:4])
             assert len(cell_id) == 5
@@ -425,7 +433,7 @@ class Sentinel2(DataSource):
                 items_by_cell[cell_id] = []
             items_by_cell[cell_id].append(item)
 
-        candidates = [[] for _ in wgs84_geometries]
+        candidates: list[list[Sentinel2Item]] = [[] for _ in wgs84_geometries]
         for idx, geometry in enumerate(wgs84_geometries):
             for cell_id in rslearn.utils.mgrs.for_each_cell(geometry.shp.bounds):
                 for item in items_by_cell.get(cell_id, []):
