@@ -8,6 +8,7 @@ osmium
 planet
 pycocotools
 rtree
+s3fs
 satlaspretrain_models
 scipy
 transformers
