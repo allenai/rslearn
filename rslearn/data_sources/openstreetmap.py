@@ -36,7 +36,7 @@ class Filter:
         tag_conditions: dict[str, list[str]] | None = None,
         tag_properties: dict[str, str] | None = None,
         to_geometry: str | None = None,
-    ):
+    ) -> None:
         """Create a new Filter instance.
 
         Args:
@@ -104,12 +104,12 @@ class Filter:
 class BoundsHandler(osmium.SimpleHandler):
     """An osmium handler for computing the bounds of an input file."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize a new BoundsHandler."""
         osmium.SimpleHandler.__init__(self)
         self.bounds = (180, 90, -180, -90)
 
-    def node(self, n):
+    def node(self, n: osmium.Node) -> None:
         """Handle nodes and update the computed bounds."""
         lon = n.location.lon
         lat = n.location.lat
@@ -130,7 +130,7 @@ class OsmHandler(osmium.SimpleHandler):
         geometries: list[STGeometry],
         grid_size: float = 0.03,
         padding: float = 0.03,
-    ):
+    ) -> None:
         """Initialize a new OsmHandler.
 
         Args:
@@ -168,7 +168,7 @@ class OsmHandler(osmium.SimpleHandler):
 
         self.features = []
 
-    def node(self, n):
+    def node(self, n: osmium.Node) -> None:
         """Handle nodes."""
         # Check if node is relevant to our geometries.
         lon = n.location.lon
@@ -193,7 +193,7 @@ class OsmHandler(osmium.SimpleHandler):
             )
             self.features.append(feat)
 
-    def _get_way_coords(self, node_ids):
+    def _get_way_coords(self, node_ids: list[int]) -> list:
         coords = []
         for id in node_ids:
             if id not in self.cached_nodes:
@@ -201,7 +201,7 @@ class OsmHandler(osmium.SimpleHandler):
             coords.append(self.cached_nodes[id])
         return coords
 
-    def way(self, w):
+    def way(self, w: osmium.Way) -> None:
         """Handle ways."""
         # Collect nodes, skip if too few.
         node_ids = [member.ref for member in w.nodes]
@@ -235,7 +235,7 @@ class OsmHandler(osmium.SimpleHandler):
             )
             self.features.append(feat)
 
-    def match_relation(self, r):
+    def match_relation(self, r: osmium.Relation) -> None:
         """Handle relations."""
         # Collect ways and distinguish exterior vs holes, skip if none found.
         exterior_ways = []
@@ -267,7 +267,7 @@ class OsmHandler(osmium.SimpleHandler):
         # Merge the ways in case some exterior/interior polygons are split into
         # multiple ways.
         # And convert them from node IDs to coordinates.
-        def get_polygons(ways):
+        def get_polygons(ways: list) -> list:
             polygons: list[list[int]] = []
             for way in ways:
                 # Attempt to match the way to an existing polygon.
@@ -437,7 +437,7 @@ class OpenStreetMap(DataSource):
             categories=categories,
         )
 
-    def _get_pbf_bounds(self):
+    def _get_pbf_bounds(self) -> list[tuple[float, float, float, float]]:
         if not self.bounds_fname.exists():
             pbf_bounds = []
             for pbf_fname in self.pbf_fnames:

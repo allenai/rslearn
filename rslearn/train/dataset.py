@@ -47,7 +47,9 @@ class SamplerFactory:
 class RandomSamplerFactory(SamplerFactory):
     """A sampler factory for RandomSampler."""
 
-    def __init__(self, replacement: bool = False, num_samples: int | None = None):
+    def __init__(
+        self, replacement: bool = False, num_samples: int | None = None
+    ) -> None:
         """Initialize a RandomSamplerFactory.
 
         Args:
@@ -75,7 +77,9 @@ class RandomSamplerFactory(SamplerFactory):
 class WeightedRandomSamplerFactory(SamplerFactory):
     """A sampler factory for WeightedRandomSampler."""
 
-    def __init__(self, option_key: str, num_samples: int, replacement: bool = True):
+    def __init__(
+        self, option_key: str, num_samples: int, replacement: bool = True
+    ) -> None:
         """Initialize a WeightedRandomSamplerFactory.
 
         Args:
@@ -119,7 +123,7 @@ class DataInput:
         passthrough: bool = False,
         is_target: bool = False,
         dtype: DType = DType.FLOAT32,
-    ):
+    ) -> None:
         """Initialize a new DataInput.
 
         Args:
@@ -156,7 +160,7 @@ class SplitConfig:
         patch_size: int | tuple[int, int] | None = None,
         load_all_patches: bool | None = None,
         skip_targets: bool | None = None,
-    ):
+    ) -> None:
         """Initialize a new SplitConfig.
 
         Args:
@@ -244,7 +248,7 @@ def check_window(inputs: dict[str, DataInput], window: Window) -> bool:
     """
 
     # Make sure window has all the needed layers.
-    def is_any_layer_available(data_input):
+    def is_any_layer_available(data_input: DataInput) -> bool:
         for layer_name in data_input.layers:
             completed_fname = window.path / "layers" / layer_name / "completed"
             if completed_fname.exists():
@@ -275,7 +279,7 @@ class ModelDataset(torch.utils.data.Dataset):
         inputs: dict[str, DataInput],
         task: Task,
         workers: int,
-    ):
+    ) -> None:
         """Instantiate a new ModelDataset.
 
         Args:
@@ -399,7 +403,7 @@ class ModelDataset(torch.utils.data.Dataset):
         """Returns the dataset length."""
         return len(self.windows)
 
-    def __getitem__(self, idx) -> tuple[dict[str, Any], dict[str, Any]]:
+    def __getitem__(self, idx: int) -> tuple[dict[str, Any], dict[str, Any]]:
         """Read one training example.
 
         Args:
@@ -416,7 +420,7 @@ class ModelDataset(torch.utils.data.Dataset):
             window, bounds, (patch_idx, num_patches) = window
         elif self.patch_size:
 
-            def get_patch_range(n_patch, n_window):
+            def get_patch_range(n_patch: int, n_window: int) -> list[int]:
                 if n_patch > n_window:
                     # Select arbitrary range containing the entire window.
                     # Basically arbitrarily padding the window to get to patch size.
@@ -446,7 +450,7 @@ class ModelDataset(torch.utils.data.Dataset):
             bounds = window.bounds
 
         # Read the inputs and targets.
-        def read_input(data_input: DataInput):
+        def read_input(data_input: DataInput) -> torch.Tensor:
             # First enumerate all options of individual layers to read.
             layer_options = []
             for layer_name in data_input.layers:
@@ -581,7 +585,7 @@ class RetryDataset(torch.utils.data.Dataset):
 
     def __init__(
         self, dataset: torch.utils.data.Dataset, retries: int = 3, delay: float = 5
-    ):
+    ) -> None:
         """Create a new RetryDataset.
 
         Args:
@@ -593,7 +597,7 @@ class RetryDataset(torch.utils.data.Dataset):
         self.retries = retries
         self.delay = delay
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Return length of the dataset."""
         return len(self.dataset)
 

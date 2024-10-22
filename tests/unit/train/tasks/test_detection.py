@@ -5,7 +5,7 @@ from rslearn.train.tasks.detection import F1Metric
 EPSILON = 1e-4
 
 
-def test_f1_metric():
+def test_f1_metric() -> None:
     # Try 1 tp, 1 fp, 2 fn at best score threshold (0.4 F1).
     # (At 0.5 it should be 2 fp but at 0.9 it is 1 fp.)
     pred_dict = {

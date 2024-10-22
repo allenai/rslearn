@@ -17,7 +17,7 @@ class Normalize(Transform):
         | None = None,
         selectors: list[str] = ["image"],
         bands: list[int] | None = None,
-    ):
+    ) -> None:
         """Initialize a new Normalize.
 
         Result will be (input - mean) / std.

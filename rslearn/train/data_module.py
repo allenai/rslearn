@@ -48,7 +48,7 @@ class RslearnDataModule(L.LightningDataModule):
         val_config: SplitConfig = SplitConfig(),
         test_config: SplitConfig = SplitConfig(),
         predict_config: SplitConfig = SplitConfig(),
-    ):
+    ) -> None:
         """Initialize a new RslearnDataModule.
 
         Args:
@@ -79,7 +79,7 @@ class RslearnDataModule(L.LightningDataModule):
             "predict": default_config.update(predict_config),
         }
 
-    def setup(self, stage: str):
+    def setup(self, stage: str) -> None:
         """Set up datasets and samplers.
 
         Args:

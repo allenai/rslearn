@@ -30,7 +30,7 @@ class RslearnWriter(BasePredictionWriter):
         output_layer: str,
         path_options: dict[str, Any] = {},
         selector: list[str] = [],
-    ):
+    ) -> None:
         """Create a new RslearnWriter.
 
         Args:
@@ -71,7 +71,7 @@ class RslearnWriter(BasePredictionWriter):
         batch: Any,
         batch_idx: int,
         dataloader_idx: int,
-    ):
+    ) -> None:
         """Write a batch of predictions into the rslearn dataset.
 
         Args:

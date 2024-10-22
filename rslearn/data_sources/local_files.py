@@ -1,5 +1,6 @@
 """Data source for raster or vector data in local files."""
 
+from abc import ABC, abstractmethod
 from typing import Any
 
 import fiona
@@ -23,9 +24,10 @@ from .raster_source import get_needed_projections, ingest_raster
 Importers = ClassRegistry()
 
 
-class Importer:
-    """An abstract class for importing data from local files."""
+class Importer(ABC):
+    """An abstract base class for importing data from local files."""
 
+    @abstractmethod
     def list_items(self, config: LayerConfig, src_dir: UPath) -> list[Item]:
         """Extract a list of Items from the source directory.
 
@@ -33,15 +35,16 @@ class Importer:
             config: the configuration of the layer.
             src_dir: the source directory.
         """
-        raise NotImplementedError
+        pass
 
+    @abstractmethod
     def ingest_item(
         self,
         config: LayerConfig,
         tile_store: TileStore,
         item: Item,
         cur_geometries: list[STGeometry],
-    ):
+    ) -> None:
         """Ingest the specified local file item.
 
         Args:
@@ -50,7 +53,7 @@ class Importer:
             item: the Item to ingest
             cur_geometries: the geometries where the item is needed.
         """
-        raise NotImplementedError
+        pass
 
 
 class RasterItemSpec:
@@ -226,7 +229,7 @@ class RasterImporter(Importer):
         tile_store: TileStore,
         item: Item,
         cur_geometries: list[STGeometry],
-    ):
+    ) -> None:
         """Ingest the specified local file item.
 
         Args:
@@ -314,7 +317,7 @@ class VectorImporter(Importer):
         tile_store: TileStore,
         item: Item,
         cur_geometries: list[STGeometry],
-    ):
+    ) -> None:
         """Ingest the specified local file item.
 
         Args:

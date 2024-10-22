@@ -70,7 +70,7 @@ class ArrayWithTransform:
         """
         return self.array
 
-    def close(self):
+    def close(self) -> None:
         """This is to mimic the rasterio.DatasetReader API.
 
         The close function is a no-op.
@@ -258,7 +258,7 @@ def materialize_raster(
     window: Window,
     layer_name: str,
     band_cfg: BandSetConfig,
-):
+) -> None:
     """Materialize a given raster for a window.
 
     Currently it is only supported for materializing one band set.

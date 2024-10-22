@@ -18,10 +18,12 @@ INITIAL_LR = 1e-3
 
 
 class RecordParamsCallback(pl.Callback):
-    def __init__(self):
+    def __init__(self) -> None:
         self.recorded_params = []
 
-    def on_train_epoch_start(self, trainer, pl_module) -> None:
+    def on_train_epoch_start(
+        self, trainer: pl.Trainer, pl_module: RslearnLightningModule
+    ) -> None:
         self.recorded_params.append(
             pl_module.model.encoder[0].model.features[0][0].weight.tolist()
         )
@@ -84,7 +86,7 @@ def get_itc_modules(
     return pl_module, data_module
 
 
-def test_freeze_unfreeze(image_to_class_dataset: Dataset):
+def test_freeze_unfreeze(image_to_class_dataset: Dataset) -> None:
     """Test the FreezeUnfreeze callback by making sure the weights don't change in the
     first epoch but then unfreeze and do change in the second epoch."""
     pl_module, data_module = get_itc_modules(image_to_class_dataset)
@@ -105,7 +107,7 @@ def test_freeze_unfreeze(image_to_class_dataset: Dataset):
     assert record_callback.recorded_params[0] != record_callback.recorded_params[2]
 
 
-def test_unfreeze_lr_factor(image_to_class_dataset: Dataset):
+def test_unfreeze_lr_factor(image_to_class_dataset: Dataset) -> None:
     """Make sure learning rate is set correctly after unfreezing."""
     plateau_factor = 0.5
     unfreeze_lr_factor = 3

@@ -333,9 +333,7 @@ def apply_on_windows(
     p.close()
 
 
-def apply_on_windows_args(
-    f: Callable[[list[Window]], None], args: argparse.Namespace
-) -> None:
+def apply_on_windows_args(f: Callable[..., None], args: argparse.Namespace) -> None:
     """Call apply_on_windows with arguments passed via command-line interface."""
     dataset = Dataset(UPath(args.root))
     apply_on_windows(

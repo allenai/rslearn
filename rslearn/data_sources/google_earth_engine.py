@@ -95,7 +95,7 @@ class GEE(DataSource):
 
         return GEE(**kwargs)
 
-    def get_collection(self):
+    def get_collection(self) -> ee.ImageCollection:
         """Returns the Earth Engine image collection for this data source."""
         image_collection = ee.ImageCollection(self.collection_name)
         for k, v in self.filters:
@@ -108,7 +108,7 @@ class GEE(DataSource):
 
         if not csv_blob.exists():
             # Export feature collection of image metadata to GCS.
-            def image_to_feature(image) -> ee.Feature:
+            def image_to_feature(image: ee.Image) -> ee.Feature:
                 geometry = image.geometry().transform(proj="EPSG:4326")
                 return ee.Feature(geometry, {"time": image.date().format()})
 

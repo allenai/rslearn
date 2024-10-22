@@ -5,7 +5,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.train.tasks.classification import ClassificationTask
 
 
-def test_positive_class_threshold():
+def test_positive_class_threshold() -> None:
     # Check that task returns different output depending on the threshold.
     probs = torch.tensor([0.7, 0.3], dtype=torch.float32)
     metadata = dict(
@@ -56,7 +56,7 @@ def test_positive_class_threshold():
     assert output[0].properties["cls"] == "positive"
 
 
-def test_per_class_f1():
+def test_per_class_f1() -> None:
     targets = [
         {
             "class": torch.tensor(0, dtype=torch.int32),

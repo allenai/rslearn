@@ -112,7 +112,7 @@ class Naip(DataSource):
         if use_rtree_index:
             from rslearn.utils.rtree_index import RtreeIndex, get_cached_rtree
 
-            def build_fn(index: RtreeIndex):
+            def build_fn(index: RtreeIndex) -> None:
                 for item in self._read_index_shapefiles(desc="Building rtree index"):
                     index.insert(item.geometry.shp.bounds, json.dumps(item.serialize()))
 

@@ -38,7 +38,7 @@ class M2MAPIClient:
     pagination_size = 1000
     TIMEOUT = 1000000  # Set very high to start
 
-    def __init__(self, username, password):
+    def __init__(self, username: str, password: str) -> None:
         """Initialize a new M2MAPIClient.
 
         Args:
@@ -80,15 +80,15 @@ class M2MAPIClient:
             return data
         return None
 
-    def close(self):
+    def close(self) -> None:
         """Logout from the API."""
         self.request("logout")
 
-    def __enter__(self):
+    def __enter__(self) -> "M2MAPIClient":
         """Enter function to provide with semantics."""
         return self
 
-    def __exit__(self):
+    def __exit__(self) -> None:
         """Exit function to provide with semantics.
 
         Logs out the API.

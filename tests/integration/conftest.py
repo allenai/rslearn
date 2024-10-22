@@ -16,7 +16,7 @@ __all__ = [
 
 # maybe I don't want to explictly autouse this
 @pytest.fixture(scope="session", autouse=True)
-def test_bucket():
+def test_bucket() -> str:
     os.environ.setdefault("TEST_BUCKET", "test-bucket-rslearn")
     test_bucket = os.environ["TEST_BUCKET"]
     print(f"test_bucket: {test_bucket}")
@@ -30,6 +30,6 @@ def test_bucket():
 
 
 @pytest.fixture(scope="session", autouse=True)
-def test_prefix():
+def test_prefix() -> str:
     os.environ.setdefault("TEST_PREFIX", "tests/")
     return os.environ["TEST_PREFIX"]
