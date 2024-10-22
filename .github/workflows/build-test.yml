@@ -68,7 +68,7 @@ jobs:
 
   test:
     needs: build
-    runs-on: ubuntu-latest-l
+    runs-on: ubuntu-latest-m
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
