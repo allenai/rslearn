@@ -18,7 +18,6 @@ repos:
       - id: pretty-format-json
         args: ["--autofix"]
       - id: check-case-conflict
-      - id: check-docstring-first
       - id: check-added-large-files
         exclude: wheels/*
       - id: check-ast
