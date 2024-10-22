@@ -1,9 +1,12 @@
 name: Build, Test, and Publish Docker Image RSLEARN
 
-on: # TODO: Only run on pull request or push to main
+on:
   push:
     branches:
-      - henryh/setup_github_actions
+      - master
+  pull_request:
+    branches:
+      - master
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -113,7 +116,6 @@ jobs:
             pytest tests/integration/ --ignore tests/integration/data_sources/ -vv
 
       - name: Run Data Sources Integration Tests
-        # Try running these tests in parallel
         run: |
           docker run --rm \
             -e TEST_BUCKET="${{ env.TEST_BUCKET }}" \
@@ -130,7 +132,7 @@ jobs:
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
-            pytest tests/integration/data_sources/test_google_earth_engine.py
+            pytest tests/integration/data_sources/
 
       # Add Job to clean up test bucket
       - name: Clean up

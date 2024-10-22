@@ -2,15 +2,28 @@ import os
 import pathlib
 import random
 
+import pytest
 from upath import UPath
 
-from rslearn.config import (BandSetConfig, DType, LayerType, QueryConfig,
-                            RasterLayerConfig, SpaceMode)
+from rslearn.config import (
+    BandSetConfig,
+    DType,
+    LayerType,
+    QueryConfig,
+    RasterLayerConfig,
+    SpaceMode,
+)
 from rslearn.data_sources.google_earth_engine import GEE
 from rslearn.tile_stores import FileTileStore
 from rslearn.utils import STGeometry
 
+RUNNING_IN_CI = os.environ.get("CI", "false").lower() == "true"
 
+
+@pytest.mark.skipif(
+    RUNNING_IN_CI,
+    reason="Skipping in CI environment as the memory requirements are too big",
+)
 class TestGEE:
     """Tests the GEE data source."""
 
@@ -31,9 +44,7 @@ class TestGEE:
             collection_name="COPERNICUS/S1_GRD",
             gcs_bucket_name=os.environ["TEST_BUCKET"],
             service_account_name=os.environ["TEST_SERVICE_ACCOUNT_NAME"],
-            service_account_credentials=os.environ[
-                "GOOGLE_APPLICATION_CREDENTIALS"
-            ],
+            service_account_credentials=os.environ["GOOGLE_APPLICATION_CREDENTIALS"],
             filters=[
                 ("transmitterReceiverPolarisation", ["VV", "VH"]),
                 ("instrumentMode", "IW"),
