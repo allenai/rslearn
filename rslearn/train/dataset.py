@@ -337,6 +337,7 @@ class ModelDataset(torch.utils.data.Dataset):
 
         # Eliminate windows that are missing either a requisite input layer, or missing
         # all target layers.
+        new_windows = []
         if workers == 0:
             for window in windows:
                 if check_window(self.inputs, window) is None:
@@ -355,7 +356,6 @@ class ModelDataset(torch.utils.data.Dataset):
                     for window in windows
                 ],
             )
-            new_windows = []
             for window in tqdm.tqdm(
                 outputs, total=len(windows), desc="Checking available layers in windows"
             ):
