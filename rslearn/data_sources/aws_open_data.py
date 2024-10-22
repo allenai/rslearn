@@ -23,7 +23,7 @@ from upath import UPath
 
 import rslearn.data_sources.utils
 import rslearn.utils.mgrs
-from rslearn.config import LayerConfig, RasterLayerConfig
+from rslearn.config import RasterLayerConfig
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_EPSG, WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import GridIndex, Projection, STGeometry, daterange
@@ -61,7 +61,7 @@ class NaipItem(Item):
         return d
 
     @staticmethod
-    def deserialize(d: dict) -> Item:
+    def deserialize(d: dict) -> "NaipItem":
         """Deserializes an item from a JSON-decoded dictionary."""
         item = super(NaipItem, NaipItem).deserialize(d)
         return NaipItem(
@@ -84,7 +84,7 @@ class Naip(DataSource):
 
     def __init__(
         self,
-        config: LayerConfig,
+        config: RasterLayerConfig,
         index_cache_dir: UPath,
         use_rtree_index: bool = False,
         states: list[str] | None = None,
@@ -122,9 +122,8 @@ class Naip(DataSource):
             )
 
     @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "Naip":
+    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Naip":
         """Creates a new Naip instance from a configuration dictionary."""
-        assert isinstance(config, RasterLayerConfig)
         if config.data_source is None:
             raise ValueError(f"data_source is required for config dict {config}")
         d = config.data_source.config_dict
@@ -285,7 +284,7 @@ class Naip(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[list[NaipItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -299,7 +298,7 @@ class Naip(DataSource):
             geometry.to_projection(WGS84_PROJECTION) for geometry in geometries
         ]
 
-        items = [[] for _ in geometries]
+        items: list = [[] for _ in geometries]
         if self.rtree_index:
             for idx, geometry in enumerate(wgs84_geometries):
                 encoded_items = self.rtree_index.query(geometry.shp.bounds)
@@ -328,7 +327,7 @@ class Naip(DataSource):
             groups.append(cur_groups)
         return groups
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: Any) -> NaipItem:
         """Deserializes an item from JSON-decoded data."""
         assert isinstance(serialized_item, dict)
         return NaipItem.deserialize(serialized_item)
@@ -336,7 +335,7 @@ class Naip(DataSource):
     def ingest(
         self,
         tile_store: TileStore,
-        items: list[Item],
+        items: list[NaipItem],
         geometries: list[list[STGeometry]],
     ) -> None:
         """Ingest items into the given tile store.
@@ -404,7 +403,7 @@ class Sentinel2Item(Item):
         return d
 
     @staticmethod
-    def deserialize(d: dict) -> Item:
+    def deserialize(d: dict) -> "Sentinel2Item":
         """Deserializes an item from a JSON-decoded dictionary."""
         if "name" not in d:
             d["name"] = d["blob_path"].split("/")[-1].split(".tif")[0]
@@ -471,7 +470,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
 
     def __init__(
         self,
-        config: LayerConfig,
+        config: RasterLayerConfig,
         modality: Sentinel2Modality,
         metadata_cache_dir: UPath,
         max_time_delta: timedelta = timedelta(days=30),
@@ -503,9 +502,10 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         self.bucket = boto3.resource("s3").Bucket(bucket_name)
 
     @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "Sentinel2":
+    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Sentinel2":
         """Creates a new Sentinel2 instance from a configuration dictionary."""
-        assert isinstance(config, RasterLayerConfig)
+        if config.data_source is None:
+            raise ValueError("Sentinel2 data source requires a data source config")
         d = config.data_source.config_dict
         kwargs = dict(
             config=config,
@@ -525,7 +525,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
         return Sentinel2(**kwargs)
 
     def _read_products(
-        self, needed_cell_months: set[tuple[str, int, int, int]]
+        self, needed_cell_months: set[tuple[str, int, int]]
     ) -> Generator[Sentinel2Item, None, None]:
         """Read productInfo.json files and yield relevant Sentinel2Items.
 
@@ -600,7 +600,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[list[Sentinel2Item]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -630,7 +630,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
                 ):
                     needed_cell_months.add((cell_id, ts.year, ts.month))
 
-        items_by_cell = {}
+        items_by_cell: dict[str, list[Sentinel2Item]] = {}
         for item in self._read_products(needed_cell_months):
             cell_id = "".join(item.blob_path.split("/")[1:4])
             if cell_id not in items_by_cell:
@@ -663,7 +663,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
 
         return groups
 
-    def get_item_by_name(self, name: str) -> Item:
+    def get_item_by_name(self, name: str) -> Sentinel2Item:
         """Gets an item by name."""
         # Product name is like:
         #   S2B_MSIL1C_20240201T230819_N0510_R015_T51CWM_20240202T012755.
@@ -682,12 +682,14 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
                 return item
         raise ValueError(f"item {name} not found")
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: Any) -> Sentinel2Item:
         """Deserializes an item from JSON-decoded data."""
         assert isinstance(serialized_item, dict)
         return Sentinel2Item.deserialize(serialized_item)
 
-    def retrieve_item(self, item: Item) -> Generator[tuple[str, BinaryIO], None, None]:
+    def retrieve_item(
+        self, item: Sentinel2Item
+    ) -> Generator[tuple[str, BinaryIO], None, None]:
         """Retrieves the rasters corresponding to an item as file streams."""
         for fname, _ in self.band_fnames[self.modality]:
             buf = io.BytesIO()
@@ -698,7 +700,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
             yield (fname, buf)
 
     def _get_harmonize_callback(
-        self, item: Item
+        self, item: Sentinel2Item
     ) -> Callable[[npt.NDArray], npt.NDArray] | None:
         """Gets the harmonization callback for the given item.
 
@@ -712,6 +714,8 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
             return None
         # Search metadata XML for the RADIO_ADD_OFFSET tag.
         # This contains the per-band offset, but we assume all bands have the same offset.
+        if item.geometry.time_range is None:
+            raise ValueError("Sentinel2 on AWS requires geometry time ranges to be set")
         ts = item.geometry.time_range[0]
         metadata_fname = (
             f"products/{ts.year}/{ts.month}/{ts.day}/{item.name}/metadata.xml"
@@ -727,7 +731,7 @@ class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
     def ingest(
         self,
         tile_store: TileStore,
-        items: list[Item],
+        items: list[Sentinel2Item],
         geometries: list[list[STGeometry]],
     ) -> None:
         """Ingest items into the given tile store.
