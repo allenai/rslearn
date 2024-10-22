@@ -143,7 +143,8 @@ class RslearnLightningModule(L.LightningModule):
 
     def on_fit_start(self) -> None:
         """Called when the fit begins."""
-        if self.restore_config:
+        # Only restore if doing a fresh fit.
+        if self.trainer.ckpt_path is None and self.restore_config:
             state_dict = self.restore_config.get_state_dict()
             missing_keys, unexpected_keys = self.model.load_state_dict(
                 state_dict, strict=False
