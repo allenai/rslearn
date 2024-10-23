@@ -49,7 +49,7 @@ class RestoreConfig:
         """Returns the state dict configured in this RestoreConfig."""
         print(f"loading state dict from {self.restore_path}")
         with self.restore_path.open("rb") as f:
-            state_dict = torch.load(f)
+            state_dict = torch.load(f, map_location="cpu")
         for k in self.selector:
             state_dict = state_dict[k]
 
