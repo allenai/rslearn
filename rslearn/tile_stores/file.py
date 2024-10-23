@@ -11,7 +11,6 @@ from rslearn.utils import Feature, PixelBounds, Projection
 from rslearn.utils.fsspec import open_atomic
 from rslearn.utils.raster_format import (
     GeotiffRasterFormat,
-    RasterFormat,
     load_raster_format,
 )
 from rslearn.utils.vector_format import (
@@ -30,7 +29,7 @@ class FileTileStoreLayer(TileStoreLayer):
         self,
         path: UPath,
         projection: Projection | None = None,
-        raster_format: RasterFormat = GeotiffRasterFormat(),
+        raster_format: GeotiffRasterFormat = GeotiffRasterFormat(),
         vector_format: VectorFormat = GeojsonVectorFormat(),
     ):
         """Creates a new FileTileStoreLayer.
@@ -129,7 +128,7 @@ class FileTileStore(TileStore):
     def __init__(
         self,
         path: UPath,
-        raster_format: RasterFormat = GeotiffRasterFormat(),
+        raster_format: GeotiffRasterFormat = GeotiffRasterFormat(),
         vector_format: VectorFormat = GeojsonVectorFormat(),
     ):
         """Initialize a new FileTileStore.

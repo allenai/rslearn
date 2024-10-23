@@ -16,6 +16,7 @@ def test_positive_class_threshold() -> None:
     # Default should use 0.5 threshold.
     task = ClassificationTask(property_name="cls", classes=["positive", "negative"])
     output = task.process_output(probs, metadata)
+    assert output[0].properties is not None
     assert output[0].properties["cls"] == "positive"
 
     task = ClassificationTask(
@@ -25,6 +26,7 @@ def test_positive_class_threshold() -> None:
         positive_class_threshold=0.6,
     )
     output = task.process_output(probs, metadata)
+    assert output[0].properties is not None
     assert output[0].properties["cls"] == "positive"
 
     task = ClassificationTask(
@@ -34,6 +36,7 @@ def test_positive_class_threshold() -> None:
         positive_class_threshold=0.75,
     )
     output = task.process_output(probs, metadata)
+    assert output[0].properties is not None
     assert output[0].properties["cls"] == "negative"
 
     # Now switch the class order.
@@ -44,6 +47,7 @@ def test_positive_class_threshold() -> None:
         positive_class_threshold=0.4,
     )
     output = task.process_output(probs, metadata)
+    assert output[0].properties is not None
     assert output[0].properties["cls"] == "negative"
 
     task = ClassificationTask(
@@ -53,6 +57,7 @@ def test_positive_class_threshold() -> None:
         positive_class_threshold=0.2,
     )
     output = task.process_output(probs, metadata)
+    assert output[0].properties is not None
     assert output[0].properties["cls"] == "positive"
 
 

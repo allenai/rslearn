@@ -44,7 +44,7 @@ def test_retry_dataset() -> None:
             pass
 
 
-def test_dataset_covers_border(image_to_class_dataset: Dataset):
+def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
     # Make sure that, when loading all patches, the border of the raster is included in
     # the generated windows.
     # The image_to_class_dataset window is 4x4 so 3x3 patch will ensure irregular window

@@ -8,12 +8,8 @@ import shapely
 import torch
 from PIL import Image, ImageDraw
 from torchmetrics import Metric, MetricCollection
-from torchmetrics.classification import (
-    MulticlassAccuracy,
-    MulticlassF1Score,
-    MulticlassPrecision,
-    MulticlassRecall,
-)
+from torchmetrics.classification import (MulticlassAccuracy, MulticlassF1Score,
+                                         MulticlassPrecision, MulticlassRecall)
 
 from rslearn.utils import Feature, STGeometry
 
@@ -37,7 +33,7 @@ class ClassificationTask(BasicTask):
         f1_metric_kwargs: dict[str, Any] = {},
         positive_class: str | None = None,
         positive_class_threshold: float = 0.5,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Initialize a new ClassificationTask.
 
@@ -120,9 +116,10 @@ class ClassificationTask(BasicTask):
 
         data = raw_inputs["targets"]
         for feat in data:
-            for property_name, property_value in self.filters:
-                if feat.properties.get(property_name) != property_value:
-                    continue
+            if self.filters:
+                for property_name, property_value in self.filters:
+                    if feat.properties.get(property_name) != property_value:
+                        continue
             if self.property_name not in feat.properties:
                 continue
 

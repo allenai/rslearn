@@ -160,7 +160,8 @@ class RslearnWriter(BasePredictionWriter):
 
             # This is the last patch so it's time to merge outputs from overlapped patches
             if self.merger is not None:
-                pending_output = self.merger.merge(pending_output)
+                # TODO: HackyNot sure why we don't pass metadata to the merger can't see any subclasses
+                pending_output = self.merger.merge(pending_output)  # type: ignore
 
             # This is the last patch so it's time to write it.
             layer_dir = (
