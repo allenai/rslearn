@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any
 
 import osmium
+import osmium.osm.types
 import shapely
 from upath import UPath
 
@@ -109,7 +110,7 @@ class BoundsHandler(osmium.SimpleHandler):
         osmium.SimpleHandler.__init__(self)
         self.bounds: tuple[float, float, float, float] = (180, 90, -180, -90)
 
-    def node(self, n: osmium.Node) -> None:
+    def node(self, n: osmium.osm.types.Node) -> None:
         """Handle nodes and update the computed bounds."""
         lon = n.location.lon
         lat = n.location.lat
@@ -168,7 +169,7 @@ class OsmHandler(osmium.SimpleHandler):
 
         self.features: list[Feature] = []
 
-    def node(self, n: osmium.Node) -> None:
+    def node(self, n: osmium.osm.types.Node) -> None:
         """Handle nodes."""
         # Check if node is relevant to our geometries.
         lon = n.location.lon
@@ -201,7 +202,7 @@ class OsmHandler(osmium.SimpleHandler):
             coords.append(self.cached_nodes[id])
         return coords
 
-    def way(self, w: osmium.Way) -> None:
+    def way(self, w: osmium.osm.types.Way) -> None:
         """Handle ways."""
         # Collect nodes, skip if too few.
         node_ids = [member.ref for member in w.nodes]
@@ -235,7 +236,7 @@ class OsmHandler(osmium.SimpleHandler):
             )
             self.features.append(feat)
 
-    def match_relation(self, r: osmium.Relation) -> None:
+    def match_relation(self, r: osmium.osm.types.Relation) -> None:
         """Handle relations."""
         # Collect ways and distinguish exterior vs holes, skip if none found.
         exterior_ways = []
