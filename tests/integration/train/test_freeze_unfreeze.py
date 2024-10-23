@@ -19,7 +19,7 @@ INITIAL_LR = 1e-3
 
 class RecordParamsCallback(pl.Callback):
     def __init__(self) -> None:
-        self.recorded_params = []
+        self.recorded_params: list = []
 
     def on_train_epoch_start(
         self, trainer: pl.Trainer, pl_module: RslearnLightningModule

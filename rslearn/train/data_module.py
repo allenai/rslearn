@@ -15,7 +15,7 @@ from .dataset import DataInput, ModelDataset, RetryDataset, SplitConfig
 
 def collate_fn(
     batch: list[tuple[dict[str, Any], dict[str, Any]]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple:
     """Collate batch of training examples.
 
     We just make list of the inputs and another of the targets.

@@ -26,6 +26,8 @@ def data_source_from_config(config: LayerConfig, ds_path: UPath) -> DataSource:
         config: the LayerConfig containing this data source.
         ds_path: the dataset root directory.
     """
+    if config.data_source is None:
+        raise ValueError("No data source specified")
     name = config.data_source.name
     module_name = ".".join(name.split(".")[:-1])
     class_name = name.split(".")[-1]

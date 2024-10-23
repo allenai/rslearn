@@ -144,23 +144,25 @@ def get_needed_projections(
         list of Projection objects for which the item has not been ingested yet
     """
     # Identify which band set configs are relevant to this raster.
-    raster_bands = set(raster_bands)
-    relevant_band_sets = []
+    raster_bands_set = set(raster_bands)
+    relevant_band_set_list = []
     for band_set in band_sets:
         is_match = False
+        if band_set.bands is None:
+            continue
         for band in band_set.bands:
-            if band not in raster_bands:
+            if band not in raster_bands_set:
                 continue
             is_match = True
             break
         if not is_match:
             continue
-        relevant_band_sets.append(band_set)
+        relevant_band_set_list.append(band_set)
 
     all_projections = {geometry.projection for geometry in geometries}
     needed_projections = []
     for projection in all_projections:
-        for band_set in relevant_band_sets:
+        for band_set in relevant_band_set_list:
             final_projection, _ = band_set.get_final_projection_and_bounds(
                 projection, None
             )
@@ -272,7 +274,8 @@ def materialize_raster(
     window_projection, window_bounds = band_cfg.get_final_projection_and_bounds(
         window.projection, window.bounds
     )
-
+    if window_bounds is None:
+        raise ValueError(f"No windowbounds specified for {layer_name}")
     # Re-project to just extract the window.
     array = raster.read()
     window_width = window_bounds[2] - window_bounds[0]
@@ -297,7 +300,10 @@ def materialize_raster(
         dst_transform=dst_transform,
         resampling=rasterio.enums.Resampling.bilinear,
     )
-
+    if band_cfg.bands is None or band_cfg.format is None:
+        raise ValueError(
+            f"No bands or format specified for {layer_name} materialization"
+        )
     # Write the array to layer directory.
     layer_dir = window.path / "layers" / layer_name
     out_dir = layer_dir / "_".join(band_cfg.bands)

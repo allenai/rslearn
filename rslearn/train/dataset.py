@@ -236,7 +236,7 @@ class SplitConfig:
         return True if self.skip_targets is True else False
 
 
-def check_window(inputs: dict[str, DataInput], window: Window) -> bool:
+def check_window(inputs: dict[str, DataInput], window: Window) -> Window | None:
     """Verify that the window has the required layers based on the specified inputs.
 
     Args:
@@ -374,13 +374,15 @@ class ModelDataset(torch.utils.data.Dataset):
             # TODO: use hash of window names so this is deterministic and not arbitrarily ordered according to load_windows
             windows = windows[0 : split_config.num_samples]
 
-        self.windows = windows
+        self.windows: list = windows
 
         # If we're loading all patches, we need to include the patch details.
-        if split_config.get_load_all_patches():
+        if split_config.get_load_all_patches() and self.patch_size is not None:
             patches = []
             for window in self.windows:
                 cur_patches = []
+                if window is None:
+                    raise ValueError("Window is None in load_all_patches")
                 for col in range(
                     window.bounds[0], window.bounds[2], self.patch_size[0]
                 ):
@@ -403,7 +405,9 @@ class ModelDataset(torch.utils.data.Dataset):
         """Returns the dataset length."""
         return len(self.windows)
 
-    def __getitem__(self, idx: int) -> tuple[dict[str, Any], dict[str, Any]]:
+    def __getitem__(
+        self, idx: int
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         """Read one training example.
 
         Args:
@@ -472,6 +476,8 @@ class ModelDataset(torch.utils.data.Dataset):
                 # See what different sets of bands we need to read to get all the
                 # configured bands.
                 needed_bands = data_input.bands
+                if needed_bands is None:
+                    raise ValueError(f"No bands specified for {layer}")
                 needed_band_indexes = {}
                 for i, band in enumerate(needed_bands):
                     needed_band_indexes[band] = i
@@ -479,6 +485,8 @@ class ModelDataset(torch.utils.data.Dataset):
                 for band_set in layer_config.band_sets:
                     needed_src_indexes = []
                     needed_dst_indexes = []
+                    if band_set.bands is None:
+                        continue
                     for i, band in enumerate(band_set.bands):
                         if band not in needed_band_indexes:
                             continue
@@ -505,6 +513,8 @@ class ModelDataset(torch.utils.data.Dataset):
                     _, final_bounds = band_set.get_final_projection_and_bounds(
                         window.projection, bounds
                     )
+                    if band_set.format is None:
+                        raise ValueError(f"No format specified for {layer}")
                     raster_format = load_raster_format(
                         RasterFormatConfig(band_set.format["name"], band_set.format)
                     )
