@@ -25,7 +25,6 @@ def get_harmonize_callback(
     offset = None
     for el in tree.iter("RADIO_ADD_OFFSET"):
         if el.text is None:
-            # TODO: NOT SURE This is correct behavior or we should return None
             raise ValueError(f"text is missing in {el}")
         value = int(el.text)
         if offset is None:

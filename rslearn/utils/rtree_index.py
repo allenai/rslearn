@@ -73,17 +73,6 @@ def delete_partially_created_local_files(fname: str) -> None:
             os.unlink(cur_fname)
 
 
-def copy_cache_to_local_dir(
-    cache_dir: UPath, tmp_dir: str, extension_suffix: str
-) -> None:
-    """Copy the rtree index files from cache_dir to a local temporary directory."""
-    extensions = [".dat", ".idx"]
-    for ext in extensions:
-        with (cache_dir / f"rtree_index{ext}").open("rb") as src:
-            with open(os.path.join(tmp_dir, f"rtree_index{ext}"), "wb") as dst:
-                shutil.copyfileobj(src, dst)
-
-
 def get_cached_rtree(
     cache_dir: UPath, tmp_dir: str, build_fn: Callable[[RtreeIndex], None]
 ) -> RtreeIndex:
