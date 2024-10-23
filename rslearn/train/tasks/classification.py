@@ -8,8 +8,12 @@ import shapely
 import torch
 from PIL import Image, ImageDraw
 from torchmetrics import Metric, MetricCollection
-from torchmetrics.classification import (MulticlassAccuracy, MulticlassF1Score,
-                                         MulticlassPrecision, MulticlassRecall)
+from torchmetrics.classification import (
+    MulticlassAccuracy,
+    MulticlassF1Score,
+    MulticlassPrecision,
+    MulticlassRecall,
+)
 
 from rslearn.utils import Feature, STGeometry
 
@@ -22,7 +26,7 @@ class ClassificationTask(BasicTask):
     def __init__(
         self,
         property_name: str,
-        classes: list[str],
+        classes: list,  # TODO: Should this be a list of str or int or can it be both?
         filters: list[tuple[str, str]] | None = None,
         read_class_id: bool = False,
         allow_invalid: bool = False,
@@ -116,7 +120,9 @@ class ClassificationTask(BasicTask):
 
         data = raw_inputs["targets"]
         for feat in data:
-            if self.filters:
+            if feat.properties is None:
+                continue
+            if self.filters is not None:
                 for property_name, property_value in self.filters:
                     if feat.properties.get(property_name) != property_value:
                         continue
@@ -175,7 +181,7 @@ class ClassificationTask(BasicTask):
             class_idx = probs.argmax()
 
         if not self.read_class_id:
-            value = self.classes[class_idx]
+            value = self.classes[class_idx]  # type: ignore
         else:
             value = class_idx
 
@@ -189,7 +195,7 @@ class ClassificationTask(BasicTask):
                 self.property_name: value,
             },
         )
-        if self.prob_property:
+        if self.prob_property is not None and feature.properties is not None:
             feature.properties[self.prob_property] = probs.tolist()
         return [feature]
 
@@ -212,6 +218,8 @@ class ClassificationTask(BasicTask):
         image = super().visualize(input_dict, target_dict, output)["image"]
         image = Image.fromarray(image)
         draw = ImageDraw.Draw(image)
+        if target_dict is None:
+            raise ValueError("target_dict is required for visualization")
         target_class = self.classes[target_dict["class"]]
         output_class = self.classes[output.argmax()]
         text = f"Label: {target_class}\nOutput: {output_class}"

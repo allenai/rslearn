@@ -21,7 +21,7 @@ class GridIndex(SpatialIndex):
         """
         self.size = size
         self.grid: dict = {}
-        self.items = []
+        self.items: list = []
 
     def insert(self, box: tuple[float, float, float, float], data: Any) -> None:
         """Insert a box into the index.
