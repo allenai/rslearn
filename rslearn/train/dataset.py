@@ -158,6 +158,7 @@ class SplitConfig:
         transforms: list[torch.nn.Module] | None = None,
         sampler: SamplerFactory | None = None,
         patch_size: int | tuple[int, int] | None = None,
+        overlap_ratio: float | None = None,
         load_all_patches: bool | None = None,
         skip_targets: bool | None = None,
     ) -> None:
@@ -175,6 +176,8 @@ class SplitConfig:
             sampler: SamplerFactory for this split
             patch_size: an optional square size or (width, height) tuple. If set, read
                 crops of this size rather than entire windows.
+            overlap_ratio: an optional float between 0 and 1. If set, read patches with
+                this ratio of overlap.
             load_all_patches: with patch_size set, rather than sampling a random patch
                 for each window, read all patches as separate sequential items in the
                 dataset.
@@ -189,6 +192,10 @@ class SplitConfig:
         self.patch_size = patch_size
         self.load_all_patches = load_all_patches
         self.skip_targets = skip_targets
+        self.overlap_ratio = overlap_ratio
+        if self.overlap_ratio is not None:
+            if not (0 < self.overlap_ratio < 1):
+                raise ValueError("overlap_ratio must be between 0 and 1 (exclusive)")
 
     def update(self, other: "SplitConfig") -> "SplitConfig":
         """Override settings in this SplitConfig with those in another.
@@ -204,6 +211,7 @@ class SplitConfig:
             transforms=self.transforms,
             sampler=self.sampler,
             patch_size=self.patch_size,
+            overlap_ratio=self.overlap_ratio,
             load_all_patches=self.load_all_patches,
             skip_targets=self.skip_targets,
         )
@@ -221,6 +229,8 @@ class SplitConfig:
             result.sampler = other.sampler
         if other.patch_size:
             result.patch_size = other.patch_size
+        if other.overlap_ratio is not None:
+            result.overlap_ratio = other.overlap_ratio
         if other.load_all_patches is not None:
             result.load_all_patches = other.load_all_patches
         if other.skip_targets is not None:
@@ -379,15 +389,24 @@ class ModelDataset(torch.utils.data.Dataset):
         # If we're loading all patches, we need to include the patch details.
         if split_config.get_load_all_patches() and self.patch_size is not None:
             patches = []
+            overlap_size = int(
+                self.patch_size[0] * split_config.overlap_ratio
+                if split_config.overlap_ratio
+                else 0
+            )
             for window in self.windows:
                 cur_patches = []
                 if window is None:
                     raise ValueError("Window is None in load_all_patches")
                 for col in range(
-                    window.bounds[0], window.bounds[2], self.patch_size[0]
+                    window.bounds[0],
+                    window.bounds[2],
+                    self.patch_size[0] - overlap_size,
                 ):
                     for row in range(
-                        window.bounds[1], window.bounds[3], self.patch_size[1]
+                        window.bounds[1],
+                        window.bounds[3],
+                        self.patch_size[1] - overlap_size,
                     ):
                         cur_patches.append(
                             (

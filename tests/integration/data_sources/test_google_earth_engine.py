@@ -3,6 +3,7 @@ import pathlib
 import random
 from typing import Any
 
+import pytest
 from upath import UPath
 
 from rslearn.config import (
@@ -17,7 +18,13 @@ from rslearn.data_sources.google_earth_engine import GEE
 from rslearn.tile_stores import FileTileStore
 from rslearn.utils import STGeometry
 
+RUNNING_IN_CI = os.environ.get("CI", "false").lower() == "true"
 
+
+@pytest.mark.skipif(
+    RUNNING_IN_CI,
+    reason="Skipping in CI environment as the memory requirements are too big",
+)
 class TestGEE:
     """Tests the GEE data source."""
 

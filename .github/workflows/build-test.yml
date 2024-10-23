@@ -1,9 +1,11 @@
-name: Build, Test, and Publish Docker Image RSLEARN
+name: Build, Test, and Publish Docker Image rslearn
 
-on: # TODO: Only run on pull request or push to main
+on:
   push:
     branches:
-      - henryh/setup_github_actions
+      - master
+  pull_request:
+    types: [opened, synchronize, reopened]
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -68,7 +70,7 @@ jobs:
 
   test:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -113,7 +115,6 @@ jobs:
             pytest tests/integration/ --ignore tests/integration/data_sources/ -vv
 
       - name: Run Data Sources Integration Tests
-        # Try running these tests in parallel
         run: |
           docker run --rm \
             -e TEST_BUCKET="${{ env.TEST_BUCKET }}" \
@@ -130,7 +131,7 @@ jobs:
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
-            pytest tests/integration/data_sources/test_google_earth_engine.py
+            pytest tests/integration/data_sources/
 
       # Add Job to clean up test bucket
       - name: Clean up

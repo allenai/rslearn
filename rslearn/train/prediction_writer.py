@@ -17,6 +17,24 @@ from rslearn.utils.vector_format import load_vector_format
 from .lightning_module import RslearnLightningModule
 
 
+class PatchPredictionMerger:
+    """Base class for merging predictions from multiple patches."""
+
+    def merge(
+        self, outputs: Sequence[Any], metadatas: Sequence[Any]
+    ) -> tuple[Sequence[Any], Sequence[Any]]:
+        """Merge the outputs and metadatas.
+
+        Args:
+            outputs: the outputs to process.
+            metadatas: the metadatas to process.
+
+        Returns:
+            the merged outputs and metadatas.
+        """
+        raise NotImplementedError
+
+
 class RslearnWriter(BasePredictionWriter):
     """A writer that writes predictions back into the rslearn dataset.
 
@@ -30,7 +48,8 @@ class RslearnWriter(BasePredictionWriter):
         output_layer: str,
         path_options: dict[str, Any] = {},
         selector: list[str] = [],
-    ) -> None:
+        merger: PatchPredictionMerger | None = None,
+    ):
         """Create a new RslearnWriter.
 
         Args:
@@ -39,11 +58,11 @@ class RslearnWriter(BasePredictionWriter):
             path_options: additional options for path to pass to fsspec
             selector: keys to access the desired output in the output dict if needed.
                 e.g ["key1", "key2"] gets output["key1"]["key2"]
+            merger: merger to use to merge outputs from overlapped patches.
         """
         super().__init__(write_interval="batch")
         self.output_layer = output_layer
         self.selector = selector
-
         self.path = UPath(path, **path_options)
         self.dataset = Dataset(self.path)
         self.layer_config = self.dataset.layers[self.output_layer]
@@ -58,6 +77,8 @@ class RslearnWriter(BasePredictionWriter):
             self.format = load_vector_format(self.layer_config.format)
         else:
             raise ValueError(f"invalid layer type {self.layer_config.layer_type}")
+
+        self.merger = merger
 
         # Map from window name to pending data to write.
         # This is used when windows are split up into patches, so the data from all the
@@ -92,7 +113,6 @@ class RslearnWriter(BasePredictionWriter):
             for output, metadata in zip(prediction, metadatas)
         ]
 
-        _, _, metadatas = batch
         for output, metadata in zip(outputs, metadatas):
             if not isinstance(output, dict):
                 raise ValueError(f"Unsupported output type {type(output)}")
@@ -135,9 +155,14 @@ class RslearnWriter(BasePredictionWriter):
             if metadata["patch_idx"] < metadata["num_patches"] - 1:
                 continue
 
-            # This is the last patch so it's time to write it.
             pending_output = self.pending_outputs[window_name]
             del self.pending_outputs[window_name]
+
+            # This is the last patch so it's time to merge outputs from overlapped patches
+            if self.merger is not None:
+                pending_output = self.merger.merge(pending_output)
+
+            # This is the last patch so it's time to write it.
             layer_dir = (
                 self.dataset.path
                 / "windows"
