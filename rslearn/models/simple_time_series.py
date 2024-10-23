@@ -54,12 +54,11 @@ class SimpleTimeSeries(torch.nn.Module):
             self.num_groups = len(self.groups)
         else:
             self.num_groups = 1
-
+        if num_layers is None:
+            raise ValueError(f"num_layers must be specified for {self.op} op")
         if self.op == "convrnn":
-            if num_layers is None:
-                raise ValueError("num_layers must be specified for convrnn op")
             rnn_kernel_size = 3
-            self.rnn_layers = []
+            rnn_layers = []
             for _, count in out_channels:
                 cur_layer = [
                     torch.nn.Sequential(
@@ -79,11 +78,11 @@ class SimpleTimeSeries(torch.nn.Module):
                         )
                     )
                 cur_layer = torch.nn.Sequential(*cur_layer)
-                self.rnn_layers.append(cur_layer)
-            self.rnn_layers = torch.nn.ModuleList(self.rnn_layers)
+                rnn_layers.append(cur_layer)
+            self.rnn_layers = torch.nn.ModuleList(rnn_layers)
 
         elif self.op == "conv3d":
-            self.conv3d_layers = []
+            conv3d_layers = []
             for _, count in out_channels:
                 cur_layer = [
                     torch.nn.Sequential(
@@ -93,11 +92,11 @@ class SimpleTimeSeries(torch.nn.Module):
                     for _ in range(num_layers)
                 ]
                 cur_layer = torch.nn.Sequential(*cur_layer)
-                self.conv3d_layers.append(cur_layer)
-            self.conv3d_layers = torch.nn.ModuleList(self.conv3d_layers)
+                conv3d_layers.append(cur_layer)
+            self.conv3d_layers = torch.nn.ModuleList(conv3d_layers)
 
         elif self.op == "conv1d":
-            self.conv1d_layers = []
+            conv1d_layers = []
             for _, count in out_channels:
                 cur_layer = [
                     torch.nn.Sequential(
@@ -107,8 +106,8 @@ class SimpleTimeSeries(torch.nn.Module):
                     for _ in range(num_layers)
                 ]
                 cur_layer = torch.nn.Sequential(*cur_layer)
-                self.conv1d_layers.append(cur_layer)
-            self.conv1d_layers = torch.nn.ModuleList(self.conv1d_layers)
+                conv1d_layers.append(cur_layer)
+            self.conv1d_layers = torch.nn.ModuleList(conv1d_layers)
 
         else:
             assert self.op in ["max", "mean"]
@@ -131,7 +130,9 @@ class SimpleTimeSeries(torch.nn.Module):
         return out_channels
 
     def forward(
-        self, inputs: list[dict[str, Any]], targets: list[dict[str, Any]] = None
+        self,
+        inputs: list[dict[str, Any]],
+        targets: list[dict[str, Any]] | None = None,
     ) -> list[torch.Tensor]:
         """Compute outputs from the backbone.
 
@@ -173,13 +174,13 @@ class SimpleTimeSeries(torch.nn.Module):
         for feature_idx in range(len(all_features)):
             aggregated_features = []
             for group in groups:
-                group_features = []
+                group_features_list = []
                 for image_idx in group:
-                    group_features.append(
+                    group_features_list.append(
                         all_features[feature_idx][:, image_idx, :, :, :]
                     )
                 # Resulting group features are (depth, batch, C, height, width).
-                group_features = torch.stack(group_features, dim=0)
+                group_features = torch.stack(group_features_list, dim=0)
 
                 if self.op == "max":
                     group_features = torch.amax(group_features, dim=0)
