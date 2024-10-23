@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - master
-      - henryh/setup_github_actions
   pull_request:
     types: [opened, synchronize]
 env:
