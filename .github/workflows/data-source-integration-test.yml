@@ -1,19 +1,18 @@
-name: Build, Test, and Publish Docker Image rslearn
+name: Data Source Integration Test for pulling External Data
 
 on:
-  push:
-    branches:
-      - master
-  pull_request:
-    types: [opened, synchronize, reopened]
+    schedule:
+        - cron: "43 20 * * 1,3" # UTC time
+    workflow_dispatch:
+
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-  SERVICE_NAME: "rslearn_projects"
+REGISTRY: ghcr.io
+IMAGE_NAME: ${{ github.repository }}
+SERVICE_NAME: "rslearn_projects"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+group: ${{ github.workflow }}-${{ github.ref }}
+cancel-in-progress: true
 
 jobs:
   build:
@@ -67,7 +66,6 @@ jobs:
             GHCR_IMAGE=`echo ${GHCR_IMAGE} | tr '[:upper:]' '[:lower:]'` # docker requires that all image names be lowercase
             echo "ghcr.io Docker image name is ${GHCR_IMAGE}"
             echo "ghcr_image_name=\"${GHCR_IMAGE}\"" >> $GITHUB_OUTPUT
-
   test:
     needs: build
     runs-on: ubuntu-latest-m
@@ -82,36 +80,35 @@ jobs:
             username: ${{ github.actor }}
             password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull the latest image
-        run: |
-          docker pull ${{ needs.build.outputs.ghcr_docker_image }}
-
       - name: Set Environment Variables
         run: |
           echo "TEST_BUCKET=test-bucket-rslearn" >> $GITHUB_ENV
           echo "GCSFS_DEFAULT_PROJECT=skylight-proto-1" >> $GITHUB_ENV
-
-      - name: Run Unit Tests
-        run: |
-          docker run --rm ${{ needs.build.outputs.ghcr_docker_image }} pytest -n auto tests/ --ignore tests/integration/ -vv
 
       - name: Authenticate into gcp
         uses: "google-github-actions/auth@v2"
         with:
           credentials_json: ${{secrets.GOOGLE_CREDENTIALS }}
 
-      - name: Run All other Integration Tests
+      - name: Run Data Sources Integration Tests
         run: |
           docker run --rm \
             -e TEST_BUCKET="${{ env.TEST_BUCKET }}" \
             -v ${{env.GOOGLE_GHA_CREDS_PATH}}:/tmp/gcp-credentials.json:ro \
             -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-credentials.json \
+            -e AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            -e GCSFS_DEFAULT_PROJECT="${{ env.GCSFS_DEFAULT_PROJECT }}" \
+            -e AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            -e AWS_DEFAULT_REGION="${{ secrets.AWS_DEFAULT_REGION }}" \
+            -e TEST_SERVICE_ACCOUNT_NAME="${{ secrets.TEST_SERVICE_ACCOUNT_NAME }}" \
+            -e TEST_XYZ_TILES_TEMPLATE="${{ secrets.TEST_XYZ_TILES_TEMPLATE }}" \
+            -e TEST_USGS_LANDSAT_USERNAME="${{ secrets.TEST_USGS_LANDSAT_USERNAME }}" \
+            -e TEST_USGS_LANDSAT_PASSWORD="${{ secrets.TEST_USGS_LANDSAT_PASSWORD }}" \
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
-            pytest tests/integration/ --ignore tests/integration/data_sources/ -vv
+            pytest tests/integration/data_sources/
 
-      # Add Job to clean up test bucket
       - name: Clean up
         if: always()
         run: |
