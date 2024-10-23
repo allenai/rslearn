@@ -107,7 +107,7 @@ class BoundsHandler(osmium.SimpleHandler):
     def __init__(self) -> None:
         """Initialize a new BoundsHandler."""
         osmium.SimpleHandler.__init__(self)
-        self.bounds = (180, 90, -180, -90)
+        self.bounds: tuple[float, float, float, float] = (180, 90, -180, -90)
 
     def node(self, n: osmium.Node) -> None:
         """Handle nodes and update the computed bounds."""
@@ -438,8 +438,9 @@ class OpenStreetMap(DataSource[OsmItem]):
             categories=categories,
         )
 
-    # TODO: Should these be float or int type checker doesn't know about the file?
-    def _get_pbf_bounds(self) -> list[tuple[int, int, int, int]]:
+    def _get_pbf_bounds(self) -> list[tuple[float, float, float, float]]:
+        # Determine WGS84 bounds of each PBF file by processing them through
+        # BoundsHandler.
         if not self.bounds_fname.exists():
             pbf_bounds = []
             for pbf_fname in self.pbf_fnames:
