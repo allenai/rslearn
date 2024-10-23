@@ -46,27 +46,6 @@ class NoopTransform(torch.nn.Module):
         )
         return image_list, targets
 
-    def postprocess(
-        self,
-        detections: dict[str, torch.Tensor],
-        image_sizes: list[tuple[int, int]],
-        orig_sizes: list[tuple[int, int]],
-    ) -> dict[str, torch.Tensor]:
-        """Post-process the detections to reflect original image size.
-
-        Since we didn't transform the images, we don't need to do anything here.
-
-        Args:
-            detections: the raw detections
-            image_sizes: the transformed image sizes
-            orig_sizes: the original image sizes
-
-        Returns:
-            the post-processed detections (unmodified from the provided detections)
-        """
-        # TODO: Are these unused variables needed?
-        return detections
-
 
 class FasterRCNN(torch.nn.Module):
     """Faster R-CNN head for predicting bounding boxes.
