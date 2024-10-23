@@ -3,10 +3,9 @@ name: Lint (type checking, security, code quality, ruff)
 on:
   push:
     branches:
-      - "henryh/add-linting-workflows"
+      - master
   pull_request:
-    branches:
-      - "master"
+    types: [opened, synchronize, reopened]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
