@@ -70,7 +70,7 @@ jobs:
 
   test:
     needs: build
-    runs-on: ubuntu-latest-m
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
