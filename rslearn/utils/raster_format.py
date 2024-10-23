@@ -339,11 +339,7 @@ class GeotiffRasterFormat(RasterFormat):
             profile["blockysize"] = self.block_size
 
         path.mkdir(parents=True, exist_ok=True)
-        path_to_write = path / self.fname
-        parent_file = path_to_write.parent
-        parent_file.mkdir(parents=True, exist_ok=True)
-        print(f"path_to_write: {path_to_write}")
-        with (path_to_write).open("wb") as f:
+        with (path / self.fname).open("wb") as f:
             with rasterio.open(f, "w", **profile) as dst:
                 dst.write(array)
 

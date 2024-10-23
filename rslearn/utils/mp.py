@@ -34,7 +34,7 @@ def star_imap_unordered(
     p: multiprocessing.pool.Pool,
     fn: Callable[..., Any],
     kwargs_list: list[dict[str, Any]],
-) -> IMapIterator[Any]:
+) -> IMapIterator:
     """Wrapper for Pool.imap_unordered that exposes kwargs to the function.
 
     Args:
