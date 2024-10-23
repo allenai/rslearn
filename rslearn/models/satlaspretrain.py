@@ -50,15 +50,12 @@ class SatlasPretrain(torch.nn.Module):
                 [32, 2048],
             ]
 
-    def forward(
-        self, inputs: list[dict[str, Any]], targets: list[dict[str, Any]] | None = None
-    ) -> list[torch.Tensor]:
+    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Compute feature maps from the SatlasPretrain backbone.
 
         Inputs:
             inputs: input dicts that must include "image" key containing the image to
                 process.
-            targets: target dicts that are ignored
         """
         images = torch.stack([inp["image"] for inp in inputs], dim=0)
         return self.model(images)

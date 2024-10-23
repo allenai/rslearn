@@ -75,7 +75,6 @@ class Ssl4eoS12(torch.nn.Module):
     def forward(
         self,
         inputs: list[dict[str, Any]],
-        targets: list[dict[str, Any]] | None = None,
     ) -> list[torch.Tensor]:
         """Compute outputs from the backbone.
 
@@ -86,7 +85,6 @@ class Ssl4eoS12(torch.nn.Module):
         Inputs:
             inputs: input dicts that must include "image" key containing the image to
                 process.
-            targets: target dicts that are ignored unless
         """
         x = torch.stack([inp["image"] for inp in inputs], dim=0)
         x = self.model.conv1(x)

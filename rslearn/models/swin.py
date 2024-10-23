@@ -131,7 +131,6 @@ class Swin(torch.nn.Module):
     def forward(
         self,
         inputs: list[dict[str, Any]],
-        targets: list[dict[str, Any]] | None = None,
     ) -> list[torch.Tensor]:
         """Compute outputs from the backbone.
 
@@ -142,9 +141,7 @@ class Swin(torch.nn.Module):
         Inputs:
             inputs: input dicts that must include "image" key containing the image to
                 process.
-            targets: target dicts that are ignored unless
         """
-        # TODO: Are Targets  supposed to be ignored? Is this to maintain a common interface?
         images = torch.stack([inp["image"] for inp in inputs], dim=0)
 
         if self.output_layers:
