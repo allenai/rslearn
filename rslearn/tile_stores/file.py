@@ -70,6 +70,8 @@ class FileTileStoreLayer(TileStoreLayer):
             bounds: the bounds of the raster
             array: the raster data
         """
+        if self.projection is None:
+            raise ValueError("need a projection to encode and write raster data")
         self.raster_format.encode_raster(self.path, self.projection, bounds, array)
 
     def get_raster_bounds(self) -> PixelBounds:
@@ -93,6 +95,8 @@ class FileTileStoreLayer(TileStoreLayer):
         Args:
             data: the vector data
         """
+        if self.projection is None:
+            raise ValueError("need a projection to encode and write vector data")
         self.vector_format.encode_vector(self.path, self.projection, data)
 
     def get_metadata(self) -> LayerMetadata:
