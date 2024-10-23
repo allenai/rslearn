@@ -33,7 +33,7 @@ class GridIndex(SpatialIndex):
         item_idx = len(self.items)
         self.items.append(data)
 
-        def f(cell: Any) -> None:
+        def f(cell: tuple[int, int]) -> None:
             if cell not in self.grid:
                 self.grid[cell] = []
             self.grid[cell].append(item_idx)
@@ -71,7 +71,7 @@ class GridIndex(SpatialIndex):
         """
         matches = set()
 
-        def f(cell: Any) -> None:
+        def f(cell: tuple[int, int]) -> None:
             if cell not in self.grid:
                 return
             for item_idx in self.grid[cell]:

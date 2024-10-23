@@ -20,17 +20,14 @@ from .lightning_module import RslearnLightningModule
 class PatchPredictionMerger:
     """Base class for merging predictions from multiple patches."""
 
-    def merge(
-        self, outputs: Sequence[Any], metadatas: Sequence[Any]
-    ) -> tuple[Sequence[Any], Sequence[Any]]:
-        """Merge the outputs and metadatas.
+    def merge(self, outputs: Sequence[Any]) -> tuple[Sequence[Any]]:
+        """Merge the outputs.
 
         Args:
             outputs: the outputs to process.
-            metadatas: the metadatas to process.
 
         Returns:
-            the merged outputs and metadatas.
+            the merged outputs.
         """
         raise NotImplementedError
 
@@ -160,8 +157,7 @@ class RslearnWriter(BasePredictionWriter):
 
             # This is the last patch so it's time to merge outputs from overlapped patches
             if self.merger is not None:
-                # TODO: HackyNot sure why we don't pass metadata to the merger can't see any subclasses
-                pending_output = self.merger.merge(pending_output)  # type: ignore
+                pending_output = self.merger.merge(pending_output)
 
             # This is the last patch so it's time to write it.
             layer_dir = (

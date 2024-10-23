@@ -27,7 +27,7 @@ class ClassificationTask(BasicTask):
         self,
         property_name: str,
         classes: list,  # TODO: Should this be a list of str or int or can it be both?
-        filters: list[tuple[str, str]] | None = None,
+        filters: list[tuple[str, str]] = [],
         read_class_id: bool = False,
         allow_invalid: bool = False,
         skip_unknown_categories: bool = False,
@@ -95,9 +95,6 @@ class ClassificationTask(BasicTask):
             else:
                 self.positive_class_id = self.classes.index(self.positive_class)
 
-        if not self.filters:
-            self.filters = []
-
     def process_inputs(
         self,
         raw_inputs: dict[str, torch.Tensor | list[Feature]],
@@ -122,10 +119,9 @@ class ClassificationTask(BasicTask):
         for feat in data:
             if feat.properties is None:
                 continue
-            if self.filters is not None:
-                for property_name, property_value in self.filters:
-                    if feat.properties.get(property_name) != property_value:
-                        continue
+            for property_name, property_value in self.filters:
+                if feat.properties.get(property_name) != property_value:
+                    continue
             if self.property_name not in feat.properties:
                 continue
 

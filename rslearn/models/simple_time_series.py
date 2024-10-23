@@ -132,14 +132,12 @@ class SimpleTimeSeries(torch.nn.Module):
     def forward(
         self,
         inputs: list[dict[str, Any]],
-        targets: list[dict[str, Any]] | None = None,
     ) -> list[torch.Tensor]:
         """Compute outputs from the backbone.
 
         Inputs:
             inputs: input dicts that must include "image" key containing the image time
                 series to process (with images concatenated on the channel dimension).
-            targets: target dicts that are ignored unless
         """
         # First get features of each image.
         # To do so, we need to split up each grouped image into its component images (which have had their channels stacked).
