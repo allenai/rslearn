@@ -1,4 +1,6 @@
-"""Normalization transforms."""
+"""Concatenate bands across multiple image inputs."""
+
+from typing import Any
 
 import torch
 
@@ -24,7 +26,9 @@ class Concatenate(Transform):
         self.selections = selections
         self.output_selector = output_selector
 
-    def forward(self, input_dict, target_dict):
+    def forward(
+        self, input_dict: dict[str, Any], target_dict: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Apply concatenation over the inputs and targets.
 
         Args:

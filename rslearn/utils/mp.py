@@ -1,7 +1,8 @@
 """Multi-processing utilities."""
 
 import multiprocessing.pool
-from collections.abc import Callable, Generator
+from collections.abc import Callable
+from multiprocessing.pool import IMapIterator
 from typing import Any
 
 
@@ -20,7 +21,7 @@ class StarImapUnorderedWrapper:
         """
         self.fn = fn
 
-    def __call__(self, kwargs: dict[str, Any]):
+    def __call__(self, kwargs: dict[str, Any]) -> Any:
         """Wrapped call to the underlying function.
 
         Args:
@@ -33,7 +34,7 @@ def star_imap_unordered(
     p: multiprocessing.pool.Pool,
     fn: Callable[..., Any],
     kwargs_list: list[dict[str, Any]],
-) -> Generator[Any, None, None]:
+) -> IMapIterator[Any]:
     """Wrapper for Pool.imap_unordered that exposes kwargs to the function.
 
     Args:

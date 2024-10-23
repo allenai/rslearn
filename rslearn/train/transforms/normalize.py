@@ -1,5 +1,7 @@
 """Normalization transforms."""
 
+from typing import Any
+
 import torch
 
 from .transform import Transform
@@ -12,9 +14,9 @@ class Normalize(Transform):
         self,
         mean: float | list[float],
         std: float | list[float],
-        valid_range: tuple[float, float]
-        | tuple[list[float], list[float]]
-        | None = None,
+        valid_range: (
+            tuple[float, float] | tuple[list[float], list[float]] | None
+        ) = None,
         selectors: list[str] = ["image"],
         bands: list[int] | None = None,
     ) -> None:
@@ -61,7 +63,9 @@ class Normalize(Transform):
                 image = torch.clamp(image, min=self.valid_min, max=self.valid_max)
         return image
 
-    def forward(self, input_dict, target_dict):
+    def forward(
+        self, input_dict: dict[str, Any], target_dict: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Apply normalization over the inputs and targets.
 
         Args:

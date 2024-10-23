@@ -90,7 +90,7 @@ class Transform(torch.nn.Module):
 
     def apply_fn(
         self,
-        fn: Callable[[Any], Any],
+        fn: Callable,
         input_dict: dict[str, Any],
         target_dict: dict[str, Any],
         selectors: list[str],

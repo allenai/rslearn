@@ -51,7 +51,7 @@ class SatlasPretrain(torch.nn.Module):
             ]
 
     def forward(
-        self, inputs: list[dict[str, Any]], targets: list[dict[str, Any]] = None
+        self, inputs: list[dict[str, Any]], targets: list[dict[str, Any]] | None = None
     ) -> list[torch.Tensor]:
         """Compute feature maps from the SatlasPretrain backbone.
 
