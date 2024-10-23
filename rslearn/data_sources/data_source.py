@@ -57,6 +57,8 @@ class DataSource:
     Data sources should support at least one of ingest and materialize.
     """
 
+    TIMEOUT = 1000000  # Set very high to start
+
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
     ) -> list[list[list[Item]]]:
