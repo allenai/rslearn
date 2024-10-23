@@ -6,6 +6,7 @@ import pathlib
 import shutil
 import tempfile
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import planet
@@ -14,7 +15,7 @@ import shapely
 from fsspec.implementations.local import LocalFileSystem
 from upath import UPath
 
-from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
+from rslearn.config import QueryConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
@@ -33,7 +34,7 @@ class Planet(DataSource):
 
     def __init__(
         self,
-        config: LayerConfig,
+        config: RasterLayerConfig,
         item_type_id: str,
         cache_dir: UPath | None = None,
         asset_type_id: str = "ortho_analytic_sr",
@@ -73,9 +74,10 @@ class Planet(DataSource):
         self.bands = bands
 
     @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "Planet":
+    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Planet":
         """Creates a new Planet instance from a configuration dictionary."""
-        assert isinstance(config, RasterLayerConfig)
+        if config.data_source is None:
+            raise ValueError("data_source is required")
         d = config.data_source.config_dict
         kwargs = dict(
             config=config,
@@ -101,11 +103,10 @@ class Planet(DataSource):
 
         async with planet.Session() as session:
             client = session.client("data")
-
+            gte = geometry.time_range[0] if geometry.time_range is not None else None
+            lte = geometry.time_range[1] if geometry.time_range is not None else None
             filter_list = [
-                planet.data_filter.date_range_filter(
-                    "acquired", gte=geometry.time_range[0], lte=geometry.time_range[1]
-                ),
+                planet.data_filter.date_range_filter("acquired", gte=gte, lte=lte),
                 planet.data_filter.geometry_filter(geojson_data),
                 planet.data_filter.asset_filter([self.asset_type_id]),
             ]
@@ -265,7 +266,7 @@ class Planet(DataSource):
                 if not needed_projections:
                     continue
 
-                asset_path = asyncio.run(self._download_asset(item, tmp_dir))
+                asset_path = asyncio.run(self._download_asset(item, Path(tmp_dir)))
                 with asset_path.open("rb") as f:
                     with rasterio.open(f) as raster:
                         for projection in needed_projections:
