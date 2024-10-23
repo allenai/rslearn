@@ -15,7 +15,7 @@ from .dataset import DataInput, ModelDataset, RetryDataset, SplitConfig
 
 def collate_fn(
     batch: list[tuple[dict[str, Any], dict[str, Any]]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple:
     """Collate batch of training examples.
 
     We just make list of the inputs and another of the targets.
@@ -48,7 +48,7 @@ class RslearnDataModule(L.LightningDataModule):
         val_config: SplitConfig = SplitConfig(),
         test_config: SplitConfig = SplitConfig(),
         predict_config: SplitConfig = SplitConfig(),
-    ):
+    ) -> None:
         """Initialize a new RslearnDataModule.
 
         Args:
@@ -79,7 +79,7 @@ class RslearnDataModule(L.LightningDataModule):
             "predict": default_config.update(predict_config),
         }
 
-    def setup(self, stage: str):
+    def setup(self, stage: str) -> None:
         """Set up datasets and samplers.
 
         Args:
@@ -106,12 +106,13 @@ class RslearnDataModule(L.LightningDataModule):
 
     def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:
         dataset = self.datasets[split]
+        persistent_workers = self.num_workers > 0
         kwargs = dict(
             dataset=dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             collate_fn=collate_fn,
-            persistent_workers=True,
+            persistent_workers=persistent_workers,
         )
         sampler_factory = self.split_configs[split].sampler
         if sampler_factory:

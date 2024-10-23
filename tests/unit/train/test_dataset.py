@@ -10,7 +10,7 @@ class TestException(Exception):
 
 
 class TestDataset(Dataset):
-    def __init__(self, failures: int = 0):
+    def __init__(self, failures: int = 0) -> None:
         # Raise Exception in __getitem__ for the given number of failures before
         # ultimately succeeding.
         self.failures = failures
@@ -29,7 +29,7 @@ class TestDataset(Dataset):
         return 1
 
 
-def test_retry_dataset():
+def test_retry_dataset() -> None:
     # First try with 3 failures, this should succeed.
     dataset = TestDataset(failures=3)
     dataset = RetryDataset(dataset, retries=3, delay=0.01)
@@ -44,7 +44,7 @@ def test_retry_dataset():
             pass
 
 
-def test_dataset_covers_border(image_to_class_dataset: Dataset):
+def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
     # Make sure that, when loading all patches, the border of the raster is included in
     # the generated windows.
     # The image_to_class_dataset window is 4x4 so 3x3 patch will ensure irregular window

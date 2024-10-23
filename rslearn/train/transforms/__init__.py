@@ -12,7 +12,7 @@ class Sequential(torch.nn.Module):
     tuple.
     """
 
-    def __init__(self, *args):
+    def __init__(self, *args: Any) -> None:
         """Initialize a new Sequential from a list of transforms."""
         super().__init__()
         self.transforms = torch.nn.ModuleList(args)
