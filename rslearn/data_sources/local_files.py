@@ -1,7 +1,6 @@
 """Data source for raster or vector data in local files."""
 
-from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 import fiona
 import rasterio
@@ -12,7 +11,7 @@ from rasterio.crs import CRS
 from upath import UPath
 
 import rslearn.data_sources.utils
-from rslearn.config import LayerConfig, LayerType, VectorLayerConfig
+from rslearn.config import LayerConfig, LayerType, RasterLayerConfig, VectorLayerConfig
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_PROJECTION
 from rslearn.tile_stores import LayerMetadata, PrefixedTileStore, TileStore
 from rslearn.utils import Feature, Projection, STGeometry
@@ -23,26 +22,28 @@ from .raster_source import get_needed_projections, ingest_raster
 
 Importers = ClassRegistry()
 
+ItemType = TypeVar("ItemType", bound=Item)
+LayerConfigType = TypeVar("LayerConfigType", bound=LayerConfig)
+ImporterType = TypeVar("ImporterType", bound="Importer")
 
-class Importer(ABC):
+
+class Importer(Generic[ItemType, LayerConfigType]):
     """An abstract base class for importing data from local files."""
 
-    @abstractmethod
-    def list_items(self, config: LayerConfig, src_dir: UPath) -> list[Item]:
+    def list_items(self, config: LayerConfigType, src_dir: UPath) -> list[ItemType]:
         """Extract a list of Items from the source directory.
 
         Args:
             config: the configuration of the layer.
             src_dir: the source directory.
         """
-        pass
+        raise NotImplementedError
 
-    @abstractmethod
     def ingest_item(
         self,
-        config: LayerConfig,
+        config: LayerConfigType,
         tile_store: TileStore,
-        item: Item,
+        item: ItemType,
         cur_geometries: list[STGeometry],
     ) -> None:
         """Ingest the specified local file item.
@@ -53,7 +54,7 @@ class Importer(ABC):
             item: the Item to ingest
             cur_geometries: the geometries where the item is needed.
         """
-        pass
+        raise NotImplementedError
 
 
 class RasterItemSpec:
@@ -134,7 +135,7 @@ class RasterItem(Item):
         return d
 
     @staticmethod
-    def deserialize(d: dict) -> Item:
+    def deserialize(d: dict) -> "RasterItem":
         """Deserializes an item from a JSON-decoded dictionary."""
         item = super(RasterItem, RasterItem).deserialize(d)
         spec = RasterItemSpec.deserialize(d["spec"])
@@ -162,7 +163,7 @@ class VectorItem(Item):
         return d
 
     @staticmethod
-    def deserialize(d: dict) -> Item:
+    def deserialize(d: dict) -> "VectorItem":
         """Deserializes an item from a JSON-decoded dictionary."""
         item = super(VectorItem, VectorItem).deserialize(d)
         return VectorItem(
@@ -174,7 +175,7 @@ class VectorItem(Item):
 class RasterImporter(Importer):
     """An Importer for raster data."""
 
-    def list_items(self, config: LayerConfig, src_dir: UPath) -> list[Item]:
+    def list_items(self, config: LayerConfig, src_dir: UPath) -> list[RasterItem]:
         """Extract a list of Items from the source directory.
 
         Args:
@@ -182,6 +183,8 @@ class RasterImporter(Importer):
             src_dir: the source directory.
         """
         item_specs: list[RasterItemSpec] = []
+        if config.data_source is None:
+            raise ValueError("RasterImporter requires a data source config")
         # See if user has provided the item specs directly.
         if "item_specs" in config.data_source.config_dict:
             for spec_dict in config.data_source.config_dict["item_specs"]:
@@ -195,7 +198,7 @@ class RasterImporter(Importer):
                 spec = RasterItemSpec(fnames=[path], bands=None)
                 item_specs.append(spec)
 
-        items: list[Item] = []
+        items = []
         for spec in item_specs:
             # Get geometry from the first raster file.
             # We assume files are readable with rasterio.
@@ -225,9 +228,9 @@ class RasterImporter(Importer):
 
     def ingest_item(
         self,
-        config: LayerConfig,
+        config: RasterLayerConfig,
         tile_store: TileStore,
-        item: Item,
+        item: RasterItem,
         cur_geometries: list[STGeometry],
     ) -> None:
         """Ingest the specified local file item.
@@ -235,10 +238,9 @@ class RasterImporter(Importer):
         Args:
             config: the configuration of the layer.
             tile_store: the TileStore to ingest the data into.
-            item: the Item to ingest
+            item: the RasterItem to ingest
             cur_geometries: the geometries where the item is needed.
         """
-        assert isinstance(item, RasterItem)
         for file_idx, fname in enumerate(item.spec.fnames):
             with fname.open("rb") as f:
                 with rasterio.open(f) as src:
@@ -267,7 +269,7 @@ class RasterImporter(Importer):
 class VectorImporter(Importer):
     """An Importer for vector data."""
 
-    def list_items(self, config: LayerConfig, src_dir: UPath) -> list[Item]:
+    def list_items(self, config: LayerConfig, src_dir: UPath) -> list[VectorItem]:
         """Extract a list of Items from the source directory.
 
         Args:
@@ -275,7 +277,7 @@ class VectorImporter(Importer):
             src_dir: the source directory.
         """
         file_paths = src_dir.glob("**/*.*")
-        items: list[Item] = []
+        items: list[VectorItem] = []
 
         for path in file_paths:
             # Get the bounds of the features in the vector file, which we assume fiona can
@@ -313,9 +315,9 @@ class VectorImporter(Importer):
 
     def ingest_item(
         self,
-        config: LayerConfig,
+        config: VectorLayerConfig,
         tile_store: TileStore,
-        item: Item,
+        item: VectorItem,
         cur_geometries: list[STGeometry],
     ) -> None:
         """Ingest the specified local file item.
@@ -326,7 +328,8 @@ class VectorImporter(Importer):
             item: the Item to ingest
             cur_geometries: the geometries where the item is needed.
         """
-        assert isinstance(config, VectorLayerConfig)
+        if not isinstance(config, VectorLayerConfig):
+            raise ValueError("VectorImporter requires a VectorLayerConfig")
 
         needed_projections = set()
         for geometry in cur_geometries:
@@ -379,7 +382,11 @@ class VectorImporter(Importer):
 class LocalFiles(DataSource):
     """A data source for ingesting data from local files."""
 
-    def __init__(self, config: LayerConfig, src_dir: UPath) -> None:
+    def __init__(
+        self,
+        config: LayerConfig,
+        src_dir: UPath,
+    ) -> None:
         """Initialize a new LocalFiles instance.
 
         Args:
@@ -387,14 +394,17 @@ class LocalFiles(DataSource):
             src_dir: source directory to ingest
         """
         self.config = config
+
+        self.importer = Importers[config.layer_type.value]
         self.src_dir = src_dir
 
-        self.importer: Importer = Importers[config.layer_type.value]
-        self.items = self.importer.list_items(config, src_dir)
+        self.items = self.importer.list_items(self.config, src_dir)
 
     @staticmethod
     def from_config(config: LayerConfig, ds_path: UPath) -> "LocalFiles":
         """Creates a new LocalFiles instance from a configuration dictionary."""
+        if config.data_source is None:
+            raise ValueError("LocalFiles data source requires a data source config")
         d = config.data_source.config_dict
         return LocalFiles(config=config, src_dir=join_upath(ds_path, d["src_dir"]))
 
@@ -424,13 +434,14 @@ class LocalFiles(DataSource):
             groups.append(cur_groups)
         return groups
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: Any) -> RasterItem | VectorItem:
         """Deserializes an item from JSON-decoded data."""
-        assert isinstance(serialized_item, dict)
         if self.config.layer_type == LayerType.RASTER:
             return RasterItem.deserialize(serialized_item)
         elif self.config.layer_type == LayerType.VECTOR:
             return VectorItem.deserialize(serialized_item)
+        else:
+            raise ValueError(f"Unknown layer type: {self.config.layer_type}")
 
     def ingest(
         self,
