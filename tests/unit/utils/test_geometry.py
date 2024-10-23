@@ -44,7 +44,7 @@ class TestSTGeometry:
     ) -> STGeometry:
         return STGeometry(WGS84_PROJECTION, shp, time_range)
 
-    def test_contains_time(self, geom: STGeometry):
+    def test_contains_time(self, geom: STGeometry) -> None:
         assert geom.contains_time(datetime(2022, 1, 15, 12))
         assert not geom.contains_time(datetime(2022, 1, 16, 12))
         assert not geom.contains_time(datetime(2022, 1, 14, 12))
@@ -109,7 +109,7 @@ class TestSTGeometry:
         dst_geom = geom.to_projection(dst_proj)
         final_geom = dst_geom.to_projection(WGS84_PROJECTION)
 
-        def is_same_shp(shp1, shp2):
+        def is_same_shp(shp1: shapely.Geometry, shp2: shapely.Geometry) -> bool:
             intersection = shp1.intersection(shp2).area
             union = shp1.union(shp2).area
             return abs(intersection - union) < 1e-3
