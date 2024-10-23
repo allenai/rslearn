@@ -54,60 +54,65 @@ class SimpleTimeSeries(torch.nn.Module):
             self.num_groups = len(self.groups)
         else:
             self.num_groups = 1
-        if num_layers is None:
-            raise ValueError(f"num_layers must be specified for {self.op} op")
-        if self.op == "convrnn":
-            rnn_kernel_size = 3
-            rnn_layers = []
-            for _, count in out_channels:
-                cur_layer = [
-                    torch.nn.Sequential(
-                        torch.nn.Conv2d(
-                            2 * count, count, rnn_kernel_size, padding="same"
-                        ),
-                        torch.nn.ReLU(inplace=True),
-                    )
-                ]
-                for _ in range(num_layers - 1):
-                    cur_layer.append(
+
+        if self.op in ["convrnn", "conv3d", "conv1d"]:
+            if num_layers is None:
+                raise ValueError(f"num_layers must be specified for {self.op} op")
+
+            if self.op == "convrnn":
+                rnn_kernel_size = 3
+                rnn_layers = []
+                for _, count in out_channels:
+                    cur_layer = [
                         torch.nn.Sequential(
                             torch.nn.Conv2d(
-                                count, count, rnn_kernel_size, padding="same"
+                                2 * count, count, rnn_kernel_size, padding="same"
                             ),
                             torch.nn.ReLU(inplace=True),
                         )
-                    )
-                cur_layer = torch.nn.Sequential(*cur_layer)
-                rnn_layers.append(cur_layer)
-            self.rnn_layers = torch.nn.ModuleList(rnn_layers)
+                    ]
+                    for _ in range(num_layers - 1):
+                        cur_layer.append(
+                            torch.nn.Sequential(
+                                torch.nn.Conv2d(
+                                    count, count, rnn_kernel_size, padding="same"
+                                ),
+                                torch.nn.ReLU(inplace=True),
+                            )
+                        )
+                    cur_layer = torch.nn.Sequential(*cur_layer)
+                    rnn_layers.append(cur_layer)
+                self.rnn_layers = torch.nn.ModuleList(rnn_layers)
 
-        elif self.op == "conv3d":
-            conv3d_layers = []
-            for _, count in out_channels:
-                cur_layer = [
-                    torch.nn.Sequential(
-                        torch.nn.Conv3d(count, count, 3, padding=1, stride=(2, 1, 1)),
-                        torch.nn.ReLU(inplace=True),
-                    )
-                    for _ in range(num_layers)
-                ]
-                cur_layer = torch.nn.Sequential(*cur_layer)
-                conv3d_layers.append(cur_layer)
-            self.conv3d_layers = torch.nn.ModuleList(conv3d_layers)
+            elif self.op == "conv3d":
+                conv3d_layers = []
+                for _, count in out_channels:
+                    cur_layer = [
+                        torch.nn.Sequential(
+                            torch.nn.Conv3d(
+                                count, count, 3, padding=1, stride=(2, 1, 1)
+                            ),
+                            torch.nn.ReLU(inplace=True),
+                        )
+                        for _ in range(num_layers)
+                    ]
+                    cur_layer = torch.nn.Sequential(*cur_layer)
+                    conv3d_layers.append(cur_layer)
+                self.conv3d_layers = torch.nn.ModuleList(conv3d_layers)
 
-        elif self.op == "conv1d":
-            conv1d_layers = []
-            for _, count in out_channels:
-                cur_layer = [
-                    torch.nn.Sequential(
-                        torch.nn.Conv1d(count, count, 3, padding=1, stride=2),
-                        torch.nn.ReLU(inplace=True),
-                    )
-                    for _ in range(num_layers)
-                ]
-                cur_layer = torch.nn.Sequential(*cur_layer)
-                conv1d_layers.append(cur_layer)
-            self.conv1d_layers = torch.nn.ModuleList(conv1d_layers)
+            elif self.op == "conv1d":
+                conv1d_layers = []
+                for _, count in out_channels:
+                    cur_layer = [
+                        torch.nn.Sequential(
+                            torch.nn.Conv1d(count, count, 3, padding=1, stride=2),
+                            torch.nn.ReLU(inplace=True),
+                        )
+                        for _ in range(num_layers)
+                    ]
+                    cur_layer = torch.nn.Sequential(*cur_layer)
+                    conv1d_layers.append(cur_layer)
+                self.conv1d_layers = torch.nn.ModuleList(conv1d_layers)
 
         else:
             assert self.op in ["max", "mean"]
