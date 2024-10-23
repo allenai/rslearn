@@ -355,7 +355,7 @@ class LandsatOliTirs(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[list[LandsatOliTirsItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -474,7 +474,7 @@ class LandsatOliTirs(DataSource):
     def ingest(
         self,
         tile_store: TileStore,
-        items: list[Item],
+        items: list[LandsatOliTirsItem],
         geometries: list[list[STGeometry]],
     ) -> None:
         """Ingest items into the given tile store.

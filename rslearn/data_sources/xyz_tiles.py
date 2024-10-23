@@ -209,7 +209,7 @@ class XyzTiles(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[list[XyzItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         In XyzTiles we treat the data source as containing a single item, i.e., the
@@ -280,7 +280,7 @@ class XyzTiles(DataSource):
     def materialize(
         self,
         window: Window,
-        item_groups: list[list[Item]],
+        item_groups: list[list[XyzItem]],
         layer_name: str,
         layer_cfg: LayerConfig,
     ) -> None:
