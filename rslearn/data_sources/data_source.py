@@ -54,7 +54,7 @@ class Item:
 ItemType = TypeVar("ItemType", bound="Item")
 
 
-class DataSource:
+class DataSource(Generic[ItemType]):
     """A set of raster or vector files that can be retrieved.
 
     Data sources should support at least one of ingest and materialize.
@@ -62,7 +62,7 @@ class DataSource:
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Generic[ItemType]]]]:
+    ) -> list[list[list[ItemType]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -74,14 +74,14 @@ class DataSource:
         """
         raise NotImplementedError
 
-    def deserialize_item(self, serialized_item: Any) -> Generic[ItemType]:
+    def deserialize_item(self, serialized_item: Any) -> ItemType:
         """Deserializes an item from JSON-decoded data."""
         raise NotImplementedError
 
     def ingest(
         self,
         tile_store: TileStore,
-        items: list[Generic[ItemType]],
+        items: list[ItemType],
         geometries: list[list[STGeometry]],
     ) -> None:
         """Ingest items into the given tile store.
@@ -96,7 +96,7 @@ class DataSource:
     def materialize(
         self,
         window: Window,
-        item_groups: list[list[Generic[ItemType]]],
+        item_groups: list[list[ItemType]],
         layer_name: str,
         layer_cfg: LayerConfig,
     ) -> None:
@@ -111,19 +111,19 @@ class DataSource:
         raise NotImplementedError
 
 
-class ItemLookupDataSource(DataSource):
+class ItemLookupDataSource(DataSource[ItemType]):
     """A data source that can look up items by name."""
 
-    def get_item_by_name(self, name: str) -> Generic[ItemType]:
+    def get_item_by_name(self, name: str) -> ItemType:
         """Gets an item by name."""
         raise NotImplementedError
 
 
-class RetrieveItemDataSource(DataSource):
+class RetrieveItemDataSource(DataSource[ItemType]):
     """A data source that can retrieve items in their raw format."""
 
     def retrieve_item(
-        self, item: Generic[ItemType]
+        self, item: ItemType
     ) -> Generator[tuple[str, BinaryIO], None, None]:
         """Retrieves the rasters corresponding to an item as file streams."""
         raise NotImplementedError

@@ -417,7 +417,9 @@ class Sentinel2Item(Item):
 
 
 # TODO: Distinguish between AWS and GCP data sources in class names.
-class Sentinel2(ItemLookupDataSource, RetrieveItemDataSource):
+class Sentinel2(
+    ItemLookupDataSource[Sentinel2Item], RetrieveItemDataSource[Sentinel2Item]
+):
     """A data source for Sentinel-2 L1C and L2A imagery on AWS.
 
     Specifically, uses the sentinel-s2-l1c and sentinel-s2-l2a S3 buckets maintained by
