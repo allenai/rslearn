@@ -10,7 +10,7 @@ import osmium
 import shapely
 from upath import UPath
 
-from rslearn.config import LayerConfig, QueryConfig, VectorLayerConfig
+from rslearn.config import QueryConfig, VectorLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
@@ -64,7 +64,7 @@ class Filter:
         Returns:
             the Filter object
         """
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         if "feature_types" in d:
             kwargs["feature_types"] = [FeatureType(el) for el in d["feature_types"]]
         if "tag_conditions" in d:
@@ -163,10 +163,10 @@ class OsmHandler(osmium.SimpleHandler):
             )
             self.grid_index.insert(bounds, 1)
 
-        self.cached_nodes = {}
-        self.cached_ways = {}
+        self.cached_nodes: dict = {}
+        self.cached_ways: dict = {}
 
-        self.features = []
+        self.features: list[Feature] = []
 
     def node(self, n: osmium.Node) -> None:
         """Handle nodes."""
@@ -366,13 +366,13 @@ class OsmItem(Item):
         return d
 
     @staticmethod
-    def deserialize(d: dict) -> Item:
+    def deserialize(d: dict) -> "OsmItem":
         """Deserializes an item from a JSON-decoded dictionary."""
         item = super(OsmItem, OsmItem).deserialize(d)
         return OsmItem(name=item.name, geometry=item.geometry, path_uri=d["path_uri"])
 
 
-class OpenStreetMap(DataSource):
+class OpenStreetMap(DataSource[OsmItem]):
     """A data source for OpenStreetMap data from PBF file.
 
     An existing local PBF file can be used, or if the provided path doesn't exist, then
@@ -420,9 +420,10 @@ class OpenStreetMap(DataSource):
         self.pbf_bounds = self._get_pbf_bounds()
 
     @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "OpenStreetMap":
+    def from_config(config: VectorLayerConfig, ds_path: UPath) -> "OpenStreetMap":
         """Creates a new OpenStreetMap instance from a configuration dictionary."""
-        assert isinstance(config, VectorLayerConfig)
+        if config.data_source is None:
+            raise ValueError("data_source is required")
         d = config.data_source.config_dict
         categories = {
             category_name: Filter.from_config(filter_config_dict)
@@ -437,7 +438,8 @@ class OpenStreetMap(DataSource):
             categories=categories,
         )
 
-    def _get_pbf_bounds(self) -> list[tuple[float, float, float, float]]:
+    # TODO: Should these be float or int type checker doesn't know about the file?
+    def _get_pbf_bounds(self) -> list[tuple[int, int, int, int]]:
         if not self.bounds_fname.exists():
             pbf_bounds = []
             for pbf_fname in self.pbf_fnames:
@@ -458,7 +460,7 @@ class OpenStreetMap(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[list[OsmItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -487,14 +489,14 @@ class OpenStreetMap(DataSource):
             groups.append(cur_groups)
         return groups
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: Any) -> OsmItem:
         """Deserializes an item from JSON-decoded data."""
         return OsmItem.deserialize(serialized_item)
 
     def ingest(
         self,
         tile_store: TileStore,
-        items: list[Item],
+        items: list[OsmItem],
         geometries: list[list[STGeometry]],
     ) -> None:
         """Ingest items into the given tile store.
