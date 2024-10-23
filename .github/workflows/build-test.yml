@@ -1,4 +1,4 @@
-name: Build, Test, and Publish Docker Image RSLEARN
+name: Build, Test, and Publish Docker Image rslearn
 
 on:
   push:
