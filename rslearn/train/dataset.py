@@ -518,9 +518,15 @@ class ModelDataset(torch.utils.data.Dataset):
                     raster_format = load_raster_format(
                         RasterFormatConfig(band_set.format["name"], band_set.format)
                     )
+                    if band_set.bands is None:
+                        # Raising Error as It is unclear the intended behavior here.
+                        raise ValueError("No bands specified for band set")
                     cur_path = layer_dir / "_".join(band_set.bands)
+                    if final_bounds is None:
+                        raise ValueError("Final bounds are None")
                     src = raster_format.decode_raster(cur_path, final_bounds)
-
+                    if src is None:
+                        raise ValueError(f"Source is None for {data_input}")
                     # Resize to patch size if needed.
                     # This is for band sets that are stored at a lower resolution.
                     # Here we assume that it is a multiple.
