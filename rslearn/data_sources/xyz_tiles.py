@@ -307,13 +307,10 @@ class XyzTiles(DataSource):
             window_projection, shapely.box(*window_bounds), None
         )
         projected_geometry = window_geometry.to_projection(self.projection)
-        projected_bounds: tuple[int, int, int, int] = tuple(
-            math.floor(projected_geometry.shp.bounds[0]),
-            math.floor(projected_geometry.shp.bounds[1]),
-            math.floor(projected_geometry.shp.bounds[2]),
-            math.floor(projected_geometry.shp.bounds[3]),
+        projected_bounds = tuple(
+            math.floor(projected_geometry.shp.bounds[i]) for i in range(4)
         )
-        projected_raster = self.read_bounds(item.url_template, projected_bounds)
+        projected_raster = self.read_bounds(item.url_template, projected_bounds)  # type: ignore
 
         # Attach the transform to the raster.
         src_transform = rasterio.transform.Affine(

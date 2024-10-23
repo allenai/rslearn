@@ -97,7 +97,7 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
             layer_cfg, dataset.path
         )
 
-        geometries_by_item = {}
+        geometries_by_item: dict = {}
         for window in windows:
             layer_datas = window.load_layer_datas()
             if layer_name not in layer_datas:
@@ -225,6 +225,8 @@ def materialize_window(
             item_group.append(item)
         item_groups.append(item_group)
 
+    if layer_cfg.data_source is None:
+        raise ValueError("data_source is required")
     if layer_cfg.data_source.ingest:
         if not is_window_ingested(dataset, window, check_layer_name=layer_name):
             logger.info(
