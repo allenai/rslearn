@@ -1,7 +1,5 @@
 import json
-import os
-import random
-from collections.abc import Generator
+import pathlib
 
 import numpy as np
 import pytest
@@ -16,16 +14,13 @@ from rslearn.utils.vector_format import GeojsonVectorFormat
 
 
 @pytest.fixture
-def image_to_class_dataset() -> Generator[Dataset, None, None]:
+def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
     """Create sample dataset with a raster input and target class.
 
     It consists of one window with one single-band image and a GeoJSON data with class
     ID property. The property could be used for regression too.
     """
-    test_id = random.randint(10000, 99999)
-    bucket_name = os.environ["TEST_BUCKET"]
-    prefix = os.environ["TEST_PREFIX"] + f"test_{test_id}/"
-    ds_path = UPath(f"gcs://{bucket_name}/{prefix}")
+    ds_path = UPath(tmp_path)
 
     dataset_config = {
         "layers": {
@@ -88,8 +83,4 @@ def image_to_class_dataset() -> Generator[Dataset, None, None]:
     )
     (layer_dir / "completed").touch()
 
-    dataset = Dataset(ds_path)
-    yield dataset
-
-    for fname in ds_path.fs.find(ds_path.path):
-        ds_path.fs.delete(fname)
+    return Dataset(ds_path)

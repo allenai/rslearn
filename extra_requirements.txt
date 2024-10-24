@@ -3,6 +3,7 @@ earthengine-api
 einops
 gcsfs
 google-cloud-storage
+interrogate
 mgrs
 osmium
 planet

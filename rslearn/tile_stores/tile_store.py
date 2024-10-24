@@ -1,5 +1,6 @@
 """Base class for tile stores."""
 
+from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any
 
@@ -52,12 +53,13 @@ class LayerMetadata:
         )
 
 
-class TileStoreLayer:
+class TileStoreLayer(ABC):
     """An abstract class for a layer in a tile store.
 
     The layer can store one or more raster and vector datas.
     """
 
+    @abstractmethod
     def read_raster(self, bounds: PixelBounds) -> npt.NDArray[Any] | None:
         """Read raster data from the store.
 
@@ -67,8 +69,9 @@ class TileStoreLayer:
         Returns:
             the raster data
         """
-        raise NotImplementedError
+        pass
 
+    @abstractmethod
     def write_raster(self, bounds: PixelBounds, array: npt.NDArray[Any]) -> None:
         """Write raster data to the store.
 
@@ -76,8 +79,9 @@ class TileStoreLayer:
             bounds: the bounds of the raster
             array: the raster data
         """
-        raise NotImplementedError
+        pass
 
+    @abstractmethod
     def read_vector(self, bounds: PixelBounds) -> list[Feature]:
         """Read vector data from the store.
 
@@ -87,20 +91,23 @@ class TileStoreLayer:
         Returns:
             the vector data
         """
-        raise NotImplementedError
+        pass
 
+    @abstractmethod
     def write_vector(self, data: list[Feature]) -> None:
         """Save vector tiles to the store.
 
         Args:
             data: the vector data
         """
-        raise NotImplementedError
+        pass
 
+    @abstractmethod
     def get_metadata(self) -> LayerMetadata:
         """Get the LayerMetadata associated with this layer."""
-        raise NotImplementedError
+        pass
 
+    @abstractmethod
     def set_property(self, key: str, value: Any) -> None:
         """Set a property in the metadata for this layer.
 
@@ -108,7 +115,12 @@ class TileStoreLayer:
             key: the property key
             value: the property value
         """
-        raise NotImplementedError
+        pass
+
+    @abstractmethod
+    def get_raster_bounds(self) -> PixelBounds:
+        """Get the bounds of the raster data in the store."""
+        pass
 
 
 class TileStore:

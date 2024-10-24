@@ -30,10 +30,6 @@ def prepare_dataset_windows(
         if not layer_cfg.data_source:
             continue
 
-        data_source = rslearn.data_sources.data_source_from_config(
-            layer_cfg, dataset.path
-        )
-
         # Get windows that need to be prepared for this layer.
         needed_windows = []
         for window in windows:
@@ -42,6 +38,14 @@ def prepare_dataset_windows(
                 continue
             needed_windows.append(window)
         print(f"Preparing {len(needed_windows)} windows for layer {layer_name}")
+        if len(needed_windows) == 0:
+            continue
+
+        # Create data source after checking for at least one window so it can be fast
+        # if there are no windows to prepare.
+        data_source = rslearn.data_sources.data_source_from_config(
+            layer_cfg, dataset.path
+        )
 
         # Get STGeometry for each window.
         geometries = []
@@ -97,7 +101,7 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
             layer_cfg, dataset.path
         )
 
-        geometries_by_item = {}
+        geometries_by_item: dict = {}
         for window in windows:
             layer_datas = window.load_layer_datas()
             if layer_name not in layer_datas:
@@ -225,6 +229,8 @@ def materialize_window(
             item_group.append(item)
         item_groups.append(item_group)
 
+    if layer_cfg.data_source is None:
+        raise ValueError("data_source is required")
     if layer_cfg.data_source.ingest:
         if not is_window_ingested(dataset, window, check_layer_name=layer_name):
             logger.info(

@@ -7,7 +7,7 @@ from rslearn.utils.get_utm_ups_crs import (
 )
 
 
-def test_seattle():
+def test_seattle() -> None:
     # Seattle is in UTM 10N which is EPSG:32610
     lon = -122.34
     lat = 47.62
@@ -22,11 +22,11 @@ def test_seattle():
     epsilon = 1e-2
     proj_bounds = get_proj_bounds(crs)
     # from https://epsg.io/32610
-    expected = [166021.44, 0, 833978.56, 9329005.18]
-    assert all([abs(a - b) < epsilon for a, b in zip(proj_bounds, expected)])
+    expected_2 = [166021.44, 0, 833978.56, 9329005.18]
+    assert all([abs(a - b) < epsilon for a, b in zip(proj_bounds, expected_2)])
 
 
-def test_antarctica():
+def test_antarctica() -> None:
     # South pole should use UPS South which is EPSG:5042 for (E, N) format.
     lon = -122.34
     lat = -88

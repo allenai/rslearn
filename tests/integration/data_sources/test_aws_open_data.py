@@ -2,6 +2,7 @@ import os
 import pathlib
 import random
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from upath import UPath
@@ -24,7 +25,9 @@ class TestNaip:
 
     TEST_BANDS = ["R", "G", "B", "IR"]
 
-    def run_simple_test(self, tile_store_dir: UPath, seattle2020: STGeometry, **kwargs):
+    def run_simple_test(
+        self, tile_store_dir: UPath, seattle2020: STGeometry, **kwargs: Any
+    ) -> None:
         """Apply test where we ingest an item corresponding to seattle2020."""
         layer_config = RasterLayerConfig(
             LayerType.RASTER,
@@ -34,6 +37,7 @@ class TestNaip:
         data_source = Naip(config=layer_config, states=["wa"], years=[2019], **kwargs)
 
         # Expand time range since NAIP isn't available very frequently.
+        assert seattle2020.time_range is not None
         seattle2020.time_range = (
             seattle2020.time_range[0] - timedelta(days=500),
             seattle2020.time_range[1] + timedelta(days=500),
@@ -57,7 +61,7 @@ class TestNaip:
     @pytest.mark.parametrize("use_rtree_index", [False, True])
     def test_local(
         self, tmp_path: pathlib.Path, seattle2020: STGeometry, use_rtree_index: bool
-    ):
+    ) -> None:
         """Test ingesting to local filesystem."""
         tile_store_dir = UPath(tmp_path) / "tiles"
         tile_store_dir.mkdir(parents=True, exist_ok=True)
@@ -71,7 +75,7 @@ class TestNaip:
         )
 
     @pytest.mark.parametrize("use_rtree_index", [False, True])
-    def test_gcs(self, seattle2020: STGeometry, use_rtree_index: bool):
+    def test_gcs(self, seattle2020: STGeometry, use_rtree_index: bool) -> None:
         """Test ingesting to GCS.
 
         Main thing is to test index_cache_dir being on GCS.
@@ -98,7 +102,7 @@ class TestSentinel2:
 
     def run_simple_test(
         self, tile_store_dir: UPath, metadata_cache_dir: UPath, seattle2020: STGeometry
-    ):
+    ) -> None:
         """Apply test where we ingest an item corresponding to seattle2020."""
         layer_config = RasterLayerConfig(
             LayerType.RASTER,
@@ -125,7 +129,7 @@ class TestSentinel2:
         )
         assert expected_path.exists()
 
-    def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry):
+    def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         """Test ingesting to local filesystem."""
         tile_store_dir = UPath(tmp_path) / "tiles"
         tile_store_dir.mkdir(parents=True, exist_ok=True)
@@ -133,7 +137,7 @@ class TestSentinel2:
         metadata_cache_dir.mkdir(parents=True, exist_ok=True)
         self.run_simple_test(tile_store_dir, metadata_cache_dir, seattle2020)
 
-    def test_gcs(self, seattle2020: STGeometry):
+    def test_gcs(self, seattle2020: STGeometry) -> None:
         """Test ingesting to GCS.
 
         Main thing is to test metadata_cache_dir being on GCS.

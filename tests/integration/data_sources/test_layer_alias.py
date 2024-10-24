@@ -12,10 +12,10 @@ from rslearn.dataset.manage import (
 )
 
 
-def test_layer_alias(local_files_dataset: Dataset):
+def test_layer_alias(local_files_dataset: Dataset) -> None:
     """Set layers with alias and make sure they share the place in tile store."""
-
-    src_dir = local_files_dataset.src_dir
+    # Src dir is set in fixture.
+    src_dir = local_files_dataset.src_dir  # type: ignore
     windows = local_files_dataset.load_windows()
     window_path = windows[0].path
 

@@ -17,6 +17,21 @@ from rslearn.utils.vector_format import load_vector_format
 from .lightning_module import RslearnLightningModule
 
 
+class PatchPredictionMerger:
+    """Base class for merging predictions from multiple patches."""
+
+    def merge(self, outputs: Sequence[Any]) -> tuple[Sequence[Any]]:
+        """Merge the outputs.
+
+        Args:
+            outputs: the outputs to process.
+
+        Returns:
+            the merged outputs.
+        """
+        raise NotImplementedError
+
+
 class RslearnWriter(BasePredictionWriter):
     """A writer that writes predictions back into the rslearn dataset.
 
@@ -30,6 +45,7 @@ class RslearnWriter(BasePredictionWriter):
         output_layer: str,
         path_options: dict[str, Any] = {},
         selector: list[str] = [],
+        merger: PatchPredictionMerger | None = None,
     ):
         """Create a new RslearnWriter.
 
@@ -38,15 +54,17 @@ class RslearnWriter(BasePredictionWriter):
             output_layer: which layer to write the outputs under.
             path_options: additional options for path to pass to fsspec
             selector: keys to access the desired output in the output dict if needed.
+                e.g ["key1", "key2"] gets output["key1"]["key2"]
+            merger: merger to use to merge outputs from overlapped patches.
         """
         super().__init__(write_interval="batch")
         self.output_layer = output_layer
         self.selector = selector
-
         self.path = UPath(path, **path_options)
         self.dataset = Dataset(self.path)
         self.layer_config = self.dataset.layers[self.output_layer]
-
+        # TODO: This is a bit of a hack to get the type checker to be happy.
+        self.format: Any
         if self.layer_config.layer_type == LayerType.RASTER:
             band_cfg = self.layer_config.band_sets[0]
             self.format = load_raster_format(
@@ -57,10 +75,12 @@ class RslearnWriter(BasePredictionWriter):
         else:
             raise ValueError(f"invalid layer type {self.layer_config.layer_type}")
 
+        self.merger = merger
+
         # Map from window name to pending data to write.
         # This is used when windows are split up into patches, so the data from all the
         # patches of each window need to be reconstituted.
-        self.pending_outputs = {}
+        self.pending_outputs: dict[str, Any] = {}
 
     def write_on_batch_end(
         self,
@@ -71,7 +91,7 @@ class RslearnWriter(BasePredictionWriter):
         batch: Any,
         batch_idx: int,
         dataloader_idx: int,
-    ):
+    ) -> None:
         """Write a batch of predictions into the rslearn dataset.
 
         Args:
@@ -90,8 +110,9 @@ class RslearnWriter(BasePredictionWriter):
             for output, metadata in zip(prediction, metadatas)
         ]
 
-        _, _, metadatas = batch
         for output, metadata in zip(outputs, metadatas):
+            if not isinstance(output, dict):
+                raise ValueError(f"Unsupported output type {type(output)}")
             for k in self.selector:
                 output = output[k]
 
@@ -100,7 +121,9 @@ class RslearnWriter(BasePredictionWriter):
             window_bounds = metadata["window_bounds"]
 
             if self.layer_config.layer_type == LayerType.RASTER:
-                if window_name not in self.pending_outputs:
+                if window_name not in self.pending_outputs and isinstance(
+                    output, np.ndarray
+                ):
                     self.pending_outputs[window_name] = np.zeros(
                         (
                             output.shape[0],
@@ -129,9 +152,14 @@ class RslearnWriter(BasePredictionWriter):
             if metadata["patch_idx"] < metadata["num_patches"] - 1:
                 continue
 
-            # This is the last patch so it's time to write it.
             pending_output = self.pending_outputs[window_name]
             del self.pending_outputs[window_name]
+
+            # This is the last patch so it's time to merge outputs from overlapped patches
+            if self.merger is not None:
+                pending_output = self.merger.merge(pending_output)
+
+            # This is the last patch so it's time to write it.
             layer_dir = (
                 self.dataset.path
                 / "windows"
