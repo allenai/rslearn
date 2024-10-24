@@ -1,4 +1,6 @@
+accelerate
 earthengine-api
+einops
 gcsfs
 google-cloud-storage
 interrogate
@@ -7,6 +9,8 @@ osmium
 planet
 pycocotools
 rtree
+s3fs
 satlaspretrain_models
 scipy
+transformers
 wandb
