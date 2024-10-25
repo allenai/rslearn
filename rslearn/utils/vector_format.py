@@ -1,11 +1,13 @@
 """Classes for writing vector data to a UPath."""
 
 import json
+from enum import Enum
 from typing import Any
 
 import numpy as np
 import shapely
 from class_registry import ClassRegistry
+from rasterio.crs import CRS
 from upath import UPath
 
 from rslearn.config import VectorFormatConfig
@@ -180,11 +182,40 @@ class TileVectorFormat(VectorFormat):
         return TileVectorFormat(tile_size=config.get("tile_size", 512))
 
 
+class GeojsonCoordinateMode(Enum):
+    """The projection to use when writing GeoJSON file."""
+
+    # Write the features as is.
+    PIXEL = "pixel"
+
+    # Write the features in CRS coordinates (i.e., a projection with x_resolution=1 and
+    # y_resolution=1).
+    CRS = "crs"
+
+    # Write in WGS84 (longitude, latitude) coordinates.
+    WGS84 = "wgs84"
+
+
 @VectorFormats.register("geojson")
 class GeojsonVectorFormat(VectorFormat):
     """A vector format that uses one big GeoJSON."""
 
     fname = "data.geojson"
+
+    def __init__(
+        self, coordinate_mode: GeojsonCoordinateMode = GeojsonCoordinateMode.CRS
+    ):
+        """Create a new GeojsonVectorFormat.
+
+        Args:
+            coordinate_mode: the projection to use for coordinates written to the
+                GeoJSON files. PIXEL means we write them as is, CRS means we just undo
+                the resolution in the Projection so they are in CRS coordinates, and
+                WGS84 means we always write longitude/latitude. When using PIXEL, the
+                GeoJSON will not be readable by GIS tools since it relies on a custom
+                encoding.
+        """
+        self.coordinate_mode = coordinate_mode
 
     def encode_vector(
         self, path: UPath, projection: Projection, features: list[Feature]
@@ -196,16 +227,36 @@ class GeojsonVectorFormat(VectorFormat):
             projection: the projection of the raster data
             features: the vector data
         """
+        fc: dict[str, Any] = {"type": "FeatureCollection"}
+
+        # Identify target projection and convert features.
+        # Also set the target projection in the FeatureCollection.
+        # For PIXEL mode, we need to use a custom encoding so the resolution is stored.
+        output_projection: Projection
+        if self.coordinate_mode == GeojsonCoordinateMode.PIXEL:
+            output_projection = projection
+            fc["properties"] = projection.serialize()
+        else:
+            if self.coordinate_mode == GeojsonCoordinateMode.CRS:
+                output_projection = Projection(projection.crs, 1, 1)
+            elif self.coordinate_mode == GeojsonCoordinateMode.WGS84:
+                output_projection = WGS84_PROJECTION
+
+            fc["crs"] = {
+                "type": "name",
+                "properties": {
+                    "name": output_projection.crs.to_wkt(),
+                },
+            }
+
+        fc["features"] = []
+        for feat in features:
+            feat = feat.to_projection(output_projection)
+            fc["features"].append(feat.to_geojson())
+
         path.mkdir(parents=True, exist_ok=True)
         with (path / self.fname).open("w") as f:
-            json.dump(
-                {
-                    "type": "FeatureCollection",
-                    "features": [feat.to_geojson() for feat in features],
-                    "properties": projection.serialize(),
-                },
-                f,
-            )
+            json.dump(fc, f)
 
     def decode_vector(self, path: UPath, bounds: PixelBounds) -> list[Feature]:
         """Decodes vector data.
@@ -219,10 +270,20 @@ class GeojsonVectorFormat(VectorFormat):
         """
         with (path / self.fname).open("r") as f:
             fc = json.load(f)
+
+        # Detect the projection that the features are stored under.
         if "properties" in fc and "crs" in fc["properties"]:
+            # Means it uses our custom Projection encoding.
             projection = Projection.deserialize(fc["properties"])
+        elif "crs" in fc:
+            # Means it uses standard GeoJSON CRS encoding.
+            crs = CRS.from_string(fc["crs"]["properties"]["name"])
+            projection = Projection(crs, 1, 1)
         else:
+            # Otherwise it should be WGS84 (GeoJSONs created in rslearn should include
+            # the "crs" attribute, but maybe it was created externally).
             projection = WGS84_PROJECTION
+
         return [Feature.from_geojson(projection, feat) for feat in fc["features"]]
 
     @staticmethod
