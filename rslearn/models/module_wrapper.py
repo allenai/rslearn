@@ -1,7 +1,5 @@
 """Module wrappers."""
 
-from typing import Any
-
 import torch
 
 
@@ -26,7 +24,9 @@ class DecoderModuleWrapper(torch.nn.Module):
         super().__init__()
         self.module = module
 
-    def forward(self, features: list[torch.Tensor], inputs: list[dict[str, Any]]):
+    def forward(
+        self, features: list[torch.Tensor], inputs: list[torch.Tensor]
+    ) -> list[torch.Tensor]:
         """Apply the wrapped module on each feature map.
 
         Args:

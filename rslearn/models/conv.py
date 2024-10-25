@@ -1,7 +1,5 @@
 """A single convolutional layer."""
 
-from typing import Any
-
 import torch
 
 
@@ -34,11 +32,13 @@ class Conv(torch.nn.Module):
         super().__init__()
 
         self.layer = torch.nn.Conv2d(
-            in_channels, out_channels, kernel_size, padding=padding
+            in_channels, out_channels, kernel_size, padding=padding, stride=stride
         )
         self.activation = activation
 
-    def forward(self, features: list[torch.Tensor], inputs: list[dict[str, Any]]):
+    def forward(
+        self, features: list[torch.Tensor], inputs: list[torch.Tensor]
+    ) -> list[torch.Tensor]:
         """Compute flat output vector from multi-scale feature map.
 
         Args:
