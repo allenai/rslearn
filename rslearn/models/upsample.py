@@ -1,7 +1,5 @@
 """An upsampling layer."""
 
-from typing import Any
-
 import torch
 
 
@@ -22,7 +20,9 @@ class Upsample(torch.nn.Module):
         super().__init__()
         self.layer = torch.nn.Upsample(scale_factor=scale_factor, mode=mode)
 
-    def forward(self, features: list[torch.Tensor], inputs: list[dict[str, Any]]):
+    def forward(
+        self, features: list[torch.Tensor], inputs: list[torch.Tensor]
+    ) -> list[torch.Tensor]:
         """Compute flat output vector from multi-scale feature map.
 
         Args:
