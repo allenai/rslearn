@@ -109,7 +109,9 @@ jobs:
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
-            pytest tests/integration/ --ignore tests/integration/data_sources/ -vv
+            pytest tests/integration/ -vv \
+            --ignore tests/integration/data_sources/ \
+            --ignore tests/unit/models/
 
       # Add Job to clean up test bucket
       - name: Clean up
