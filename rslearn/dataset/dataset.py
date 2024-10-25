@@ -52,7 +52,7 @@ class Dataset:
             for layer_name, d in config["layers"].items():
                 # Layer names must not contain period, since we use period to
                 # distinguish different materialized groups within a layer.
-                assert "." not in layer_name
+                assert "." not in layer_name, "layer names must not contain periods"
                 self.layers[layer_name] = load_layer_config(d)
 
             self.tile_store_config = TileStoreConfig.from_config(config["tile_store"])
