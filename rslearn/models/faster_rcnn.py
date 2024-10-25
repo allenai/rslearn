@@ -10,7 +10,7 @@ import torchvision
 class NoopTransform(torch.nn.Module):
     """A placeholder transform used with torchvision detection model."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Create a new NoopTransform."""
         super().__init__()
 
@@ -46,23 +46,6 @@ class NoopTransform(torch.nn.Module):
         )
         return image_list, targets
 
-    def postprocess(
-        self, detections: dict[str, torch.Tensor], image_sizes, orig_sizes
-    ) -> dict[str, torch.Tensor]:
-        """Post-process the detections to reflect original image size.
-
-        Since we didn't transform the images, we don't need to do anything here.
-
-        Args:
-            detections: the raw detections
-            image_sizes: the transformed image sizes
-            orig_sizes: the original image sizes
-
-        Returns:
-            the post-processed detections (unmodified from the provided detections)
-        """
-        return detections
-
 
 class FasterRCNN(torch.nn.Module):
     """Faster R-CNN head for predicting bounding boxes.
@@ -80,7 +63,7 @@ class FasterRCNN(torch.nn.Module):
         anchor_sizes: list[list[int]],
         instance_segmentation: bool = False,
         box_score_thresh: float = 0.05,
-    ):
+    ) -> None:
         """Create a new FasterRCNN.
 
         Args:

@@ -4,12 +4,7 @@ import random
 
 from upath import UPath
 
-from rslearn.config import (
-    LayerType,
-    QueryConfig,
-    SpaceMode,
-    VectorLayerConfig,
-)
+from rslearn.config import LayerType, QueryConfig, SpaceMode, VectorLayerConfig
 from rslearn.data_sources.openstreetmap import FeatureType, Filter, OpenStreetMap
 from rslearn.tile_stores import FileTileStore
 from rslearn.utils import STGeometry
@@ -18,12 +13,13 @@ from rslearn.utils import STGeometry
 class TestOpenStreetMap:
     """Tests the GEE data source."""
 
-    def run_simple_test(self, tile_store_dir: UPath, seattle2020: STGeometry):
+    def run_simple_test(self, tile_store_dir: UPath, seattle2020: STGeometry) -> None:
         """Apply test where we ingest an item corresponding to seattle2020."""
         layer_config = VectorLayerConfig(
             LayerType.VECTOR,
         )
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
+        # Is there a smaller area we can use?
         data_source = OpenStreetMap(
             config=layer_config,
             pbf_fnames=[
@@ -52,7 +48,7 @@ class TestOpenStreetMap:
         )
         assert expected_path.exists()
 
-    def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry):
+    def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         """Test ingesting to local filesystem."""
         tile_store_dir = UPath(tmp_path) / "tiles"
         tile_store_dir.mkdir(parents=True, exist_ok=True)
@@ -61,7 +57,7 @@ class TestOpenStreetMap:
             seattle2020,
         )
 
-    def test_gcs(self, seattle2020: STGeometry):
+    def test_gcs(self, seattle2020: STGeometry) -> None:
         """Test ingesting to GCS.
 
         Main thing is to test index_cache_dir being on GCS.

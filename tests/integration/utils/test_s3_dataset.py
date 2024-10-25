@@ -1,6 +1,7 @@
 import json
 import os
 import random
+from pathlib import Path
 
 import shapely
 from upath import UPath
@@ -19,12 +20,12 @@ from rslearn.utils.vector_format import load_vector_format
 class TestLocalFiles:
     """Tests that dataset works with S3 using LocalFiles data source."""
 
-    def cleanup(self, ds_path: UPath):
+    def cleanup(self, ds_path: UPath) -> None:
         """Delete everything in the specified path."""
         for fname in ds_path.fs.find(ds_path.path):
             ds_path.fs.delete(fname)
 
-    def test_dataset(self, tmp_path):
+    def test_dataset(self, tmp_path: Path) -> None:
         features = [
             Feature(
                 geometry=STGeometry(WGS84_PROJECTION, shapely.Point(5, 5), None),

@@ -9,7 +9,7 @@ from rslearn.const import Projection
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
-def test_geotiff_tiling(tmp_path: pathlib.Path):
+def test_geotiff_tiling(tmp_path: pathlib.Path) -> None:
     path = UPath(tmp_path)
     block_size = 128
     projection = Projection(CRS.from_epsg(3857), 1, -1)

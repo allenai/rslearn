@@ -139,7 +139,7 @@ class RslearnLightningModule(L.LightningModule):
         self.val_metrics = metrics.clone(prefix="val_")
         self.test_metrics = metrics.clone(prefix="test_")
 
-        self.schedulers = {}
+        self.schedulers: dict = {}
 
     def on_fit_start(self) -> None:
         """Called when the fit begins."""

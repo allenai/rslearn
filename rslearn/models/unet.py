@@ -19,7 +19,7 @@ class UNetDecoder(torch.nn.Module):
         out_channels: int,
         conv_layers_per_resolution: int = 1,
         kernel_size: int = 3,
-    ):
+    ) -> None:
         """Initialize a UNetDecoder.
 
         Args:
@@ -110,7 +110,9 @@ class UNetDecoder(torch.nn.Module):
         layers.append(torch.nn.Sequential(*cur_layers))
         self.layers = torch.nn.ModuleList(layers)
 
-    def forward(self, in_features: list[torch.Tensor], inputs: list[dict[str, Any]]):
+    def forward(
+        self, in_features: list[torch.Tensor], inputs: list[dict[str, Any]]
+    ) -> torch.Tensor:
         """Compute output from multi-scale feature map.
 
         Args:
