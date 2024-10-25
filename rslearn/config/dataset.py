@@ -112,7 +112,7 @@ class BandSetConfig:
         self,
         config_dict: dict[str, Any],
         dtype: DType,
-        bands: list[str] | None = None,
+        bands: list[str],
         format: dict[str, Any] | None = None,
         zoom_offset: int = 0,
         remap: dict[str, Any] | None = None,
@@ -130,13 +130,14 @@ class BandSetConfig:
         """
         self.config_dict = config_dict
         self.bands = bands
-        self.format = format
         self.dtype = dtype
         self.zoom_offset = zoom_offset
         self.remap = remap
 
-        if not self.format:
+        if format is None:
             self.format = {"name": "geotiff"}
+        else:
+            self.format = format
 
     def serialize(self) -> dict[str, Any]:
         """Serialize this BandSetConfig to a config dict, currently unused."""
@@ -158,8 +159,9 @@ class BandSetConfig:
         kwargs = dict(
             config_dict=config,
             dtype=DType(config["dtype"]),
+            bands=config["bands"],
         )
-        for k in ["bands", "format", "zoom_offset", "remap"]:
+        for k in ["format", "zoom_offset", "remap"]:
             if k in config:
                 kwargs[k] = config[k]
         return BandSetConfig(**kwargs)  # type: ignore

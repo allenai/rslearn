@@ -1,7 +1,7 @@
 """Functions to manage datasets."""
 
 import rslearn.data_sources
-from rslearn.config import LayerConfig, LayerType
+from rslearn.config import LayerConfig, LayerType, RasterLayerConfig
 from rslearn.data_sources import DataSource, Item
 from rslearn.tile_stores import TileStore, get_tile_store_for_layer
 from rslearn.utils import logger
@@ -151,6 +151,7 @@ def is_window_ingested(
                 item = Item.deserialize(serialized_item)
 
                 if layer_cfg.layer_type == LayerType.RASTER:
+                    assert isinstance(layer_cfg, RasterLayerConfig)
                     for band_set in layer_cfg.band_sets:
                         projection, _ = band_set.get_final_projection_and_bounds(
                             window.projection, window.bounds
