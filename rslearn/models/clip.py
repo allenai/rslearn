@@ -24,6 +24,13 @@ class CLIP(torch.nn.Module):
         model = AutoModelForZeroShotImageClassification.from_pretrained(model_name)
         self.encoder = model.vision_model
 
+        # Get number of features and token map size from encoder attributes.
+        self.num_features = self.encoder.post_layernorm.normalized_shape[0]
+        crop_size = self.processor.image_processor.crop_size
+        stride = self.encoder.embeddings.patch_embedding.stride
+        self.height = crop_size["height"] // stride[0]
+        self.width = crop_size["width"] // stride[1]
+
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Compute outputs from the backbone.
 
@@ -43,8 +50,13 @@ class CLIP(torch.nn.Module):
         )
         pixel_values = clip_inputs["pixel_values"].to(device)
         output = self.encoder(pixel_values=pixel_values)
-        # Ignore class token output which is before the 24x24 patch tokens.
-        image_features = output.last_hidden_state[:, 1:577, :]
+        # Ignore class token output which is before the patch tokens.
+        image_features = output.last_hidden_state[:, 1:, :]
+        batch_size = image_features.shape[0]
 
-        # 576x1024 -> 24x24x1024
-        return [image_features.reshape(-1, 24, 24, 1024).permute(0, 3, 1, 2)]
+        # 576x1024 -> HxWxC
+        return [
+            image_features.reshape(
+                batch_size, self.height, self.width, self.num_features
+            ).permute(0, 3, 1, 2)
+        ]
