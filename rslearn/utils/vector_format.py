@@ -203,7 +203,7 @@ class GeojsonVectorFormat(VectorFormat):
     fname = "data.geojson"
 
     def __init__(
-        self, coordinate_mode: GeojsonCoordinateMode = GeojsonCoordinateMode.CRS
+        self, coordinate_mode: GeojsonCoordinateMode = GeojsonCoordinateMode.PIXEL
     ):
         """Create a new GeojsonVectorFormat.
 
