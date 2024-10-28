@@ -217,13 +217,13 @@ class GeojsonVectorFormat(VectorFormat):
         """
         self.coordinate_mode = coordinate_mode
 
-    def encode_vector(
-        self, path: UPath, projection: Projection, features: list[Feature]
+    def encode_to_file(
+        self, fname: UPath, projection: Projection, features: list[Feature]
     ) -> None:
-        """Encodes vector data.
+        """Encode vector data to a specific file.
 
         Args:
-            path: the directory to write to
+            fname: the file to write to
             projection: the projection of the raster data
             features: the vector data
         """
@@ -254,21 +254,32 @@ class GeojsonVectorFormat(VectorFormat):
             feat = feat.to_projection(output_projection)
             fc["features"].append(feat.to_geojson())
 
-        path.mkdir(parents=True, exist_ok=True)
-        with (path / self.fname).open("w") as f:
+        with fname.open("w") as f:
             json.dump(fc, f)
 
-    def decode_vector(self, path: UPath, bounds: PixelBounds) -> list[Feature]:
-        """Decodes vector data.
+    def encode_vector(
+        self, path: UPath, projection: Projection, features: list[Feature]
+    ) -> None:
+        """Encodes vector data.
 
         Args:
-            path: the directory to read from
-            bounds: the bounds of the vector data to read
+            path: the directory to write to
+            projection: the projection of the raster data
+            features: the vector data
+        """
+        path.mkdir(parents=True, exist_ok=True)
+        self.encode_to_file(path / self.fname, projection, features)
+
+    def decode_from_file(self, fname: UPath) -> list[Feature]:
+        """Decodes vector data from a filename.
+
+        Args:
+            fname: the filename to read.
 
         Returns:
             the vector data
         """
-        with (path / self.fname).open("r") as f:
+        with fname.open("r") as f:
             fc = json.load(f)
 
         # Detect the projection that the features are stored under.
@@ -285,6 +296,18 @@ class GeojsonVectorFormat(VectorFormat):
             projection = WGS84_PROJECTION
 
         return [Feature.from_geojson(projection, feat) for feat in fc["features"]]
+
+    def decode_vector(self, path: UPath, bounds: PixelBounds) -> list[Feature]:
+        """Decodes vector data.
+
+        Args:
+            path: the directory to read from
+            bounds: the bounds of the vector data to read
+
+        Returns:
+            the vector data
+        """
+        return self.decode_from_file(path / self.fname)
 
     @staticmethod
     def from_config(name: str, config: dict[str, Any]) -> "GeojsonVectorFormat":
