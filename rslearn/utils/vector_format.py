@@ -299,7 +299,7 @@ class GeojsonVectorFormat(VectorFormat):
         """
         kwargs = {}
         if "coordinate_mode" in config:
-            kwargs["coordinate_mode"] = config["coordinate_mode"]
+            kwargs["coordinate_mode"] = GeojsonCoordinateMode(config["coordinate_mode"])
         return GeojsonVectorFormat(**kwargs)
 
 
