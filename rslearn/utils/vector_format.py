@@ -297,7 +297,10 @@ class GeojsonVectorFormat(VectorFormat):
         Returns:
             the GeojsonVectorFormat
         """
-        return GeojsonVectorFormat()
+        kwargs = {}
+        if "coordinate_mode" in config:
+            kwargs["coordinate_mode"] = config["coordinate_mode"]
+        return GeojsonVectorFormat(**kwargs)
 
 
 def load_vector_format(config: VectorFormatConfig) -> VectorFormat:
