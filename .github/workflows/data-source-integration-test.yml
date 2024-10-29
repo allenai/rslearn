@@ -6,9 +6,9 @@ on:
     workflow_dispatch:
 
 env:
-REGISTRY: ghcr.io
-IMAGE_NAME: ${{ github.repository }}
-SERVICE_NAME: "rslearn_projects"
+    REGISTRY: ghcr.io
+    IMAGE_NAME: ${{ github.repository }}
+    SERVICE_NAME: "rslearn_projects"
 
 concurrency:
 group: ${{ github.workflow }}-${{ github.ref }}
