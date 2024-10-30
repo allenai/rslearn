@@ -13,7 +13,7 @@ class CLIP(torch.nn.Module):
         self,
         model_name: str,
     ):
-        """Instantiate a new Molmo instance.
+        """Instantiate a new CLIP instance.
 
         Args:
             model_name: the model name like "openai/clip-vit-large-patch14-336".
