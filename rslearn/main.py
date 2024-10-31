@@ -1,7 +1,6 @@
 """Entrypoint for the rslearn command-line interface."""
 
 import argparse
-import logging
 import multiprocessing
 import random
 import sys
@@ -22,12 +21,14 @@ from rslearn.data_sources import Item, data_source_from_config
 from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
 from rslearn.dataset.manage import materialize_dataset_windows, prepare_dataset_windows
+from rslearn.log_utils import get_logger
 from rslearn.tile_stores import get_tile_store_for_layer
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.utils import Projection, STGeometry
 
-logging.basicConfig()
+logger = get_logger(__name__)
+
 handler_registry = {}
 
 ItemType = TypeVar("ItemType", bound="Item")
@@ -220,7 +221,7 @@ def add_windows() -> None:
     else:
         raise Exception("one of box or fname must be specified")
 
-    print(f"created {len(windows)} windows")
+    logger.info(f"created {len(windows)} windows")
 
 
 def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
@@ -303,11 +304,11 @@ def apply_on_windows(
     windows = dataset.load_windows(
         groups=groups, names=names, workers=workers, show_progress=True
     )
-    print(f"found {len(windows)} windows")
+    logger.info(f"found {len(windows)} windows")
 
     if hasattr(f, "get_jobs"):
         jobs = f.get_jobs(windows, workers)
-        print(f"got {len(jobs)} jobs")
+        logger.info(f"got {len(jobs)} jobs")
     else:
         jobs = windows
 
@@ -455,7 +456,7 @@ class IngestHandler:
                     geometries=[geometries for _, geometries in items_and_geometries],
                 )
             except Exception as e:
-                print(
+                logger.error(
                     "warning: got error while ingesting "
                     + f"{len(items_and_geometries)} items: {e}"
                 )
@@ -514,7 +515,7 @@ class IngestHandler:
             for item, geometries in geometries_by_item.items():
                 jobs.append((layer_name, layer_cfg, item, geometries))
 
-        print(f"computed {len(jobs)} ingest jobs from {len(windows)} windows")
+        logger.info(f"computed {len(jobs)} ingest jobs from {len(windows)} windows")
         return jobs
 
 
@@ -609,7 +610,7 @@ class RslearnLightningCLI(LightningCLI):
             artifact_id = (
                 f"{c.trainer.logger.init_args.project}/model-{c.wandb_run_id}:latest"
             )
-            print(f"restoring from artifact {artifact_id} on wandb")
+            logger.info(f"restoring from artifact {artifact_id} on wandb")
             artifact = api.artifact(artifact_id, type="model")
             artifact_dir = artifact.download()
             c.ckpt_path = str(Path(artifact_dir) / "model.ckpt")
@@ -677,7 +678,7 @@ def main() -> None:
 
     handler = handler_registry.get((args.category, args.command))
     if handler is None:
-        print(f"Unknown command: {args.category} {args.command}", file=sys.stderr)
+        logger.error(f"Unknown command: {args.category} {args.command}")
         sys.exit(1)
 
     handler()

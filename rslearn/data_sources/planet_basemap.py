@@ -14,10 +14,13 @@ from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
+from rslearn.log_utils import get_logger
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry
 
 from .raster_source import get_needed_projections, ingest_raster
+
+logger = get_logger(__name__)
 
 
 class PlanetItem(Item):
@@ -61,14 +64,14 @@ class ApiError(Exception):
     pass
 
 
-class Planet(DataSource):
+class PlanetBasemap(DataSource):
     """A data source for Planet Labs Basemaps API."""
 
     api_url = "https://api.planet.com/basemaps/v1/"
 
     def __init__(
         self,
-        config: LayerConfig,
+        config: RasterLayerConfig,
         series_id: str,
         bands: list[str],
         api_key: str | None = None,
@@ -104,9 +107,11 @@ class Planet(DataSource):
             self.mosaics[mosaic_dict["id"]] = geom
 
     @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "Planet":
-        """Creates a new Planet instance from a configuration dictionary."""
+    def from_config(config: LayerConfig, ds_path: UPath) -> "PlanetBasemap":
+        """Creates a new PlanetBasemap instance from a configuration dictionary."""
         assert isinstance(config, RasterLayerConfig)
+        if config.data_source is None:
+            raise ValueError("data_source is required")
         d = config.data_source.config_dict
         kwargs = dict(
             config=config,
@@ -119,7 +124,7 @@ class Planet(DataSource):
         for optional_key in optional_keys:
             if optional_key in d:
                 kwargs[optional_key] = d[optional_key]
-        return Planet(**kwargs)
+        return PlanetBasemap(**kwargs)
 
     def _api_get(
         self,
@@ -140,6 +145,8 @@ class Planet(DataSource):
         Raises:
             ApiError: if the API returned an error response.
         """
+        if path is None and url is None:
+            raise ValueError("Only one of path or url should be set")
         if query_args:
             kwargs = dict(params=query_args)
         else:
@@ -147,8 +154,9 @@ class Planet(DataSource):
 
         if path:
             url = self.api_url + path
-
-        response = self.session.get(url, **kwargs)
+        if url is None:
+            raise ValueError("url is required")
+        response = self.session.get(url, **kwargs)  # type: ignore
 
         if response.status_code != 200:
             raise ApiError(
@@ -158,7 +166,7 @@ class Planet(DataSource):
 
     def _api_get_paginate(
         self, path: str, list_key: str, query_args: dict[str, str] | None = None
-    ):
+    ) -> list:
         """Get all items in a paginated response.
 
         Args:
@@ -177,6 +185,9 @@ class Planet(DataSource):
         items = []
         while True:
             json_data = self._api_get(url=next_url, query_args=query_args)
+            if not isinstance(json_data, dict):
+                logger.warning(f"Expected dict, got {type(json_data)}")
+                continue
             items += json_data[list_key]
 
             if "_next" in json_data["_links"]:
@@ -186,7 +197,7 @@ class Planet(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[list[PlanetItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
