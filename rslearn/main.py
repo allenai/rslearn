@@ -336,7 +336,7 @@ def apply_on_windows(
 
 def apply_on_windows_args(f: Callable[..., None], args: argparse.Namespace) -> None:
     """Call apply_on_windows with arguments passed via command-line interface."""
-    dataset = Dataset(UPath(args.root))
+    dataset = Dataset(UPath(args.root), args.disabled_layers)
     apply_on_windows(
         f,
         dataset,
@@ -389,6 +389,12 @@ def dataset_prepare() -> None:
         default=False,
         action=argparse.BooleanOptionalAction,
         help="Prepare windows even if they were previously prepared",
+    )
+    parser.add_argument(
+        "--disabled-layers",
+        type=str,
+        default=[],
+        help="List of layers to disable",
     )
     add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
