@@ -541,8 +541,15 @@ class Sentinel2(DataSource):
                 blob = self.bucket.blob(item.blob_prefix + suffix)
                 if not blob.exists():
                     continue
+                logger.info(
+                    "gcp_public_data start downloading %s", item.blob_prefix + suffix
+                )
                 blob.download_to_file(buf)
                 buf.seek(0)
+                logger.info(
+                    "gcp_public_data done downloading %s, now ingesting into tile store",
+                    item.blob_prefix + suffix,
+                )
                 with rasterio.open(buf) as raster:
                     for projection in needed_projections:
                         ingest_raster(
@@ -553,3 +560,8 @@ class Sentinel2(DataSource):
                             layer_config=self.config,
                             array_callback=harmonize_callback,
                         )
+
+                logger.info(
+                    "gcp_public_data done ingesting into tile store %s",
+                    item.blob_prefix + suffix,
+                )
