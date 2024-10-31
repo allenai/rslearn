@@ -186,6 +186,8 @@ class XyzTiles(DataSource):
     @staticmethod
     def from_config(config: LayerConfig, ds_path: UPath) -> "XyzTiles":
         """Creates a new XyzTiles instance from a configuration dictionary."""
+        if config.data_source is None:
+            raise ValueError("data_source is required")
         d = config.data_source.config_dict
         time_ranges = []
         for str1, str2 in d["time_ranges"]:
@@ -207,7 +209,7 @@ class XyzTiles(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[list[XyzItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         In XyzTiles we treat the data source as containing a single item, i.e., the
@@ -278,7 +280,7 @@ class XyzTiles(DataSource):
     def materialize(
         self,
         window: Window,
-        item_groups: list[list[Item]],
+        item_groups: list[list[XyzItem]],
         layer_name: str,
         layer_cfg: LayerConfig,
     ) -> None:
@@ -305,13 +307,10 @@ class XyzTiles(DataSource):
             window_projection, shapely.box(*window_bounds), None
         )
         projected_geometry = window_geometry.to_projection(self.projection)
-        projected_bounds = [
-            math.floor(projected_geometry.shp.bounds[0]),
-            math.floor(projected_geometry.shp.bounds[1]),
-            math.ceil(projected_geometry.shp.bounds[2]),
-            math.ceil(projected_geometry.shp.bounds[3]),
-        ]
-        projected_raster = self.read_bounds(item.url_template, projected_bounds)
+        projected_bounds = tuple(
+            math.floor(projected_geometry.shp.bounds[i]) for i in range(4)
+        )
+        projected_raster = self.read_bounds(item.url_template, projected_bounds)  # type: ignore
 
         # Attach the transform to the raster.
         src_transform = rasterio.transform.Affine(

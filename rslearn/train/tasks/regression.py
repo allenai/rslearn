@@ -24,8 +24,8 @@ class RegressionTask(BasicTask):
         allow_invalid: bool = False,
         scale_factor: float = 1,
         metric_mode: str = "mse",
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         """Initialize a new RegressionTask.
 
         Args:
@@ -71,6 +71,8 @@ class RegressionTask(BasicTask):
 
         data = raw_inputs["targets"]
         for feat in data:
+            if feat.properties is None or self.filters is None:
+                continue
             for property_name, property_value in self.filters:
                 if feat.properties.get(property_name) != property_value:
                     continue
@@ -109,6 +111,8 @@ class RegressionTask(BasicTask):
         image = super().visualize(input_dict, target_dict, output)["image"]
         image = Image.fromarray(image)
         draw = ImageDraw.Draw(image)
+        if target_dict is None:
+            raise ValueError("target_dict is required for visualization")
         target = target_dict["value"] / self.scale_factor
         output = output / self.scale_factor
         text = f"Label: {target:.2f}\nOutput: {output:.2f}"
@@ -154,7 +158,7 @@ class RegressionHead(torch.nn.Module):
         logits: torch.Tensor,
         inputs: list[dict[str, Any]],
         targets: list[dict[str, Any]] | None = None,
-    ):
+    ) -> tuple[torch.Tensor, dict[str, Any]]:
         """Compute the regression outputs and loss from logits and targets.
 
         Args:
@@ -192,7 +196,7 @@ class RegressionHead(torch.nn.Module):
 class RegressionMetricWrapper(Metric):
     """Metric for regression task."""
 
-    def __init__(self, metric: Metric, scale_factor: float, **kwargs):
+    def __init__(self, metric: Metric, scale_factor: float, **kwargs: Any) -> None:
         """Initialize a new RegressionMetricWrapper.
 
         Args:

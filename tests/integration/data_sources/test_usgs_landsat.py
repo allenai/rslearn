@@ -1,6 +1,7 @@
 import os
 import pathlib
 import random
+from typing import Any
 
 from upath import UPath
 
@@ -22,7 +23,9 @@ class TestLandsatOliTirs:
 
     TEST_BAND = "B8"
 
-    def run_simple_test(self, tile_store_dir: UPath, seattle2020: STGeometry, **kwargs):
+    def run_simple_test(
+        self, tile_store_dir: UPath, seattle2020: STGeometry, **kwargs: Any
+    ) -> None:
         """Apply test where we ingest an item corresponding to seattle2020."""
         layer_config = RasterLayerConfig(
             LayerType.RASTER,
@@ -50,7 +53,7 @@ class TestLandsatOliTirs:
         )
         assert expected_path.exists()
 
-    def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry):
+    def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         """Test ingesting to local filesystem."""
         tile_store_dir = UPath(tmp_path) / "tiles"
         tile_store_dir.mkdir(parents=True, exist_ok=True)
@@ -59,7 +62,7 @@ class TestLandsatOliTirs:
             seattle2020,
         )
 
-    def test_gcs(self, seattle2020: STGeometry):
+    def test_gcs(self, seattle2020: STGeometry) -> None:
         """Test ingesting to GCS.
 
         Main thing is to test index_cache_dir being on GCS.

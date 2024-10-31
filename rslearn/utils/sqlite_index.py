@@ -1,4 +1,10 @@
-"""Contains a SpatialIndex implementation that uses an sqlite database."""
+"""Contains a SpatialIndex implementation that uses an sqlite database.
+
+# TODO: This is not yet complete decide to either complete it or remove this file.
+"""
+
+# Ignoring Mypy until we determine if we want to keep this file.
+# mypy: ignore-errors
 
 import json
 import sqlite3

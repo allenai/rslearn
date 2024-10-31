@@ -20,7 +20,7 @@ def is_same_resolution(res1: float, res2: float) -> bool:
     return (max(res1, res2) / min(res1, res2) - 1) < RESOLUTION_EPSILON
 
 
-def shp_intersects(shp1: shapely.Geometry, shp2: shapely.Geometry):
+def shp_intersects(shp1: shapely.Geometry, shp2: shapely.Geometry) -> bool:
     """Returns whether the two shapes intersect.
 
     Tries shp.intersects but falls back to shp.intersection which can be more
@@ -166,7 +166,7 @@ class STGeometry:
 
     def intersects_time_range(
         self, time_range: tuple[datetime, datetime] | None
-    ) -> timedelta:
+    ) -> bool:
         """Returns whether this geometry intersects the other time range."""
         if self.time_range is None or time_range is None:
             return True
@@ -194,7 +194,12 @@ class STGeometry:
     def to_projection(self, projection: Projection) -> "STGeometry":
         """Transforms this geometry to the specified projection."""
 
-        def apply_resolution(array, x_resolution, y_resolution, forward=True):
+        def apply_resolution(
+            array: np.ndarray,
+            x_resolution: float,
+            y_resolution: float,
+            forward: bool = True,
+        ) -> np.ndarray:
             if forward:
                 return np.stack(
                     [array[:, 0] / x_resolution, array[:, 1] / y_resolution], axis=1

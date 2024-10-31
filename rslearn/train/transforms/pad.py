@@ -68,7 +68,7 @@ class Pad(Transform):
             if before > 0:
                 # Padding.
                 if horizontal:
-                    padding_tuple = (before, after)
+                    padding_tuple: tuple = (before, after)
                 else:
                     padding_tuple = (before, after, 0, 0)
                 return torch.nn.functional.pad(im, padding_tuple)

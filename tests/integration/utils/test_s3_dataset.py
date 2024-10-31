@@ -1,10 +1,12 @@
 import json
 import os
 import random
+from pathlib import Path
 
 import shapely
 from upath import UPath
 
+from rslearn.config import VectorLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
 from rslearn.dataset.manage import (
@@ -19,12 +21,12 @@ from rslearn.utils.vector_format import load_vector_format
 class TestLocalFiles:
     """Tests that dataset works with S3 using LocalFiles data source."""
 
-    def cleanup(self, ds_path: UPath):
+    def cleanup(self, ds_path: UPath) -> None:
         """Delete everything in the specified path."""
         for fname in ds_path.fs.find(ds_path.path):
             ds_path.fs.delete(fname)
 
-    def test_dataset(self, tmp_path):
+    def test_dataset(self, tmp_path: Path) -> None:
         features = [
             Feature(
                 geometry=STGeometry(WGS84_PROJECTION, shapely.Point(5, 5), None),
@@ -55,7 +57,7 @@ class TestLocalFiles:
                     "type": "vector",
                     "data_source": {
                         "name": "rslearn.data_sources.local_files.LocalFiles",
-                        "src_dir": src_data_dir,
+                        "src_dir": "file://" + src_data_dir,
                     },
                 },
             },
@@ -87,6 +89,7 @@ class TestLocalFiles:
 
         window = windows[0]
         layer_config = dataset.layers["local_file"]
+        assert isinstance(layer_config, VectorLayerConfig)
         vector_format = load_vector_format(layer_config.format)
         features = vector_format.decode_vector(
             window.path / "layers" / "local_file", window.bounds

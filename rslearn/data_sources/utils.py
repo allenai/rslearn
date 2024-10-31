@@ -1,5 +1,7 @@
 """Utilities shared by data sources."""
 
+from typing import TypeVar
+
 from rslearn.config import QueryConfig, SpaceMode, TimeMode
 from rslearn.data_sources import Item
 from rslearn.utils import STGeometry, shp_intersects
@@ -11,10 +13,12 @@ MOSAIC_REMAINDER_EPSILON = 0.01
 """Fraction of original geometry area below which mosaic is considered to contain the
 entire geometry."""
 
+ItemType = TypeVar("ItemType", bound=Item)
+
 
 def match_candidate_items_to_window(
-    geometry: STGeometry, items: list[Item], query_config: QueryConfig
-) -> list[list[Item]]:
+    geometry: STGeometry, items: list[ItemType], query_config: QueryConfig
+) -> list[list[ItemType]]:
     """Match candidate items to a window based on the query configuration.
 
     Candidate items should be collected that intersect with the window's spatial
@@ -45,17 +49,20 @@ def match_candidate_items_to_window(
                 items = [
                     item
                     for item in items
-                    if not item.time_range or item.range[1] <= geometry.time_range[0]
+                    if not item.geometry.time_range
+                    or item.geometry.time_range[1] <= geometry.time_range[0]
                 ]
             elif query_config.time_mode == TimeMode.AFTER:
                 items = [
                     item
                     for item in items
-                    if not item.time_range
-                    or item.time_range[0] >= geometry.time_range[1]
+                    if not item.geometry.time_range
+                    or item.geometry.time_range[0] >= geometry.time_range[1]
                 ]
             items.sort(
-                key=lambda item: geometry.distance_to_time_range(item.time_range)
+                key=lambda item: geometry.distance_to_time_range(
+                    item.geometry.time_range
+                )
             )
 
     # Now apply space mode.

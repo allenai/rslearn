@@ -44,7 +44,7 @@ class MultiTaskModel(torch.nn.Module):
             tuple (outputs, loss_dict) from the last module.
         """
         features = self.encoder(inputs)
-        outputs = [{} for _ in inputs]
+        outputs: list[dict[str, Any]] = [{} for _ in inputs]
         losses = {}
         for name, decoder in self.decoders.items():
             cur = features

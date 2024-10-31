@@ -63,7 +63,7 @@ class MultiTask(Task):
 
     def process_output(
         self, raw_output: Any, metadata: dict[str, Any]
-    ) -> npt.NDArray[Any] | list[Feature]:
+    ) -> dict[str, Any]:
         """Processes an output into raster or vector data.
 
         Args:
