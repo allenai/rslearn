@@ -392,9 +392,9 @@ def dataset_prepare() -> None:
     )
     parser.add_argument(
         "--disabled-layers",
-        type=str,
-        default=[],
-        help="List of layers to disable",
+        type=lambda s: s.split(","),
+        default="[]",
+        help="List of layers to disable e.g 'layer1,layer2'",
     )
     add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
@@ -469,6 +469,21 @@ class IngestHandler:
 
         gc.collect()
 
+    def _load_layer_data_for_windows(
+        self, windows: list[Window], workers: int
+    ) -> list[tuple[Window, dict[str, WindowLayerData]]]:
+        if workers == 0:
+            return [(_load_window_layer_datas(window)) for window in windows]
+        p = multiprocessing.Pool(workers)
+        outputs = p.imap_unordered(_load_window_layer_datas, windows)
+        windows_and_layer_datas = []
+        for window, layer_datas in tqdm.tqdm(
+            outputs, total=len(windows), desc="Loading window layer datas"
+        ):
+            windows_and_layer_datas.append((window, layer_datas))
+        p.close()
+        return windows_and_layer_datas
+
     def get_jobs(
         self, windows: list[Window], workers: int
     ) -> list[tuple[str, LayerConfig, Item, list[STGeometry]]]:
@@ -485,14 +500,7 @@ class IngestHandler:
         # TODO: avoid duplicating ingest_dataset_windows...
 
         # Load layer datas of each window.
-        p = multiprocessing.Pool(workers)
-        outputs = p.imap_unordered(_load_window_layer_datas, windows)
-        windows_and_layer_datas = []
-        for window, layer_datas in tqdm.tqdm(
-            outputs, total=len(windows), desc="Loading window layer datas"
-        ):
-            windows_and_layer_datas.append((window, layer_datas))
-        p.close()
+        windows_and_layer_datas = self._load_layer_data_for_windows(windows, workers)
 
         jobs: list[tuple[str, LayerConfig, Item, list[STGeometry]]] = []
         for layer_name, layer_cfg in self.dataset.layers.items():
@@ -532,6 +540,12 @@ def dataset_ingest() -> None:
         prog="rslearn dataset ingest",
         description="rslearn dataset ingest: ingest items in retrieved data sources",
     )
+    parser.add_argument(
+        "--disabled-layers",
+        type=lambda s: s.split(","),
+        default="[]",
+        help="List of layers to disable e.g 'layer1,layer2'",
+    )
     add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
 
@@ -570,6 +584,12 @@ def dataset_materialize() -> None:
             "rslearn dataset materialize: "
             + "materialize data from retrieved data sources"
         ),
+    )
+    parser.add_argument(
+        "--disabled-layers",
+        type=lambda s: s.split(","),
+        default="[]",
+        help="List of layers to disable e.g 'layer1,layer2'",
     )
     add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])

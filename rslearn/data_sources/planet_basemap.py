@@ -218,7 +218,7 @@ class PlanetBasemap(DataSource):
             for mosaic_id, mosaic_geom in self.mosaics.items():
                 if not geometry.intersects(mosaic_geom):
                     continue
-
+                logger.info(f"found mosaic {mosaic_geom} for geom {geometry}")
                 # List all quads that intersect the current geometry's
                 # longitude/latitude bbox in this mosaic.
                 for quad_dict in self._api_get_paginate(
@@ -226,6 +226,7 @@ class PlanetBasemap(DataSource):
                     list_key="items",
                     query_args={"bbox": geom_bbox_str},
                 ):
+                    logger.info(f"quad_dict: {quad_dict}")
                     shp = shapely.box(*quad_dict["bbox"])
                     geom = STGeometry(WGS84_PROJECTION, shp, mosaic_geom.time_range)
                     quad_id = quad_dict["id"]
