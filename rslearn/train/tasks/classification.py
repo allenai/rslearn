@@ -6,9 +6,14 @@ import numpy as np
 import numpy.typing as npt
 import shapely
 import torch
-import torchmetrics.classification
 from PIL import Image, ImageDraw
 from torchmetrics import Metric, MetricCollection
+from torchmetrics.classification import (
+    MulticlassAccuracy,
+    MulticlassF1Score,
+    MulticlassPrecision,
+    MulticlassRecall,
+)
 
 from rslearn.utils import Feature, STGeometry
 
@@ -21,14 +26,18 @@ class ClassificationTask(BasicTask):
     def __init__(
         self,
         property_name: str,
-        classes: list[str],
-        filters: list[tuple[str, str]] | None = None,
+        classes: list,  # TODO: Should this be a list of str or int or can it be both?
+        filters: list[tuple[str, str]] = [],
         read_class_id: bool = False,
         allow_invalid: bool = False,
         skip_unknown_categories: bool = False,
         prob_property: str | None = None,
         metric_kwargs: dict[str, Any] = {},
-        **kwargs,
+        enable_f1_metric: bool = False,
+        f1_metric_kwargs: dict[str, Any] = {},
+        positive_class: str | None = None,
+        positive_class_threshold: float = 0.5,
+        **kwargs: Any,
     ):
         """Initialize a new ClassificationTask.
 
@@ -48,6 +57,11 @@ class ClassificationTask(BasicTask):
                 under this property name.
             metric_kwargs: additional arguments to pass to underlying metric, see
                 torchmetrics.classification.MulticlassAccuracy.
+            enable_f1_metric: whether to compute F1 (default false)
+            f1_metric_kwargs: extra arguments to pass to F1 metric.
+            positive_class: positive class name.
+            positive_class_threshold: threshold for classifying the positive class in
+                binary classification (default 0.5).
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -59,9 +73,27 @@ class ClassificationTask(BasicTask):
         self.skip_unknown_categories = skip_unknown_categories
         self.prob_property = prob_property
         self.metric_kwargs = metric_kwargs
+        self.enable_f1_metric = enable_f1_metric
+        self.f1_metric_kwargs = f1_metric_kwargs
+        self.positive_class = positive_class
+        self.positive_class_threshold = positive_class_threshold
 
-        if not self.filters:
-            self.filters = []
+        if self.positive_class_threshold != 0.5:
+            # Must be binary classification
+            if len(self.classes) != 2:
+                raise ValueError(
+                    "positive_class_threshold is only applicable for binary classification."
+                )
+            if positive_class is None:
+                raise ValueError(
+                    "Please set positive_class when using positive_class_threshold."
+                )
+            elif self.positive_class not in self.classes:
+                raise ValueError(
+                    f"Positive class '{self.positive_class}' not found in classes {self.classes}."
+                )
+            else:
+                self.positive_class_id = self.classes.index(self.positive_class)
 
     def process_inputs(
         self,
@@ -85,6 +117,8 @@ class ClassificationTask(BasicTask):
 
         data = raw_inputs["targets"]
         for feat in data:
+            if feat.properties is None:
+                continue
             for property_name, property_value in self.filters:
                 if feat.properties.get(property_name) != property_value:
                     continue
@@ -132,9 +166,21 @@ class ClassificationTask(BasicTask):
             either raster or vector data.
         """
         probs = raw_output.cpu().numpy()
-        value = probs.argmax()
+        if len(self.classes) == 2 and self.positive_class_threshold != 0.5:
+            positive_class_prob = probs[self.positive_class_id]
+            if positive_class_prob >= self.positive_class_threshold:
+                class_idx = self.positive_class_id
+            else:
+                class_idx = 1 - self.positive_class_id
+        else:
+            # For multiclass classification or when using the default threshold
+            class_idx = probs.argmax()
+
         if not self.read_class_id:
-            value = self.classes[value]
+            value = self.classes[class_idx]  # type: ignore
+        else:
+            value = class_idx
+
         feature = Feature(
             STGeometry(
                 metadata["projection"],
@@ -145,7 +191,7 @@ class ClassificationTask(BasicTask):
                 self.property_name: value,
             },
         )
-        if self.prob_property:
+        if self.prob_property is not None and feature.properties is not None:
             feature.properties[self.prob_property] = probs.tolist()
         return [feature]
 
@@ -168,6 +214,8 @@ class ClassificationTask(BasicTask):
         image = super().visualize(input_dict, target_dict, output)["image"]
         image = Image.fromarray(image)
         draw = ImageDraw.Draw(image)
+        if target_dict is None:
+            raise ValueError("target_dict is required for visualization")
         target_class = self.classes[target_dict["class"]]
         output_class = self.classes[output.argmax()]
         text = f"Label: {target_class}\nOutput: {output_class}"
@@ -181,11 +229,38 @@ class ClassificationTask(BasicTask):
     def get_metrics(self) -> MetricCollection:
         """Get the metrics for this task."""
         metrics = {}
-        metric_kwargs = dict(num_classes=len(self.classes))
+        metric_kwargs = {"num_classes": len(self.classes)}
         metric_kwargs.update(self.metric_kwargs)
-        metrics["accuracy"] = ClassificationMetric(
-            torchmetrics.classification.MulticlassAccuracy(**metric_kwargs)
-        )
+        metrics["accuracy"] = ClassificationMetric(MulticlassAccuracy(**metric_kwargs))
+
+        if self.enable_f1_metric:
+            kwargs = {
+                "num_classes": len(self.classes),
+                "average": None,
+            }  # Default to per-class metrics
+            kwargs.update(self.f1_metric_kwargs)
+
+            # Check the 'average' parameter
+            average_mode = kwargs.get("average", None)
+            if average_mode in (None, "none"):
+                # Generate per-class metrics with class-specific names
+                for class_id, class_name in enumerate(self.classes):
+                    metrics[f"{class_name}_recall"] = ClassificationMetric(
+                        MulticlassRecall(**kwargs), class_id
+                    )
+                    metrics[f"{class_name}_precision"] = ClassificationMetric(
+                        MulticlassPrecision(**kwargs), class_id
+                    )
+                    metrics[f"{class_name}_f1"] = ClassificationMetric(
+                        MulticlassF1Score(**kwargs), class_id
+                    )
+            else:
+                metrics["recall"] = ClassificationMetric(MulticlassRecall(**kwargs))
+                metrics["precision"] = ClassificationMetric(
+                    MulticlassPrecision(**kwargs)
+                )
+                metrics["f1"] = ClassificationMetric(MulticlassF1Score(**kwargs))
+
         return MetricCollection(metrics)
 
 
@@ -228,10 +303,17 @@ class ClassificationHead(torch.nn.Module):
 class ClassificationMetric(Metric):
     """Metric for classification task."""
 
-    def __init__(self, metric: Metric):
-        """Initialize a new ClassificationMetric."""
+    def __init__(self, metric: Metric, class_idx: int | None = None):
+        """Initialize a new ClassificationMetric.
+
+        Args:
+            metric: the metric to wrap
+            class_idx: optional class index to return metric value for. If set, the
+                metric should return a dict from class index to metric value.
+        """
         super().__init__()
         self.metric = metric
+        self.class_idx = class_idx
 
     def update(
         self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
@@ -257,7 +339,11 @@ class ClassificationMetric(Metric):
 
     def compute(self) -> Any:
         """Returns the computed metric."""
-        return self.metric.compute()
+        result = self.metric.compute()
+        if self.class_idx is None:
+            return result
+        else:
+            return result[self.class_idx]
 
     def reset(self) -> None:
         """Reset metric."""

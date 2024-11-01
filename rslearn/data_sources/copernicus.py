@@ -37,6 +37,8 @@ def get_harmonize_callback(
     """
     offset = None
     for el in tree.iter("RADIO_ADD_OFFSET"):
+        if el.text is None:
+            raise ValueError(f"text is missing in {el}")
         value = int(el.text)
         if offset is None:
             offset = value
@@ -49,8 +51,8 @@ def get_harmonize_callback(
     if offset is None or offset == 0:
         return None
 
-    def callback(array):
-        return np.clip(array, -offset, None) + offset
+    def callback(array: npt.NDArray) -> npt.NDArray:
+        return np.clip(array, -offset, None) + offset  # type: ignore
 
     return callback
 
@@ -77,11 +79,14 @@ def load_sentinel2_tile_index(cache_dir: UPath) -> GridIndex:
         namespace = "{http://www.opengis.net/kml/2.2}"
         json_data: dict[str, tuple[float, float, float, float]] = {}
         for placemark_node in tree.iter(namespace + "Placemark"):
-            tile_name = placemark_node.find(namespace + "name").text
+            name_node = placemark_node.find(namespace + "name")
+            assert name_node is not None and name_node.text is not None
+            tile_name = name_node.text
             bounds = None
             for coord_node in placemark_node.iter(namespace + "coordinates"):
                 # It is list of space-separated coordinates like:
                 #   180,-73.0597374076,0 176.8646237862,-72.9914734628,0 ...
+                assert coord_node.text is not None
                 point_strs = coord_node.text.strip().split()
                 for point_str in point_strs:
                     parts = point_str.split(",")
@@ -99,6 +104,7 @@ def load_sentinel2_tile_index(cache_dir: UPath) -> GridIndex:
                             max(bounds[3], lat),
                         )
 
+            assert bounds is not None
             json_data[tile_name] = bounds
 
         with json_fname.open("w") as f:
@@ -135,6 +141,7 @@ def get_sentinel2_tiles(geometry: STGeometry, cache_dir: UPath) -> list[str]:
     results = set()
     for shp in flatten_shape(wgs84_geometry.shp):
         for result in tile_index.query(shp.bounds):
+            assert isinstance(result, str)
             print(shp, result)
             results.add(result)
-    return results
+    return list(results)

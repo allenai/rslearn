@@ -21,7 +21,7 @@ def is_same_resolution(res1: float, res2: float) -> bool:
     return (max(res1, res2) / min(res1, res2) - 1) < RESOLUTION_EPSILON
 
 
-def shp_intersects(shp1: shapely.Geometry, shp2: shapely.Geometry):
+def shp_intersects(shp1: shapely.Geometry, shp2: shapely.Geometry) -> bool:
     """Returns whether the two shapes intersect.
 
     Tries shp.intersects but falls back to shp.intersection which can be more
@@ -167,7 +167,7 @@ class STGeometry:
 
     def intersects_time_range(
         self, time_range: tuple[datetime, datetime] | None
-    ) -> timedelta:
+    ) -> bool:
         """Returns whether this geometry intersects the other time range."""
         if self.time_range is None or time_range is None:
             return True
@@ -195,7 +195,12 @@ class STGeometry:
     def to_projection(self, projection: Projection) -> "STGeometry":
         """Transforms this geometry to the specified projection."""
 
-        def apply_resolution(array, x_resolution, y_resolution, forward=True):
+        def apply_resolution(
+            array: np.ndarray,
+            x_resolution: float,
+            y_resolution: float,
+            forward: bool = True,
+        ) -> np.ndarray:
             if forward:
                 return np.stack(
                     [array[:, 0] / x_resolution, array[:, 1] / y_resolution], axis=1
@@ -310,7 +315,7 @@ def _collect_shapes(shapes: list[shapely.Geometry]) -> shapely.Geometry:
 
 
 def split_shape_at_prime_meridian(
-    shp: shapely.Geometry, epsilon=1e-6
+    shp: shapely.Geometry, epsilon: float = 1e-6
 ) -> shapely.Geometry:
     """Split the given shape at the prime meridian.
 
@@ -358,7 +363,7 @@ def split_shape_at_prime_meridian(
     if isinstance(shp, shapely.LineString | shapely.Polygon):
         # We add 360 to the negative coordinates and then separate the parts above and
         # below 180.
-        def add360(array: npt.NDArray[np.float32]):
+        def add360(array: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
             new_array = array.copy()
             new_array[new_array[:, 0] < 0, 0] += 360
             return new_array
@@ -375,7 +380,7 @@ def split_shape_at_prime_meridian(
     raise TypeError("Unsupported shape type")
 
 
-def split_at_prime_meridian(geometry: STGeometry, epsilon=1e-6) -> STGeometry:
+def split_at_prime_meridian(geometry: STGeometry, epsilon: float = 1e-6) -> STGeometry:
     """Split lines and polygons in the given geometry at the prime meridian.
 
     The returned geometry will always be in WGS84 projection.

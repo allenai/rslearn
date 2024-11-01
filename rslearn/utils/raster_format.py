@@ -67,7 +67,7 @@ class ImageTileRasterFormat(RasterFormat):
     by their (possibly negative) column and row along the grid.
     """
 
-    def __init__(self, format: str, tile_size: int = 512):
+    def __init__(self, format: str, tile_size: int = TILE_SIZE):
         """Initialize a new ImageTileRasterFormat instance.
 
         Args:
@@ -278,13 +278,18 @@ class GeotiffRasterFormat(RasterFormat):
 
     fname = "geotiff.tif"
 
-    def __init__(self, block_size: int = 512):
+    def __init__(self, block_size: int = TILE_SIZE, always_enable_tiling: bool = False):
         """Initializes a GeotiffRasterFormat.
 
         Args:
             block_size: the block size to use in the output GeoTIFF
+            always_enable_tiling: whether to always enable tiling when creating
+                GeoTIFFs. The default is False so that tiling is only used if the size
+                of the GeoTIFF exceeds the block_size on either dimension. If True,
+                then tiling is always enabled (cloud-optimized GeoTIFF).
         """
         self.block_size = block_size
+        self.always_enable_tiling = always_enable_tiling
 
     def encode_raster(
         self,
@@ -319,11 +324,19 @@ class GeotiffRasterFormat(RasterFormat):
             "dtype": array.dtype.name,
             "crs": crs,
             "transform": transform,
+            # Configure rasterio to use BIGTIFF when needed to write large files.
+            # Without BIGTIFF it is up to 4 GB and trying to write larger files would
+            # result in an error.
+            "BIGTIFF": "IF_SAFER",
         }
-        if array.shape[2] > TILE_SIZE and array.shape[1] > TILE_SIZE:
+        if (
+            array.shape[2] > self.block_size
+            or array.shape[1] > self.block_size
+            or self.always_enable_tiling
+        ):
             profile["tiled"] = True
-            profile["blockxsize"] = TILE_SIZE
-            profile["blockysize"] = TILE_SIZE
+            profile["blockxsize"] = self.block_size
+            profile["blockysize"] = self.block_size
 
         path.mkdir(parents=True, exist_ok=True)
         with (path / self.fname).open("wb") as f:
@@ -432,7 +445,12 @@ class GeotiffRasterFormat(RasterFormat):
         Returns:
             the GeotiffRasterFormat
         """
-        return GeotiffRasterFormat(block_size=config.get("block_size", 512))
+        kwargs = {}
+        if "block_size" in config:
+            kwargs["block_size"] = config["block_size"]
+        if "always_enable_tiling" in config:
+            kwargs["always_enable_tiling"] = config["always_enable_tiling"]
+        return GeotiffRasterFormat(**kwargs)
 
 
 @RasterFormats.register("single_image")

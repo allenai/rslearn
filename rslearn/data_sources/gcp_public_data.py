@@ -18,7 +18,7 @@ import tqdm
 from google.cloud import storage
 from upath import UPath
 
-from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
+from rslearn.config import QueryConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
@@ -30,6 +30,7 @@ from .copernicus import get_harmonize_callback, get_sentinel2_tiles
 from .raster_source import get_needed_projections, ingest_raster
 
 
+# TODO: this is a copy of the Sentinel2Item class in aws_open_data.py
 class Sentinel2Item(Item):
     """An item in the Sentinel2 data source."""
 
@@ -56,7 +57,7 @@ class Sentinel2Item(Item):
         return d
 
     @staticmethod
-    def deserialize(d: dict[str, Any]) -> Item:
+    def deserialize(d: dict[str, Any]) -> "Sentinel2Item":
         """Deserializes an item from a JSON-decoded dictionary."""
         item = super(Sentinel2Item, Sentinel2Item).deserialize(d)
         return Sentinel2Item(
@@ -67,6 +68,7 @@ class Sentinel2Item(Item):
         )
 
 
+# TODO: Distinguish between AWS and GCP data sources in class names.
 class Sentinel2(DataSource):
     """A data source for Sentinel-2 data on Google Cloud Storage.
 
@@ -102,7 +104,7 @@ class Sentinel2(DataSource):
 
     def __init__(
         self,
-        config: LayerConfig,
+        config: RasterLayerConfig,
         index_cache_dir: UPath,
         max_time_delta: timedelta = timedelta(days=30),
         sort_by: str | None = None,
@@ -138,11 +140,11 @@ class Sentinel2(DataSource):
         self.index_cache_dir.mkdir(parents=True, exist_ok=True)
 
         self.bucket = storage.Client.create_anonymous_client().bucket(self.bucket_name)
-
+        self.rtree_index: Any | None = None
         if use_rtree_index:
             from rslearn.utils.rtree_index import RtreeIndex, get_cached_rtree
 
-            def build_fn(index: RtreeIndex):
+            def build_fn(index: RtreeIndex) -> None:
                 """Build the RtreeIndex from items in the data source."""
                 for item in self._read_index(
                     desc="Building rtree index", time_range=rtree_time_range
@@ -154,13 +156,12 @@ class Sentinel2(DataSource):
             self.rtree_index = get_cached_rtree(
                 self.index_cache_dir, self.rtree_tmp_dir.name, build_fn
             )
-        else:
-            self.rtree_index = None
 
     @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "Sentinel2":
+    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Sentinel2":
         """Creates a new Sentinel2 instance from a configuration dictionary."""
-        assert isinstance(config, RasterLayerConfig)
+        if config.data_source is None:
+            raise ValueError("config.data_source is required")
         d = config.data_source.config_dict
         kwargs = dict(
             config=config,
@@ -180,7 +181,7 @@ class Sentinel2(DataSource):
 
     def _read_index(
         self, desc: str, time_range: tuple[datetime, datetime] | None = None
-    ) -> Generator[dict[str, str], None, None]:
+    ) -> Generator[Sentinel2Item, None, None]:
         """Read the index.csv.gz in the Cloud Storage bucket.
 
         The CSV only contains the bounding box of each image and not the exact
@@ -264,7 +265,7 @@ class Sentinel2(DataSource):
         with cache_xml_fname.open("rb") as f:
             return ET.parse(f)
 
-    def get_item_by_name(self, name: str) -> Item:
+    def get_item_by_name(self, name: str) -> Sentinel2Item:
         """Gets an item by name.
 
         Reads the individual product metadata file (MTD_MSIL1C.xml) to get both the
@@ -288,27 +289,38 @@ class Sentinel2(DataSource):
         # The EXT_POS_LIST tag has flat list of polygon coordinates.
         elements = list(tree.iter("EXT_POS_LIST"))
         assert len(elements) == 1
-        coords = elements[0].text.strip().split(" ")
+        if elements[0].text is None:
+            raise ValueError(f"EXT_POS_LIST is empty for {name}")
+        coords_text = elements[0].text.strip().split(" ")
         # Convert flat list of lat1 lon1 lat2 lon2 ...
         # into (lon1, lat1), (lon2, lat2), ...
         # Then we can get the shapely geometry.
         coords = [
-            [float(coords[i + 1]), float(coords[i])] for i in range(0, len(coords), 2)
+            [float(coords_text[i + 1]), float(coords_text[i])]
+            for i in range(0, len(coords_text), 2)
         ]
         shp = shapely.Polygon(coords)
 
         # Get blob prefix which is a subfolder of the base_url
         elements = list(tree.iter("IMAGE_FILE"))
-        elements = [el for el in elements if el.text.endswith("_B01")]
+        elements = [
+            el for el in elements if el.text is not None and el.text.endswith("_B01")
+        ]
         assert len(elements) == 1
+        if elements[0].text is None:
+            raise ValueError(f"IMAGE_FILE is empty for {name}")
         blob_prefix = base_url + elements[0].text.split("B01")[0]
 
         elements = list(tree.iter("PRODUCT_START_TIME"))
         assert len(elements) == 1
+        if elements[0].text is None:
+            raise ValueError(f"PRODUCT_START_TIME is empty for {name}")
         start_time = dateutil.parser.isoparse(elements[0].text)
 
         elements = list(tree.iter("Cloud_Coverage_Assessment"))
         assert len(elements) == 1
+        if elements[0].text is None:
+            raise ValueError(f"Cloud_Coverage_Assessment is empty for {name}")
         cloud_cover = float(elements[0].text)
 
         geometry = STGeometry(WGS84_PROJECTION, shp, (start_time, start_time))
@@ -376,9 +388,9 @@ class Sentinel2(DataSource):
 
     def _get_candidate_items_index(
         self, wgs84_geometries: list[STGeometry]
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[Sentinel2Item]]:
         """List relevant items using rtree index."""
-        candidates = [[] for _ in wgs84_geometries]
+        candidates: list[list[Sentinel2Item]] = [[] for _ in wgs84_geometries]
         for idx, geometry in enumerate(wgs84_geometries):
             time_range = None
             if geometry.time_range:
@@ -386,7 +398,8 @@ class Sentinel2(DataSource):
                     geometry.time_range[0] - self.max_time_delta,
                     geometry.time_range[1] + self.max_time_delta,
                 )
-
+            if self.rtree_index is None:
+                raise ValueError("rtree_index is required")
             encoded_items = self.rtree_index.query(geometry.shp.bounds)
             for encoded_item in encoded_items:
                 item = Sentinel2Item.deserialize(json.loads(encoded_item))
@@ -402,7 +415,7 @@ class Sentinel2(DataSource):
 
     def _get_candidate_items_direct(
         self, wgs84_geometries: list[STGeometry]
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[Sentinel2Item]]:
         """Use _read_products to list relevant items."""
         needed_cell_years = set()
         for wgs84_geometry in wgs84_geometries:
@@ -417,7 +430,7 @@ class Sentinel2(DataSource):
                 ):
                     needed_cell_years.add((cell_id, year))
 
-        items_by_cell = {}
+        items_by_cell: dict[str, list[Sentinel2Item]] = {}
         for item in self._read_products(needed_cell_years):
             cell_id = "".join(item.blob_prefix.split("/")[1:4])
             assert len(cell_id) == 5
@@ -425,7 +438,7 @@ class Sentinel2(DataSource):
                 items_by_cell[cell_id] = []
             items_by_cell[cell_id].append(item)
 
-        candidates = [[] for _ in wgs84_geometries]
+        candidates: list[list[Sentinel2Item]] = [[] for _ in wgs84_geometries]
         for idx, geometry in enumerate(wgs84_geometries):
             for cell_id in get_sentinel2_tiles(geometry, self.index_cache_dir):
                 for item in items_by_cell.get(cell_id, []):
@@ -437,7 +450,7 @@ class Sentinel2(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[list[Sentinel2Item]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -468,12 +481,14 @@ class Sentinel2(DataSource):
             groups.append(cur_groups)
         return groups
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: Any) -> Sentinel2Item:
         """Deserializes an item from JSON-decoded data."""
         assert isinstance(serialized_item, dict)
         return Sentinel2Item.deserialize(serialized_item)
 
-    def retrieve_item(self, item: Item) -> Generator[tuple[str, BinaryIO], None, None]:
+    def retrieve_item(
+        self, item: Sentinel2Item
+    ) -> Generator[tuple[str, BinaryIO], None, None]:
         """Retrieves the rasters corresponding to an item as file streams."""
         for suffix, _ in self.bands:
             blob_path = item.blob_prefix + suffix
@@ -489,7 +504,7 @@ class Sentinel2(DataSource):
     def ingest(
         self,
         tile_store: TileStore,
-        items: list[Item],
+        items: list[Sentinel2Item],
         geometries: list[list[STGeometry]],
     ) -> None:
         """Ingest items into the given tile store.

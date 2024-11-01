@@ -10,13 +10,13 @@ MESSAGE = "hello world"
 SLEEP_TIME = 1
 
 
-def sleepy_writer(fname: str):
+def sleepy_writer(fname: str) -> None:
     with open_atomic(fname, "w") as f:
         time.sleep(SLEEP_TIME * 2)
         f.write(MESSAGE)
 
 
-def test_open_atomic(tmp_path: pathlib.Path):
+def test_open_atomic(tmp_path: pathlib.Path) -> None:
     # Make sure that open_atomic actually creates file atomically on local filesystem.
     # So we create file, then write to it in another process and sleep and read from
     # first process and make sure it's okay.

@@ -25,7 +25,7 @@ def add_windows_from_geometries(
     window_size: int | None = None,
     time_range: tuple[datetime, datetime] | None = None,
     use_utm: bool = False,
-):
+) -> list[Window]:
     """Create windows based on a list of STGeometry.
 
     Args:

@@ -7,7 +7,7 @@ from rslearn.train.transforms.flip import Flip
 class TestTransforms:
     """Test transforms working with ModelDataset."""
 
-    def test_flip(self, image_to_class_dataset: Dataset):
+    def test_flip(self, image_to_class_dataset: Dataset) -> None:
         split_config = SplitConfig(transforms=[Flip()])
         image_data_input = DataInput(
             "raster", ["image"], bands=["band"], passthrough=True

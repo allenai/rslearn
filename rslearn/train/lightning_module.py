@@ -124,6 +124,7 @@ class RslearnLightningModule(L.LightningModule):
         self.plateau_min_lr = plateau_min_lr
         self.plateau_cooldown = plateau_cooldown
         self.visualize_dir = visualize_dir
+        self.restore_config = restore_config
 
         if print_parameters:
             for name, param in self.named_parameters():
@@ -132,8 +133,19 @@ class RslearnLightningModule(L.LightningModule):
         if print_model:
             print(self.model)
 
-        if restore_config:
-            state_dict = restore_config.get_state_dict()
+        self.epochs = 0
+
+        metrics = self.task.get_metrics()
+        self.val_metrics = metrics.clone(prefix="val_")
+        self.test_metrics = metrics.clone(prefix="test_")
+
+        self.schedulers: dict = {}
+
+    def on_fit_start(self) -> None:
+        """Called when the fit begins."""
+        # Only restore if doing a fresh fit.
+        if self.trainer.ckpt_path is None and self.restore_config:
+            state_dict = self.restore_config.get_state_dict()
             missing_keys, unexpected_keys = self.model.load_state_dict(
                 state_dict, strict=False
             )
@@ -142,19 +154,14 @@ class RslearnLightningModule(L.LightningModule):
                     f"warning: restore yielded missing_keys={missing_keys} and unexpected_keys={unexpected_keys}"
                 )
 
-        self.epochs = 0
-
-        metrics = self.task.get_metrics()
-        self.val_metrics = metrics.clone(prefix="val_")
-        self.test_metrics = metrics.clone(prefix="test_")
-
     def configure_optimizers(self) -> OptimizerLRSchedulerConfig:
         """Initialize the optimizer and learning rate scheduler.
 
         Returns:
             Optimizer and learning rate scheduler.
         """
-        optimizer = AdamW(self.parameters(), lr=self.lr)
+        params = [p for p in self.parameters() if p.requires_grad]
+        optimizer = AdamW(params, lr=self.lr)
         d = dict(
             optimizer=optimizer,
         )
@@ -171,6 +178,7 @@ class RslearnLightningModule(L.LightningModule):
                 "monitor": "train_loss",
                 "interval": "epoch",
             }
+            self.schedulers["plateau"] = scheduler
         return d
 
     def training_step(

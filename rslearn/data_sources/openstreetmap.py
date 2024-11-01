@@ -7,10 +7,11 @@ from enum import Enum
 from typing import Any
 
 import osmium
+import osmium.osm.types
 import shapely
 from upath import UPath
 
-from rslearn.config import LayerConfig, QueryConfig, VectorLayerConfig
+from rslearn.config import QueryConfig, VectorLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
@@ -36,7 +37,7 @@ class Filter:
         tag_conditions: dict[str, list[str]] | None = None,
         tag_properties: dict[str, str] | None = None,
         to_geometry: str | None = None,
-    ):
+    ) -> None:
         """Create a new Filter instance.
 
         Args:
@@ -64,7 +65,7 @@ class Filter:
         Returns:
             the Filter object
         """
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         if "feature_types" in d:
             kwargs["feature_types"] = [FeatureType(el) for el in d["feature_types"]]
         if "tag_conditions" in d:
@@ -104,12 +105,12 @@ class Filter:
 class BoundsHandler(osmium.SimpleHandler):
     """An osmium handler for computing the bounds of an input file."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize a new BoundsHandler."""
         osmium.SimpleHandler.__init__(self)
-        self.bounds = (180, 90, -180, -90)
+        self.bounds: tuple[float, float, float, float] = (180, 90, -180, -90)
 
-    def node(self, n):
+    def node(self, n: osmium.osm.types.Node) -> None:
         """Handle nodes and update the computed bounds."""
         lon = n.location.lon
         lat = n.location.lat
@@ -130,7 +131,7 @@ class OsmHandler(osmium.SimpleHandler):
         geometries: list[STGeometry],
         grid_size: float = 0.03,
         padding: float = 0.03,
-    ):
+    ) -> None:
         """Initialize a new OsmHandler.
 
         Args:
@@ -163,12 +164,12 @@ class OsmHandler(osmium.SimpleHandler):
             )
             self.grid_index.insert(bounds, 1)
 
-        self.cached_nodes = {}
-        self.cached_ways = {}
+        self.cached_nodes: dict = {}
+        self.cached_ways: dict = {}
 
-        self.features = []
+        self.features: list[Feature] = []
 
-    def node(self, n):
+    def node(self, n: osmium.osm.types.Node) -> None:
         """Handle nodes."""
         # Check if node is relevant to our geometries.
         lon = n.location.lon
@@ -193,7 +194,7 @@ class OsmHandler(osmium.SimpleHandler):
             )
             self.features.append(feat)
 
-    def _get_way_coords(self, node_ids):
+    def _get_way_coords(self, node_ids: list[int]) -> list:
         coords = []
         for id in node_ids:
             if id not in self.cached_nodes:
@@ -201,7 +202,7 @@ class OsmHandler(osmium.SimpleHandler):
             coords.append(self.cached_nodes[id])
         return coords
 
-    def way(self, w):
+    def way(self, w: osmium.osm.types.Way) -> None:
         """Handle ways."""
         # Collect nodes, skip if too few.
         node_ids = [member.ref for member in w.nodes]
@@ -235,7 +236,7 @@ class OsmHandler(osmium.SimpleHandler):
             )
             self.features.append(feat)
 
-    def match_relation(self, r):
+    def match_relation(self, r: osmium.osm.types.Relation) -> None:
         """Handle relations."""
         # Collect ways and distinguish exterior vs holes, skip if none found.
         exterior_ways = []
@@ -267,7 +268,7 @@ class OsmHandler(osmium.SimpleHandler):
         # Merge the ways in case some exterior/interior polygons are split into
         # multiple ways.
         # And convert them from node IDs to coordinates.
-        def get_polygons(ways):
+        def get_polygons(ways: list) -> list:
             polygons: list[list[int]] = []
             for way in ways:
                 # Attempt to match the way to an existing polygon.
@@ -366,13 +367,13 @@ class OsmItem(Item):
         return d
 
     @staticmethod
-    def deserialize(d: dict) -> Item:
+    def deserialize(d: dict) -> "OsmItem":
         """Deserializes an item from a JSON-decoded dictionary."""
         item = super(OsmItem, OsmItem).deserialize(d)
         return OsmItem(name=item.name, geometry=item.geometry, path_uri=d["path_uri"])
 
 
-class OpenStreetMap(DataSource):
+class OpenStreetMap(DataSource[OsmItem]):
     """A data source for OpenStreetMap data from PBF file.
 
     An existing local PBF file can be used, or if the provided path doesn't exist, then
@@ -420,9 +421,10 @@ class OpenStreetMap(DataSource):
         self.pbf_bounds = self._get_pbf_bounds()
 
     @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "OpenStreetMap":
+    def from_config(config: VectorLayerConfig, ds_path: UPath) -> "OpenStreetMap":
         """Creates a new OpenStreetMap instance from a configuration dictionary."""
-        assert isinstance(config, VectorLayerConfig)
+        if config.data_source is None:
+            raise ValueError("data_source is required")
         d = config.data_source.config_dict
         categories = {
             category_name: Filter.from_config(filter_config_dict)
@@ -437,7 +439,9 @@ class OpenStreetMap(DataSource):
             categories=categories,
         )
 
-    def _get_pbf_bounds(self):
+    def _get_pbf_bounds(self) -> list[tuple[float, float, float, float]]:
+        # Determine WGS84 bounds of each PBF file by processing them through
+        # BoundsHandler.
         if not self.bounds_fname.exists():
             pbf_bounds = []
             for pbf_fname in self.pbf_fnames:
@@ -458,7 +462,7 @@ class OpenStreetMap(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[list[OsmItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -487,14 +491,14 @@ class OpenStreetMap(DataSource):
             groups.append(cur_groups)
         return groups
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: Any) -> OsmItem:
         """Deserializes an item from JSON-decoded data."""
         return OsmItem.deserialize(serialized_item)
 
     def ingest(
         self,
         tile_store: TileStore,
-        items: list[Item],
+        items: list[OsmItem],
         geometries: list[list[STGeometry]],
     ) -> None:
         """Ingest items into the given tile store.

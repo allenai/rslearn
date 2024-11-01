@@ -6,7 +6,7 @@ import shutil
 import urllib.request
 import zipfile
 from collections.abc import Generator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, BinaryIO
 
 import boto3
@@ -20,7 +20,7 @@ import tqdm
 from upath import UPath
 
 import rslearn.data_sources.utils
-from rslearn.config import LayerConfig, RasterLayerConfig
+from rslearn.config import RasterLayerConfig
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
 from rslearn.utils import STGeometry
@@ -35,7 +35,7 @@ class LandsatOliTirsItem(Item):
 
     def __init__(
         self, name: str, geometry: STGeometry, blob_path: str, cloud_cover: float
-    ):
+    ) -> None:
         """Creates a new LandsatOliTirsItem.
 
         Args:
@@ -57,7 +57,7 @@ class LandsatOliTirsItem(Item):
         return d
 
     @staticmethod
-    def deserialize(d: dict) -> Item:
+    def deserialize(d: dict) -> "LandsatOliTirsItem":
         """Deserializes an item from a JSON-decoded dictionary."""
         if "name" not in d:
             d["name"] = d["blob_path"].split("/")[-1].split(".tif")[0]
@@ -89,7 +89,7 @@ class LandsatOliTirs(DataSource):
 
     def __init__(
         self,
-        config: LayerConfig,
+        config: RasterLayerConfig,
         metadata_cache_dir: UPath,
         max_time_delta: timedelta = timedelta(days=30),
         sort_by: str | None = None,
@@ -109,15 +109,16 @@ class LandsatOliTirs(DataSource):
         self.metadata_cache_dir = metadata_cache_dir
         self.max_time_delta = max_time_delta
         self.sort_by = sort_by
+        print(self.metadata_cache_dir)
 
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
-
         self.metadata_cache_dir.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "LandsatOliTirs":
+    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "LandsatOliTirs":
         """Creates a new LandsatOliTirs instance from a configuration dictionary."""
-        assert isinstance(config, RasterLayerConfig)
+        if config.data_source is None:
+            raise ValueError(f"data_source is required for config dict {config}")
         d = config.data_source.config_dict
         kwargs = dict(
             config=config,
@@ -180,8 +181,9 @@ class LandsatOliTirs(DataSource):
                     ts = dateutil.parser.isoparse(date_str + "T" + time_str)
 
                     blob_path = obj.key.split("MTL.json")[0]
+                    time_range: tuple[datetime, datetime] = (ts, ts)
                     geometry = STGeometry(
-                        WGS84_PROJECTION, shapely.Polygon(coordinates), [ts, ts]
+                        WGS84_PROJECTION, shapely.Polygon(coordinates), time_range
                     )
                     items.append(
                         LandsatOliTirsItem(
@@ -215,6 +217,7 @@ class LandsatOliTirs(DataSource):
         if not shp_fname.exists():
             # Download and extract zip to cache dir.
             zip_fname = self.metadata_cache_dir / f"{prefix}.zip"
+            print(f"Downloading {self.wrs2_url} to {zip_fname}")
             with urllib.request.urlopen(self.wrs2_url) as response:
                 with zip_fname.open("wb") as f:
                     shutil.copyfileobj(response, f)
@@ -244,6 +247,13 @@ class LandsatOliTirs(DataSource):
                 polygons = []
                 for feat in src:
                     shp = shapely.geometry.shape(feat["geometry"])
+
+                    # Need to buffer the shape because Landsat scenes include some
+                    # buffer beyond the polygon and this has caused us to not identify
+                    # scenes in the past.
+                    # 0.2 degree buffer seems sufficient.
+                    shp = shp.buffer(0.2)
+
                     path = str(feat["properties"]["PATH"]).zfill(3)
                     row = str(feat["properties"]["ROW"]).zfill(3)
                     polygons.append((shp, path, row))
@@ -251,7 +261,7 @@ class LandsatOliTirs(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[list[LandsatOliTirsItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -297,14 +307,16 @@ class LandsatOliTirs(DataSource):
             elif self.sort_by is not None:
                 raise ValueError(f"invalid sort_by setting ({self.sort_by})")
 
-            cur_groups = rslearn.data_sources.utils.match_candidate_items_to_window(
-                geometry, cur_items, query_config
+            cur_groups: list[list[LandsatOliTirsItem]] = (
+                rslearn.data_sources.utils.match_candidate_items_to_window(
+                    geometry, cur_items, query_config
+                )
             )
             groups.append(cur_groups)
 
         return groups
 
-    def get_item_by_name(self, name: str) -> Item:
+    def get_item_by_name(self, name: str) -> LandsatOliTirsItem:
         """Gets an item by name."""
         # Product name is like LC08_L1TP_046027_20230715_20230724_02_T1.
         # We want to use _read_products so we need to extract:
@@ -322,12 +334,14 @@ class LandsatOliTirs(DataSource):
                 return item
         raise ValueError(f"item {name} not found")
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: Any) -> LandsatOliTirsItem:
         """Deserializes an item from JSON-decoded data."""
         assert isinstance(serialized_item, dict)
         return LandsatOliTirsItem.deserialize(serialized_item)
 
-    def retrieve_item(self, item: Item) -> Generator[tuple[str, BinaryIO], None, None]:
+    def retrieve_item(
+        self, item: LandsatOliTirsItem
+    ) -> Generator[tuple[str, BinaryIO], None, None]:
         """Retrieves the rasters corresponding to an item as file streams."""
         for band in self.bands:
             buf = io.BytesIO()
@@ -343,7 +357,7 @@ class LandsatOliTirs(DataSource):
     def ingest(
         self,
         tile_store: TileStore,
-        items: list[Item],
+        items: list[LandsatOliTirsItem],
         geometries: list[list[STGeometry]],
     ) -> None:
         """Ingest items into the given tile store.
@@ -360,7 +374,10 @@ class LandsatOliTirs(DataSource):
                     tile_store, (item.name, "_".join(band_names))
                 )
                 needed_projections = get_needed_projections(
-                    cur_tile_store, band_names, self.config.band_sets, cur_geometries
+                    cur_tile_store,
+                    band_names,
+                    self.config.band_sets,
+                    cur_geometries,  # type: ignore
                 )
                 if not needed_projections:
                     continue
