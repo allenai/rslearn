@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import rasterio.warp
 import shapely
 import shapely.wkt
@@ -265,3 +266,145 @@ class STGeometry:
                 else None
             ),
         )
+
+
+def flatten_shape(shp: shapely.Geometry) -> list[shapely.Geometry]:
+    """Flatten the shape into a list of primitive shapes (Point, LineString, and Polygon).
+
+    Args:
+        shp: the shape, which could be a primitive shape like polygon or a collection.
+
+    Returns:
+        list of primitive shapes.
+    """
+    if isinstance(
+        shp,
+        shapely.MultiPoint
+        | shapely.MultiLineString
+        | shapely.MultiPolygon
+        | shapely.GeometryCollection,
+    ):
+        flat_list: list[shapely.Geometry] = []
+        for component in shp.geoms:
+            flat_list.extend(flatten_shape(component))
+        return flat_list
+
+    else:
+        return [shp]
+
+
+def _collect_shapes(shapes: list[shapely.Geometry]) -> shapely.Geometry:
+    # Collect the shapes into an appropriate container.
+    flat_list: list[shapely.Geometry] = []
+    for shp in shapes:
+        flat_list.extend(flatten_shape(shp))
+
+    if len(flat_list) == 1:
+        return flat_list[0]
+
+    if all(isinstance(shp, shapely.Point) for shp in flat_list):
+        return shapely.MultiPoint(flat_list)
+
+    if all(isinstance(shp, shapely.LineString) for shp in flat_list):
+        return shapely.MultiLineString(flat_list)
+
+    if all(isinstance(shp, shapely.Polygon) for shp in flat_list):
+        return shapely.MultiPolygon(flat_list)
+
+    return shapely.GeometryCollection(flat_list)
+
+
+def split_shape_at_prime_meridian(
+    shp: shapely.Geometry, epsilon: float = 1e-6
+) -> shapely.Geometry:
+    """Split the given shape at the prime meridian.
+
+    The shape must be in WGS84 coordinates.
+
+    See split_at_prime_meridian for details.
+
+    Args:
+        shp: the shape to split.
+        epsilon: the padding in degrees.
+
+    Returns:
+        the split shape, in WGS84 projection.
+    """
+    # We assume the shape is fine if:
+    # 1. It doesn't need padding (no coordinates close to +/- 180).
+    # 2. And all coordinates are either less than 90 or more than -90 (meaning the
+    #    shape approaches the prime meridian on at most one side).
+    bounds = shp.bounds
+    if bounds[0] > -180 + epsilon and bounds[2] < 90:
+        return shp
+    if bounds[0] > -90 and bounds[2] < 180 - epsilon:
+        return shp
+
+    if isinstance(
+        shp,
+        shapely.MultiPoint
+        | shapely.MultiLineString
+        | shapely.MultiPolygon
+        | shapely.GeometryCollection,
+    ):
+        return _collect_shapes(
+            [split_shape_at_prime_meridian(component) for component in shp]
+        )
+
+    if isinstance(shp, shapely.Point):
+        # Points only need padding.
+        lon = shp.x
+        if lon < -180 + epsilon:
+            lon = -180 + epsilon
+        if lon > 180 - epsilon:
+            lon = 180 - epsilon
+        return shapely.Point(lon, shp.y)
+
+    if isinstance(shp, shapely.LineString | shapely.Polygon):
+        # We add 360 to the negative coordinates and then separate the parts above and
+        # below 180.
+        def add360(array: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
+            new_array = array.copy()
+            new_array[new_array[:, 0] < 0, 0] += 360
+            return new_array
+
+        shp = shapely.transform(shp, add360)
+
+        positive_part = shapely.box(0, -90, 180 - epsilon, 90)
+        negative_part = shapely.box(180 + epsilon, -90, 360, 90)
+        positive_shp = shp.intersection(positive_part)
+        negative_shp = shp.intersection(negative_part)
+        negative_shp = shapely.transform(negative_shp, lambda coords: coords - [360, 0])
+        return _collect_shapes([positive_shp, negative_shp])
+
+    raise TypeError("Unsupported shape type")
+
+
+def split_at_prime_meridian(geometry: STGeometry, epsilon: float = 1e-6) -> STGeometry:
+    """Split lines and polygons in the given geometry at the prime meridian.
+
+    The returned geometry will always be in WGS84 projection.
+
+    Small padding is also introduced to ensure coordinates are a bit more than -180 or
+    a bit less than 180.
+
+    For example, if the input is a polygon:
+
+        Polygon([[-180, 10], [180, 11], [-179, 11], [-179, 10]])
+
+    Then it would be converted to:
+
+        Polygon([[-179.999999, 10], [-179,999999, 11], [-179, 11], [-179, 10]])
+
+    Args:
+        geometry: the geometry to split.
+        epsilon: the padding in degrees. It is equivalent to about 1 m at the equator.
+            We ensure no longitude coordinates are within this padding of +/- 180.
+
+    Returns:
+        the padded geometry, in WGS84 projection.
+    """
+    # Convert to WGS84.
+    geometry = geometry.to_projection(Projection(CRS.from_epsg(4326), 1, 1))
+    new_shp = split_shape_at_prime_meridian(geometry.shp, epsilon=epsilon)
+    return STGeometry(geometry.projection, new_shp, geometry.time_range)

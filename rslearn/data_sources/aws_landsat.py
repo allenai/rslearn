@@ -20,7 +20,6 @@ import tqdm
 from upath import UPath
 
 import rslearn.data_sources.utils
-import rslearn.utils.mgrs
 from rslearn.config import RasterLayerConfig
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore

@@ -18,7 +18,6 @@ from google.cloud import storage
 from upath import UPath
 
 import rslearn.data_sources.utils
-import rslearn.utils.mgrs
 from rslearn.config import DType, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore

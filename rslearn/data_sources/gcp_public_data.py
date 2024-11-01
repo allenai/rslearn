@@ -18,16 +18,16 @@ import tqdm
 from google.cloud import storage
 from upath import UPath
 
-import rslearn.utils.mgrs
 from rslearn.config import QueryConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import STGeometry, logger
+from rslearn.utils import logger
 from rslearn.utils.fsspec import join_upath, open_atomic
+from rslearn.utils.geometry import STGeometry, flatten_shape, split_at_prime_meridian
 
-from .copernicus import get_harmonize_callback
+from .copernicus import get_harmonize_callback, get_sentinel2_tiles
 from .raster_source import get_needed_projections, ingest_raster
 
 
@@ -150,7 +150,8 @@ class Sentinel2(DataSource):
                 for item in self._read_index(
                     desc="Building rtree index", time_range=rtree_time_range
                 ):
-                    index.insert(item.geometry.shp.bounds, json.dumps(item.serialize()))
+                    for shp in flatten_shape(item.geometry.shp):
+                        index.insert(shp.bounds, json.dumps(item.serialize()))
 
             self.rtree_tmp_dir = tempfile.TemporaryDirectory()
             self.rtree_index = get_cached_rtree(
@@ -234,6 +235,7 @@ class Sentinel2(DataSource):
                     geometry = STGeometry(
                         WGS84_PROJECTION, shp, (sensing_time, sensing_time)
                     )
+                    geometry = split_at_prime_meridian(geometry)
 
                     cloud_cover = float(row["CLOUD_COVER"])
 
@@ -322,9 +324,12 @@ class Sentinel2(DataSource):
             raise ValueError(f"Cloud_Coverage_Assessment is empty for {name}")
         cloud_cover = float(elements[0].text)
 
+        geometry = STGeometry(WGS84_PROJECTION, shp, (start_time, start_time))
+        geometry = split_at_prime_meridian(geometry)
+
         return Sentinel2Item(
             name,
-            STGeometry(WGS84_PROJECTION, shp, (start_time, start_time)),
+            geometry,
             blob_prefix,
             cloud_cover,
         )
@@ -429,7 +434,7 @@ class Sentinel2(DataSource):
                 raise ValueError(
                     "Sentinel2 on GCP requires geometry time ranges to be set"
                 )
-            for cell_id in rslearn.utils.mgrs.for_each_cell(wgs84_geometry.shp.bounds):
+            for cell_id in get_sentinel2_tiles(wgs84_geometry, self.index_cache_dir):
                 for year in range(
                     (wgs84_geometry.time_range[0] - self.max_time_delta).year,
                     (wgs84_geometry.time_range[1] + self.max_time_delta).year + 1,
@@ -446,7 +451,7 @@ class Sentinel2(DataSource):
 
         candidates: list[list[Sentinel2Item]] = [[] for _ in wgs84_geometries]
         for idx, geometry in enumerate(wgs84_geometries):
-            for cell_id in rslearn.utils.mgrs.for_each_cell(geometry.shp.bounds):
+            for cell_id in get_sentinel2_tiles(geometry, self.index_cache_dir):
                 for item in items_by_cell.get(cell_id, []):
                     if not geometry.shp.intersects(item.geometry.shp):
                         continue
