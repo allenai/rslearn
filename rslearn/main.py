@@ -400,6 +400,7 @@ def dataset_prepare() -> None:
     args = parser.parse_args(args=sys.argv[3:])
 
     fn = PrepareHandler(args.force)
+    logger.info(f"Running prepare with args: {args}")
     apply_on_windows_args(fn, args)
 
 
@@ -550,6 +551,7 @@ def dataset_ingest() -> None:
     args = parser.parse_args(args=sys.argv[3:])
 
     fn = IngestHandler()
+    logger.info(f"Running ingest with args: {args}")
     apply_on_windows_args(fn, args)
 
 
@@ -593,7 +595,7 @@ def dataset_materialize() -> None:
     )
     add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
-
+    logger.info(f"Running materialize with args: {args}")
     fn = MaterializeHandler()
     apply_on_windows_args(fn, args)
 
