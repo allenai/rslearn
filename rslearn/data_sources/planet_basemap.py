@@ -226,14 +226,14 @@ class PlanetBasemap(DataSource):
                     list_key="items",
                     query_args={"bbox": geom_bbox_str},
                 ):
-                    logger.info(f"quad_dict: {quad_dict}")
+                    logger.info(f"found quad {quad_dict}")
                     shp = shapely.box(*quad_dict["bbox"])
                     geom = STGeometry(WGS84_PROJECTION, shp, mosaic_geom.time_range)
                     quad_id = quad_dict["id"]
                     items.append(
                         PlanetItem(f"{mosaic_id}_{quad_id}", geom, mosaic_id, quad_id)
                     )
-
+            logger.info(f"found {len(items)} items for geom {geometry}")
             cur_groups = match_candidate_items_to_window(geometry, items, query_config)
             groups.append(cur_groups)
 
@@ -277,6 +277,11 @@ class PlanetBasemap(DataSource):
                     download_url, allow_redirects=True, stream=True
                 )
                 if response.status_code != 200:
+                    # # temporary skip for now
+                    # logger.error(
+                    #     f"{download_url}: got status code {response.status_code}: {response.text}"
+                    # )
+                    # continue
                     raise ApiError(
                         f"{download_url}: got status code {response.status_code}: {response.text}"
                     )

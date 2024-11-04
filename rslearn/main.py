@@ -371,6 +371,7 @@ class PrepareHandler:
 
     def __call__(self, windows: list[Window]) -> None:
         """Prepares the windows from apply_on_windows."""
+        logger.info(f"Running prepare on {len(windows)} windows")
         if self.dataset is None:
             raise ValueError("dataset not set")
         prepare_dataset_windows(self.dataset, windows, self.force)
@@ -400,7 +401,6 @@ def dataset_prepare() -> None:
     args = parser.parse_args(args=sys.argv[3:])
 
     fn = PrepareHandler(args.force)
-    logger.info(f"Running prepare with args: {args}")
     apply_on_windows_args(fn, args)
 
 
@@ -436,6 +436,7 @@ class IngestHandler:
         Args:
             jobs: list of (layer_name, item, geometries) tuples to ingest.
         """
+        logger.info(f"Running ingest for {len(jobs)} jobs")
         import gc
 
         if self.dataset is None:
@@ -551,7 +552,6 @@ def dataset_ingest() -> None:
     args = parser.parse_args(args=sys.argv[3:])
 
     fn = IngestHandler()
-    logger.info(f"Running ingest with args: {args}")
     apply_on_windows_args(fn, args)
 
 
@@ -572,6 +572,7 @@ class MaterializeHandler:
 
     def __call__(self, windows: list[Window]) -> None:
         """Materializes the windows from apply_on_windows."""
+        logger.info(f"Running Materialize with {len(windows)} windows")
         if self.dataset is None:
             raise ValueError("dataset not set")
         materialize_dataset_windows(self.dataset, windows)
@@ -595,7 +596,6 @@ def dataset_materialize() -> None:
     )
     add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
-    logger.info(f"Running materialize with args: {args}")
     fn = MaterializeHandler()
     apply_on_windows_args(fn, args)
 
