@@ -1,7 +1,6 @@
 """rslearn utilities."""
 
-import logging
-import os
+from rslearn.log_utils import get_logger
 
 from .feature import Feature
 from .geometry import (
@@ -16,8 +15,7 @@ from .grid_index import GridIndex
 from .time import daterange
 from .utils import open_atomic
 
-logger = logging.getLogger(__name__)
-logger.setLevel(os.environ.get("RSLEARN_LOGLEVEL", "INFO").upper())
+logger = get_logger(__name__)
 
 __all__ = (
     "Feature",
