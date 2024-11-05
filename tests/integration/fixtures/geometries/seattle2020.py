@@ -25,3 +25,22 @@ def seattle2020() -> STGeometry:
         point.y + size // 2,
     )
     return STGeometry(dst_projection, box, time_range)
+
+
+@pytest.fixture
+def tropical_forest2024() -> STGeometry:
+    ts = datetime(2024, 4, 1, tzinfo=timezone.utc)
+    time_range = (ts, ts + timedelta(days=1))
+
+    wgs84_shp = shapely.Polygon(
+        [
+            (-76.9995, -10.15),
+            (-76.9995, -20.15),
+            (-69.9995, -20.15),
+            (-69.9995, -10.15),
+        ]
+    )
+    wgs84_geom = STGeometry(WGS84_PROJECTION, wgs84_shp, time_range)
+    dst_projection = Projection(CRS.from_epsg(3857), 10.0, -10.0)
+    dst_geom = wgs84_geom.to_projection(dst_projection)
+    return STGeometry(dst_projection, dst_geom.shp, time_range)

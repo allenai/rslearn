@@ -15,9 +15,12 @@ from rasterio.crs import CRS
 from rslearn.config import BandSetConfig, RasterFormatConfig, RasterLayerConfig
 from rslearn.const import TILE_SIZE
 from rslearn.dataset import Window
+from rslearn.log_utils import get_logger
 from rslearn.tile_stores import LayerMetadata, TileStore
 from rslearn.utils import Projection, STGeometry
 from rslearn.utils.raster_format import load_raster_format
+
+logger = get_logger(__name__)
 
 
 class ArrayWithTransform:
@@ -218,16 +221,17 @@ def ingest_raster(
     else:
         # Compute the suggested target transform.
         # rasterio negates the y resolution itself so here we have to negate it.
+        raster_bounds: rasterio.coords.BoundingBox = raster.bounds
         (dst_transform, dst_width, dst_height) = (
             rasterio.warp.calculate_default_transform(
                 # Source info.
                 src_crs=raster.crs,
                 width=raster.width,
                 height=raster.height,
-                left=raster.bounds[0],
-                bottom=raster.bounds[1],
-                right=raster.bounds[2],
-                top=raster.bounds[3],
+                left=raster_bounds.left,
+                bottom=raster_bounds.bottom,
+                right=raster_bounds.right,
+                top=raster_bounds.top,
                 # Destination info.
                 dst_crs=projection.crs,
                 resolution=(projection.x_resolution, -projection.y_resolution),
