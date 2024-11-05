@@ -10,6 +10,10 @@ import shapely
 import shapely.wkt
 from rasterio.crs import CRS
 
+from rslearn.log_utils import get_logger
+
+logger = get_logger(__name__)
+
 RESOLUTION_EPSILON = 1e-6
 
 

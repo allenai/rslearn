@@ -4,11 +4,12 @@ import pytest
 from google.cloud import storage
 
 from .fixtures.datasets.local_files_dataset import local_files_dataset
-from .fixtures.geometries.seattle2020 import seattle2020
+from .fixtures.geometries.seattle2020 import seattle2020, tropical_forest2024
 
 __all__ = [
     "local_files_dataset",
     "seattle2020",
+    "tropical_forest2024",
 ]
 
 
