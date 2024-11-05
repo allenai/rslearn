@@ -393,8 +393,8 @@ def dataset_prepare() -> None:
     )
     parser.add_argument(
         "--disabled-layers",
-        type=lambda s: s.split(","),
-        default="[]",
+        type=lambda s: s.split(",") if s else [],
+        default="",
         help="List of layers to disable e.g 'layer1,layer2'",
     )
     add_apply_on_windows_args(parser)
