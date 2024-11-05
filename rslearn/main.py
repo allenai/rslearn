@@ -25,7 +25,7 @@ from rslearn.log_utils import get_logger
 from rslearn.tile_stores import get_tile_store_for_layer
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
-from rslearn.utils import Projection, STGeometry
+from rslearn.utils import Projection, STGeometry, parse_disabled_layers
 
 logger = get_logger(__name__)
 
@@ -393,7 +393,7 @@ def dataset_prepare() -> None:
     )
     parser.add_argument(
         "--disabled-layers",
-        type=lambda s: s.split(",") if s else [],
+        type=parse_disabled_layers,
         default="",
         help="List of layers to disable e.g 'layer1,layer2'",
     )
@@ -544,8 +544,8 @@ def dataset_ingest() -> None:
     )
     parser.add_argument(
         "--disabled-layers",
-        type=lambda s: s.split(","),
-        default="[]",
+        type=parse_disabled_layers,
+        default="",
         help="List of layers to disable e.g 'layer1,layer2'",
     )
     add_apply_on_windows_args(parser)
@@ -590,8 +590,8 @@ def dataset_materialize() -> None:
     )
     parser.add_argument(
         "--disabled-layers",
-        type=lambda s: s.split(","),
-        default="[]",
+        type=parse_disabled_layers,
+        default="",
         help="List of layers to disable e.g 'layer1,layer2'",
     )
     add_apply_on_windows_args(parser)
