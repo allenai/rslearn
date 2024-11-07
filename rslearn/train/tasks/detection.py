@@ -17,21 +17,21 @@ from rslearn.utils import Feature, STGeometry
 from .task import BasicTask
 
 DEFAULT_COLORS = [
-    [255, 0, 0],
-    [0, 255, 0],
-    [0, 0, 255],
-    [255, 255, 0],
-    [0, 255, 255],
-    [255, 0, 255],
-    [0, 128, 0],
-    [255, 160, 122],
-    [139, 69, 19],
-    [128, 128, 128],
-    [255, 255, 255],
-    [143, 188, 143],
-    [95, 158, 160],
-    [255, 200, 0],
-    [128, 0, 0],
+    (255, 0, 0),
+    (0, 255, 0),
+    (0, 0, 255),
+    (255, 255, 0),
+    (0, 255, 255),
+    (255, 0, 255),
+    (0, 128, 0),
+    (255, 160, 122),
+    (139, 69, 19),
+    (128, 128, 128),
+    (255, 255, 255),
+    (143, 188, 143),
+    (95, 158, 160),
+    (255, 200, 0),
+    (128, 0, 0),
 ]
 
 
@@ -69,8 +69,8 @@ class DetectionTask(BasicTask):
             ]
         ],
         f1_metric_kwargs: dict[str, Any] = {},
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         """Initialize a new SegmentationTask.
 
         Args:
@@ -147,9 +147,12 @@ class DetectionTask(BasicTask):
 
         data = raw_inputs["targets"]
         for feat in data:
-            for property_name, property_value in self.filters:
-                if feat.properties.get(property_name) != property_value:
-                    continue
+            if feat.properties is None:
+                continue
+            if self.filters is not None:
+                for property_name, property_value in self.filters:
+                    if feat.properties.get(property_name) != property_value:
+                        continue
             if self.property_name not in feat.properties:
                 continue
 
@@ -299,7 +302,9 @@ class DetectionTask(BasicTask):
         """
         image = super().visualize(input_dict, target_dict, output)["image"]
 
-        def draw_boxes(image: npt.NDArray[Any], d: dict[str, torch.Tensor]):
+        def draw_boxes(
+            image: npt.NDArray[Any], d: dict[str, torch.Tensor]
+        ) -> npt.NDArray[Any]:
             boxes = d["boxes"].cpu().numpy()
             class_ids = d["labels"].cpu().numpy()
             if "scores" in d:
@@ -320,6 +325,8 @@ class DetectionTask(BasicTask):
 
             return image
 
+        if target_dict is None:
+            raise ValueError("target_dict is required for visualization")
         return {
             "gt": draw_boxes(image.copy(), target_dict),
             "pred": draw_boxes(image.copy(), output),
@@ -349,16 +356,20 @@ class DetectionTask(BasicTask):
                     suffix = "_" + str(thresholds[0]).replace(".", ",")
 
                 metrics["F1" + suffix] = DetectionMetric(
-                    F1Metric(score_thresholds=thresholds, **kwargs)
+                    F1Metric(score_thresholds=thresholds, **kwargs)  # type: ignore
                 )
                 metrics["precision" + suffix] = DetectionMetric(
                     F1Metric(
-                        score_thresholds=thresholds, metric_mode="precision", **kwargs
+                        score_thresholds=thresholds,
+                        metric_mode="precision",
+                        **kwargs,  # type: ignore
                     )
                 )
                 metrics["recall" + suffix] = DetectionMetric(
                     F1Metric(
-                        score_thresholds=thresholds, metric_mode="recall", **kwargs
+                        score_thresholds=thresholds,
+                        metric_mode="recall",
+                        **kwargs,  # type: ignore
                     )
                 )
 

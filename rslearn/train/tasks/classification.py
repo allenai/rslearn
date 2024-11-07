@@ -26,8 +26,8 @@ class ClassificationTask(BasicTask):
     def __init__(
         self,
         property_name: str,
-        classes: list[str],
-        filters: list[tuple[str, str]] | None = None,
+        classes: list,  # TODO: Should this be a list of str or int or can it be both?
+        filters: list[tuple[str, str]] = [],
         read_class_id: bool = False,
         allow_invalid: bool = False,
         skip_unknown_categories: bool = False,
@@ -37,7 +37,7 @@ class ClassificationTask(BasicTask):
         f1_metric_kwargs: dict[str, Any] = {},
         positive_class: str | None = None,
         positive_class_threshold: float = 0.5,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Initialize a new ClassificationTask.
 
@@ -95,9 +95,6 @@ class ClassificationTask(BasicTask):
             else:
                 self.positive_class_id = self.classes.index(self.positive_class)
 
-        if not self.filters:
-            self.filters = []
-
     def process_inputs(
         self,
         raw_inputs: dict[str, torch.Tensor | list[Feature]],
@@ -120,6 +117,8 @@ class ClassificationTask(BasicTask):
 
         data = raw_inputs["targets"]
         for feat in data:
+            if feat.properties is None:
+                continue
             for property_name, property_value in self.filters:
                 if feat.properties.get(property_name) != property_value:
                     continue
@@ -178,7 +177,7 @@ class ClassificationTask(BasicTask):
             class_idx = probs.argmax()
 
         if not self.read_class_id:
-            value = self.classes[class_idx]
+            value = self.classes[class_idx]  # type: ignore
         else:
             value = class_idx
 
@@ -192,7 +191,7 @@ class ClassificationTask(BasicTask):
                 self.property_name: value,
             },
         )
-        if self.prob_property:
+        if self.prob_property is not None and feature.properties is not None:
             feature.properties[self.prob_property] = probs.tolist()
         return [feature]
 
@@ -215,6 +214,8 @@ class ClassificationTask(BasicTask):
         image = super().visualize(input_dict, target_dict, output)["image"]
         image = Image.fromarray(image)
         draw = ImageDraw.Draw(image)
+        if target_dict is None:
+            raise ValueError("target_dict is required for visualization")
         target_class = self.classes[target_dict["class"]]
         output_class = self.classes[output.argmax()]
         text = f"Label: {target_class}\nOutput: {output_class}"

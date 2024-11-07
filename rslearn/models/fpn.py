@@ -32,7 +32,7 @@ class Fpn(torch.nn.Module):
             in_channels_list=in_channels, out_channels=out_channels
         )
 
-    def forward(self, x: list[torch.Tensor]):
+    def forward(self, x: list[torch.Tensor]) -> list[torch.Tensor]:
         """Compute outputs of the FPN.
 
         Args:

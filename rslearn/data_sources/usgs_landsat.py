@@ -1,4 +1,7 @@
-"""Data source for Landsat data from USGS M2M API."""
+"""Data source for Landsat data from USGS M2M API.
+
+# TODO: Handle the requests in a helper function for none checking
+"""
 
 import io
 import json
@@ -15,7 +18,7 @@ import requests
 import shapely
 from upath import UPath
 
-from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
+from rslearn.config import QueryConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
@@ -36,8 +39,9 @@ class M2MAPIClient:
 
     api_url = "https://m2m.cr.usgs.gov/api/api/json/stable/"
     pagination_size = 1000
+    TIMEOUT = 1000000  # Set very high to start
 
-    def __init__(self, username, password):
+    def __init__(self, username: str, password: str) -> None:
         """Initialize a new M2MAPIClient.
 
         Args:
@@ -47,7 +51,9 @@ class M2MAPIClient:
         self.username = username
         self.password = password
         json_data = json.dumps({"username": self.username, "password": self.password})
-        response = requests.post(self.api_url + "login", data=json_data)
+        response = requests.post(
+            self.api_url + "login", data=json_data, timeout=self.TIMEOUT
+        )
         response.raise_for_status()
         self.auth_token = response.json()["data"]
 
@@ -67,24 +73,26 @@ class M2MAPIClient:
             self.api_url + endpoint,
             headers={"X-Auth-Token": self.auth_token},
             data=json.dumps(data),
+            timeout=self.TIMEOUT,
         )
         response.raise_for_status()
         if response.text:
-            data = response.json()
-            if data["errorMessage"]:
-                raise APIException(data["errorMessage"])
-            return data
+            response_dict = response.json()
+
+            if response_dict["errorMessage"]:
+                raise APIException(response_dict["errorMessage"])
+            return response_dict
         return None
 
-    def close(self):
+    def close(self) -> None:
         """Logout from the API."""
         self.request("logout")
 
-    def __enter__(self):
+    def __enter__(self) -> "M2MAPIClient":
         """Enter function to provide with semantics."""
         return self
 
-    def __exit__(self):
+    def __exit__(self) -> None:
         """Exit function to provide with semantics.
 
         Logs out the API.
@@ -100,7 +108,10 @@ class M2MAPIClient:
         Returns:
             list of filter objects
         """
-        return self.request("dataset-filters", {"datasetName": dataset_name})["data"]
+        response_dict = self.request("dataset-filters", {"datasetName": dataset_name})
+        if response_dict is None:
+            raise APIException("No response from API")
+        return response_dict["data"]
 
     def scene_search(
         self,
@@ -119,7 +130,7 @@ class M2MAPIClient:
             bbox: optional spatial filter
             metadata_filter: optional metadata filter dict
         """
-        base_data = {"datasetName": dataset_name, "sceneFilter": {}}
+        base_data: dict[str, Any] = {"datasetName": dataset_name, "sceneFilter": {}}
         if acquisition_time_range:
             base_data["sceneFilter"]["acquisitionFilter"] = {
                 "start": acquisition_time_range[0].isoformat(),
@@ -146,7 +157,10 @@ class M2MAPIClient:
             cur_data = base_data.copy()
             cur_data["startingNumber"] = starting_number
             cur_data["maxResults"] = self.pagination_size
-            data = self.request("scene-search", cur_data)["data"]
+            response_dict = self.request("scene-search", cur_data)
+            if response_dict is None:
+                raise APIException("No response from API")
+            data = response_dict["data"]
             results.extend(data["results"])
             if data["recordsReturned"] < self.pagination_size:
                 break
@@ -164,14 +178,17 @@ class M2MAPIClient:
         Returns:
             full scene metadata
         """
-        return self.request(
+        response_dict = self.request(
             "scene-metadata",
             {
                 "datasetName": dataset_name,
                 "entityId": entity_id,
                 "metadataType": "full",
             },
-        )["data"]
+        )
+        if response_dict is None:
+            raise APIException("No response from API")
+        return response_dict["data"]
 
     def get_downloadable_products(
         self, dataset_name: str, entity_id: str
@@ -186,7 +203,10 @@ class M2MAPIClient:
             list of downloadable products
         """
         data = {"datasetName": dataset_name, "entityIds": [entity_id]}
-        return self.request("download-options", data)["data"]
+        response_dict = self.request("download-options", data)
+        if response_dict is None:
+            raise APIException("No response from API")
+        return response_dict["data"]
 
     def get_download_url(self, entity_id: str, product_id: str) -> str:
         """Get the download URL for a given product.
@@ -204,9 +224,15 @@ class M2MAPIClient:
                 {"label": label, "entityId": entity_id, "productId": product_id}
             ]
         }
-        response = self.request("download-request", data)["data"]
+        response_dict = self.request("download-request", data)
+        if response_dict is None:
+            raise APIException("No response from API")
+        response = response_dict["data"]
         while True:
-            response = self.request("download-retrieve", {"label": label})["data"]
+            response_dict = self.request("download-retrieve", {"label": label})
+            if response_dict is None:
+                raise APIException("No response from API")
+            response = response_dict["data"]
             if len(response["available"]) > 0:
                 return response["available"][0]["url"]
             if len(response["requested"]) == 0:
@@ -264,7 +290,7 @@ class LandsatOliTirs(DataSource):
 
     def __init__(
         self,
-        config: LayerConfig,
+        config: RasterLayerConfig,
         username: str,
         password: str,
         max_time_delta: timedelta = timedelta(days=30),
@@ -289,9 +315,10 @@ class LandsatOliTirs(DataSource):
         self.client = M2MAPIClient(username, password)
 
     @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "LandsatOliTirs":
+    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "LandsatOliTirs":
         """Creates a new LandsatOliTirs instance from a configuration dictionary."""
-        assert isinstance(config, RasterLayerConfig)
+        if config.data_source is None:
+            raise ValueError("data_source is required")
         d = config.data_source.config_dict
         if "max_time_delta" in d:
             max_time_delta = timedelta(seconds=pytimeparse.parse(d["max_time_delta"]))
@@ -328,7 +355,7 @@ class LandsatOliTirs(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[list[LandsatOliTirsItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -400,7 +427,7 @@ class LandsatOliTirs(DataSource):
         assert isinstance(serialized_item, dict)
         return LandsatOliTirsItem.deserialize(serialized_item)
 
-    def _get_download_urls(self, item: Item) -> dict[str, str]:
+    def _get_download_urls(self, item: Item) -> dict[str, tuple[str, str]]:
         """Gets the download URLs for each band.
 
         Args:
@@ -438,7 +465,7 @@ class LandsatOliTirs(DataSource):
         download_urls = self._get_download_urls(item)
         for _, (display_id, download_url) in download_urls.items():
             buf = io.BytesIO()
-            with requests.get(download_url, stream=True) as r:
+            with requests.get(download_url, stream=True, timeout=self.TIMEOUT) as r:
                 r.raise_for_status()
                 shutil.copyfileobj(r.raw, buf)
             buf.seek(0)
@@ -447,7 +474,7 @@ class LandsatOliTirs(DataSource):
     def ingest(
         self,
         tile_store: TileStore,
-        items: list[Item],
+        items: list[LandsatOliTirsItem],
         geometries: list[list[STGeometry]],
     ) -> None:
         """Ingest items into the given tile store.
@@ -471,7 +498,9 @@ class LandsatOliTirs(DataSource):
                     continue
 
                 buf = io.BytesIO()
-                with requests.get(download_urls[band][1], stream=True) as r:
+                with requests.get(
+                    download_urls[band][1], stream=True, timeout=self.TIMEOUT
+                ) as r:
                     r.raise_for_status()
                     shutil.copyfileobj(r.raw, buf)
                 buf.seek(0)

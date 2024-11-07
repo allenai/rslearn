@@ -14,7 +14,7 @@ class Ssl4eoS12(torch.nn.Module):
         backbone_ckpt_path: str,
         arch: str = "resnet50",
         output_layers: list[int] = [0, 1, 2, 3],
-    ):
+    ) -> None:
         """Instantiate a new Swin instance.
 
         Args:
@@ -51,7 +51,7 @@ class Ssl4eoS12(torch.nn.Module):
                 f"warning: got missing_keys={missing_keys}, unexpected_keys={unexpected_keys} when loading SSL4EO-S12 state dict"
             )
 
-    def get_backbone_channels(self):
+    def get_backbone_channels(self) -> list[tuple[int, int]]:
         """Returns the output channels of this model when used as a backbone.
 
         The output channels is a list of (downsample_factor, depth) that corresponds
@@ -65,16 +65,17 @@ class Ssl4eoS12(torch.nn.Module):
         """
         if self.arch == "resnet50":
             all_out_channels = [
-                [4, 256],
-                [8, 512],
-                [16, 1024],
-                [32, 2048],
+                (4, 256),
+                (8, 512),
+                (16, 1024),
+                (32, 2048),
             ]
         return [all_out_channels[idx] for idx in self.output_layers]
 
     def forward(
-        self, inputs: list[dict[str, Any]], targets: list[dict[str, Any]] = None
-    ):
+        self,
+        inputs: list[dict[str, Any]],
+    ) -> list[torch.Tensor]:
         """Compute outputs from the backbone.
 
         If output_layers is set, then the outputs are multi-scale feature maps;
@@ -84,7 +85,6 @@ class Ssl4eoS12(torch.nn.Module):
         Inputs:
             inputs: input dicts that must include "image" key containing the image to
                 process.
-            targets: target dicts that are ignored unless
         """
         x = torch.stack([inp["image"] for inp in inputs], dim=0)
         x = self.model.conv1(x)

@@ -1,14 +1,16 @@
 """Functions to manage datasets."""
 
 import rslearn.data_sources
-from rslearn.config import LayerConfig, LayerType
+from rslearn.config import LayerConfig, LayerType, RasterLayerConfig
 from rslearn.data_sources import DataSource, Item
+from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, get_tile_store_for_layer
-from rslearn.utils import logger
 
 from .dataset import Dataset
 from .materialize import Materializers
 from .window import Window, WindowLayerData
+
+logger = get_logger(__name__)
 
 
 def prepare_dataset_windows(
@@ -30,10 +32,6 @@ def prepare_dataset_windows(
         if not layer_cfg.data_source:
             continue
 
-        data_source = rslearn.data_sources.data_source_from_config(
-            layer_cfg, dataset.path
-        )
-
         # Get windows that need to be prepared for this layer.
         needed_windows = []
         for window in windows:
@@ -41,7 +39,15 @@ def prepare_dataset_windows(
             if layer_name in layer_datas and not force:
                 continue
             needed_windows.append(window)
-        print(f"Preparing {len(needed_windows)} windows for layer {layer_name}")
+        logger.info(f"Preparing {len(needed_windows)} windows for layer {layer_name}")
+        if len(needed_windows) == 0:
+            continue
+
+        # Create data source after checking for at least one window so it can be fast
+        # if there are no windows to prepare.
+        data_source = rslearn.data_sources.data_source_from_config(
+            layer_cfg, dataset.path
+        )
 
         # Get STGeometry for each window.
         geometries = []
@@ -97,7 +103,7 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
             layer_cfg, dataset.path
         )
 
-        geometries_by_item = {}
+        geometries_by_item: dict = {}
         for window in windows:
             layer_datas = window.load_layer_datas()
             if layer_name not in layer_datas:
@@ -147,6 +153,7 @@ def is_window_ingested(
                 item = Item.deserialize(serialized_item)
 
                 if layer_cfg.layer_type == LayerType.RASTER:
+                    assert isinstance(layer_cfg, RasterLayerConfig)
                     for band_set in layer_cfg.band_sets:
                         projection, _ = band_set.get_final_projection_and_bounds(
                             window.projection, window.bounds
@@ -225,6 +232,8 @@ def materialize_window(
             item_group.append(item)
         item_groups.append(item_group)
 
+    if layer_cfg.data_source is None:
+        raise ValueError("data_source is required")
     if layer_cfg.data_source.ingest:
         if not is_window_ingested(dataset, window, check_layer_name=layer_name):
             logger.info(

@@ -72,7 +72,7 @@ class Transform(torch.nn.Module):
         target_dict: dict[str, Any],
         selector: str,
         v: Any,
-    ):
+    ) -> None:
         """Write the item to the specified selector.
 
         Args:
@@ -90,12 +90,12 @@ class Transform(torch.nn.Module):
 
     def apply_fn(
         self,
-        fn: Callable[[Any], Any],
+        fn: Callable,
         input_dict: dict[str, Any],
         target_dict: dict[str, Any],
         selectors: list[str],
         **kwargs: dict[str, Any],
-    ):
+    ) -> None:
         """Apply the specified function on the selectors in input/target dicts.
 
         Args:

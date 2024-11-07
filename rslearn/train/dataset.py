@@ -47,7 +47,9 @@ class SamplerFactory:
 class RandomSamplerFactory(SamplerFactory):
     """A sampler factory for RandomSampler."""
 
-    def __init__(self, replacement: bool = False, num_samples: int | None = None):
+    def __init__(
+        self, replacement: bool = False, num_samples: int | None = None
+    ) -> None:
         """Initialize a RandomSamplerFactory.
 
         Args:
@@ -75,7 +77,9 @@ class RandomSamplerFactory(SamplerFactory):
 class WeightedRandomSamplerFactory(SamplerFactory):
     """A sampler factory for WeightedRandomSampler."""
 
-    def __init__(self, option_key: str, num_samples: int, replacement: bool = True):
+    def __init__(
+        self, option_key: str, num_samples: int, replacement: bool = True
+    ) -> None:
         """Initialize a WeightedRandomSamplerFactory.
 
         Args:
@@ -119,7 +123,7 @@ class DataInput:
         passthrough: bool = False,
         is_target: bool = False,
         dtype: DType = DType.FLOAT32,
-    ):
+    ) -> None:
         """Initialize a new DataInput.
 
         Args:
@@ -154,9 +158,10 @@ class SplitConfig:
         transforms: list[torch.nn.Module] | None = None,
         sampler: SamplerFactory | None = None,
         patch_size: int | tuple[int, int] | None = None,
+        overlap_ratio: float | None = None,
         load_all_patches: bool | None = None,
         skip_targets: bool | None = None,
-    ):
+    ) -> None:
         """Initialize a new SplitConfig.
 
         Args:
@@ -171,6 +176,8 @@ class SplitConfig:
             sampler: SamplerFactory for this split
             patch_size: an optional square size or (width, height) tuple. If set, read
                 crops of this size rather than entire windows.
+            overlap_ratio: an optional float between 0 and 1. If set, read patches with
+                this ratio of overlap.
             load_all_patches: with patch_size set, rather than sampling a random patch
                 for each window, read all patches as separate sequential items in the
                 dataset.
@@ -185,6 +192,10 @@ class SplitConfig:
         self.patch_size = patch_size
         self.load_all_patches = load_all_patches
         self.skip_targets = skip_targets
+        self.overlap_ratio = overlap_ratio
+        if self.overlap_ratio is not None:
+            if not (0 < self.overlap_ratio < 1):
+                raise ValueError("overlap_ratio must be between 0 and 1 (exclusive)")
 
     def update(self, other: "SplitConfig") -> "SplitConfig":
         """Override settings in this SplitConfig with those in another.
@@ -200,6 +211,7 @@ class SplitConfig:
             transforms=self.transforms,
             sampler=self.sampler,
             patch_size=self.patch_size,
+            overlap_ratio=self.overlap_ratio,
             load_all_patches=self.load_all_patches,
             skip_targets=self.skip_targets,
         )
@@ -217,6 +229,8 @@ class SplitConfig:
             result.sampler = other.sampler
         if other.patch_size:
             result.patch_size = other.patch_size
+        if other.overlap_ratio is not None:
+            result.overlap_ratio = other.overlap_ratio
         if other.load_all_patches is not None:
             result.load_all_patches = other.load_all_patches
         if other.skip_targets is not None:
@@ -232,7 +246,7 @@ class SplitConfig:
         return True if self.skip_targets is True else False
 
 
-def check_window(inputs: dict[str, DataInput], window: Window) -> bool:
+def check_window(inputs: dict[str, DataInput], window: Window) -> Window | None:
     """Verify that the window has the required layers based on the specified inputs.
 
     Args:
@@ -244,7 +258,7 @@ def check_window(inputs: dict[str, DataInput], window: Window) -> bool:
     """
 
     # Make sure window has all the needed layers.
-    def is_any_layer_available(data_input):
+    def is_any_layer_available(data_input: DataInput) -> bool:
         for layer_name in data_input.layers:
             completed_fname = window.path / "layers" / layer_name / "completed"
             if completed_fname.exists():
@@ -275,7 +289,7 @@ class ModelDataset(torch.utils.data.Dataset):
         inputs: dict[str, DataInput],
         task: Task,
         workers: int,
-    ):
+    ) -> None:
         """Instantiate a new ModelDataset.
 
         Args:
@@ -337,26 +351,32 @@ class ModelDataset(torch.utils.data.Dataset):
 
         # Eliminate windows that are missing either a requisite input layer, or missing
         # all target layers.
-        p = multiprocessing.Pool(workers)
-        outputs = star_imap_unordered(
-            p,
-            check_window,
-            [
-                dict(
-                    inputs=self.inputs,
-                    window=window,
-                )
-                for window in windows
-            ],
-        )
         new_windows = []
-        for window in tqdm.tqdm(
-            outputs, total=len(windows), desc="Checking available layers in windows"
-        ):
-            if window is None:
-                continue
-            new_windows.append(window)
-        p.close()
+        if workers == 0:
+            for window in windows:
+                if check_window(self.inputs, window) is None:
+                    continue
+                new_windows.append(window)
+        else:
+            p = multiprocessing.Pool(workers)
+            outputs = star_imap_unordered(
+                p,
+                check_window,
+                [
+                    dict(
+                        inputs=self.inputs,
+                        window=window,
+                    )
+                    for window in windows
+                ],
+            )
+            for window in tqdm.tqdm(
+                outputs, total=len(windows), desc="Checking available layers in windows"
+            ):
+                if window is None:
+                    continue
+                new_windows.append(window)
+            p.close()
         windows = new_windows
 
         # Limit windows to num_samples if requested.
@@ -364,18 +384,29 @@ class ModelDataset(torch.utils.data.Dataset):
             # TODO: use hash of window names so this is deterministic and not arbitrarily ordered according to load_windows
             windows = windows[0 : split_config.num_samples]
 
-        self.windows = windows
+        self.windows: list = windows
 
         # If we're loading all patches, we need to include the patch details.
-        if split_config.get_load_all_patches():
+        if split_config.get_load_all_patches() and self.patch_size is not None:
             patches = []
+            overlap_size = int(
+                self.patch_size[0] * split_config.overlap_ratio
+                if split_config.overlap_ratio
+                else 0
+            )
             for window in self.windows:
                 cur_patches = []
+                if window is None:
+                    raise ValueError("Window is None in load_all_patches")
                 for col in range(
-                    window.bounds[0], window.bounds[2], self.patch_size[0]
+                    window.bounds[0],
+                    window.bounds[2],
+                    self.patch_size[0] - overlap_size,
                 ):
                     for row in range(
-                        window.bounds[1], window.bounds[3], self.patch_size[1]
+                        window.bounds[1],
+                        window.bounds[3],
+                        self.patch_size[1] - overlap_size,
                     ):
                         cur_patches.append(
                             (
@@ -393,7 +424,9 @@ class ModelDataset(torch.utils.data.Dataset):
         """Returns the dataset length."""
         return len(self.windows)
 
-    def __getitem__(self, idx) -> tuple[dict[str, Any], dict[str, Any]]:
+    def __getitem__(
+        self, idx: int
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         """Read one training example.
 
         Args:
@@ -410,7 +443,7 @@ class ModelDataset(torch.utils.data.Dataset):
             window, bounds, (patch_idx, num_patches) = window
         elif self.patch_size:
 
-            def get_patch_range(n_patch, n_window):
+            def get_patch_range(n_patch: int, n_window: int) -> list[int]:
                 if n_patch > n_window:
                     # Select arbitrary range containing the entire window.
                     # Basically arbitrarily padding the window to get to patch size.
@@ -440,7 +473,7 @@ class ModelDataset(torch.utils.data.Dataset):
             bounds = window.bounds
 
         # Read the inputs and targets.
-        def read_input(data_input: DataInput):
+        def read_input(data_input: DataInput) -> torch.Tensor:
             # First enumerate all options of individual layers to read.
             layer_options = []
             for layer_name in data_input.layers:
@@ -454,7 +487,13 @@ class ModelDataset(torch.utils.data.Dataset):
             # the options, as well as picking multiple for series inputs.
             layer = random.choice(layer_options)
             layer_dir = window.path / "layers" / layer
-            layer_config = self.dataset.layers[layer]
+
+            # The model config may reference a specific group within a layer, like
+            # "image.2" in a dataset that has a layer "image" with max_matches > 1.
+            # So we need to split off the period. Layer names should not contain
+            # period.
+            layer_ds_key = layer.split(".")[0]
+            layer_config = self.dataset.layers[layer_ds_key]
 
             if data_input.data_type == "raster":
                 assert isinstance(layer_config, RasterLayerConfig)
@@ -462,6 +501,8 @@ class ModelDataset(torch.utils.data.Dataset):
                 # See what different sets of bands we need to read to get all the
                 # configured bands.
                 needed_bands = data_input.bands
+                if needed_bands is None:
+                    raise ValueError(f"No bands specified for {layer}")
                 needed_band_indexes = {}
                 for i, band in enumerate(needed_bands):
                     needed_band_indexes[band] = i
@@ -469,6 +510,8 @@ class ModelDataset(torch.utils.data.Dataset):
                 for band_set in layer_config.band_sets:
                     needed_src_indexes = []
                     needed_dst_indexes = []
+                    if band_set.bands is None:
+                        continue
                     for i, band in enumerate(band_set.bands):
                         if band not in needed_band_indexes:
                             continue
@@ -495,12 +538,20 @@ class ModelDataset(torch.utils.data.Dataset):
                     _, final_bounds = band_set.get_final_projection_and_bounds(
                         window.projection, bounds
                     )
+                    if band_set.format is None:
+                        raise ValueError(f"No format specified for {layer}")
                     raster_format = load_raster_format(
                         RasterFormatConfig(band_set.format["name"], band_set.format)
                     )
+                    if band_set.bands is None:
+                        # Raising Error as It is unclear the intended behavior here.
+                        raise ValueError("No bands specified for band set")
                     cur_path = layer_dir / "_".join(band_set.bands)
+                    if final_bounds is None:
+                        raise ValueError("Final bounds are None")
                     src = raster_format.decode_raster(cur_path, final_bounds)
-
+                    if src is None:
+                        raise ValueError(f"Source is None for {data_input}")
                     # Resize to patch size if needed.
                     # This is for band sets that are stored at a lower resolution.
                     # Here we assume that it is a multiple.
@@ -575,7 +626,7 @@ class RetryDataset(torch.utils.data.Dataset):
 
     def __init__(
         self, dataset: torch.utils.data.Dataset, retries: int = 3, delay: float = 5
-    ):
+    ) -> None:
         """Create a new RetryDataset.
 
         Args:
@@ -587,7 +638,7 @@ class RetryDataset(torch.utils.data.Dataset):
         self.retries = retries
         self.delay = delay
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Return length of the dataset."""
         return len(self.dataset)
 

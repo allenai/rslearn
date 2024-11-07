@@ -274,7 +274,7 @@ Modify the configuration file:
     }]
   }],
   "targets": [{
-    
+
   }],
   "batch_size": 16,
   "train_transforms": [{

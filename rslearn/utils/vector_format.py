@@ -76,7 +76,7 @@ class TileVectorFormat(VectorFormat):
             projection: the projection of the raster data
             features: the vector data
         """
-        tile_data = {}
+        tile_data: dict = {}
         for feat in features:
             if not feat.geometry.shp.is_valid:
                 continue

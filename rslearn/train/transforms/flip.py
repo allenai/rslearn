@@ -1,5 +1,7 @@
 """Flip transform."""
 
+from typing import Any
+
 import torch
 
 from .transform import Transform
@@ -90,7 +92,9 @@ class Flip(Transform):
             )
         return boxes
 
-    def forward(self, input_dict, target_dict):
+    def forward(
+        self, input_dict: dict[str, Any], target_dict: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Apply transform over the inputs and targets.
 
         Args:
