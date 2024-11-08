@@ -4,7 +4,7 @@ import functools
 import io
 import json
 import shutil
-import urllib
+import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Callable
@@ -14,6 +14,7 @@ import numpy.typing as npt
 from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
+from rslearn.utils.fsspec import open_atomic
 from rslearn.utils.geometry import STGeometry, flatten_shape
 from rslearn.utils.grid_index import GridIndex
 
@@ -107,7 +108,7 @@ def load_sentinel2_tile_index(cache_dir: UPath) -> GridIndex:
             assert bounds is not None
             json_data[tile_name] = bounds
 
-        with json_fname.open("w") as f:
+        with open_atomic(json_fname, "w") as f:
             json.dump(json_data, f)
 
     else:
