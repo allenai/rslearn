@@ -21,7 +21,7 @@ class PoolingDecoder(torch.nn.Module):
         num_fc_layers: int = 0,
         conv_channels: int = 128,
         fc_channels: int = 512,
-    ):
+    ) -> None:
         """Initialize a PoolingDecoder.
 
         Args:
@@ -57,7 +57,9 @@ class PoolingDecoder(torch.nn.Module):
 
         self.output_layer = torch.nn.Linear(prev_channels, out_channels)
 
-    def forward(self, features: list[torch.Tensor], inputs: list[dict[str, Any]]):
+    def forward(
+        self, features: list[torch.Tensor], inputs: list[dict[str, Any]]
+    ) -> torch.Tensor:
         """Compute flat output vector from multi-scale feature map.
 
         Args:

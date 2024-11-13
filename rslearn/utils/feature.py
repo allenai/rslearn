@@ -41,7 +41,7 @@ class Feature:
         return Feature(self.geometry.to_projection(projection), self.properties)
 
     @staticmethod
-    def from_geojson(projection: Projection, d: dict[str, Any]):
+    def from_geojson(projection: Projection, d: dict[str, Any]) -> "Feature":
         """Construct a Feature from a GeoJSON encoding.
 
         Args:

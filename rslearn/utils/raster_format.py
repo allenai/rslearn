@@ -13,11 +13,12 @@ from upath import UPath
 
 from rslearn.config import RasterFormatConfig
 from rslearn.const import TILE_SIZE
-from rslearn.utils import logger
+from rslearn.log_utils import get_logger
 
 from .geometry import PixelBounds, Projection
 
 RasterFormats = ClassRegistry()
+logger = get_logger(__name__)
 
 
 class RasterFormat:
@@ -341,6 +342,7 @@ class GeotiffRasterFormat(RasterFormat):
 
         path.mkdir(parents=True, exist_ok=True)
         with (path / self.fname).open("wb") as f:
+            logger.info(f"Writing geotiff to {path / self.fname}")
             with rasterio.open(f, "w", **profile) as dst:
                 dst.write(array)
 

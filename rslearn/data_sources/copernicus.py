@@ -24,6 +24,8 @@ def get_harmonize_callback(
     """
     offset = None
     for el in tree.iter("RADIO_ADD_OFFSET"):
+        if el.text is None:
+            raise ValueError(f"text is missing in {el}")
         value = int(el.text)
         if offset is None:
             offset = value
@@ -36,7 +38,7 @@ def get_harmonize_callback(
     if offset is None or offset == 0:
         return None
 
-    def callback(array):
-        return np.clip(array, -offset, None) + offset
+    def callback(array: npt.NDArray) -> npt.NDArray:
+        return np.clip(array, -offset, None) + offset  # type: ignore
 
     return callback

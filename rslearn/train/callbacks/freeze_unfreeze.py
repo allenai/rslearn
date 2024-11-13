@@ -14,7 +14,7 @@ class FreezeUnfreeze(BaseFinetuning):
         module_selector: list[str | int],
         unfreeze_at_epoch: int | None = None,
         unfreeze_lr_factor: float = 1,
-    ):
+    ) -> None:
         """Creates a new FreezeUnfreeze.
 
         Args:
@@ -40,7 +40,7 @@ class FreezeUnfreeze(BaseFinetuning):
                 target_module = getattr(target_module, k)
         return target_module
 
-    def freeze_before_training(self, pl_module: LightningModule):
+    def freeze_before_training(self, pl_module: LightningModule) -> None:
         """Freeze the model at the beginning of training.
 
         Args:
@@ -51,7 +51,7 @@ class FreezeUnfreeze(BaseFinetuning):
 
     def finetune_function(
         self, pl_module: LightningModule, current_epoch: int, optimizer: Optimizer
-    ):
+    ) -> None:
         """Check whether we should unfreeze the model on each epoch.
 
         Args:

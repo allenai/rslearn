@@ -15,9 +15,12 @@ from rasterio.crs import CRS
 from rslearn.config import BandSetConfig, RasterFormatConfig, RasterLayerConfig
 from rslearn.const import TILE_SIZE
 from rslearn.dataset import Window
+from rslearn.log_utils import get_logger
 from rslearn.tile_stores import LayerMetadata, TileStore
 from rslearn.utils import Projection, STGeometry
 from rslearn.utils.raster_format import load_raster_format
+
+logger = get_logger(__name__)
 
 
 class ArrayWithTransform:
@@ -70,7 +73,7 @@ class ArrayWithTransform:
         """
         return self.array
 
-    def close(self):
+    def close(self) -> None:
         """This is to mimic the rasterio.DatasetReader API.
 
         The close function is a no-op.
@@ -144,23 +147,25 @@ def get_needed_projections(
         list of Projection objects for which the item has not been ingested yet
     """
     # Identify which band set configs are relevant to this raster.
-    raster_bands = set(raster_bands)
-    relevant_band_sets = []
+    raster_bands_set = set(raster_bands)
+    relevant_band_set_list = []
     for band_set in band_sets:
         is_match = False
+        if band_set.bands is None:
+            continue
         for band in band_set.bands:
-            if band not in raster_bands:
+            if band not in raster_bands_set:
                 continue
             is_match = True
             break
         if not is_match:
             continue
-        relevant_band_sets.append(band_set)
+        relevant_band_set_list.append(band_set)
 
     all_projections = {geometry.projection for geometry in geometries}
     needed_projections = []
     for projection in all_projections:
-        for band_set in relevant_band_sets:
+        for band_set in relevant_band_set_list:
             final_projection, _ = band_set.get_final_projection_and_bounds(
                 projection, None
             )
@@ -216,16 +221,17 @@ def ingest_raster(
     else:
         # Compute the suggested target transform.
         # rasterio negates the y resolution itself so here we have to negate it.
+        raster_bounds: rasterio.coords.BoundingBox = raster.bounds
         (dst_transform, dst_width, dst_height) = (
             rasterio.warp.calculate_default_transform(
                 # Source info.
                 src_crs=raster.crs,
                 width=raster.width,
                 height=raster.height,
-                left=raster.bounds[0],
-                bottom=raster.bounds[1],
-                right=raster.bounds[2],
-                top=raster.bounds[3],
+                left=raster_bounds.left,
+                bottom=raster_bounds.bottom,
+                right=raster_bounds.right,
+                top=raster_bounds.top,
                 # Destination info.
                 dst_crs=projection.crs,
                 resolution=(projection.x_resolution, -projection.y_resolution),
@@ -258,7 +264,7 @@ def materialize_raster(
     window: Window,
     layer_name: str,
     band_cfg: BandSetConfig,
-):
+) -> None:
     """Materialize a given raster for a window.
 
     Currently it is only supported for materializing one band set.
@@ -272,7 +278,8 @@ def materialize_raster(
     window_projection, window_bounds = band_cfg.get_final_projection_and_bounds(
         window.projection, window.bounds
     )
-
+    if window_bounds is None:
+        raise ValueError(f"No windowbounds specified for {layer_name}")
     # Re-project to just extract the window.
     array = raster.read()
     window_width = window_bounds[2] - window_bounds[0]
@@ -297,7 +304,10 @@ def materialize_raster(
         dst_transform=dst_transform,
         resampling=rasterio.enums.Resampling.bilinear,
     )
-
+    if band_cfg.bands is None or band_cfg.format is None:
+        raise ValueError(
+            f"No bands or format specified for {layer_name} materialization"
+        )
     # Write the array to layer directory.
     layer_dir = window.path / "layers" / layer_name
     out_dir = layer_dir / "_".join(band_cfg.bands)

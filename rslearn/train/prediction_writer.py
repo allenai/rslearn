@@ -8,7 +8,12 @@ from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from upath import UPath
 
-from rslearn.config import LayerType, RasterFormatConfig
+from rslearn.config import (
+    LayerType,
+    RasterFormatConfig,
+    RasterLayerConfig,
+    VectorLayerConfig,
+)
 from rslearn.dataset import Dataset
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.raster_format import load_raster_format
@@ -20,17 +25,14 @@ from .lightning_module import RslearnLightningModule
 class PatchPredictionMerger:
     """Base class for merging predictions from multiple patches."""
 
-    def merge(
-        self, outputs: Sequence[Any], metadatas: Sequence[Any]
-    ) -> tuple[Sequence[Any], Sequence[Any]]:
-        """Merge the outputs and metadatas.
+    def merge(self, outputs: Sequence[Any]) -> tuple[Sequence[Any]]:
+        """Merge the outputs.
 
         Args:
             outputs: the outputs to process.
-            metadatas: the metadatas to process.
 
         Returns:
-            the merged outputs and metadatas.
+            the merged outputs.
         """
         raise NotImplementedError
 
@@ -57,6 +59,7 @@ class RslearnWriter(BasePredictionWriter):
             output_layer: which layer to write the outputs under.
             path_options: additional options for path to pass to fsspec
             selector: keys to access the desired output in the output dict if needed.
+                e.g ["key1", "key2"] gets output["key1"]["key2"]
             merger: merger to use to merge outputs from overlapped patches.
         """
         super().__init__(write_interval="batch")
@@ -65,13 +68,16 @@ class RslearnWriter(BasePredictionWriter):
         self.path = UPath(path, **path_options)
         self.dataset = Dataset(self.path)
         self.layer_config = self.dataset.layers[self.output_layer]
-
+        # TODO: This is a bit of a hack to get the type checker to be happy.
+        self.format: Any
         if self.layer_config.layer_type == LayerType.RASTER:
+            assert isinstance(self.layer_config, RasterLayerConfig)
             band_cfg = self.layer_config.band_sets[0]
             self.format = load_raster_format(
                 RasterFormatConfig(band_cfg.format["name"], band_cfg.format)
             )
         elif self.layer_config.layer_type == LayerType.VECTOR:
+            assert isinstance(self.layer_config, VectorLayerConfig)
             self.format = load_vector_format(self.layer_config.format)
         else:
             raise ValueError(f"invalid layer type {self.layer_config.layer_type}")
@@ -81,7 +87,7 @@ class RslearnWriter(BasePredictionWriter):
         # Map from window name to pending data to write.
         # This is used when windows are split up into patches, so the data from all the
         # patches of each window need to be reconstituted.
-        self.pending_outputs = {}
+        self.pending_outputs: dict[str, Any] = {}
 
     def write_on_batch_end(
         self,
@@ -92,7 +98,7 @@ class RslearnWriter(BasePredictionWriter):
         batch: Any,
         batch_idx: int,
         dataloader_idx: int,
-    ):
+    ) -> None:
         """Write a batch of predictions into the rslearn dataset.
 
         Args:
@@ -112,6 +118,8 @@ class RslearnWriter(BasePredictionWriter):
         ]
 
         for output, metadata in zip(outputs, metadatas):
+            if not isinstance(output, dict):
+                raise ValueError(f"Unsupported output type {type(output)}")
             for k in self.selector:
                 output = output[k]
 
@@ -120,7 +128,9 @@ class RslearnWriter(BasePredictionWriter):
             window_bounds = metadata["window_bounds"]
 
             if self.layer_config.layer_type == LayerType.RASTER:
-                if window_name not in self.pending_outputs:
+                if window_name not in self.pending_outputs and isinstance(
+                    output, np.ndarray
+                ):
                     self.pending_outputs[window_name] = np.zeros(
                         (
                             output.shape[0],
@@ -167,6 +177,7 @@ class RslearnWriter(BasePredictionWriter):
             )
 
             if self.layer_config.layer_type == LayerType.RASTER:
+                assert isinstance(self.layer_config, RasterLayerConfig)
                 band_dir = layer_dir / "_".join(self.layer_config.band_sets[0].bands)
                 self.format.encode_raster(
                     band_dir, metadata["projection"], window_bounds, pending_output

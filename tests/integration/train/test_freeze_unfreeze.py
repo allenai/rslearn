@@ -18,10 +18,12 @@ INITIAL_LR = 1e-3
 
 
 class RecordParamsCallback(pl.Callback):
-    def __init__(self):
-        self.recorded_params = []
+    def __init__(self) -> None:
+        self.recorded_params: list = []
 
-    def on_train_epoch_start(self, trainer, pl_module) -> None:
+    def on_train_epoch_start(
+        self, trainer: pl.Trainer, pl_module: RslearnLightningModule
+    ) -> None:
         self.recorded_params.append(
             pl_module.model.encoder[0].model.features[0][0].weight.tolist()
         )
@@ -53,6 +55,7 @@ class LMWithCustomPlateau(RslearnLightningModule):
 def get_itc_modules(
     image_to_class_dataset: Dataset, pl_module_kwargs: dict[str, Any] = {}
 ) -> tuple[LMWithCustomPlateau, RslearnDataModule]:
+    """Get the LightningModule and DataModule for the image to class task."""
     image_data_input = DataInput("raster", ["image"], bands=["band"], passthrough=True)
     target_data_input = DataInput("vector", ["label"])
     task = ClassificationTask("label", ["cls0", "cls1"], read_class_id=True)
@@ -63,7 +66,6 @@ def get_itc_modules(
             "targets": target_data_input,
         },
         task=task,
-        num_workers=1,
     )
     model = SingleTaskModel(
         encoder=[
@@ -84,9 +86,9 @@ def get_itc_modules(
     return pl_module, data_module
 
 
-def test_freeze_unfreeze(image_to_class_dataset: Dataset):
-    # Test the FreezeUnfreeze callback by making sure the weights don't change in the
-    # first epoch but then unfreeze and do change in the second epoch.
+def test_freeze_unfreeze(image_to_class_dataset: Dataset) -> None:
+    """Test the FreezeUnfreeze callback by making sure the weights don't change in the
+    first epoch but then unfreeze and do change in the second epoch."""
     pl_module, data_module = get_itc_modules(image_to_class_dataset)
     freeze_unfreeze = FreezeUnfreeze(
         module_selector=["model", "encoder"],
@@ -105,8 +107,8 @@ def test_freeze_unfreeze(image_to_class_dataset: Dataset):
     assert record_callback.recorded_params[0] != record_callback.recorded_params[2]
 
 
-def test_unfreeze_lr_factor(image_to_class_dataset: Dataset):
-    # Make sure learning rate is set correctly after unfreezing.
+def test_unfreeze_lr_factor(image_to_class_dataset: Dataset) -> None:
+    """Make sure learning rate is set correctly after unfreezing."""
     plateau_factor = 0.5
     unfreeze_lr_factor = 3
 
