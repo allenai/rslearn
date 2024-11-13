@@ -375,13 +375,32 @@ class GeotiffRasterFormat(RasterFormat):
                     bounds[2] - offset[0],
                     bounds[3] - offset[1],
                 ]
+
+                # Make sure the requested bounds intersects the raster, otherwise the
+                # windowed read may fail.
+                # This is generally unexpected but can happen if we are loading a patch
+                # of a window that is close to the edge of the window, and when we
+                # downsample it for a lower resolution raster (negative zoom offset) it
+                # ends up being out of bounds.
                 if (
                     relative_bounds[2] < 0
                     or relative_bounds[3] < 0
                     or relative_bounds[0] >= src.width
                     or relative_bounds[1] >= src.height
                 ):
-                    return None
+                    logger.warning(
+                        "GeotiffRasterFormat.decode_raster got request for a window %s "
+                        + "outside the raster (transform=%s)",
+                        bounds,
+                        transform,
+                    )
+                    # Assume all of the bands have the same dtype, so just use first
+                    # one (src.dtypes is list of dtype per band).
+                    return np.zeros(
+                        (src.count, bounds[3] - bounds[1], bounds[2] - bounds[0]),
+                        dtype=src.dtypes[0],
+                    )
+
                 # Now get the actual pixels we will read, which must be contained in
                 # the GeoTIFF.
                 # Padding is (before_x, before_y, after_x, after_y) and will be used to
