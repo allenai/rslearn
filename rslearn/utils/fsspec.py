@@ -6,6 +6,8 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
+import rasterio
+import rasterio.io
 from fsspec.implementations.local import LocalFileSystem
 from upath import UPath
 
@@ -87,3 +89,55 @@ def open_atomic(path: UPath, *args: Any, **kwargs: Any) -> Generator[Any, None, 
     else:
         with path.open(*args, **kwargs) as file:
             yield file
+
+
+@contextmanager
+def open_rasterio_upath_reader(
+    path: UPath, **kwargs: Any
+) -> Generator[rasterio.io.DatasetReader, None, None]:
+    """Open a raster for reading.
+
+    If the UPath is local, then we open with rasterio directly, since this is much
+    faster. Otherwise, we open the file stream first and then use rasterio with file
+    stream.
+
+    Args:
+        path: the path to read.
+        **kwargs: additional keyword arguments for :code:`rasterio.open`
+    """
+    if isinstance(path.fs, LocalFileSystem):
+        with rasterio.open(path.path, **kwargs) as raster:
+            yield raster
+
+    else:
+        with path.open("rb") as f:
+            with rasterio.open(f, **kwargs) as raster:
+                yield raster
+
+
+@contextmanager
+def open_rasterio_upath_writer(
+    path: UPath, **kwargs: Any
+) -> Generator[rasterio.io.DatasetWriter, None, None]:
+    """Open a raster for writing.
+
+    If the UPath is local, then we open with rasterio directly, since this is much
+    faster. We also write atomically by writing to temporary file and then renaming it,
+    to avoid concurrency issues. Otherwise, we open the file stream first and then use
+    rasterio with file stream (and assume that it is object storage so the write will
+    be atomic).
+
+    Args:
+        path: the path to write.
+        **kwargs: additional keyword arguments for :code:`rasterio.open`
+    """
+    if isinstance(path.fs, LocalFileSystem):
+        tmppath = path.path + ".tmp." + str(os.getpid())
+        with rasterio.open(tmppath, "w", **kwargs) as raster:
+            yield raster
+        os.rename(tmppath, path.path)
+
+    else:
+        with path.open("wb") as f:
+            with rasterio.open(f, "w", **kwargs) as raster:
+                yield raster

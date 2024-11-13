@@ -71,10 +71,7 @@ class GEE(DataSource):
         )
         ee.Initialize(credentials)
 
-        self.rtree_tmp_dir = tempfile.TemporaryDirectory()
-        self.rtree_index = get_cached_rtree(
-            self.index_cache_dir, self.rtree_tmp_dir.name, self._build_index
-        )
+        self.rtree_index = get_cached_rtree(self.index_cache_dir, self._build_index)
 
     @staticmethod
     def from_config(config: RasterLayerConfig, ds_path: UPath) -> "GEE":

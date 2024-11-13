@@ -414,9 +414,10 @@ def _load_window_layer_datas(
 class IngestHandler:
     """apply_on_windows handler for the rslearn dataset ingest command."""
 
-    def __init__(self) -> None:
+    def __init__(self, ignore_errors: bool = False) -> None:
         """Initialize a new IngestHandler."""
         self.dataset: Dataset | None = None
+        self.ignore_errors = ignore_errors
 
     def set_dataset(self, dataset: Dataset) -> None:
         """Captures the dataset from apply_on_windows_args.
@@ -464,6 +465,9 @@ class IngestHandler:
                     geometries=[geometries for _, geometries in items_and_geometries],
                 )
             except Exception as e:
+                if not self.ignore_errors:
+                    raise
+
                 logger.error(
                     "warning: got error while ingesting "
                     + f"{len(items_and_geometries)} items: {e}"
@@ -548,10 +552,17 @@ def dataset_ingest() -> None:
         default="",
         help="List of layers to disable e.g 'layer1,layer2'",
     )
+    parser.add_argument(
+        "--ignore-errors",
+        type=bool,
+        default=False,
+        help="Ignore ingestion errors in individual jobs",
+        action=argparse.BooleanOptionalAction,
+    )
     add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
 
-    fn = IngestHandler()
+    fn = IngestHandler(ignore_errors=args.ignore_errors)
     apply_on_windows_args(fn, args)
 
 
