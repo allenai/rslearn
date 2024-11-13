@@ -1,6 +1,7 @@
 import os
 import pathlib
 import random
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -19,7 +20,6 @@ from rslearn.tile_stores import FileTileStore
 from rslearn.utils import STGeometry
 
 
-# What functionality are we really testing here how does local vs gcs compare is it the ingestion Otherwise we can do in memory bucket but unsure
 class TestSentinel2:
     """Tests the Sentinel2 data source."""
 
@@ -34,9 +34,18 @@ class TestSentinel2:
             [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[self.TEST_BAND])],
         )
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
-        data_source = Sentinel2(
-            config=layer_config, rtree_time_range=seattle2020.time_range, **kwargs
+
+        # In case rtree is enabled, use a small time range to minimize the time needed
+        # to create the index.
+        assert seattle2020.time_range is not None
+        rtree_time_range = (
+            seattle2020.time_range[0],
+            seattle2020.time_range[0] + timedelta(days=3),
         )
+        data_source = Sentinel2(
+            config=layer_config, rtree_time_range=rtree_time_range, **kwargs
+        )
+
         print("get items")
         item_groups = data_source.get_items([seattle2020], query_config)[0]
         item = item_groups[0][0]

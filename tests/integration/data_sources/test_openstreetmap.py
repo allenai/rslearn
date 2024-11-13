@@ -1,10 +1,13 @@
 import os
 import pathlib
 import random
+from datetime import datetime, timezone
 
+import shapely
 from upath import UPath
 
 from rslearn.config import LayerType, QueryConfig, SpaceMode, VectorLayerConfig
+from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.openstreetmap import FeatureType, Filter, OpenStreetMap
 from rslearn.tile_stores import FileTileStore
 from rslearn.utils import STGeometry
@@ -13,8 +16,19 @@ from rslearn.utils import STGeometry
 class TestOpenStreetMap:
     """Tests the GEE data source."""
 
-    def run_simple_test(self, tile_store_dir: UPath, seattle2020: STGeometry) -> None:
-        """Apply test where we ingest an item corresponding to seattle2020."""
+    def run_simple_test(self, tile_store_dir: UPath) -> None:
+        """Apply test where we ingest an item corresponding to an area of Delaware."""
+        # We use Delaware instead of seattle2020 here because delaware-latest.osm.pbf
+        # is much smaller than washington-latest.osm.pbf so it speeds up the test.
+        delaware_area = STGeometry(
+            WGS84_PROJECTION,
+            shapely.box(-75.6, 39.1, -75.5, 39.2),
+            (
+                datetime(2020, 7, 1, tzinfo=timezone.utc),
+                datetime(2020, 8, 1, tzinfo=timezone.utc),
+            ),
+        )
+
         layer_config = VectorLayerConfig(
             LayerType.VECTOR,
         )
@@ -24,7 +38,7 @@ class TestOpenStreetMap:
             config=layer_config,
             pbf_fnames=[
                 UPath(
-                    "https://download.geofabrik.de/north-america/us/washington-latest.osm.pbf"
+                    "https://download.geofabrik.de/north-america/us/delaware-latest.osm.pbf"
                 )
             ],
             bounds_fname=tile_store_dir / "bounds.json",
@@ -38,26 +52,23 @@ class TestOpenStreetMap:
             },
         )
         print("get items")
-        item_groups = data_source.get_items([seattle2020], query_config)[0]
+        item_groups = data_source.get_items([delaware_area], query_config)[0]
         item = item_groups[0][0]
         tile_store = FileTileStore(tile_store_dir)
         print("ingest")
-        data_source.ingest(tile_store, item_groups[0], [[seattle2020]])
+        data_source.ingest(tile_store, item_groups[0], [[delaware_area]])
         expected_path = (
-            tile_store_dir / item.name / str(seattle2020.projection) / "data.geojson"
+            tile_store_dir / item.name / str(delaware_area.projection) / "data.geojson"
         )
         assert expected_path.exists()
 
-    def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
+    def test_local(self, tmp_path: pathlib.Path) -> None:
         """Test ingesting to local filesystem."""
         tile_store_dir = UPath(tmp_path) / "tiles"
         tile_store_dir.mkdir(parents=True, exist_ok=True)
-        self.run_simple_test(
-            tile_store_dir,
-            seattle2020,
-        )
+        self.run_simple_test(tile_store_dir)
 
-    def test_gcs(self, seattle2020: STGeometry) -> None:
+    def test_gcs(self) -> None:
         """Test ingesting to GCS.
 
         Main thing is to test index_cache_dir being on GCS.
@@ -67,7 +78,4 @@ class TestOpenStreetMap:
         prefix = os.environ["TEST_PREFIX"] + f"test_{test_id}/"
         test_path = UPath(f"gcs://{bucket_name}/{prefix}")
         tile_store_dir = test_path / "tiles"
-        self.run_simple_test(
-            tile_store_dir,
-            seattle2020,
-        )
+        self.run_simple_test(tile_store_dir)

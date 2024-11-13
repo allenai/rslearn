@@ -14,11 +14,14 @@ import numpy.typing as npt
 from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
+from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import open_atomic
 from rslearn.utils.geometry import STGeometry, flatten_shape
 from rslearn.utils.grid_index import GridIndex
 
 SENTINEL2_TILE_URL = "https://sentiwiki.copernicus.eu/__attachments/1692737/S2A_OPER_GIP_TILPAR_MPC__20151209T095117_V20150622T000000_21000101T000000_B00.zip"
+
+logger = get_logger(__name__)
 
 
 def get_harmonize_callback(
@@ -58,12 +61,11 @@ def get_harmonize_callback(
     return callback
 
 
-@functools.cache
-def load_sentinel2_tile_index(cache_dir: UPath) -> GridIndex:
-    """Load a GridIndex over Sentinel-2 tiles."""
+def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
     json_fname = cache_dir / "tile_index.json"
 
     if not json_fname.exists():
+        logger.info("caching list of Sentinel-2 tiles to %s", json_fname)
         # Identify the Sentinel-2 tile names and bounds using the KML file.
         # First, download the zip file and extract and parse the KML.
         buf = io.BytesIO()
@@ -111,11 +113,22 @@ def load_sentinel2_tile_index(cache_dir: UPath) -> GridIndex:
         with open_atomic(json_fname, "w") as f:
             json.dump(json_data, f)
 
-    else:
-        with json_fname.open() as f:
-            json_data = json.load(f)
 
-    # Now we can populate the grid index.
+@functools.cache
+def load_sentinel2_tile_index(cache_dir: UPath) -> GridIndex:
+    """Load a GridIndex over Sentinel-2 tiles.
+
+    Args:
+        cache_dir: the directory to cache the list of Sentinel-2 tiles.
+
+    Returns:
+        GridIndex over the tile names
+    """
+    _cache_sentinel2_tile_index(cache_dir)
+    json_fname = cache_dir / "tile_index.json"
+    with json_fname.open() as f:
+        json_data = json.load(f)
+
     grid_index = GridIndex(0.5)
     for tile_name, bounds in json_data.items():
         grid_index.insert(bounds, tile_name)
@@ -143,6 +156,5 @@ def get_sentinel2_tiles(geometry: STGeometry, cache_dir: UPath) -> list[str]:
     for shp in flatten_shape(wgs84_geometry.shp):
         for result in tile_index.query(shp.bounds):
             assert isinstance(result, str)
-            print(shp, result)
             results.add(result)
     return list(results)

@@ -2,7 +2,6 @@
 
 import io
 import json
-import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Generator
 from datetime import datetime, timedelta, timezone
@@ -115,10 +114,7 @@ class Naip(DataSource):
                 for item in self._read_index_shapefiles(desc="Building rtree index"):
                     index.insert(item.geometry.shp.bounds, json.dumps(item.serialize()))
 
-            self.rtree_tmp_dir = tempfile.TemporaryDirectory()
-            self.rtree_index = get_cached_rtree(
-                self.index_cache_dir, self.rtree_tmp_dir.name, build_fn
-            )
+            self.rtree_index = get_cached_rtree(self.index_cache_dir, build_fn)
 
     @staticmethod
     def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Naip":

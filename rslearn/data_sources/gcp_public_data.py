@@ -1,10 +1,8 @@
 """Data source for raster data on public Cloud Storage buckets."""
 
-import csv
-import gzip
 import io
 import json
-import tempfile
+import random
 import xml.etree.ElementTree as ET
 from collections.abc import Generator
 from datetime import datetime, timedelta
@@ -15,7 +13,7 @@ import pytimeparse
 import rasterio
 import shapely
 import tqdm
-from google.cloud import storage
+from google.cloud import bigquery, storage
 from upath import UPath
 
 from rslearn.config import QueryConfig, RasterLayerConfig
@@ -84,7 +82,8 @@ class Sentinel2(DataSource):
 
     bucket_name = "gcp-public-data-sentinel-2"
 
-    index_fname = "index.csv.gz"
+    # Name of BigQuery table containing index of Sentinel-2 scenes in the bucket.
+    table_name = "bigquery-public-data.cloud_storage_geo_index.sentinel_2_index"
 
     bands = [
         ("B01.jp2", ["B01"]),
@@ -112,14 +111,14 @@ class Sentinel2(DataSource):
         use_rtree_index: bool = True,
         harmonize: bool = False,
         rtree_time_range: tuple[datetime, datetime] | None = None,
+        rtree_cache_dir: UPath | None = None,
     ):
         """Initialize a new Sentinel2 instance.
 
         Args:
             config: the LayerConfig of the layer containing this data source.
-            index_cache_dir: local directory to cache the index.csv.gz contents, as
-                well as individual product metadata files. Defaults to None in which
-                case products are looked up from the cloud storage directly.
+            index_cache_dir: local directory to cache the index contents, as well as
+                individual product metadata files.
             max_time_delta: maximum time before a query start time or after a
                 query end time to look for products. This is required due to the large
                 number of available products, and defaults to 30 days.
@@ -131,6 +130,10 @@ class Sentinel2(DataSource):
                 see https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
             rtree_time_range: only populate the rtree index with scenes within this
                 time range
+            rtree_cache_dir: by default, if use_rtree_index is enabled, the rtree is
+                stored in index_cache_dir (where product XML files are also stored). If
+                rtree_cache_dir is set, then the rtree is stored here instead (so
+                index_cache_dir is only used to cache product XML files).
         """
         self.config = config
         self.index_cache_dir = index_cache_dir
@@ -140,10 +143,14 @@ class Sentinel2(DataSource):
 
         self.index_cache_dir.mkdir(parents=True, exist_ok=True)
 
-        self.bucket = storage.Client.create_anonymous_client().bucket(self.bucket_name)
+        self.bucket = storage.Client().bucket(self.bucket_name)
         self.rtree_index: Any | None = None
         if use_rtree_index:
             from rslearn.utils.rtree_index import RtreeIndex, get_cached_rtree
+
+            if rtree_cache_dir is None:
+                rtree_cache_dir = self.index_cache_dir
+            rtree_cache_dir.mkdir(parents=True, exist_ok=True)
 
             def build_fn(index: RtreeIndex) -> None:
                 """Build the RtreeIndex from items in the data source."""
@@ -153,10 +160,7 @@ class Sentinel2(DataSource):
                     for shp in flatten_shape(item.geometry.shp):
                         index.insert(shp.bounds, json.dumps(item.serialize()))
 
-            self.rtree_tmp_dir = tempfile.TemporaryDirectory()
-            self.rtree_index = get_cached_rtree(
-                self.index_cache_dir, self.rtree_tmp_dir.name, build_fn
-            )
+            self.rtree_index = get_cached_rtree(rtree_cache_dir, build_fn)
 
     @staticmethod
     def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Sentinel2":
@@ -173,6 +177,16 @@ class Sentinel2(DataSource):
             kwargs["max_time_delta"] = timedelta(
                 seconds=pytimeparse.parse(d["max_time_delta"])
             )
+
+        if "rtree_time_range" in d:
+            kwargs["rtree_time_range"] = (
+                datetime.fromisoformat(d["rtree_time_range"][0]),
+                datetime.fromisoformat(d["rtree_time_range"][1]),
+            )
+
+        if "rtree_cache_dir" in d:
+            kwargs["rtree_cache_dir"] = join_upath(ds_path, d["rtree_cache_dir"])
+
         simple_optionals = ["sort_by", "use_rtree_index", "harmonize"]
         for k in simple_optionals:
             if k in d:
@@ -183,9 +197,9 @@ class Sentinel2(DataSource):
     def _read_index(
         self, desc: str, time_range: tuple[datetime, datetime] | None = None
     ) -> Generator[Sentinel2Item, None, None]:
-        """Read the index.csv.gz in the Cloud Storage bucket.
+        """Read Sentinel-2 scenes from BigQuery table.
 
-        The CSV only contains the bounding box of each image and not the exact
+        The table only contains the bounding box of each image and not the exact
         geometry, which can be retrieved from individual product metadata
         (MTD_MSIL1C.xml) files.
 
@@ -193,53 +207,63 @@ class Sentinel2(DataSource):
             desc: description to include with tqdm progress bar.
             time_range: optional time_range to restrict the reading.
         """
-        blob = self.bucket.blob(self.index_fname)
-        with blob.open("rb") as blob_f:
-            with gzip.open(blob_f, "rt") as gzip_f:
-                reader = csv.DictReader(gzip_f)
-                for row in tqdm.tqdm(reader, desc=desc):
-                    if not row["BASE_URL"]:
-                        continue
-                    product_id = row["PRODUCT_ID"]
-                    product_id_parts = product_id.split("_")
-                    if len(product_id_parts) < 7:
-                        continue
-                    product_type = product_id_parts[1]
-                    if product_type != "MSIL1C":
-                        continue
-                    time_str = product_id_parts[2]
-                    tile_id = product_id_parts[5]
-                    assert tile_id[0] == "T"
+        query_str = f"""
+            SELECT  source_url, base_url, product_id, sensing_time, granule_id,
+                    east_lon, south_lat, west_lon, north_lat, cloud_cover
+            FROM    `{self.table_name}`
+        """
+        if time_range is not None:
+            query_str += f"""
+                WHERE sensing_time >= "{time_range[0]}" AND sensing_time <= "{time_range[1]}"
+            """
 
-                    sensing_time = dateutil.parser.isoparse(row["SENSING_TIME"])
-                    if time_range and (
-                        sensing_time < time_range[0] or sensing_time > time_range[1]
-                    ):
-                        continue
+        client = bigquery.Client()
+        result = client.query(query_str)
 
-                    granule_id = row["GRANULE_ID"]
-                    base_url = row["BASE_URL"].split(
-                        "gs://gcp-public-data-sentinel-2/"
-                    )[1]
+        for row in tqdm.tqdm(result, desc=desc):
+            # Some entries have source_url correct and others have base_url correct.
+            # If base_url is correct, then it seems the source_url always ends in
+            # index.csv.gz.
+            if row["source_url"] and not row["source_url"].endswith("index.csv.gz"):
+                base_url = row["source_url"].split("gs://gcp-public-data-sentinel-2/")[
+                    1
+                ]
+            else:
+                assert row["base_url"] is not None and row["base_url"] != ""
+                base_url = row["base_url"].split("gs://gcp-public-data-sentinel-2/")[1]
 
-                    blob_prefix = f"{base_url}/GRANULE/{granule_id}/IMG_DATA/{tile_id}_{time_str}_"
+            product_id = row["product_id"]
+            product_id_parts = product_id.split("_")
+            if len(product_id_parts) < 7:
+                continue
+            product_type = product_id_parts[1]
+            if product_type != "MSIL1C":
+                continue
+            time_str = product_id_parts[2]
+            tile_id = product_id_parts[5]
+            assert tile_id[0] == "T"
 
-                    # Extract the spatial and temporal bounds of the image.
-                    bounds = (
-                        float(row["EAST_LON"]),
-                        float(row["SOUTH_LAT"]),
-                        float(row["WEST_LON"]),
-                        float(row["NORTH_LAT"]),
-                    )
-                    shp = shapely.box(*bounds)
-                    geometry = STGeometry(
-                        WGS84_PROJECTION, shp, (sensing_time, sensing_time)
-                    )
-                    geometry = split_at_prime_meridian(geometry)
+            granule_id = row["granule_id"]
 
-                    cloud_cover = float(row["CLOUD_COVER"])
+            blob_prefix = (
+                f"{base_url}/GRANULE/{granule_id}/IMG_DATA/{tile_id}_{time_str}_"
+            )
 
-                    yield Sentinel2Item(product_id, geometry, blob_prefix, cloud_cover)
+            # Extract the spatial and temporal bounds of the image.
+            bounds = (
+                float(row["east_lon"]),
+                float(row["south_lat"]),
+                float(row["west_lon"]),
+                float(row["north_lat"]),
+            )
+            shp = shapely.box(*bounds)
+            sensing_time = row["sensing_time"]
+            geometry = STGeometry(WGS84_PROJECTION, shp, (sensing_time, sensing_time))
+            geometry = split_at_prime_meridian(geometry)
+
+            cloud_cover = float(row["cloud_cover"])
+
+            yield Sentinel2Item(product_id, geometry, blob_prefix, cloud_cover)
 
     def _get_xml_by_name(self, name: str) -> ET.ElementTree:
         """Gets the metadata XML of an item by its name.
@@ -343,7 +367,15 @@ class Sentinel2(DataSource):
             needed_cell_years: set of (mgrs grid cell, year) where we need to search
                 for images.
         """
-        for cell_id, year in tqdm.tqdm(needed_cell_years, desc="Reading product infos"):
+        # Read the product infos in random order so in case there are multiple jobs
+        # reading similar cells, they are more likely to work on different cells/years
+        # in parallel.
+        needed_cell_years_list = list(needed_cell_years)
+        random.shuffle(needed_cell_years_list)
+
+        for cell_id, year in tqdm.tqdm(
+            needed_cell_years_list, desc="Reading product infos"
+        ):
             assert len(cell_id) == 5
             cache_fname = self.index_cache_dir / f"{cell_id}_{year}.json"
 
