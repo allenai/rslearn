@@ -116,9 +116,8 @@ class Sentinel2(DataSource):
 
         Args:
             config: the LayerConfig of the layer containing this data source.
-            index_cache_dir: local directory to cache the index.csv.gz contents, as
-                well as individual product metadata files. Defaults to None in which
-                case products are looked up from the cloud storage directly.
+            index_cache_dir: local directory to cache the index contents, as well as
+                individual product metadata files.
             max_time_delta: maximum time before a query start time or after a
                 query end time to look for products. This is required due to the large
                 number of available products, and defaults to 30 days.
@@ -208,8 +207,8 @@ class Sentinel2(DataSource):
             time_range: optional time_range to restrict the reading.
         """
         query_str = f"""
-            SELECT  source_url, product_id, sensing_time, granule_id, east_lon,
-                    south_lat, west_lon, north_lat, cloud_cover
+            SELECT  source_url, base_url, product_id, sensing_time, granule_id,
+                    east_lon, south_lat, west_lon, north_lat, cloud_cover
             FROM    `{self.table_name}`
         """
         if time_range is not None:
@@ -221,8 +220,17 @@ class Sentinel2(DataSource):
         result = client.query(query_str)
 
         for row in tqdm.tqdm(result, desc=desc):
-            if not row["source_url"]:
-                continue
+            # Some entries have source_url correct and others have base_url correct.
+            # If base_url is correct, then it seems the source_url always ends in
+            # index.csv.gz.
+            if row["source_url"] and not row["source_url"].endswith("index.csv.gz"):
+                base_url = row["source_url"].split("gs://gcp-public-data-sentinel-2/")[
+                    1
+                ]
+            else:
+                assert row["base_url"] is not None and row["base_url"] != ""
+                base_url = row["base_url"].split("gs://gcp-public-data-sentinel-2/")[1]
+
             product_id = row["product_id"]
             product_id_parts = product_id.split("_")
             if len(product_id_parts) < 7:
@@ -235,7 +243,6 @@ class Sentinel2(DataSource):
             assert tile_id[0] == "T"
 
             granule_id = row["granule_id"]
-            base_url = row["source_url"].split("gs://gcp-public-data-sentinel-2/")[1]
 
             blob_prefix = (
                 f"{base_url}/GRANULE/{granule_id}/IMG_DATA/{tile_id}_{time_str}_"
