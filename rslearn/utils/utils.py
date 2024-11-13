@@ -23,3 +23,8 @@ def open_atomic(
     with open(tmppath, *args, **kwargs) as file:  # type: ignore
         yield file
     os.rename(tmppath, filepath)
+
+
+def parse_disabled_layers(disabled_layers: str) -> list[str]:
+    """Parse the disabled layers string."""
+    return disabled_layers.split(",") if disabled_layers else []

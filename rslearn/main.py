@@ -1,7 +1,6 @@
 """Entrypoint for the rslearn command-line interface."""
 
 import argparse
-import logging
 import multiprocessing
 import random
 import sys
@@ -22,12 +21,14 @@ from rslearn.data_sources import Item, data_source_from_config
 from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
 from rslearn.dataset.manage import materialize_dataset_windows, prepare_dataset_windows
+from rslearn.log_utils import get_logger
 from rslearn.tile_stores import get_tile_store_for_layer
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
-from rslearn.utils import Projection, STGeometry
+from rslearn.utils import Projection, STGeometry, parse_disabled_layers
 
-logging.basicConfig()
+logger = get_logger(__name__)
+
 handler_registry = {}
 
 ItemType = TypeVar("ItemType", bound="Item")
@@ -220,7 +221,7 @@ def add_windows() -> None:
     else:
         raise Exception("one of box or fname must be specified")
 
-    print(f"created {len(windows)} windows")
+    logger.info(f"created {len(windows)} windows")
 
 
 def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
@@ -303,11 +304,11 @@ def apply_on_windows(
     windows = dataset.load_windows(
         groups=groups, names=names, workers=workers, show_progress=True
     )
-    print(f"found {len(windows)} windows")
+    logger.info(f"found {len(windows)} windows")
 
     if hasattr(f, "get_jobs"):
         jobs = f.get_jobs(windows, workers)
-        print(f"got {len(jobs)} jobs")
+        logger.info(f"got {len(jobs)} jobs")
     else:
         jobs = windows
 
@@ -335,7 +336,7 @@ def apply_on_windows(
 
 def apply_on_windows_args(f: Callable[..., None], args: argparse.Namespace) -> None:
     """Call apply_on_windows with arguments passed via command-line interface."""
-    dataset = Dataset(UPath(args.root))
+    dataset = Dataset(UPath(args.root), args.disabled_layers)
     apply_on_windows(
         f,
         dataset,
@@ -370,6 +371,7 @@ class PrepareHandler:
 
     def __call__(self, windows: list[Window]) -> None:
         """Prepares the windows from apply_on_windows."""
+        logger.info(f"Running prepare on {len(windows)} windows")
         if self.dataset is None:
             raise ValueError("dataset not set")
         prepare_dataset_windows(self.dataset, windows, self.force)
@@ -388,6 +390,12 @@ def dataset_prepare() -> None:
         default=False,
         action=argparse.BooleanOptionalAction,
         help="Prepare windows even if they were previously prepared",
+    )
+    parser.add_argument(
+        "--disabled-layers",
+        type=parse_disabled_layers,
+        default="",
+        help="List of layers to disable e.g 'layer1,layer2'",
     )
     add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
@@ -428,6 +436,7 @@ class IngestHandler:
         Args:
             jobs: list of (layer_name, item, geometries) tuples to ingest.
         """
+        logger.info(f"Running ingest for {len(jobs)} jobs")
         import gc
 
         if self.dataset is None:
@@ -455,12 +464,27 @@ class IngestHandler:
                     geometries=[geometries for _, geometries in items_and_geometries],
                 )
             except Exception as e:
-                print(
+                logger.error(
                     "warning: got error while ingesting "
                     + f"{len(items_and_geometries)} items: {e}"
                 )
 
         gc.collect()
+
+    def _load_layer_data_for_windows(
+        self, windows: list[Window], workers: int
+    ) -> list[tuple[Window, dict[str, WindowLayerData]]]:
+        if workers == 0:
+            return [(_load_window_layer_datas(window)) for window in windows]
+        p = multiprocessing.Pool(workers)
+        outputs = p.imap_unordered(_load_window_layer_datas, windows)
+        windows_and_layer_datas = []
+        for window, layer_datas in tqdm.tqdm(
+            outputs, total=len(windows), desc="Loading window layer datas"
+        ):
+            windows_and_layer_datas.append((window, layer_datas))
+        p.close()
+        return windows_and_layer_datas
 
     def get_jobs(
         self, windows: list[Window], workers: int
@@ -478,14 +502,7 @@ class IngestHandler:
         # TODO: avoid duplicating ingest_dataset_windows...
 
         # Load layer datas of each window.
-        p = multiprocessing.Pool(workers)
-        outputs = p.imap_unordered(_load_window_layer_datas, windows)
-        windows_and_layer_datas = []
-        for window, layer_datas in tqdm.tqdm(
-            outputs, total=len(windows), desc="Loading window layer datas"
-        ):
-            windows_and_layer_datas.append((window, layer_datas))
-        p.close()
+        windows_and_layer_datas = self._load_layer_data_for_windows(windows, workers)
 
         jobs: list[tuple[str, LayerConfig, Item, list[STGeometry]]] = []
         for layer_name, layer_cfg in self.dataset.layers.items():
@@ -514,7 +531,7 @@ class IngestHandler:
             for item, geometries in geometries_by_item.items():
                 jobs.append((layer_name, layer_cfg, item, geometries))
 
-        print(f"computed {len(jobs)} ingest jobs from {len(windows)} windows")
+        logger.info(f"computed {len(jobs)} ingest jobs from {len(windows)} windows")
         return jobs
 
 
@@ -524,6 +541,12 @@ def dataset_ingest() -> None:
     parser = argparse.ArgumentParser(
         prog="rslearn dataset ingest",
         description="rslearn dataset ingest: ingest items in retrieved data sources",
+    )
+    parser.add_argument(
+        "--disabled-layers",
+        type=parse_disabled_layers,
+        default="",
+        help="List of layers to disable e.g 'layer1,layer2'",
     )
     add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
@@ -549,6 +572,7 @@ class MaterializeHandler:
 
     def __call__(self, windows: list[Window]) -> None:
         """Materializes the windows from apply_on_windows."""
+        logger.info(f"Running Materialize with {len(windows)} windows")
         if self.dataset is None:
             raise ValueError("dataset not set")
         materialize_dataset_windows(self.dataset, windows)
@@ -564,9 +588,14 @@ def dataset_materialize() -> None:
             + "materialize data from retrieved data sources"
         ),
     )
+    parser.add_argument(
+        "--disabled-layers",
+        type=parse_disabled_layers,
+        default="",
+        help="List of layers to disable e.g 'layer1,layer2'",
+    )
     add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
-
     fn = MaterializeHandler()
     apply_on_windows_args(fn, args)
 
@@ -609,7 +638,7 @@ class RslearnLightningCLI(LightningCLI):
             artifact_id = (
                 f"{c.trainer.logger.init_args.project}/model-{c.wandb_run_id}:latest"
             )
-            print(f"restoring from artifact {artifact_id} on wandb")
+            logger.info(f"restoring from artifact {artifact_id} on wandb")
             artifact = api.artifact(artifact_id, type="model")
             artifact_dir = artifact.download()
             c.ckpt_path = str(Path(artifact_dir) / "model.ckpt")
@@ -677,7 +706,7 @@ def main() -> None:
 
     handler = handler_registry.get((args.category, args.command))
     if handler is None:
-        print(f"Unknown command: {args.category} {args.command}", file=sys.stderr)
+        logger.error(f"Unknown command: {args.category} {args.command}")
         sys.exit(1)
 
     handler()

@@ -3,12 +3,14 @@
 import rslearn.data_sources
 from rslearn.config import LayerConfig, LayerType, RasterLayerConfig
 from rslearn.data_sources import DataSource, Item
+from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, get_tile_store_for_layer
-from rslearn.utils import logger
 
 from .dataset import Dataset
 from .materialize import Materializers
 from .window import Window, WindowLayerData
+
+logger = get_logger(__name__)
 
 
 def prepare_dataset_windows(
@@ -37,7 +39,7 @@ def prepare_dataset_windows(
             if layer_name in layer_datas and not force:
                 continue
             needed_windows.append(window)
-        print(f"Preparing {len(needed_windows)} windows for layer {layer_name}")
+        logger.info(f"Preparing {len(needed_windows)} windows for layer {layer_name}")
         if len(needed_windows) == 0:
             continue
 
