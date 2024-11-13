@@ -5,7 +5,6 @@ gcsfs>=2024.10
 google-cloud-bigquery>=2.18
 google-cloud-storage>=2.18
 interrogate>=1.7
-mgrs>=1.4
 osmium>=3.7
 planet>=2.10
 pycocotools>=2.0
