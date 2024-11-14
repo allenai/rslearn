@@ -9,6 +9,7 @@ import numpy.typing as npt
 import rasterio
 from class_registry import ClassRegistry
 from PIL import Image
+from rasterio.crs import CRS
 from upath import UPath
 
 from rslearn.config import RasterFormatConfig
@@ -20,6 +21,47 @@ from .geometry import PixelBounds, Projection
 
 RasterFormats = ClassRegistry()
 logger = get_logger(__name__)
+
+
+def get_raster_projection_and_bounds_from_transform(
+    crs: CRS, transform: affine.Affine, width: int, height: int
+) -> tuple[Projection, PixelBounds]:
+    """Determine Projection and bounds from the specified CRS and transform.
+
+    Args:
+        crs: the coordinate reference system.
+        transform: corresponding affine transform matrix.
+        width: the array width
+        height: the array height
+
+    Returns:
+        a tuple (projection, bounds).
+    """
+    x_resolution = transform.a
+    y_resolution = transform.e
+    projection = Projection(crs, x_resolution, y_resolution)
+    offset = (
+        int(round(transform.c / x_resolution)),
+        int(round(transform.f / y_resolution)),
+    )
+    bounds = (offset[0], offset[1], offset[0] + width, offset[1] + height)
+    return (projection, bounds)
+
+
+def get_raster_projection_and_bounds(
+    raster: rasterio.DatasetReader,
+) -> tuple[Projection, PixelBounds]:
+    """Determine the Projection and bounds of the specified raster.
+
+    Args:
+        raster: the raster dataset opened with rasterio.
+
+    Returns:
+        a tuple (projection, bounds).
+    """
+    return get_raster_projection_and_bounds_from_transform(
+        raster.crs, raster.transform, raster.width, raster.height
+    )
 
 
 class RasterFormat:
@@ -440,19 +482,8 @@ class GeotiffRasterFormat(RasterFormat):
             the PixelBounds of the raster
         """
         with open_rasterio_upath_reader(path / self.fname) as src:
-            transform = src.transform
-            x_resolution = transform.a
-            y_resolution = transform.e
-            offset = (
-                int(transform.c / x_resolution),
-                int(transform.f / y_resolution),
-            )
-            return (
-                offset[0],
-                offset[1],
-                offset[0] + src.width,
-                offset[1] + src.height,
-            )
+            _, bounds = get_raster_projection_and_bounds(src)
+            return bounds
 
     @staticmethod
     def from_config(name: str, config: dict[str, Any]) -> "GeotiffRasterFormat":

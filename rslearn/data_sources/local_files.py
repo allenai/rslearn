@@ -13,18 +13,19 @@ from upath import UPath
 import rslearn.data_sources.utils
 from rslearn.config import LayerConfig, LayerType, RasterLayerConfig, VectorLayerConfig
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_PROJECTION
-from rslearn.tile_stores import LayerMetadata, PrefixedTileStore, TileStore
+from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import Feature, Projection, STGeometry
-from rslearn.utils.fsspec import get_upath_local, join_upath
+from rslearn.utils.fsspec import get_upath_local, join_upath, open_rasterio_upath_reader
 
 from .data_source import DataSource, Item, QueryConfig
-from .raster_source import get_needed_projections, ingest_raster
 
 Importers = ClassRegistry()
 
 ItemType = TypeVar("ItemType", bound=Item)
 LayerConfigType = TypeVar("LayerConfigType", bound=LayerConfig)
 ImporterType = TypeVar("ImporterType", bound="Importer")
+
+SOURCE_NAME = "rslearn.data_sources.local_files.LocalFiles"
 
 
 class Importer(Generic[ItemType, LayerConfigType]):
@@ -42,7 +43,7 @@ class Importer(Generic[ItemType, LayerConfigType]):
     def ingest_item(
         self,
         config: LayerConfigType,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         item: ItemType,
         cur_geometries: list[STGeometry],
     ) -> None:
@@ -50,7 +51,7 @@ class Importer(Generic[ItemType, LayerConfigType]):
 
         Args:
             config: the configuration of the layer.
-            tile_store: the TileStore to ingest the data into.
+            tile_store: the tile store to ingest the data into.
             item: the Item to ingest
             cur_geometries: the geometries where the item is needed.
         """
@@ -229,7 +230,7 @@ class RasterImporter(Importer):
     def ingest_item(
         self,
         config: RasterLayerConfig,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         item: RasterItem,
         cur_geometries: list[STGeometry],
     ) -> None:
@@ -237,32 +238,20 @@ class RasterImporter(Importer):
 
         Args:
             config: the configuration of the layer.
-            tile_store: the TileStore to ingest the data into.
+            tile_store: the tile store to ingest the data into.
             item: the RasterItem to ingest
             cur_geometries: the geometries where the item is needed.
         """
         for file_idx, fname in enumerate(item.spec.fnames):
-            with fname.open("rb") as f:
-                with rasterio.open(f) as src:
-                    if item.spec.bands:
-                        bands = item.spec.bands[file_idx]
-                    else:
-                        bands = [f"B{band_idx+1}" for band_idx in range(src.count)]
-                    cur_tile_store = PrefixedTileStore(tile_store, ("_".join(bands),))
-                    needed_projections = get_needed_projections(
-                        cur_tile_store, bands, config.band_sets, cur_geometries
-                    )
-                    if not needed_projections:
-                        return
+            with open_rasterio_upath_reader(fname) as src:
+                if item.spec.bands:
+                    bands = item.spec.bands[file_idx]
+                else:
+                    bands = [f"B{band_idx+1}" for band_idx in range(src.count)]
 
-                    for projection in needed_projections:
-                        ingest_raster(
-                            tile_store=cur_tile_store,
-                            raster=src,
-                            projection=projection,
-                            time_range=item.geometry.time_range,
-                            layer_config=config,
-                        )
+            if tile_store.is_raster_ready(item.name, bands):
+                continue
+            tile_store.write_raster_file(item.name, bands, fname)
 
 
 @Importers.register("vector")
@@ -316,7 +305,7 @@ class VectorImporter(Importer):
     def ingest_item(
         self,
         config: VectorLayerConfig,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         item: VectorItem,
         cur_geometries: list[STGeometry],
     ) -> None:
@@ -331,17 +320,7 @@ class VectorImporter(Importer):
         if not isinstance(config, VectorLayerConfig):
             raise ValueError("VectorImporter requires a VectorLayerConfig")
 
-        needed_projections = set()
-        for geometry in cur_geometries:
-            projection, _ = config.get_final_projection_and_bounds(
-                geometry.projection, None
-            )
-            ts_layer = tile_store.get_layer((str(projection),))
-            if ts_layer and ts_layer.get_metadata().properties.get("completed"):
-                continue
-            needed_projections.add(projection)
-
-        if not needed_projections:
+        if tile_store.is_vector_ready(item.name):
             return
 
         path = UPath(item.path_uri)
@@ -369,14 +348,7 @@ class VectorImporter(Importer):
                         )
                     )
 
-                for projection in needed_projections:
-                    cur_features = [feat.to_projection(projection) for feat in features]
-                    layer = tile_store.create_layer(
-                        (str(projection),),
-                        LayerMetadata(projection, None, {}),
-                    )
-                    layer.write_vector(cur_features)
-                    layer.set_property("completed", True)
+                tile_store.write_vector(item.name, features)
 
 
 class LocalFiles(DataSource):
@@ -445,7 +417,7 @@ class LocalFiles(DataSource):
 
     def ingest(
         self,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         items: list[Item],
         geometries: list[list[STGeometry]],
     ) -> None:
@@ -457,5 +429,4 @@ class LocalFiles(DataSource):
             geometries: a list of geometries needed for each item
         """
         for item, cur_geometries in zip(items, geometries):
-            cur_tile_store = PrefixedTileStore(tile_store, (item.name,))
-            self.importer.ingest_item(self.config, cur_tile_store, item, cur_geometries)
+            self.importer.ingest_item(self.config, tile_store, item, cur_geometries)
