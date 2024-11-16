@@ -2,7 +2,9 @@
 
 import io
 import json
+import os
 import random
+import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Generator
 from datetime import datetime, timedelta
@@ -20,13 +22,15 @@ from rslearn.config import QueryConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
-from rslearn.tile_stores import PrefixedTileStore, TileStore
-from rslearn.utils import logger
+from rslearn.log_utils import get_logger
+from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath, open_atomic
 from rslearn.utils.geometry import STGeometry, flatten_shape, split_at_prime_meridian
+from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 from .copernicus import get_harmonize_callback, get_sentinel2_tiles
-from .raster_source import get_needed_projections, ingest_raster
+
+logger = get_logger(__name__)
 
 
 # TODO: this is a copy of the Sentinel2Item class in aws_open_data.py
@@ -546,7 +550,7 @@ class Sentinel2(DataSource):
 
     def ingest(
         self,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         items: list[Sentinel2Item],
         geometries: list[list[STGeometry]],
     ) -> None:
@@ -557,45 +561,44 @@ class Sentinel2(DataSource):
             items: the items to ingest
             geometries: a list of geometries needed for each item
         """
-        for item, cur_geometries in zip(items, geometries):
-            harmonize_callback = None
-            if self.harmonize:
-                harmonize_callback = get_harmonize_callback(
-                    self._get_xml_by_name(item.name)
-                )
-
+        for item in items:
             for suffix, band_names in self.bands:
-                cur_tile_store = PrefixedTileStore(
-                    tile_store, (item.name, "_".join(band_names))
-                )
-                needed_projections = get_needed_projections(
-                    cur_tile_store, band_names, self.config.band_sets, cur_geometries
-                )
-                if not needed_projections:
+                if tile_store.is_raster_ready(item.name, band_names):
                     continue
 
-                buf = io.BytesIO()
-                blob = self.bucket.blob(item.blob_prefix + suffix)
-                if not blob.exists():
-                    continue
-                logger.info(
-                    "gcp_public_data start downloading %s", item.blob_prefix + suffix
-                )
-                blob.download_to_file(buf)
-                buf.seek(0)
-                logger.info(
-                    "gcp_public_data done downloading %s, now ingesting into tile store",
-                    item.blob_prefix + suffix,
-                )
-                with rasterio.open(buf) as raster:
-                    for projection in needed_projections:
-                        ingest_raster(
-                            tile_store=cur_tile_store,
-                            raster=raster,
-                            projection=projection,
-                            time_range=item.geometry.time_range,
-                            layer_config=self.config,
-                            array_callback=harmonize_callback,
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    fname = os.path.join(tmp_dir, suffix)
+                    blob = self.bucket.blob(item.blob_prefix + suffix)
+                    logger.info(
+                        "gcp_public_data start downloading %s",
+                        item.blob_prefix + suffix,
+                    )
+                    blob.download_to_filename(fname)
+                    logger.info(
+                        "gcp_public_data done downloading %s, now ingesting into tile store",
+                        item.blob_prefix + suffix,
+                    )
+
+                    harmonize_callback = None
+                    if self.harmonize:
+                        harmonize_callback = get_harmonize_callback(
+                            self._get_xml_by_name(item.name)
+                        )
+
+                    if harmonize_callback is not None:
+                        # In this case we need to read the array, convert the pixel
+                        # values, and pass modified array directly to the TileStore.
+                        with rasterio.open(fname) as src:
+                            array = src.read()
+                            projection, bounds = get_raster_projection_and_bounds(src)
+                        array = harmonize_callback(array)
+                        tile_store.write_raster(
+                            item.name, band_names, projection, bounds, array
+                        )
+
+                    else:
+                        tile_store.write_raster_file(
+                            item.name, band_names, UPath(fname)
                         )
 
                 logger.info(
