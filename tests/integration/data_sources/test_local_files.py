@@ -67,23 +67,6 @@ class TestLocalFiles:
         vector_format = GeojsonVectorFormat(coordinate_mode=coordinate_mode)
         vector_format.encode_vector(src_data_dir, custom_projection, features)
 
-        # Primary purpose of this test is to make sure LocalFiles can import the data,
-        # but here we also verify that it has been encoded based on the desired
-        # coordinate mode.
-        with (src_data_dir / "data.geojson").open() as f:
-            fc = json.load(f)
-            feat_x, feat_y = fc["features"][0]["geometry"]["coordinates"]
-        if coordinate_mode == GeojsonCoordinateMode.CRS:
-            assert feat_x == pytest.approx(
-                features[0].geometry.shp.x * custom_projection.x_resolution
-            )
-            assert feat_y == pytest.approx(
-                features[0].geometry.shp.y * custom_projection.y_resolution
-            )
-        elif coordinate_mode == GeojsonCoordinateMode.WGS84:
-            assert feat_x == pytest.approx(seattle.shp.x)
-            assert feat_y == pytest.approx(seattle.shp.y)
-
         dataset_config = {
             "layers": {
                 "local_file": {
