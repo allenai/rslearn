@@ -232,9 +232,13 @@ class Sentinel2(DataSource):
             # index.csv.gz.
             if row["source_url"] and not row["source_url"].endswith("index.csv.gz"):
                 base_url = row["source_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
-            else:
-                assert row["base_url"] is not None and row["base_url"] != ""
+            elif row["base_url"] is not None and row["base_url"] != "":
                 base_url = row["base_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
+            else:
+                raise ValueError(
+                    f"Unexpected value '{row['source_url']}' in column 'source_url'"
+                    + f" and '{row['base_url']} in column 'base_url'"
+                )
 
             product_id = row["product_id"]
             product_id_parts = product_id.split("_")
