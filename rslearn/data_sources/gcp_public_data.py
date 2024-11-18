@@ -21,6 +21,7 @@ from upath import UPath
 from rslearn.config import QueryConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
+from rslearn.data_sources.raster_source import is_raster_needed
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath, open_atomic
@@ -550,6 +551,8 @@ class Sentinel2(DataSource):
         """
         for item in items:
             for suffix, band_names in self.bands:
+                if not is_raster_needed(band_names, self.config.band_sets):
+                    continue
                 if tile_store.is_raster_ready(item.name, band_names):
                     continue
 
@@ -558,8 +561,10 @@ class Sentinel2(DataSource):
                     blob = self.bucket.blob(item.blob_prefix + suffix)
                     blob.download_to_filename(fname)
 
+                    # Harmonize values if needed.
+                    # TCI does not need harmonization.
                     harmonize_callback = None
-                    if self.harmonize:
+                    if self.harmonize and suffix != "TCI.jp2":
                         harmonize_callback = get_harmonize_callback(
                             self._get_xml_by_name(item.name)
                         )
