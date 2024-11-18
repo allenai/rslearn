@@ -23,12 +23,15 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.raster_source import is_raster_needed
 from rslearn.data_sources.utils import match_candidate_items_to_window
+from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath, open_atomic
 from rslearn.utils.geometry import STGeometry, flatten_shape, split_at_prime_meridian
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 from .copernicus import get_harmonize_callback, get_sentinel2_tiles
+
+logger = get_logger(__name__)
 
 
 # TODO: this is a copy of the Sentinel2Item class in aws_open_data.py
@@ -389,10 +392,8 @@ class Sentinel2(DataSource):
                 items = []
 
                 for product_prefix in ["S2A_MSIL1C", "S2B_MSIL1C"]:
-                    blob_prefix = (
-                        f"tiles/{cell_part1}/{cell_part2}/{cell_part3}/"
-                        + f"{product_prefix}_{year}"
-                    )
+                    cell_folder = f"tiles/{cell_part1}/{cell_part2}/{cell_part3}"
+                    blob_prefix = f"{cell_folder}/{product_prefix}_{year}"
                     blobs = self.bucket.list_blobs(prefix=blob_prefix, delimiter="/")
 
                     # Need to consume the iterator to obtain folder names.
@@ -407,7 +408,21 @@ class Sentinel2(DataSource):
                         expected_suffix = ".SAFE"
                         assert folder_name.endswith(expected_suffix)
                         item_name = folder_name.split(expected_suffix)[0]
-                        # TODO: has big problem here
+
+                        # Make sure metadata XML blob exists, otherwise we won't be
+                        # able to load the item.
+                        # (Sometimes there is a .SAFE folder but some files like the
+                        # XML file are just missing for whatever reason.)
+                        xml_blob_path = f"{cell_folder}/{folder_name}/MTD_MSIL1C.xml"
+                        xml_blob = self.bucket.blob(xml_blob_path)
+                        if not xml_blob.exists():
+                            logger.warning(
+                                "no metadata XML for Sentinel-2 folder %s at %s",
+                                folder_name,
+                                xml_blob_path,
+                            )
+                            continue
+
                         item = self.get_item_by_name(item_name)
                         items.append(item)
 

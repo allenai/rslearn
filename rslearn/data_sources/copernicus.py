@@ -65,6 +65,10 @@ def get_harmonize_callback(
 
 
 def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
+    """Cache the tiles from SENTINEL2_TILE_URL.
+
+    This way we just need to download it once.
+    """
     json_fname = cache_dir / "tile_index.json"
 
     if not json_fname.exists():
@@ -120,6 +124,9 @@ def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
 @functools.cache
 def load_sentinel2_tile_index(cache_dir: UPath) -> GridIndex:
     """Load a GridIndex over Sentinel-2 tiles.
+
+    This function is cached so the GridIndex only needs to be constructed once (per
+    process).
 
     Args:
         cache_dir: the directory to cache the list of Sentinel-2 tiles.
