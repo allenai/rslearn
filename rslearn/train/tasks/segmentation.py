@@ -12,22 +12,23 @@ from rslearn.utils import Feature
 
 from .task import BasicTask
 
+# TODO: This is duplicated code fix it
 DEFAULT_COLORS = [
-    [255, 0, 0],
-    [0, 255, 0],
-    [0, 0, 255],
-    [255, 255, 0],
-    [0, 255, 255],
-    [255, 0, 255],
-    [0, 128, 0],
-    [255, 160, 122],
-    [139, 69, 19],
-    [128, 128, 128],
-    [255, 255, 255],
-    [143, 188, 143],
-    [95, 158, 160],
-    [255, 200, 0],
-    [128, 0, 0],
+    (255, 0, 0),
+    (0, 255, 0),
+    (0, 0, 255),
+    (255, 255, 0),
+    (0, 255, 255),
+    (255, 0, 255),
+    (0, 128, 0),
+    (255, 160, 122),
+    (139, 69, 19),
+    (128, 128, 128),
+    (255, 255, 255),
+    (143, 188, 143),
+    (95, 158, 160),
+    (255, 200, 0),
+    (128, 0, 0),
 ]
 
 
@@ -40,8 +41,8 @@ class SegmentationTask(BasicTask):
         colors: list[tuple[int, int, int]] = DEFAULT_COLORS,
         zero_is_invalid: bool = False,
         metric_kwargs: dict[str, Any] = {},
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         """Initialize a new SegmentationTask.
 
         Args:
@@ -60,7 +61,7 @@ class SegmentationTask(BasicTask):
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, torch.Tensor | list[Feature]],
+        raw_inputs: dict[str, torch.Tensor],
         metadata: dict[str, Any],
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -78,6 +79,7 @@ class SegmentationTask(BasicTask):
         if not load_targets:
             return {}, {}
 
+        # TODO: List[Feature] is currently not supported
         assert raw_inputs["targets"].shape[0] == 1
         labels = raw_inputs["targets"][0, :, :].long()
 
@@ -123,6 +125,8 @@ class SegmentationTask(BasicTask):
             a dictionary mapping image name to visualization image
         """
         image = super().visualize(input_dict, target_dict, output)["image"]
+        if target_dict is None:
+            raise ValueError("target_dict is required for visualization")
         gt_classes = target_dict["classes"].cpu().numpy()
         pred_classes = output.cpu().numpy().argmax(axis=0)
         gt_vis = np.zeros((gt_classes.shape[0], gt_classes.shape[1], 3), dtype=np.uint8)
@@ -159,7 +163,7 @@ class SegmentationHead(torch.nn.Module):
         logits: torch.Tensor,
         inputs: list[dict[str, Any]],
         targets: list[dict[str, Any]] | None = None,
-    ):
+    ) -> tuple[torch.Tensor, dict[str, Any]]:
         """Compute the segmentation outputs from logits and targets.
 
         Args:

@@ -10,6 +10,7 @@ Each source supports operations to lookup items that match with spatiotemporal
 geometries, and ingest those items.
 """
 
+import functools
 import importlib
 
 from upath import UPath
@@ -19,6 +20,7 @@ from rslearn.config import LayerConfig
 from .data_source import DataSource, Item, ItemLookupDataSource, RetrieveItemDataSource
 
 
+@functools.cache
 def data_source_from_config(config: LayerConfig, ds_path: UPath) -> DataSource:
     """Loads a data source from config dict.
 
@@ -26,6 +28,8 @@ def data_source_from_config(config: LayerConfig, ds_path: UPath) -> DataSource:
         config: the LayerConfig containing this data source.
         ds_path: the dataset root directory.
     """
+    if config.data_source is None:
+        raise ValueError("No data source specified")
     name = config.data_source.name
     module_name = ".".join(name.split(".")[:-1])
     class_name = name.split(".")[-1]

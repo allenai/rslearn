@@ -112,7 +112,7 @@ class BandSetConfig:
         self,
         config_dict: dict[str, Any],
         dtype: DType,
-        bands: list[str] | None = None,
+        bands: list[str],
         format: dict[str, Any] | None = None,
         zoom_offset: int = 0,
         remap: dict[str, Any] | None = None,
@@ -130,13 +130,14 @@ class BandSetConfig:
         """
         self.config_dict = config_dict
         self.bands = bands
-        self.format = format
         self.dtype = dtype
         self.zoom_offset = zoom_offset
         self.remap = remap
 
-        if not self.format:
+        if format is None:
             self.format = {"name": "geotiff"}
+        else:
+            self.format = format
 
     def serialize(self) -> dict[str, Any]:
         """Serialize this BandSetConfig to a config dict, currently unused."""
@@ -158,11 +159,12 @@ class BandSetConfig:
         kwargs = dict(
             config_dict=config,
             dtype=DType(config["dtype"]),
+            bands=config["bands"],
         )
-        for k in ["bands", "format", "zoom_offset", "remap"]:
+        for k in ["format", "zoom_offset", "remap"]:
             if k in config:
                 kwargs[k] = config[k]
-        return BandSetConfig(**kwargs)
+        return BandSetConfig(**kwargs)  # type: ignore
 
     def get_final_projection_and_bounds(
         self, projection: Projection, bounds: PixelBounds | None
@@ -187,11 +189,15 @@ class BandSetConfig:
             projection.x_resolution / (2**self.zoom_offset),
             projection.y_resolution / (2**self.zoom_offset),
         )
-        if bounds:
+        if bounds is not None:
             if self.zoom_offset > 0:
-                bounds = tuple(x * (2**self.zoom_offset) for x in bounds)
+                zoom_factor = 2**self.zoom_offset
+                bounds = tuple(x * zoom_factor for x in bounds)  # type: ignore
             else:
-                bounds = tuple(x // (2 ** (-self.zoom_offset)) for x in bounds)
+                bounds = tuple(
+                    x // (2 ** (-self.zoom_offset))
+                    for x in bounds  # type: ignore
+                )
         return projection, bounds
 
 
@@ -422,7 +428,7 @@ class RasterLayerConfig(LayerConfig):
             ]
         if "alias" in config:
             kwargs["alias"] = config["alias"]
-        return RasterLayerConfig(**kwargs)
+        return RasterLayerConfig(**kwargs)  # type: ignore
 
 
 class VectorLayerConfig(LayerConfig):
@@ -456,7 +462,7 @@ class VectorLayerConfig(LayerConfig):
         Args:
             config: the config dict for this VectorLayerConfig
         """
-        kwargs = {"layer_type": LayerType(config["type"])}
+        kwargs: dict[str, Any] = {"layer_type": LayerType(config["type"])}
         if "data_source" in config:
             kwargs["data_source"] = DataSourceConfig.from_config(config["data_source"])
         if "zoom_offset" in config:
@@ -465,7 +471,7 @@ class VectorLayerConfig(LayerConfig):
             kwargs["format"] = VectorFormatConfig.from_config(config["format"])
         if "alias" in config:
             kwargs["alias"] = config["alias"]
-        return VectorLayerConfig(**kwargs)
+        return VectorLayerConfig(**kwargs)  # type: ignore
 
     def get_final_projection_and_bounds(
         self, projection: Projection, bounds: PixelBounds | None
@@ -488,9 +494,12 @@ class VectorLayerConfig(LayerConfig):
         )
         if bounds:
             if self.zoom_offset > 0:
-                bounds = tuple(x * (2**self.zoom_offset) for x in bounds)
+                bounds = tuple(x * (2**self.zoom_offset) for x in bounds)  # type: ignore
             else:
-                bounds = tuple(x // (2 ** (-self.zoom_offset)) for x in bounds)
+                bounds = tuple(
+                    x // (2 ** (-self.zoom_offset))
+                    for x in bounds  # type: ignore
+                )
         return projection, bounds
 
 

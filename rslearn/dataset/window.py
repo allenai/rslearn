@@ -7,8 +7,11 @@ from typing import Any
 import shapely
 from upath import UPath
 
+from rslearn.log_utils import get_logger
 from rslearn.utils import Projection, STGeometry
 from rslearn.utils.fsspec import open_atomic
+
+logger = get_logger(__name__)
 
 
 class WindowLayerData:
@@ -115,6 +118,7 @@ class Window:
             "options": self.options,
         }
         metadata_path = self.path / "metadata.json"
+        logger.info(f"Saving window metadata to {metadata_path}")
         with open_atomic(metadata_path, "w") as f:
             json.dump(metadata, f)
 
@@ -141,6 +145,7 @@ class Window:
         """Save layer datas to items.json."""
         json_data = [layer_data.serialize() for layer_data in layer_datas.values()]
         items_fname = self.path / "items.json"
+        logger.info(f"Saving window items to {items_fname}")
         with open_atomic(items_fname, "w") as f:
             json.dump(json_data, f)
 

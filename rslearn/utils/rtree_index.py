@@ -18,7 +18,7 @@ class RtreeIndex(SpatialIndex):
     Both in-memory and on-disk options are supported.
     """
 
-    def __init__(self, fname: str | None = None):
+    def __init__(self, fname: str | None = None) -> None:
         """Initialize a new RtreeIndex.
 
         If fname is set, the index is persisted on disk, otherwise it is in-memory.
@@ -50,6 +50,7 @@ class RtreeIndex(SpatialIndex):
         self.counter += 1
         self.index.insert(id=self.counter, coordinates=box, obj=data)
 
+    # TODO: Make a named tuple for all the bounding box stuff
     def query(self, box: tuple[float, float, float, float]) -> list[Any]:
         """Query the index for objects intersecting a box.
 
@@ -61,6 +62,15 @@ class RtreeIndex(SpatialIndex):
         """
         results = self.index.intersection(box, objects=True)
         return [r.object for r in results]
+
+
+def delete_partially_created_local_files(fname: str) -> None:
+    """Delete partially created .dat and .idx files."""
+    extensions = [".dat", ".idx"]
+    for ext in extensions:
+        cur_fname = fname + ext
+        if os.path.exists(cur_fname):
+            os.unlink(cur_fname)
 
 
 def get_cached_rtree(
@@ -96,12 +106,7 @@ def get_cached_rtree(
             local_fname = (cache_dir / "rtree_index").path
         else:
             local_fname = os.path.join(tmp_dir, "rtree_index")
-
-        # Delete any local files that might be partially created.
-        for ext in extensions:
-            cur_fname = local_fname + ext
-            if os.path.exists(cur_fname):
-                os.unlink(cur_fname)
+        delete_partially_created_local_files(local_fname)
 
         rtree_index = RtreeIndex(local_fname)
         build_fn(rtree_index)

@@ -69,7 +69,7 @@ class Crop(Transform):
             "remove_from_top": remove_from_top,
         }
 
-    def apply_image(self, image: torch.Tensor, state: dict[str, bool]) -> torch.Tensor:
+    def apply_image(self, image: torch.Tensor, state: dict[str, Any]) -> torch.Tensor:
         """Apply the sampled state on the specified image.
 
         Args:
@@ -97,7 +97,9 @@ class Crop(Transform):
         """
         raise NotImplementedError
 
-    def forward(self, input_dict, target_dict):
+    def forward(
+        self, input_dict: dict[str, Any], target_dict: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Apply transform over the inputs and targets.
 
         Args:
@@ -116,6 +118,8 @@ class Crop(Transform):
             ):
                 smallest_image_shape = image.shape[-2:]
 
+        if smallest_image_shape is None:
+            raise ValueError("No image found to crop")
         state = self.sample_state(smallest_image_shape)
 
         self.apply_fn(

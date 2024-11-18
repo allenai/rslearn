@@ -1,6 +1,6 @@
 """Classes to implement dataset materialization."""
 
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 import numpy as np
 import numpy.typing as npt
@@ -24,8 +24,10 @@ from .window import Window
 
 Materializers = ClassRegistry()
 
+LayerConfigType = TypeVar("LayerConfigType", bound=LayerConfig)
 
-class Materializer:
+
+class Materializer(Generic[LayerConfigType]):
     """An abstract class that materializes data from a tile store."""
 
     def materialize(
@@ -33,7 +35,7 @@ class Materializer:
         tile_store: TileStore,
         window: Window,
         layer_name: str,
-        layer_cfg: LayerConfig,
+        layer_cfg: LayerConfigType,
         item_groups: list[list[Item]],
     ) -> None:
         """Materialize portions of items corresponding to this window into the dataset.
@@ -82,6 +84,8 @@ def read_raster_window_from_tiles(
     dst_row_offset = intersection[1] - bounds[1]
 
     src = ts_layer.read_raster(intersection)
+    if src is None:
+        raise ValueError(f"No raster data found for bounds {intersection}")
     src = src[src_indexes, :, :]
     if remapper:
         src = remapper(src, dst.dtype)
@@ -97,7 +101,7 @@ def read_raster_window_from_tiles(
 
 
 @Materializers.register("raster")
-class RasterMaterializer(Materializer):
+class RasterMaterializer(Materializer[RasterLayerConfig]):
     """A Materializer for raster data."""
 
     def materialize(
@@ -105,7 +109,7 @@ class RasterMaterializer(Materializer):
         tile_store: TileStore,
         window: Window,
         layer_name: str,
-        layer_cfg: LayerConfig,
+        layer_cfg: RasterLayerConfig,
         item_groups: list[list[Item]],
     ) -> None:
         """Materialize portions of items corresponding to this window into the dataset.
@@ -141,6 +145,12 @@ class RasterMaterializer(Materializer):
             remapper = None
             if band_cfg.remap:
                 remapper = load_remapper(band_cfg.remap)
+
+            if band_cfg.format is None or band_cfg.bands is None or bounds is None:
+                raise ValueError(
+                    f"No raster format or bands specified for {layer_name} \
+                          with  {band_cfg}"
+                )
 
             raster_format = load_raster_format(
                 RasterFormatConfig(band_cfg.format["name"], band_cfg.format)
@@ -182,6 +192,11 @@ class RasterMaterializer(Materializer):
                         ts_layer = layer_tile_store.get_layer(
                             (item.name, suffix, str(projection))
                         )
+                        if ts_layer is None:
+                            raise ValueError(
+                                f"No tile store layer found for {item.name} {suffix} \
+                                      {projection}"
+                            )
                         read_raster_window_from_tiles(
                             dst, ts_layer, bounds, src_indexes, dst_indexes, remapper
                         )
@@ -223,6 +238,8 @@ class VectorMaterializer(Materializer):
         projection, bounds = layer_cfg.get_final_projection_and_bounds(
             window.projection, window.bounds
         )
+        if bounds is None:
+            raise ValueError(f"No bounds specified for {layer_name}")
         vector_format = load_vector_format(layer_cfg.format)
 
         out_layer_dirs: list[UPath] = []
@@ -241,6 +258,10 @@ class VectorMaterializer(Materializer):
                 ts_layer = get_tile_store_for_layer(
                     tile_store, layer_name, layer_cfg
                 ).get_layer((item.name, str(projection)))
+                if ts_layer is None:
+                    raise ValueError(
+                        f"No tile store layer found for {item.name} {projection}"
+                    )
                 cur_features = ts_layer.read_vector(bounds)
                 features.extend(cur_features)
 

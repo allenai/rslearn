@@ -75,5 +75,6 @@ def local_files_dataset(tmp_path: pathlib.Path) -> Dataset:
     ).save()
 
     dataset = Dataset(ds_path)
-    dataset.src_dir = src_data_dir
+    # Hack for testing purposes
+    dataset.src_dir = src_data_dir  # type: ignore
     return dataset
