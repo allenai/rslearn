@@ -323,7 +323,12 @@ class GeotiffRasterFormat(RasterFormat):
 
     fname = "geotiff.tif"
 
-    def __init__(self, block_size: int = TILE_SIZE, always_enable_tiling: bool = False):
+    def __init__(
+        self,
+        block_size: int = TILE_SIZE,
+        always_enable_tiling: bool = False,
+        geotiff_options: dict[str, Any] = {},
+    ):
         """Initializes a GeotiffRasterFormat.
 
         Args:
@@ -332,9 +337,11 @@ class GeotiffRasterFormat(RasterFormat):
                 GeoTIFFs. The default is False so that tiling is only used if the size
                 of the GeoTIFF exceeds the block_size on either dimension. If True,
                 then tiling is always enabled (cloud-optimized GeoTIFF).
+            geotiff_options: other options to pass to rasterio.open (for writes).
         """
         self.block_size = block_size
         self.always_enable_tiling = always_enable_tiling
+        self.geotiff_options = geotiff_options
 
     def encode_raster(
         self,
@@ -382,6 +389,8 @@ class GeotiffRasterFormat(RasterFormat):
             profile["tiled"] = True
             profile["blockxsize"] = self.block_size
             profile["blockysize"] = self.block_size
+
+        profile.update(self.geotiff_options)
 
         path.mkdir(parents=True, exist_ok=True)
         logger.info(f"Writing geotiff to {path / self.fname}")
