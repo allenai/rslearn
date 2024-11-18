@@ -1,5 +1,4 @@
 import json
-import os
 import pathlib
 
 import pytest
@@ -64,7 +63,7 @@ class TestCoordinateModes:
         self,
         tmp_path: pathlib.Path,
         seattle_point: STGeometry,
-        coordinate_mode: GeojsonCoordinateMode,
+        request: pytest.FixtureRequest,
     ) -> UPath:
         # Make a vector dataset with one point in EPSG:3857.
         # We will use it to check that it intersects correctly with
@@ -77,7 +76,7 @@ class TestCoordinateModes:
         ]
         src_data_dir = ds_path / "src_data"
         src_data_dir.mkdir(parents=True, exist_ok=True)
-        vector_format = GeojsonVectorFormat(coordinate_mode=coordinate_mode)
+        vector_format = GeojsonVectorFormat(coordinate_mode=request.param)
         vector_format.encode_vector(src_data_dir, self.source_data_projection, features)
 
         dataset_config = {
@@ -95,8 +94,10 @@ class TestCoordinateModes:
                 "root_dir": "tiles",
             },
         }
-        with open(os.path.join(tmp_path, "config.json"), "w") as f:
+        with (ds_path / "config.json").open("w") as f:
             json.dump(dataset_config, f)
+
+        return ds_path
 
     def test_matching_units_in_wrong_crs(
         self, seattle_point: STGeometry, vector_ds_path: UPath
