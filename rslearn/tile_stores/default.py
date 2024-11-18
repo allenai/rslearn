@@ -43,6 +43,7 @@ class DefaultTileStore(TileStore):
         path_suffix: str = "tiles",
         convert_rasters_to_cogs: bool = True,
         tile_size: int = 256,
+        geotiff_options: dict[str, Any] = {},
     ):
         """Create a new DefaultTileStore.
 
@@ -53,10 +54,12 @@ class DefaultTileStore(TileStore):
             convert_rasters_to_cogs: whether to re-encode all raster files to tiled
                 GeoTIFFs.
             tile_size: if converting to COGs, the tile size to use.
+            geotiff_options: other options to pass to rasterio.open (for writes).
         """
         self.path_suffix = path_suffix
         self.convert_rasters_to_cogs = convert_rasters_to_cogs
         self.tile_size = tile_size
+        self.geotiff_options = geotiff_options
 
         self.path: UPath | None = None
 
@@ -220,7 +223,7 @@ class DefaultTileStore(TileStore):
             array: the raster data.
         """
         raster_dir = self._get_raster_dir(layer_name, item_name, bands)
-        raster_format = GeotiffRasterFormat()
+        raster_format = GeotiffRasterFormat(geotiff_options=self.geotiff_options)
         raster_format.encode_raster(raster_dir, projection, bounds, array)
         (raster_dir / COMPLETED_FNAME).touch()
 
@@ -257,6 +260,8 @@ class DefaultTileStore(TileStore):
                 "blockxsize": self.tile_size,
                 "blockysize": self.tile_size,
             }
+
+            output_profile.update(self.geotiff_options)
 
             with open_rasterio_upath_writer(
                 raster_dir / "geotiff.tif", **output_profile

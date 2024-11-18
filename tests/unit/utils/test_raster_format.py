@@ -82,3 +82,18 @@ def test_geotiff_out_of_bounds(tmp_path: pathlib.Path, monkeypatch: Any) -> None
     assert array.shape == (1, 4, 4)
     assert np.all(array == 0)
     assert logger.warned
+
+
+def test_geotiff_compress_zstd(tmp_path: pathlib.Path) -> None:
+    # Make sure we can use ZSTD compression successfully.
+    path = UPath(tmp_path)
+    projection = Projection(CRS.from_epsg(3857), 1, -1)
+    array = np.zeros((1, 4, 4))
+    raster_format = GeotiffRasterFormat(
+        geotiff_options=dict(
+            compress="zstd",
+        )
+    )
+    raster_format.encode_raster(path, projection, (0, 0, 4, 4), array)
+    with rasterio.open(path / "geotiff.tif") as raster:
+        assert raster.profile["compress"] == "zstd"
