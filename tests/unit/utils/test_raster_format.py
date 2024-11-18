@@ -1,4 +1,5 @@
 import pathlib
+from typing import Any
 
 import numpy as np
 import rasterio
@@ -6,6 +7,7 @@ from rasterio.crs import CRS
 from upath import UPath
 
 from rslearn.const import Projection
+from rslearn.utils import raster_format
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
@@ -42,3 +44,41 @@ def test_geotiff_tiling(tmp_path: pathlib.Path) -> None:
     with (path / "geotiff.tif").open("rb") as f:
         with rasterio.open(f) as raster:
             assert raster.profile["tiled"]
+
+
+def test_geotiff_out_of_bounds(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
+    # GeotiffRasterFormat should log warning but return zero array if we request a
+    # tile that is fully out of bounds.
+    # If it is partially out of bounds, it shouldn't warn and should just return the
+    # partial content.
+    path = UPath(tmp_path)
+    projection = Projection(CRS.from_epsg(3857), 1, -1)
+    format = GeotiffRasterFormat()
+
+    array = np.ones((1, 8, 8), dtype=np.uint8)
+    format.encode_raster(path, projection, (0, 0, 8, 8), array)
+
+    class TestLogger:
+        def __init__(self) -> None:
+            self.warned = False
+
+        def warning(self, *args: list[Any], **kwargs: dict[str, Any]) -> None:
+            self.warned = True
+
+    logger = TestLogger()
+    monkeypatch.setattr(raster_format, "logger", logger)
+    array = format.decode_raster(path, (2, 2, 6, 6))
+    assert array.shape == (1, 4, 4)
+    assert np.all(array == 1)
+    assert not logger.warned
+
+    array = format.decode_raster(path, (4, 4, 12, 12))
+    assert array.shape == (1, 8, 8)
+    assert np.all(array[:, 0:4, 0:4] == 1)
+    assert np.all(array[:, 0:8, 4:8] == 0)
+    assert not logger.warned
+
+    array = format.decode_raster(path, (8, 8, 12, 12))
+    assert array.shape == (1, 4, 4)
+    assert np.all(array == 0)
+    assert logger.warned
