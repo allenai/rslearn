@@ -307,6 +307,8 @@ class VectorImporter(Importer):
                             bounds[2] = max(bounds[2], cur_bounds[2])
                             bounds[3] = max(bounds[3], cur_bounds[3])
 
+                    # Normal GeoJSON should have coordinates in CRS coordinates, i.e. it
+                    # should be 1 projection unit/pixel.
                     projection = Projection(crs, 1, 1)
                     geometry = STGeometry(
                         projection,
@@ -363,6 +365,8 @@ class VectorImporter(Importer):
         with get_upath_local(path, extra_paths=aux_files) as local_fname:
             with fiona.open(local_fname) as src:
                 crs = CRS.from_wkt(src.crs.to_wkt())
+                # Normal GeoJSON should have coordinates in CRS coordinates, i.e. it
+                # should be 1 projection unit/pixel.
                 projection = Projection(crs, 1, 1)
 
                 features = []
