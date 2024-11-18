@@ -32,24 +32,46 @@ def test_f1_metric() -> None:
         "labels": torch.tensor([0, 0, 0], dtype=torch.int32),
     }
 
-    metric = F1Metric(num_classes=1, cmp_mode="iou", cmp_threshold=0.5)
+    metric = F1Metric(
+        num_classes=1, cmp_mode="iou", cmp_threshold=0.5, score_thresholds=[0.8]
+    )
+    metric.update([pred_dict], [gt_dict])
+    f1 = metric.compute()
+    assert abs(f1 - 0.4) < EPSILON
+
+    metric = F1Metric(
+        num_classes=1, cmp_mode="iou", cmp_threshold=0.5, score_thresholds=[0.4]
+    )
+    metric.update([pred_dict], [gt_dict])
+    f1 = metric.compute()
+    assert abs(f1 - 1 / 3) < EPSILON
+
+    metric = F1Metric(
+        num_classes=1, cmp_mode="iou", cmp_threshold=0.5, score_thresholds=[0.4, 0.8]
+    )
     metric.update([pred_dict], [gt_dict])
     f1 = metric.compute()
     assert abs(f1 - 0.4) < EPSILON
 
     # With stricter IoU threshold, we should get 0 tp.
-    metric = F1Metric(num_classes=1, cmp_mode="iou", cmp_threshold=0.95)
+    metric = F1Metric(
+        num_classes=1, cmp_mode="iou", cmp_threshold=0.95, score_thresholds=[0.8]
+    )
     metric.update([pred_dict], [gt_dict])
     f1 = metric.compute()
     assert abs(f1 - 0) < EPSILON
 
     # Try distance threshold in same way (which compares centers).
-    metric = F1Metric(num_classes=1, cmp_mode="distance", cmp_threshold=2)
+    metric = F1Metric(
+        num_classes=1, cmp_mode="distance", cmp_threshold=2, score_thresholds=[0.8]
+    )
     metric.update([pred_dict], [gt_dict])
     f1 = metric.compute()
     assert abs(f1 - 0.4) < EPSILON
 
-    metric = F1Metric(num_classes=1, cmp_mode="distance", cmp_threshold=0.5)
+    metric = F1Metric(
+        num_classes=1, cmp_mode="distance", cmp_threshold=0.5, score_thresholds=[0.8]
+    )
     metric.update([pred_dict], [gt_dict])
     f1 = metric.compute()
     assert abs(f1 - 0) < EPSILON
