@@ -404,7 +404,6 @@ class Sentinel2(DataSource):
                         expected_suffix = ".SAFE"
                         assert folder_name.endswith(expected_suffix)
                         item_name = folder_name.split(expected_suffix)[0]
-                        # TODO: has big problem here
                         item = self.get_item_by_name(item_name)
                         items.append(item)
 
