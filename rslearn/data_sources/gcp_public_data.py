@@ -82,12 +82,12 @@ class Sentinel2(DataSource):
     The bucket is public and free so no credentials are needed.
     """
 
-    bucket_name = "gcp-public-data-sentinel-2"
+    BUCKET_NAME = "gcp-public-data-sentinel-2"
 
     # Name of BigQuery table containing index of Sentinel-2 scenes in the bucket.
-    table_name = "bigquery-public-data.cloud_storage_geo_index.sentinel_2_index"
+    TABLE_NAME = "bigquery-public-data.cloud_storage_geo_index.sentinel_2_index"
 
-    bands = [
+    BANDS = [
         ("B01.jp2", ["B01"]),
         ("B02.jp2", ["B02"]),
         ("B03.jp2", ["B03"]),
@@ -145,7 +145,7 @@ class Sentinel2(DataSource):
 
         self.index_cache_dir.mkdir(parents=True, exist_ok=True)
 
-        self.bucket = storage.Client().bucket(self.bucket_name)
+        self.bucket = storage.Client().bucket(self.BUCKET_NAME)
         self.rtree_index: Any | None = None
         if use_rtree_index:
             from rslearn.utils.rtree_index import RtreeIndex, get_cached_rtree
@@ -212,7 +212,7 @@ class Sentinel2(DataSource):
         query_str = f"""
             SELECT  source_url, base_url, product_id, sensing_time, granule_id,
                     east_lon, south_lat, west_lon, north_lat, cloud_cover
-            FROM    `{self.table_name}`
+            FROM    `{self.TABLE_NAME}`
         """
         if time_range is not None:
             query_str += f"""
@@ -227,12 +227,10 @@ class Sentinel2(DataSource):
             # If base_url is correct, then it seems the source_url always ends in
             # index.csv.gz.
             if row["source_url"] and not row["source_url"].endswith("index.csv.gz"):
-                base_url = row["source_url"].split("gs://gcp-public-data-sentinel-2/")[
-                    1
-                ]
+                base_url = row["source_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
             else:
                 assert row["base_url"] is not None and row["base_url"] != ""
-                base_url = row["base_url"].split("gs://gcp-public-data-sentinel-2/")[1]
+                base_url = row["base_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
 
             product_id = row["product_id"]
             product_id_parts = product_id.split("_")
@@ -543,7 +541,7 @@ class Sentinel2(DataSource):
         self, item: Sentinel2Item
     ) -> Generator[tuple[str, BinaryIO], None, None]:
         """Retrieves the rasters corresponding to an item as file streams."""
-        for suffix, _ in self.bands:
+        for suffix, _ in self.BANDS:
             blob_path = item.blob_prefix + suffix
             fname = blob_path.split("/")[-1]
             buf = io.BytesIO()
@@ -574,7 +572,7 @@ class Sentinel2(DataSource):
                     self._get_xml_by_name(item.name)
                 )
 
-            for suffix, band_names in self.bands:
+            for suffix, band_names in self.BANDS:
                 cur_tile_store = PrefixedTileStore(
                     tile_store, (item.name, "_".join(band_names))
                 )
