@@ -7,9 +7,12 @@ import tqdm
 from upath import UPath
 
 from rslearn.config import TileStoreConfig, load_layer_config
+from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, load_tile_store
 
 from .window import Window
+
+logger = get_logger(__name__)
 
 
 class Dataset:
@@ -37,21 +40,29 @@ class Dataset:
     materialize.
     """
 
-    def __init__(self, path: UPath) -> None:
+    def __init__(self, path: UPath, disabled_layers: list[str] = []) -> None:
         """Initializes a new Dataset.
 
         Args:
             path: the root directory of the dataset
+            disabled_layers: list of layers to disable
         """
         self.path = path
 
         # Load dataset configuration.
+
         with (self.path / "config.json").open("r") as f:
             config = json.load(f)
-            self.layers: dict = {
-                layer_name: load_layer_config(d)
-                for layer_name, d in config["layers"].items()
-            }
+            self.layers = {}
+            for layer_name, d in config["layers"].items():
+                # Layer names must not contain period, since we use period to
+                # distinguish different materialized groups within a layer.
+                assert "." not in layer_name, "layer names must not contain periods"
+                if layer_name in disabled_layers:
+                    logger.warning(f"Layer {layer_name} is disabled")
+                    continue
+                self.layers[layer_name] = load_layer_config(d)
+
             self.tile_store_config = TileStoreConfig.from_config(config["tile_store"])
             self.materializer_name = config.get("materialize")
 

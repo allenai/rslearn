@@ -8,7 +8,12 @@ from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from upath import UPath
 
-from rslearn.config import LayerType, RasterFormatConfig
+from rslearn.config import (
+    LayerType,
+    RasterFormatConfig,
+    RasterLayerConfig,
+    VectorLayerConfig,
+)
 from rslearn.dataset import Dataset
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.raster_format import load_raster_format
@@ -66,11 +71,13 @@ class RslearnWriter(BasePredictionWriter):
         # TODO: This is a bit of a hack to get the type checker to be happy.
         self.format: Any
         if self.layer_config.layer_type == LayerType.RASTER:
+            assert isinstance(self.layer_config, RasterLayerConfig)
             band_cfg = self.layer_config.band_sets[0]
             self.format = load_raster_format(
                 RasterFormatConfig(band_cfg.format["name"], band_cfg.format)
             )
         elif self.layer_config.layer_type == LayerType.VECTOR:
+            assert isinstance(self.layer_config, VectorLayerConfig)
             self.format = load_vector_format(self.layer_config.format)
         else:
             raise ValueError(f"invalid layer type {self.layer_config.layer_type}")
@@ -170,6 +177,7 @@ class RslearnWriter(BasePredictionWriter):
             )
 
             if self.layer_config.layer_type == LayerType.RASTER:
+                assert isinstance(self.layer_config, RasterLayerConfig)
                 band_dir = layer_dir / "_".join(self.layer_config.band_sets[0].bands)
                 self.format.encode_raster(
                     band_dir, metadata["projection"], window_bounds, pending_output

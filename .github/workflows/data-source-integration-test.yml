@@ -6,13 +6,13 @@ on:
     workflow_dispatch:
 
 env:
-REGISTRY: ghcr.io
-IMAGE_NAME: ${{ github.repository }}
-SERVICE_NAME: "rslearn_projects"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  SERVICE_NAME: "rslearn_projects"
 
 concurrency:
-group: ${{ github.workflow }}-${{ github.ref }}
-cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -104,6 +104,7 @@ jobs:
             -e TEST_XYZ_TILES_TEMPLATE="${{ secrets.TEST_XYZ_TILES_TEMPLATE }}" \
             -e TEST_USGS_LANDSAT_USERNAME="${{ secrets.TEST_USGS_LANDSAT_USERNAME }}" \
             -e TEST_USGS_LANDSAT_PASSWORD="${{ secrets.TEST_USGS_LANDSAT_PASSWORD }}" \
+            -e PL_API_KEY="${{ secrets.PL_API_KEY }}" \
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
