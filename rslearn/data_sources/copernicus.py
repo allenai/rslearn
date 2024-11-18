@@ -20,6 +20,7 @@ from rslearn.utils.geometry import STGeometry, flatten_shape
 from rslearn.utils.grid_index import GridIndex
 
 SENTINEL2_TILE_URL = "https://sentiwiki.copernicus.eu/__attachments/1692737/S2A_OPER_GIP_TILPAR_MPC__20151209T095117_V20150622T000000_21000101T000000_B00.zip"
+SENTINEL2_KML_NAMESPACE = "{http://www.opengis.net/kml/2.2}"
 
 logger = get_logger(__name__)
 
@@ -68,58 +69,65 @@ def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
     """
     json_fname = cache_dir / "tile_index.json"
 
-    if not json_fname.exists():
-        logger.info("caching list of Sentinel-2 tiles to %s", json_fname)
-        xml_assert_message = "unexpected Sentinel-2 tile XML structure"
+    if json_fname.exists():
+        return
 
-        # Identify the Sentinel-2 tile names and bounds using the KML file.
-        # First, download the zip file and extract and parse the KML.
-        buf = io.BytesIO()
-        with urllib.request.urlopen(SENTINEL2_TILE_URL) as response:
-            shutil.copyfileobj(response, buf)
-        buf.seek(0)
-        with zipfile.ZipFile(buf, "r") as zipf:
-            member_names = zipf.namelist()
-            assert len(member_names) == 1, xml_assert_message
-            with zipf.open(member_names[0]) as memberf:
-                tree = ET.parse(memberf)
+    logger.info("caching list of Sentinel-2 tiles to %s", json_fname)
+    xml_assert_message = "unexpected Sentinel-2 tile XML structure"
 
-        # The KML is list of Placemark so iterate over those.
-        namespace = "{http://www.opengis.net/kml/2.2}"
-        json_data: dict[str, tuple[float, float, float, float]] = {}
-        for placemark_node in tree.iter(namespace + "Placemark"):
-            name_node = placemark_node.find(namespace + "name")
-            assert (
-                name_node is not None and name_node.text is not None
-            ), xml_assert_message
-            tile_name = name_node.text
-            bounds = None
-            for coord_node in placemark_node.iter(namespace + "coordinates"):
-                # It is list of space-separated coordinates like:
-                #   180,-73.0597374076,0 176.8646237862,-72.9914734628,0 ...
-                assert coord_node.text is not None, xml_assert_message
-                point_strs = coord_node.text.strip().split()
-                for point_str in point_strs:
-                    parts = point_str.split(",")
-                    if len(parts) != 2 and len(parts) != 3:
-                        continue
-                    lon = float(parts[0])
-                    lat = float(parts[1])
-                    if bounds is None:
-                        bounds = (lon, lat, lon, lat)
-                    else:
-                        bounds = (
-                            min(bounds[0], lon),
-                            min(bounds[1], lat),
-                            max(bounds[2], lon),
-                            max(bounds[3], lat),
-                        )
+    # Identify the Sentinel-2 tile names and bounds using the KML file.
+    # First, download the zip file and extract and parse the KML.
+    buf = io.BytesIO()
+    with urllib.request.urlopen(SENTINEL2_TILE_URL) as response:
+        shutil.copyfileobj(response, buf)
+    buf.seek(0)
+    with zipfile.ZipFile(buf, "r") as zipf:
+        member_names = zipf.namelist()
+        assert len(member_names) == 1, xml_assert_message
+        with zipf.open(member_names[0]) as memberf:
+            tree = ET.parse(memberf)
 
-            assert bounds is not None, xml_assert_message
-            json_data[tile_name] = bounds
+    # Map from the tile name to the longitude/latitude bounds.
+    json_data: dict[str, tuple[float, float, float, float]] = {}
 
-        with open_atomic(json_fname, "w") as f:
-            json.dump(json_data, f)
+    # The KML is list of Placemark so iterate over those.
+    for placemark_node in tree.iter(SENTINEL2_KML_NAMESPACE + "Placemark"):
+        # The <name> node specifies the Sentinel-2 tile name.
+        name_node = placemark_node.find(SENTINEL2_KML_NAMESPACE + "name")
+        assert name_node is not None and name_node.text is not None, xml_assert_message
+        tile_name = name_node.text
+
+        # There may be one or more <coordinates> nodes depending on whether it is a
+        # MultiGeometry. Here we just iterate over all of the coordinates since we are
+        # only interested in the bounds in WGS-84 coordinates.
+        lons = []
+        lats = []
+        for coord_node in placemark_node.iter(SENTINEL2_KML_NAMESPACE + "coordinates"):
+            # It is list of space-separated coordinates like:
+            #   180,-73.0597374076,0 176.8646237862,-72.9914734628,0 ...
+            assert coord_node.text is not None, xml_assert_message
+            point_strs = coord_node.text.strip().split()
+            for point_str in point_strs:
+                parts = point_str.split(",")
+                if len(parts) != 2 and len(parts) != 3:
+                    continue
+
+                lon = float(parts[0])
+                lat = float(parts[1])
+                lons.append(lon)
+                lats.append(lat)
+
+        assert len(lons) > 0 and len(lats) > 0, xml_assert_message
+        bounds = (
+            min(lons),
+            min(lats),
+            max(lons),
+            max(lats),
+        )
+        json_data[tile_name] = bounds
+
+    with open_atomic(json_fname, "w") as f:
+        json.dump(json_data, f)
 
 
 @functools.cache
