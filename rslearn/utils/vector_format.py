@@ -12,10 +12,12 @@ from upath import UPath
 
 from rslearn.config import VectorFormatConfig
 from rslearn.const import WGS84_PROJECTION
+from rslearn.log_utils import get_logger
 
 from .feature import Feature
 from .geometry import PixelBounds, Projection, STGeometry
 
+logger = get_logger(__name__)
 VectorFormats = ClassRegistry()
 
 
@@ -126,7 +128,9 @@ class TileVectorFormat(VectorFormat):
                 "features": [geojson_feat for geojson_feat in geojson_features],
                 "properties": projection.serialize(),
             }
-            with (path / f"{col}_{row}.geojson").open("w") as f:
+            cur_fname = path / f"{col}_{row}.geojson"
+            logger.debug("writing tile (%d, %d) to %s", col, row, cur_fname)
+            with cur_fname.open("w") as f:
                 json.dump(fc, f)
 
     def decode_vector(self, path: UPath, bounds: PixelBounds) -> list[Feature]:
@@ -254,6 +258,11 @@ class GeojsonVectorFormat(VectorFormat):
             feat = feat.to_projection(output_projection)
             fc["features"].append(feat.to_geojson())
 
+        logger.debug(
+            "writing features to %s with coordinate mode %s",
+            fname,
+            self.coordinate_mode,
+        )
         with fname.open("w") as f:
             json.dump(fc, f)
 
