@@ -1,10 +1,11 @@
 import os
 import pathlib
 import random
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
+import shapely
 from upath import UPath
 
 from rslearn.config import (
@@ -15,15 +16,16 @@ from rslearn.config import (
     RasterLayerConfig,
     SpaceMode,
 )
+from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.gcp_public_data import Sentinel2
 from rslearn.tile_stores import FileTileStore
 from rslearn.utils import STGeometry
 
+TEST_BAND = "B04"
+
 
 class TestSentinel2:
     """Tests the Sentinel2 data source."""
-
-    TEST_BAND = "B04"
 
     def run_simple_test(
         self, tile_store_dir: UPath, seattle2020: STGeometry, **kwargs: Any
@@ -31,7 +33,7 @@ class TestSentinel2:
         """Apply test where we ingest an item corresponding to seattle2020."""
         layer_config = RasterLayerConfig(
             LayerType.RASTER,
-            [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[self.TEST_BAND])],
+            [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[TEST_BAND])],
         )
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
 
@@ -55,7 +57,7 @@ class TestSentinel2:
         expected_path = (
             tile_store_dir
             / item.name
-            / self.TEST_BAND
+            / TEST_BAND
             / str(seattle2020.projection)
             / "geotiff.tif"
         )
@@ -95,3 +97,59 @@ class TestSentinel2:
             index_cache_dir=index_cache_dir,
             use_rtree_index=use_rtree_index,
         )
+
+
+def test_prepare_zero_longitude_no_matches(tmp_path: pathlib.Path) -> None:
+    # Make sure get_items works for scenes and geometries near 0 longitude.
+    # At (0, 40) there should be no Sentinel-2 coverage.
+    layer_config = RasterLayerConfig(
+        LayerType.RASTER,
+        [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[TEST_BAND])],
+    )
+    query_config = QueryConfig(space_mode=SpaceMode.MOSAIC)
+    data_source = Sentinel2(
+        config=layer_config,
+        use_rtree_index=False,
+        index_cache_dir=UPath(tmp_path),
+    )
+    time_range = (
+        datetime(2024, 1, 1, tzinfo=timezone.utc),
+        datetime(2024, 2, 1, tzinfo=timezone.utc),
+    )
+    negative_geom = STGeometry(
+        WGS84_PROJECTION, shapely.box(-179.99, 40.0, -179.9, 40.1), time_range
+    )
+    positive_geom = STGeometry(
+        WGS84_PROJECTION, shapely.box(179.9, 40.0, 179.99, 40.1), time_range
+    )
+    groups = data_source.get_items([negative_geom, positive_geom], query_config)
+    for group in groups:
+        assert len(group) == 0
+
+
+def test_prepare_zero_longitude_yes_matches(tmp_path: pathlib.Path) -> None:
+    # Make sure get_items works for scenes and geometries near 0 longitude.
+    # At (0, 63) there should be some Sentinel-2 scenes.
+    layer_config = RasterLayerConfig(
+        LayerType.RASTER,
+        [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[TEST_BAND])],
+    )
+    query_config = QueryConfig(space_mode=SpaceMode.MOSAIC)
+    data_source = Sentinel2(
+        config=layer_config,
+        use_rtree_index=False,
+        index_cache_dir=UPath(tmp_path),
+    )
+    time_range = (
+        datetime(2024, 1, 1, tzinfo=timezone.utc),
+        datetime(2024, 2, 1, tzinfo=timezone.utc),
+    )
+    negative_geom = STGeometry(
+        WGS84_PROJECTION, shapely.box(-179.99, 63.0, -179.9, 63.1), time_range
+    )
+    positive_geom = STGeometry(
+        WGS84_PROJECTION, shapely.box(179.9, 63.0, 179.99, 63.1), time_range
+    )
+    groups = data_source.get_items([negative_geom, positive_geom], query_config)
+    for group in groups:
+        assert len(group) > 0 and len(group[0]) > 0

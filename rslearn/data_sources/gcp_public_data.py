@@ -400,6 +400,12 @@ class Sentinel2(DataSource):
                     for _ in blobs:
                         pass
 
+                    logger.debug(
+                        "under %s, found %d folders to scan",
+                        blob_prefix,
+                        len(blobs.prefixes),
+                    )
+
                     for prefix in blobs.prefixes:
                         folder_name = prefix.split("/")[-2]
                         expected_suffix = ".SAFE"
