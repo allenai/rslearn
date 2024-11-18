@@ -127,11 +127,15 @@ class Sentinel2(DataSource):
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
             use_rtree_index: whether to create an rtree index to enable faster lookups
-                (default true)
+                (default true). Note that the rtree is populated from a BigQuery table
+                where Google maintains an index, and this requires GCP credentials to
+                query; additionally, rtree creation can take several minutes/hours. Use
+                use_rtree_index=False to avoid the need for credentials.
             harmonize: harmonize pixel values across different processing baselines,
                 see https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
             rtree_time_range: only populate the rtree index with scenes within this
-                time range
+                time range. Restricting to a few months significantly speeds up rtree
+                creation time.
             rtree_cache_dir: by default, if use_rtree_index is enabled, the rtree is
                 stored in index_cache_dir (where product XML files are also stored). If
                 rtree_cache_dir is set, then the rtree is stored here instead (so
@@ -145,7 +149,7 @@ class Sentinel2(DataSource):
 
         self.index_cache_dir.mkdir(parents=True, exist_ok=True)
 
-        self.bucket = storage.Client().bucket(self.BUCKET_NAME)
+        self.bucket = storage.Client.create_anonymous_client().bucket(self.BUCKET_NAME)
         self.rtree_index: Any | None = None
         if use_rtree_index:
             from rslearn.utils.rtree_index import RtreeIndex, get_cached_rtree
