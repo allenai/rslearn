@@ -70,6 +70,8 @@ def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
 
     if not json_fname.exists():
         logger.info("caching list of Sentinel-2 tiles to %s", json_fname)
+        xml_assert_message = "unexpected Sentinel-2 tile XML structure"
+
         # Identify the Sentinel-2 tile names and bounds using the KML file.
         # First, download the zip file and extract and parse the KML.
         buf = io.BytesIO()
@@ -78,7 +80,7 @@ def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
         buf.seek(0)
         with zipfile.ZipFile(buf, "r") as zipf:
             member_names = zipf.namelist()
-            assert len(member_names) == 1
+            assert len(member_names) == 1, xml_assert_message
             with zipf.open(member_names[0]) as memberf:
                 tree = ET.parse(memberf)
 
@@ -87,13 +89,15 @@ def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
         json_data: dict[str, tuple[float, float, float, float]] = {}
         for placemark_node in tree.iter(namespace + "Placemark"):
             name_node = placemark_node.find(namespace + "name")
-            assert name_node is not None and name_node.text is not None
+            assert (
+                name_node is not None and name_node.text is not None
+            ), xml_assert_message
             tile_name = name_node.text
             bounds = None
             for coord_node in placemark_node.iter(namespace + "coordinates"):
                 # It is list of space-separated coordinates like:
                 #   180,-73.0597374076,0 176.8646237862,-72.9914734628,0 ...
-                assert coord_node.text is not None
+                assert coord_node.text is not None, xml_assert_message
                 point_strs = coord_node.text.strip().split()
                 for point_str in point_strs:
                     parts = point_str.split(",")
@@ -111,7 +115,7 @@ def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
                             max(bounds[3], lat),
                         )
 
-            assert bounds is not None
+            assert bounds is not None, xml_assert_message
             json_data[tile_name] = bounds
 
         with open_atomic(json_fname, "w") as f:
