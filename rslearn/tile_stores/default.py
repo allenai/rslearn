@@ -1,5 +1,6 @@
 """Default TileStore implementation."""
 
+import math
 import shutil
 from typing import Any
 
@@ -143,10 +144,10 @@ class DefaultTileStore(TileStore):
                     vrt.bounds[3] / projection.y_resolution,
                 )
                 return (
-                    min(bounds[0], bounds[2]),
-                    min(bounds[1], bounds[3]),
-                    max(bounds[0], bounds[2]),
-                    max(bounds[1], bounds[3]),
+                    math.floor(min(bounds[0], bounds[2])),
+                    math.floor(min(bounds[1], bounds[3])),
+                    math.ceil(max(bounds[0], bounds[2])),
+                    math.ceil(max(bounds[1], bounds[3])),
                 )
 
     def read_raster(
@@ -193,8 +194,8 @@ class DefaultTileStore(TileStore):
                 src,
                 crs=projection.crs,
                 transform=wanted_transform,
-                height=bounds[2] - bounds[0],
-                width=bounds[3] - bounds[1],
+                width=bounds[2] - bounds[0],
+                height=bounds[3] - bounds[1],
                 resampling=resampling,
             ) as vrt:
                 return vrt.read()
@@ -220,9 +221,7 @@ class DefaultTileStore(TileStore):
         """
         raster_dir = self._get_raster_dir(layer_name, item_name, bands)
         raster_format = GeotiffRasterFormat()
-        raster_format.encode_raster(
-            raster_dir / "geotiff.tif", projection, bounds, array
-        )
+        raster_format.encode_raster(raster_dir, projection, bounds, array)
         (raster_dir / COMPLETED_FNAME).touch()
 
     def write_raster_file(

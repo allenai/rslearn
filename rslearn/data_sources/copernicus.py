@@ -56,7 +56,10 @@ def get_harmonize_callback(
         return None
 
     def callback(array: npt.NDArray) -> npt.NDArray:
-        return np.clip(array, -offset, None) + offset  # type: ignore
+        # Subtract positive number instead of add negative number since only the former
+        # works with uint16 array.
+        assert array.shape[0] == 1 and array.dtype == np.uint16
+        return np.clip(array, -offset, None) - (-offset)  # type: ignore
 
     return callback
 

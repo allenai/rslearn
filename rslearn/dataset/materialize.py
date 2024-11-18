@@ -99,8 +99,6 @@ def read_raster_window_from_tiles(
     src = tile_store.read_raster(
         item_name, bands, projection, intersection, resampling=resampling
     )
-    if src is None:
-        raise ValueError(f"No raster data found for bounds {intersection}")
     src = src[src_indexes, :, :]
     if remapper:
         src = remapper(src, dst.dtype)
