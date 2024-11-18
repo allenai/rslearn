@@ -411,6 +411,8 @@ class Sentinel2(DataSource):
 
                         # Make sure metadata XML blob exists, otherwise we won't be
                         # able to load the item.
+                        # (Sometimes there is a .SAFE folder but some files like the
+                        # XML file are just missing for whatever reason.)
                         xml_blob_path = f"{cell_folder}/{folder_name}/MTD_MSIL1C.xml"
                         xml_blob = self.bucket.blob(xml_blob_path)
                         if not xml_blob.exists():
