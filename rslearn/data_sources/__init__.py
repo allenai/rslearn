@@ -31,7 +31,7 @@ def data_source_from_config(config: LayerConfig, ds_path: UPath) -> DataSource:
         config: the LayerConfig containing this data source.
         ds_path: the dataset root directory.
     """
-    logger.debug("getting a data source for dataset at %s", ds_path)
+    logger.debug(f"getting a data source for dataset at {ds_path}")
     if config.data_source is None:
         raise ValueError("No data source specified")
     name = config.data_source.name

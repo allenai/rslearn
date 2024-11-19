@@ -12,7 +12,7 @@ from upath import UPath
 
 import rslearn.data_sources.utils
 from rslearn.config import LayerConfig, LayerType, RasterLayerConfig, VectorLayerConfig
-from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_PROJECTION
+from rslearn.const import SHAPEFILE_AUX_EXTENSIONS
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import Feature, Projection, STGeometry
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_rasterio_upath_reader
@@ -258,6 +258,9 @@ class RasterImporter(Importer):
 class VectorImporter(Importer):
     """An Importer for vector data."""
 
+    # We need some buffer around GeoJSON bounds in case it just contains one point.
+    item_buffer_epsilon = 1e-4
+
     def list_items(self, config: LayerConfig, src_dir: UPath) -> list[VectorItem]:
         """Extract a list of Items from the source directory.
 
@@ -293,8 +296,14 @@ class VectorImporter(Importer):
                             bounds[2] = max(bounds[2], cur_bounds[2])
                             bounds[3] = max(bounds[3], cur_bounds[3])
 
+                    # Normal GeoJSON should have coordinates in CRS coordinates, i.e. it
+                    # should be 1 projection unit/pixel.
                     projection = Projection(crs, 1, 1)
-                    geometry = STGeometry(projection, shapely.box(*bounds), None)
+                    geometry = STGeometry(
+                        projection,
+                        shapely.box(*bounds).buffer(self.item_buffer_epsilon),
+                        None,
+                    )
 
             items.append(
                 VectorItem(path.name.split(".")[0], geometry, path.absolute().as_uri())
@@ -332,14 +341,18 @@ class VectorImporter(Importer):
                 aux_files.append(path.parent / (prefix + ext))
 
         # TODO: move converting fiona file to list[Feature] to utility function.
-        # TODO: don't assume WGS-84 projection here.
         with get_upath_local(path, extra_paths=aux_files) as local_fname:
             with fiona.open(local_fname) as src:
+                crs = CRS.from_wkt(src.crs.to_wkt())
+                # Normal GeoJSON should have coordinates in CRS coordinates, i.e. it
+                # should be 1 projection unit/pixel.
+                projection = Projection(crs, 1, 1)
+
                 features = []
                 for feat in src:
                     features.append(
                         Feature.from_geojson(
-                            WGS84_PROJECTION,
+                            projection,
                             {
                                 "type": "Feature",
                                 "geometry": dict(feat.geometry),
