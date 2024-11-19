@@ -11,6 +11,10 @@ import rasterio.io
 from fsspec.implementations.local import LocalFileSystem
 from upath import UPath
 
+from rslearn.log_utils import get_logger
+
+logger = get_logger(__name__)
+
 
 @contextmanager
 def get_upath_local(
@@ -81,12 +85,14 @@ def open_atomic(path: UPath, *args: Any, **kwargs: Any) -> Generator[Any, None, 
         **kwargs: any valid keyword arguments for :code:`open`
     """
     if isinstance(path.fs, LocalFileSystem):
+        logger.debug("open_atomic: writing atomically to local file at %s", path)
         tmppath = path.path + ".tmp." + str(os.getpid())
         with open(tmppath, *args, **kwargs) as file:
             yield file
         os.rename(tmppath, path.path)
 
     else:
+        logger.debug("open_atomic: writing to remote file at %s", path)
         with path.open(*args, **kwargs) as file:
             yield file
 
@@ -106,10 +112,12 @@ def open_rasterio_upath_reader(
         **kwargs: additional keyword arguments for :code:`rasterio.open`
     """
     if isinstance(path.fs, LocalFileSystem):
+        logger.debug("reading from local rasterio dataset at %s", path)
         with rasterio.open(path.path, **kwargs) as raster:
             yield raster
 
     else:
+        logger.debug("reading from remote rasterio dataset at %s", path)
         with path.open("rb") as f:
             with rasterio.open(f, **kwargs) as raster:
                 yield raster
@@ -132,12 +140,19 @@ def open_rasterio_upath_writer(
         **kwargs: additional keyword arguments for :code:`rasterio.open`
     """
     if isinstance(path.fs, LocalFileSystem):
+        logger.debug(
+            "open_rasterio_upath_writer: writing atomically to local rasterio dataset at %s",
+            path,
+        )
         tmppath = path.path + ".tmp." + str(os.getpid())
         with rasterio.open(tmppath, "w", **kwargs) as raster:
             yield raster
         os.rename(tmppath, path.path)
 
     else:
+        logger.debug(
+            "open_rasterio_upath_writer: writing to remote rasterio dataset at %s", path
+        )
         with path.open("wb") as f:
             with rasterio.open(f, "w", **kwargs) as raster:
                 yield raster
