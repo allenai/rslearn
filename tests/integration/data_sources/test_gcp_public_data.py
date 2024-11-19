@@ -99,8 +99,8 @@ class TestSentinel2:
         )
 
 
-def test_prepare_zero_longitude_no_matches(tmp_path: pathlib.Path) -> None:
-    # Make sure get_items works for scenes and geometries near 0 longitude.
+def test_prepare_antimeridian_no_matches(tmp_path: pathlib.Path) -> None:
+    # Make sure get_items works for scenes and geometries near +/- 180 longitude.
     # At (0, 40) there should be no Sentinel-2 coverage.
     layer_config = RasterLayerConfig(
         LayerType.RASTER,
@@ -127,7 +127,7 @@ def test_prepare_zero_longitude_no_matches(tmp_path: pathlib.Path) -> None:
         assert len(group) == 0
 
 
-def test_prepare_zero_longitude_yes_matches(tmp_path: pathlib.Path) -> None:
+def test_prepare_antimeridian_yes_matches(tmp_path: pathlib.Path) -> None:
     # Make sure get_items works for scenes and geometries near 0 longitude.
     # At (0, 63) there should be some Sentinel-2 scenes.
     layer_config = RasterLayerConfig(

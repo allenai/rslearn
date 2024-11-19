@@ -125,17 +125,20 @@ class TestSTGeometry:
 
 
 class TestSplitPrimeMeridian:
-    def test_point(self) -> None:
-        epsilon = 1e-6
+    epsilon = 1e-3
 
+    def test_point_unaffected(self) -> None:
+        # This point shouldn't be modified.
         p = split_shape_at_prime_meridian(shapely.Point(0, 0))
         assert p.x == 0 and p.y == 0
 
-        p = split_shape_at_prime_meridian(shapely.Point(-180, 45))
-        assert abs(p.x - (-180 + epsilon)) < epsilon / 2 and p.y == 45
+    def test_point_negative_antimeridian(self) -> None:
+        p = split_shape_at_prime_meridian(shapely.Point(-180, 45), epsilon=self.epsilon)
+        assert abs(p.x - (-180 + self.epsilon)) < self.epsilon / 2 and p.y == 45
 
-        p = split_shape_at_prime_meridian(shapely.Point(180, 45))
-        assert abs(p.x - (180 - epsilon)) < epsilon / 2 and p.y == 45
+    def test_point_positive_antimeridian(self) -> None:
+        p = split_shape_at_prime_meridian(shapely.Point(180, 45), epsilon=self.epsilon)
+        assert abs(p.x - (180 - self.epsilon)) < self.epsilon / 2 and p.y == 45
 
     def test_line(self) -> None:
         line = shapely.LineString(
@@ -147,19 +150,18 @@ class TestSplitPrimeMeridian:
         output = split_shape_at_prime_meridian(line)
         # Should consist of two lines, one from (175, 1) to (180-ish, 1.5).
         # And another from (-180-ish, 1.5) to (-175, 2).
-        epsilon = 1e-3
         assert isinstance(output, shapely.MultiLineString)
         assert len(output.geoms) == 2
-        assert (output.geoms[0].coords[0][0] - 175) < epsilon
-        assert (output.geoms[0].coords[0][1] - 1) < epsilon
-        assert (output.geoms[0].coords[1][0] - 180) < epsilon
-        assert (output.geoms[0].coords[1][1] - 1.5) < epsilon
-        assert (output.geoms[1].coords[0][0] + 180) < epsilon
-        assert (output.geoms[1].coords[0][1] - 1.5) < epsilon
-        assert (output.geoms[1].coords[1][0] + 175) < epsilon
-        assert (output.geoms[1].coords[1][1] - 2) < epsilon
+        assert (output.geoms[0].coords[0][0] - 175) < self.epsilon
+        assert (output.geoms[0].coords[0][1] - 1) < self.epsilon
+        assert (output.geoms[0].coords[1][0] - 180) < self.epsilon
+        assert (output.geoms[0].coords[1][1] - 1.5) < self.epsilon
+        assert (output.geoms[1].coords[0][0] + 180) < self.epsilon
+        assert (output.geoms[1].coords[0][1] - 1.5) < self.epsilon
+        assert (output.geoms[1].coords[1][0] + 175) < self.epsilon
+        assert (output.geoms[1].coords[1][1] - 2) < self.epsilon
 
-    def test_polygon(self) -> None:
+    def test_polygon_crossing_antimeridian(self) -> None:
         polygon = shapely.Polygon(
             [
                 [-179, 45],
@@ -169,12 +171,14 @@ class TestSplitPrimeMeridian:
             ]
         )
         expected_area = 2
-        epsilon = 1e-3
-        assert (polygon.area - expected_area) > epsilon
         output = split_shape_at_prime_meridian(polygon)
-        assert (output.area - expected_area) < epsilon
-        assert (output.bounds[0] + 180) < epsilon and (output.bounds[2] - 180) < epsilon
+        assert abs(output.area - expected_area) < self.epsilon
+        assert (output.bounds[0] + 180) < self.epsilon and (
+            output.bounds[2] - 180
+        ) < self.epsilon
 
+    def test_polygon_crossing_zero_longitude(self) -> None:
+        # Splitting shouldn't affect shapes that don't need to be split.
         polygon = shapely.box(-1, -1, 1, 1)
         output = split_shape_at_prime_meridian(polygon)
         assert output == polygon
