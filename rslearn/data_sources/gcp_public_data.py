@@ -592,8 +592,6 @@ class Sentinel2(DataSource):
 
                 buf = io.BytesIO()
                 blob = self.bucket.blob(item.blob_prefix + suffix)
-                if not blob.exists():
-                    continue
                 blob.download_to_file(buf)
                 buf.seek(0)
                 with rasterio.open(buf) as raster:
