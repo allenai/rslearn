@@ -1,5 +1,6 @@
 """Default Dataset for rslearn."""
 
+import hashlib
 import multiprocessing
 import os
 import random
@@ -379,9 +380,19 @@ class ModelDataset(torch.utils.data.Dataset):
             p.close()
         windows = new_windows
 
+        # Sort the windows to ensure that the dataset is consistent across GPUs.
+        # Inconsistent ordering can lead to a subset of windows being processed during
+        # "model test" / "model predict" when using multiple GPUs.
+        # We use a hash so that functionality like num_samples limit gets a random
+        # subset of windows (with respect to the hash function choice).
+        windows.sort(
+            key=lambda window: hashlib.sha256(window.name.encode()).hexdigest()
+        )
+
         # Limit windows to num_samples if requested.
         if split_config.num_samples:
-            # TODO: use hash of window names so this is deterministic and not arbitrarily ordered according to load_windows
+            # The windows are sorted by hash of window name so this distribution should
+            # be representative of the population.
             windows = windows[0 : split_config.num_samples]
 
         self.windows: list = windows
