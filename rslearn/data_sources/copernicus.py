@@ -72,7 +72,7 @@ def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
     if json_fname.exists():
         return
 
-    logger.info("caching list of Sentinel-2 tiles to %s", json_fname)
+    logger.info(f"caching list of Sentinel-2 tiles to {json_fname}")
     xml_assert_message = "unexpected Sentinel-2 tile XML structure"
 
     # Identify the Sentinel-2 tile names and bounds using the KML file.
