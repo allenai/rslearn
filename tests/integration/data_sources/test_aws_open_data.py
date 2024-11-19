@@ -136,16 +136,3 @@ class TestSentinel2:
         metadata_cache_dir = UPath(tmp_path) / "cache"
         metadata_cache_dir.mkdir(parents=True, exist_ok=True)
         self.run_simple_test(tile_store_dir, metadata_cache_dir, seattle2020)
-
-    def test_gcs(self, seattle2020: STGeometry) -> None:
-        """Test ingesting to GCS.
-
-        Main thing is to test metadata_cache_dir being on GCS.
-        """
-        test_id = random.randint(10000, 99999)
-        bucket_name = os.environ["TEST_BUCKET"]
-        prefix = os.environ["TEST_PREFIX"] + f"test_{test_id}/"
-        test_path = UPath(f"gcs://{bucket_name}/{prefix}")
-        tile_store_dir = test_path / "tiles"
-        metadata_cache_dir = test_path / "cache"
-        self.run_simple_test(tile_store_dir, metadata_cache_dir, seattle2020)

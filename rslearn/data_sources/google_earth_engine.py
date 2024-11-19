@@ -18,7 +18,6 @@ from google.cloud import storage
 from upath import UPath
 
 import rslearn.data_sources.utils
-import rslearn.utils.mgrs
 from rslearn.config import DType, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.tile_stores import PrefixedTileStore, TileStore
@@ -72,10 +71,7 @@ class GEE(DataSource):
         )
         ee.Initialize(credentials)
 
-        self.rtree_tmp_dir = tempfile.TemporaryDirectory()
-        self.rtree_index = get_cached_rtree(
-            self.index_cache_dir, self.rtree_tmp_dir.name, self._build_index
-        )
+        self.rtree_index = get_cached_rtree(self.index_cache_dir, self._build_index)
 
     @staticmethod
     def from_config(config: RasterLayerConfig, ds_path: UPath) -> "GEE":

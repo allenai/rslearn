@@ -14,6 +14,7 @@ from upath import UPath
 from rslearn.config import RasterFormatConfig
 from rslearn.const import TILE_SIZE
 from rslearn.log_utils import get_logger
+from rslearn.utils.fsspec import open_rasterio_upath_reader, open_rasterio_upath_writer
 
 from .geometry import PixelBounds, Projection
 
@@ -341,14 +342,11 @@ class GeotiffRasterFormat(RasterFormat):
             profile["blockysize"] = self.block_size
 
         path.mkdir(parents=True, exist_ok=True)
-        with (path / self.fname).open("wb") as f:
-            logger.info(f"Writing geotiff to {path / self.fname}")
-            with rasterio.open(f, "w", **profile) as dst:
-                dst.write(array)
+        logger.info(f"Writing geotiff to {path / self.fname}")
+        with open_rasterio_upath_writer(path / self.fname, **profile) as dst:
+            dst.write(array)
 
-    def decode_raster(
-        self, path: UPath, bounds: PixelBounds
-    ) -> npt.NDArray[Any] | None:
+    def decode_raster(self, path: UPath, bounds: PixelBounds) -> npt.NDArray[Any]:
         """Decodes raster data.
 
         Args:
@@ -358,78 +356,67 @@ class GeotiffRasterFormat(RasterFormat):
         Returns:
             the raster data, or None if no image content is found
         """
-        with (path / self.fname).open("rb") as f:
-            with rasterio.open(f) as src:
-                transform = src.transform
-                x_resolution = transform.a
-                y_resolution = transform.e
-                offset = (
-                    int(transform.c / x_resolution),
-                    int(transform.f / y_resolution),
-                )
-                # bounds is in global pixel coordinates.
-                # We first convert that to pixels relative to top-left of the raster.
-                relative_bounds = [
-                    bounds[0] - offset[0],
-                    bounds[1] - offset[1],
-                    bounds[2] - offset[0],
-                    bounds[3] - offset[1],
-                ]
+        with open_rasterio_upath_reader(path / self.fname) as src:
+            transform = src.transform
+            x_resolution = transform.a
+            y_resolution = transform.e
+            offset = (
+                int(transform.c / x_resolution),
+                int(transform.f / y_resolution),
+            )
+            # bounds is in global pixel coordinates.
+            # We first convert that to pixels relative to top-left of the raster.
+            relative_bounds = [
+                bounds[0] - offset[0],
+                bounds[1] - offset[1],
+                bounds[2] - offset[0],
+                bounds[3] - offset[1],
+            ]
 
-                # Make sure the requested bounds intersects the raster, otherwise the
-                # windowed read may fail.
-                # This is generally unexpected but can happen if we are loading a patch
-                # of a window that is close to the edge of the window, and when we
-                # downsample it for a lower resolution raster (negative zoom offset) it
-                # ends up being out of bounds.
-                if (
-                    relative_bounds[2] < 0
-                    or relative_bounds[3] < 0
-                    or relative_bounds[0] >= src.width
-                    or relative_bounds[1] >= src.height
-                ):
-                    logger.warning(
-                        "GeotiffRasterFormat.decode_raster got request for a window %s "
-                        + "outside the raster (transform=%s)",
-                        bounds,
-                        transform,
-                    )
-                    # Assume all of the bands have the same dtype, so just use first
-                    # one (src.dtypes is list of dtype per band).
-                    return np.zeros(
-                        (src.count, bounds[3] - bounds[1], bounds[2] - bounds[0]),
-                        dtype=src.dtypes[0],
-                    )
-
-                # Now get the actual pixels we will read, which must be contained in
-                # the GeoTIFF.
-                # Padding is (before_x, before_y, after_x, after_y) and will be used to
-                # pad the output back to the originally requested bounds.
-                padding = [0, 0, 0, 0]
-                if relative_bounds[0] < 0:
-                    padding[0] = -relative_bounds[0]
-                    relative_bounds[0] = 0
-                if relative_bounds[1] < 0:
-                    padding[1] = -relative_bounds[1]
-                    relative_bounds[1] = 0
-                if relative_bounds[2] > src.width:
-                    padding[2] = relative_bounds[2] - src.width
-                    relative_bounds[2] = src.width
-                if relative_bounds[3] > src.height:
-                    padding[3] = relative_bounds[3] - src.height
-                    relative_bounds[3] = src.height
-
-                window = rasterio.windows.Window(
-                    relative_bounds[0],
-                    relative_bounds[1],
-                    relative_bounds[2] - relative_bounds[0],
-                    relative_bounds[3] - relative_bounds[1],
+            # Make sure the requested bounds intersects the raster, otherwise the
+            # windowed read cannot be performed.
+            if (
+                relative_bounds[2] < 0
+                or relative_bounds[3] < 0
+                or relative_bounds[0] >= src.width
+                or relative_bounds[1] >= src.height
+            ):
+                # Assume all of the bands have the same dtype, so just use first
+                # one (src.dtypes is list of dtype per band).
+                return np.zeros(
+                    (src.count, bounds[3] - bounds[1], bounds[2] - bounds[0]),
+                    dtype=src.dtypes[0],
                 )
-                array = src.read(window=window)
-                array = np.pad(
-                    array, ((0, 0), (padding[1], padding[3]), (padding[0], padding[2]))
-                )
-                return array
+
+            # Now get the actual pixels we will read, which must be contained in
+            # the GeoTIFF.
+            # Padding is (before_x, before_y, after_x, after_y) and will be used to
+            # pad the output back to the originally requested bounds.
+            padding = [0, 0, 0, 0]
+            if relative_bounds[0] < 0:
+                padding[0] = -relative_bounds[0]
+                relative_bounds[0] = 0
+            if relative_bounds[1] < 0:
+                padding[1] = -relative_bounds[1]
+                relative_bounds[1] = 0
+            if relative_bounds[2] > src.width:
+                padding[2] = relative_bounds[2] - src.width
+                relative_bounds[2] = src.width
+            if relative_bounds[3] > src.height:
+                padding[3] = relative_bounds[3] - src.height
+                relative_bounds[3] = src.height
+
+            window = rasterio.windows.Window(
+                relative_bounds[0],
+                relative_bounds[1],
+                relative_bounds[2] - relative_bounds[0],
+                relative_bounds[3] - relative_bounds[1],
+            )
+            array = src.read(window=window)
+            array = np.pad(
+                array, ((0, 0), (padding[1], padding[3]), (padding[0], padding[2]))
+            )
+            return array
 
     def get_raster_bounds(self, path: UPath) -> PixelBounds:
         """Returns the bounds of the stored raster.
@@ -440,21 +427,20 @@ class GeotiffRasterFormat(RasterFormat):
         Returns:
             the PixelBounds of the raster
         """
-        with (path / self.fname).open("rb") as f:
-            with rasterio.open(f) as src:
-                transform = src.transform
-                x_resolution = transform.a
-                y_resolution = transform.e
-                offset = (
-                    int(transform.c / x_resolution),
-                    int(transform.f / y_resolution),
-                )
-                return (
-                    offset[0],
-                    offset[1],
-                    offset[0] + src.width,
-                    offset[1] + src.height,
-                )
+        with open_rasterio_upath_reader(path / self.fname) as src:
+            transform = src.transform
+            x_resolution = transform.a
+            y_resolution = transform.e
+            offset = (
+                int(transform.c / x_resolution),
+                int(transform.f / y_resolution),
+            )
+            return (
+                offset[0],
+                offset[1],
+                offset[0] + src.width,
+                offset[1] + src.height,
+            )
 
     @staticmethod
     def from_config(name: str, config: dict[str, Any]) -> "GeotiffRasterFormat":
