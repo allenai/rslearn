@@ -1,3 +1,4 @@
+# These are requirements that are specific to a subset of data sources or models.
 accelerate>=1.0
 earthengine-api>=0.1
 einops>=0.8

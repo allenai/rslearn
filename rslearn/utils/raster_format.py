@@ -388,9 +388,7 @@ class GeotiffRasterFormat(RasterFormat):
         with open_rasterio_upath_writer(path / self.fname, **profile) as dst:
             dst.write(array)
 
-    def decode_raster(
-        self, path: UPath, bounds: PixelBounds
-    ) -> npt.NDArray[Any] | None:
+    def decode_raster(self, path: UPath, bounds: PixelBounds) -> npt.NDArray[Any]:
         """Decodes raster data.
 
         Args:
@@ -418,23 +416,13 @@ class GeotiffRasterFormat(RasterFormat):
             ]
 
             # Make sure the requested bounds intersects the raster, otherwise the
-            # windowed read may fail.
-            # This is generally unexpected but can happen if we are loading a patch
-            # of a window that is close to the edge of the window, and when we
-            # downsample it for a lower resolution raster (negative zoom offset) it
-            # ends up being out of bounds.
+            # windowed read cannot be performed.
             if (
                 relative_bounds[2] < 0
                 or relative_bounds[3] < 0
                 or relative_bounds[0] >= src.width
                 or relative_bounds[1] >= src.height
             ):
-                logger.warning(
-                    "GeotiffRasterFormat.decode_raster got request for a window %s "
-                    + "outside the raster (transform=%s)",
-                    bounds,
-                    transform,
-                )
                 # Assume all of the bands have the same dtype, so just use first
                 # one (src.dtypes is list of dtype per band).
                 return np.zeros(

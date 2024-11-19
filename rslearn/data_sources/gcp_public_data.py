@@ -85,12 +85,12 @@ class Sentinel2(DataSource):
     The bucket is public and free so no credentials are needed.
     """
 
-    bucket_name = "gcp-public-data-sentinel-2"
+    BUCKET_NAME = "gcp-public-data-sentinel-2"
 
     # Name of BigQuery table containing index of Sentinel-2 scenes in the bucket.
-    table_name = "bigquery-public-data.cloud_storage_geo_index.sentinel_2_index"
+    TABLE_NAME = "bigquery-public-data.cloud_storage_geo_index.sentinel_2_index"
 
-    bands = [
+    BANDS = [
         ("B01.jp2", ["B01"]),
         ("B02.jp2", ["B02"]),
         ("B03.jp2", ["B03"]),
@@ -130,11 +130,15 @@ class Sentinel2(DataSource):
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
             use_rtree_index: whether to create an rtree index to enable faster lookups
-                (default true)
+                (default true). Note that the rtree is populated from a BigQuery table
+                where Google maintains an index, and this requires GCP credentials to
+                query; additionally, rtree creation can take several minutes/hours. Use
+                use_rtree_index=False to avoid the need for credentials.
             harmonize: harmonize pixel values across different processing baselines,
                 see https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
             rtree_time_range: only populate the rtree index with scenes within this
-                time range
+                time range. Restricting to a few months significantly speeds up rtree
+                creation time.
             rtree_cache_dir: by default, if use_rtree_index is enabled, the rtree is
                 stored in index_cache_dir (where product XML files are also stored). If
                 rtree_cache_dir is set, then the rtree is stored here instead (so
@@ -148,7 +152,7 @@ class Sentinel2(DataSource):
 
         self.index_cache_dir.mkdir(parents=True, exist_ok=True)
 
-        self.bucket = storage.Client().bucket(self.bucket_name)
+        self.bucket = storage.Client.create_anonymous_client().bucket(self.BUCKET_NAME)
         self.rtree_index: Any | None = None
         if use_rtree_index:
             from rslearn.utils.rtree_index import RtreeIndex, get_cached_rtree
@@ -215,7 +219,7 @@ class Sentinel2(DataSource):
         query_str = f"""
             SELECT  source_url, base_url, product_id, sensing_time, granule_id,
                     east_lon, south_lat, west_lon, north_lat, cloud_cover
-            FROM    `{self.table_name}`
+            FROM    `{self.TABLE_NAME}`
         """
         if time_range is not None:
             query_str += f"""
@@ -230,12 +234,14 @@ class Sentinel2(DataSource):
             # If base_url is correct, then it seems the source_url always ends in
             # index.csv.gz.
             if row["source_url"] and not row["source_url"].endswith("index.csv.gz"):
-                base_url = row["source_url"].split("gs://gcp-public-data-sentinel-2/")[
-                    1
-                ]
+                base_url = row["source_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
+            elif row["base_url"] is not None and row["base_url"] != "":
+                base_url = row["base_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
             else:
-                assert row["base_url"] is not None and row["base_url"] != ""
-                base_url = row["base_url"].split("gs://gcp-public-data-sentinel-2/")[1]
+                raise ValueError(
+                    f"Unexpected value '{row['source_url']}' in column 'source_url'"
+                    + f" and '{row['base_url']} in column 'base_url'"
+                )
 
             product_id = row["product_id"]
             product_id_parts = product_id.split("_")
@@ -403,6 +409,12 @@ class Sentinel2(DataSource):
                     for _ in blobs:
                         pass
 
+                    logger.debug(
+                        "under %s, found %d folders to scan",
+                        blob_prefix,
+                        len(blobs.prefixes),
+                    )
+
                     for prefix in blobs.prefixes:
                         folder_name = prefix.split("/")[-2]
                         expected_suffix = ".SAFE"
@@ -540,7 +552,7 @@ class Sentinel2(DataSource):
         self, item: Sentinel2Item
     ) -> Generator[tuple[str, BinaryIO], None, None]:
         """Retrieves the rasters corresponding to an item as file streams."""
-        for suffix, _ in self.bands:
+        for suffix, _ in self.BANDS:
             blob_path = item.blob_prefix + suffix
             fname = blob_path.split("/")[-1]
             buf = io.BytesIO()
@@ -565,7 +577,7 @@ class Sentinel2(DataSource):
             geometries: a list of geometries needed for each item
         """
         for item in items:
-            for suffix, band_names in self.bands:
+            for suffix, band_names in self.BANDS:
                 if not is_raster_needed(band_names, self.config.band_sets):
                     continue
                 if tile_store.is_raster_ready(item.name, band_names):
