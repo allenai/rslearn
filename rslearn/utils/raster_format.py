@@ -346,9 +346,7 @@ class GeotiffRasterFormat(RasterFormat):
         with open_rasterio_upath_writer(path / self.fname, **profile) as dst:
             dst.write(array)
 
-    def decode_raster(
-        self, path: UPath, bounds: PixelBounds
-    ) -> npt.NDArray[Any] | None:
+    def decode_raster(self, path: UPath, bounds: PixelBounds) -> npt.NDArray[Any]:
         """Decodes raster data.
 
         Args:

@@ -1,6 +1,7 @@
 import pathlib
 
 import numpy as np
+import pytest
 import rasterio
 from rasterio.crs import CRS
 from upath import UPath
@@ -44,27 +45,27 @@ def test_geotiff_tiling(tmp_path: pathlib.Path) -> None:
             assert raster.profile["tiled"]
 
 
-def test_geotiff_out_of_bounds(tmp_path: pathlib.Path) -> None:
-    # GeotiffRasterFormat should log warning but return zero array if we request a
-    # tile that is fully out of bounds.
-    # If it is partially out of bounds, it shouldn't warn and should just return the
-    # partial content.
-    path = UPath(tmp_path)
-    projection = Projection(CRS.from_epsg(3857), 1, -1)
-    format = GeotiffRasterFormat()
+class TestGeotiffInOrOutOfBounds:
+    @pytest.fixture
+    def encoded_raster_path(self, tmp_path: pathlib.Path) -> UPath:
+        path = UPath(tmp_path)
+        projection = Projection(CRS.from_epsg(3857), 1, -1)
+        array = np.ones((1, 8, 8), dtype=np.uint8)
+        GeotiffRasterFormat().encode_raster(path, projection, (0, 0, 8, 8), array)
+        return path
 
-    array = np.ones((1, 8, 8), dtype=np.uint8)
-    format.encode_raster(path, projection, (0, 0, 8, 8), array)
+    def test_geotiff_in_bounds(self, encoded_raster_path: UPath) -> None:
+        array = GeotiffRasterFormat().decode_raster(encoded_raster_path, (2, 2, 6, 6))
+        assert array.shape == (1, 4, 4)
+        assert np.all(array == 1)
 
-    array = format.decode_raster(path, (2, 2, 6, 6))
-    assert array.shape == (1, 4, 4)
-    assert np.all(array == 1)
+    def test_geotiff_partial_overlap(self, encoded_raster_path: UPath) -> None:
+        array = GeotiffRasterFormat().decode_raster(encoded_raster_path, (4, 4, 12, 12))
+        assert array.shape == (1, 8, 8)
+        assert np.all(array[:, 0:4, 0:4] == 1)
+        assert np.all(array[:, 0:8, 4:8] == 0)
 
-    array = format.decode_raster(path, (4, 4, 12, 12))
-    assert array.shape == (1, 8, 8)
-    assert np.all(array[:, 0:4, 0:4] == 1)
-    assert np.all(array[:, 0:8, 4:8] == 0)
-
-    array = format.decode_raster(path, (8, 8, 12, 12))
-    assert array.shape == (1, 4, 4)
-    assert np.all(array == 0)
+    def test_geotiff_out_of_bounds(self, encoded_raster_path: UPath) -> None:
+        array = GeotiffRasterFormat().decode_raster(encoded_raster_path, (8, 8, 12, 12))
+        assert array.shape == (1, 4, 4)
+        assert np.all(array == 0)
