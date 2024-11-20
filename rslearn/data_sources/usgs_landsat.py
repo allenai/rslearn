@@ -41,19 +41,36 @@ class M2MAPIClient:
     pagination_size = 1000
     TIMEOUT = 1000000  # Set very high to start
 
-    def __init__(self, username: str, password: str) -> None:
+    def __init__(
+        self, username: str, password: str | None = None, token: str | None = None
+    ) -> None:
         """Initialize a new M2MAPIClient.
 
         Args:
             username: the EROS username
             password: the EROS password
+            token: the application token. One of password or token must be specified.
         """
         self.username = username
-        self.password = password
-        json_data = json.dumps({"username": self.username, "password": self.password})
-        response = requests.post(
-            self.api_url + "login", data=json_data, timeout=self.TIMEOUT
-        )
+
+        if password is not None and token is not None:
+            raise ValueError("only one of password or token can be specified")
+
+        if password is not None:
+            json_data = json.dumps({"username": self.username, "password": password})
+            response = requests.post(
+                self.api_url + "login", data=json_data, timeout=self.TIMEOUT
+            )
+
+        elif token is not None:
+            json_data = json.dumps({"username": username, "token": token})
+            response = requests.post(
+                self.api_url + "login-token", data=json_data, timeout=self.TIMEOUT
+            )
+
+        else:
+            raise ValueError("one of password or token must be specified")
+
         response.raise_for_status()
         self.auth_token = response.json()["data"]
 
@@ -292,27 +309,29 @@ class LandsatOliTirs(DataSource):
         self,
         config: RasterLayerConfig,
         username: str,
-        password: str,
         max_time_delta: timedelta = timedelta(days=30),
         sort_by: str | None = None,
+        password: str | None = None,
+        token: str | None = None,
     ):
         """Initialize a new LandsatOliTirs instance.
 
         Args:
             config: the LayerConfig of the layer containing this data source
             username: EROS username
-            password: EROS password
             max_time_delta: maximum time before a query start time or after a
                 query end time to look for products. This is required due to the large
                 number of available products, and defaults to 30 days.
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
+            password: EROS password (see M2MAPIClient).
+            token: EROS application token (see M2MAPIClient).
         """
         self.config = config
         self.max_time_delta = max_time_delta
         self.sort_by = sort_by
 
-        self.client = M2MAPIClient(username, password)
+        self.client = M2MAPIClient(username, password=password, token=token)
 
     @staticmethod
     def from_config(config: RasterLayerConfig, ds_path: UPath) -> "LandsatOliTirs":
@@ -324,12 +343,20 @@ class LandsatOliTirs(DataSource):
             max_time_delta = timedelta(seconds=pytimeparse.parse(d["max_time_delta"]))
         else:
             max_time_delta = timedelta(days=30)
+
+        # Optional config.
+        kwargs = {}
+        for k in ["password", "token"]:
+            if k not in d:
+                continue
+            kwargs[k] = d[k]
+
         return LandsatOliTirs(
             config=config,
             username=d["username"],
-            password=d["password"],
             max_time_delta=max_time_delta,
             sort_by=d.get("sort_by"),
+            **kwargs,
         )
 
     def _scene_metadata_to_item(self, result: dict[str, Any]) -> LandsatOliTirsItem:

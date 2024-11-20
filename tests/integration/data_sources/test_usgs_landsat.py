@@ -34,7 +34,7 @@ class TestLandsatOliTirs:
         data_source = LandsatOliTirs(
             config=layer_config,
             username=os.environ["TEST_USGS_LANDSAT_USERNAME"],
-            password=os.environ["TEST_USGS_LANDSAT_PASSWORD"],
+            token=os.environ["TEST_USGS_LANDSAT_TOKEN"],
             **kwargs,
         )
         print("get items")
