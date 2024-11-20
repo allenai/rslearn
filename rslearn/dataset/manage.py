@@ -1,10 +1,14 @@
 """Functions to manage datasets."""
 
 import rslearn.data_sources
-from rslearn.config import LayerConfig, LayerType, RasterLayerConfig
+from rslearn.config import (
+    LayerConfig,
+    LayerType,
+    RasterLayerConfig,
+)
 from rslearn.data_sources import DataSource, Item
 from rslearn.log_utils import get_logger
-from rslearn.tile_stores import TileStore, get_tile_store_for_layer
+from rslearn.tile_stores import TileStore, get_tile_store_with_layer
 
 from .dataset import Dataset
 from .materialize import Materializers
@@ -118,10 +122,9 @@ def ingest_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
                     geometries_by_item[item].append(geometry)
 
         print(f"Ingesting {len(geometries_by_item)} items in layer {layer_name}")
-        cur_tile_store = get_tile_store_for_layer(tile_store, layer_name, layer_cfg)
         geometries_and_items = list(geometries_by_item.items())
         data_source.ingest(
-            tile_store=cur_tile_store,
+            tile_store=get_tile_store_with_layer(tile_store, layer_name, layer_cfg),
             items=[item for item, _ in geometries_and_items],
             geometries=[geometries for _, geometries in geometries_and_items],
         )
@@ -147,6 +150,9 @@ def is_window_ingested(
             continue
         if layer_name not in layer_datas:
             return False
+
+        layer_tile_store = get_tile_store_with_layer(tile_store, layer_name, layer_cfg)
+
         layer_data = layer_datas[layer_name]
         for group in layer_data.serialized_item_groups:
             for serialized_item in group:
@@ -155,40 +161,21 @@ def is_window_ingested(
                 if layer_cfg.layer_type == LayerType.RASTER:
                     assert isinstance(layer_cfg, RasterLayerConfig)
                     for band_set in layer_cfg.band_sets:
-                        projection, _ = band_set.get_final_projection_and_bounds(
-                            window.projection, window.bounds
-                        )
-                        cur_tile_store = get_tile_store_for_layer(
-                            tile_store, layer_name, layer_cfg
-                        )
-                        layer_prefix = (item.name,)
                         # Make sure that layers exist containing each configured band.
                         # And that those layers are marked completed.
-                        suffixes = cur_tile_store.list_layers(layer_prefix)
-                        needed_suffixes = []
-                        needed_bands = {band for band in band_set.bands}
-                        for suffix in suffixes:
-                            cur_bands = suffix.split("_")
+                        available_bands = layer_tile_store.get_raster_bands(item.name)
+                        wanted_bands = {band for band in band_set.bands}
+                        for cur_bands in available_bands:
                             is_needed = False
                             for band in cur_bands:
-                                if band in needed_bands:
+                                if band in wanted_bands:
                                     is_needed = True
-                                    needed_bands.remove(band)
+                                    wanted_bands.remove(band)
                             if not is_needed:
                                 continue
-                            needed_suffixes.append(suffix)
-                        if len(needed_bands) > 0:
+                        if len(wanted_bands) > 0:
                             return False
 
-                        for suffix in needed_suffixes:
-                            layer_id = (item.name, suffix, str(projection))
-                            ts_layer = get_tile_store_for_layer(
-                                tile_store, layer_name, layer_cfg
-                            ).get_layer(layer_id)
-                            if not ts_layer:
-                                return False
-                            if not ts_layer.get_metadata().properties.get("completed"):
-                                return False
     return True
 
 
@@ -251,7 +238,13 @@ def materialize_window(
             materializer = Materializers[dataset.materializer_name]
         else:
             materializer = Materializers[layer_cfg.layer_type.value]
-        materializer.materialize(tile_store, window, layer_name, layer_cfg, item_groups)
+        materializer.materialize(
+            get_tile_store_with_layer(tile_store, layer_name, layer_cfg),
+            window,
+            layer_name,
+            layer_cfg,
+            item_groups,
+        )
 
     else:
         # This window is meant to be materialized directly from the data source.

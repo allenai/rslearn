@@ -511,26 +511,3 @@ def load_layer_config(config: dict[str, Any]) -> LayerConfig:
     elif layer_type == LayerType.VECTOR:
         return VectorLayerConfig.from_config(config)
     raise ValueError(f"Unknown layer type {layer_type}")
-
-
-class TileStoreConfig:
-    """A configuration specifying a TileStore."""
-
-    def __init__(self, name: str, config_dict: dict[str, Any]) -> None:
-        """Create a new TileStoreConfig.
-
-        Args:
-            name: the tile store implementation name to use
-            config_dict: configuration options
-        """
-        self.name = name
-        self.config_dict = config_dict
-
-    @staticmethod
-    def from_config(config: dict[str, Any]) -> "TileStoreConfig":
-        """Create a TileStoreConfig from config dict.
-
-        Args:
-            config: the config dict for this TileStoreConfig
-        """
-        return TileStoreConfig(name=config["name"], config_dict=config)

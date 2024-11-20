@@ -1,7 +1,6 @@
 """Data source for raster or vector data in local files."""
 
 import csv
-import io
 import json
 import os
 import tempfile
@@ -20,13 +19,13 @@ from upath import UPath
 import rslearn.data_sources.utils
 from rslearn.config import DType, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
-from rslearn.tile_stores import PrefixedTileStore, TileStore
+from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
 from rslearn.utils.fsspec import join_upath
+from rslearn.utils.raster_format import get_raster_projection_and_bounds_from_transform
 from rslearn.utils.rtree_index import RtreeIndex, get_cached_rtree
 
 from .data_source import DataSource, Item, QueryConfig
-from .raster_source import ArrayWithTransform, get_needed_projections, ingest_raster
 
 
 class GEE(DataSource):
@@ -193,7 +192,7 @@ class GEE(DataSource):
 
     def ingest(
         self,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         items: list[Item],
         geometries: list[list[STGeometry]],
     ) -> None:
@@ -213,12 +212,8 @@ class GEE(DataSource):
                     continue
                 bands.append(band)
 
-        for item, cur_geometries in zip(items, geometries):
-            cur_tile_store = PrefixedTileStore(tile_store, (item.name, "_".join(bands)))
-            needed_projections = get_needed_projections(
-                cur_tile_store, bands, self.config.band_sets, cur_geometries
-            )
-            if not needed_projections:
+        for item in items:
+            if tile_store.is_raster_ready(item.name, bands):
                 continue
 
             filtered = self.get_collection().filter(
@@ -253,18 +248,17 @@ class GEE(DataSource):
             # See what files the export produced.
             # If there are multiple, then we merge them into one file since that's the
             # simplest way to handle it.
-            blobs = self.bucket.list_blobs(prefix=blob_path)
-            blobs = list(blobs)
-            raster = None
+            blobs = list(self.bucket.list_blobs(prefix=blob_path))
 
-            if len(blobs) == 1:
-                buf = io.BytesIO()
-                blobs[0].download_to_file(buf)
-                buf.seek(0)
-                raster = rasterio.open(buf)
+            with tempfile.TemporaryDirectory() as tmp_dir_name:
+                if len(blobs) == 1:
+                    local_fname = os.path.join(
+                        tmp_dir_name, blobs[0].name.split("/")[-1]
+                    )
+                    blobs[0].download_to_filename(local_fname)
+                    tile_store.write_raster_file(item.name, bands, UPath(local_fname))
 
-            else:
-                with tempfile.TemporaryDirectory() as tmp_dir_name:
+                else:
                     rasterio_datasets = []
                     for blob in blobs:
                         local_fname = os.path.join(
@@ -278,23 +272,19 @@ class GEE(DataSource):
                     if self.dtype:
                         merge_kwargs["dtype"] = self.dtype.value
                     array, transform = rasterio.merge.merge(**merge_kwargs)
-                    crs = rasterio_datasets[0].crs
+                    projection, bounds = (
+                        get_raster_projection_and_bounds_from_transform(
+                            rasterio_datasets[0].crs,
+                            transform,
+                            array.shape[2],
+                            array.shape[1],
+                        )
+                    )
 
                     for ds in rasterio_datasets:
                         ds.close()
 
-                raster = ArrayWithTransform(array, crs, transform)
-
-            for projection in needed_projections:
-                ingest_raster(
-                    tile_store=cur_tile_store,
-                    raster=raster,
-                    projection=projection,
-                    time_range=item.geometry.time_range,
-                    layer_config=self.config,
-                )
-
-            raster.close()
+                    tile_store.write_raster(item.name, bands, projection, bounds, array)
 
             for blob in blobs:
                 blob.delete()

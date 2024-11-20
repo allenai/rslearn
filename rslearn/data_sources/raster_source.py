@@ -1,10 +1,7 @@
 """Helper functions for raster data sources."""
 
-from collections.abc import Callable
-from datetime import datetime
 from typing import Any
 
-import affine
 import numpy as np
 import numpy.typing as npt
 import rasterio.enums
@@ -12,15 +9,30 @@ import rasterio.io
 import rasterio.transform
 from rasterio.crs import CRS
 
-from rslearn.config import BandSetConfig, RasterFormatConfig, RasterLayerConfig
+from rslearn.config import BandSetConfig, RasterFormatConfig
 from rslearn.const import TILE_SIZE
 from rslearn.dataset import Window
 from rslearn.log_utils import get_logger
-from rslearn.tile_stores import LayerMetadata, TileStore
-from rslearn.utils import Projection, STGeometry
 from rslearn.utils.raster_format import load_raster_format
 
 logger = get_logger(__name__)
+
+
+def is_raster_needed(raster_bands: list[str], band_sets: list[BandSetConfig]) -> bool:
+    """Check if the raster by comparing its bands to the configured bands.
+
+    Args:
+        raster_bands: the list of bands in the raster in question.
+        band_sets: the band sets configured in the dataset.
+
+    Returns:
+        whether the raster is needed for the dataset.
+    """
+    for band_set in band_sets:
+        for band in band_set.bands:
+            if band in raster_bands:
+                return True
+    return False
 
 
 class ArrayWithTransform:
@@ -124,139 +136,6 @@ class ArrayWithTransform:
         return np.pad(
             tile, ((0, 0), (padding[0], padding[1]), (padding[2], padding[3]))
         )
-
-
-def get_needed_projections(
-    tile_store: TileStore,
-    raster_bands: list[str],
-    band_sets: list[BandSetConfig],
-    geometries: list[STGeometry],
-) -> list[Projection]:
-    """Determines the projections of an item that are needed for a given raster file.
-
-    Projections that appear in geometries are skipped if a corresponding layer is
-    present in tile_store with metadata marked completed.
-
-    Args:
-        tile_store: TileStore prefixed with the item name and file name
-        raster_bands: list of bands contained in the raster file
-        band_sets: configured band sets
-        geometries: list of geometries for which the item is needed
-
-    Returns:
-        list of Projection objects for which the item has not been ingested yet
-    """
-    # Identify which band set configs are relevant to this raster.
-    raster_bands_set = set(raster_bands)
-    relevant_band_set_list = []
-    for band_set in band_sets:
-        is_match = False
-        if band_set.bands is None:
-            continue
-        for band in band_set.bands:
-            if band not in raster_bands_set:
-                continue
-            is_match = True
-            break
-        if not is_match:
-            continue
-        relevant_band_set_list.append(band_set)
-
-    all_projections = {geometry.projection for geometry in geometries}
-    needed_projections = []
-    for projection in all_projections:
-        for band_set in relevant_band_set_list:
-            final_projection, _ = band_set.get_final_projection_and_bounds(
-                projection, None
-            )
-            ts_layer = tile_store.get_layer((str(final_projection),))
-            if ts_layer and ts_layer.get_metadata().properties.get("completed"):
-                continue
-            needed_projections.append(final_projection)
-    return needed_projections
-
-
-def ingest_raster(
-    tile_store: TileStore,
-    raster: rasterio.io.DatasetReader | ArrayWithTransform,
-    projection: Projection,
-    time_range: tuple[datetime, datetime] | None = None,
-    layer_config: RasterLayerConfig | None = None,
-    array_callback: Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None = None,
-) -> None:
-    """Ingests an in-memory rasterio dataset into the tile store.
-
-    Args:
-        tile_store: the tile store to ingest into, prefixed with the item name and
-            raster band names
-        raster: the rasterio raster
-        projection: the projection to save the raster as
-        time_range: time range of the raster
-        layer_config: the RasterLayerConfig of this layer
-        array_callback: callback function to apply on the array read from the raster
-    """
-    # Get layer in tile store to save under.
-    ts_layer = tile_store.create_layer(
-        (str(projection),), LayerMetadata(projection, time_range, {})
-    )
-    if ts_layer.get_metadata().properties.get("completed"):
-        return
-
-    # Warp each raster to this projection if needed.
-    array = raster.read()
-    if array_callback:
-        array = array_callback(array)
-
-    needs_warping = True
-    if isinstance(raster.transform, affine.Affine):
-        raster_projection = Projection(
-            raster.crs, raster.transform.a, raster.transform.e
-        )
-        needs_warping = raster_projection != projection
-
-    if not needs_warping:
-        # Include the top-left pixel index.
-        warped_array = ArrayWithTransform(array, raster.crs, raster.transform)
-
-    else:
-        # Compute the suggested target transform.
-        # rasterio negates the y resolution itself so here we have to negate it.
-        raster_bounds: rasterio.coords.BoundingBox = raster.bounds
-        (dst_transform, dst_width, dst_height) = (
-            rasterio.warp.calculate_default_transform(
-                # Source info.
-                src_crs=raster.crs,
-                width=raster.width,
-                height=raster.height,
-                left=raster_bounds.left,
-                bottom=raster_bounds.bottom,
-                right=raster_bounds.right,
-                top=raster_bounds.top,
-                # Destination info.
-                dst_crs=projection.crs,
-                resolution=(projection.x_resolution, -projection.y_resolution),
-            )
-        )
-
-        resampling_method = rasterio.enums.Resampling.bilinear
-        if layer_config:
-            resampling_method = layer_config.resampling_method
-
-        # Re-project the raster to the destination crs, resolution, and transform.
-        dst_array = np.zeros((array.shape[0], dst_height, dst_width), dtype=array.dtype)
-        rasterio.warp.reproject(
-            source=array,
-            src_crs=raster.crs,
-            src_transform=raster.transform,
-            destination=dst_array,
-            dst_crs=projection.crs,
-            dst_transform=dst_transform,
-            resampling=resampling_method,
-        )
-        warped_array = ArrayWithTransform(dst_array, projection.crs, dst_transform)
-
-    ts_layer.write_raster(warped_array.pixel_bounds(), warped_array.array)
-    ts_layer.set_property("completed", True)
 
 
 def materialize_raster(

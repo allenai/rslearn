@@ -1,37 +1,69 @@
 """Tile stores that store ingested raster and vector data before materialization."""
 
+from typing import Any
+
+import jsonargparse
 from upath import UPath
 
-from rslearn.config import TileStoreConfig
+from rslearn.config import LayerConfig
 
-from .file import FileTileStore
-from .tile_store import (
-    LayerMetadata,
-    PrefixedTileStore,
-    TileStore,
-    TileStoreLayer,
-    get_tile_store_for_layer,
-)
-
-registry = {"file": FileTileStore}
+from .default import DefaultTileStore
+from .tile_store import TileStore, TileStoreWithLayer
 
 
-def load_tile_store(config: TileStoreConfig, ds_path: UPath) -> TileStore:
+def load_tile_store(config: dict[str, Any], ds_path: UPath) -> TileStore:
     """Load a tile store from a configuration.
 
     Args:
         config: the tile store configuration.
         ds_path: the dataset root path.
+
+    Returns:
+        the TileStore
     """
-    return registry[config.name].from_config(config, ds_path)
+    if config is None:
+        tile_store = DefaultTileStore()
+        tile_store.set_dataset_path(ds_path)
+        return tile_store
+
+    # Backwards compatability.
+    if "name" in config and "root_dir" in config and config["name"] == "file":
+        tile_store = DefaultTileStore(config["root_dir"])
+        tile_store.set_dataset_path(ds_path)
+        return tile_store
+
+    parser = jsonargparse.ArgumentParser()
+    parser.add_argument("--tile_store", type=TileStore)
+    cfg = parser.parse_object({"tile_store": config})
+    tile_store = parser.instantiate_classes(cfg).tile_store
+    tile_store.set_dataset_path(ds_path)
+    return tile_store
+
+
+def get_tile_store_with_layer(
+    tile_store: TileStore, layer_name: str, layer_cfg: LayerConfig
+) -> TileStoreWithLayer:
+    """Get the TileStoreWithLayer for the specified layer.
+
+    Uses alias of the layer if it is set, otherwise just the layer name.
+
+    Args:
+        tile_store: the tile store.
+        layer_name: the layer name.
+        layer_cfg: the layer configuration which can specify an alias.
+
+    Returns:
+        corresponding TileStoreWithLayer
+    """
+    if layer_cfg.alias is not None:
+        return TileStoreWithLayer(tile_store, layer_cfg.alias)
+    return TileStoreWithLayer(tile_store, layer_name)
 
 
 __all__ = (
-    "FileTileStore",
-    "LayerMetadata",
-    "PrefixedTileStore",
+    "DefaultTileStore",
     "TileStore",
-    "TileStoreLayer",
+    "TileStoreWithLayer",
     "load_tile_store",
-    "get_tile_store_for_layer",
+    "get_tile_store_with_layer",
 )

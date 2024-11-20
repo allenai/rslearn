@@ -6,7 +6,7 @@ import multiprocessing
 import tqdm
 from upath import UPath
 
-from rslearn.config import TileStoreConfig, load_layer_config
+from rslearn.config import load_layer_config
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, load_tile_store
 
@@ -63,7 +63,7 @@ class Dataset:
                     continue
                 self.layers[layer_name] = load_layer_config(d)
 
-            self.tile_store_config = TileStoreConfig.from_config(config["tile_store"])
+            self.tile_store_config = config.get("tile_store", None)
             self.materializer_name = config.get("materialize")
 
     def load_windows(
