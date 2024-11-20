@@ -76,7 +76,6 @@ def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
         return
 
     logger.info(f"caching list of Sentinel-2 tiles to {json_fname}")
-    xml_assert_message = "unexpected Sentinel-2 tile XML structure"
 
     # Identify the Sentinel-2 tile names and bounds using the KML file.
     # First, download the zip file and extract and parse the KML.
@@ -86,7 +85,11 @@ def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
     buf.seek(0)
     with zipfile.ZipFile(buf, "r") as zipf:
         member_names = zipf.namelist()
-        assert len(member_names) == 1, xml_assert_message
+        if len(member_names) != 1:
+            raise ValueError(
+                "Sentinel-2 tile zip file unexpectedly contains more than one file"
+            )
+
         with zipf.open(member_names[0]) as memberf:
             tree = ET.parse(memberf)
 
@@ -97,7 +100,9 @@ def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
     for placemark_node in tree.iter(SENTINEL2_KML_NAMESPACE + "Placemark"):
         # The <name> node specifies the Sentinel-2 tile name.
         name_node = placemark_node.find(SENTINEL2_KML_NAMESPACE + "name")
-        assert name_node is not None and name_node.text is not None, xml_assert_message
+        if name_node is None or name_node.text is None:
+            raise ValueError("Sentinel-2 KML has Placemark without valid name node")
+
         tile_name = name_node.text
 
         # There may be one or more <coordinates> nodes depending on whether it is a
@@ -108,7 +113,9 @@ def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
         for coord_node in placemark_node.iter(SENTINEL2_KML_NAMESPACE + "coordinates"):
             # It is list of space-separated coordinates like:
             #   180,-73.0597374076,0 176.8646237862,-72.9914734628,0 ...
-            assert coord_node.text is not None, xml_assert_message
+            if coord_node.text is None:
+                raise ValueError("Sentinel-2 KML has coordinates node missing text")
+
             point_strs = coord_node.text.strip().split()
             for point_str in point_strs:
                 parts = point_str.split(",")
@@ -120,7 +127,9 @@ def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
                 lons.append(lon)
                 lats.append(lat)
 
-        assert len(lons) > 0 and len(lats) > 0, xml_assert_message
+        if len(lons) == 0 or len(lats) == 0:
+            raise ValueError("Sentinel-2 KML has Placemark with no coordinates")
+
         bounds = (
             min(lons),
             min(lats),
