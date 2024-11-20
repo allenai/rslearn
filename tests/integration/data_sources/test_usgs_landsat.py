@@ -2,10 +2,12 @@ import os
 import pathlib
 from typing import Any
 
+import pytest
 from upath import UPath
 
 from rslearn.config import (
     BandSetConfig,
+    DataSourceConfig,
     DType,
     LayerType,
     QueryConfig,
@@ -60,3 +62,41 @@ class TestLandsatOliTirs:
             tile_store_dir,
             seattle2020,
         )
+
+
+class TestLoadFromConfig:
+    """Tests LandsatOliTirs.load_from_config."""
+
+    TEST_BAND = "B8"
+
+    def test_config_missing_password_or_token(self, tmp_path: pathlib.Path) -> None:
+        data_source_config = DataSourceConfig(
+            "landsat",
+            QueryConfig(),
+            dict(
+                username=os.environ["TEST_USGS_LANDSAT_USERNAME"],
+            ),
+        )
+        config = RasterLayerConfig(
+            LayerType.RASTER,
+            [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[self.TEST_BAND])],
+            data_source=data_source_config,
+        )
+        with pytest.raises(ValueError):
+            LandsatOliTirs.from_config(config, UPath(tmp_path))
+
+    def test_okay_config(self, tmp_path: pathlib.Path) -> None:
+        data_source_config = DataSourceConfig(
+            "landsat",
+            QueryConfig(),
+            dict(
+                username=os.environ["TEST_USGS_LANDSAT_USERNAME"],
+                token=os.environ["TEST_USGS_LANDSAT_TOKEN"],
+            ),
+        )
+        config = RasterLayerConfig(
+            LayerType.RASTER,
+            [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[self.TEST_BAND])],
+            data_source=data_source_config,
+        )
+        LandsatOliTirs.from_config(config, UPath(tmp_path))
