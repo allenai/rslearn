@@ -498,6 +498,8 @@ class GeotiffRasterFormat(RasterFormat):
             kwargs["block_size"] = config["block_size"]
         if "always_enable_tiling" in config:
             kwargs["always_enable_tiling"] = config["always_enable_tiling"]
+        if "geotiff_options" in config:
+            kwargs["geotiff_options"] = config["geotiff_options"]
         return GeotiffRasterFormat(**kwargs)
 
 
