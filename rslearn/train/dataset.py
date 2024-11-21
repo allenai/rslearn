@@ -261,8 +261,8 @@ def check_window(inputs: dict[str, DataInput], window: Window) -> Window | None:
     # Make sure window has all the needed layers.
     def is_any_layer_available(data_input: DataInput) -> bool:
         for layer_name in data_input.layers:
-            completed_fname = window.path / "layers" / layer_name / "completed"
-            if completed_fname.exists():
+            layer_dir = window.get_layer_dir(layer_name)
+            if (layer_dir / "completed").exists():
                 return True
         return False
 
@@ -488,8 +488,8 @@ class ModelDataset(torch.utils.data.Dataset):
             # First enumerate all options of individual layers to read.
             layer_options = []
             for layer_name in data_input.layers:
-                completed_fname = window.path / "layers" / layer_name / "completed"
-                if not completed_fname.exists():
+                layer_dir = window.get_layer_dir(layer_name)
+                if not (layer_dir / "completed").exists():
                     continue
                 layer_options.append(layer_name)
 
@@ -497,7 +497,7 @@ class ModelDataset(torch.utils.data.Dataset):
             # In the future we need to support different configuration for how to pick
             # the options, as well as picking multiple for series inputs.
             layer = random.choice(layer_options)
-            layer_dir = window.path / "layers" / layer
+            layer_dir = window.get_layer_dir(layer)
 
             # The model config may reference a specific group within a layer, like
             # "image.2" in a dataset that has a layer "image" with max_matches > 1.

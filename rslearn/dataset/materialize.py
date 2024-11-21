@@ -6,7 +6,6 @@ import numpy as np
 import numpy.typing as npt
 from class_registry import ClassRegistry
 from rasterio.enums import Resampling
-from upath import UPath
 
 from rslearn.config import (
     LayerConfig,
@@ -136,15 +135,6 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
         """
         assert isinstance(layer_cfg, RasterLayerConfig)
 
-        out_layer_dirs: list[UPath] = []
-        for group_id in range(len(item_groups)):
-            if group_id == 0:
-                out_layer_name = layer_name
-            else:
-                out_layer_name = f"{layer_name}.{group_id}"
-            out_layer_dir = window.path / "layers" / out_layer_name
-            out_layer_dirs.append(out_layer_dir)
-
         for band_cfg in layer_cfg.band_sets:
             # band_cfg could specify zoom_offset and maybe other parameters that affect
             # projection/bounds, so use the corrected projection/bounds.
@@ -218,13 +208,14 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
                         )
 
                 raster_format.encode_raster(
-                    out_layer_dirs[group_id] / "_".join(band_cfg.bands),
+                    window.get_raster_dir(layer_name, band_cfg.bands, group_id),
                     projection,
                     bounds,
                     dst,
                 )
 
-        for out_layer_dir in out_layer_dirs:
+        for group_id in range(len(item_groups)):
+            out_layer_dir = window.get_layer_dir(layer_name, group_id)
             (out_layer_dir / "completed").touch()
 
 
@@ -258,15 +249,6 @@ class VectorMaterializer(Materializer):
             raise ValueError(f"No bounds specified for {layer_name}")
         vector_format = load_vector_format(layer_cfg.format)
 
-        out_layer_dirs: list[UPath] = []
-        for group_id in range(len(item_groups)):
-            if group_id == 0:
-                out_layer_name = layer_name
-            else:
-                out_layer_name = f"{layer_name}.{group_id}"
-            out_layer_dir = window.path / "layers" / out_layer_name
-            out_layer_dirs.append(out_layer_dir)
-
         for group_id, group in enumerate(item_groups):
             features: list[Feature] = []
 
@@ -274,7 +256,10 @@ class VectorMaterializer(Materializer):
                 cur_features = tile_store.read_vector(item.name, projection, bounds)
                 features.extend(cur_features)
 
-            vector_format.encode_vector(out_layer_dirs[group_id], projection, features)
+            vector_format.encode_vector(
+                window.get_layer_dir(layer_name, group_id), projection, features
+            )
 
-        for out_layer_dir in out_layer_dirs:
+        for group_id in range(len(item_groups)):
+            out_layer_dir = window.get_layer_dir(layer_name, group_id)
             (out_layer_dir / "completed").touch()

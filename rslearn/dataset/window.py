@@ -13,6 +13,47 @@ from rslearn.utils.fsspec import open_atomic
 
 logger = get_logger(__name__)
 
+LAYERS_DIRECTORY_NAME = "layers"
+
+
+def get_window_layer_dir(
+    window_path: UPath, layer_name: str, group_idx: int = 0
+) -> UPath:
+    """Get the directory containing materialized data for the specified layer.
+
+    Args:
+        window_path: the window directory.
+        layer_name: the layer name.
+        group_idx: the index of the group within the layer to get the directory
+            for (default 0).
+
+    Returns:
+        the path where data is or should be materialized.
+    """
+    if group_idx == 0:
+        folder_name = layer_name
+    else:
+        folder_name = f"{layer_name}.{group_idx}"
+    return window_path / LAYERS_DIRECTORY_NAME / folder_name
+
+
+def get_window_raster_dir(
+    window_path: UPath, layer_name: str, bands: list[str], group_idx: int = 0
+) -> UPath:
+    """Get the directory where the raster is materialized.
+
+    Args:
+        window_path: the window directory.
+        layer_name: the layer name
+        bands: the bands in the raster. It should match a band set defined for this
+            layer.
+        group_idx: the index of the group within the layer.
+
+    Returns:
+        the directory containing the raster.
+    """
+    return get_window_layer_dir(window_path, layer_name, group_idx) / "_".join(bands)
+
 
 class WindowLayerData:
     """Layer data for retrieved layers specifying relevant items in the data source.
@@ -148,6 +189,35 @@ class Window:
         logger.info(f"Saving window items to {items_fname}")
         with open_atomic(items_fname, "w") as f:
             json.dump(json_data, f)
+
+    def get_layer_dir(self, layer_name: str, group_idx: int = 0) -> UPath:
+        """Get the directory containing materialized data for the specified layer.
+
+        Args:
+            layer_name: the layer name.
+            group_idx: the index of the group within the layer to get the directory
+                for (default 0).
+
+        Returns:
+            the path where data is or should be materialized.
+        """
+        return get_window_layer_dir(self.path, layer_name, group_idx)
+
+    def get_raster_dir(
+        self, layer_name: str, bands: list[str], group_idx: int = 0
+    ) -> UPath:
+        """Get the directory where the raster is materialized.
+
+        Args:
+            layer_name: the layer name
+            bands: the bands in the raster. It should match a band set defined for this
+                layer.
+            group_idx: the index of the group within the layer.
+
+        Returns:
+            the directory containing the raster.
+        """
+        return get_window_raster_dir(self.path, layer_name, bands, group_idx)
 
     @staticmethod
     def load(path: UPath) -> "Window":
