@@ -72,6 +72,18 @@ class Sentinel2Item(Item):
         )
 
 
+class CorruptItemException(Exception):
+    """A Sentinel-2 scene is corrupted or otherwise unreadable for a known reason."""
+
+    def __init__(self, message: str) -> None:
+        """Create a new CorruptItemException.
+
+        Args:
+            message: error message.
+        """
+        self.message = message
+
+
 # TODO: Distinguish between AWS and GCP data sources in class names.
 class Sentinel2(DataSource):
     """A data source for Sentinel-2 data on Google Cloud Storage.
@@ -301,19 +313,8 @@ class Sentinel2(DataSource):
         with cache_xml_fname.open("rb") as f:
             return ET.parse(f)
 
-    def get_item_by_name(self, name: str) -> Sentinel2Item:
-        """Gets an item by name.
-
-        Reads the individual product metadata file (MTD_MSIL1C.xml) to get both the
-        expected blob path where images are stored as well as the detailed geometry of
-        the product (not just the bounding box).
-
-        Args:
-            name: the name of the item to get
-
-        Returns:
-            the item object
-        """
+    def _get_item_by_name(self, name: str) -> Sentinel2Item:
+        # Get the item without the caching logic.
         parts = name.split("_")
         assert len(parts[5]) == 6
         assert parts[5][0] == "T"
@@ -347,6 +348,19 @@ class Sentinel2(DataSource):
             raise ValueError(f"IMAGE_FILE is empty for {name}")
         blob_prefix = base_url + elements[0].text.split("B01")[0]
 
+        # Some Sentinel-2 scenes in the bucket are missing a subset of image files. So
+        # here we verify that all the bands we know about are intact.
+        expected_suffixes = {t[0] for t in self.BANDS}
+        for blob in self.bucket.list_blobs(prefix=blob_prefix):
+            assert blob.name.startswith(blob_prefix)
+            suffix = blob.name[len(blob_prefix) :]
+            if suffix in expected_suffixes:
+                expected_suffixes.remove(suffix)
+        if len(expected_suffixes) > 0:
+            raise CorruptItemException(
+                f"item is missing image files: {expected_suffixes}"
+            )
+
         elements = list(tree.iter("PRODUCT_START_TIME"))
         assert len(elements) == 1
         if elements[0].text is None:
@@ -368,6 +382,103 @@ class Sentinel2(DataSource):
             blob_prefix,
             cloud_cover,
         )
+
+    def get_item_by_name(self, name: str) -> Sentinel2Item:
+        """Gets an item by name.
+
+        Reads the individual product metadata file (MTD_MSIL1C.xml) to get both the
+        expected blob path where images are stored as well as the detailed geometry of
+        the product (not just the bounding box).
+
+        Args:
+            name: the name of the item to get
+
+        Returns:
+            the item object
+        """
+        # Cache the result if _get_item_by_name.
+        # We want to cache the item if it is successful, but also the
+        # CorruptItemException if it is raised.
+        cache_item_fname = self.index_cache_dir / (name + ".json")
+
+        if cache_item_fname.exists():
+            with cache_item_fname.open() as f:
+                d = json.load(f)
+
+            if "error" in d:
+                raise CorruptItemException(d["error"])
+
+            return Sentinel2Item.deserialize(d)
+
+        try:
+            item = self._get_item_by_name(name)
+        except CorruptItemException as e:
+            with open_atomic(cache_item_fname, "w") as f:
+                json.dump({"error": e.message}, f)
+            raise
+
+        with open_atomic(cache_item_fname, "w") as f:
+            json.dump(item.serialize(), f)
+        return item
+
+    def _read_products_for_cell_year(
+        self, cell_id: str, year: int
+    ) -> list[Sentinel2Item]:
+        # Read items for the given cell and year. These items are cached by
+        # _read_products together in one file.
+        cell_part1 = cell_id[0:2]
+        cell_part2 = cell_id[2:3]
+        cell_part3 = cell_id[3:5]
+
+        items = []
+
+        for product_prefix in ["S2A_MSIL1C", "S2B_MSIL1C"]:
+            cell_folder = f"tiles/{cell_part1}/{cell_part2}/{cell_part3}"
+            blob_prefix = f"{cell_folder}/{product_prefix}_{year}"
+            blobs = self.bucket.list_blobs(prefix=blob_prefix, delimiter="/")
+
+            # Need to consume the iterator to obtain folder names.
+            # See https://cloud.google.com/storage/docs/samples/storage-list-files-with-prefix#storage_list_files_with_prefix-python # noqa: E501
+            # Previously we checked for .SAFE_$folder$ blobs here, but those do
+            # not exist for some years like 2017.
+            for _ in blobs:
+                pass
+
+            logger.debug(
+                "under %s, found %d folders to scan",
+                blob_prefix,
+                len(blobs.prefixes),
+            )
+
+            for prefix in blobs.prefixes:
+                folder_name = prefix.split("/")[-2]
+                expected_suffix = ".SAFE"
+                assert folder_name.endswith(expected_suffix)
+                item_name = folder_name.split(expected_suffix)[0]
+
+                # Make sure metadata XML blob exists, otherwise we won't be
+                # able to load the item.
+                # (Sometimes there is a .SAFE folder but some files like the
+                # XML file are just missing for whatever reason.)
+                xml_blob_path = f"{cell_folder}/{folder_name}/MTD_MSIL1C.xml"
+                xml_blob = self.bucket.blob(xml_blob_path)
+                if not xml_blob.exists():
+                    logger.warning(
+                        "no metadata XML for Sentinel-2 folder %s at %s",
+                        folder_name,
+                        xml_blob_path,
+                    )
+                    continue
+
+                try:
+                    item = self.get_item_by_name(item_name)
+                except CorruptItemException as e:
+                    logger.warning("skipping corrupt item %s: %s", item_name, e.message)
+                    continue
+
+                items.append(item)
+
+        return items
 
     def _read_products(
         self, needed_cell_years: set[tuple[str, int]]
@@ -391,53 +502,7 @@ class Sentinel2(DataSource):
             cache_fname = self.index_cache_dir / f"{cell_id}_{year}.json"
 
             if not cache_fname.exists():
-                cell_part1 = cell_id[0:2]
-                cell_part2 = cell_id[2:3]
-                cell_part3 = cell_id[3:5]
-
-                items = []
-
-                for product_prefix in ["S2A_MSIL1C", "S2B_MSIL1C"]:
-                    cell_folder = f"tiles/{cell_part1}/{cell_part2}/{cell_part3}"
-                    blob_prefix = f"{cell_folder}/{product_prefix}_{year}"
-                    blobs = self.bucket.list_blobs(prefix=blob_prefix, delimiter="/")
-
-                    # Need to consume the iterator to obtain folder names.
-                    # See https://cloud.google.com/storage/docs/samples/storage-list-files-with-prefix#storage_list_files_with_prefix-python # noqa: E501
-                    # Previously we checked for .SAFE_$folder$ blobs here, but those do
-                    # not exist for some years like 2017.
-                    for _ in blobs:
-                        pass
-
-                    logger.debug(
-                        "under %s, found %d folders to scan",
-                        blob_prefix,
-                        len(blobs.prefixes),
-                    )
-
-                    for prefix in blobs.prefixes:
-                        folder_name = prefix.split("/")[-2]
-                        expected_suffix = ".SAFE"
-                        assert folder_name.endswith(expected_suffix)
-                        item_name = folder_name.split(expected_suffix)[0]
-
-                        # Make sure metadata XML blob exists, otherwise we won't be
-                        # able to load the item.
-                        # (Sometimes there is a .SAFE folder but some files like the
-                        # XML file are just missing for whatever reason.)
-                        xml_blob_path = f"{cell_folder}/{folder_name}/MTD_MSIL1C.xml"
-                        xml_blob = self.bucket.blob(xml_blob_path)
-                        if not xml_blob.exists():
-                            logger.warning(
-                                "no metadata XML for Sentinel-2 folder %s at %s",
-                                folder_name,
-                                xml_blob_path,
-                            )
-                            continue
-
-                        item = self.get_item_by_name(item_name)
-                        items.append(item)
-
+                items = self._read_products_for_cell_year(cell_id, year)
                 with open_atomic(cache_fname, "w") as f:
                     json.dump([item.serialize() for item in items], f)
 
@@ -445,8 +510,7 @@ class Sentinel2(DataSource):
                 with cache_fname.open() as f:
                     items = [Sentinel2Item.deserialize(d) for d in json.load(f)]
 
-            for item in items:
-                yield item
+            yield from items
 
     def _get_candidate_items_index(
         self, wgs84_geometries: list[STGeometry]
@@ -469,7 +533,15 @@ class Sentinel2(DataSource):
                     continue
                 if not item.geometry.shp.intersects(geometry.shp):
                     continue
-                item = self.get_item_by_name(item.name)
+
+                # Get the item from XML to get its exact geometry (the index only
+                # knows the bounding box of the item).
+                try:
+                    item = self.get_item_by_name(item.name)
+                except CorruptItemException as e:
+                    logger.warning("skipping corrupt item %s: %s", item.name, e.message)
+                    continue
+
                 if not item.geometry.shp.intersects(geometry.shp):
                     continue
                 candidates[idx].append(item)
