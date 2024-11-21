@@ -188,11 +188,11 @@ def materialize_raster(
             f"No bands or format specified for {layer_name} materialization"
         )
     # Write the array to layer directory.
-    layer_dir = window.path / "layers" / layer_name
-    out_dir = layer_dir / "_".join(band_cfg.bands)
+    out_dir = window.get_raster_dir(layer_name, band_cfg.bands)
     out_dir.mkdir(parents=True, exist_ok=True)
     raster_format = load_raster_format(
         RasterFormatConfig(band_cfg.format["name"], band_cfg.format)
     )
     raster_format.encode_raster(out_dir, window_projection, window_bounds, dst_array)
+    layer_dir = window.get_layer_dir(layer_name)
     (layer_dir / "completed").touch()
