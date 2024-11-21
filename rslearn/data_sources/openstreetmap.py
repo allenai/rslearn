@@ -15,7 +15,7 @@ from rslearn.config import QueryConfig, VectorLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
-from rslearn.tile_stores import LayerMetadata, TileStore
+from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import Feature, GridIndex, STGeometry
 from rslearn.utils.fsspec import get_upath_local, join_upath
 
@@ -497,7 +497,7 @@ class OpenStreetMap(DataSource[OsmItem]):
 
     def ingest(
         self,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         items: list[OsmItem],
         geometries: list[list[STGeometry]],
     ) -> None:
@@ -511,6 +511,9 @@ class OpenStreetMap(DataSource[OsmItem]):
         item_names = [item.name for item in items]
         item_names.sort()
         for cur_item, cur_geometries in zip(items, geometries):
+            if tile_store.is_vector_ready(cur_item.name):
+                continue
+
             print(
                 f"ingesting osm item {cur_item.name} "
                 + f"with {len(cur_geometries)} geometries"
@@ -519,17 +522,4 @@ class OpenStreetMap(DataSource[OsmItem]):
             with get_upath_local(UPath(cur_item.path_uri)) as local_fname:
                 handler.apply_file(local_fname)
 
-            projections = set()
-            for geometry in cur_geometries:
-                projection, _ = self.config.get_final_projection_and_bounds(
-                    geometry.projection, None
-                )
-                projections.add(projection)
-
-            for projection in projections:
-                features = [feat.to_projection(projection) for feat in handler.features]
-                layer = tile_store.create_layer(
-                    (cur_item.name, str(projection)),
-                    LayerMetadata(projection, None, {}),
-                )
-                layer.write_vector(features)
+            tile_store.write_vector(cur_item.name, handler.features)

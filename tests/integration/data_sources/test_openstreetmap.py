@@ -9,7 +9,7 @@ from upath import UPath
 from rslearn.config import LayerType, QueryConfig, SpaceMode, VectorLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.openstreetmap import FeatureType, Filter, OpenStreetMap
-from rslearn.tile_stores import FileTileStore
+from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils import STGeometry
 
 
@@ -54,12 +54,16 @@ class TestOpenStreetMap:
         print("get items")
         item_groups = data_source.get_items([delaware_area], query_config)[0]
         item = item_groups[0][0]
-        tile_store = FileTileStore(tile_store_dir)
+        tile_store = DefaultTileStore(str(tile_store_dir))
+        tile_store.set_dataset_path(tile_store_dir)
+        layer_name = "layer"
         print("ingest")
-        data_source.ingest(tile_store, item_groups[0], [[delaware_area]])
-        expected_path = (
-            tile_store_dir / item.name / str(delaware_area.projection) / "data.geojson"
+        data_source.ingest(
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[0],
+            [[delaware_area]],
         )
+        expected_path = tile_store_dir / layer_name / item.name / "data.geojson"
         assert expected_path.exists()
 
     def test_local(self, tmp_path: pathlib.Path) -> None:

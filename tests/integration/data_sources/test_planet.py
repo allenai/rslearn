@@ -13,7 +13,7 @@ from rslearn.config import (
     SpaceMode,
 )
 from rslearn.data_sources.planet import Planet
-from rslearn.tile_stores import FileTileStore
+from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils import STGeometry
 
 RUNNING_IN_CI = os.environ.get("CI", "false").lower() == "true"
@@ -42,14 +42,11 @@ class TestPlanet:
         print("get items")
         item_groups = data_source.get_items([seattle2020], query_config)[0]
         item = item_groups[0][0]
-        tile_store = FileTileStore(tile_store_dir)
+        tile_store = DefaultTileStore(str(tile_store_dir))
+        tile_store.set_dataset_path(tile_store_dir)
+        layer_name = "layer"
         print("ingest")
-        data_source.ingest(tile_store, item_groups[0], [[seattle2020]])
-        expected_path = (
-            tile_store_dir
-            / item.name
-            / "_".join(self.TEST_BANDS)
-            / str(seattle2020.projection)
-            / "geotiff.tif"
+        data_source.ingest(
+            TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
         )
-        assert expected_path.exists()
+        assert tile_store.is_raster_ready(layer_name, item.name, self.TEST_BANDS)

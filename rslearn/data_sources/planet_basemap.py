@@ -5,7 +5,6 @@ import tempfile
 from datetime import datetime
 from typing import Any
 
-import rasterio
 import requests
 import shapely
 from upath import UPath
@@ -15,10 +14,8 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.log_utils import get_logger
-from rslearn.tile_stores import PrefixedTileStore, TileStore
+from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
-
-from .raster_source import get_needed_projections, ingest_raster
 
 logger = get_logger(__name__)
 
@@ -246,7 +243,7 @@ class PlanetBasemap(DataSource):
 
     def ingest(
         self,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         items: list[Item],
         geometries: list[list[STGeometry]],
     ) -> None:
@@ -257,47 +254,24 @@ class PlanetBasemap(DataSource):
             items: the items to ingest
             geometries: a list of geometries needed for each item
         """
-        for item, cur_geometries in zip(items, geometries):
+        for item in items:
+            if tile_store.is_raster_ready(item.name, self.bands):
+                continue
+
+            assert isinstance(item, PlanetItem)
+            download_url = (
+                self.api_url + f"mosaics/{item.mosaic_id}/quads/{item.quad_id}/full"
+            )
+            response = self.session.get(download_url, allow_redirects=True, stream=True)
+            if response.status_code != 200:
+                raise ApiError(
+                    f"{download_url}: got status code {response.status_code}: {response.text}"
+                )
+
             with tempfile.TemporaryDirectory() as tmp_dir:
-                band_names = self.bands
-                cur_tile_store = PrefixedTileStore(
-                    tile_store, (item.name, "_".join(band_names))
-                )
-                needed_projections = get_needed_projections(
-                    cur_tile_store, band_names, self.config.band_sets, cur_geometries
-                )
-                if not needed_projections:
-                    continue
+                local_fname = os.path.join(tmp_dir, "temp.tif")
+                with open(local_fname, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
 
-                assert isinstance(item, PlanetItem)
-                download_url = (
-                    self.api_url + f"mosaics/{item.mosaic_id}/quads/{item.quad_id}/full"
-                )
-                response = self.session.get(
-                    download_url, allow_redirects=True, stream=True
-                )
-                if response.status_code != 200:
-                    # # temporary skip for now
-                    # logger.error(
-                    #     f"{download_url}: got status code {response.status_code}: {response.text}"
-                    # )
-                    # continue
-                    raise ApiError(
-                        f"{download_url}: got status code {response.status_code}: {response.text}"
-                    )
-
-                with tempfile.TemporaryDirectory() as tmp_dir:
-                    local_fname = os.path.join(tmp_dir, "temp.tif")
-                    with open(local_fname, "wb") as f:
-                        for chunk in response.iter_content(chunk_size=8192):
-                            f.write(chunk)
-
-                    with rasterio.open(local_fname) as raster:
-                        for projection in needed_projections:
-                            ingest_raster(
-                                tile_store=cur_tile_store,
-                                raster=raster,
-                                projection=projection,
-                                time_range=item.geometry.time_range,
-                                layer_config=self.config,
-                            )
+                tile_store.write_raster_file(item.name, self.bands, UPath(local_fname))

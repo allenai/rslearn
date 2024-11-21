@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 import planet
-import rasterio
 import shapely
 from fsspec.implementations.local import LocalFileSystem
 from upath import UPath
@@ -19,11 +18,9 @@ from rslearn.config import QueryConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
-from rslearn.tile_stores import PrefixedTileStore, TileStore
+from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
 from rslearn.utils.fsspec import join_upath
-
-from .raster_source import get_needed_projections, ingest_raster
 
 
 class Planet(DataSource):
@@ -243,7 +240,7 @@ class Planet(DataSource):
 
     def ingest(
         self,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         items: list[Item],
         geometries: list[list[STGeometry]],
     ) -> None:
@@ -254,26 +251,10 @@ class Planet(DataSource):
             items: the items to ingest
             geometries: a list of geometries needed for each item
         """
-        for item, cur_geometries in zip(items, geometries):
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                band_names = self.bands
-                cur_tile_store = PrefixedTileStore(
-                    tile_store, (item.name, "_".join(band_names))
-                )
-                needed_projections = get_needed_projections(
-                    cur_tile_store, band_names, self.config.band_sets, cur_geometries
-                )
-                if not needed_projections:
-                    continue
+        for item in items:
+            if tile_store.is_raster_ready(item.name, self.bands):
+                continue
 
+            with tempfile.TemporaryDirectory() as tmp_dir:
                 asset_path = asyncio.run(self._download_asset(item, Path(tmp_dir)))
-                with asset_path.open("rb") as f:
-                    with rasterio.open(f) as raster:
-                        for projection in needed_projections:
-                            ingest_raster(
-                                tile_store=cur_tile_store,
-                                raster=raster,
-                                projection=projection,
-                                time_range=item.geometry.time_range,
-                                layer_config=self.config,
-                            )
+                tile_store.write_raster_file(item.name, self.bands, asset_path)

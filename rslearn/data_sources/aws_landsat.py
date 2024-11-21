@@ -2,7 +2,9 @@
 
 import io
 import json
+import os
 import shutil
+import tempfile
 import urllib.request
 import zipfile
 from collections.abc import Generator
@@ -14,7 +16,6 @@ import dateutil.parser
 import fiona
 import fiona.transform
 import pytimeparse
-import rasterio
 import shapely
 import tqdm
 from upath import UPath
@@ -22,12 +23,11 @@ from upath import UPath
 import rslearn.data_sources.utils
 from rslearn.config import RasterLayerConfig
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_PROJECTION
-from rslearn.tile_stores import PrefixedTileStore, TileStore
+from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 
 from .data_source import DataSource, Item, QueryConfig
-from .raster_source import get_needed_projections, ingest_raster
 
 
 class LandsatOliTirsItem(Item):
@@ -356,7 +356,7 @@ class LandsatOliTirs(DataSource):
 
     def ingest(
         self,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         items: list[LandsatOliTirsItem],
         geometries: list[list[STGeometry]],
     ) -> None:
@@ -370,31 +370,14 @@ class LandsatOliTirs(DataSource):
         for item, cur_geometries in zip(items, geometries):
             for band in self.bands:
                 band_names = [band]
-                cur_tile_store = PrefixedTileStore(
-                    tile_store, (item.name, "_".join(band_names))
-                )
-                needed_projections = get_needed_projections(
-                    cur_tile_store,
-                    band_names,
-                    self.config.band_sets,
-                    cur_geometries,  # type: ignore
-                )
-                if not needed_projections:
+                if tile_store.is_raster_ready(item.name, band_names):
                     continue
 
-                buf = io.BytesIO()
-                self.bucket.download_fileobj(
-                    item.blob_path + f"{band}.TIF",
-                    buf,
-                    ExtraArgs={"RequestPayer": "requester"},
-                )
-                buf.seek(0)
-                with rasterio.open(buf) as raster:
-                    for projection in needed_projections:
-                        ingest_raster(
-                            tile_store=cur_tile_store,
-                            raster=raster,
-                            projection=projection,
-                            time_range=item.geometry.time_range,
-                            layer_config=self.config,
-                        )
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    fname = os.path.join(tmp_dir, f"{band}.tif")
+                    self.bucket.download_file(
+                        item.blob_path + f"{band}.TIF",
+                        fname,
+                        ExtraArgs={"RequestPayer": "requester"},
+                    )
+                    tile_store.write_raster_file(item.name, band_names, UPath(fname))
