@@ -140,7 +140,7 @@ class ERA5LandMonthlyMeans(DataSource):
             # Variable data is stored in a 3D array (1, height, width)
             if len(band_data.shape) == 3:
                 bands_data.append(band_data[0, :, :])
-        tif_data = np.array(bands_data)  # (num_bands, height, width)
+        array = np.array(bands_data)  # (num_bands, height, width)
         # Get metadata for the GeoTIFF
         lat = nc.variables["latitude"][:]
         lon = nc.variables["longitude"][:]
@@ -153,15 +153,15 @@ class ERA5LandMonthlyMeans(DataSource):
             tif_path,
             "w",
             driver="GTiff",
-            height=tif_data.shape[1],
-            width=tif_data.shape[2],
-            count=tif_data.shape[0],
-            dtype=tif_data.dtype,
+            height=array.shape[1],
+            width=array.shape[2],
+            count=array.shape[0],
+            dtype=array.dtype,
             crs=crs,
             transform=transform,
         ) as dst:
-            for i in range(tif_data.shape[0]):
-                dst.write(tif_data[i, :, :], i + 1)  # Write each band to the GeoTIFF
+            for i in range(array.shape[0]):
+                dst.write(array[i, :, :], i + 1)  # Write each band to the GeoTIFF
 
     def ingest(
         self,
