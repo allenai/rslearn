@@ -36,7 +36,7 @@ class ERA5LandMonthlyMeans(DataSource):
     PIXEL_SIZE = 0.1  # degrees, native resolution is 9km
 
     # see: https://confluence.ecmwf.int/display/CKB/ERA5-Land%3A+data+documentation
-    # Table 2 & 3 for variable shortnames
+    # For variable full & short names
 
     def __init__(
         self,
@@ -140,7 +140,7 @@ class ERA5LandMonthlyMeans(DataSource):
             # Variable data is stored in a 3D array (1, height, width)
             if len(band_data.shape) == 3:
                 bands_data.append(band_data[0, :, :])
-        tif_data = np.array(bands_data)  # shape (num_bands, height, width)
+        tif_data = np.array(bands_data)  # (num_bands, height, width)
         # Get metadata for the GeoTIFF
         lat = nc.variables["latitude"][:]
         lon = nc.variables["longitude"][:]
@@ -197,16 +197,16 @@ class ERA5LandMonthlyMeans(DataSource):
                 "year": [f"{item.geometry.time_range[0].year}"],  # type: ignore
                 "month": [
                     f"{item.geometry.time_range[0].month:02d}"  # type: ignore
-                ],  # Zero-padded month
-                "time": ["00:00"],  # default to 00:00
+                ],
+                "time": ["00:00"],
                 "area": [
                     bounds[3],
                     bounds[0],
                     bounds[1],
                     bounds[2],
-                ],  # [max_lat, min_lon, min_lat, max_lon]
-                "data_format": "netcdf",  # default to netcdf
-                "download_format": "unarchived",  # default to unarchived
+                ],
+                "data_format": "netcdf",
+                "download_format": "unarchived",
             }
             with tempfile.TemporaryDirectory() as tmp_dir:
                 local_nc_fname = os.path.join(tmp_dir, f"{item.name}.nc")
