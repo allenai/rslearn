@@ -2,6 +2,8 @@
 
 import io
 import json
+import os
+import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Generator
 from datetime import datetime, timedelta, timezone
@@ -23,9 +25,10 @@ from upath import UPath
 import rslearn.data_sources.utils
 from rslearn.config import RasterLayerConfig
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_EPSG, WGS84_PROJECTION
-from rslearn.tile_stores import PrefixedTileStore, TileStore
+from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import GridIndex, Projection, STGeometry, daterange
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
+from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 from .copernicus import get_harmonize_callback, get_sentinel2_tiles
 from .data_source import (
@@ -35,7 +38,6 @@ from .data_source import (
     QueryConfig,
     RetrieveItemDataSource,
 )
-from .raster_source import get_needed_projections, ingest_raster
 
 
 class NaipItem(Item):
@@ -329,7 +331,7 @@ class Naip(DataSource):
 
     def ingest(
         self,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         items: list[NaipItem],
         geometries: list[list[STGeometry]],
     ) -> None:
@@ -340,29 +342,17 @@ class Naip(DataSource):
             items: the items to ingest
             geometries: a list of geometries needed for each item
         """
-        for item, cur_geometries in zip(items, geometries):
+        for item in items:
             bands = ["R", "G", "B", "IR"]
-            cur_tile_store = PrefixedTileStore(tile_store, (item.name, "_".join(bands)))
-            needed_projections = get_needed_projections(
-                cur_tile_store, bands, self.config.band_sets, cur_geometries
-            )
-            if not needed_projections:
+            if tile_store.is_raster_ready(item.name, bands):
                 continue
 
-            buf = io.BytesIO()
-            self.bucket.download_fileobj(
-                item.blob_path, buf, ExtraArgs={"RequestPayer": "requester"}
-            )
-            buf.seek(0)
-            with rasterio.open(buf) as raster:
-                for projection in needed_projections:
-                    ingest_raster(
-                        tile_store=cur_tile_store,
-                        raster=raster,
-                        projection=projection,
-                        time_range=item.geometry.time_range,
-                        layer_config=self.config,
-                    )
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                fname = os.path.join(tmp_dir, item.blob_path.split("/")[-1])
+                self.bucket.download_file(
+                    item.blob_path, fname, ExtraArgs={"RequestPayer": "requester"}
+                )
+                tile_store.write_raster_file(item.name, bands, UPath(fname))
 
 
 class Sentinel2Modality(Enum):
@@ -728,7 +718,7 @@ class Sentinel2(
 
     def ingest(
         self,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         items: list[Sentinel2Item],
         geometries: list[list[STGeometry]],
     ) -> None:
@@ -739,42 +729,43 @@ class Sentinel2(
             items: the items to ingest
             geometries: a list of geometries needed for each item
         """
-        for item, cur_geometries in zip(items, geometries):
-            harmonize_callback = self._get_harmonize_callback(item)
-
+        for item in items:
             for fname, band_names in self.band_fnames[self.modality]:
-                cur_tile_store = PrefixedTileStore(
-                    tile_store, (item.name, "_".join(band_names))
-                )
-                needed_projections = get_needed_projections(
-                    cur_tile_store, band_names, self.config.band_sets, cur_geometries
-                )
-                if not needed_projections:
+                if tile_store.is_raster_ready(item.name, band_names):
                     continue
 
-                buf = io.BytesIO()
-                try:
-                    self.bucket.download_fileobj(
-                        item.blob_path + fname,
-                        buf,
-                        ExtraArgs={"RequestPayer": "requester"},
-                    )
-                except Exception as e:
-                    # TODO: sometimes for some reason object doesn't exist
-                    # we should probably investigate further why it happens
-                    # and then should create the layer here and mark it completed
-                    print(
-                        f"warning: got error {e} downloading {item.blob_path + fname}"
-                    )
-                    continue
-                buf.seek(0)
-                with rasterio.open(buf) as raster:
-                    for projection in needed_projections:
-                        ingest_raster(
-                            tile_store=cur_tile_store,
-                            raster=raster,
-                            projection=projection,
-                            time_range=item.geometry.time_range,
-                            layer_config=self.config,
-                            array_callback=harmonize_callback,
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    local_fname = os.path.join(tmp_dir, fname.split("/")[-1])
+
+                    try:
+                        self.bucket.download_file(
+                            item.blob_path + fname,
+                            local_fname,
+                            ExtraArgs={"RequestPayer": "requester"},
+                        )
+                    except Exception as e:
+                        # TODO: sometimes for some reason object doesn't exist
+                        # we should probably investigate further why it happens
+                        # and then should create the layer here and mark it completed
+                        print(
+                            f"warning: got error {e} downloading {item.blob_path + fname}"
+                        )
+                        continue
+
+                    harmonize_callback = self._get_harmonize_callback(item)
+
+                    if harmonize_callback is not None:
+                        # In this case we need to read the array, convert the pixel
+                        # values, and pass modified array directly to the TileStore.
+                        with rasterio.open(local_fname) as src:
+                            array = src.read()
+                            projection, bounds = get_raster_projection_and_bounds(src)
+                        array = harmonize_callback(array)
+                        tile_store.write_raster(
+                            item.name, band_names, projection, bounds, array
+                        )
+
+                    else:
+                        tile_store.write_raster_file(
+                            item.name, band_names, UPath(local_fname)
                         )

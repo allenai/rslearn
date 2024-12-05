@@ -5,7 +5,7 @@ from typing import Any, BinaryIO, Generic, TypeVar
 
 from rslearn.config import LayerConfig, QueryConfig
 from rslearn.dataset import Window
-from rslearn.tile_stores import TileStore
+from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
 
 
@@ -82,7 +82,7 @@ class DataSource(Generic[ItemType]):
 
     def ingest(
         self,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         items: list[ItemType],
         geometries: list[list[STGeometry]],
     ) -> None:

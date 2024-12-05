@@ -22,7 +22,7 @@ from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
 from rslearn.dataset.manage import materialize_dataset_windows, prepare_dataset_windows
 from rslearn.log_utils import get_logger
-from rslearn.tile_stores import get_tile_store_for_layer
+from rslearn.tile_stores import get_tile_store_with_layer
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.utils import Projection, STGeometry, parse_disabled_layers
@@ -454,13 +454,15 @@ class IngestHandler:
             configs_by_layer[layer_name] = layer_cfg
 
         for layer_name, items_and_geometries in jobs_by_layer.items():
-            cur_tile_store = get_tile_store_for_layer(tile_store, layer_name, layer_cfg)
+            layer_tile_store = get_tile_store_with_layer(
+                tile_store, layer_name, layer_cfg
+            )
             layer_cfg = self.dataset.layers[layer_name]
             data_source = data_source_from_config(layer_cfg, self.dataset.path)
 
             try:
                 data_source.ingest(
-                    tile_store=cur_tile_store,
+                    tile_store=layer_tile_store,
                     items=[item for item, _ in items_and_geometries],
                     geometries=[geometries for _, geometries in items_and_geometries],
                 )

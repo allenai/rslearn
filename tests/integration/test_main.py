@@ -123,14 +123,7 @@ class TestIngestion:
 
     @pytest.fixture
     def ingested_fname(self, prepared_dataset: Dataset) -> UPath:
-        return (
-            prepared_dataset.path
-            / "tiles"
-            / "local_files"
-            / "foo"
-            / str(WGS84_PROJECTION)
-            / "data.geojson"
-        )
+        return prepared_dataset.path / "tiles" / "local_files" / "foo" / "data.geojson"
 
     def test_normal_ingest_fails(
         self, prepared_dataset: Dataset, monkeypatch: Any
