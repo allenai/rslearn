@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+from datetime import datetime, timezone
 
 import cdsapi
 import netCDF4
@@ -25,7 +26,7 @@ logger = get_logger(__name__)
 class ERA5LandMonthlyMeans(DataSource):
     """A data source for ingesting ERA5 land monthly averaged data from the Copernicus Climate Data Store.
 
-    The API key should be set via environment variable (CDS_API_KEY).
+    The API key should be set via environment variable (CDSAPI_KEY).
     """
 
     api_url = "https://cds.climate.copernicus.eu/api"
@@ -33,6 +34,8 @@ class ERA5LandMonthlyMeans(DataSource):
     # see: https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-land-monthly-means
     DATASET = "reanalysis-era5-land-monthly-means"
     PRODUCT_TYPE = "monthly_averaged_reanalysis"
+    DATA_FORMAT = "netcdf"
+    DOWNLOAD_FORMAT = "unarchived"
     PIXEL_SIZE = 0.1  # degrees, native resolution is 9km
 
     # see: https://confluence.ecmwf.int/display/CKB/ERA5-Land%3A+data+documentation
@@ -50,15 +53,10 @@ class ERA5LandMonthlyMeans(DataSource):
             api_key: the API key
         """
         self.config = config
-
-        if api_key is None:
-            api_key = os.environ["CDS_API_KEY"]
-        # Follow CDS API docs: https://pypi.org/project/cdsapi/
-        # Copy both url and key to $HOME/.cdsapirc
-        with open(os.path.expanduser("~/.cdsapirc"), "w") as f:
-            f.write(f"url: {self.api_url}\nkey: {api_key}")
-
-        self.client = cdsapi.Client()
+        self.client = cdsapi.Client(
+            url=self.api_url,
+            key=api_key,
+        )
 
     @staticmethod
     def from_config(
@@ -76,9 +74,10 @@ class ERA5LandMonthlyMeans(DataSource):
         if config.data_source is None:
             raise ValueError("data_source is required")
         d = config.data_source.config_dict
+        api_key = d.get("api_key")
         return ERA5LandMonthlyMeans(
             config=config,
-            api_key=d["api_key"],
+            api_key=api_key,
         )
 
     def get_items(
@@ -100,8 +99,24 @@ class ERA5LandMonthlyMeans(DataSource):
         for geometry in wgs84_geometries:
             cur_items = []
             # Create an item for each year & month within the time range
-            start_date = geometry.time_range[0].replace(day=1)  # type: ignore
-            end_date = geometry.time_range[1].replace(day=1)  # type: ignore
+            start_date = datetime(
+                geometry.time_range[0].year,  # type: ignore
+                geometry.time_range[0].month,  # type: ignore
+                day=1,
+                hour=0,
+                minute=0,
+                second=0,
+                tzinfo=timezone.utc,
+            )
+            end_date = datetime(
+                geometry.time_range[1].year,  # type: ignore
+                geometry.time_range[1].month,  # type: ignore
+                day=1,
+                hour=0,
+                minute=0,
+                second=0,
+                tzinfo=timezone.utc,
+            )
             while start_date <= end_date:
                 # Get the first and last day of the current year & month
                 # Use this as the item's time range
@@ -203,8 +218,8 @@ class ERA5LandMonthlyMeans(DataSource):
                     bounds[1],
                     bounds[2],
                 ],
-                "data_format": "netcdf",
-                "download_format": "unarchived",
+                "data_format": self.DATA_FORMAT,
+                "download_format": self.DOWNLOAD_FORMAT,
             }
             with tempfile.TemporaryDirectory() as tmp_dir:
                 local_nc_fname = os.path.join(tmp_dir, f"{item.name}.nc")
