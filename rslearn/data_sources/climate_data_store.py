@@ -50,8 +50,6 @@ class ERA5LandMonthlyMeans(DataSource):
             api_key: the API key
         """
         self.config = config
-        self.dataset = self.DATASET
-        self.product_type = self.PRODUCT_TYPE
 
         if api_key is None:
             api_key = os.environ["CDS_API_KEY"]
@@ -192,7 +190,7 @@ class ERA5LandMonthlyMeans(DataSource):
             # Send the request to the CDS API
             bounds = item.geometry.shp.bounds
             request = {
-                "product_type": [self.product_type],
+                "product_type": [self.PRODUCT_TYPE],
                 "variable": bands,
                 "year": [f"{item.geometry.time_range[0].year}"],  # type: ignore
                 "month": [
@@ -211,7 +209,7 @@ class ERA5LandMonthlyMeans(DataSource):
             with tempfile.TemporaryDirectory() as tmp_dir:
                 local_nc_fname = os.path.join(tmp_dir, f"{item.name}.nc")
                 local_tif_fname = os.path.join(tmp_dir, f"{item.name}.tif")
-                self.client.retrieve(self.dataset, request, local_nc_fname)
+                self.client.retrieve(self.DATASET, request, local_nc_fname)
                 self._convert_nc_to_tif(
                     UPath(local_nc_fname),
                     UPath(local_tif_fname),
