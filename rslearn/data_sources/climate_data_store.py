@@ -190,9 +190,9 @@ class ERA5LandMonthlyMeans(DataSource):
                 raise ValueError(
                     f"Latitude spacing is not uniform: {lat[i + 1] - lat[i]}"
                 )
-        west = lon.min()
-        north = lat.max()
-        pixel_size_x, pixel_size_y = self.PIXEL_SIZE, -self.PIXEL_SIZE
+        west = lon.min() - self.PIXEL_SIZE / 2
+        north = lat.max() + self.PIXEL_SIZE / 2
+        pixel_size_x, pixel_size_y = self.PIXEL_SIZE, self.PIXEL_SIZE
         transform = from_origin(west, north, pixel_size_x, pixel_size_y)
         crs = f"EPSG:{WGS84_EPSG}"
         with rasterio.open(
