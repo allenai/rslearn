@@ -157,6 +157,17 @@ class ERA5LandMonthlyMeans(DataSource):
         # Get metadata for the GeoTIFF
         lat = nc.variables["latitude"][:]
         lon = nc.variables["longitude"][:]
+        # Check the spacing of the grid, make sure it's uniform
+        for i in range(len(lon) - 1):
+            if lon[i + 1] - lon[i] != self.PIXEL_SIZE:
+                raise ValueError(
+                    f"Longitude spacing is not uniform: {lon[i + 1] - lon[i]}"
+                )
+        for i in range(len(lat) - 1):
+            if lat[i + 1] - lat[i] != self.PIXEL_SIZE:
+                raise ValueError(
+                    f"Latitude spacing is not uniform: {lat[i + 1] - lat[i]}"
+                )
         west = lon.min()
         north = lat.max()
         pixel_size_x, pixel_size_y = self.PIXEL_SIZE, self.PIXEL_SIZE
