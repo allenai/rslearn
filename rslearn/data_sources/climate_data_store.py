@@ -3,6 +3,7 @@
 import os
 import tempfile
 from datetime import datetime, timezone
+from typing import Any
 
 import cdsapi
 import netCDF4
@@ -10,6 +11,7 @@ import numpy as np
 import rasterio
 from dateutil.relativedelta import relativedelta
 from rasterio.transform import from_origin
+from shapely.geometry import box
 from upath import UPath
 
 from rslearn.config import QueryConfig, RasterLayerConfig
@@ -95,49 +97,69 @@ class ERA5LandMonthlyMeans(DataSource):
         wgs84_geometries = [
             geometry.to_projection(WGS84_PROJECTION) for geometry in geometries
         ]
+        # Union all the geometries to form the request geometry
+        union_bounds = [geometry.shp.bounds for geometry in wgs84_geometries]
+        minx = min([b[0] for b in union_bounds])
+        miny = min([b[1] for b in union_bounds])
+        maxx = max([b[2] for b in union_bounds])
+        maxy = max([b[3] for b in union_bounds])
+        union_shp = box(minx, miny, maxx, maxy)
+        union_time_range = (
+            min([geometry.time_range[0] for geometry in wgs84_geometries]),  # type: ignore
+            max([geometry.time_range[1] for geometry in wgs84_geometries]),  # type: ignore
+        )
+        union_geometry = STGeometry(WGS84_PROJECTION, union_shp, union_time_range)
+        # Create an item for each month within the time range
+        union_items = []
+        start_date = datetime(
+            union_geometry.time_range[0].year,  # type: ignore
+            union_geometry.time_range[0].month,  # type: ignore
+            day=1,
+            hour=0,
+            minute=0,
+            second=0,
+            tzinfo=timezone.utc,
+        )
+        end_date = datetime(
+            union_geometry.time_range[1].year,  # type: ignore
+            union_geometry.time_range[1].month,  # type: ignore
+            day=1,
+            hour=0,
+            minute=0,
+            second=0,
+            tzinfo=timezone.utc,
+        )
+        while start_date <= end_date:
+            # Get the first and last day of the current year & month
+            # Use this as the item's time range
+            item_start_date, item_end_date = (
+                start_date,
+                start_date + relativedelta(months=1) - relativedelta(days=1),
+            )
+            item_geometry = STGeometry(
+                union_geometry.projection,
+                union_geometry.shp,
+                (item_start_date, item_end_date),
+            )
+            item_bounds = item_geometry.shp.bounds
+            item_name = f"{item_bounds[0]}_{item_bounds[1]}_{item_start_date.year}_{item_start_date.month:02d}"
+            item = Item(item_name, item_geometry)
+            union_items.append(item)
+            start_date += relativedelta(months=1)
+
         groups = []
         for geometry in wgs84_geometries:
-            cur_items = []
-            # Create an item for each year & month within the time range
-            start_date = datetime(
-                geometry.time_range[0].year,  # type: ignore
-                geometry.time_range[0].month,  # type: ignore
-                day=1,
-                hour=0,
-                minute=0,
-                second=0,
-                tzinfo=timezone.utc,
-            )
-            end_date = datetime(
-                geometry.time_range[1].year,  # type: ignore
-                geometry.time_range[1].month,  # type: ignore
-                day=1,
-                hour=0,
-                minute=0,
-                second=0,
-                tzinfo=timezone.utc,
-            )
-            while start_date <= end_date:
-                # Get the first and last day of the current year & month
-                # Use this as the item's time range
-                item_start_date, item_end_date = (
-                    start_date,
-                    start_date + relativedelta(months=1) - relativedelta(days=1),
-                )
-                item_geometry = STGeometry(
-                    geometry.projection, geometry.shp, (item_start_date, item_end_date)
-                )
-                item_bounds = item_geometry.shp.bounds
-                item_name = f"{item_bounds[0]}_{item_bounds[1]}_{item_start_date.year}_{item_start_date.month:02d}"
-                item = Item(item_name, item_geometry)
-                cur_items.append(item)
-                start_date += relativedelta(months=1)
             cur_groups = match_candidate_items_to_window(
-                geometry, cur_items, query_config
+                geometry, union_items, query_config
             )
             groups.append(cur_groups)
 
         return groups
+
+    def deserialize_item(self, serialized_item: Any) -> Item:
+        """Deserializes an item from JSON-decoded data."""
+        assert isinstance(serialized_item, dict)
+        return Item.deserialize(serialized_item)
 
     def _convert_nc_to_tif(self, nc_path: UPath, tif_path: UPath) -> None:
         """Convert a netCDF file to a GeoTIFF file.
@@ -159,18 +181,18 @@ class ERA5LandMonthlyMeans(DataSource):
         lon = nc.variables["longitude"][:]
         # Check the spacing of the grid, make sure it's uniform
         for i in range(len(lon) - 1):
-            if lon[i + 1] - lon[i] != self.PIXEL_SIZE:
+            if round(lon[i + 1] - lon[i], 1) != self.PIXEL_SIZE:
                 raise ValueError(
                     f"Longitude spacing is not uniform: {lon[i + 1] - lon[i]}"
                 )
         for i in range(len(lat) - 1):
-            if lat[i + 1] - lat[i] != self.PIXEL_SIZE:
+            if round(lat[i + 1] - lat[i], 1) != -self.PIXEL_SIZE:
                 raise ValueError(
                     f"Latitude spacing is not uniform: {lat[i + 1] - lat[i]}"
                 )
         west = lon.min()
         north = lat.max()
-        pixel_size_x, pixel_size_y = self.PIXEL_SIZE, self.PIXEL_SIZE
+        pixel_size_x, pixel_size_y = self.PIXEL_SIZE, -self.PIXEL_SIZE
         transform = from_origin(west, north, pixel_size_x, pixel_size_y)
         crs = f"EPSG:{WGS84_EPSG}"
         with rasterio.open(
@@ -212,7 +234,6 @@ class ERA5LandMonthlyMeans(DataSource):
         for item in items:
             if tile_store.is_raster_ready(item.name, bands):
                 continue
-
             # Send the request to the CDS API
             bounds = item.geometry.shp.bounds
             request = {
@@ -224,10 +245,10 @@ class ERA5LandMonthlyMeans(DataSource):
                 ],
                 "time": ["00:00"],
                 "area": [
-                    bounds[3],
-                    bounds[0],
-                    bounds[1],
-                    bounds[2],
+                    bounds[3],  # North
+                    bounds[0],  # West
+                    bounds[1],  # South
+                    bounds[2],  # East
                 ],
                 "data_format": self.DATA_FORMAT,
                 "download_format": self.DOWNLOAD_FORMAT,
