@@ -54,7 +54,6 @@ class TestERA5LandMonthlyMeans:
 
     def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         """Test ingesting to local filesystem."""
-        tmp_path = pathlib.Path.cwd()
         tile_store_dir = UPath(tmp_path) / "tiles"
         tile_store_dir.mkdir(parents=True, exist_ok=True)
         self.run_simple_test(tile_store_dir, seattle2020)
