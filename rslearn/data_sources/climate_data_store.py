@@ -29,6 +29,10 @@ class ERA5LandMonthlyMeans(DataSource):
     """A data source for ingesting ERA5 land monthly averaged data from the Copernicus Climate Data Store.
 
     The API key should be set via environment variable (CDSAPI_KEY).
+
+    We recommend using the default number of workers (0, which means using the main process only)
+    when preparing the ERA5LandMonthlyMeans dataset, as it will combine multiple geometries
+    into a single CDS API request for each month to speed up dataset ingestion.
     """
 
     api_url = "https://cds.climate.copernicus.eu/api"
