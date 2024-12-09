@@ -235,6 +235,8 @@ class ERA5LandMonthlyMeans(DataSource):
             if tile_store.is_raster_ready(item.name, bands):
                 continue
             # Send the request to the CDS API
+            # Given that ERA5 is at a very coarse resolution, we add a buffer of half a pixel size
+            # to the bounds to ensure that we fully cover the geometries
             bounds = item.geometry.shp.bounds
             request = {
                 "product_type": [self.PRODUCT_TYPE],
@@ -245,10 +247,10 @@ class ERA5LandMonthlyMeans(DataSource):
                 ],
                 "time": ["00:00"],
                 "area": [
-                    bounds[3],  # North
-                    bounds[0],  # West
-                    bounds[1],  # South
-                    bounds[2],  # East
+                    bounds[3] + self.PIXEL_SIZE / 2,  # North
+                    bounds[0] - self.PIXEL_SIZE / 2,  # West
+                    bounds[1] - self.PIXEL_SIZE / 2,  # South
+                    bounds[2] + self.PIXEL_SIZE / 2,  # East
                 ],
                 "data_format": self.DATA_FORMAT,
                 "download_format": self.DOWNLOAD_FORMAT,
