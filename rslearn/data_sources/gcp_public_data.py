@@ -71,6 +71,10 @@ class Sentinel2Item(Item):
             cloud_cover=d["cloud_cover"],
         )
 
+    def __repr__(self) -> str:
+        """String representation of the item."""
+        return f"Sentinel2Item(name={self.name}, geometry={self.geometry}, blob_prefix={self.blob_prefix}, cloud_cover={self.cloud_cover})"
+
 
 # TODO: Distinguish between AWS and GCP data sources in class names.
 class Sentinel2(DataSource):
@@ -584,30 +588,39 @@ class Sentinel2(DataSource):
                     continue
 
                 with tempfile.TemporaryDirectory() as tmp_dir:
-                    fname = os.path.join(tmp_dir, suffix)
-                    blob = self.bucket.blob(item.blob_prefix + suffix)
-                    blob.download_to_filename(fname)
+                    try:
+                        fname = os.path.join(tmp_dir, suffix)
+                        blob = self.bucket.blob(item.blob_prefix + suffix)
+                        blob.download_to_filename(fname)
 
-                    # Harmonize values if needed.
-                    # TCI does not need harmonization.
-                    harmonize_callback = None
-                    if self.harmonize and suffix != "TCI.jp2":
-                        harmonize_callback = get_harmonize_callback(
-                            self._get_xml_by_name(item.name)
-                        )
+                        # Harmonize values if needed.
+                        # TCI does not need harmonization.
+                        harmonize_callback = None
+                        if self.harmonize and suffix != "TCI.jp2":
+                            harmonize_callback = get_harmonize_callback(
+                                self._get_xml_by_name(item.name)
+                            )
 
-                    if harmonize_callback is not None:
-                        # In this case we need to read the array, convert the pixel
-                        # values, and pass modified array directly to the TileStore.
-                        with rasterio.open(fname) as src:
-                            array = src.read()
-                            projection, bounds = get_raster_projection_and_bounds(src)
-                        array = harmonize_callback(array)
-                        tile_store.write_raster(
-                            item.name, band_names, projection, bounds, array
-                        )
+                        if harmonize_callback is not None:
+                            # In this case we need to read the array, convert the pixel
+                            # values, and pass modified array directly to the TileStore.
+                            with rasterio.open(fname) as src:
+                                array = src.read()
+                                projection, bounds = get_raster_projection_and_bounds(
+                                    src
+                                )
+                            array = harmonize_callback(array)
+                            tile_store.write_raster(
+                                item.name, band_names, projection, bounds, array
+                            )
 
-                    else:
-                        tile_store.write_raster_file(
-                            item.name, band_names, UPath(fname)
-                        )
+                        else:
+                            tile_store.write_raster_file(
+                                item.name, band_names, UPath(fname)
+                            )
+                    except Exception as e:
+                        logger.error(f"Error ingesting item {item.name}: {e}")
+                        logger.error(f"Item: {item}")
+                        logger.error(f"Band names: {band_names}")
+                        logger.error(f"suffix: {suffix}")
+                        raise e
