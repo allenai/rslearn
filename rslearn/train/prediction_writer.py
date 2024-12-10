@@ -14,7 +14,7 @@ from rslearn.config import (
     RasterLayerConfig,
     VectorLayerConfig,
 )
-from rslearn.dataset import Dataset
+from rslearn.dataset import Dataset, Window, get_window_layer_dir
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.raster_format import load_raster_format
 from rslearn.utils.vector_format import load_vector_format
@@ -167,13 +167,11 @@ class RslearnWriter(BasePredictionWriter):
                 pending_output = self.merger.merge(pending_output)
 
             # This is the last patch so it's time to write it.
-            layer_dir = (
-                self.dataset.path
-                / "windows"
-                / metadata["group"]
-                / window_name
-                / "layers"
-                / self.output_layer
+            layer_dir = get_window_layer_dir(
+                window_path=Window.get_window_root(
+                    self.dataset.path, metadata["group"], window_name
+                ),
+                layer_name=self.output_layer,
             )
 
             if self.layer_config.layer_type == LayerType.RASTER:

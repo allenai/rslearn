@@ -59,7 +59,7 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
     # Add image where pixel value is 4*col+row.
     image = np.arange(0, 4 * 4, dtype=np.uint8)
     image = image.reshape(1, 4, 4)
-    layer_dir = window_path / "layers" / "image"
+    layer_dir = window.get_layer_dir("image")
     SingleImageRasterFormat().encode_raster(
         layer_dir / "band",
         window.projection,
@@ -75,7 +75,7 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
             "label": 1,
         },
     )
-    layer_dir = window_path / "layers" / "label"
+    layer_dir = window.get_layer_dir("label")
     GeojsonVectorFormat().encode_vector(
         layer_dir,
         window.projection,
