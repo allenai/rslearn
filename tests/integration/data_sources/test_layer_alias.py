@@ -17,7 +17,7 @@ def test_layer_alias(local_files_dataset: Dataset) -> None:
     # Src dir is set in fixture.
     src_dir = local_files_dataset.src_dir  # type: ignore
     windows = local_files_dataset.load_windows()
-    window_path = windows[0].path
+    window = windows[0]
 
     # Update dataset config to use a layer with alias, and reload.
     dataset_config = {
@@ -45,7 +45,8 @@ def test_layer_alias(local_files_dataset: Dataset) -> None:
     prepare_dataset_windows(local_files_dataset, windows)
     ingest_dataset_windows(local_files_dataset, windows)
     materialize_dataset_windows(local_files_dataset, windows)
-    assert (window_path / "layers" / "layer1" / "data.geojson").exists()
+    layer_dir = window.get_layer_dir("layer1")
+    assert (layer_dir / "data.geojson").exists()
 
     # Now make a different layer with same alias.
     # Then rename src_dir after preparing.
@@ -74,7 +75,8 @@ def test_layer_alias(local_files_dataset: Dataset) -> None:
     ingest_dataset_windows(local_files_dataset, windows)
     materialize_dataset_windows(local_files_dataset, windows)
     os.rename(src_dir + ".moved", src_dir)
-    assert (window_path / "layers" / "layer2" / "data.geojson").exists()
+    layer_dir = window.get_layer_dir("layer2")
+    assert (layer_dir / "data.geojson").exists()
 
     # Now third layer with no alias should fail.
     dataset_config = {

@@ -92,7 +92,7 @@ class TestLocalFiles:
         assert isinstance(layer_config, VectorLayerConfig)
         vector_format = load_vector_format(layer_config.format)
         features = vector_format.decode_vector(
-            window.path / "layers" / "local_file", window.bounds
+            window.get_layer_dir("local_file"), window.bounds
         )
 
         assert len(features) == 2

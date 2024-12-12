@@ -137,14 +137,13 @@ def test_basic_time_series(image_to_class_dataset: Dataset) -> None:
     # This simulates a second item group in the layer (called image.1).
     window = image_to_class_dataset.load_windows()[0]
     image = np.zeros((1, 4, 4), dtype=np.uint8)
-    layer_dir = window.path / "layers" / "image.1"
     SingleImageRasterFormat().encode_raster(
-        layer_dir / "band",
+        window.get_raster_dir("image", ["band"], group_idx=1),
         window.projection,
         window.bounds,
         image,
     )
-    (layer_dir / "completed").touch()
+    (window.get_layer_dir("image", group_idx=1) / "completed").touch()
 
     dataset = ModelDataset(
         image_to_class_dataset,
