@@ -712,8 +712,17 @@ def model_predict() -> None:
 
 def main() -> None:
     """CLI entrypoint."""
-    multiprocessing.set_start_method(MULTIPROCESSING_CONTEXT)
-    logger.info(f"Using multiprocessing context: {multiprocessing.get_context()}")
+    try:
+        multiprocessing.set_start_method(MULTIPROCESSING_CONTEXT)
+    except RuntimeError as e:
+        logger.error(
+            f"Multiprocessing context already set to {multiprocessing.get_context()}: "
+            + f"ignoring {e}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to set multiprocessing context: {e}")
+    finally:
+        logger.info(f"Using multiprocessing context: {multiprocessing.get_context()}")
     parser = argparse.ArgumentParser(description="rslearn")
     parser.add_argument(
         "category", help="Command category: dataset, annotate, or model"
