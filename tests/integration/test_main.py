@@ -1,5 +1,6 @@
 import json
 import pathlib
+import subprocess
 import sys
 from datetime import datetime, timezone
 from typing import Any
@@ -123,14 +124,7 @@ class TestIngestion:
 
     @pytest.fixture
     def ingested_fname(self, prepared_dataset: Dataset) -> UPath:
-        return (
-            prepared_dataset.path
-            / "tiles"
-            / "local_files"
-            / "foo"
-            / str(WGS84_PROJECTION)
-            / "data.geojson"
-        )
+        return prepared_dataset.path / "tiles" / "local_files" / "foo" / "data.geojson"
 
     def test_normal_ingest_fails(
         self, prepared_dataset: Dataset, monkeypatch: Any
@@ -184,6 +178,24 @@ class TestIngestion:
         rslearn.main.main()
 
         assert not ingested_fname.exists()
+
+    def test_ingestion_from_command_line(
+        self, prepared_dataset: Dataset, ingested_fname: UPath, monkeypatch: Any
+    ) -> None:
+        args = [
+            "rslearn",
+            "dataset",
+            "ingest",
+            "--root",
+            str(prepared_dataset.path),
+            "--disabled-layers",
+            "sentinel2",
+        ]
+        monkeypatch.setattr(sys, "argv", args)
+
+        subprocess.run(args, check=True)
+
+        assert ingested_fname.exists()
 
     def test_ingest_ignore_errors(
         self, prepared_dataset: Dataset, ingested_fname: UPath, monkeypatch: Any

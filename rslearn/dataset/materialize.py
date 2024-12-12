@@ -5,6 +5,7 @@ from typing import Any, Generic, TypeVar
 import numpy as np
 import numpy.typing as npt
 from class_registry import ClassRegistry
+from rasterio.enums import Resampling
 from upath import UPath
 
 from rslearn.config import (
@@ -14,8 +15,9 @@ from rslearn.config import (
     VectorLayerConfig,
 )
 from rslearn.data_sources import Item
-from rslearn.tile_stores import TileStore, TileStoreLayer, get_tile_store_for_layer
-from rslearn.utils import Feature, PixelBounds
+from rslearn.tile_stores import TileStoreWithLayer
+from rslearn.utils.feature import Feature
+from rslearn.utils.geometry import PixelBounds, Projection
 from rslearn.utils.raster_format import load_raster_format
 from rslearn.utils.vector_format import load_vector_format
 
@@ -32,7 +34,7 @@ class Materializer(Generic[LayerConfigType]):
 
     def materialize(
         self,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         window: Window,
         layer_name: str,
         layer_cfg: LayerConfigType,
@@ -52,11 +54,15 @@ class Materializer(Generic[LayerConfigType]):
 
 def read_raster_window_from_tiles(
     dst: npt.NDArray[Any],
-    ts_layer: TileStoreLayer,
+    tile_store: TileStoreWithLayer,
+    item_name: str,
+    bands: list[str],
+    projection: Projection,
     bounds: PixelBounds,
     src_indexes: list[int],
     dst_indexes: list[int],
     remapper: Remapper | None = None,
+    resampling: Resampling = Resampling.bilinear,
 ) -> None:
     """Read a window of raster data from tiles in a tile store.
 
@@ -64,13 +70,20 @@ def read_raster_window_from_tiles(
 
     Args:
         dst: the destination numpy array
-        ts_layer: the tile store layer to read
-        bounds: the bounds in pixel coordinates matching projection of ts_layer
+        tile_store: the TileStore to read from.
+        item_name: the item name.
+        bands: the bands that identify the raster we want to read.
+        projection: the projection of the dst array.
+        bounds: the bounds of the dst array.
         src_indexes: the source band indexes to use
         dst_indexes: corresponding destination band indexes for each source band index
         remapper: optional remapper to apply on the source pixel values
+        resampling: how to resample the pixels in case re-projection is needed.
     """
-    src_bounds = ts_layer.get_raster_bounds()
+    # Only read the portion of the raster that overlaps with dst.
+    # This way we can avoid creating big arrays that are all empty which speeds things
+    # up for large windows.
+    src_bounds = tile_store.get_raster_bounds(item_name, bands, projection)
     intersection = (
         max(bounds[0], src_bounds[0]),
         max(bounds[1], src_bounds[1]),
@@ -83,9 +96,9 @@ def read_raster_window_from_tiles(
     dst_col_offset = intersection[0] - bounds[0]
     dst_row_offset = intersection[1] - bounds[1]
 
-    src = ts_layer.read_raster(intersection)
-    if src is None:
-        raise ValueError(f"No raster data found for bounds {intersection}")
+    src = tile_store.read_raster(
+        item_name, bands, projection, intersection, resampling=resampling
+    )
     src = src[src_indexes, :, :]
     if remapper:
         src = remapper(src, dst.dtype)
@@ -106,7 +119,7 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
 
     def materialize(
         self,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         window: Window,
         layer_name: str,
         layer_cfg: RasterLayerConfig,
@@ -115,15 +128,13 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
         """Materialize portions of items corresponding to this window into the dataset.
 
         Args:
-            tile_store: the tile store where the items have been ingested (unprefixed)
+            tile_store: the tile store where the items have been ingested
             window: the window to materialize
             layer_name: name of the layer to materialize
             layer_cfg: the configuration of the layer to materialize
             item_groups: the items associated with this window and layer
         """
         assert isinstance(layer_cfg, RasterLayerConfig)
-
-        layer_tile_store = get_tile_store_for_layer(tile_store, layer_name, layer_cfg)
 
         out_layer_dirs: list[UPath] = []
         for group_id in range(len(item_groups)):
@@ -164,41 +175,46 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
                 for item in group:
                     # Identify which tile store layer(s) to read to get the configured
                     # bands.
-                    needed_band_indexes = {}
+                    wanted_band_indexes = {}
                     for i, band in enumerate(band_cfg.bands):
-                        needed_band_indexes[band] = i
-                    suffixes = layer_tile_store.list_layers((item.name,))
-                    needed_suffixes_and_indexes = []
-                    for suffix in suffixes:
-                        bands = suffix.split("_")
+                        wanted_band_indexes[band] = i
+
+                    available_bands = tile_store.get_raster_bands(item.name)
+                    needed_band_sets_and_indexes = []
+                    for band_set in available_bands:
                         needed_src_indexes = []
                         needed_dst_indexes = []
-                        for i, band in enumerate(bands):
-                            if band not in needed_band_indexes:
+                        for i, band in enumerate(band_set):
+                            if band not in wanted_band_indexes:
                                 continue
                             needed_src_indexes.append(i)
-                            needed_dst_indexes.append(needed_band_indexes[band])
-                            del needed_band_indexes[band]
+                            needed_dst_indexes.append(wanted_band_indexes[band])
+                            del wanted_band_indexes[band]
                         if len(needed_src_indexes) == 0:
                             continue
-                        needed_suffixes_and_indexes.append(
-                            (suffix, needed_src_indexes, needed_dst_indexes)
+                        needed_band_sets_and_indexes.append(
+                            (band_set, needed_src_indexes, needed_dst_indexes)
                         )
-                    if len(needed_band_indexes) > 0:
+                    if len(wanted_band_indexes) > 0:
                         # This item doesn't have all the needed bands, so skip it.
                         continue
 
-                    for suffix, src_indexes, dst_indexes in needed_suffixes_and_indexes:
-                        ts_layer = layer_tile_store.get_layer(
-                            (item.name, suffix, str(projection))
-                        )
-                        if ts_layer is None:
-                            raise ValueError(
-                                f"No tile store layer found for {item.name} {suffix} \
-                                      {projection}"
-                            )
+                    for (
+                        band_set,
+                        src_indexes,
+                        dst_indexes,
+                    ) in needed_band_sets_and_indexes:
                         read_raster_window_from_tiles(
-                            dst, ts_layer, bounds, src_indexes, dst_indexes, remapper
+                            dst,
+                            tile_store,
+                            item.name,
+                            band_set,
+                            projection,
+                            bounds,
+                            src_indexes,
+                            dst_indexes,
+                            remapper,
+                            resampling=layer_cfg.resampling_method,
                         )
 
                 raster_format.encode_raster(
@@ -218,7 +234,7 @@ class VectorMaterializer(Materializer):
 
     def materialize(
         self,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         window: Window,
         layer_name: str,
         layer_cfg: LayerConfig,
@@ -255,14 +271,7 @@ class VectorMaterializer(Materializer):
             features: list[Feature] = []
 
             for item in group:
-                ts_layer = get_tile_store_for_layer(
-                    tile_store, layer_name, layer_cfg
-                ).get_layer((item.name, str(projection)))
-                if ts_layer is None:
-                    raise ValueError(
-                        f"No tile store layer found for {item.name} {projection}"
-                    )
-                cur_features = ts_layer.read_vector(bounds)
+                cur_features = tile_store.read_vector(item.name, projection, bounds)
                 features.extend(cur_features)
 
             vector_format.encode_vector(out_layer_dirs[group_id], projection, features)

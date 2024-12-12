@@ -15,7 +15,7 @@ from rslearn.config import (
     SpaceMode,
 )
 from rslearn.data_sources.usgs_landsat import LandsatOliTirs
-from rslearn.tile_stores import FileTileStore
+from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils import STGeometry
 
 
@@ -42,17 +42,14 @@ class TestLandsatOliTirs:
         print("get items")
         item_groups = data_source.get_items([seattle2020], query_config)[0]
         item = item_groups[0][0]
-        tile_store = FileTileStore(tile_store_dir)
+        tile_store = DefaultTileStore(str(tile_store_dir))
+        tile_store.set_dataset_path(tile_store_dir)
+        layer_name = "layer"
         print("ingest")
-        data_source.ingest(tile_store, item_groups[0], [[seattle2020]])
-        expected_path = (
-            tile_store_dir
-            / item.name
-            / self.TEST_BAND
-            / str(seattle2020.projection)
-            / "geotiff.tif"
+        data_source.ingest(
+            TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
         )
-        assert expected_path.exists()
+        assert tile_store.is_raster_ready(layer_name, item.name, [self.TEST_BAND])
 
     def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         """Test ingesting to local filesystem."""

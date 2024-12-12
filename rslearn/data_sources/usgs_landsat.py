@@ -5,7 +5,9 @@
 
 import io
 import json
+import os
 import shutil
+import tempfile
 import time
 import uuid
 from collections.abc import Generator
@@ -13,7 +15,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, BinaryIO
 
 import pytimeparse
-import rasterio
 import requests
 import shapely
 from upath import UPath
@@ -22,10 +23,8 @@ from rslearn.config import QueryConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
-from rslearn.tile_stores import PrefixedTileStore, TileStore
+from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
-
-from .raster_source import get_needed_projections, ingest_raster
 
 
 class APIException(Exception):
@@ -500,7 +499,7 @@ class LandsatOliTirs(DataSource):
 
     def ingest(
         self,
-        tile_store: TileStore,
+        tile_store: TileStoreWithLayer,
         items: list[LandsatOliTirsItem],
         geometries: list[list[STGeometry]],
     ) -> None:
@@ -511,32 +510,24 @@ class LandsatOliTirs(DataSource):
             items: the items to ingest
             geometries: a list of geometries needed for each item
         """
-        for item, cur_geometries in zip(items, geometries):
+        for item in items:
             download_urls = self._get_download_urls(item)
+
             for band in self.bands:
                 band_names = [band]
-                cur_tile_store = PrefixedTileStore(
-                    tile_store, (item.name, "_".join(band_names))
-                )
-                needed_projections = get_needed_projections(
-                    cur_tile_store, band_names, self.config.band_sets, cur_geometries
-                )
-                if not needed_projections:
+                if tile_store.is_raster_ready(item.name, band_names):
                     continue
 
-                buf = io.BytesIO()
-                with requests.get(
-                    download_urls[band][1], stream=True, timeout=self.TIMEOUT
-                ) as r:
-                    r.raise_for_status()
-                    shutil.copyfileobj(r.raw, buf)
-                buf.seek(0)
-                with rasterio.open(buf) as raster:
-                    for projection in needed_projections:
-                        ingest_raster(
-                            tile_store=cur_tile_store,
-                            raster=raster,
-                            projection=projection,
-                            time_range=item.geometry.time_range,
-                            layer_config=self.config,
-                        )
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    local_filename = os.path.join(tmp_dir, "data.tif")
+
+                    with requests.get(
+                        download_urls[band][1], stream=True, timeout=self.TIMEOUT
+                    ) as r:
+                        r.raise_for_status()
+                        with open(local_filename, "wb") as f:
+                            shutil.copyfileobj(r.raw, f)
+
+                    tile_store.write_raster_file(
+                        item.name, band_names, UPath(local_filename)
+                    )
