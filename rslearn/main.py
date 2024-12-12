@@ -599,7 +599,7 @@ class MaterializeHandler:
         except Exception as e:
             if not self.ignore_errors:
                 logger.error(f"Error materializing windows: {e}")
-                raise e
+                raise
             logger.warning(f"Ignoring error while materializing windows: {e}")
 
 
@@ -738,7 +738,7 @@ def main() -> None:
         )
     except Exception as e:
         logger.error(f"Failed to set multiprocessing context: {e}")
-        raise e
+        raise
     finally:
         logger.info(f"Using multiprocessing context: {multiprocessing.get_context()}")
     parser = argparse.ArgumentParser(description="rslearn")
