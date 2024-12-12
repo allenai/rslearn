@@ -105,6 +105,7 @@ jobs:
             -e TEST_USGS_LANDSAT_USERNAME="${{ secrets.TEST_USGS_LANDSAT_USERNAME }}" \
             -e TEST_USGS_LANDSAT_PASSWORD="${{ secrets.TEST_USGS_LANDSAT_PASSWORD }}" \
             -e PL_API_KEY="${{ secrets.PL_API_KEY }}" \
+            -e CDSAPI_KEY="${{ secrets.CDSAPI_KEY }}" \
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
