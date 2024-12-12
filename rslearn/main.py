@@ -33,6 +33,8 @@ handler_registry = {}
 
 ItemType = TypeVar("ItemType", bound="Item")
 
+MULTIPROCESSING_CONTEXT = "forkserver"
+
 
 def register_handler(category: Any, command: str) -> Callable:
     """Register a new handler for a command."""
@@ -710,6 +712,8 @@ def model_predict() -> None:
 
 def main() -> None:
     """CLI entrypoint."""
+    multiprocessing.set_start_method(MULTIPROCESSING_CONTEXT)
+    logger.info(f"Using multiprocessing context: {multiprocessing.get_context()}")
     parser = argparse.ArgumentParser(description="rslearn")
     parser.add_argument(
         "category", help="Command category: dataset, annotate, or model"
@@ -726,5 +730,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    multiprocessing.set_start_method("forkserver")
     main()
