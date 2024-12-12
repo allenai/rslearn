@@ -84,6 +84,23 @@ class CorruptItemException(Exception):
         self.message = message
 
 
+class MissingXMLException(Exception):
+    """Exception for when an item's XML file does not exist in GCS.
+
+    Some items that appear in the index on BigQuery, or that have a folder, lack an XML
+    file, and so in those cases this exception can be ignored.
+    """
+
+    def __init__(self, item_name: str):
+        """Create a new MissingXMLException.
+
+        Args:
+            item_name: the name of the item (Sentinel-2 scene) that is missing its XML
+                file in the GCS bucket.
+        """
+        self.item_name = item_name
+
+
 # TODO: Distinguish between AWS and GCP data sources in class names.
 class Sentinel2(DataSource):
     """A data source for Sentinel-2 data on Google Cloud Storage.
@@ -307,6 +324,8 @@ class Sentinel2(DataSource):
         if not cache_xml_fname.exists():
             metadata_blob_path = base_url + "MTD_MSIL1C.xml"
             blob = self.bucket.blob(metadata_blob_path)
+            if not blob.exists():
+                raise MissingXMLException(name)
             with open_atomic(cache_xml_fname, "wb") as f:
                 blob.download_to_file(f)
 
@@ -375,6 +394,11 @@ class Sentinel2(DataSource):
 
         geometry = STGeometry(WGS84_PROJECTION, shp, (start_time, start_time))
         geometry = split_at_prime_meridian(geometry)
+
+        # Sometimes the geometry is not valid.
+        # We just apply make_valid on it to correct issues.
+        if not geometry.shp.is_valid:
+            geometry.shp = shapely.make_valid(geometry.shp)
 
         return Sentinel2Item(
             name,
@@ -456,24 +480,21 @@ class Sentinel2(DataSource):
                 assert folder_name.endswith(expected_suffix)
                 item_name = folder_name.split(expected_suffix)[0]
 
-                # Make sure metadata XML blob exists, otherwise we won't be
-                # able to load the item.
-                # (Sometimes there is a .SAFE folder but some files like the
-                # XML file are just missing for whatever reason.)
-                xml_blob_path = f"{cell_folder}/{folder_name}/MTD_MSIL1C.xml"
-                xml_blob = self.bucket.blob(xml_blob_path)
-                if not xml_blob.exists():
-                    logger.warning(
-                        "no metadata XML for Sentinel-2 folder %s at %s",
-                        folder_name,
-                        xml_blob_path,
-                    )
-                    continue
-
                 try:
                     item = self.get_item_by_name(item_name)
                 except CorruptItemException as e:
                     logger.warning("skipping corrupt item %s: %s", item_name, e.message)
+                    continue
+                except MissingXMLException:
+                    # Sometimes there is a .SAFE folder but some files like the
+                    # XML file are just missing for whatever reason. Since we
+                    # know this happens occasionally, we just ignore the error
+                    # here.
+                    logger.warning(
+                        "no metadata XML for Sentinel-2 folder %s/%s",
+                        blob_prefix,
+                        folder_name,
+                    )
                     continue
 
                 items.append(item)
@@ -540,6 +561,14 @@ class Sentinel2(DataSource):
                     item = self.get_item_by_name(item.name)
                 except CorruptItemException as e:
                     logger.warning("skipping corrupt item %s: %s", item.name, e.message)
+                    continue
+                except MissingXMLException:
+                    # Sometimes a scene that appears in the BigQuery index does not
+                    # actually have an XML file on GCS. Since we know this happens
+                    # occasionally, we ignore the error here.
+                    logger.warning(
+                        "skipping item %s that is missing XML file", item.name
+                    )
                     continue
 
                 if not item.geometry.shp.intersects(geometry.shp):
@@ -658,13 +687,13 @@ class Sentinel2(DataSource):
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     fname = os.path.join(tmp_dir, suffix)
                     blob = self.bucket.blob(item.blob_prefix + suffix)
-                    logger.info(
-                        "gcp_public_data start downloading %s",
+                    logger.debug(
+                        "gcp_public_data downloading raster file %s",
                         item.blob_prefix + suffix,
                     )
                     blob.download_to_filename(fname)
-                    logger.info(
-                        "gcp_public_data done downloading %s, now ingesting into tile store",
+                    logger.debug(
+                        "gcp_public_data ingesting raster file %s into tile store",
                         item.blob_prefix + suffix,
                     )
 
@@ -692,7 +721,7 @@ class Sentinel2(DataSource):
                             item.name, band_names, UPath(fname)
                         )
 
-                logger.info(
-                    "gcp_public_data done ingesting into tile store %s",
+                logger.debug(
+                    "gcp_public_data done ingesting raster file %s",
                     item.blob_prefix + suffix,
                 )
