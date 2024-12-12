@@ -1,11 +1,13 @@
 # These are requirements that are specific to a subset of data sources or models.
 accelerate>=1.0
+cdsapi>=0.7.4
 earthengine-api>=0.1
 einops>=0.8
 gcsfs>=2024.10
 google-cloud-bigquery>=2.18
 google-cloud-storage>=2.18
 interrogate>=1.7
+netCDF4>=1.7.2
 osmium>=3.7
 planet>=2.10
 pycocotools>=2.0
