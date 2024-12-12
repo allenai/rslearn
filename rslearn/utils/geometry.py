@@ -352,7 +352,7 @@ def split_shape_at_prime_meridian(
         | shapely.GeometryCollection,
     ):
         return _collect_shapes(
-            [split_shape_at_prime_meridian(component) for component in shp]
+            [split_shape_at_prime_meridian(component) for component in shp.geoms]
         )
 
     if isinstance(shp, shapely.Point):
