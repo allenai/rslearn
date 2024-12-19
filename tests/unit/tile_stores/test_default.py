@@ -2,6 +2,7 @@ import pathlib
 
 import numpy as np
 import pytest
+import rasterio
 from rasterio.crs import CRS
 from upath import UPath
 
@@ -54,3 +55,28 @@ def test_partial_read(tile_store_with_ones: DefaultTileStore) -> None:
     # These portions do not.
     assert np.all(result[:, :, 2:4] == 0)
     assert np.all(result[:, 2:4, :] == 0)
+
+
+def test_zstd_compression(tmp_path: pathlib.Path) -> None:
+    # Make sure we can correctly write a GeoTIFF with ZSTD compression.
+    ds_path = UPath(tmp_path)
+    tile_store = DefaultTileStore(
+        geotiff_options=dict(
+            compress="zstd",
+        )
+    )
+    tile_store.set_dataset_path(ds_path)
+    raster_size = 4
+    tile_store.write_raster(
+        LAYER_NAME,
+        ITEM_NAME,
+        BANDS,
+        PROJECTION,
+        (0, 0, raster_size, raster_size),
+        np.zeros((len(BANDS), raster_size, raster_size), dtype=np.uint8),
+    )
+
+    assert tile_store.path is not None
+    fname = tile_store.path / LAYER_NAME / ITEM_NAME / "_".join(BANDS) / "geotiff.tif"
+    with rasterio.open(fname) as raster:
+        assert raster.profile["compress"] == "zstd"
