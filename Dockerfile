@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.4.0-cuda11.8-cudnn9-runtime@sha256:58a28ab734f23561aa146fbaf777fb319a953ca1e188832863ed57d510c9f197
+FROM pytorch/pytorch:2.5.0-cuda11.8-cudnn9-runtime@sha256:d15e9803095e462e351f097fb1f5e7cdaa4f5e855d7ff6d6f36ec4c2aa2938ea
 
 # Weirdly this stopped working
 # RUN apt-get update \
@@ -16,4 +16,4 @@ COPY ./test_requirements.txt /rslearn/test_requirements.txt
 RUN pip install --no-cache-dir -r test_requirements.txt
 
 COPY ./ /rslearn
-RUN pip install --no-cache-dir  .
+RUN pip install --no-cache-dir  rslearn[extra]
