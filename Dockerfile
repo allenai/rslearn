@@ -16,4 +16,4 @@ COPY ./test_requirements.txt /rslearn/test_requirements.txt
 RUN pip install --no-cache-dir -r test_requirements.txt
 
 COPY ./ /rslearn
-RUN pip install --no-cache-dir  rslearn[extra]
+RUN pip install --no-cache-dir  .
