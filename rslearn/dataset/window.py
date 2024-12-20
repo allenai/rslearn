@@ -13,6 +13,47 @@ from rslearn.utils.fsspec import open_atomic
 
 logger = get_logger(__name__)
 
+LAYERS_DIRECTORY_NAME = "layers"
+
+
+def get_window_layer_dir(
+    window_path: UPath, layer_name: str, group_idx: int = 0
+) -> UPath:
+    """Get the directory containing materialized data for the specified layer.
+
+    Args:
+        window_path: the window directory.
+        layer_name: the layer name.
+        group_idx: the index of the group within the layer to get the directory
+            for (default 0).
+
+    Returns:
+        the path where data is or should be materialized.
+    """
+    if group_idx == 0:
+        folder_name = layer_name
+    else:
+        folder_name = f"{layer_name}.{group_idx}"
+    return window_path / LAYERS_DIRECTORY_NAME / folder_name
+
+
+def get_window_raster_dir(
+    window_path: UPath, layer_name: str, bands: list[str], group_idx: int = 0
+) -> UPath:
+    """Get the directory where the raster is materialized.
+
+    Args:
+        window_path: the window directory.
+        layer_name: the layer name
+        bands: the bands in the raster. It should match a band set defined for this
+            layer.
+        group_idx: the index of the group within the layer.
+
+    Returns:
+        the directory containing the raster.
+    """
+    return get_window_layer_dir(window_path, layer_name, group_idx) / "_".join(bands)
+
 
 class WindowLayerData:
     """Layer data for retrieved layers specifying relevant items in the data source.
@@ -148,6 +189,67 @@ class Window:
         logger.info(f"Saving window items to {items_fname}")
         with open_atomic(items_fname, "w") as f:
             json.dump(json_data, f)
+
+    def get_layer_dir(self, layer_name: str, group_idx: int = 0) -> UPath:
+        """Get the directory containing materialized data for the specified layer.
+
+        Args:
+            layer_name: the layer name.
+            group_idx: the index of the group within the layer to get the directory
+                for (default 0).
+
+        Returns:
+            the path where data is or should be materialized.
+        """
+        return get_window_layer_dir(self.path, layer_name, group_idx)
+
+    def is_layer_completed(self, layer_name: str, group_idx: int = 0) -> bool:
+        """Check whether the specified layer is completed.
+
+        Completed means there is data in the layer and the data has been written
+        (materialized).
+
+        Args:
+            layer_name: the layer name.
+            group_idx: the index of the group within the layer.
+
+        Returns:
+            whether the layer is completed
+        """
+        layer_dir = self.get_layer_dir(layer_name, group_idx)
+        return (layer_dir / "completed").exists()
+
+    def mark_layer_completed(self, layer_name: str, group_idx: int = 0) -> None:
+        """Mark the specified layer completed.
+
+        This must be done after the contents of the layer have been written. If a layer
+        has multiple groups, the caller should wait until the contents of all groups
+        have been written before marking them completed; this is because, when
+        materializing a window, we skip materialization if the first group
+        (group_idx=0) is marked completed.
+
+        Args:
+            layer_name: the layer name.
+            group_idx: the index of the group within the layer.
+        """
+        layer_dir = self.get_layer_dir(layer_name, group_idx)
+        (layer_dir / "completed").touch()
+
+    def get_raster_dir(
+        self, layer_name: str, bands: list[str], group_idx: int = 0
+    ) -> UPath:
+        """Get the directory where the raster is materialized.
+
+        Args:
+            layer_name: the layer name
+            bands: the bands in the raster. It should match a band set defined for this
+                layer.
+            group_idx: the index of the group within the layer.
+
+        Returns:
+            the directory containing the raster.
+        """
+        return get_window_raster_dir(self.path, layer_name, bands, group_idx)
 
     @staticmethod
     def load(path: UPath) -> "Window":
