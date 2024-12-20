@@ -33,6 +33,8 @@ handler_registry = {}
 
 ItemType = TypeVar("ItemType", bound="Item")
 
+MULTIPROCESSING_CONTEXT = "forkserver"
+
 
 def register_handler(category: Any, command: str) -> Callable:
     """Register a new handler for a command."""
@@ -284,7 +286,7 @@ def apply_on_windows(
         window: optional, only apply on windows with this name.
         workers: the number of parallel workers to use, default 0 (main thread only).
         batch_size: if workers > 0, the maximum number of windows to pass to the
-            function. If workers == 0, all windows are always passed.
+            function.
         jobs_per_process: optional, terminate processes after they have handled this
             many jobs. This is useful if there is a memory leak in a dependency.
         use_initial_job: if workers > 0, by default, an initial job is run on the first
@@ -312,13 +314,9 @@ def apply_on_windows(
     else:
         jobs = windows
 
-    if workers == 0:
-        f(jobs)
-        return
-
     random.shuffle(jobs)
 
-    if use_initial_job:
+    if use_initial_job and len(jobs) > 0:
         # Apply directly on first window to get any initialization out of the way.
         f([jobs[0]])
         jobs = jobs[1:]
@@ -327,11 +325,18 @@ def apply_on_windows(
     for i in range(0, len(jobs), batch_size):
         batches.append(jobs[i : i + batch_size])
 
-    p = multiprocessing.Pool(processes=workers, maxtasksperchild=jobs_per_process)
-    outputs = p.imap_unordered(f, batches)
-    for _ in tqdm.tqdm(outputs, total=len(batches)):
-        pass
-    p.close()
+    num_batches = len(batches)
+    if workers == 0:
+        # Process batches sequentially but with same error handling as parallel
+        for batch in tqdm.tqdm(batches, total=num_batches):
+            f(batch)
+    else:
+        # Process batches in parallel
+        p = multiprocessing.Pool(processes=workers, maxtasksperchild=jobs_per_process)
+        outputs = p.imap_unordered(f, batches)
+        for _ in tqdm.tqdm(outputs, total=num_batches):
+            pass
+        p.close()
 
 
 def apply_on_windows_args(f: Callable[..., None], args: argparse.Namespace) -> None:
@@ -571,9 +576,10 @@ def dataset_ingest() -> None:
 class MaterializeHandler:
     """apply_on_windows handler for the rslearn dataset materialize command."""
 
-    def __init__(self) -> None:
+    def __init__(self, ignore_errors: bool = False) -> None:
         """Initialize a MaterializeHandler."""
         self.dataset: Dataset | None = None
+        self.ignore_errors = ignore_errors
 
     def set_dataset(self, dataset: Dataset) -> None:
         """Captures the dataset from apply_on_windows_args.
@@ -588,7 +594,13 @@ class MaterializeHandler:
         logger.info(f"Running Materialize with {len(windows)} windows")
         if self.dataset is None:
             raise ValueError("dataset not set")
-        materialize_dataset_windows(self.dataset, windows)
+        try:
+            materialize_dataset_windows(self.dataset, windows)
+        except Exception as e:
+            if not self.ignore_errors:
+                logger.error(f"Error materializing windows: {e}")
+                raise
+            logger.warning(f"Ignoring error while materializing windows: {e}")
 
 
 @register_handler("dataset", "materialize")
@@ -607,9 +619,16 @@ def dataset_materialize() -> None:
         default="",
         help="List of layers to disable e.g 'layer1,layer2'",
     )
+    parser.add_argument(
+        "--ignore-errors",
+        type=bool,
+        default=False,
+        help="Ignore errors in individual jobs",
+        action=argparse.BooleanOptionalAction,
+    )
     add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
-    fn = MaterializeHandler()
+    fn = MaterializeHandler(ignore_errors=args.ignore_errors)
     apply_on_windows_args(fn, args)
 
 
@@ -710,6 +729,18 @@ def model_predict() -> None:
 
 def main() -> None:
     """CLI entrypoint."""
+    try:
+        multiprocessing.set_start_method(MULTIPROCESSING_CONTEXT)
+    except RuntimeError as e:
+        logger.error(
+            f"Multiprocessing context already set to {multiprocessing.get_context()}: "
+            + f"ignoring {e}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to set multiprocessing context: {e}")
+        raise
+    finally:
+        logger.info(f"Using multiprocessing context: {multiprocessing.get_context()}")
     parser = argparse.ArgumentParser(description="rslearn")
     parser.add_argument(
         "category", help="Command category: dataset, annotate, or model"
@@ -726,5 +757,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    multiprocessing.set_start_method("forkserver")
     main()

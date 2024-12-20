@@ -72,6 +72,8 @@ class DefaultTileStore(TileStore):
         self, layer_name: str, item_name: str, bands: list[str]
     ) -> UPath:
         assert self.path is not None
+        if any(["_" in band for band in bands]):
+            raise ValueError("band names must not contain '_'")
         return self.path / layer_name / item_name / "_".join(bands)
 
     def is_raster_ready(
