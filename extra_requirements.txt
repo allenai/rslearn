@@ -1,5 +1,5 @@
 # These are requirements that are specific to a subset of data sources or models.
-accelerate>=1.0
+acceleradocker te>=1.0
 cdsapi>=0.7.4
 earthengine-api>=0.1
 einops>=0.8

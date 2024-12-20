@@ -5,7 +5,7 @@ from typing import Any
 
 import lightning as L
 import torch
-from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfigDict
+from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfigType
 from PIL import Image
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -154,7 +154,7 @@ class RslearnLightningModule(L.LightningModule):
                     f"warning: restore yielded missing_keys={missing_keys} and unexpected_keys={unexpected_keys}"
                 )
 
-    def configure_optimizers(self) -> OptimizerLRSchedulerConfigDict:
+    def configure_optimizers(self) -> OptimizerLRSchedulerConfigType:
         """Initialize the optimizer and learning rate scheduler.
 
         Returns:
