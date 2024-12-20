@@ -198,8 +198,7 @@ def materialize_window(
         layer_cfg: the layer config
     """
     # Check if layer is materialized already.
-    layer_dir = window.get_layer_dir(layer_name)
-    if (layer_dir / "completed").exists():
+    if window.is_layer_completed(layer_name):
         return
 
     layer_datas = window.load_layer_datas()

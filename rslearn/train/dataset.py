@@ -261,8 +261,7 @@ def check_window(inputs: dict[str, DataInput], window: Window) -> Window | None:
     # Make sure window has all the needed layers.
     def is_any_layer_available(data_input: DataInput) -> bool:
         for layer_name in data_input.layers:
-            layer_dir = window.get_layer_dir(layer_name)
-            if (layer_dir / "completed").exists():
+            if window.is_layer_completed(layer_name):
                 return True
         return False
 

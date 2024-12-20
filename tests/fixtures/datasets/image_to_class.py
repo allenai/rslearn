@@ -59,14 +59,15 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
     # Add image where pixel value is 4*col+row.
     image = np.arange(0, 4 * 4, dtype=np.uint8)
     image = image.reshape(1, 4, 4)
-    layer_dir = window.get_layer_dir("image")
+    layer_name = "image"
+    layer_dir = window.get_layer_dir(layer_name)
     SingleImageRasterFormat().encode_raster(
         layer_dir / "band",
         window.projection,
         window.bounds,
         image,
     )
-    (layer_dir / "completed").touch()
+    window.mark_layer_completed(layer_name)
 
     # Add label.
     feature = Feature(
@@ -75,12 +76,13 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
             "label": 1,
         },
     )
-    layer_dir = window.get_layer_dir("label")
+    layer_name = "label"
+    layer_dir = window.get_layer_dir(layer_name)
     GeojsonVectorFormat().encode_vector(
         layer_dir,
         window.projection,
         [feature],
     )
-    (layer_dir / "completed").touch()
+    window.mark_layer_completed(layer_name)
 
     return Dataset(ds_path)

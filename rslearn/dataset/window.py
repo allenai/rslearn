@@ -203,6 +203,38 @@ class Window:
         """
         return get_window_layer_dir(self.path, layer_name, group_idx)
 
+    def is_layer_completed(self, layer_name: str, group_idx: int = 0) -> bool:
+        """Check whether the specified layer is completed.
+
+        Completed means there is data in the layer and the data has been written
+        (materialized).
+
+        Args:
+            layer_name: the layer name.
+            group_idx: the index of the group within the layer.
+
+        Returns:
+            whether the layer is completed
+        """
+        layer_dir = self.get_layer_dir(layer_name, group_idx)
+        return (layer_dir / "completed").exists()
+
+    def mark_layer_completed(self, layer_name: str, group_idx: int = 0) -> None:
+        """Mark the specified layer completed.
+
+        This must be done after the contents of the layer have been written. If a layer
+        has multiple groups, the caller should wait until the contents of all groups
+        have been written before marking them completed; this is because, when
+        materializing a window, we skip materialization if the first group
+        (group_idx=0) is marked completed.
+
+        Args:
+            layer_name: the layer name.
+            group_idx: the index of the group within the layer.
+        """
+        layer_dir = self.get_layer_dir(layer_name, group_idx)
+        (layer_dir / "completed").touch()
+
     def get_raster_dir(
         self, layer_name: str, bands: list[str], group_idx: int = 0
     ) -> UPath:

@@ -215,8 +215,7 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
                 )
 
         for group_id in range(len(item_groups)):
-            out_layer_dir = window.get_layer_dir(layer_name, group_id)
-            (out_layer_dir / "completed").touch()
+            window.mark_layer_completed(layer_name, group_id)
 
 
 @Materializers.register("vector")
@@ -261,5 +260,4 @@ class VectorMaterializer(Materializer):
             )
 
         for group_id in range(len(item_groups)):
-            out_layer_dir = window.get_layer_dir(layer_name, group_id)
-            (out_layer_dir / "completed").touch()
+            window.mark_layer_completed(layer_name, group_id)
