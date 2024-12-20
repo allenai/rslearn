@@ -2,7 +2,7 @@ from typing import Any
 
 import lightning.pytorch as pl
 import pytest
-from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
+from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfigDict
 
 from rslearn.dataset import Dataset
 from rslearn.models.pooling_decoder import PoolingDecoder
@@ -36,7 +36,7 @@ class LMWithCustomPlateau(RslearnLightningModule):
     epoch.
     """
 
-    def configure_optimizers(self) -> OptimizerLRSchedulerConfig:
+    def configure_optimizers(self) -> OptimizerLRSchedulerConfigDict:
         """Initialize the optimizer and learning rate scheduler.
 
         Returns:
