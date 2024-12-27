@@ -194,5 +194,4 @@ def materialize_raster(
         RasterFormatConfig(band_cfg.format["name"], band_cfg.format)
     )
     raster_format.encode_raster(out_dir, window_projection, window_bounds, dst_array)
-    layer_dir = window.get_layer_dir(layer_name)
-    (layer_dir / "completed").touch()
+    window.mark_layer_completed(layer_name)
