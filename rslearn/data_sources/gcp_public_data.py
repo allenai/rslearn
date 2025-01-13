@@ -7,6 +7,7 @@ import random
 import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Generator
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, BinaryIO
 
@@ -101,6 +102,16 @@ class MissingXMLException(Exception):
         self.item_name = item_name
 
 
+@dataclass
+class ParsedProductXML:
+    """Result of parsing a Sentinel-2 product XML file."""
+
+    blob_prefix: str
+    shp: shapely.Polygon
+    start_time: datetime
+    cloud_cover: float
+
+
 # TODO: Distinguish between AWS and GCP data sources in class names.
 class Sentinel2(DataSource):
     """A data source for Sentinel-2 data on Google Cloud Storage.
@@ -135,6 +146,14 @@ class Sentinel2(DataSource):
         ("B8A.jp2", ["B8A"]),
         ("TCI.jp2", ["R", "G", "B"]),
     ]
+
+    # Possible prefixes of the product name that may appear on GCS, before the year
+    # appears in the product name. For example, a product may start with
+    # "S2A_MSIL1C_20230101..." so S2A_MSIL1C appears here. This list is used when
+    # enumerating the list of products on GCS that fall in a certain year: because the
+    # year comes after this prefix, filtering in the object list operation requires
+    # including this prefix first followed by the year.
+    VALID_PRODUCT_PREFIXES = ["S2A_MSIL1C", "S2B_MSIL1C", "S2C_MSIL1C"]
 
     def __init__(
         self,
@@ -332,16 +351,36 @@ class Sentinel2(DataSource):
         with cache_xml_fname.open("rb") as f:
             return ET.parse(f)
 
-    def _get_item_by_name(self, name: str) -> Sentinel2Item:
-        # Get the item without the caching logic.
+    def _parse_xml(self, name: str) -> ParsedProductXML:
+        """Parse a Sentinel-2 product XML file.
+
+        This extracts the blob prefix in the GCS bucket, the polygon extent, sensing
+        start time, and cloud cover.
+
+        Args:
+            name: the Sentinel-2 scene name.
+        """
+        # Parse the product name, e.g.
+        # S2B_MSIL1C_20211114T083119_N0301_R021_T36RUU_20211114T091848.
+        # We just need the cell ID from the name (here it is 36RUU) since that is part
+        # of the path in the GCS bucket.
         parts = name.split("_")
-        assert len(parts[5]) == 6
-        assert parts[5][0] == "T"
-        cell_id = parts[5][1:]
+        cell_id_with_prefix = parts[5]
+        if len(cell_id_with_prefix) != 6:
+            raise ValueError(
+                f"cell ID should be 6 characters but got {cell_id_with_prefix}"
+            )
+        if cell_id_with_prefix[0] != "T":
+            raise ValueError(
+                f"cell ID should start with T but got {cell_id_with_prefix}"
+            )
+        cell_id = cell_id_with_prefix[1:]
         base_url = f"tiles/{cell_id[0:2]}/{cell_id[2:3]}/{cell_id[3:5]}/{name}.SAFE/"
 
+        # Get the XML. This helper function handles caching the XML file.
         tree = self._get_xml_by_name(name)
 
+        # Now parse the XML, starting with the detailed geometry of the image.
         # The EXT_POS_LIST tag has flat list of polygon coordinates.
         elements = list(tree.iter("EXT_POS_LIST"))
         assert len(elements) == 1
@@ -367,12 +406,44 @@ class Sentinel2(DataSource):
             raise ValueError(f"IMAGE_FILE is empty for {name}")
         blob_prefix = base_url + elements[0].text.split("B01")[0]
 
+        # Get the sensing start time.
+        elements = list(tree.iter("PRODUCT_START_TIME"))
+        assert len(elements) == 1
+        if elements[0].text is None:
+            raise ValueError(f"PRODUCT_START_TIME is empty for {name}")
+        start_time = dateutil.parser.isoparse(elements[0].text)
+
+        # Get the cloud cover.
+        elements = list(tree.iter("Cloud_Coverage_Assessment"))
+        assert len(elements) == 1
+        if elements[0].text is None:
+            raise ValueError(f"Cloud_Coverage_Assessment is empty for {name}")
+        cloud_cover = float(elements[0].text)
+
+        return ParsedProductXML(
+            blob_prefix=blob_prefix,
+            shp=shp,
+            start_time=start_time,
+            cloud_cover=cloud_cover,
+        )
+
+    def _get_item_by_name(self, name: str) -> Sentinel2Item:
+        """Gets an item by name.
+
+        This implements the main logic of processing the product metadata file
+        without the caching logic in get_item_by_name, see that function for details.
+
+        Args:
+            name: the Sentinel-2 scene ID.
+        """
+        product_xml = self._parse_xml(name)
+
         # Some Sentinel-2 scenes in the bucket are missing a subset of image files. So
         # here we verify that all the bands we know about are intact.
         expected_suffixes = {t[0] for t in self.BANDS}
-        for blob in self.bucket.list_blobs(prefix=blob_prefix):
-            assert blob.name.startswith(blob_prefix)
-            suffix = blob.name[len(blob_prefix) :]
+        for blob in self.bucket.list_blobs(prefix=product_xml.blob_prefix):
+            assert blob.name.startswith(product_xml.blob_prefix)
+            suffix = blob.name[len(product_xml.blob_prefix) :]
             if suffix in expected_suffixes:
                 expected_suffixes.remove(suffix)
         if len(expected_suffixes) > 0:
@@ -380,19 +451,8 @@ class Sentinel2(DataSource):
                 f"item is missing image files: {expected_suffixes}"
             )
 
-        elements = list(tree.iter("PRODUCT_START_TIME"))
-        assert len(elements) == 1
-        if elements[0].text is None:
-            raise ValueError(f"PRODUCT_START_TIME is empty for {name}")
-        start_time = dateutil.parser.isoparse(elements[0].text)
-
-        elements = list(tree.iter("Cloud_Coverage_Assessment"))
-        assert len(elements) == 1
-        if elements[0].text is None:
-            raise ValueError(f"Cloud_Coverage_Assessment is empty for {name}")
-        cloud_cover = float(elements[0].text)
-
-        geometry = STGeometry(WGS84_PROJECTION, shp, (start_time, start_time))
+        time_range = (product_xml.start_time, product_xml.start_time)
+        geometry = STGeometry(WGS84_PROJECTION, product_xml.shp, time_range)
         geometry = split_at_prime_meridian(geometry)
 
         # Sometimes the geometry is not valid.
@@ -401,10 +461,10 @@ class Sentinel2(DataSource):
             geometry.shp = shapely.make_valid(geometry.shp)
 
         return Sentinel2Item(
-            name,
-            geometry,
-            blob_prefix,
-            cloud_cover,
+            name=name,
+            geometry=geometry,
+            blob_prefix=product_xml.blob_prefix,
+            cloud_cover=product_xml.cloud_cover,
         )
 
     def get_item_by_name(self, name: str) -> Sentinel2Item:
@@ -420,8 +480,10 @@ class Sentinel2(DataSource):
         Returns:
             the item object
         """
-        # Cache the result if _get_item_by_name.
-        # We want to cache the item if it is successful, but also the
+        # The main logic for getting the item is implemented in _get_item_by_name.
+        # Here, we implement caching logic so that, if we have already seen this item
+        # before, then we can just deserialize it from a JSON file.
+        # We want to cache the item if it is successful, but also cache the
         # CorruptItemException if it is raised.
         cache_item_fname = self.index_cache_dir / (name + ".json")
 
@@ -448,15 +510,18 @@ class Sentinel2(DataSource):
     def _read_products_for_cell_year(
         self, cell_id: str, year: int
     ) -> list[Sentinel2Item]:
-        # Read items for the given cell and year. These items are cached by
-        # _read_products together in one file.
+        """Read items for the given cell and year directly from the GCS bucket.
+
+        This helper function is used by self._read_products which then caches the
+        items together in one file.
+        """
         cell_part1 = cell_id[0:2]
         cell_part2 = cell_id[2:3]
         cell_part3 = cell_id[3:5]
 
         items = []
 
-        for product_prefix in ["S2A_MSIL1C", "S2B_MSIL1C"]:
+        for product_prefix in self.VALID_PRODUCT_PREFIXES:
             cell_folder = f"tiles/{cell_part1}/{cell_part2}/{cell_part3}"
             blob_prefix = f"{cell_folder}/{product_prefix}_{year}"
             blobs = self.bucket.list_blobs(prefix=blob_prefix, delimiter="/")
@@ -536,7 +601,11 @@ class Sentinel2(DataSource):
     def _get_candidate_items_index(
         self, wgs84_geometries: list[STGeometry]
     ) -> list[list[Sentinel2Item]]:
-        """List relevant items using rtree index."""
+        """List relevant items using rtree index.
+
+        Args:
+            wgs84_geometries: the geometries to query.
+        """
         candidates: list[list[Sentinel2Item]] = [[] for _ in wgs84_geometries]
         for idx, geometry in enumerate(wgs84_geometries):
             time_range = None
@@ -579,7 +648,11 @@ class Sentinel2(DataSource):
     def _get_candidate_items_direct(
         self, wgs84_geometries: list[STGeometry]
     ) -> list[list[Sentinel2Item]]:
-        """Use _read_products to list relevant items."""
+        """Use _read_products to list relevant items.
+
+        Args:
+            wgs84_geometries: the geometries to query.
+        """
         needed_cell_years = set()
         for wgs84_geometry in wgs84_geometries:
             if wgs84_geometry.time_range is None:
