@@ -6,7 +6,7 @@ import os
 import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Generator
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, BinaryIO
 
@@ -15,7 +15,6 @@ import dateutil.parser
 import fiona
 import fiona.transform
 import numpy.typing as npt
-import pytimeparse
 import rasterio
 import shapely
 import tqdm
@@ -128,8 +127,10 @@ class Naip(DataSource):
             config=config,
             index_cache_dir=join_upath(ds_path, d["index_cache_dir"]),
         )
-        if "use_rtree_index" in d:
-            kwargs["use_rtree_index"] = d["use_rtree_index"]
+        simple_optionals = ["use_rtree_index", "states", "years"]
+        for k in simple_optionals:
+            if k in d:
+                kwargs[k] = d[k]
         return Naip(**kwargs)
 
     def _download_manifest(self) -> UPath:
@@ -401,7 +402,6 @@ class Sentinel2Item(Item):
         )
 
 
-# TODO: Distinguish between AWS and GCP data sources in class names.
 class Sentinel2(
     ItemLookupDataSource[Sentinel2Item], RetrieveItemDataSource[Sentinel2Item]
 ):
@@ -461,7 +461,6 @@ class Sentinel2(
         config: RasterLayerConfig,
         modality: Sentinel2Modality,
         metadata_cache_dir: UPath,
-        max_time_delta: timedelta = timedelta(days=30),
         sort_by: str | None = None,
         harmonize: bool = False,
     ) -> None:
@@ -471,9 +470,6 @@ class Sentinel2(
             config: the LayerConfig of the layer containing this data source.
             modality: L1C or L2A.
             metadata_cache_dir: directory to cache product metadata files.
-            max_time_delta: maximum time before a query start time or after a
-                query end time to look for products. This is required due to the large
-                number of available products, and defaults to 30 days.
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
             harmonize: harmonize pixel values across different processing baselines,
@@ -482,7 +478,6 @@ class Sentinel2(
         self.config = config
         self.modality = modality
         self.metadata_cache_dir = metadata_cache_dir
-        self.max_time_delta = max_time_delta
         self.sort_by = sort_by
         self.harmonize = harmonize
 
@@ -501,10 +496,6 @@ class Sentinel2(
             metadata_cache_dir=join_upath(ds_path, d["metadata_cache_dir"]),
         )
 
-        if "max_time_delta" in d:
-            kwargs["max_time_delta"] = timedelta(
-                seconds=pytimeparse.parse(d["max_time_delta"])
-            )
         simple_optionals = ["sort_by", "harmonize"]
         for k in simple_optionals:
             if k in d:
@@ -613,8 +604,8 @@ class Sentinel2(
                 )
             for cell_id in get_sentinel2_tiles(wgs84_geometry, self.metadata_cache_dir):
                 for ts in daterange(
-                    wgs84_geometry.time_range[0] - self.max_time_delta,
-                    wgs84_geometry.time_range[1] + self.max_time_delta,
+                    wgs84_geometry.time_range[0],
+                    wgs84_geometry.time_range[1],
                 ):
                     needed_cell_months.add((cell_id, ts.year, ts.month))
 
