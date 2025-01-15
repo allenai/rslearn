@@ -20,6 +20,7 @@ Quick links:
   datasets, windows, layers, and data sources.
 - [Examples](Examples.md) contains more examples, including customizing different
   stages of rslearn with additional code.
+- [DatasetConfig](DatasetConfig.md) documents the dataset configuration file.
 
 
 Setup

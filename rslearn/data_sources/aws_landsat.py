@@ -8,14 +8,13 @@ import tempfile
 import urllib.request
 import zipfile
 from collections.abc import Generator
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, BinaryIO
 
 import boto3
 import dateutil.parser
 import fiona
 import fiona.transform
-import pytimeparse
 import shapely
 import tqdm
 from upath import UPath
@@ -91,7 +90,6 @@ class LandsatOliTirs(DataSource):
         self,
         config: RasterLayerConfig,
         metadata_cache_dir: UPath,
-        max_time_delta: timedelta = timedelta(days=30),
         sort_by: str | None = None,
     ) -> None:
         """Initialize a new LandsatOliTirs instance.
@@ -99,15 +97,11 @@ class LandsatOliTirs(DataSource):
         Args:
             config: configuration of this layer
             metadata_cache_dir: directory to cache product metadata files.
-            max_time_delta: maximum time before a query start time or after a
-                query end time to look for products. This is required due to the large
-                number of available products, and defaults to 30 days.
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
         """
         self.config = config
         self.metadata_cache_dir = metadata_cache_dir
-        self.max_time_delta = max_time_delta
         self.sort_by = sort_by
         print(self.metadata_cache_dir)
 
@@ -124,10 +118,6 @@ class LandsatOliTirs(DataSource):
             config=config,
             metadata_cache_dir=join_upath(ds_path, d["metadata_cache_dir"]),
         )
-        if "max_time_delta" in d:
-            kwargs["max_time_delta"] = timedelta(
-                seconds=pytimeparse.parse(d["max_time_delta"])
-            )
         if "sort_by" in d:
             kwargs["sort_by"] = d["sort_by"]
 
@@ -287,8 +277,8 @@ class LandsatOliTirs(DataSource):
                     cur_pathrows.add((path, row))
             for path, row in cur_pathrows:
                 for year in range(
-                    (wgs84_geometry.time_range[0] - self.max_time_delta).year,
-                    (wgs84_geometry.time_range[1] + self.max_time_delta).year + 1,
+                    wgs84_geometry.time_range[0].year,
+                    wgs84_geometry.time_range[1].year + 1,
                 ):
                     needed_year_pathrows.add((year, path, row))
 

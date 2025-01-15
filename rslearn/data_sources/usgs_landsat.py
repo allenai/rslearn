@@ -11,10 +11,9 @@ import tempfile
 import time
 import uuid
 from collections.abc import Generator
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, BinaryIO
 
-import pytimeparse
 import requests
 import shapely
 from upath import UPath
@@ -308,7 +307,6 @@ class LandsatOliTirs(DataSource):
         self,
         config: RasterLayerConfig,
         username: str,
-        max_time_delta: timedelta = timedelta(days=30),
         sort_by: str | None = None,
         password: str | None = None,
         token: str | None = None,
@@ -318,16 +316,12 @@ class LandsatOliTirs(DataSource):
         Args:
             config: the LayerConfig of the layer containing this data source
             username: EROS username
-            max_time_delta: maximum time before a query start time or after a
-                query end time to look for products. This is required due to the large
-                number of available products, and defaults to 30 days.
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
             password: EROS password (see M2MAPIClient).
             token: EROS application token (see M2MAPIClient).
         """
         self.config = config
-        self.max_time_delta = max_time_delta
         self.sort_by = sort_by
 
         self.client = M2MAPIClient(username, password=password, token=token)
@@ -338,10 +332,6 @@ class LandsatOliTirs(DataSource):
         if config.data_source is None:
             raise ValueError("data_source is required")
         d = config.data_source.config_dict
-        if "max_time_delta" in d:
-            max_time_delta = timedelta(seconds=pytimeparse.parse(d["max_time_delta"]))
-        else:
-            max_time_delta = timedelta(days=30)
 
         # Optional config.
         kwargs = {}
@@ -353,7 +343,6 @@ class LandsatOliTirs(DataSource):
         return LandsatOliTirs(
             config=config,
             username=d["username"],
-            max_time_delta=max_time_delta,
             sort_by=d.get("sort_by"),
             **kwargs,
         )

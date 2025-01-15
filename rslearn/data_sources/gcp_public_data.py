@@ -7,11 +7,10 @@ import random
 import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Generator
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, BinaryIO
 
 import dateutil.parser
-import pytimeparse
 import rasterio
 import shapely
 import tqdm
@@ -72,7 +71,6 @@ class Sentinel2Item(Item):
         )
 
 
-# TODO: Distinguish between AWS and GCP data sources in class names.
 class Sentinel2(DataSource):
     """A data source for Sentinel-2 data on Google Cloud Storage.
 
@@ -111,7 +109,6 @@ class Sentinel2(DataSource):
         self,
         config: RasterLayerConfig,
         index_cache_dir: UPath,
-        max_time_delta: timedelta = timedelta(days=30),
         sort_by: str | None = None,
         use_rtree_index: bool = True,
         harmonize: bool = False,
@@ -124,9 +121,6 @@ class Sentinel2(DataSource):
             config: the LayerConfig of the layer containing this data source.
             index_cache_dir: local directory to cache the index contents, as well as
                 individual product metadata files.
-            max_time_delta: maximum time before a query start time or after a
-                query end time to look for products. This is required due to the large
-                number of available products, and defaults to 30 days.
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
             use_rtree_index: whether to create an rtree index to enable faster lookups
@@ -146,7 +140,6 @@ class Sentinel2(DataSource):
         """
         self.config = config
         self.index_cache_dir = index_cache_dir
-        self.max_time_delta = max_time_delta
         self.sort_by = sort_by
         self.harmonize = harmonize
 
@@ -181,11 +174,6 @@ class Sentinel2(DataSource):
             config=config,
             index_cache_dir=join_upath(ds_path, d["index_cache_dir"]),
         )
-
-        if "max_time_delta" in d:
-            kwargs["max_time_delta"] = timedelta(
-                seconds=pytimeparse.parse(d["max_time_delta"])
-            )
 
         if "rtree_time_range" in d:
             kwargs["rtree_time_range"] = (
@@ -457,8 +445,8 @@ class Sentinel2(DataSource):
             time_range = None
             if geometry.time_range:
                 time_range = (
-                    geometry.time_range[0] - self.max_time_delta,
-                    geometry.time_range[1] + self.max_time_delta,
+                    geometry.time_range[0],
+                    geometry.time_range[1],
                 )
             if self.rtree_index is None:
                 raise ValueError("rtree_index is required")
@@ -487,8 +475,8 @@ class Sentinel2(DataSource):
                 )
             for cell_id in get_sentinel2_tiles(wgs84_geometry, self.index_cache_dir):
                 for year in range(
-                    (wgs84_geometry.time_range[0] - self.max_time_delta).year,
-                    (wgs84_geometry.time_range[1] + self.max_time_delta).year + 1,
+                    wgs84_geometry.time_range[0].year,
+                    wgs84_geometry.time_range[1].year + 1,
                 ):
                     needed_cell_years.add((cell_id, year))
 
