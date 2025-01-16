@@ -155,6 +155,9 @@ class Sentinel2(DataSource):
     # including this prefix first followed by the year.
     VALID_PRODUCT_PREFIXES = ["S2A_MSIL1C", "S2B_MSIL1C", "S2C_MSIL1C"]
 
+    # The name of the L1C product metadata XML file.
+    METADATA_FILENAME = "MTD_MSIL1C.xml"
+
     def __init__(
         self,
         config: RasterLayerConfig,
@@ -376,7 +379,7 @@ class Sentinel2(DataSource):
         cache_xml_fname = self.index_cache_dir / (name + ".xml")
         if not cache_xml_fname.exists():
             product_folder = self._build_product_folder_name(name)
-            metadata_blob_path = product_folder + "MTD_MSIL1C.xml"
+            metadata_blob_path = product_folder + self.METADATA_FILENAME
             blob = self.bucket.blob(metadata_blob_path)
             if not blob.exists():
                 raise MissingXMLException(name)
