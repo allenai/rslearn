@@ -542,7 +542,7 @@ class Sentinel2(DataSource):
 
         for product_prefix in self.VALID_PRODUCT_PREFIXES:
             cell_folder = self._build_cell_folder_name(cell_id)
-            blob_prefix = f"{cell_folder}/{product_prefix}_{year}"
+            blob_prefix = f"{cell_folder}{product_prefix}_{year}"
             blobs = self.bucket.list_blobs(prefix=blob_prefix, delimiter="/")
 
             # Need to consume the iterator to obtain folder names.
