@@ -70,18 +70,11 @@ def get_harmonize_callback(
     return callback
 
 
-def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
-    """Cache the tiles from SENTINEL2_TILE_URL.
+def get_sentinel2_tile_index() -> dict[str, tuple[float, float, float, float]]:
+    """Get the Sentinel-2 tile index.
 
-    This way we just need to download it once.
+    This is a map from tile name to the WGS84 bounds of the tile.
     """
-    json_fname = cache_dir / "tile_index.json"
-
-    if json_fname.exists():
-        return
-
-    logger.info(f"caching list of Sentinel-2 tiles to {json_fname}")
-
     # Identify the Sentinel-2 tile names and bounds using the KML file.
     # First, download the zip file and extract and parse the KML.
     buf = io.BytesIO()
@@ -99,7 +92,7 @@ def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
             tree = ET.parse(memberf)
 
     # Map from the tile name to the longitude/latitude bounds.
-    json_data: dict[str, tuple[float, float, float, float]] = {}
+    tile_index: dict[str, tuple[float, float, float, float]] = {}
 
     # The KML is list of Placemark so iterate over those.
     for placemark_node in tree.iter(SENTINEL2_KML_NAMESPACE + "Placemark"):
@@ -141,10 +134,24 @@ def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
             max(lons),
             max(lats),
         )
-        json_data[tile_name] = bounds
+        tile_index[tile_name] = bounds
 
+    return tile_index
+
+
+def _cache_sentinel2_tile_index(cache_dir: UPath) -> None:
+    """Cache the tiles from SENTINEL2_TILE_URL.
+
+    This way we just need to download it once.
+    """
+    json_fname = cache_dir / "tile_index.json"
+
+    if json_fname.exists():
+        return
+
+    logger.info(f"caching list of Sentinel-2 tiles to {json_fname}")
     with open_atomic(json_fname, "w") as f:
-        json.dump(json_data, f)
+        json.dump(get_sentinel2_tile_index(), f)
 
 
 @functools.cache
