@@ -16,11 +16,11 @@ rslearn helps with:
 
 
 Quick links:
-- [CoreConcepts](CoreConcepts.md) summarizes key concepts in rslearn, including
+- [CoreConcepts](docs/CoreConcepts.md) summarizes key concepts in rslearn, including
   datasets, windows, layers, and data sources.
-- [Examples](Examples.md) contains more examples, including customizing different
+- [Examples](docs/Examples.md) contains more examples, including customizing different
   stages of rslearn with additional code.
-- [DatasetConfig](DatasetConfig.md) documents the dataset configuration file.
+- [DatasetConfig](docs/DatasetConfig.md) documents the dataset configuration file.
 
 
 Setup
@@ -58,7 +58,6 @@ directory `/path/to/dataset` and corresponding configuration file at
             "data_source": {
                 "name": "rslearn.data_sources.gcp_public_data.Sentinel2",
                 "index_cache_dir": "cache/sentinel2/",
-                "max_time_delta": "1d",
                 "sort_by": "cloud_cover",
                 "use_rtree_index": false
             }
