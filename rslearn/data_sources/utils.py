@@ -69,8 +69,15 @@ def match_candidate_items_to_window(
     item_shps = []
     for item in items:
         item_geom = item.geometry
+        # We need to re-project items to the geometry projection for the spatial checks
+        # below. Unless the item's geometry indicates global coverage, in which case we
+        # set it to match the geometry to show that it should cover the entire
+        # geometry.
         if item_geom.projection != geometry.projection:
-            item_geom = item_geom.to_projection(geometry.projection)
+            if item_geom.is_global():
+                item_geom = geometry
+            else:
+                item_geom = item_geom.to_projection(geometry.projection)
         item_shps.append(item_geom.shp)
 
     groups = []
