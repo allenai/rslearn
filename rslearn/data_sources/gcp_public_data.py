@@ -7,6 +7,7 @@ import random
 import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Generator
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, BinaryIO
 
@@ -71,6 +72,45 @@ class Sentinel2Item(Item):
         )
 
 
+class CorruptItemException(Exception):
+    """A Sentinel-2 scene is corrupted or otherwise unreadable for a known reason."""
+
+    def __init__(self, message: str) -> None:
+        """Create a new CorruptItemException.
+
+        Args:
+            message: error message.
+        """
+        self.message = message
+
+
+class MissingXMLException(Exception):
+    """Exception for when an item's XML file does not exist in GCS.
+
+    Some items that appear in the index on BigQuery, or that have a folder, lack an XML
+    file, and so in those cases this exception can be ignored.
+    """
+
+    def __init__(self, item_name: str):
+        """Create a new MissingXMLException.
+
+        Args:
+            item_name: the name of the item (Sentinel-2 scene) that is missing its XML
+                file in the GCS bucket.
+        """
+        self.item_name = item_name
+
+
+@dataclass
+class ParsedProductXML:
+    """Result of parsing a Sentinel-2 product XML file."""
+
+    blob_prefix: str
+    shp: shapely.Polygon
+    start_time: datetime
+    cloud_cover: float
+
+
 class Sentinel2(DataSource):
     """A data source for Sentinel-2 data on Google Cloud Storage.
 
@@ -104,6 +144,17 @@ class Sentinel2(DataSource):
         ("B8A.jp2", ["B8A"]),
         ("TCI.jp2", ["R", "G", "B"]),
     ]
+
+    # Possible prefixes of the product name that may appear on GCS, before the year
+    # appears in the product name. For example, a product may start with
+    # "S2A_MSIL1C_20230101..." so S2A_MSIL1C appears here. This list is used when
+    # enumerating the list of products on GCS that fall in a certain year: because the
+    # year comes after this prefix, filtering in the object list operation requires
+    # including this prefix first followed by the year.
+    VALID_PRODUCT_PREFIXES = ["S2A_MSIL1C", "S2B_MSIL1C", "S2C_MSIL1C"]
+
+    # The name of the L1C product metadata XML file.
+    METADATA_FILENAME = "MTD_MSIL1C.xml"
 
     def __init__(
         self,
@@ -218,19 +269,22 @@ class Sentinel2(DataSource):
         result = client.query(query_str)
 
         for row in tqdm.tqdm(result, desc=desc):
+            # Figure out what the product folder is for this entry.
             # Some entries have source_url correct and others have base_url correct.
             # If base_url is correct, then it seems the source_url always ends in
             # index.csv.gz.
             if row["source_url"] and not row["source_url"].endswith("index.csv.gz"):
-                base_url = row["source_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
+                product_folder = row["source_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
             elif row["base_url"] is not None and row["base_url"] != "":
-                base_url = row["base_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
+                product_folder = row["base_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
             else:
                 raise ValueError(
                     f"Unexpected value '{row['source_url']}' in column 'source_url'"
                     + f" and '{row['base_url']} in column 'base_url'"
                 )
 
+            # Build the blob prefix based on the product ID and granule ID.
+            # The blob prefix is the prefix to the JP2 image files on GCS.
             product_id = row["product_id"]
             product_id_parts = product_id.split("_")
             if len(product_id_parts) < 7:
@@ -245,7 +299,7 @@ class Sentinel2(DataSource):
             granule_id = row["granule_id"]
 
             blob_prefix = (
-                f"{base_url}/GRANULE/{granule_id}/IMG_DATA/{tile_id}_{time_str}_"
+                f"{product_folder}/GRANULE/{granule_id}/IMG_DATA/{tile_id}_{time_str}_"
             )
 
             # Extract the spatial and temporal bounds of the image.
@@ -264,6 +318,43 @@ class Sentinel2(DataSource):
 
             yield Sentinel2Item(product_id, geometry, blob_prefix, cloud_cover)
 
+    def _build_cell_folder_name(self, cell_id: str) -> str:
+        """Get the prefix on GCS containing the product files in the provided cell.
+
+        The Sentinel-2 cell ID is based on MGRS and is a way of splitting up the world
+        into large tiles.
+
+        Args:
+            cell_id: the 5-character cell ID. Note that the product name includes the
+                cell ID with a "T" prefix, the T should be removed.
+
+        Returns:
+            the path on GCS of the folder corresponding to this Sentinel-2 cell.
+        """
+        return f"tiles/{cell_id[0:2]}/{cell_id[2:3]}/{cell_id[3:5]}/"
+
+    def _build_product_folder_name(self, item_name: str) -> str:
+        """Get the folder containing the given Sentinel-2 scene ID on GCS.
+
+        Args:
+            item_name: the item name (Sentinel-2 scene ID).
+
+        Returns:
+            the path on GCS of the .SAFE folder corresponding to this item.
+        """
+        parts = item_name.split("_")
+        cell_id_with_prefix = parts[5]
+        if len(cell_id_with_prefix) != 6:
+            raise ValueError(
+                f"cell ID should be 6 characters but got {cell_id_with_prefix}"
+            )
+        if cell_id_with_prefix[0] != "T":
+            raise ValueError(
+                f"cell ID should start with T but got {cell_id_with_prefix}"
+            )
+        cell_id = cell_id_with_prefix[1:]
+        return self._build_cell_folder_name(cell_id) + f"{item_name}.SAFE/"
+
     def _get_xml_by_name(self, name: str) -> ET.ElementTree:
         """Gets the metadata XML of an item by its name.
 
@@ -273,43 +364,32 @@ class Sentinel2(DataSource):
         Returns:
             the parsed XML ElementTree
         """
-        parts = name.split("_")
-        assert len(parts[5]) == 6
-        assert parts[5][0] == "T"
-        cell_id = parts[5][1:]
-        base_url = f"tiles/{cell_id[0:2]}/{cell_id[2:3]}/{cell_id[3:5]}/{name}.SAFE/"
-
         cache_xml_fname = self.index_cache_dir / (name + ".xml")
         if not cache_xml_fname.exists():
-            metadata_blob_path = base_url + "MTD_MSIL1C.xml"
+            product_folder = self._build_product_folder_name(name)
+            metadata_blob_path = product_folder + self.METADATA_FILENAME
             blob = self.bucket.blob(metadata_blob_path)
+            if not blob.exists():
+                raise MissingXMLException(name)
             with open_atomic(cache_xml_fname, "wb") as f:
                 blob.download_to_file(f)
 
         with cache_xml_fname.open("rb") as f:
             return ET.parse(f)
 
-    def get_item_by_name(self, name: str) -> Sentinel2Item:
-        """Gets an item by name.
+    def _parse_xml(self, name: str) -> ParsedProductXML:
+        """Parse a Sentinel-2 product XML file.
 
-        Reads the individual product metadata file (MTD_MSIL1C.xml) to get both the
-        expected blob path where images are stored as well as the detailed geometry of
-        the product (not just the bounding box).
+        This extracts the blob prefix in the GCS bucket, the polygon extent, sensing
+        start time, and cloud cover.
 
         Args:
-            name: the name of the item to get
-
-        Returns:
-            the item object
+            name: the Sentinel-2 scene name.
         """
-        parts = name.split("_")
-        assert len(parts[5]) == 6
-        assert parts[5][0] == "T"
-        cell_id = parts[5][1:]
-        base_url = f"tiles/{cell_id[0:2]}/{cell_id[2:3]}/{cell_id[3:5]}/{name}.SAFE/"
-
+        # Get the XML. This helper function handles caching the XML file.
         tree = self._get_xml_by_name(name)
 
+        # Now parse the XML, starting with the detailed geometry of the image.
         # The EXT_POS_LIST tag has flat list of polygon coordinates.
         elements = list(tree.iter("EXT_POS_LIST"))
         assert len(elements) == 1
@@ -325,7 +405,9 @@ class Sentinel2(DataSource):
         ]
         shp = shapely.Polygon(coords)
 
-        # Get blob prefix which is a subfolder of the base_url
+        # Get blob prefix which is a subfolder of the product folder.
+        # The blob prefix is the prefix to the JP2 image files on GCS.
+        product_folder = self._build_product_folder_name(name)
         elements = list(tree.iter("IMAGE_FILE"))
         elements = [
             el for el in elements if el.text is not None and el.text.endswith("_B01")
@@ -333,29 +415,163 @@ class Sentinel2(DataSource):
         assert len(elements) == 1
         if elements[0].text is None:
             raise ValueError(f"IMAGE_FILE is empty for {name}")
-        blob_prefix = base_url + elements[0].text.split("B01")[0]
+        blob_prefix = product_folder + elements[0].text.split("B01")[0]
 
+        # Get the sensing start time.
         elements = list(tree.iter("PRODUCT_START_TIME"))
         assert len(elements) == 1
         if elements[0].text is None:
             raise ValueError(f"PRODUCT_START_TIME is empty for {name}")
         start_time = dateutil.parser.isoparse(elements[0].text)
 
+        # Get the cloud cover.
         elements = list(tree.iter("Cloud_Coverage_Assessment"))
         assert len(elements) == 1
         if elements[0].text is None:
             raise ValueError(f"Cloud_Coverage_Assessment is empty for {name}")
         cloud_cover = float(elements[0].text)
 
-        geometry = STGeometry(WGS84_PROJECTION, shp, (start_time, start_time))
+        return ParsedProductXML(
+            blob_prefix=blob_prefix,
+            shp=shp,
+            start_time=start_time,
+            cloud_cover=cloud_cover,
+        )
+
+    def _get_item_by_name(self, name: str) -> Sentinel2Item:
+        """Gets an item by name.
+
+        This implements the main logic of processing the product metadata file
+        without the caching logic in get_item_by_name, see that function for details.
+
+        Args:
+            name: the Sentinel-2 scene ID.
+        """
+        product_xml = self._parse_xml(name)
+
+        # Some Sentinel-2 scenes in the bucket are missing a subset of image files. So
+        # here we verify that all the bands we know about are intact.
+        expected_suffixes = {t[0] for t in self.BANDS}
+        for blob in self.bucket.list_blobs(prefix=product_xml.blob_prefix):
+            assert blob.name.startswith(product_xml.blob_prefix)
+            suffix = blob.name[len(product_xml.blob_prefix) :]
+            if suffix in expected_suffixes:
+                expected_suffixes.remove(suffix)
+        if len(expected_suffixes) > 0:
+            raise CorruptItemException(
+                f"item is missing image files: {expected_suffixes}"
+            )
+
+        time_range = (product_xml.start_time, product_xml.start_time)
+        geometry = STGeometry(WGS84_PROJECTION, product_xml.shp, time_range)
         geometry = split_at_prime_meridian(geometry)
 
+        # Sometimes the geometry is not valid.
+        # We just apply make_valid on it to correct issues.
+        if not geometry.shp.is_valid:
+            geometry.shp = shapely.make_valid(geometry.shp)
+
         return Sentinel2Item(
-            name,
-            geometry,
-            blob_prefix,
-            cloud_cover,
+            name=name,
+            geometry=geometry,
+            blob_prefix=product_xml.blob_prefix,
+            cloud_cover=product_xml.cloud_cover,
         )
+
+    def get_item_by_name(self, name: str) -> Sentinel2Item:
+        """Gets an item by name.
+
+        Reads the individual product metadata file (MTD_MSIL1C.xml) to get both the
+        expected blob path where images are stored as well as the detailed geometry of
+        the product (not just the bounding box).
+
+        Args:
+            name: the name of the item to get
+
+        Returns:
+            the item object
+        """
+        # The main logic for getting the item is implemented in _get_item_by_name.
+        # Here, we implement caching logic so that, if we have already seen this item
+        # before, then we can just deserialize it from a JSON file.
+        # We want to cache the item if it is successful, but also cache the
+        # CorruptItemException if it is raised.
+        cache_item_fname = self.index_cache_dir / (name + ".json")
+
+        if cache_item_fname.exists():
+            with cache_item_fname.open() as f:
+                d = json.load(f)
+
+            if "error" in d:
+                raise CorruptItemException(d["error"])
+
+            return Sentinel2Item.deserialize(d)
+
+        try:
+            item = self._get_item_by_name(name)
+        except CorruptItemException as e:
+            with open_atomic(cache_item_fname, "w") as f:
+                json.dump({"error": e.message}, f)
+            raise
+
+        with open_atomic(cache_item_fname, "w") as f:
+            json.dump(item.serialize(), f)
+        return item
+
+    def _read_products_for_cell_year(
+        self, cell_id: str, year: int
+    ) -> list[Sentinel2Item]:
+        """Read items for the given cell and year directly from the GCS bucket.
+
+        This helper function is used by self._read_products which then caches the
+        items together in one file.
+        """
+        items = []
+
+        for product_prefix in self.VALID_PRODUCT_PREFIXES:
+            cell_folder = self._build_cell_folder_name(cell_id)
+            blob_prefix = f"{cell_folder}{product_prefix}_{year}"
+            blobs = self.bucket.list_blobs(prefix=blob_prefix, delimiter="/")
+
+            # Need to consume the iterator to obtain folder names.
+            # See https://cloud.google.com/storage/docs/samples/storage-list-files-with-prefix#storage_list_files_with_prefix-python # noqa: E501
+            # Previously we checked for .SAFE_$folder$ blobs here, but those do
+            # not exist for some years like 2017.
+            for _ in blobs:
+                pass
+
+            logger.debug(
+                "under %s, found %d folders to scan",
+                blob_prefix,
+                len(blobs.prefixes),
+            )
+
+            for prefix in blobs.prefixes:
+                folder_name = prefix.split("/")[-2]
+                expected_suffix = ".SAFE"
+                assert folder_name.endswith(expected_suffix)
+                item_name = folder_name.split(expected_suffix)[0]
+
+                try:
+                    item = self.get_item_by_name(item_name)
+                except CorruptItemException as e:
+                    logger.warning("skipping corrupt item %s: %s", item_name, e.message)
+                    continue
+                except MissingXMLException:
+                    # Sometimes there is a .SAFE folder but some files like the
+                    # XML file are just missing for whatever reason. Since we
+                    # know this happens occasionally, we just ignore the error
+                    # here.
+                    logger.warning(
+                        "no metadata XML for Sentinel-2 folder %s/%s",
+                        blob_prefix,
+                        folder_name,
+                    )
+                    continue
+
+                items.append(item)
+
+        return items
 
     def _read_products(
         self, needed_cell_years: set[tuple[str, int]]
@@ -379,53 +595,7 @@ class Sentinel2(DataSource):
             cache_fname = self.index_cache_dir / f"{cell_id}_{year}.json"
 
             if not cache_fname.exists():
-                cell_part1 = cell_id[0:2]
-                cell_part2 = cell_id[2:3]
-                cell_part3 = cell_id[3:5]
-
-                items = []
-
-                for product_prefix in ["S2A_MSIL1C", "S2B_MSIL1C"]:
-                    cell_folder = f"tiles/{cell_part1}/{cell_part2}/{cell_part3}"
-                    blob_prefix = f"{cell_folder}/{product_prefix}_{year}"
-                    blobs = self.bucket.list_blobs(prefix=blob_prefix, delimiter="/")
-
-                    # Need to consume the iterator to obtain folder names.
-                    # See https://cloud.google.com/storage/docs/samples/storage-list-files-with-prefix#storage_list_files_with_prefix-python # noqa: E501
-                    # Previously we checked for .SAFE_$folder$ blobs here, but those do
-                    # not exist for some years like 2017.
-                    for _ in blobs:
-                        pass
-
-                    logger.debug(
-                        "under %s, found %d folders to scan",
-                        blob_prefix,
-                        len(blobs.prefixes),
-                    )
-
-                    for prefix in blobs.prefixes:
-                        folder_name = prefix.split("/")[-2]
-                        expected_suffix = ".SAFE"
-                        assert folder_name.endswith(expected_suffix)
-                        item_name = folder_name.split(expected_suffix)[0]
-
-                        # Make sure metadata XML blob exists, otherwise we won't be
-                        # able to load the item.
-                        # (Sometimes there is a .SAFE folder but some files like the
-                        # XML file are just missing for whatever reason.)
-                        xml_blob_path = f"{cell_folder}/{folder_name}/MTD_MSIL1C.xml"
-                        xml_blob = self.bucket.blob(xml_blob_path)
-                        if not xml_blob.exists():
-                            logger.warning(
-                                "no metadata XML for Sentinel-2 folder %s at %s",
-                                folder_name,
-                                xml_blob_path,
-                            )
-                            continue
-
-                        item = self.get_item_by_name(item_name)
-                        items.append(item)
-
+                items = self._read_products_for_cell_year(cell_id, year)
                 with open_atomic(cache_fname, "w") as f:
                     json.dump([item.serialize() for item in items], f)
 
@@ -433,13 +603,16 @@ class Sentinel2(DataSource):
                 with cache_fname.open() as f:
                     items = [Sentinel2Item.deserialize(d) for d in json.load(f)]
 
-            for item in items:
-                yield item
+            yield from items
 
     def _get_candidate_items_index(
         self, wgs84_geometries: list[STGeometry]
     ) -> list[list[Sentinel2Item]]:
-        """List relevant items using rtree index."""
+        """List relevant items using rtree index.
+
+        Args:
+            wgs84_geometries: the geometries to query.
+        """
         candidates: list[list[Sentinel2Item]] = [[] for _ in wgs84_geometries]
         for idx, geometry in enumerate(wgs84_geometries):
             time_range = None
@@ -457,7 +630,23 @@ class Sentinel2(DataSource):
                     continue
                 if not item.geometry.shp.intersects(geometry.shp):
                     continue
-                item = self.get_item_by_name(item.name)
+
+                # Get the item from XML to get its exact geometry (the index only
+                # knows the bounding box of the item).
+                try:
+                    item = self.get_item_by_name(item.name)
+                except CorruptItemException as e:
+                    logger.warning("skipping corrupt item %s: %s", item.name, e.message)
+                    continue
+                except MissingXMLException:
+                    # Sometimes a scene that appears in the BigQuery index does not
+                    # actually have an XML file on GCS. Since we know this happens
+                    # occasionally, we ignore the error here.
+                    logger.warning(
+                        "skipping item %s that is missing XML file", item.name
+                    )
+                    continue
+
                 if not item.geometry.shp.intersects(geometry.shp):
                     continue
                 candidates[idx].append(item)
@@ -466,7 +655,11 @@ class Sentinel2(DataSource):
     def _get_candidate_items_direct(
         self, wgs84_geometries: list[STGeometry]
     ) -> list[list[Sentinel2Item]]:
-        """Use _read_products to list relevant items."""
+        """Use _read_products to list relevant items.
+
+        Args:
+            wgs84_geometries: the geometries to query.
+        """
         needed_cell_years = set()
         for wgs84_geometry in wgs84_geometries:
             if wgs84_geometry.time_range is None:
@@ -574,7 +767,15 @@ class Sentinel2(DataSource):
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     fname = os.path.join(tmp_dir, suffix)
                     blob = self.bucket.blob(item.blob_prefix + suffix)
+                    logger.debug(
+                        "gcp_public_data downloading raster file %s",
+                        item.blob_prefix + suffix,
+                    )
                     blob.download_to_filename(fname)
+                    logger.debug(
+                        "gcp_public_data ingesting raster file %s into tile store",
+                        item.blob_prefix + suffix,
+                    )
 
                     # Harmonize values if needed.
                     # TCI does not need harmonization.
@@ -599,3 +800,8 @@ class Sentinel2(DataSource):
                         tile_store.write_raster_file(
                             item.name, band_names, UPath(fname)
                         )
+
+                logger.debug(
+                    "gcp_public_data done ingesting raster file %s",
+                    item.blob_prefix + suffix,
+                )
