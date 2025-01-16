@@ -1,5 +1,6 @@
 """Classes for storing configuration of a dataset."""
 
+import json
 from datetime import timedelta
 from enum import Enum
 from typing import Any
@@ -140,14 +141,8 @@ class BandSetConfig:
             self.format = format
 
     def serialize(self) -> dict[str, Any]:
-        """Serialize this BandSetConfig to a config dict, currently unused."""
-        return {
-            "bands": self.bands,
-            "format": self.format,
-            "dtype": self.dtype,
-            "zoom_offset": self.zoom_offset,
-            "remap": self.remap,
-        }
+        """Serialize this BandSetConfig to a config dict."""
+        return self.config_dict
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "BandSetConfig":
@@ -259,7 +254,7 @@ class QueryConfig:
         self.max_matches = max_matches
 
     def serialize(self) -> dict[str, Any]:
-        """Serialize this QueryConfig to a config dict, currently unused."""
+        """Serialize this QueryConfig to a config dict."""
         return {
             "space_mode": str(self.space_mode),
             "time_mode": str(self.time_mode),
@@ -313,16 +308,8 @@ class DataSourceConfig:
         self.ingest = ingest
 
     def serialize(self) -> dict[str, Any]:
-        """Serialize this DataSourceConfig to a config dict, currently unused."""
-        config_dict = self.config_dict.copy()
-        config_dict["name"] = self.name
-        config_dict["query_config"] = self.query_config.serialize()
-        config_dict["ingest"] = self.ingest
-        if self.time_offset:
-            config_dict["time_offset"] = str(self.time_offset)
-        if self.duration:
-            config_dict["duration"] = str(self.duration)
-        return config_dict
+        """Serialize this DataSourceConfig to a config dict."""
+        return self.config_dict
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "DataSourceConfig":
@@ -377,12 +364,26 @@ class LayerConfig:
         self.alias = alias
 
     def serialize(self) -> dict[str, Any]:
-        """Serialize this LayerConfig to a config dict, currently unused."""
+        """Serialize this LayerConfig to a config dict."""
         return {
             "layer_type": str(self.layer_type),
-            "data_source": self.data_source,
+            "data_source": self.data_source.serialize() if self.data_source else None,
             "alias": self.alias,
         }
+
+    def __hash__(self) -> int:
+        """Return a hash of this LayerConfig."""
+        return hash(json.dumps(self.serialize(), sort_keys=True))
+
+    def __eq__(self, other: Any) -> bool:
+        """Returns whether other is the same as this LayerConfig.
+
+        Args:
+            other: the other object to compare.
+        """
+        if not isinstance(other, LayerConfig):
+            return False
+        return self.serialize() == other.serialize()
 
 
 class RasterLayerConfig(LayerConfig):

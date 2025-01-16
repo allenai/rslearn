@@ -7,10 +7,11 @@ from typing import Any
 import affine
 import numpy.typing as npt
 import rasterio.vrt
+import shapely
 from rasterio.enums import Resampling
 from upath import UPath
 
-from rslearn.utils import Feature, PixelBounds, Projection
+from rslearn.utils import Feature, PixelBounds, Projection, STGeometry
 from rslearn.utils.fsspec import (
     join_upath,
     open_rasterio_upath_reader,
@@ -318,8 +319,27 @@ class DefaultTileStore(TileStore):
         features = GeojsonVectorFormat().decode_vector(
             vector_dir / VECTOR_FNAME, bounds
         )
-        features = [feat.to_projection(projection) for feat in features]
-        return features
+
+        # Filter for vector data that intersects the requested projection and bounds.
+        if len(features) == 0:
+            return features
+        feat_projection = features[0].geometry.projection
+        requested_geom = STGeometry(projection, shapely.box(*bounds), None)
+        # We could re-project the features to the requested projection and then match
+        # against requested_geom, but we instead project the requested geometry to the
+        # projection of the features. This helps to:
+        # (a) Avoid unnecessary re-projection of features that don't match the
+        #     requested bounds, which is compute-intensive.
+        # (b) Avoid re-projection errors when there is a large GeoJSON and some
+        # features are outside the projection bounds.
+        requested_geom = requested_geom.to_projection(feat_projection)
+        reprojected_features = []
+        for feat in features:
+            if not requested_geom.intersects(feat.geometry):
+                continue
+            reprojected_features.append(feat.to_projection(projection))
+
+        return reprojected_features
 
     def write_vector(
         self, layer_name: str, item_name: str, features: list[Feature]

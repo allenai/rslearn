@@ -641,6 +641,11 @@ of bands in the source files.
 
 The time range of all items is null (infinite).
 
+For this dataset, use `--workers 0` (default) so that processing is done in the main
+thread. This is because most of the work is spent initializing the data source, due to
+the need for identifying the bounds of all of the local files, and so it is best to
+just have this done once rather than once in each worker.
+
 ### rslearn.data_sources.openstreetmap.OpenStreetMap
 
 This data source is for ingesting OpenStreetMap data from a PBF file.

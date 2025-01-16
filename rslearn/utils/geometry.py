@@ -13,11 +13,15 @@ from rasterio.crs import CRS
 from rslearn.log_utils import get_logger
 
 logger = get_logger(__name__)
+PixelBounds = tuple[int, int, int, int]
 
 RESOLUTION_EPSILON = 1e-6
+WGS84_EPSG = 4326
+WGS84_BOUNDS: PixelBounds = (-180, -90, 180, 90)
 
-
-PixelBounds = tuple[int, int, int, int]
+# Threshold in degrees above which a geometry is probably not going to re-project
+# correctly due to projections with limited validity and other issues.
+MAX_GEOMETRY_DEGREES = 10
 
 
 def is_same_resolution(res1: float, res2: float) -> bool:
@@ -103,6 +107,11 @@ class Projection:
         )
 
 
+# The Projection for WGS-84 assuming 1 degree per pixel.
+# This can be used to create STGeometry with shapes in longitude/latitude coordinates.
+WGS84_PROJECTION = Projection(CRS.from_epsg(WGS84_EPSG), 1, 1)
+
+
 class STGeometry:
     """A spatiotemporal geometry.
 
@@ -181,6 +190,30 @@ class STGeometry:
             return False
         return True
 
+    def is_global(self) -> bool:
+        """Returns whether this geometry has global spatial coverage.
+
+        Global coverage is indicated by a special geometry with WGS84 projection and
+        corners at (-180, -90, 180, 90) (see get_global_geometry).
+        """
+        if self.projection != WGS84_PROJECTION:
+            return False
+        if self.shp != shapely.box(*WGS84_BOUNDS):
+            return False
+        return True
+
+    def is_too_large(self) -> bool:
+        """Returns whether this geometry's spatial coverage is too large.
+
+        This means that it will likely have issues during re-projections and such.
+        """
+        wgs84_bounds = self.to_projection(WGS84_PROJECTION).shp.bounds
+        if wgs84_bounds[2] - wgs84_bounds[0] > MAX_GEOMETRY_DEGREES:
+            return True
+        if wgs84_bounds[3] - wgs84_bounds[1] > MAX_GEOMETRY_DEGREES:
+            return True
+        return False
+
     def intersects(self, other: "STGeometry") -> bool:
         """Returns whether this box intersects the other box."""
         # Check temporal.
@@ -188,6 +221,9 @@ class STGeometry:
             return False
 
         # Check spatial.
+        if self.is_global() or other.is_global():
+            # One of the geometries indicates global coverage.
+            return True
         # Need to reproject if projections don't match.
         if other.projection != self.projection:
             other = other.to_projection(self.projection)
@@ -234,6 +270,7 @@ class STGeometry:
                 array, projection.x_resolution, projection.y_resolution, forward=True
             ),
         )
+
         return STGeometry(projection, shp, self.time_range)
 
     def __repr__(self) -> str:
@@ -270,6 +307,18 @@ class STGeometry:
                 else None
             ),
         )
+
+
+def get_global_geometry(time_range: tuple[datetime, datetime] | None) -> STGeometry:
+    """Gets a geometry that indicates global spatial coverage for the given time range.
+
+    Args:
+        time_range: the time range for the STGeometry.
+
+    Returns:
+        STGeometry with global spatial coverage and specified time range.
+    """
+    return STGeometry(WGS84_PROJECTION, shapely.box(*WGS84_BOUNDS), time_range)
 
 
 def flatten_shape(shp: shapely.Geometry) -> list[shapely.Geometry]:
