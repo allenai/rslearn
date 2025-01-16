@@ -278,19 +278,22 @@ class Sentinel2(DataSource):
         result = client.query(query_str)
 
         for row in tqdm.tqdm(result, desc=desc):
+            # Figure out what the product folder is for this entry.
             # Some entries have source_url correct and others have base_url correct.
             # If base_url is correct, then it seems the source_url always ends in
             # index.csv.gz.
             if row["source_url"] and not row["source_url"].endswith("index.csv.gz"):
-                base_url = row["source_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
+                product_folder = row["source_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
             elif row["base_url"] is not None and row["base_url"] != "":
-                base_url = row["base_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
+                product_folder = row["base_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
             else:
                 raise ValueError(
                     f"Unexpected value '{row['source_url']}' in column 'source_url'"
                     + f" and '{row['base_url']} in column 'base_url'"
                 )
 
+            # Build the blob prefix based on the product ID and granule ID.
+            # The blob prefix is the prefix to the JP2 image files on GCS.
             product_id = row["product_id"]
             product_id_parts = product_id.split("_")
             if len(product_id_parts) < 7:
@@ -305,7 +308,7 @@ class Sentinel2(DataSource):
             granule_id = row["granule_id"]
 
             blob_prefix = (
-                f"{base_url}/GRANULE/{granule_id}/IMG_DATA/{tile_id}_{time_str}_"
+                f"{product_folder}/GRANULE/{granule_id}/IMG_DATA/{tile_id}_{time_str}_"
             )
 
             # Extract the spatial and temporal bounds of the image.
@@ -324,6 +327,43 @@ class Sentinel2(DataSource):
 
             yield Sentinel2Item(product_id, geometry, blob_prefix, cloud_cover)
 
+    def _build_cell_folder_name(self, cell_id: str) -> str:
+        """Get the prefix on GCS containing the product files in the provided cell.
+
+        The Sentinel-2 cell ID is based on MGRS and is a way of splitting up the world
+        into large tiles.
+
+        Args:
+            cell_id: the 5-character cell ID. Note that the product name includes the
+                cell ID with a "T" prefix, the T should be removed.
+
+        Returns:
+            the path on GCS of the folder corresponding to this Sentinel-2 cell.
+        """
+        return f"tiles/{cell_id[0:2]}/{cell_id[2:3]}/{cell_id[3:5]}/"
+
+    def _build_product_folder_name(self, item_name: str) -> str:
+        """Get the folder containing the given Sentinel-2 scene ID on GCS.
+
+        Args:
+            item_name: the item name (Sentinel-2 scene ID).
+
+        Returns:
+            the path on GCS of the .SAFE folder corresponding to this item.
+        """
+        parts = item_name.split("_")
+        cell_id_with_prefix = parts[5]
+        if len(cell_id_with_prefix) != 6:
+            raise ValueError(
+                f"cell ID should be 6 characters but got {cell_id_with_prefix}"
+            )
+        if cell_id_with_prefix[0] != "T":
+            raise ValueError(
+                f"cell ID should start with T but got {cell_id_with_prefix}"
+            )
+        cell_id = cell_id_with_prefix[1:]
+        return self._build_cell_folder_name(cell_id) + f"{item_name}.SAFE/"
+
     def _get_xml_by_name(self, name: str) -> ET.ElementTree:
         """Gets the metadata XML of an item by its name.
 
@@ -333,15 +373,10 @@ class Sentinel2(DataSource):
         Returns:
             the parsed XML ElementTree
         """
-        parts = name.split("_")
-        assert len(parts[5]) == 6
-        assert parts[5][0] == "T"
-        cell_id = parts[5][1:]
-        base_url = f"tiles/{cell_id[0:2]}/{cell_id[2:3]}/{cell_id[3:5]}/{name}.SAFE/"
-
         cache_xml_fname = self.index_cache_dir / (name + ".xml")
         if not cache_xml_fname.exists():
-            metadata_blob_path = base_url + "MTD_MSIL1C.xml"
+            product_folder = self._build_product_folder_name(name)
+            metadata_blob_path = product_folder + "MTD_MSIL1C.xml"
             blob = self.bucket.blob(metadata_blob_path)
             if not blob.exists():
                 raise MissingXMLException(name)
@@ -360,23 +395,6 @@ class Sentinel2(DataSource):
         Args:
             name: the Sentinel-2 scene name.
         """
-        # Parse the product name, e.g.
-        # S2B_MSIL1C_20211114T083119_N0301_R021_T36RUU_20211114T091848.
-        # We just need the cell ID from the name (here it is 36RUU) since that is part
-        # of the path in the GCS bucket.
-        parts = name.split("_")
-        cell_id_with_prefix = parts[5]
-        if len(cell_id_with_prefix) != 6:
-            raise ValueError(
-                f"cell ID should be 6 characters but got {cell_id_with_prefix}"
-            )
-        if cell_id_with_prefix[0] != "T":
-            raise ValueError(
-                f"cell ID should start with T but got {cell_id_with_prefix}"
-            )
-        cell_id = cell_id_with_prefix[1:]
-        base_url = f"tiles/{cell_id[0:2]}/{cell_id[2:3]}/{cell_id[3:5]}/{name}.SAFE/"
-
         # Get the XML. This helper function handles caching the XML file.
         tree = self._get_xml_by_name(name)
 
@@ -396,7 +414,9 @@ class Sentinel2(DataSource):
         ]
         shp = shapely.Polygon(coords)
 
-        # Get blob prefix which is a subfolder of the base_url
+        # Get blob prefix which is a subfolder of the product folder.
+        # The blob prefix is the prefix to the JP2 image files on GCS.
+        product_folder = self._build_product_folder_name(name)
         elements = list(tree.iter("IMAGE_FILE"))
         elements = [
             el for el in elements if el.text is not None and el.text.endswith("_B01")
@@ -404,7 +424,7 @@ class Sentinel2(DataSource):
         assert len(elements) == 1
         if elements[0].text is None:
             raise ValueError(f"IMAGE_FILE is empty for {name}")
-        blob_prefix = base_url + elements[0].text.split("B01")[0]
+        blob_prefix = product_folder + elements[0].text.split("B01")[0]
 
         # Get the sensing start time.
         elements = list(tree.iter("PRODUCT_START_TIME"))
@@ -515,14 +535,10 @@ class Sentinel2(DataSource):
         This helper function is used by self._read_products which then caches the
         items together in one file.
         """
-        cell_part1 = cell_id[0:2]
-        cell_part2 = cell_id[2:3]
-        cell_part3 = cell_id[3:5]
-
         items = []
 
         for product_prefix in self.VALID_PRODUCT_PREFIXES:
-            cell_folder = f"tiles/{cell_part1}/{cell_part2}/{cell_part3}"
+            cell_folder = self._build_cell_folder_name(cell_id)
             blob_prefix = f"{cell_folder}/{product_prefix}_{year}"
             blobs = self.bucket.list_blobs(prefix=blob_prefix, delimiter="/")
 
