@@ -50,14 +50,14 @@ def match_candidate_items_to_window(
                     item
                     for item in items
                     if not item.geometry.time_range
-                    or item.geometry.time_range[1] <= geometry.time_range[0]
+                    or item.geometry.time_range[1] <= geometry.time_range[1]
                 ]
             elif query_config.time_mode == TimeMode.AFTER:
                 items = [
                     item
                     for item in items
                     if not item.geometry.time_range
-                    or item.geometry.time_range[0] >= geometry.time_range[1]
+                    or item.geometry.time_range[0] >= geometry.time_range[0]
                 ]
             items.sort(
                 key=lambda item: geometry.distance_to_time_range(

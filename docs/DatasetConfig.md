@@ -349,11 +349,13 @@ re-projection).
 The time mode defines the temporal matching.
 
 - WITHIN means to use items with time ranges that are contained within the time range
-  of the window. Note that, for most data sources, the item time range is a single
-  point in time.
-- BEFORE and AFTER mean to use items either before the window start time or after the
-  window end time. In this case, the items are sorted by proximity to the window, and
-  used in that order.
+  of the window, but to process them in the order provided by the data source. Note
+  that, for most data sources, the item time range is a single point in time.
+- BEFORE and AFTER still use items with time ranges that are contained within the time
+  range of the window, but they affect the ordering of the items. BEFORE matches items
+  in reverse temporal order, starting with items just before the window end time. AFTER
+  matches items in temporal order, starting with items just after the window start
+  time.
 
 Finally, max matches is the maximum number of item groups that should be created. The
 default is 1. For MOSAIC, this means to attempt to create one mosaic covering the
@@ -370,9 +372,7 @@ For CONTAINS and INTERSECTS, it will simply choose up to that many matching item
 
 Under WITHIN time mode, the order of the items is based on the ordering provided by the
 data source. Some data sources provide options to, say, sort items by cloud cover.
-
-Under BEFORE or AFTER time mode, the ordering from the data source is overwritten by
-the temporal proximity to the window.
+Under BEFORE or AFTER time mode, the ordering from the data source is overwritten.
 
 ### Time Offset
 

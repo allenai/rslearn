@@ -35,6 +35,28 @@ pip install .[extra]
 ```
 
 
+Supported Data Sources
+----------------------
+
+rslearn supports ingesting raster and vector data from the following data sources. Even
+if you don't plan to train models within rslearn, you can still use it to easily
+download, crop, and re-project data based on spatiotemporal rectangles (windows) that
+you define. See [Examples](docs/Examples.md) and [DatasetConfig](docs/DatasetConfig.md)
+for how to setup these data sources.
+
+- Sentinel-1
+- Sentinel-2 L1C and L2A
+- Landsat 8/9 OLI-TIRS
+- National Agriculture Imagery Program
+- OpenStreetMap
+- Xyz (Slippy) Tiles (e.g., Mapbox tiles)
+- Planet Labs (PlanetScope, SkySat)
+- ESA WorldCover 2021
+
+rslearn can also be used to easily mosaic, crop, and re-project any sets of local
+raster and vector files you may have.
+
+
 Example Usage
 -------------
 
