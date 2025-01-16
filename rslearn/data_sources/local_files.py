@@ -3,7 +3,6 @@
 from typing import Any, Generic, TypeVar
 
 import fiona
-import rasterio
 import shapely
 import shapely.geometry
 from class_registry import ClassRegistry
@@ -184,10 +183,11 @@ class RasterImporter(Importer):
             src_dir: the source directory.
         """
         item_specs: list[RasterItemSpec] = []
-        if config.data_source is None:
-            raise ValueError("RasterImporter requires a data source config")
         # See if user has provided the item specs directly.
-        if "item_specs" in config.data_source.config_dict:
+        if (
+            config.data_source is not None
+            and "item_specs" in config.data_source.config_dict
+        ):
             for spec_dict in config.data_source.config_dict["item_specs"]:
                 spec = RasterItemSpec.from_config(src_dir, spec_dict)
                 item_specs.append(spec)
@@ -203,20 +203,19 @@ class RasterImporter(Importer):
         for spec in item_specs:
             # Get geometry from the first raster file.
             # We assume files are readable with rasterio.
-            with spec.fnames[0].open("rb") as f:
-                with rasterio.open(f) as src:
-                    crs = src.crs
-                    left = src.transform.c
-                    top = src.transform.f
-                    # Resolutions in projection units per pixel.
-                    x_resolution = src.transform.a
-                    y_resolution = src.transform.e
-                    start = (int(left / x_resolution), int(top / y_resolution))
-                    shp = shapely.box(
-                        start[0], start[1], start[0] + src.width, start[1] + src.height
-                    )
-                    projection = Projection(crs, x_resolution, y_resolution)
-                    geometry = STGeometry(projection, shp, None)
+            with open_rasterio_upath_reader(spec.fnames[0]) as src:
+                crs = src.crs
+                left = src.transform.c
+                top = src.transform.f
+                # Resolutions in projection units per pixel.
+                x_resolution = src.transform.a
+                y_resolution = src.transform.e
+                start = (int(left / x_resolution), int(top / y_resolution))
+                shp = shapely.box(
+                    start[0], start[1], start[0] + src.width, start[1] + src.height
+                )
+                projection = Projection(crs, x_resolution, y_resolution)
+                geometry = STGeometry(projection, shp, None)
 
             if spec.name:
                 item_name = spec.name

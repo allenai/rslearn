@@ -349,6 +349,7 @@ class GeotiffRasterFormat(RasterFormat):
         projection: Projection,
         bounds: PixelBounds,
         array: npt.NDArray[Any],
+        fname: str | None = None,
     ) -> None:
         """Encodes raster data.
 
@@ -357,7 +358,11 @@ class GeotiffRasterFormat(RasterFormat):
             projection: the projection of the raster data
             bounds: the bounds of the raster data in the projection
             array: the raster data
+            fname: override to write to non-standard filename.
         """
+        if fname is None:
+            fname = self.fname
+
         crs = projection.crs
         transform = affine.Affine(
             projection.x_resolution,
@@ -393,8 +398,8 @@ class GeotiffRasterFormat(RasterFormat):
         profile.update(self.geotiff_options)
 
         path.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Writing geotiff to {path / self.fname}")
-        with open_rasterio_upath_writer(path / self.fname, **profile) as dst:
+        logger.info(f"Writing geotiff to {path / fname}")
+        with open_rasterio_upath_writer(path / fname, **profile) as dst:
             dst.write(array)
 
     def decode_raster(self, path: UPath, bounds: PixelBounds) -> npt.NDArray[Any]:
