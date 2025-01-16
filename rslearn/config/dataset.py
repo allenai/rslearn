@@ -228,10 +228,10 @@ class TimeMode(Enum):
     """Select items closest to the window time range, up to max_matches."""
 
     BEFORE = 3
-    """Select items before the start of the window time range, up to max_matches."""
+    """Select items before the end of the window time range, up to max_matches."""
 
     AFTER = 4
-    """Select items after the end of the window time range, up to max_matches."""
+    """Select items after the start of the window time range, up to max_matches."""
 
 
 class QueryConfig:

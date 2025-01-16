@@ -36,7 +36,7 @@ create the dataset configuration file at `/path/to/dataset/config.json` as follo
 }
 ```
 
-We sampled 100 features to use, but you can try using the full GeoJSON if you like:
+We sampled 100 features to use, but you can try using the full GeoJSON if you like.
 
 ```python
 import json
@@ -63,3 +63,14 @@ label at the center of each image.
 
 We use `--utm` to create the windows in UTM projection, and `--resolution 10` to make
 the windows 10 m/pixel so they match the Sentinel-2 resolution.
+
+Use rslearn to retrieve the Sentinel-2 images:
+
+```
+rslearn dataset prepare --root /path/to/dataset --workers 32
+rslearn dataset ingest --root /path/to/dataset --workers 8 --no-use-initial-job --jobs-per-process 1
+rslearn dataset materialize --root /path/to/dataset --workers 8 --no-use-initial-job
+```
+
+
+### Add Labels
