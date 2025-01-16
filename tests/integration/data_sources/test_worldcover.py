@@ -1,4 +1,6 @@
+import os
 import pathlib
+import random
 import zipfile
 from typing import Any
 
@@ -62,7 +64,7 @@ def make_test_zip(tmp_path: pathlib.Path) -> pathlib.Path:
         int(dst_geom.shp.x) + SIZE // 2,
         int(dst_geom.shp.y) + SIZE // 2,
     )
-    array = np.zeros((1, SIZE, SIZE), dtype=np.uint8)
+    array = np.ones((1, SIZE, SIZE), dtype=np.uint8)
     raster_path = UPath(tmp_path)
     raster_format = GeotiffRasterFormat()
     raster_format.encode_raster(raster_path, projection, bounds, array)
@@ -70,19 +72,33 @@ def make_test_zip(tmp_path: pathlib.Path) -> pathlib.Path:
     # Create a zip file containing it.
     zip_fname = tmp_path / "data.zip"
     zipf = zipfile.ZipFile(zip_fname, "w")
-    zipf.write(tmp_path / raster_format.fname)
+    zipf.write(tmp_path / raster_format.fname, arcname="data.tif")
     zipf.close()
 
     return zip_fname
 
 
-def test_ingest_seattle(
+# We have a separate run_test_with_worldcover_dir so that we can parameterize the test
+# by local directory vs GCP bucket for the worldcover directory.
+# We test both because there is special logic in WorldCover to download to local vs
+# remote directory, since it will first extract zip file locally and then upload if the
+# destination is remote.
+def run_test_with_worldcover_dir(
+    worldcover_dir: UPath,
     tmp_path: pathlib.Path,
     seattle2020: STGeometry,
     httpserver: HTTPServer,
     monkeypatch: Any,
 ) -> None:
-    """Test ingesting an item corresponding to seattle2020 to local filesystem."""
+    """Tests ingesting the example data corresponding to seattle2020.
+
+    Args:
+        worldcover_dir: the directory to store WorldCover GeoTIFFs.
+        tmp_path: temporary path for making zip file and for tile store.
+        seattle2020: the geometry to use for prepare.
+        httpserver: server for serving the example data.
+        monkeypatch: monkey patch instance.
+    """
 
     # The WorldCover data is large so we use test data instead. We need to start a test
     # server that serves the data.
@@ -102,7 +118,6 @@ def test_ingest_seattle(
         LayerType.RASTER,
         [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[TEST_BAND])],
     )
-    worldcover_dir = UPath(tmp_path) / "worldcover"
     data_source = WorldCover(
         config=layer_config,
         worldcover_dir=worldcover_dir,
@@ -122,3 +137,52 @@ def test_ingest_seattle(
         TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
     )
     assert tile_store.is_raster_ready(layer_name, item.name, [TEST_BAND])
+
+    # Double check that the data intersected our example GeoTIFF and isn't just all 0.
+    bounds = (
+        int(seattle2020.shp.bounds[0]),
+        int(seattle2020.shp.bounds[1]),
+        int(seattle2020.shp.bounds[2]),
+        int(seattle2020.shp.bounds[3]),
+    )
+    raster_data = tile_store.read_raster(
+        layer_name, item.name, [TEST_BAND], seattle2020.projection, bounds
+    )
+    assert raster_data.max() == 1
+
+
+def test_local_worldcover_dir(
+    tmp_path: pathlib.Path,
+    seattle2020: STGeometry,
+    httpserver: HTTPServer,
+    monkeypatch: Any,
+) -> None:
+    """Run the WorldCover test with a local directory."""
+    worldcover_dir = UPath(tmp_path) / "worldcover"
+    run_test_with_worldcover_dir(
+        worldcover_dir=worldcover_dir,
+        tmp_path=tmp_path,
+        seattle2020=seattle2020,
+        httpserver=httpserver,
+        monkeypatch=monkeypatch,
+    )
+
+
+def test_gcs_worldcover_dir(
+    tmp_path: pathlib.Path,
+    seattle2020: STGeometry,
+    httpserver: HTTPServer,
+    monkeypatch: Any,
+) -> None:
+    """Run the WorldCover test with directory on GCS."""
+    test_id = random.randint(10000, 99999)
+    bucket_name = os.environ["TEST_BUCKET"]
+    prefix = os.environ["TEST_PREFIX"] + f"test_{test_id}/"
+    worldcover_dir = UPath(f"gcs://{bucket_name}/{prefix}")
+    run_test_with_worldcover_dir(
+        worldcover_dir=worldcover_dir,
+        tmp_path=tmp_path,
+        seattle2020=seattle2020,
+        httpserver=httpserver,
+        monkeypatch=monkeypatch,
+    )
