@@ -556,6 +556,28 @@ Available bands:
 - G (from TCI asset; derived from B03)
 - B (from TCI asset; derived from B02)
 
+### rslearn.data_sources.climate_data_store.ERA5LandMonthlyMeans
+
+This data source is for ingesting ERA5 land monthly averaged data from the Copernicus Climate Data Store.
+
+We recommend using the default number of workers (`--workers 0`, which means using the
+main process only) and batch size equal to the number of windows when preparing the
+ERA5LandMonthlyMeans dataset, as it will combine multiple geometries into a single CDS
+API request for each month to speed up dataset ingestion.
+
+Valid bands are the `shortName` of parameters listed at
+https://confluence.ecmwf.int/display/CKB/ERA5-Land%3A+data+documentation.
+
+The additional data source configuration looks like this:
+
+```jsonc
+{
+  // Optional API key. If not provided in the data source configuration, it must be set
+  // via the CDSAPI_KEY environment variable.
+  "api_key": null
+}
+```
+
 ### rslearn.data_sources.gcp_public_data.Sentinel2
 
 This data source is for Sentinel-2 data on Google Cloud Storage.
