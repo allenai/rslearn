@@ -125,8 +125,13 @@ class BandSetConfig:
             dtype: the pixel value type to store tiles in
             bands: list of band names in this BandSetConfig
             format: the format to store tiles in, defaults to geotiff
-            zoom_offset: non-negative integer, store images at window resolution
-                divided by 2^(zoom_offset).
+            zoom_offset: store images at a resolution higher or lower than the window
+                resolution. This enables keeping source data at its native resolution,
+                either to save storage space (for lower resolution data) or to retain
+                details (for higher resolution data). If positive, store data at the
+                window resolution divided by 2^(zoom_offset) (higher resolution). If
+                negative, store data at the window resolution multiplied by
+                2^(-zoom_offset) (lower resolution).
             remap: config dict for Remapper to remap pixel values
         """
         self.config_dict = config_dict
