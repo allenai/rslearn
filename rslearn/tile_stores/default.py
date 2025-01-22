@@ -331,7 +331,7 @@ class DefaultTileStore(TileStore):
         # (a) Avoid unnecessary re-projection of features that don't match the
         #     requested bounds, which is compute-intensive.
         # (b) Avoid re-projection errors when there is a large GeoJSON and some
-        # features are outside the projection bounds.
+        #     features are outside the projection bounds.
         requested_geom = requested_geom.to_projection(feat_projection)
         reprojected_features = []
         for feat in features:
