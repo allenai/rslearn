@@ -21,7 +21,8 @@ WGS84_BOUNDS: PixelBounds = (-180, -90, 180, 90)
 
 # Threshold in degrees above which a geometry is probably not going to re-project
 # correctly due to projections with limited validity and other issues.
-MAX_GEOMETRY_DEGREES = 10
+# 6 degrees corresponds to the UTM zone interval.
+MAX_GEOMETRY_DEGREES = 6
 
 
 def is_same_resolution(res1: float, res2: float) -> bool:
