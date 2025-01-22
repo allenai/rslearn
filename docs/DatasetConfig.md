@@ -20,8 +20,8 @@ retrieves data from data sources in three steps:
 The tile store is an intermediate storage to store the ingested items.
 
 Below, we detail the dataset configuration file specification. See
-[DatasetConfigExamples.md](DatasetConfigExamples.md) for some examples of dataset
-configuration files for different use cases.
+[Examples.md](Examples.md) for some examples of dataset configuration files for
+different use cases.
 
 The overall dataset configuration file looks like this:
 
