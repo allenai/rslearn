@@ -1,5 +1,6 @@
 """Utilities shared by data sources."""
 
+from datetime import datetime, timezone
 from typing import TypeVar
 
 from rslearn.config import QueryConfig, SpaceMode, TimeMode
@@ -34,43 +35,41 @@ def match_candidate_items_to_window(
     """
     # Use time mode to filter and order the items.
     if geometry.time_range:
-        if query_config.time_mode == TimeMode.WITHIN:
-            items = [
-                item
-                for item in items
-                if geometry.intersects_time_range(item.geometry.time_range)
-            ]
-        elif query_config.time_mode in [
-            TimeMode.NEAREST,
-            TimeMode.BEFORE,
-            TimeMode.AFTER,
-        ]:
-            if query_config.time_mode == TimeMode.BEFORE:
-                items = [
-                    item
-                    for item in items
-                    if not item.geometry.time_range
-                    or item.geometry.time_range[1] <= geometry.time_range[0]
-                ]
-            elif query_config.time_mode == TimeMode.AFTER:
-                items = [
-                    item
-                    for item in items
-                    if not item.geometry.time_range
-                    or item.geometry.time_range[0] >= geometry.time_range[1]
-                ]
+        items = [
+            item
+            for item in items
+            if geometry.intersects_time_range(item.geometry.time_range)
+        ]
+
+        placeholder_datetime = datetime.now(timezone.utc)
+        if query_config.time_mode == TimeMode.BEFORE:
             items.sort(
-                key=lambda item: geometry.distance_to_time_range(
-                    item.geometry.time_range
-                )
+                key=lambda item: item.geometry.time_range[0]
+                if item.geometry.time_range
+                else placeholder_datetime,
+                reverse=True,
+            )
+        elif query_config.time_mode == TimeMode.AFTER:
+            items.sort(
+                key=lambda item: item.geometry.time_range[0]
+                if item.geometry.time_range
+                else placeholder_datetime,
+                reverse=False,
             )
 
     # Now apply space mode.
     item_shps = []
     for item in items:
         item_geom = item.geometry
+        # We need to re-project items to the geometry projection for the spatial checks
+        # below. Unless the item's geometry indicates global coverage, in which case we
+        # set it to match the geometry to show that it should cover the entire
+        # geometry.
         if item_geom.projection != geometry.projection:
-            item_geom = item_geom.to_projection(geometry.projection)
+            if item_geom.is_global():
+                item_geom = geometry
+            else:
+                item_geom = item_geom.to_projection(geometry.projection)
         item_shps.append(item_geom.shp)
 
     groups = []

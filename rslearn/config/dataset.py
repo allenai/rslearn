@@ -1,5 +1,6 @@
 """Classes for storing configuration of a dataset."""
 
+import json
 from datetime import timedelta
 from enum import Enum
 from typing import Any
@@ -124,8 +125,13 @@ class BandSetConfig:
             dtype: the pixel value type to store tiles in
             bands: list of band names in this BandSetConfig
             format: the format to store tiles in, defaults to geotiff
-            zoom_offset: non-negative integer, store images at window resolution
-                divided by 2^(zoom_offset).
+            zoom_offset: store images at a resolution higher or lower than the window
+                resolution. This enables keeping source data at its native resolution,
+                either to save storage space (for lower resolution data) or to retain
+                details (for higher resolution data). If positive, store data at the
+                window resolution divided by 2^(zoom_offset) (higher resolution). If
+                negative, store data at the window resolution multiplied by
+                2^(-zoom_offset) (lower resolution).
             remap: config dict for Remapper to remap pixel values
         """
         self.config_dict = config_dict
@@ -140,14 +146,8 @@ class BandSetConfig:
             self.format = format
 
     def serialize(self) -> dict[str, Any]:
-        """Serialize this BandSetConfig to a config dict, currently unused."""
-        return {
-            "bands": self.bands,
-            "format": self.format,
-            "dtype": self.dtype,
-            "zoom_offset": self.zoom_offset,
-            "remap": self.remap,
-        }
+        """Serialize this BandSetConfig to a config dict."""
+        return self.config_dict
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "BandSetConfig":
@@ -228,10 +228,10 @@ class TimeMode(Enum):
     """Select items closest to the window time range, up to max_matches."""
 
     BEFORE = 3
-    """Select items before the start of the window time range, up to max_matches."""
+    """Select items before the end of the window time range, up to max_matches."""
 
     AFTER = 4
-    """Select items after the end of the window time range, up to max_matches."""
+    """Select items after the start of the window time range, up to max_matches."""
 
 
 class QueryConfig:
@@ -259,7 +259,7 @@ class QueryConfig:
         self.max_matches = max_matches
 
     def serialize(self) -> dict[str, Any]:
-        """Serialize this QueryConfig to a config dict, currently unused."""
+        """Serialize this QueryConfig to a config dict."""
         return {
             "space_mode": str(self.space_mode),
             "time_mode": str(self.time_mode),
@@ -313,16 +313,8 @@ class DataSourceConfig:
         self.ingest = ingest
 
     def serialize(self) -> dict[str, Any]:
-        """Serialize this DataSourceConfig to a config dict, currently unused."""
-        config_dict = self.config_dict.copy()
-        config_dict["name"] = self.name
-        config_dict["query_config"] = self.query_config.serialize()
-        config_dict["ingest"] = self.ingest
-        if self.time_offset:
-            config_dict["time_offset"] = str(self.time_offset)
-        if self.duration:
-            config_dict["duration"] = str(self.duration)
-        return config_dict
+        """Serialize this DataSourceConfig to a config dict."""
+        return self.config_dict
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "DataSourceConfig":
@@ -377,12 +369,26 @@ class LayerConfig:
         self.alias = alias
 
     def serialize(self) -> dict[str, Any]:
-        """Serialize this LayerConfig to a config dict, currently unused."""
+        """Serialize this LayerConfig to a config dict."""
         return {
             "layer_type": str(self.layer_type),
-            "data_source": self.data_source,
+            "data_source": self.data_source.serialize() if self.data_source else None,
             "alias": self.alias,
         }
+
+    def __hash__(self) -> int:
+        """Return a hash of this LayerConfig."""
+        return hash(json.dumps(self.serialize(), sort_keys=True))
+
+    def __eq__(self, other: Any) -> bool:
+        """Returns whether other is the same as this LayerConfig.
+
+        Args:
+            other: the other object to compare.
+        """
+        if not isinstance(other, LayerConfig):
+            return False
+        return self.serialize() == other.serialize()
 
 
 class RasterLayerConfig(LayerConfig):
