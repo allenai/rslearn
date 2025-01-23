@@ -20,8 +20,8 @@ retrieves data from data sources in three steps:
 The tile store is an intermediate storage to store the ingested items.
 
 Below, we detail the dataset configuration file specification. See
-[DatasetConfigExamples.md](DatasetConfigExamples.md) for some examples of dataset
-configuration files for different use cases.
+[Examples.md](Examples.md) for some examples of dataset configuration files for
+different use cases.
 
 The overall dataset configuration file looks like this:
 
@@ -599,7 +599,7 @@ The bucket is public and free so no credentials are needed.
   // "cloud_cover".
   "sort_by": null,
   // Flag (default true) to build an rtree index to speed up product lookups. This can
-  // be set false to avoid length (multiple hours) rtree creation time if you are only
+  // be set false to avoid lengthy (multiple hours) rtree creation time if you are only
   // using a few windows.
   "use_rtree_index": true,
   // Flag (default false) to harmonize pixel values across different processing
