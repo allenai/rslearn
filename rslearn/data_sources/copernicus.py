@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 
 
 def get_harmonize_callback(
-    tree: ET.ElementTree,
+    tree: ET.ElementTree | ET.Element,
 ) -> Callable[[npt.NDArray], npt.NDArray] | None:
     """Gets the harmonization callback based on the metadata XML.
 
@@ -41,17 +41,22 @@ def get_harmonize_callback(
         None if no callback is needed, or the callback to subtract the new offset
     """
     offset = None
-    for el in tree.iter("RADIO_ADD_OFFSET"):
-        if el.text is None:
-            raise ValueError(f"text is missing in {el}")
-        value = int(el.text)
-        if offset is None:
-            offset = value
-            assert offset <= 0
-            # For now assert the offset is always -1000.
-            assert offset == -1000
-        else:
-            assert offset == value
+
+    # The metadata will use different tag for L1C / L2A.
+    # L1C: RADIO_ADD_OFFSET
+    # L2A: BOA_ADD_OFFSET
+    for potential_tag in ["RADIO_ADD_OFFSET", "BOA_ADD_OFFSET"]:
+        for el in tree.iter(potential_tag):
+            if el.text is None:
+                raise ValueError(f"text is missing in {el}")
+            value = int(el.text)
+            if offset is None:
+                offset = value
+                assert offset <= 0
+                # For now assert the offset is always -1000.
+                assert offset == -1000
+            else:
+                assert offset == value
 
     if offset is None or offset == 0:
         return None
