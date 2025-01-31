@@ -227,7 +227,7 @@ class RasterImporter(Importer):
                 item_name = spec.fnames[0].name.split(".")[0]
 
             logger.debug(
-                "RasterImporter.list_items: got bounds of %s: %s", path, geometry
+                "RasterImporter.list_items: got bounds of %s: %s", item_name, geometry
             )
             items.append(RasterItem(item_name, geometry, spec))
 
