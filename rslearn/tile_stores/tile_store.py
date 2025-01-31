@@ -1,6 +1,5 @@
 """Base class for tile stores."""
 
-from abc import ABC, abstractmethod
 from typing import Any
 
 import numpy.typing as npt
@@ -10,13 +9,12 @@ from upath import UPath
 from rslearn.utils import Feature, PixelBounds, Projection
 
 
-class TileStore(ABC):
+class TileStore:
     """An abstract class for a tile store.
 
     A tile store supports operations to read and write raster and vector data.
     """
 
-    @abstractmethod
     def set_dataset_path(self, ds_path: UPath) -> None:
         """Set the dataset path.
 
@@ -28,7 +26,6 @@ class TileStore(ABC):
         """
         pass
 
-    @abstractmethod
     def is_raster_ready(
         self, layer_name: str, item_name: str, bands: list[str]
     ) -> bool:
@@ -43,9 +40,8 @@ class TileStore(ABC):
             whether there is a raster in the store matching the source, item, and
                 bands.
         """
-        pass
+        raise NotImplementedError
 
-    @abstractmethod
     def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
         """Get the sets of bands that have been stored for the specified item.
 
@@ -58,9 +54,8 @@ class TileStore(ABC):
                 stored corresponding to each inner list). If no rasters are ready for
                 this item, returns empty list.
         """
-        pass
+        raise NotImplementedError
 
-    @abstractmethod
     def get_raster_bounds(
         self, layer_name: str, item_name: str, bands: list[str], projection: Projection
     ) -> PixelBounds:
@@ -76,9 +71,8 @@ class TileStore(ABC):
         Returns:
             the bounds of the raster in the projection.
         """
-        pass
+        raise NotImplementedError
 
-    @abstractmethod
     def read_raster(
         self,
         layer_name: str,
@@ -102,9 +96,8 @@ class TileStore(ABC):
         Returns:
             the raster data
         """
-        pass
+        raise NotImplementedError
 
-    @abstractmethod
     def write_raster(
         self,
         layer_name: str,
@@ -124,9 +117,8 @@ class TileStore(ABC):
             bounds: the bounds of the array.
             array: the raster data.
         """
-        pass
+        raise NotImplementedError
 
-    @abstractmethod
     def write_raster_file(
         self, layer_name: str, item_name: str, bands: list[str], fname: UPath
     ) -> None:
@@ -138,9 +130,8 @@ class TileStore(ABC):
             bands: the list of bands in the array.
             fname: the raster file.
         """
-        pass
+        raise NotImplementedError
 
-    @abstractmethod
     def is_vector_ready(self, layer_name: str, item_name: str) -> bool:
         """Checks if this vector item has been written to the store.
 
@@ -151,9 +142,8 @@ class TileStore(ABC):
         Returns:
             whether the vector data from the item has been stored.
         """
-        pass
+        raise NotImplementedError
 
-    @abstractmethod
     def read_vector(
         self,
         layer_name: str,
@@ -172,9 +162,8 @@ class TileStore(ABC):
         Returns:
             the vector data
         """
-        pass
+        raise NotImplementedError
 
-    @abstractmethod
     def write_vector(
         self, layer_name: str, item_name: str, features: list[Feature]
     ) -> None:
@@ -185,7 +174,7 @@ class TileStore(ABC):
             item_name: the item to write.
             features: the vector data.
         """
-        pass
+        raise NotImplementedError
 
 
 class TileStoreWithLayer:
