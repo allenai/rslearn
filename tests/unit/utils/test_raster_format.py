@@ -6,7 +6,7 @@ import rasterio
 from rasterio.crs import CRS
 from upath import UPath
 
-from rslearn.const import Projection
+from rslearn.utils.geometry import Projection
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 

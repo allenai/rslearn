@@ -5,7 +5,7 @@ import pyproj.database
 import shapely
 from rasterio.crs import CRS
 
-from rslearn.utils import Projection, STGeometry
+from rslearn.utils.geometry import WGS84_PROJECTION, Projection, STGeometry
 
 UPS_NORTH_EPSG = 5041
 """EPSG code for the UPS North CRS."""
@@ -121,8 +121,7 @@ def get_proj_bounds(utm_crs: CRS) -> tuple[float, float, float, float]:
     """
     bounds = get_wgs84_bounds(utm_crs)
     # Convert from WGS84 to the UTM zone.
-    src_proj = Projection(CRS.from_epsg(4326), 1, 1)
     dst_proj = Projection(utm_crs, 1, 1)
     shp = shapely.box(*bounds)
-    result = STGeometry(src_proj, shp, None).to_projection(dst_proj).shp
+    result = STGeometry(WGS84_PROJECTION, shp, None).to_projection(dst_proj).shp
     return result.bounds

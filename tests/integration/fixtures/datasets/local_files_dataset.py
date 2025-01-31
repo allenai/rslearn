@@ -55,11 +55,7 @@ def local_files_dataset(tmp_path: pathlib.Path) -> Dataset:
                     "src_dir": src_data_dir,
                 },
             },
-        },
-        "tile_store": {
-            "name": "file",
-            "root_dir": "tiles",
-        },
+        }
     }
     with open(os.path.join(tmp_path, "config.json"), "w") as f:
         json.dump(dataset_config, f)
