@@ -2,6 +2,7 @@ import json
 import os
 import pathlib
 
+import numpy as np
 import pytest
 import shapely
 from rasterio.crs import CRS
@@ -18,6 +19,7 @@ from rslearn.dataset.manage import (
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import Projection, STGeometry
 from rslearn.utils.get_utm_ups_crs import get_utm_ups_projection
+from rslearn.utils.raster_format import GeotiffRasterFormat
 from rslearn.utils.vector_format import (
     GeojsonCoordinateMode,
     GeojsonVectorFormat,
@@ -131,6 +133,83 @@ class TestLocalFiles:
         assert len(features) == 1
         assert features[0].properties is not None
         assert features[0].properties["check"]
+
+    def test_raster_dataset_with_item_spec(self, tmp_path: pathlib.Path) -> None:
+        """Test LocalFiles with directly provided item specs."""
+        ds_path = UPath(tmp_path)
+
+        # Create two source GeoTIFFs to read from.
+        source_dir_name = "source_data"
+        src_path = UPath(tmp_path / source_dir_name)
+        projection = Projection(CRS.from_epsg(3857), 1, -1)
+        bounds = (0, 0, 8, 8)
+        b1 = np.zeros((1, 8, 8), dtype=np.uint8)
+        b2 = np.ones((1, 8, 8), dtype=np.uint8)
+        GeotiffRasterFormat().encode_raster(
+            src_path, projection, bounds, b1, fname="b1.tif"
+        )
+        GeotiffRasterFormat().encode_raster(
+            src_path, projection, bounds, b2, fname="b2.tif"
+        )
+
+        # Make an rslearn dataset that uses LocalFiles to ingest the source data.
+        # We need to pass item specs because we have bands in two separate files.
+        layer_name = "local_file"
+        dataset_config = {
+            "layers": {
+                layer_name: {
+                    "type": "raster",
+                    "band_sets": [
+                        {
+                            "bands": ["b1", "b2"],
+                            "dtype": "uint8",
+                        }
+                    ],
+                    "data_source": {
+                        "name": "rslearn.data_sources.local_files.LocalFiles",
+                        "src_dir": source_dir_name,
+                        "item_specs": [
+                            {
+                                "fnames": ["b1.tif", "b2.tif"],
+                                "bands": [["b1"], ["b2"]],
+                            }
+                        ],
+                    },
+                },
+            },
+        }
+        with (ds_path / "config.json").open("w") as f:
+            json.dump(dataset_config, f)
+
+        # Create a window and materialize it.
+        Window(
+            path=Window.get_window_root(ds_path, "default", "default"),
+            group="default",
+            name="default",
+            projection=projection,
+            bounds=bounds,
+            time_range=None,
+        ).save()
+        dataset = Dataset(ds_path)
+        windows = dataset.load_windows()
+        prepare_dataset_windows(dataset, windows)
+        ingest_dataset_windows(dataset, windows)
+        materialize_dataset_windows(dataset, windows)
+
+        # Verify that b1 is 0s and b2 is 1s.
+        window = windows[0]
+        raster_dir = window.get_raster_dir(layer_name, ["b1", "b2"])
+        materialized_image = GeotiffRasterFormat().decode_raster(
+            raster_dir, window.bounds
+        )
+        assert (
+            materialized_image[0, :, :].min() == 0
+            and materialized_image[0, :, :].max() == 0
+        )
+        assert (
+            materialized_image[1, :, :].min() == 1
+            and materialized_image[1, :, :].max() == 1
+        )
 
 
 class TestCoordinateModes:

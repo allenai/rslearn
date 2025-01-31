@@ -402,17 +402,23 @@ class GeotiffRasterFormat(RasterFormat):
         with open_rasterio_upath_writer(path / fname, **profile) as dst:
             dst.write(array)
 
-    def decode_raster(self, path: UPath, bounds: PixelBounds) -> npt.NDArray[Any]:
+    def decode_raster(
+        self, path: UPath, bounds: PixelBounds, fname: str | None = None
+    ) -> npt.NDArray[Any]:
         """Decodes raster data.
 
         Args:
             path: the directory to read from
             bounds: the bounds of the raster to read
+            fname: override the filename to read from
 
         Returns:
             the raster data, or None if no image content is found
         """
-        with open_rasterio_upath_reader(path / self.fname) as src:
+        if fname is None:
+            fname = self.fname
+
+        with open_rasterio_upath_reader(path / fname) as src:
             transform = src.transform
             x_resolution = transform.a
             y_resolution = transform.e
