@@ -12,12 +12,15 @@ from upath import UPath
 import rslearn.data_sources.utils
 from rslearn.config import LayerConfig, LayerType, RasterLayerConfig, VectorLayerConfig
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS
+from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
-from rslearn.utils import Feature, Projection, STGeometry
+from rslearn.utils.feature import Feature
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_rasterio_upath_reader
+from rslearn.utils.geometry import Projection, STGeometry, get_global_geometry
 
 from .data_source import DataSource, Item, QueryConfig
 
+logger = get_logger("__name__")
 Importers = ClassRegistry()
 
 ItemType = TypeVar("ItemType", bound=Item)
@@ -222,8 +225,12 @@ class RasterImporter(Importer):
             else:
                 item_name = spec.fnames[0].name.split(".")[0]
 
+            logger.debug(
+                "RasterImporter.list_items: got bounds of %s: %s", item_name, geometry
+            )
             items.append(RasterItem(item_name, geometry, spec))
 
+        logger.debug("RasterImporter.list_items: discovered %d items", len(items))
         return items
 
     def ingest_item(
@@ -304,10 +311,22 @@ class VectorImporter(Importer):
                         None,
                     )
 
+                    # There can be problems with GeoJSON files that have large spatial
+                    # coverage, since the bounds may not re-project correctly to match
+                    # windows that are using projections with limited validity.
+                    # We check if there is a large spatial coverage here, and mark the
+                    # item's geometry as having global coverage if so.
+                    if geometry.is_too_large():
+                        geometry = get_global_geometry(time_range=None)
+
+            logger.debug(
+                "VectorImporter.list_items: got bounds of %s: %s", path, geometry
+            )
             items.append(
                 VectorItem(path.name.split(".")[0], geometry, path.absolute().as_uri())
             )
 
+        logger.debug("VectorImporter.list_items: discovered %d items", len(items))
         return items
 
     def ingest_item(
