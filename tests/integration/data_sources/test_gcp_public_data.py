@@ -23,10 +23,13 @@ from rslearn.data_sources.gcp_public_data import (
     MissingXMLException,
     Sentinel2,
 )
+from rslearn.log_utils import get_logger
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils import STGeometry
 
 TEST_BAND = "B04"
+
+logger = get_logger(__name__)
 
 
 class TestSentinel2:
@@ -216,3 +219,17 @@ def test_product_with_missing_bands(sentinel2_without_rtree: Sentinel2) -> None:
 
     with pytest.raises(CorruptItemException):
         sentinel2_without_rtree.get_item_by_name(item_name)
+
+
+def test_product_with_incorrect_geometry(sentinel2_without_rtree: Sentinel2) -> None:
+    """Verify that the data source raises a CorruptItemException for products with
+    missing or invalid geometry."""
+
+    # This is an example product where the geometry is a MultiLineString (area is 0).
+    item_name = "S2B_MSIL1C_20190111T193659_N0207_R056_T08MLS_20190111T205033"
+
+    with pytest.raises(CorruptItemException):
+        item = sentinel2_without_rtree.get_item_by_name(item_name)
+        logger.error(
+            "item should not have been returned, the geometry is %s", {item.geometry}
+        )
