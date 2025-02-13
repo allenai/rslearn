@@ -358,7 +358,7 @@ class GeotiffRasterFormat(RasterFormat):
             projection: the projection of the raster data
             bounds: the bounds of the raster data in the projection
             array: the raster data
-            fname: override to write to non-standard filename.
+            fname: override the filename to save as
         """
         if fname is None:
             fname = self.fname
