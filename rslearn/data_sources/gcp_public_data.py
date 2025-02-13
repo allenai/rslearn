@@ -269,6 +269,20 @@ class Sentinel2(DataSource):
         result = client.query(query_str)
 
         for row in tqdm.tqdm(result, desc=desc):
+            # Validate product ID has correct number of sections and that it is MSIL1C.
+            # We must do this before checking source_url because we want to skip the
+            # products that say OPER instead of MSIL1C.
+            product_id = row["product_id"]
+            product_id_parts = product_id.split("_")
+            if len(product_id_parts) < 7:
+                continue
+            product_type = product_id_parts[1]
+            if product_type != "MSIL1C":
+                continue
+            time_str = product_id_parts[2]
+            tile_id = product_id_parts[5]
+            assert tile_id[0] == "T"
+
             # Figure out what the product folder is for this entry.
             # Some entries have source_url correct and others have base_url correct.
             # If base_url is correct, then it seems the source_url always ends in
@@ -281,23 +295,12 @@ class Sentinel2(DataSource):
                 raise ValueError(
                     f"Unexpected value '{row['source_url']}' in column 'source_url'"
                     + f" and '{row['base_url']} in column 'base_url'"
+                    + f"for product {row['product_id']}"
                 )
 
             # Build the blob prefix based on the product ID and granule ID.
             # The blob prefix is the prefix to the JP2 image files on GCS.
-            product_id = row["product_id"]
-            product_id_parts = product_id.split("_")
-            if len(product_id_parts) < 7:
-                continue
-            product_type = product_id_parts[1]
-            if product_type != "MSIL1C":
-                continue
-            time_str = product_id_parts[2]
-            tile_id = product_id_parts[5]
-            assert tile_id[0] == "T"
-
             granule_id = row["granule_id"]
-
             blob_prefix = (
                 f"{product_folder}/GRANULE/{granule_id}/IMG_DATA/{tile_id}_{time_str}_"
             )
@@ -470,6 +473,14 @@ class Sentinel2(DataSource):
         # We just apply make_valid on it to correct issues.
         if not geometry.shp.is_valid:
             geometry.shp = shapely.make_valid(geometry.shp)
+
+        # Some rasters have zero-area geometry due to incorrect geometry. For example,
+        # S2B_MSIL1C_20190111T193659_N0207_R056_T08MLS_20190111T205033.SAFE.
+        # So here we add a check for that and mark it corrupt if so.
+        if geometry.shp.area == 0:
+            raise CorruptItemException(
+                f"XML for item {name} shows geometry with zero area"
+            )
 
         return Sentinel2Item(
             name=name,
