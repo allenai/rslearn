@@ -503,7 +503,7 @@ class LandsatOliTirs(DataSource, TileStore):
     def materialize(
         self,
         window: Window,
-        item_groups: list[list[Item]],
+        item_groups: list[list[LandsatOliTirsItem]],
         layer_name: str,
         layer_cfg: LayerConfig,
     ) -> None:
