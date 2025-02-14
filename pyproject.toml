@@ -29,6 +29,9 @@ include = ["rslearn*"]
 dependencies = {file = ["requirements.txt"]}
 optional-dependencies = {extra = { file = ["extra_requirements.txt"] }}
 
+[tool.setuptools.package-data]
+rslearn = ["py.typed"]
+
 [tool.ruff]
 fix = true
 
