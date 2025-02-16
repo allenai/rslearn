@@ -13,7 +13,7 @@ from rslearn.config import (
     RasterLayerConfig,
     VectorLayerConfig,
 )
-from rslearn.data_sources import Item
+from rslearn.data_sources.data_source import ItemType
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, Projection
@@ -37,7 +37,7 @@ class Materializer(Generic[LayerConfigType]):
         window: Window,
         layer_name: str,
         layer_cfg: LayerConfigType,
-        item_groups: list[list[Item]],
+        item_groups: list[list[ItemType]],
     ) -> None:
         """Materialize portions of items corresponding to this window into the dataset.
 
@@ -122,7 +122,7 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
         window: Window,
         layer_name: str,
         layer_cfg: RasterLayerConfig,
-        item_groups: list[list[Item]],
+        item_groups: list[list[ItemType]],
     ) -> None:
         """Materialize portions of items corresponding to this window into the dataset.
 
@@ -228,7 +228,7 @@ class VectorMaterializer(Materializer):
         window: Window,
         layer_name: str,
         layer_cfg: LayerConfig,
-        item_groups: list[list[Item]],
+        item_groups: list[list[ItemType]],
     ) -> None:
         """Materialize portions of items corresponding to this window into the dataset.
 
