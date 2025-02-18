@@ -60,39 +60,6 @@ class TestLandsatOliTirs:
         )
         assert tile_store.is_raster_ready(layer_name, item.name, [TEST_BAND])
 
-    def test_cloud_cover_sorting(
-        self, tmp_path: pathlib.Path, seattle2020: STGeometry
-    ) -> None:
-        """Verify that data source sorts by cloud cover correctly when requested."""
-        # Adjust the time range to have enough time for 10 images.
-        # Need assert for type checker to be happy.
-        assert seattle2020.time_range is not None
-        seattle2020.time_range = (
-            seattle2020.time_range[0],
-            seattle2020.time_range[0] + timedelta(days=120),
-        )
-
-        # Initialize the data source and perform the get_items query.
-        layer_config = RasterLayerConfig(
-            LayerType.RASTER,
-            [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[TEST_BAND])],
-        )
-        query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS, max_matches=10)
-        data_source = LandsatOliTirs(
-            config=layer_config,
-            metadata_cache_dir=UPath(tmp_path),
-            sort_by="cloud_cover",
-        )
-        item_groups = data_source.get_items([seattle2020], query_config)[0]
-
-        # Verify the result.
-        # There should be enough images matching this geometry that we exhaust max_matches.
-        assert len(item_groups) == 10
-        # And they should be ordered by cloud cover.
-        cloud_covers = [group[0].cloud_cover for group in item_groups]
-        sorted_cloud_covers = list(sorted(cloud_covers))
-        assert cloud_covers == sorted_cloud_covers
-
     def test_materialize(
         self,
         tmp_path: pathlib.Path,
@@ -125,3 +92,36 @@ class TestLandsatOliTirs:
             window, item_groups, "landsat", landsat_layer_config
         )
         assert window.is_layer_completed("landsat")
+
+    def test_cloud_cover_sorting(
+        self, tmp_path: pathlib.Path, seattle2020: STGeometry
+    ) -> None:
+        """Verify that data source sorts by cloud cover correctly when requested."""
+        # Adjust the time range to have enough time for 10 images.
+        # Need assert for type checker to be happy.
+        assert seattle2020.time_range is not None
+        seattle2020.time_range = (
+            seattle2020.time_range[0],
+            seattle2020.time_range[0] + timedelta(days=120),
+        )
+
+        # Initialize the data source and perform the get_items query.
+        layer_config = RasterLayerConfig(
+            LayerType.RASTER,
+            [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[TEST_BAND])],
+        )
+        query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS, max_matches=10)
+        data_source = LandsatOliTirs(
+            config=layer_config,
+            metadata_cache_dir=UPath(tmp_path),
+            sort_by="cloud_cover",
+        )
+        item_groups = data_source.get_items([seattle2020], query_config)[0]
+
+        # Verify the result.
+        # There should be enough images matching this geometry that we exhaust max_matches.
+        assert len(item_groups) == 10
+        # And they should be ordered by cloud cover.
+        cloud_covers = [group[0].cloud_cover for group in item_groups]
+        sorted_cloud_covers = list(sorted(cloud_covers))
+        assert cloud_covers == sorted_cloud_covers
