@@ -269,22 +269,16 @@ class Sentinel2(DataSource):
         result = client.query(query_str)
 
         for row in tqdm.tqdm(result, desc=desc):
-            # Figure out what the product folder is for this entry.
-            # Some entries have source_url correct and others have base_url correct.
-            # If base_url is correct, then it seems the source_url always ends in
-            # index.csv.gz.
-            if row["source_url"] and not row["source_url"].endswith("index.csv.gz"):
-                product_folder = row["source_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
-            elif row["base_url"] is not None and row["base_url"] != "":
-                product_folder = row["base_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
-            else:
-                raise ValueError(
-                    f"Unexpected value '{row['source_url']}' in column 'source_url'"
-                    + f" and '{row['base_url']} in column 'base_url'"
-                )
-
-            # Build the blob prefix based on the product ID and granule ID.
-            # The blob prefix is the prefix to the JP2 image files on GCS.
+            # Validate product ID has correct number of sections and that it is MSIL1C.
+            # Example product IDs:
+            # - S2B_MSIL1C_20180210T200549_N0206_R128_T08VPK_20180210T215722
+            # - S2A_OPER_PRD_MSIL1C_PDMC_20160315T180002_R091_V20160315T060423_20160315T060423
+            # We must do this before checking source_url because we want to skip the
+            # products that say OPER instead of MSIL1C (occasionally the OPER products
+            # are missing other fields in the CSV).
+            # For example, the OPER product above has:
+            # - source_url = https://storage.googleapis.com/gcp-public-data-sentinel-2/index.csv.gz
+            # - base_url = None
             product_id = row["product_id"]
             product_id_parts = product_id.split("_")
             if len(product_id_parts) < 7:
@@ -296,8 +290,30 @@ class Sentinel2(DataSource):
             tile_id = product_id_parts[5]
             assert tile_id[0] == "T"
 
-            granule_id = row["granule_id"]
+            # Figure out what the product folder is for this entry.
+            # Some entries have source_url correct and others have base_url correct.
+            # If base_url is correct, then it seems the source_url always ends in
+            # index.csv.gz.
+            # Example 1:
+            # - source_url = https://storage.googleapis.com/gcp-public-data-sentinel-2/index.csv.gz
+            # - base_url = gs://gcp-public-data-sentinel-2/tiles/54/U/VV/S2A_MSIL1C_20160219T015301_N0201_R017_T54UVV_20160222T152042.SAFE
+            # Example 2:
+            # - source_url = gs://gcp-public-data-sentinel-2/tiles/15/C/WM/S2B_MSIL1C_20250101T121229_N0511_R080_T15CWM_20250101T150509.SAFE
+            # - base_url = None
+            if row["source_url"] and not row["source_url"].endswith("index.csv.gz"):
+                product_folder = row["source_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
+            elif row["base_url"] is not None and row["base_url"] != "":
+                product_folder = row["base_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
+            else:
+                raise ValueError(
+                    f"Unexpected value '{row['source_url']}' in column 'source_url'"
+                    + f" and '{row['base_url']} in column 'base_url'"
+                    + f"for product {row['product_id']}"
+                )
 
+            # Build the blob prefix based on the product ID and granule ID.
+            # The blob prefix is the prefix to the JP2 image files on GCS.
+            granule_id = row["granule_id"]
             blob_prefix = (
                 f"{product_folder}/GRANULE/{granule_id}/IMG_DATA/{tile_id}_{time_str}_"
             )
@@ -470,6 +486,14 @@ class Sentinel2(DataSource):
         # We just apply make_valid on it to correct issues.
         if not geometry.shp.is_valid:
             geometry.shp = shapely.make_valid(geometry.shp)
+
+        # Some rasters have zero-area geometry due to incorrect geometry. For example,
+        # S2B_MSIL1C_20190111T193659_N0207_R056_T08MLS_20190111T205033.SAFE.
+        # So here we add a check for that and mark it corrupt if so.
+        if geometry.shp.area == 0:
+            raise CorruptItemException(
+                f"XML for item {name} shows geometry with zero area"
+            )
 
         return Sentinel2Item(
             name=name,
