@@ -250,10 +250,7 @@ def materialize_window(
         print(
             f"Materializing {len(item_groups)} item groups in layer {layer_name} via data source"
         )
-        try:
-            data_source.materialize(window, item_groups, layer_name, layer_cfg)
-        except Exception as e:
-            print(f"error materializing window {window.name}: {e}")
+        data_source.materialize(window, item_groups, layer_name, layer_cfg)
 
 
 def materialize_dataset_windows(dataset: Dataset, windows: list[Window]) -> None:
