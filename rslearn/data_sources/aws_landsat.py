@@ -11,20 +11,26 @@ from collections.abc import Generator
 from datetime import datetime
 from typing import Any, BinaryIO
 
+import affine
 import boto3
 import dateutil.parser
 import fiona
 import fiona.transform
+import numpy.typing as npt
+import rasterio
 import shapely
 import tqdm
+from rasterio.enums import Resampling
 from upath import UPath
 
 import rslearn.data_sources.utils
-from rslearn.config import RasterLayerConfig
+from rslearn.config import LayerConfig, RasterLayerConfig
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_PROJECTION
-from rslearn.tile_stores import TileStoreWithLayer
-from rslearn.utils import STGeometry
+from rslearn.dataset import Window
+from rslearn.dataset.materialize import RasterMaterializer
+from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
+from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 
 from .data_source import DataSource, Item, QueryConfig
 
@@ -69,7 +75,7 @@ class LandsatOliTirsItem(Item):
         )
 
 
-class LandsatOliTirs(DataSource):
+class LandsatOliTirs(DataSource, TileStore):
     """A data source for Landsat 8/9 OLI-TIRS imagery on AWS.
 
     Specifically, uses the usgs-landsat S3 bucket maintained by USGS. The data includes
@@ -105,6 +111,7 @@ class LandsatOliTirs(DataSource):
         self.sort_by = sort_by
         print(self.metadata_cache_dir)
 
+        self.client = boto3.client("s3")
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
         self.metadata_cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -371,3 +378,148 @@ class LandsatOliTirs(DataSource):
                         ExtraArgs={"RequestPayer": "requester"},
                     )
                     tile_store.write_raster_file(item.name, band_names, UPath(fname))
+
+    # The functions below are to emulate TileStore functionality so we can easily
+    # support materialization directly from the COGs.
+    def is_raster_ready(
+        self, layer_name: str, item_name: str, bands: list[str]
+    ) -> bool:
+        """Checks if this raster has been written to the store.
+
+        Args:
+            layer_name: the layer name or alias.
+            item_name: the item.
+            bands: the list of bands identifying which specific raster to read.
+
+        Returns:
+            whether there is a raster in the store matching the source, item, and
+                bands.
+        """
+        # Always ready since we access it on AWS bucket.
+        return True
+
+    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
+        """Get the sets of bands that have been stored for the specified item.
+
+        Args:
+            layer_name: the layer name or alias.
+            item_name: the item.
+
+        Returns:
+            a list of lists of bands that are in the tile store (with one raster
+                stored corresponding to each inner list). If no rasters are ready for
+                this item, returns empty list.
+        """
+        return [[band] for band in self.bands]
+
+    def get_raster_bounds(
+        self, layer_name: str, item_name: str, bands: list[str], projection: Projection
+    ) -> PixelBounds:
+        """Get the bounds of the raster in the specified projection.
+
+        Args:
+            layer_name: the layer name or alias.
+            item_name: the item to check.
+            bands: the list of bands identifying which specific raster to read. These
+                bands must match the bands of a stored raster.
+            projection: the projection to get the raster's bounds in.
+
+        Returns:
+            the bounds of the raster in the projection.
+        """
+        item = self.get_item_by_name(item_name)
+        geom = item.geometry.to_projection(projection)
+        return (
+            int(geom.shp.bounds[0]),
+            int(geom.shp.bounds[1]),
+            int(geom.shp.bounds[2]),
+            int(geom.shp.bounds[3]),
+        )
+
+    def read_raster(
+        self,
+        layer_name: str,
+        item_name: str,
+        bands: list[str],
+        projection: Projection,
+        bounds: PixelBounds,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> npt.NDArray[Any]:
+        """Read raster data from the store.
+
+        Args:
+            layer_name: the layer name or alias.
+            item_name: the item to read.
+            bands: the list of bands identifying which specific raster to read. These
+                bands must match the bands of a stored raster.
+            projection: the projection to read in.
+            bounds: the bounds to read.
+            resampling: the resampling method to use in case reprojection is needed.
+
+        Returns:
+            the raster data
+        """
+        # Landsat assets have single band per asset.
+        assert len(bands) == 1
+        band = bands[0]
+
+        # Get the item since it has the blob path.
+        item = self.get_item_by_name(item_name)
+
+        # Create pre-signed URL for rasterio access.
+        # We do this because accessing via URL is much faster since rasterio can use
+        # the URL directly.
+        blob_key = item.blob_path + f"{band}.TIF"
+        url = self.client.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": self.bucket_name,
+                "Key": blob_key,
+                "RequestPayer": "requester",
+            },
+        )
+
+        # Construct the transform to use for the warped dataset.
+        wanted_transform = affine.Affine(
+            projection.x_resolution,
+            0,
+            bounds[0] * projection.x_resolution,
+            0,
+            projection.y_resolution,
+            bounds[1] * projection.y_resolution,
+        )
+
+        with rasterio.open(url) as src:
+            with rasterio.vrt.WarpedVRT(
+                src,
+                crs=projection.crs,
+                transform=wanted_transform,
+                width=bounds[2] - bounds[0],
+                height=bounds[3] - bounds[1],
+                resampling=resampling,
+            ) as vrt:
+                return vrt.read()
+
+    def materialize(
+        self,
+        window: Window,
+        item_groups: list[list[LandsatOliTirsItem]],
+        layer_name: str,
+        layer_cfg: LayerConfig,
+    ) -> None:
+        """Materialize data for the window.
+
+        Args:
+            window: the window to materialize
+            item_groups: the items from get_items
+            layer_name: the name of this layer
+            layer_cfg: the config of this layer
+        """
+        assert isinstance(layer_cfg, RasterLayerConfig)
+        RasterMaterializer().materialize(
+            TileStoreWithLayer(self, layer_name),
+            window,
+            layer_name,
+            layer_cfg,
+            item_groups,
+        )
