@@ -180,7 +180,7 @@ class LandsatOliTirs(DataSource):
                             name=metadata["PRODUCT_CONTENTS"]["LANDSAT_PRODUCT_ID"],
                             geometry=geometry,
                             blob_path=blob_path,
-                            cloud_cover=image_attributes["CLOUD_COVER"],
+                            cloud_cover=float(image_attributes["CLOUD_COVER"]),
                         )
                     )
 
@@ -293,7 +293,7 @@ class LandsatOliTirs(DataSource):
                 cur_items.append(item)
 
             if self.sort_by == "cloud_cover":
-                items.sort(key=lambda item: item.cloud_cover)
+                cur_items.sort(key=lambda item: item.cloud_cover)
             elif self.sort_by is not None:
                 raise ValueError(f"invalid sort_by setting ({self.sort_by})")
 
