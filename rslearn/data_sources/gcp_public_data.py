@@ -270,8 +270,15 @@ class Sentinel2(DataSource):
 
         for row in tqdm.tqdm(result, desc=desc):
             # Validate product ID has correct number of sections and that it is MSIL1C.
+            # Example product IDs:
+            # - S2B_MSIL1C_20180210T200549_N0206_R128_T08VPK_20180210T215722
+            # - S2A_OPER_PRD_MSIL1C_PDMC_20160315T180002_R091_V20160315T060423_20160315T060423
             # We must do this before checking source_url because we want to skip the
-            # products that say OPER instead of MSIL1C.
+            # products that say OPER instead of MSIL1C (occasionally the OPER products
+            # are missing other fields in the CSV).
+            # For example, the OPER product above has:
+            # - source_url = https://storage.googleapis.com/gcp-public-data-sentinel-2/index.csv.gz
+            # - base_url = None
             product_id = row["product_id"]
             product_id_parts = product_id.split("_")
             if len(product_id_parts) < 7:
@@ -287,6 +294,12 @@ class Sentinel2(DataSource):
             # Some entries have source_url correct and others have base_url correct.
             # If base_url is correct, then it seems the source_url always ends in
             # index.csv.gz.
+            # Example 1:
+            # - source_url = https://storage.googleapis.com/gcp-public-data-sentinel-2/index.csv.gz
+            # - base_url = gs://gcp-public-data-sentinel-2/tiles/54/U/VV/S2A_MSIL1C_20160219T015301_N0201_R017_T54UVV_20160222T152042.SAFE
+            # Example 2:
+            # - source_url = gs://gcp-public-data-sentinel-2/tiles/15/C/WM/S2B_MSIL1C_20250101T121229_N0511_R080_T15CWM_20250101T150509.SAFE
+            # - base_url = None
             if row["source_url"] and not row["source_url"].endswith("index.csv.gz"):
                 product_folder = row["source_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
             elif row["base_url"] is not None and row["base_url"] != "":
