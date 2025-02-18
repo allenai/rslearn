@@ -141,7 +141,7 @@ class Naip(DataSource):
         """
         manifest_path = self.index_cache_dir / self.manifest_fname
         if not manifest_path.exists():
-            with manifest_path.open("wb") as dst:
+            with open_atomic(manifest_path, "wb") as dst:
                 self.bucket.download_fileobj(
                     self.manifest_fname,
                     dst,
