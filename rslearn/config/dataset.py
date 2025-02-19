@@ -117,6 +117,7 @@ class BandSetConfig:
         format: dict[str, Any] | None = None,
         zoom_offset: int = 0,
         remap: dict[str, Any] | None = None,
+        class_names: list[list[str]] | None = None,
     ) -> None:
         """Creates a new BandSetConfig instance.
 
@@ -133,12 +134,22 @@ class BandSetConfig:
                 negative, store data at the window resolution multiplied by
                 2^(-zoom_offset) (lower resolution).
             remap: config dict for Remapper to remap pixel values
+            class_names: optional list of names for the different possible values of
+                each band. The length of this list must equal the number of bands. For
+                example, [["forest", "desert"]] means that it is a single-band raster
+                where values can be 0 (forest) or 1 (desert).
         """
+        if class_names is not None and len(bands) != len(class_names):
+            raise ValueError(
+                f"the number of class lists ({len(class_names)}) does not match the number of bands ({len(bands)})"
+            )
+
         self.config_dict = config_dict
         self.bands = bands
         self.dtype = dtype
         self.zoom_offset = zoom_offset
         self.remap = remap
+        self.class_names = class_names
 
         if format is None:
             self.format = {"name": "geotiff"}
@@ -161,7 +172,7 @@ class BandSetConfig:
             dtype=DType(config["dtype"]),
             bands=config["bands"],
         )
-        for k in ["format", "zoom_offset", "remap"]:
+        for k in ["format", "zoom_offset", "remap", "class_names"]:
             if k in config:
                 kwargs[k] = config[k]
         return BandSetConfig(**kwargs)  # type: ignore
@@ -447,6 +458,8 @@ class VectorLayerConfig(LayerConfig):
         zoom_offset: int = 0,
         format: VectorFormatConfig = VectorFormatConfig("geojson"),
         alias: str | None = None,
+        class_property_name: str | None = None,
+        class_names: list[str] | None = None,
     ):
         """Initialize a new VectorLayerConfig.
 
@@ -456,10 +469,17 @@ class VectorLayerConfig(LayerConfig):
             zoom_offset: zoom offset at which to store the vector data
             format: the VectorFormatConfig, default storing as GeoJSON
             alias: alias for this layer to use in the tile store
+            class_property_name: optional metadata field indicating that the GeoJSON
+                features contain a property that corresponds to a class label, and this
+                is the name of that property.
+            class_names: the list of classes that the class_property_name property
+                could be set to.
         """
         super().__init__(layer_type, data_source, alias)
         self.zoom_offset = zoom_offset
         self.format = format
+        self.class_property_name = class_property_name
+        self.class_names = class_names
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "VectorLayerConfig":
@@ -471,12 +491,18 @@ class VectorLayerConfig(LayerConfig):
         kwargs: dict[str, Any] = {"layer_type": LayerType(config["type"])}
         if "data_source" in config:
             kwargs["data_source"] = DataSourceConfig.from_config(config["data_source"])
-        if "zoom_offset" in config:
-            kwargs["zoom_offset"] = config["zoom_offset"]
         if "format" in config:
             kwargs["format"] = VectorFormatConfig.from_config(config["format"])
-        if "alias" in config:
-            kwargs["alias"] = config["alias"]
+
+        simple_optionals = [
+            "zoom_offset",
+            "alias",
+            "class_property_name",
+            "class_names",
+        ]
+        for k in simple_optionals:
+            if k in config:
+                kwargs[k] = config[k]
         return VectorLayerConfig(**kwargs)  # type: ignore
 
     def get_final_projection_and_bounds(
