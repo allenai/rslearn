@@ -106,6 +106,8 @@ jobs:
             -e TEST_USGS_LANDSAT_TOKEN="${{ secrets.TEST_USGS_LANDSAT_TOKEN }}" \
             -e PL_API_KEY="${{ secrets.PL_API_KEY }}" \
             -e CDSAPI_KEY="${{ secrets.CDSAPI_KEY }}" \
+            -e COPERNICUS_USERNAME="${{ secrets.COPERNICUS_USERNAME }}" \
+            -e COPERNICUS_PASSWORD="${{ secrets.COPERNICUS_PASSWORD }}" \
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
