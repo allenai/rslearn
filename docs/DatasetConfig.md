@@ -731,6 +731,106 @@ This data source is still experimental.
 
 This data source is still experimental.
 
+### rslearn.data_sources.planetary_computer.PlanetaryComputer
+
+This data source is for raster data from Microsoft Planetary Computer. See their
+[Data Catalog](https://planetarycomputer.microsoft.com/catalog).
+
+```jsonc
+{
+  // Required collection name, e.g. "landsat-c2-l2" or "modis-17A2HGF-061".
+  "collection_name": null,
+  // Required map from asset name to list of bands in the asset to download.
+  // You may need to perform a STAC search to see what the asset names are.
+  // Example: {"B8A": ["B8A"], "visual": ["R", "G", "B"]}
+  "asset_bands": null,
+  // Include this query argument for STAC searches.
+  // Example: {"sar:instrument_mode": {"eq": "IW"}}
+  "query": null,
+  // Sort by this property in the STAC items.
+  // Example: "eo:cloud_cover"
+  "sort_by": null,
+  // Whether to sort ascending or descending (default ascending).
+  "sort_ascending": true,
+  // Timeout for requests.
+  "timeout": 10,
+}
+```
+
+### rslearn.data_sources.planetary_computer.Sentinel1
+
+Sentinel-1 radiometrically-terrain-corrected data on Microsoft Planetary Computer.
+
+It automatically determines the bands to download from the band sets, so all parameters
+are optional. The band names are "hh", "hv", "vv", and "vh" depending on the scene.
+
+```jsonc
+{
+  // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
+  "query": null,
+  "sort_by": null,
+  "sort_ascending": true,
+  "timeout": 10,
+}
+```
+
+### rslearn.data_sources.planetary_computer.Sentinel2
+
+Sentinel-2 L2A data on Microsoft Planetary Computer.
+
+The bands to download are determined from the band sets.
+
+```jsonc
+{
+  // Flag (default false) to harmonize pixel values across different processing
+  // baselines (recommended), see
+  // https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
+  "harmonize": false
+  // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
+  "query": null,
+  "sort_by": null,
+  "sort_ascending": true,
+  "timeout": 10,
+}
+```
+
+Available bands:
+- B01
+- B02
+- B03
+- B04
+- B05
+- B06
+- B07
+- B08
+- B09
+- B11
+- B12
+- B8A
+- visual
+
+Note that B10 is not present in L2A.
+
+### rslearn.data_sources.earthdata_srtm.SRTM
+
+Elevation data from the Shuttle Radar Topography Mission via NASA Earthdata.
+
+A NASA Earthdata account is needed, see https://urs.earthdata.nasa.gov/.
+
+```jsonc
+{
+  // Earthdata account username. It can also be set via the NASA_EARTHDATA_USERNAME
+  // environment variable.
+  "username": null,
+  // Earthdata account password. It can also be set via the NASA_EARTHDATA_PASSWORD
+  // environment variable.
+  "password": null,
+}
+```
+
+The band name is set based on the configured band set, which must have a single band.
+The source data is INT16 so use INT32 in rslearn (currently INT16 is not supported).
+
 ### rslearn.data_sources.usgs_landsat.LandsatOliTirs
 
 This data source is for Landsat data from the USGS M2M API.

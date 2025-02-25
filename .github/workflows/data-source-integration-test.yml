@@ -106,6 +106,8 @@ jobs:
             -e TEST_USGS_LANDSAT_TOKEN="${{ secrets.TEST_USGS_LANDSAT_TOKEN }}" \
             -e PL_API_KEY="${{ secrets.PL_API_KEY }}" \
             -e CDSAPI_KEY="${{ secrets.CDSAPI_KEY }}" \
+            -e NASA_EARTHDATA_USERNAME="${{ secrets.NASA_EARTHDATA_USERNAME }}" \
+            -e NASA_EARTHDATA_PASSWORD="${{ secrets.NASA_EARTHDATA_PASSWORD }}" \
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
