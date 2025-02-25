@@ -6,11 +6,9 @@ import random
 import sys
 from collections.abc import Callable
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, TypeVar
 
 import tqdm
-import wandb
 from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
 from rasterio.crs import CRS
 from upath import UPath
@@ -644,39 +642,14 @@ class RslearnLightningCLI(LightningCLI):
         parser.link_arguments(
             "data.init_args.task", "model.init_args.task", apply_on="instantiate"
         )
-        parser.add_argument(
-            "--wandb_run_id",
-            default="",
-            type=str,
-            help="W&B run ID to load checkpoint from",
-        )
-        parser.add_argument(
-            "--wandb_resume",
-            default=False,
-            type=bool,
-            help="Whether to resume from specified wandb_run_id",
-        )
 
     def before_instantiate_classes(self) -> None:
         """Called before Lightning class initialization.
 
-        Sets up wandb_run_id / wandb_resume arguments.
+        Sets the dataset path for any configured RslearnPredictionWriter callbacks.
         """
         subcommand = self.config.subcommand
         c = self.config[subcommand]
-
-        if c.wandb_run_id:
-            api = wandb.Api()
-            artifact_id = (
-                f"{c.trainer.logger.init_args.project}/model-{c.wandb_run_id}:latest"
-            )
-            logger.info(f"restoring from artifact {artifact_id} on wandb")
-            artifact = api.artifact(artifact_id, type="model")
-            artifact_dir = artifact.download()
-            c.ckpt_path = str(Path(artifact_dir) / "model.ckpt")
-
-        if c.wandb_resume:
-            c.trainer.logger.init_args.id = c.wandb_run_id
 
         # If there is a RslearnPredictionWriter, set its path.
         prediction_writer_callback = None
