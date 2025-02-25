@@ -96,22 +96,34 @@ jobs:
             -e TEST_BUCKET="${{ env.TEST_BUCKET }}" \
             -v ${{env.GOOGLE_GHA_CREDS_PATH}}:/tmp/gcp-credentials.json:ro \
             -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-credentials.json \
-            -e AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}" \
-            -e GCSFS_DEFAULT_PROJECT="${{ env.GCSFS_DEFAULT_PROJECT }}" \
-            -e AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
-            -e AWS_DEFAULT_REGION="${{ secrets.AWS_DEFAULT_REGION }}" \
-            -e TEST_SERVICE_ACCOUNT_NAME="${{ secrets.TEST_SERVICE_ACCOUNT_NAME }}" \
-            -e TEST_XYZ_TILES_TEMPLATE="${{ secrets.TEST_XYZ_TILES_TEMPLATE }}" \
-            -e TEST_USGS_LANDSAT_USERNAME="${{ secrets.TEST_USGS_LANDSAT_USERNAME }}" \
-            -e TEST_USGS_LANDSAT_TOKEN="${{ secrets.TEST_USGS_LANDSAT_TOKEN }}" \
-            -e PL_API_KEY="${{ secrets.PL_API_KEY }}" \
-            -e CDSAPI_KEY="${{ secrets.CDSAPI_KEY }}" \
-            -e NASA_EARTHDATA_USERNAME="${{ secrets.NASA_EARTHDATA_USERNAME }}" \
-            -e NASA_EARTHDATA_PASSWORD="${{ secrets.NASA_EARTHDATA_PASSWORD }}" \
+            -e GCSFS_DEFAULT_PROJECT="${env.GCSFS_DEFAULT_PROJECT}" \
+            -e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
+            -e AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
+            -e AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION}" \
+            -e TEST_SERVICE_ACCOUNT_NAME="${TEST_SERVICE_ACCOUNT_NAME}" \
+            -e TEST_XYZ_TILES_TEMPLATE="${TEST_XYZ_TILES_TEMPLATE}" \
+            -e TEST_USGS_LANDSAT_USERNAME="${TEST_USGS_LANDSAT_USERNAME}" \
+            -e TEST_USGS_LANDSAT_TOKEN="${TEST_USGS_LANDSAT_TOKEN}" \
+            -e PL_API_KEY="${PL_API_KEY}" \
+            -e CDSAPI_KEY="${CDSAPI_KEY}" \
+            -e NASA_EARTHDATA_USERNAME="${NASA_EARTHDATA_USERNAME}" \
+            -e NASA_EARTHDATA_PASSWORD="${NASA_EARTHDATA_PASSWORD}" \
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
             pytest tests/integration/data_sources/
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          TEST_SERVICE_ACCOUNT_NAME: ${{ secrets.TEST_SERVICE_ACCOUNT_NAME }}
+          TEST_XYZ_TILES_TEMPLATE: ${{ secrets.TEST_XYZ_TILES_TEMPLATE }}
+          TEST_USGS_LANDSAT_USERNAME: ${{ secrets.TEST_USGS_LANDSAT_USERNAME }}
+          TEST_USGS_LANDSAT_TOKEN: ${{ secrets.TEST_USGS_LANDSAT_TOKEN }}
+          PL_API_KEY: ${{ secrets.PL_API_KEY }}
+          CDSAPI_KEY: ${{ secrets.CDSAPI_KEY }}
+          NASA_EARTHDATA_USERNAME: ${{ secrets.NASA_EARTHDATA_USERNAME }}
+          NASA_EARTHDATA_PASSWORD: ${{ secrets.NASA_EARTHDATA_PASSWORD }}
 
       - name: Clean up
         if: always()
