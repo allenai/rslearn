@@ -54,7 +54,9 @@ repos:
         exclude: ^tests/
         args:
           - -s
-          - B101,B311,B324,B108,B104,B310,B405,B314,B608
+          # Skip B113 request_without_timeout because it has false positives e.g. when
+          # timeout is computed by a function.
+          - B101,B311,B324,B108,B104,B310,B405,B314,B608,B113
   - repo: local
     hooks:
       - id: interrogate

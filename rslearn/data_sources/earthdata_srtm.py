@@ -4,6 +4,7 @@ import math
 import os
 import tempfile
 import zipfile
+from datetime import timedelta
 from typing import Any
 
 import requests
@@ -47,7 +48,7 @@ class SRTM(DataSource):
         username: str | None = None,
         password: str | None = None,
         band_name: str = "srtm",
-        timeout_seconds: float = 10,
+        timeout: timedelta = timedelta(seconds=10),
     ):
         """Initialize a new SRTM instance.
 
@@ -57,10 +58,10 @@ class SRTM(DataSource):
             password: NASA Earthdata account password. If not set, it is read from the
                 NASA_EARTHDATA_PASSWORD environment variable.
             band_name: what to call the band.
-            timeout_seconds: timeout for downloading data.
+            timeout: timeout for requests.
         """
         self.band_name = band_name
-        self.timeout_seconds = timeout_seconds
+        self.timeout = timeout
 
         if username is None:
             username = os.environ["NASA_EARTHDATA_USERNAME"]
@@ -88,6 +89,9 @@ class SRTM(DataSource):
         kwargs: dict[str, Any] = {
             "band_name": config.band_sets[0].bands[0],
         }
+
+        if "timeout_seconds" in d:
+            kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
 
         simple_optionals = ["username", "password"]
         for k in simple_optionals:
@@ -244,7 +248,10 @@ class SRTM(DataSource):
 
             # Try to access directly.
             response = self.session.get(
-                url, stream=True, timeout=self.timeout_seconds, allow_redirects=False
+                url,
+                stream=True,
+                timeout=self.timeout.total_seconds(),
+                allow_redirects=False,
             )
 
             if response.status_code == 302:
@@ -255,7 +262,10 @@ class SRTM(DataSource):
                 logger.debug(f"Following redirect to {redirect_url}")
                 auth = requests.auth.HTTPBasicAuth(self.username, self.password)
                 response = self.session.get(
-                    redirect_url, stream=True, timeout=self.timeout_seconds, auth=auth
+                    redirect_url,
+                    stream=True,
+                    timeout=self.timeout.total_seconds(),
+                    auth=auth,
                 )
 
             if response.status_code == 404:
