@@ -43,7 +43,7 @@ class M2MAPIClient:
         username: str,
         password: str | None = None,
         token: str | None = None,
-        timeout: timedelta = timedelta(seconds=10),
+        timeout: timedelta = timedelta(seconds=120),
     ) -> None:
         """Initialize a new M2MAPIClient.
 
