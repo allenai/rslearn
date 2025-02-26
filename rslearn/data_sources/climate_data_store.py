@@ -46,7 +46,7 @@ class ERA5LandMonthlyMeans(DataSource):
     PIXEL_SIZE = 0.1  # degrees, native resolution is 9km
 
     # see: https://confluence.ecmwf.int/display/CKB/ERA5-Land%3A+data+documentation
-    # For variable full & short names
+    # Use "Variable name in CDS" for the API request
 
     def __init__(
         self,
@@ -235,9 +235,10 @@ class ERA5LandMonthlyMeans(DataSource):
                 if band in bands:
                     continue
                 bands.append(band)
-
+        # rslearn band names, remove "_"
+        band_names = [band.replace("_", " ") for band in bands]
         for item in items:
-            if tile_store.is_raster_ready(item.name, bands):
+            if tile_store.is_raster_ready(item.name, band_names):
                 continue
             # Send the request to the CDS API
             # Given that ERA5 is at a very coarse resolution, we add a buffer of half a pixel size
@@ -268,4 +269,6 @@ class ERA5LandMonthlyMeans(DataSource):
                     UPath(local_nc_fname),
                     UPath(local_tif_fname),
                 )
-                tile_store.write_raster_file(item.name, bands, UPath(local_tif_fname))
+                tile_store.write_raster_file(
+                    item.name, band_names, UPath(local_tif_fname)
+                )

@@ -21,10 +21,12 @@ from rslearn.utils import STGeometry
 class TestERA5LandMonthlyMeans:
     """Tests the ERA5LandMonthlyMeans data source from the Climate Data Store."""
 
-    TEST_BANDS = ["2t", "tp"]  # 2m temperature and total precipitation
+    TEST_BANDS = ["2m_temperature", "total_precipitation"]
 
     def run_simple_test(self, tile_store_dir: UPath, seattle2020: STGeometry) -> None:
         """Apply test where we ingest an item corresponding to seattle2020."""
+        # rslearn band names, remove "_"
+        band_names = [band.replace("_", " ") for band in self.TEST_BANDS]
         layer_config = RasterLayerConfig(
             LayerType.RASTER,
             [BandSetConfig(config_dict={}, dtype=DType.FLOAT32, bands=self.TEST_BANDS)],
@@ -49,8 +51,8 @@ class TestERA5LandMonthlyMeans:
         data_source.ingest(
             TileStoreWithLayer(tile_store, layer_name), item_groups[1], [[seattle2020]]
         )
-        assert tile_store.is_raster_ready(layer_name, item_0.name, self.TEST_BANDS)
-        assert tile_store.is_raster_ready(layer_name, item_1.name, self.TEST_BANDS)
+        assert tile_store.is_raster_ready(layer_name, item_0.name, band_names)
+        assert tile_store.is_raster_ready(layer_name, item_1.name, band_names)
 
     def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         """Test ingesting to local filesystem."""
