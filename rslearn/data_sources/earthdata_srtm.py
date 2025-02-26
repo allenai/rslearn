@@ -78,6 +78,8 @@ class SRTM(DataSource):
         if config.data_source is None:
             raise ValueError("config.data_source is required")
         d = config.data_source.config_dict
+        if len(config.band_sets) != 1:
+            raise ValueError("expected a single band set")
         if len(config.band_sets[0].bands) != 1:
             raise ValueError("expected band set to have a single band")
         kwargs: dict[str, Any] = {
