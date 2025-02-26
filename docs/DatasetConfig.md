@@ -753,7 +753,7 @@ This data source is for raster data from Microsoft Planetary Computer. See their
   // Whether to sort ascending or descending (default ascending).
   "sort_ascending": true,
   // Timeout for requests.
-  "timeout": 10,
+  "timeout_seconds": 10,
 }
 ```
 
@@ -770,7 +770,7 @@ are optional. The band names are "hh", "hv", "vv", and "vh" depending on the sce
   "query": null,
   "sort_by": null,
   "sort_ascending": true,
-  "timeout": 10,
+  "timeout_seconds": 10,
 }
 ```
 
@@ -790,7 +790,7 @@ The bands to download are determined from the band sets.
   "query": null,
   "sort_by": null,
   "sort_ascending": true,
-  "timeout": 10,
+  "timeout_seconds": 10,
 }
 ```
 
@@ -825,11 +825,14 @@ A NASA Earthdata account is needed, see https://urs.earthdata.nasa.gov/.
   // Earthdata account password. It can also be set via the NASA_EARTHDATA_PASSWORD
   // environment variable.
   "password": null,
+  // Timeout for requests.
+  "timeout_seconds": 10,
 }
 ```
 
-The band name is set based on the configured band set, which must have a single band.
-The source data is INT16 so use INT32 in rslearn (currently INT16 is not supported).
+The data source should be configured with a single band set containing a single band.
+The band name can be set arbitrarily, but "srtm" or "elevation" is suggested. The data
+type of the band should be set to int16 to match the source data.
 
 ### rslearn.data_sources.usgs_landsat.LandsatOliTirs
 

@@ -20,7 +20,11 @@ class DType(Enum):
     UINT8 = "uint8"
     UINT16 = "uint16"
     UINT32 = "uint32"
+    UINT64 = "uint64"
+    INT8 = "int8"
+    INT16 = "int16"
     INT32 = "int32"
+    INT64 = "int64"
     FLOAT32 = "float32"
 
     def get_numpy_dtype(self) -> npt.DTypeLike:
@@ -31,8 +35,16 @@ class DType(Enum):
             return np.uint16
         elif self == DType.UINT32:
             return np.uint32
+        elif self == DType.UINT64:
+            return np.uint64
+        elif self == DType.INT8:
+            return np.int8
+        elif self == DType.INT16:
+            return np.int16
         elif self == DType.INT32:
             return np.int32
+        elif self == DType.INT64:
+            return np.int64
         elif self == DType.FLOAT32:
             return np.float32
         raise ValueError(f"unable to handle numpy dtype {self}")

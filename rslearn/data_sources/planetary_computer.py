@@ -3,6 +3,7 @@
 import os
 import tempfile
 import xml.etree.ElementTree as ET
+from datetime import timedelta
 from typing import Any
 
 import affine
@@ -56,7 +57,7 @@ class PlanetaryComputer(DataSource, TileStore):
         query: dict[str, Any] | None = None,
         sort_by: str | None = None,
         sort_ascending: bool = True,
-        timeout: int = 10,
+        timeout: timedelta = timedelta(seconds=10),
         skip_items_missing_assets: bool = False,
     ):
         """Initialize a new PlanetaryComputer instance.
@@ -68,7 +69,7 @@ class PlanetaryComputer(DataSource, TileStore):
             query: optional query argument to STAC searches.
             sort_by: sort by this property in the STAC items.
             sort_ascending: whether to sort ascending (or descending).
-            timeout: timeout for API requests in seconds.
+            timeout: timeout for API requests.
             skip_items_missing_assets: skip STAC items that are missing any of the
                 assets in asset_bands during get_items.
         """
@@ -96,7 +97,10 @@ class PlanetaryComputer(DataSource, TileStore):
             asset_bands=d["asset_bands"],
         )
 
-        simple_optionals = ["query", "sort_by", "sort_ascending", "timeout"]
+        if "timeout_seconds" in d:
+            kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
+
+        simple_optionals = ["query", "sort_by", "sort_ascending"]
         for k in simple_optionals:
             if k in d:
                 kwargs[k] = d[k]
@@ -235,7 +239,7 @@ class PlanetaryComputer(DataSource, TileStore):
                         local_fname,
                     )
                     with requests.get(
-                        asset_url, stream=True, timeout=self.timeout
+                        asset_url, stream=True, timeout=self.timeout.total_seconds()
                     ) as r:
                         r.raise_for_status()
                         with open(local_fname, "wb") as f:
@@ -482,7 +486,7 @@ class Sentinel2(PlanetaryComputer):
             "query",
             "sort_by",
             "sort_ascending",
-            "timeout",
+            "timeout_seconds",
         ]
         for k in simple_optionals:
             if k in d:
@@ -492,7 +496,7 @@ class Sentinel2(PlanetaryComputer):
 
     def _get_product_xml(self, stac_item: pystac.Item) -> ET.Element:
         asset_url = stac_item.assets["product-metadata"].href
-        response = requests.get(asset_url, timeout=self.timeout)
+        response = requests.get(asset_url, timeout=self.timeout.total_seconds())
         response.raise_for_status()
         return ET.fromstring(response.content)
 
@@ -527,7 +531,7 @@ class Sentinel2(PlanetaryComputer):
                         local_fname,
                     )
                     with requests.get(
-                        asset_url, stream=True, timeout=self.timeout
+                        asset_url, stream=True, timeout=self.timeout.total_seconds()
                     ) as r:
                         r.raise_for_status()
                         with open(local_fname, "wb") as f:
@@ -655,7 +659,7 @@ class Sentinel1(PlanetaryComputer):
             band_names=list(band_names),
         )
 
-        simple_optionals = ["query", "sort_by", "sort_ascending", "timeout"]
+        simple_optionals = ["query", "sort_by", "sort_ascending", "timeout_seconds"]
         for k in simple_optionals:
             if k in d:
                 kwargs[k] = d[k]

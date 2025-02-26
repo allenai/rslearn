@@ -4,6 +4,7 @@ import math
 import os
 import tempfile
 import zipfile
+from datetime import timedelta
 from typing import Any
 
 import requests
@@ -47,7 +48,7 @@ class SRTM(DataSource):
         username: str | None = None,
         password: str | None = None,
         band_name: str = "srtm",
-        timeout: int = 10,
+        timeout: timedelta = timedelta(seconds=10),
     ):
         """Initialize a new SRTM instance.
 
@@ -57,7 +58,7 @@ class SRTM(DataSource):
             password: NASA Earthdata account password. If not set, it is read from the
                 NASA_EARTHDATA_PASSWORD environment variable.
             band_name: what to call the band.
-            timeout: timeout for downloading data.
+            timeout: timeout for requests.
         """
         self.band_name = band_name
         self.timeout = timeout
@@ -78,11 +79,20 @@ class SRTM(DataSource):
         if config.data_source is None:
             raise ValueError("config.data_source is required")
         d = config.data_source.config_dict
+
+        # Get the band name chosen by the user.
+        # There should be a single band set with a single band.
+        if len(config.band_sets) != 1:
+            raise ValueError("expected a single band set")
         if len(config.band_sets[0].bands) != 1:
             raise ValueError("expected band set to have a single band")
         kwargs: dict[str, Any] = {
             "band_name": config.band_sets[0].bands[0],
         }
+
+        if "timeout_seconds" in d:
+            kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
+
         simple_optionals = ["username", "password"]
         for k in simple_optionals:
             if k in d:
@@ -238,7 +248,10 @@ class SRTM(DataSource):
 
             # Try to access directly.
             response = self.session.get(
-                url, stream=True, timeout=self.timeout, allow_redirects=False
+                url,
+                stream=True,
+                timeout=self.timeout.total_seconds(),
+                allow_redirects=False,
             )
 
             if response.status_code == 302:
@@ -249,7 +262,10 @@ class SRTM(DataSource):
                 logger.debug(f"Following redirect to {redirect_url}")
                 auth = requests.auth.HTTPBasicAuth(self.username, self.password)
                 response = self.session.get(
-                    redirect_url, stream=True, timeout=self.timeout, auth=auth
+                    redirect_url,
+                    stream=True,
+                    timeout=self.timeout.total_seconds(),
+                    auth=auth,
                 )
 
             if response.status_code == 404:
