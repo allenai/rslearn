@@ -46,7 +46,7 @@ class ERA5LandMonthlyMeans(DataSource):
     PIXEL_SIZE = 0.1  # degrees, native resolution is 9km
 
     # see: https://confluence.ecmwf.int/display/CKB/ERA5-Land%3A+data+documentation
-    # For variable full & short names
+    # Use "Variable name in CDS" for the API request
 
     def __init__(
         self,
