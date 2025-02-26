@@ -37,10 +37,13 @@ class M2MAPIClient:
 
     api_url = "https://m2m.cr.usgs.gov/api/api/json/stable/"
     pagination_size = 1000
-    TIMEOUT = 1000000  # Set very high to start
 
     def __init__(
-        self, username: str, password: str | None = None, token: str | None = None
+        self,
+        username: str,
+        password: str | None = None,
+        token: str | None = None,
+        timeout_seconds: float = 10,
     ) -> None:
         """Initialize a new M2MAPIClient.
 
@@ -48,8 +51,10 @@ class M2MAPIClient:
             username: the EROS username
             password: the EROS password
             token: the application token. One of password or token must be specified.
+            timeout_seconds: timeout for requests in seconds.
         """
         self.username = username
+        self.timeout_seconds = timeout_seconds
 
         if password is not None and token is not None:
             raise ValueError("only one of password or token can be specified")
@@ -57,13 +62,15 @@ class M2MAPIClient:
         if password is not None:
             json_data = json.dumps({"username": self.username, "password": password})
             response = requests.post(
-                self.api_url + "login", data=json_data, timeout=self.TIMEOUT
+                self.api_url + "login", data=json_data, timeout=self.timeout_seconds
             )
 
         elif token is not None:
             json_data = json.dumps({"username": username, "token": token})
             response = requests.post(
-                self.api_url + "login-token", data=json_data, timeout=self.TIMEOUT
+                self.api_url + "login-token",
+                data=json_data,
+                timeout=self.timeout_seconds,
             )
 
         else:
@@ -88,7 +95,7 @@ class M2MAPIClient:
             self.api_url + endpoint,
             headers={"X-Auth-Token": self.auth_token},
             data=json.dumps(data),
-            timeout=self.TIMEOUT,
+            timeout=self.timeout_seconds,
         )
         response.raise_for_status()
         if response.text:
@@ -310,6 +317,7 @@ class LandsatOliTirs(DataSource):
         sort_by: str | None = None,
         password: str | None = None,
         token: str | None = None,
+        timeout_seconds: float = 10,
     ):
         """Initialize a new LandsatOliTirs instance.
 
@@ -320,11 +328,15 @@ class LandsatOliTirs(DataSource):
                 SpaceMode.WITHIN.
             password: EROS password (see M2MAPIClient).
             token: EROS application token (see M2MAPIClient).
+            timeout_seconds: timeout for requests in seconds.
         """
         self.config = config
         self.sort_by = sort_by
+        self.timeout_seconds = timeout_seconds
 
-        self.client = M2MAPIClient(username, password=password, token=token)
+        self.client = M2MAPIClient(
+            username, password=password, token=token, timeout_seconds=timeout_seconds
+        )
 
     @staticmethod
     def from_config(config: RasterLayerConfig, ds_path: UPath) -> "LandsatOliTirs":
@@ -480,7 +492,9 @@ class LandsatOliTirs(DataSource):
         download_urls = self._get_download_urls(item)
         for _, (display_id, download_url) in download_urls.items():
             buf = io.BytesIO()
-            with requests.get(download_url, stream=True, timeout=self.TIMEOUT) as r:
+            with requests.get(
+                download_url, stream=True, timeout=self.timeout_seconds
+            ) as r:
                 r.raise_for_status()
                 shutil.copyfileobj(r.raw, buf)
             buf.seek(0)
@@ -511,7 +525,9 @@ class LandsatOliTirs(DataSource):
                     local_filename = os.path.join(tmp_dir, "data.tif")
 
                     with requests.get(
-                        download_urls[band][1], stream=True, timeout=self.TIMEOUT
+                        download_urls[band][1],
+                        stream=True,
+                        timeout=self.timeout_seconds,
                     ) as r:
                         r.raise_for_status()
                         with open(local_filename, "wb") as f:

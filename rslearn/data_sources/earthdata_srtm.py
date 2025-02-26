@@ -47,7 +47,7 @@ class SRTM(DataSource):
         username: str | None = None,
         password: str | None = None,
         band_name: str = "srtm",
-        timeout: int = 10,
+        timeout_seconds: float = 10,
     ):
         """Initialize a new SRTM instance.
 
@@ -57,10 +57,10 @@ class SRTM(DataSource):
             password: NASA Earthdata account password. If not set, it is read from the
                 NASA_EARTHDATA_PASSWORD environment variable.
             band_name: what to call the band.
-            timeout: timeout for downloading data.
+            timeout_seconds: timeout for downloading data.
         """
         self.band_name = band_name
-        self.timeout = timeout
+        self.timeout_seconds = timeout_seconds
 
         if username is None:
             username = os.environ["NASA_EARTHDATA_USERNAME"]
@@ -238,7 +238,7 @@ class SRTM(DataSource):
 
             # Try to access directly.
             response = self.session.get(
-                url, stream=True, timeout=self.timeout, allow_redirects=False
+                url, stream=True, timeout=self.timeout_seconds, allow_redirects=False
             )
 
             if response.status_code == 302:
@@ -249,7 +249,7 @@ class SRTM(DataSource):
                 logger.debug(f"Following redirect to {redirect_url}")
                 auth = requests.auth.HTTPBasicAuth(self.username, self.password)
                 response = self.session.get(
-                    redirect_url, stream=True, timeout=self.timeout, auth=auth
+                    redirect_url, stream=True, timeout=self.timeout_seconds, auth=auth
                 )
 
             if response.status_code == 404:
