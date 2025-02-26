@@ -78,6 +78,9 @@ class SRTM(DataSource):
         if config.data_source is None:
             raise ValueError("config.data_source is required")
         d = config.data_source.config_dict
+
+        # Get the band name chosen by the user.
+        # There should be a single band set with a single band.
         if len(config.band_sets) != 1:
             raise ValueError("expected a single band set")
         if len(config.band_sets[0].bands) != 1:
@@ -85,6 +88,7 @@ class SRTM(DataSource):
         kwargs: dict[str, Any] = {
             "band_name": config.band_sets[0].bands[0],
         }
+
         simple_optionals = ["username", "password"]
         for k in simple_optionals:
             if k in d:

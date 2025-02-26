@@ -828,8 +828,9 @@ A NASA Earthdata account is needed, see https://urs.earthdata.nasa.gov/.
 }
 ```
 
-The band name is set based on the configured band set, which must have a single band.
-The source data is INT16 so use INT32 in rslearn (currently INT16 is not supported).
+The data source should be configured with a single band set containing a single band.
+The band name can be set arbitrarily, but "srtm" or "elevation" is suggested. The data
+type of the band should be set to int16 to match the source data.
 
 ### rslearn.data_sources.usgs_landsat.LandsatOliTirs
 
