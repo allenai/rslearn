@@ -159,7 +159,7 @@ class Window:
             "options": self.options,
         }
         metadata_path = self.path / "metadata.json"
-        logger.info(f"Saving window metadata to {metadata_path}")
+        logger.debug(f"Saving window metadata to {metadata_path}")
         with open_atomic(metadata_path, "w") as f:
             json.dump(metadata, f)
 
