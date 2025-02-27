@@ -398,7 +398,7 @@ class GeotiffRasterFormat(RasterFormat):
         profile.update(self.geotiff_options)
 
         path.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Writing geotiff to {path / fname}")
+        logger.debug(f"Writing geotiff to {path / fname}")
         with open_rasterio_upath_writer(path / fname, **profile) as dst:
             dst.write(array)
 

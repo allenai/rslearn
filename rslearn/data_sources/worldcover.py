@@ -48,7 +48,7 @@ class WorldCover(LocalFiles):
         "ESA_WorldCover_10m_2021_v200_60deg_macrotile_S90W120.zip",
         "ESA_WorldCover_10m_2021_v200_60deg_macrotile_S90W180.zip",
     ]
-    TIMEOUT = 10
+    TIMEOUT_SECONDS = 10
 
     def __init__(
         self,
@@ -99,7 +99,7 @@ class WorldCover(LocalFiles):
                 logger.debug("%s has already been downloaded at %s", fname, dst_fname)
                 continue
             logger.info("downloading %s to %s", src_url, dst_fname)
-            with requests.get(src_url, stream=True, timeout=self.TIMEOUT) as r:
+            with requests.get(src_url, stream=True, timeout=self.TIMEOUT_SECONDS) as r:
                 r.raise_for_status()
                 with open_atomic(dst_fname, "wb") as f:
                     for chunk in r.iter_content(chunk_size=8192):
