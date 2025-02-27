@@ -25,7 +25,6 @@ class TestERA5LandMonthlyMeans:
 
     def run_simple_test(self, tile_store_dir: UPath, seattle2020: STGeometry) -> None:
         """Apply test where we ingest an item corresponding to seattle2020."""
-        # rslearn band names, remove "_"
         layer_config = RasterLayerConfig(
             LayerType.RASTER,
             [BandSetConfig(config_dict={}, dtype=DType.FLOAT32, bands=self.TEST_BANDS)],
