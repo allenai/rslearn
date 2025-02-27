@@ -7,6 +7,7 @@ from rasterio.crs import CRS
 from upath import UPath
 
 from rslearn.tile_stores.default import DefaultTileStore
+from rslearn.utils.fsspec import open_atomic
 from rslearn.utils.geometry import Projection
 
 LAYER_NAME = "layer"
@@ -80,3 +81,50 @@ def test_zstd_compression(tmp_path: pathlib.Path) -> None:
     fname = tile_store.path / LAYER_NAME / ITEM_NAME / "_".join(BANDS) / "geotiff.tif"
     with rasterio.open(fname) as raster:
         assert raster.profile["compress"] == "zstd"
+
+
+def test_leftover_tmp_file(tmp_path: pathlib.Path) -> None:
+    """Ensure that leftover files from open_atomic do not cause issues.
+
+    Previously DefaultTileStore would raise error if there was one of these leftover
+    files along with an actual raster written. Now the tmp files are ignored.
+    """
+
+    tile_store = DefaultTileStore()
+    tile_store.set_dataset_path(UPath(tmp_path))
+    raster_size = 4
+    bounds = (0, 0, raster_size, raster_size)
+    raster_dir = tile_store._get_raster_dir(LAYER_NAME, ITEM_NAME, BANDS)
+    raster_dir.mkdir(parents=True)
+
+    # Create the tmp file by writing halfway with open_atomic.
+    class TestException(Exception):
+        pass
+
+    with pytest.raises(TestException):
+        with open_atomic(raster_dir / "geotiff.tif", "wb") as f:
+            f.write(b"123")
+            raise TestException()
+
+    # Double check that there is a tmp file.
+    fnames = list(raster_dir.iterdir())
+    assert len(fnames) == 1
+    assert ".tmp." in fnames[0].name
+
+    # Read should throw ValueError because there's no raster.
+    with pytest.raises(ValueError):
+        tile_store.read_raster(LAYER_NAME, ITEM_NAME, BANDS, PROJECTION, bounds)
+
+    # Now write actual raster.
+    tile_store.write_raster(
+        LAYER_NAME,
+        ITEM_NAME,
+        BANDS,
+        PROJECTION,
+        bounds,
+        np.ones((len(BANDS), raster_size, raster_size), dtype=np.uint8),
+    )
+
+    # And make sure this time the read succeeds.
+    array = tile_store.read_raster(LAYER_NAME, ITEM_NAME, BANDS, PROJECTION, bounds)
+    assert array.min() == 1 and array.max() == 1
