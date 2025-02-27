@@ -21,7 +21,7 @@ from rslearn.utils import STGeometry
 class TestERA5LandMonthlyMeans:
     """Tests the ERA5LandMonthlyMeans data source from the Climate Data Store."""
 
-    TEST_BANDS = ["2m_temperature", "total_precipitation"]
+    TEST_BANDS = ["2m-temperature", "total-precipitation"]
 
     def run_simple_test(self, tile_store_dir: UPath, seattle2020: STGeometry) -> None:
         """Apply test where we ingest an item corresponding to seattle2020."""
