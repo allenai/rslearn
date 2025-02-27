@@ -45,8 +45,8 @@ class ERA5LandMonthlyMeans(DataSource):
     DOWNLOAD_FORMAT = "unarchived"
     PIXEL_SIZE = 0.1  # degrees, native resolution is 9km
 
-    # see: https://confluence.ecmwf.int/display/CKB/ERA5-Land%3A+data+documentation
-    # for variable names and descriptions
+    # CDS variable names reference: https://confluence.ecmwf.int/display/CKB/ERA5-Land%3A+data+documentation
+    # Replace "_" with "-" in variable names when specifying bands in the data configuration
 
     def __init__(
         self,
