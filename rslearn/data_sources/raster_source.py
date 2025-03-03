@@ -157,8 +157,6 @@ def materialize_raster(
     window_projection, window_bounds = band_cfg.get_final_projection_and_bounds(
         window.projection, window.bounds
     )
-    if window_bounds is None:
-        raise ValueError(f"No windowbounds specified for {layer_name}")
     # Re-project to just extract the window.
     array = raster.read()
     window_width = window_bounds[2] - window_bounds[0]

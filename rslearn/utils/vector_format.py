@@ -4,7 +4,6 @@ import json
 from enum import Enum
 from typing import Any
 
-import numpy as np
 import shapely
 from class_registry import ClassRegistry
 from rasterio.crs import CRS
@@ -28,24 +27,25 @@ class VectorFormat:
     a UPath. Vector data is a list of GeoJSON-like features.
     """
 
-    def encode_vector(
-        self, path: UPath, projection: Projection, features: list[Feature]
-    ) -> None:
+    def encode_vector(self, path: UPath, features: list[Feature]) -> None:
         """Encodes vector data.
 
         Args:
             path: the directory to write to
-            projection: the projection of the raster data
             features: the vector data
         """
         raise NotImplementedError
 
-    def decode_vector(self, path: UPath, bounds: PixelBounds) -> list[Feature]:
+    def decode_vector(
+        self, path: UPath, projection: Projection, bounds: PixelBounds
+    ) -> list[Feature]:
         """Decodes vector data.
 
         Args:
             path: the directory to read from
-            bounds: the bounds of the vector data to read
+            projection: the projection to read the data in
+            bounds: the bounds to read under the given projection. Only features that
+                intersect the bounds should be returned.
 
         Returns:
             the vector data
@@ -62,29 +62,62 @@ class TileVectorFormat(VectorFormat):
     intersect.
     """
 
-    def __init__(self, tile_size: int = 512):
+    def __init__(
+        self,
+        tile_size: int = 512,
+        projection: Projection | None = None,
+        index_property_name: str = "tvf_index",
+    ):
         """Initialize a new TileVectorFormat instance.
 
         Args:
             tile_size: the tile size (grid size in pixels), default 512
+            projection: if set, store features under this projection. Otherwise, the
+                output projection is taken from the first feature in an encode_vector
+                call.
+            index_property_name: property name used to store an index integer that
+                identifies the same feature across different tiles.
         """
         self.tile_size = tile_size
+        self.projection = projection
+        self.index_property_name = index_property_name
 
-    def encode_vector(
-        self, path: UPath, projection: Projection, features: list[Feature]
-    ) -> None:
+    def encode_vector(self, path: UPath, features: list[Feature]) -> None:
         """Encodes vector data.
 
         Args:
             path: the directory to write to
-            projection: the projection of the raster data
             features: the vector data
         """
-        tile_data: dict = {}
-        for feat in features:
+        # Determine the output projection to write in.
+        if len(features) == 0:
+            # We won't actually write any features but still setting output_projection
+            # to write to projection.json.
+            # We just fallback to WGS84 here.
+            output_projection = WGS84_PROJECTION
+        elif self.projection is not None:
+            output_projection = self.projection
+        else:
+            output_projection = features[0].geometry.projection
+
+        # Save metadata file containing the serialized projection so we can load it
+        # when decoding.
+        with (path / "projection.json").open("w") as f:
+            json.dump(output_projection.serialize(), f)
+
+        # Dictionary from tile (col, row) to the list of features intersecting that
+        # tile. We iterate over the features to populate tile_data, then write each
+        # tile as a separate file.
+        tile_data: dict[tuple[int, int], list[dict]] = {}
+
+        for feat_idx, feat in enumerate(features):
+            # Skip invalid features since they can cause errors.
             if not feat.geometry.shp.is_valid:
                 continue
-            bounds = feat.geometry.shp.bounds
+
+            # Identify each grid cell that this feature intersects.
+            geometry = feat.geometry.to_projection(output_projection)
+            bounds = geometry.shp.bounds
             start_tile = (
                 int(bounds[0]) // self.tile_size,
                 int(bounds[1]) // self.tile_size,
@@ -93,60 +126,73 @@ class TileVectorFormat(VectorFormat):
                 int(bounds[2]) // self.tile_size + 1,
                 int(bounds[3]) // self.tile_size + 1,
             )
+
+            # We add an index property to the features so when reading we can
+            # de-duplicate (in case we read multiple tiles that contain the same
+            # feature).
+            properties = {self.index_property_name: feat_idx}
+            properties.update(feat.properties)
+            # Use the re-projected geometry here.
+            output_feat = Feature(geometry, properties)
+            output_geojson = output_feat.to_geojson()
+
+            # Now we add the feature to each tile that it intersects.
             for col in range(start_tile[0], end_tile[0]):
                 for row in range(start_tile[1], end_tile[1]):
-                    cur_shp = feat.geometry.shp.intersection(
-                        shapely.box(
-                            col * self.tile_size,
-                            row * self.tile_size,
-                            (col + 1) * self.tile_size,
-                            (row + 1) * self.tile_size,
-                        )
+                    tile_box = shapely.box(
+                        col * self.tile_size,
+                        row * self.tile_size,
+                        (col + 1) * self.tile_size,
+                        (row + 1) * self.tile_size,
                     )
-                    cur_shp = shapely.transform(
-                        cur_shp,
-                        lambda array: array
-                        - np.array([[col * self.tile_size, row * self.tile_size]]),
-                    )
-                    cur_feat = Feature(
-                        STGeometry(projection, cur_shp, None), feat.properties
-                    )
-                    try:
-                        cur_geojson = cur_feat.to_geojson()
-                    except Exception as e:
-                        print(e)
+                    if not geometry.shp.intersects(tile_box):
                         continue
                     tile = (col, row)
                     if tile not in tile_data:
                         tile_data[tile] = []
-                    tile_data[tile].append(cur_geojson)
+                    tile_data[tile].append(output_geojson)
 
         path.mkdir(parents=True, exist_ok=True)
+
+        # Now save each tile.
         for (col, row), geojson_features in tile_data.items():
             fc = {
                 "type": "FeatureCollection",
                 "features": [geojson_feat for geojson_feat in geojson_features],
-                "properties": projection.serialize(),
+                "properties": output_projection.serialize(),
             }
             cur_fname = path / f"{col}_{row}.geojson"
             logger.debug("writing tile (%d, %d) to %s", col, row, cur_fname)
             with cur_fname.open("w") as f:
                 json.dump(fc, f)
 
-    def decode_vector(self, path: UPath, bounds: PixelBounds) -> list[Feature]:
+    def decode_vector(
+        self, path: UPath, projection: Projection, bounds: PixelBounds
+    ) -> list[Feature]:
         """Decodes vector data.
 
         Args:
             path: the directory to read from
-            bounds: the bounds of the vector data to read
+            projection: the projection to read the data in
+            bounds: the bounds to read under the given projection. Only features that
+                intersect the bounds should be returned.
 
         Returns:
             the vector data
         """
-        start_tile = (bounds[0] // self.tile_size, bounds[1] // self.tile_size)
+        # Convert the bounds to the projection of the stored data.
+        with (path / "projection.json").open() as f:
+            storage_projection = Projection.deserialize(json.load(f))
+        bounds_geom = STGeometry(projection, shapely.box(*bounds), None)
+        storage_bounds = bounds_geom.to_projection(storage_projection).shp.bounds
+
+        start_tile = (
+            int(storage_bounds[0]) // self.tile_size,
+            int(storage_bounds[1]) // self.tile_size,
+        )
         end_tile = (
-            (bounds[2] - 1) // self.tile_size + 1,
-            (bounds[3] - 1) // self.tile_size + 1,
+            (int(storage_bounds[2]) - 1) // self.tile_size + 1,
+            (int(storage_bounds[3]) - 1) // self.tile_size + 1,
         )
         features = []
         for col in range(start_tile[0], end_tile[0]):
@@ -156,20 +202,10 @@ class TileVectorFormat(VectorFormat):
                     continue
                 with cur_fname.open("r") as f:
                     fc = json.load(f)
-                if "properties" in fc and "crs" in fc["properties"]:
-                    projection = Projection.deserialize(fc["properties"])
-                else:
-                    projection = WGS84_PROJECTION
 
-                for feat in fc["features"]:
-                    shp = shapely.geometry.shape(feat["geometry"])
-                    shp = shapely.transform(
-                        shp,
-                        lambda array: array
-                        + np.array([[col * self.tile_size, row * self.tile_size]]),
-                    )
-                    feat["geometry"] = json.loads(shapely.to_geojson(shp))
-                    features.append(Feature.from_geojson(projection, feat))
+                for geojson_feat in fc["features"]:
+                    feat = Feature.from_geojson(storage_projection, geojson_feat)
+                    features.append(feat.to_projection(projection))
         return features
 
     @staticmethod
@@ -183,7 +219,14 @@ class TileVectorFormat(VectorFormat):
         Returns:
             the TileVectorFormat
         """
-        return TileVectorFormat(tile_size=config.get("tile_size", 512))
+        kwargs = {}
+        if "tile_size" in config:
+            kwargs["tile_size"] = config["tile_size"]
+        if "projection" in config:
+            kwargs["projection"] = Projection.deserialize(config["projection"])
+        if "index_property_name" in config:
+            kwargs["index_property_name"] = config["index_property_name"]
+        return TileVectorFormat(**kwargs)
 
 
 class GeojsonCoordinateMode(Enum):
@@ -221,14 +264,11 @@ class GeojsonVectorFormat(VectorFormat):
         """
         self.coordinate_mode = coordinate_mode
 
-    def encode_to_file(
-        self, fname: UPath, projection: Projection, features: list[Feature]
-    ) -> None:
+    def encode_to_file(self, fname: UPath, features: list[Feature]) -> None:
         """Encode vector data to a specific file.
 
         Args:
             fname: the file to write to
-            projection: the projection of the raster data
             features: the vector data
         """
         fc: dict[str, Any] = {"type": "FeatureCollection"}
@@ -237,15 +277,24 @@ class GeojsonVectorFormat(VectorFormat):
         # Also set the target projection in the FeatureCollection.
         # For PIXEL mode, we need to use a custom encoding so the resolution is stored.
         output_projection: Projection
-        if self.coordinate_mode == GeojsonCoordinateMode.PIXEL:
-            output_projection = projection
-            fc["properties"] = projection.serialize()
+        if len(features) > 0 and self.coordinate_mode != GeojsonCoordinateMode.WGS84:
+            if self.coordinate_mode == GeojsonCoordinateMode.PIXEL:
+                output_projection = features[0].geometry.projection
+                fc["properties"] = output_projection.serialize()
+            elif self.coordinate_mode == GeojsonCoordinateMode.CRS:
+                output_projection = Projection(
+                    features[0].geometry.projection.crs, 1, 1
+                )
+                fc["crs"] = {
+                    "type": "name",
+                    "properties": {
+                        "name": output_projection.crs.to_wkt(),
+                    },
+                }
         else:
-            if self.coordinate_mode == GeojsonCoordinateMode.CRS:
-                output_projection = Projection(projection.crs, 1, 1)
-            elif self.coordinate_mode == GeojsonCoordinateMode.WGS84:
-                output_projection = WGS84_PROJECTION
-
+            # Either there are no features so we need to fallback to WGS84, or the
+            # coordinate mode is WGS84.
+            output_projection = WGS84_PROJECTION
             fc["crs"] = {
                 "type": "name",
                 "properties": {
@@ -266,18 +315,15 @@ class GeojsonVectorFormat(VectorFormat):
         with fname.open("w") as f:
             json.dump(fc, f)
 
-    def encode_vector(
-        self, path: UPath, projection: Projection, features: list[Feature]
-    ) -> None:
+    def encode_vector(self, path: UPath, features: list[Feature]) -> None:
         """Encodes vector data.
 
         Args:
             path: the directory to write to
-            projection: the projection of the raster data
             features: the vector data
         """
         path.mkdir(parents=True, exist_ok=True)
-        self.encode_to_file(path / self.fname, projection, features)
+        self.encode_to_file(path / self.fname, features)
 
     def decode_from_file(self, fname: UPath) -> list[Feature]:
         """Decodes vector data from a filename.
@@ -306,17 +352,32 @@ class GeojsonVectorFormat(VectorFormat):
 
         return [Feature.from_geojson(projection, feat) for feat in fc["features"]]
 
-    def decode_vector(self, path: UPath, bounds: PixelBounds) -> list[Feature]:
+    def decode_vector(
+        self, path: UPath, projection: Projection, bounds: PixelBounds
+    ) -> list[Feature]:
         """Decodes vector data.
 
         Args:
             path: the directory to read from
-            bounds: the bounds of the vector data to read
+            projection: the projection to read the data in
+            bounds: the bounds to read under the given projection. Only features that
+                intersect the bounds should be returned.
 
         Returns:
             the vector data
         """
-        return self.decode_from_file(path / self.fname)
+        features = self.decode_from_file(path / self.fname)
+        # Re-project to the desired projection.
+        reprojected_features = [feat.to_projection(projection) for feat in features]
+        # Filter out features that do not intersect the given bounds.
+        filtered_features: list[Feature] = []
+        bounds_shp = shapely.box(*bounds)
+        for feat in reprojected_features:
+            if not feat.geometry.shp.intersects(bounds_shp):
+                continue
+            filtered_features.append(feat)
+
+        return filtered_features
 
     @staticmethod
     def from_config(name: str, config: dict[str, Any]) -> "GeojsonVectorFormat":

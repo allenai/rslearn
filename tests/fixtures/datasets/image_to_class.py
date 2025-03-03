@@ -71,7 +71,7 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
 
     # Add label.
     feature = Feature(
-        STGeometry(WGS84_PROJECTION, shapely.Point(1, 1), None),
+        STGeometry(window.projection, shapely.Point(1, 1), None),
         {
             "label": 1,
         },
@@ -80,7 +80,6 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
     layer_dir = window.get_layer_dir(layer_name)
     GeojsonVectorFormat().encode_vector(
         layer_dir,
-        window.projection,
         [feature],
     )
     window.mark_layer_completed(layer_name)
