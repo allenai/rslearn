@@ -545,21 +545,20 @@ class ModelDataset(torch.utils.data.Dataset):
                 )
 
                 for band_set, src_indexes, dst_indexes in needed_sets_and_indexes:
-                    _, final_bounds = band_set.get_final_projection_and_bounds(
-                        window.projection, bounds
+                    final_projection, final_bounds = (
+                        band_set.get_final_projection_and_bounds(
+                            window.projection, bounds
+                        )
                     )
                     if band_set.format is None:
                         raise ValueError(f"No format specified for {layer}")
                     raster_format = load_raster_format(
                         RasterFormatConfig(band_set.format["name"], band_set.format)
                     )
-                    if band_set.bands is None:
-                        # Raising Error as It is unclear the intended behavior here.
-                        raise ValueError("No bands specified for band set")
                     cur_path = layer_dir / "_".join(band_set.bands)
-                    if final_bounds is None:
-                        raise ValueError("Final bounds are None")
-                    src = raster_format.decode_raster(cur_path, final_bounds)
+                    src = raster_format.decode_raster(
+                        cur_path, final_projection, final_bounds
+                    )
                     if src is None:
                         raise ValueError(f"Source is None for {data_input}")
                     # Resize to patch size if needed.
@@ -586,7 +585,9 @@ class ModelDataset(torch.utils.data.Dataset):
             elif data_input.data_type == "vector":
                 assert isinstance(layer_config, VectorLayerConfig)
                 vector_format = load_vector_format(layer_config.format)
-                features = vector_format.decode_vector(layer_dir, bounds)
+                features = vector_format.decode_vector(
+                    layer_dir, window.projection, window.bounds
+                )
                 return features
 
             else:

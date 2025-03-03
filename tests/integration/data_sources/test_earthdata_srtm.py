@@ -77,7 +77,9 @@ def test_materialize_capitol_hill(tmp_path: pathlib.Path) -> None:
     materialize_dataset_windows(dataset, windows)
 
     raster_dir = window.get_raster_dir(layer_name, [band_name])
-    array = GeotiffRasterFormat().decode_raster(raster_dir, window.bounds)
+    array = GeotiffRasterFormat().decode_raster(
+        raster_dir, window.projection, window.bounds
+    )
     # Roughly 80-120 meters.
     print(f"min={array.min()} max={array.max()}")
     assert array.min() > 80

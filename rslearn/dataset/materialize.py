@@ -147,12 +147,6 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
             if band_cfg.remap:
                 remapper = load_remapper(band_cfg.remap)
 
-            if band_cfg.format is None or band_cfg.bands is None or bounds is None:
-                raise ValueError(
-                    f"No raster format or bands specified for {layer_name} \
-                          with  {band_cfg}"
-                )
-
             raster_format = load_raster_format(
                 RasterFormatConfig(band_cfg.format["name"], band_cfg.format)
             )
@@ -240,23 +234,19 @@ class VectorMaterializer(Materializer):
             item_groups: the items associated with this window and layer
         """
         assert isinstance(layer_cfg, VectorLayerConfig)
-
-        projection, bounds = layer_cfg.get_final_projection_and_bounds(
-            window.projection, window.bounds
-        )
-        if bounds is None:
-            raise ValueError(f"No bounds specified for {layer_name}")
         vector_format = load_vector_format(layer_cfg.format)
 
         for group_id, group in enumerate(item_groups):
             features: list[Feature] = []
 
             for item in group:
-                cur_features = tile_store.read_vector(item.name, projection, bounds)
+                cur_features = tile_store.read_vector(
+                    item.name, window.projection, window.bounds
+                )
                 features.extend(cur_features)
 
             vector_format.encode_vector(
-                window.get_layer_dir(layer_name, group_id), projection, features
+                window.get_layer_dir(layer_name, group_id), features
             )
 
         for group_id in range(len(item_groups)):
