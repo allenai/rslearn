@@ -262,8 +262,12 @@ class STGeometry:
             ),
         )
         # Change crs.
-        shp = rasterio.warp.transform_geom(self.projection.crs, projection.crs, shp)
-        shp = shapely.geometry.shape(shp)
+        # We only apply transform_geom if the CRS doesn't match, because even if we
+        # call transform_geom with the same source and destination CRS, it takes
+        # several milliseconds.
+        if self.projection.crs != projection.crs:
+            shp = rasterio.warp.transform_geom(self.projection.crs, projection.crs, shp)
+            shp = shapely.geometry.shape(shp)
         # Apply new resolution.
         shp = shapely.transform(
             shp,
