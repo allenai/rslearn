@@ -1,5 +1,6 @@
 """Data on Planetary Computer."""
 
+import json
 import os
 import tempfile
 import xml.etree.ElementTree as ET
@@ -25,12 +26,44 @@ from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
+from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 from .copernicus import get_harmonize_callback
 
 logger = get_logger(__name__)
+
+
+class PlanetaryComputerItem(Item):
+    """An item in the PlanetaryComputer data source."""
+
+    def __init__(self, name: str, geometry: STGeometry, asset_urls: dict[str, str]):
+        """Creates a new PlanetaryComputerItem.
+
+        Args:
+            name: unique name of the item
+            geometry: the spatial and temporal extent of the item
+            asset_urls: map from asset key to the unsigned asset URL.
+        """
+        super().__init__(name, geometry)
+        self.asset_urls = asset_urls
+
+    def serialize(self) -> dict[str, Any]:
+        """Serializes the item to a JSON-encodable dictionary."""
+        d = super().serialize()
+        d["asset_urls"] = self.asset_urls
+        return d
+
+    @staticmethod
+    def deserialize(d: dict[str, Any]) -> "PlanetaryComputerItem":
+        """Deserializes an item from a JSON-decoded dictionary."""
+        item = super(PlanetaryComputerItem, PlanetaryComputerItem).deserialize(d)
+        return PlanetaryComputerItem(
+            name=item.name,
+            geometry=item.geometry,
+            asset_urls=d["asset_urls"],
+        )
 
 
 class PlanetaryComputer(DataSource, TileStore):
@@ -59,6 +92,7 @@ class PlanetaryComputer(DataSource, TileStore):
         sort_ascending: bool = True,
         timeout: timedelta = timedelta(seconds=10),
         skip_items_missing_assets: bool = False,
+        cache_dir: UPath | None = None,
     ):
         """Initialize a new PlanetaryComputer instance.
 
@@ -72,6 +106,9 @@ class PlanetaryComputer(DataSource, TileStore):
             timeout: timeout for API requests.
             skip_items_missing_assets: skip STAC items that are missing any of the
                 assets in asset_bands during get_items.
+            cache_dir: optional directory to cache items by name, including asset URLs.
+                If not set, there will be no cache and instead STAC requests will be
+                needed each time.
         """
         self.collection_name = collection_name
         self.asset_bands = asset_bands
@@ -80,10 +117,9 @@ class PlanetaryComputer(DataSource, TileStore):
         self.sort_ascending = sort_ascending
         self.timeout = timeout
         self.skip_items_missing_assets = skip_items_missing_assets
+        self.cache_dir = cache_dir
 
-        self.client = pystac_client.Client.open(
-            self.STAC_ENDPOINT, modifier=planetary_computer.sign_inplace
-        )
+        self.client = pystac_client.Client.open(self.STAC_ENDPOINT)
         self.collection = self.client.get_collection(self.collection_name)
 
     @staticmethod
@@ -100,6 +136,9 @@ class PlanetaryComputer(DataSource, TileStore):
         if "timeout_seconds" in d:
             kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
 
+        if "cache_dir" in d:
+            kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
+
         simple_optionals = ["query", "sort_by", "sort_ascending"]
         for k in simple_optionals:
             if k in d:
@@ -107,7 +146,7 @@ class PlanetaryComputer(DataSource, TileStore):
 
         return PlanetaryComputer(**kwargs)
 
-    def _stac_item_to_item(self, stac_item: pystac.Item) -> Item:
+    def _stac_item_to_item(self, stac_item: pystac.Item) -> PlanetaryComputerItem:
         shp = shapely.geometry.shape(stac_item.geometry)
 
         # Get time range.
@@ -125,9 +164,13 @@ class PlanetaryComputer(DataSource, TileStore):
             )
 
         geom = STGeometry(WGS84_PROJECTION, shp, time_range)
-        return Item(stac_item.id, geom)
+        asset_urls = {
+            asset_key: asset_obj.href
+            for asset_key, asset_obj in stac_item.assets.items()
+        }
+        return PlanetaryComputerItem(stac_item.id, geom, asset_urls)
 
-    def get_item_by_name(self, name: str) -> Item:
+    def get_item_by_name(self, name: str) -> PlanetaryComputerItem:
         """Gets an item by name.
 
         Args:
@@ -136,12 +179,30 @@ class PlanetaryComputer(DataSource, TileStore):
         Returns:
             the item object
         """
+        # If cache_dir is set, we cache the item. First here we check if it is already
+        # in the cache.
+        cache_fname: UPath | None = None
+        if self.cache_dir:
+            cache_fname = self.cache_dir / f"{name}.json"
+        if cache_fname is not None and cache_fname.exists():
+            with cache_fname.open() as f:
+                return PlanetaryComputerItem.deserialize(json.load(f))
+
+        # No cache or not in cache, so we need to make the STAC request.
+        logger.debug("Getting STAC item {name}")
         stac_item = self.collection.get_item(name)
-        return self._stac_item_to_item(stac_item)
+        item = self._stac_item_to_item(stac_item)
+
+        # Finally we cache it if cache_dir is set.
+        if cache_fname is not None:
+            with cache_fname.open("w") as f:
+                json.dump(item.serialize(), f)
+
+        return item
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[list[PlanetaryComputerItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -194,6 +255,16 @@ class PlanetaryComputer(DataSource, TileStore):
             candidate_items = [
                 self._stac_item_to_item(stac_item) for stac_item in stac_items
             ]
+
+            # Since we made the STAC request, might as well save these to the cache.
+            if self.cache_dir is not None:
+                for item in candidate_items:
+                    cache_fname = self.cache_dir / f"{item.name}.json"
+                    if cache_fname.exists():
+                        continue
+                    with cache_fname.open("w") as f:
+                        json.dump(item.serialize(), f)
+
             cur_groups = match_candidate_items_to_window(
                 geometry, candidate_items, query_config
             )
@@ -201,15 +272,15 @@ class PlanetaryComputer(DataSource, TileStore):
 
         return groups
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: Any) -> PlanetaryComputerItem:
         """Deserializes an item from JSON-decoded data."""
         assert isinstance(serialized_item, dict)
-        return Item.deserialize(serialized_item)
+        return PlanetaryComputerItem.deserialize(serialized_item)
 
     def ingest(
         self,
         tile_store: TileStoreWithLayer,
-        items: list[Item],
+        items: list[PlanetaryComputerItem],
         geometries: list[list[STGeometry]],
     ) -> None:
         """Ingest items into the given tile store.
@@ -220,15 +291,13 @@ class PlanetaryComputer(DataSource, TileStore):
             geometries: a list of geometries needed for each item
         """
         for item in items:
-            stac_item = self.collection.get_item(item.name)
-
             for asset_key, band_names in self.asset_bands.items():
-                if asset_key not in stac_item.assets:
+                if asset_key not in item.asset_urls:
                     continue
                 if tile_store.is_raster_ready(item.name, band_names):
                     continue
 
-                asset_url = stac_item.assets[asset_key].href
+                asset_url = planetary_computer.sign(item.asset_urls[asset_key])
 
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     local_fname = os.path.join(tmp_dir, f"{asset_key}.tif")
@@ -295,10 +364,11 @@ class PlanetaryComputer(DataSource, TileStore):
             return list(self.asset_bands.values())
 
         # Otherwise we have to lookup the STAC item to see which assets it has.
-        stac_item = self.collection.get_item(item_name)
+        # Here we use get_item_by_name since it handles caching.
+        item = self.get_item_by_name(item_name)
         all_bands = []
         for asset_key, band_names in self.asset_bands.items():
-            if asset_key not in stac_item.assets:
+            if asset_key not in item.asset_urls:
                 continue
             all_bands.append(band_names)
         return all_bands
@@ -359,8 +429,8 @@ class PlanetaryComputer(DataSource, TileStore):
             the raster data
         """
         asset_key = self._get_asset_by_band(bands)
-        stac_item = self.collection.get_item(item_name)
-        asset_url = stac_item.assets[asset_key].href
+        item = self.get_item_by_name(item_name)
+        asset_url = planetary_computer.sign(item.asset_urls[asset_key])
 
         # Construct the transform to use for the warped dataset.
         wanted_transform = affine.Affine(
@@ -481,6 +551,9 @@ class Sentinel2(PlanetaryComputer):
             assets=list(needed_assets),
         )
 
+        if "cache_dir" in d:
+            kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
+
         simple_optionals = [
             "harmonize",
             "query",
@@ -494,8 +567,8 @@ class Sentinel2(PlanetaryComputer):
 
         return Sentinel2(**kwargs)
 
-    def _get_product_xml(self, stac_item: pystac.Item) -> ET.Element:
-        asset_url = stac_item.assets["product-metadata"].href
+    def _get_product_xml(self, item: PlanetaryComputerItem) -> ET.Element:
+        asset_url = planetary_computer.sign(item.asset_urls["product-metadata"])
         response = requests.get(asset_url, timeout=self.timeout.total_seconds())
         response.raise_for_status()
         return ET.fromstring(response.content)
@@ -503,7 +576,7 @@ class Sentinel2(PlanetaryComputer):
     def ingest(
         self,
         tile_store: TileStoreWithLayer,
-        items: list[Item],
+        items: list[PlanetaryComputerItem],
         geometries: list[list[STGeometry]],
     ) -> None:
         """Ingest items into the given tile store.
@@ -514,13 +587,11 @@ class Sentinel2(PlanetaryComputer):
             geometries: a list of geometries needed for each item
         """
         for item in items:
-            stac_item = self.collection.get_item(item.name)
-
             for asset_key, band_names in self.asset_bands.items():
                 if tile_store.is_raster_ready(item.name, band_names):
                     continue
 
-                asset_url = stac_item.assets[asset_key].href
+                asset_url = planetary_computer.sign(item.asset_urls[asset_key])
 
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     local_fname = os.path.join(tmp_dir, f"{asset_key}.tif")
@@ -549,7 +620,7 @@ class Sentinel2(PlanetaryComputer):
                     harmonize_callback = None
                     if self.harmonize and asset_key != "visual":
                         harmonize_callback = get_harmonize_callback(
-                            self._get_product_xml(stac_item)
+                            self._get_product_xml(item)
                         )
 
                     if harmonize_callback is not None:
@@ -606,8 +677,8 @@ class Sentinel2(PlanetaryComputer):
         if not self.harmonize or bands == self.BANDS["visual"]:
             return raw_data
 
-        stac_item = self.collection.get_item(item_name)
-        harmonize_callback = get_harmonize_callback(self._get_product_xml(stac_item))
+        item = self.get_item_by_name(item_name)
+        harmonize_callback = get_harmonize_callback(self._get_product_xml(item))
 
         if harmonize_callback is None:
             return raw_data
@@ -658,6 +729,9 @@ class Sentinel1(PlanetaryComputer):
         kwargs: dict[str, Any] = dict(
             band_names=list(band_names),
         )
+
+        if "cache_dir" in d:
+            kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
 
         simple_optionals = ["query", "sort_by", "sort_ascending", "timeout_seconds"]
         for k in simple_optionals:
