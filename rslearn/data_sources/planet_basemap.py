@@ -83,6 +83,7 @@ class PlanetBasemap(DataSource):
                 environmnet variable).
         """
         self.config = config
+        self.series_id = series_id
         self.bands = bands
 
         self.session = requests.Session()
@@ -90,18 +91,8 @@ class PlanetBasemap(DataSource):
             api_key = os.environ["PL_API_KEY"]
         self.session.auth = (api_key, "")
 
-        # List mosaics.
-        self.mosaics = {}
-        for mosaic_dict in self._api_get_paginate(
-            path=f"series/{series_id}/mosaics", list_key="mosaics"
-        ):
-            shp = shapely.box(*mosaic_dict["bbox"])
-            time_range = (
-                datetime.fromisoformat(mosaic_dict["first_acquired"]),
-                datetime.fromisoformat(mosaic_dict["last_acquired"]),
-            )
-            geom = STGeometry(WGS84_PROJECTION, shp, time_range)
-            self.mosaics[mosaic_dict["id"]] = geom
+        # Lazily load mosaics.
+        self.mosaics: dict | None = None
 
     @staticmethod
     def from_config(config: LayerConfig, ds_path: UPath) -> "PlanetBasemap":
@@ -122,6 +113,31 @@ class PlanetBasemap(DataSource):
             if optional_key in d:
                 kwargs[optional_key] = d[optional_key]
         return PlanetBasemap(**kwargs)
+
+    def _load_mosaics(self) -> dict[str, STGeometry]:
+        """Lazily load mosaics in the configured series_id from Planet API.
+
+        We don't load it when creating the data source because it takes time and caller
+        may not be calling get_items. Additionally, loading it during the get_items
+        call enables leveraging the retry loop functionality in
+        prepare_dataset_windows.
+        """
+        if self.mosaics is not None:
+            return self.mosaics
+
+        self.mosaics = {}
+        for mosaic_dict in self._api_get_paginate(
+            path=f"series/{self.series_id}/mosaics", list_key="mosaics"
+        ):
+            shp = shapely.box(*mosaic_dict["bbox"])
+            time_range = (
+                datetime.fromisoformat(mosaic_dict["first_acquired"]),
+                datetime.fromisoformat(mosaic_dict["last_acquired"]),
+            )
+            geom = STGeometry(WGS84_PROJECTION, shp, time_range)
+            self.mosaics[mosaic_dict["id"]] = geom
+
+        return self.mosaics
 
     def _api_get(
         self,
@@ -159,6 +175,7 @@ class PlanetBasemap(DataSource):
             raise ApiError(
                 f"{url}: got status code {response.status_code}: {response.text}"
             )
+
         return response.json()
 
     def _api_get_paginate(
@@ -204,6 +221,8 @@ class PlanetBasemap(DataSource):
         Returns:
             List of groups of items that should be retrieved for each geometry.
         """
+        mosaics = self._load_mosaics()
+
         groups = []
         for geometry in geometries:
             geom_bbox = geometry.to_projection(WGS84_PROJECTION).shp.bounds
@@ -212,7 +231,7 @@ class PlanetBasemap(DataSource):
             # Find the relevant mosaics that the geometry intersects.
             # For each relevant mosaic, identify the intersecting quads.
             items = []
-            for mosaic_id, mosaic_geom in self.mosaics.items():
+            for mosaic_id, mosaic_geom in mosaics.items():
                 if not geometry.intersects(mosaic_geom):
                     continue
                 logger.info(f"found mosaic {mosaic_geom} for geom {geometry}")
