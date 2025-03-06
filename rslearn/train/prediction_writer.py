@@ -182,6 +182,4 @@ class RslearnWriter(BasePredictionWriter):
                 )
 
             elif self.layer_config.layer_type == LayerType.VECTOR:
-                self.format.encode_vector(
-                    layer_dir, metadata["projection"], pending_output
-                )
+                self.format.encode_vector(layer_dir, pending_output)

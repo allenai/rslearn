@@ -45,7 +45,7 @@ class TestLocalFiles:
         assert isinstance(layer_config, VectorLayerConfig)
         vector_format = load_vector_format(layer_config.format)
         features = vector_format.decode_vector(
-            window.path / "layers" / "local_file", window.bounds
+            window.path / "layers" / "local_file", window.projection, window.bounds
         )
 
         assert len(features) == 2
@@ -128,7 +128,7 @@ class TestLocalFiles:
         assert isinstance(layer_config, VectorLayerConfig)
         vector_format = load_vector_format(layer_config.format)
         features = vector_format.decode_vector(
-            window.path / "layers" / "local_file", window.bounds
+            window.path / "layers" / "local_file", window.projection, window.bounds
         )
         assert len(features) == 1
         assert features[0].properties is not None
@@ -200,7 +200,7 @@ class TestLocalFiles:
         window = windows[0]
         raster_dir = window.get_raster_dir(layer_name, ["b1", "b2"])
         materialized_image = GeotiffRasterFormat().decode_raster(
-            raster_dir, window.bounds
+            raster_dir, window.projection, window.bounds
         )
         assert (
             materialized_image[0, :, :].min() == 0
@@ -244,7 +244,7 @@ class TestCoordinateModes:
         src_data_dir = ds_path / "src_data"
         src_data_dir.mkdir(parents=True, exist_ok=True)
         vector_format = GeojsonVectorFormat(coordinate_mode=request.param)
-        vector_format.encode_vector(src_data_dir, self.source_data_projection, features)
+        vector_format.encode_vector(src_data_dir, features)
 
         dataset_config = {
             "layers": {
