@@ -39,7 +39,7 @@ class Task:
 
     def process_output(
         self, raw_output: Any, metadata: dict[str, Any]
-    ) -> npt.NDArray[Any] | list[Feature]:
+    ) -> npt.NDArray[Any] | list[Feature] | dict[str, Any]:
         """Processes an output into raster or vector data.
 
         Args:
@@ -47,7 +47,7 @@ class Task:
             metadata: metadata about the patch being read
 
         Returns:
-            either raster or vector data.
+            raster data, vector data, or multi-task dictionary output.
         """
         raise NotImplementedError
 

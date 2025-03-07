@@ -23,7 +23,7 @@ from rslearn.log_utils import get_logger
 from rslearn.tile_stores import get_tile_store_with_layer
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
-from rslearn.utils import Projection, STGeometry, parse_disabled_layers
+from rslearn.utils import Projection, STGeometry
 
 logger = get_logger(__name__)
 
@@ -62,6 +62,11 @@ def parse_time_range(
     if not start or not end:
         return None
     return (parse_time(start), parse_time(end))
+
+
+def parse_disabled_layers(disabled_layers: str) -> list[str]:
+    """Parse the disabled layers string."""
+    return disabled_layers.split(",") if disabled_layers else []
 
 
 @register_handler("dataset", "add_windows")
