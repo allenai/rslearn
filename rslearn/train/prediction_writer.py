@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from upath import UPath
@@ -112,14 +113,12 @@ class RslearnWriter(BasePredictionWriter):
         """
         assert isinstance(pl_module, RslearnLightningModule)
         metadatas = batch[2]
-        outputs = [
+        outputs: list[Any] = [
             pl_module.task.process_output(output, metadata)
             for output, metadata in zip(prediction, metadatas)
         ]
 
         for output, metadata in zip(outputs, metadatas):
-            if not isinstance(output, dict):
-                raise ValueError(f"Unsupported output type {type(output)}")
             for k in self.selector:
                 output = output[k]
 
@@ -128,9 +127,12 @@ class RslearnWriter(BasePredictionWriter):
             window_bounds = metadata["window_bounds"]
 
             if self.layer_config.layer_type == LayerType.RASTER:
-                if window_name not in self.pending_outputs and isinstance(
-                    output, np.ndarray
-                ):
+                if not isinstance(output, npt.NDArray):
+                    raise ValueError(
+                        "expected output for raster layer to be numpy array"
+                    )
+
+                if window_name not in self.pending_outputs:
                     self.pending_outputs[window_name] = np.zeros(
                         (
                             output.shape[0],
@@ -151,9 +153,13 @@ class RslearnWriter(BasePredictionWriter):
                 )
 
             elif self.layer_config.layer_type == LayerType.VECTOR:
+                if not isinstance(output, list):
+                    raise ValueError(
+                        "expected output for vector layer to be list of features"
+                    )
+
                 if window_name not in self.pending_outputs:
                     self.pending_outputs[window_name] = []
-
                 self.pending_outputs[window_name].extend(output)
 
             if metadata["patch_idx"] < metadata["num_patches"] - 1:

@@ -4,12 +4,14 @@ from typing import Any
 
 import numpy as np
 import numpy.typing as npt
+import shapely
 import torch
 import torchmetrics
 from PIL import Image, ImageDraw
 from torchmetrics import Metric, MetricCollection
 
-from rslearn.utils import Feature
+from rslearn.utils.feature import Feature
+from rslearn.utils.geometry import STGeometry
 
 from .task import BasicTask
 
@@ -91,6 +93,31 @@ class RegressionTask(BasicTask):
             "value": torch.tensor(0, dtype=torch.float32),
             "valid": torch.tensor(0, dtype=torch.float32),
         }
+
+    def process_output(
+        self, raw_output: Any, metadata: dict[str, Any]
+    ) -> npt.NDArray[Any] | list[Feature]:
+        """Processes an output into raster or vector data.
+
+        Args:
+            raw_output: the output from prediction head.
+            metadata: metadata about the patch being read
+
+        Returns:
+            either raster or vector data.
+        """
+        output = raw_output.item() / self.scale_factor
+        feature = Feature(
+            STGeometry(
+                metadata["projection"],
+                shapely.Point(metadata["bounds"][0], metadata["bounds"][1]),
+                None,
+            ),
+            {
+                self.property_name: output,
+            },
+        )
+        return [feature]
 
     def visualize(
         self,
