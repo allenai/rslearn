@@ -1,5 +1,7 @@
 """Data source for raster or vector data in local files."""
 
+import functools
+import json
 from typing import Any, Generic, TypeVar
 
 import fiona
@@ -199,6 +201,10 @@ class RasterImporter(Importer):
             # And we'll need to autodetect the bands later.
             file_paths = src_dir.glob("**/*.*")
             for path in file_paths:
+                # Ignore JSON files.
+                if path.name.endswith(".json"):
+                    continue
+
                 spec = RasterItemSpec(fnames=[path], bands=None)
                 item_specs.append(spec)
 
@@ -278,11 +284,15 @@ class VectorImporter(Importer):
         items: list[VectorItem] = []
 
         for path in file_paths:
+            # Ignore JSON files.
+            if path.name.endswith(".json"):
+                continue
+
             # Get the bounds of the features in the vector file, which we assume fiona can
             # read.
             # For shapefile, to open it we need to copy all the aux files.
             aux_files: list[UPath] = []
-            if path.name.split(".")[-1] == "shp":
+            if path.name.endswith(".shp"):
                 prefix = ".".join(path.name.split(".")[:-1])
                 for ext in SHAPEFILE_AUX_EXTENSIONS:
                     aux_files.append(path.parent / (prefix + ext))
@@ -401,8 +411,6 @@ class LocalFiles(DataSource):
         self.importer = Importers[config.layer_type.value]
         self.src_dir = src_dir
 
-        self.items = self.importer.list_items(self.config, src_dir)
-
     @staticmethod
     def from_config(config: LayerConfig, ds_path: UPath) -> "LocalFiles":
         """Creates a new LocalFiles instance from a configuration dictionary."""
@@ -410,6 +418,26 @@ class LocalFiles(DataSource):
             raise ValueError("LocalFiles data source requires a data source config")
         d = config.data_source.config_dict
         return LocalFiles(config=config, src_dir=join_upath(ds_path, d["src_dir"]))
+
+    @functools.cache
+    def list_items(self) -> list[Item]:
+        """Lists items from the source directory while maintaining a cache file."""
+        cache_fname = self.src_dir / "summary.json"
+        if not cache_fname.exists():
+            logger.debug("cache at %s does not exist, listing items", cache_fname)
+            items = self.importer.list_items(self.config, self.src_dir)
+            serialized_items = [item.serialize() for item in items]
+            with cache_fname.open("w") as f:
+                json.dump(serialized_items, f)
+            return items
+
+        logger.debug("loading item list from cache at %s", cache_fname)
+        with cache_fname.open() as f:
+            serialized_items = json.load(f)
+        return [
+            self.deserialize_item(serialized_item)
+            for serialized_item in serialized_items
+        ]
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
@@ -426,7 +454,7 @@ class LocalFiles(DataSource):
         groups = []
         for geometry in geometries:
             cur_items = []
-            for item in self.items:
+            for item in self.list_items():
                 if not item.geometry.intersects(geometry):
                     continue
                 cur_items.append(item)
