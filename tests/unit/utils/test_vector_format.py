@@ -32,7 +32,7 @@ def test_geojson(
     out_dir = UPath(tmp_path)
     out_fname = out_dir / "data.geojson"
 
-    GeojsonVectorFormat(coordinate_mode).encode_vector(out_dir, projection, features)
+    GeojsonVectorFormat(coordinate_mode).encode_vector(out_dir, features)
     with out_fname.open() as f:
         fc = json.load(f)
         feat_x, feat_y = fc["features"][0]["geometry"]["coordinates"]
@@ -44,9 +44,6 @@ def test_geojson(
 
     elif coordinate_mode == GeojsonCoordinateMode.CRS:
         # In CRS mode, it should be in CRS coordinates.
-        GeojsonVectorFormat(GeojsonCoordinateMode.CRS).encode_vector(
-            out_dir, projection, features
-        )
         assert feat_x == pytest.approx(12340)
         assert feat_y == pytest.approx(-56780)
 
@@ -58,8 +55,11 @@ def test_geojson(
 
     # Make sure that when we read the features back, we get the same geometry as
     # before. The bounds is ignored since it is GeoJSON (no index).
-    result = GeojsonVectorFormat().decode_vector(out_dir, (0, 0, 0, 0))[0].geometry
-    result = result.to_projection(projection)
+    result = (
+        GeojsonVectorFormat()
+        .decode_vector(out_dir, projection, (col - 1, row - 1, col + 1, row + 1))[0]
+        .geometry
+    )
     assert result.shp.x == pytest.approx(geometry.shp.x)
     assert result.shp.y == pytest.approx(geometry.shp.y)
 
