@@ -6,6 +6,7 @@ import jsonargparse
 from upath import UPath
 
 from rslearn.config import LayerConfig
+from rslearn.utils.jsonargparse import init_jsonargparse
 
 from .default import DefaultTileStore
 from .tile_store import TileStore, TileStoreWithLayer
@@ -32,6 +33,7 @@ def load_tile_store(config: dict[str, Any], ds_path: UPath) -> TileStore:
         tile_store.set_dataset_path(ds_path)
         return tile_store
 
+    init_jsonargparse()
     parser = jsonargparse.ArgumentParser()
     parser.add_argument("--tile_store", type=TileStore)
     cfg = parser.parse_object({"tile_store": config})
