@@ -10,6 +10,7 @@ import rasterio
 from class_registry import ClassRegistry
 from PIL import Image
 from rasterio.crs import CRS
+from rasterio.enums import Resampling
 from upath import UPath
 
 from rslearn.config import RasterFormatConfig
@@ -64,6 +65,25 @@ def get_raster_projection_and_bounds(
     )
 
 
+def get_transform_from_projection_and_bounds(
+    projection: Projection, bounds: PixelBounds
+) -> affine.Affine:
+    """Get the affine transform that corresponds to the given projection and bounds.
+
+    Args:
+        projection: the projection. Only the resolutions are used.
+        bounds: the bounding box. Only the top-left corner is used.
+    """
+    return affine.Affine(
+        projection.x_resolution,
+        0,
+        bounds[0] * projection.x_resolution,
+        0,
+        projection.y_resolution,
+        bounds[1] * projection.y_resolution,
+    )
+
+
 class RasterFormat:
     """An abstract class for writing raster data.
 
@@ -89,16 +109,22 @@ class RasterFormat:
         raise NotImplementedError
 
     def decode_raster(
-        self, path: UPath, bounds: PixelBounds
-    ) -> npt.NDArray[Any] | None:
+        self,
+        path: UPath,
+        projection: Projection,
+        bounds: PixelBounds,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> npt.NDArray[Any]:
         """Decodes raster data.
 
         Args:
             path: the directory to read from
-            bounds: the bounds of the raster to read
+            projection: the projection to read the raster in.
+            bounds: the bounds to read in the given projection.
+            resampling: resampling method to use in case resampling is needed.
 
         Returns:
-            the raster data, or None if no image content is found
+            the raster data
         """
         raise NotImplementedError
 
@@ -197,6 +223,19 @@ class ImageTileRasterFormat(RasterFormat):
             bounds: the bounds of the raster data in the projection
             array: the raster data (must be CHW)
         """
+        # Write metadata about the projection that we are writing under.
+        # We also save dtype and number of bands so we can return correct shape when
+        # there are no intersecting tiles.
+        with (path / "metadata.json").open("w") as f:
+            json.dump(
+                {
+                    "projection": projection.serialize(),
+                    "dtype": array.dtype.name,
+                    "num_bands": array.shape[0],
+                },
+                f,
+            )
+
         start_tile = (bounds[0] // self.tile_size, bounds[1] // self.tile_size)
         end_tile = (bounds[2] // self.tile_size + 1, bounds[3] // self.tile_size + 1)
         extension = self.get_extension()
@@ -235,17 +274,34 @@ class ImageTileRasterFormat(RasterFormat):
                     self.encode_tile(f, projection, cur_bounds, cur_array)
 
     def decode_raster(
-        self, path: UPath, bounds: PixelBounds
-    ) -> npt.NDArray[Any] | None:
+        self,
+        path: UPath,
+        projection: Projection,
+        bounds: PixelBounds,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> npt.NDArray[Any]:
         """Decodes raster data.
 
         Args:
             path: the directory to read from
-            bounds: the bounds of the raster to read
+            projection: the projection to read the raster in.
+            bounds: the bounds to read in the given projection.
+            resampling: resampling method to use in case resampling is needed.
 
         Returns:
-            the raster data, or None if no image content is found
+            the raster data
         """
+        # Verify that the source data has the same projection as the requested one.
+        # ImageTileRasterFormat currently does not support re-projecting.
+        with (path / "metadata.json").open() as f:
+            image_metadata = json.load(f)
+        source_data_projection = Projection.deserialize(image_metadata["projection"])
+        if source_data_projection != projection:
+            raise NotImplementedError(
+                "not implemented to re-project source data "
+                + f"(source projection {source_data_projection} does not match requested projection {projection})"
+            )
+
         extension = self.get_extension()
 
         # Load tiles one at a time.
@@ -254,7 +310,12 @@ class ImageTileRasterFormat(RasterFormat):
             (bounds[2] - 1) // self.tile_size + 1,
             (bounds[3] - 1) // self.tile_size + 1,
         )
-        dst = None
+        dst_shape = (
+            image_metadata["num_bands"],
+            bounds[3] - bounds[1],
+            bounds[2] - bounds[0],
+        )
+        dst = np.zeros(dst_shape, dtype=image_metadata["dtype"])
         for col in range(start_tile[0], end_tile[0]):
             for row in range(start_tile[1], end_tile[1]):
                 fname = path / f"{col}_{row}.{extension}"
@@ -398,87 +459,45 @@ class GeotiffRasterFormat(RasterFormat):
         profile.update(self.geotiff_options)
 
         path.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Writing geotiff to {path / fname}")
+        logger.debug(f"Writing geotiff to {path / fname}")
         with open_rasterio_upath_writer(path / fname, **profile) as dst:
             dst.write(array)
 
     def decode_raster(
-        self, path: UPath, bounds: PixelBounds, fname: str | None = None
+        self,
+        path: UPath,
+        projection: Projection,
+        bounds: PixelBounds,
+        resampling: Resampling = Resampling.bilinear,
+        fname: str | None = None,
     ) -> npt.NDArray[Any]:
         """Decodes raster data.
 
         Args:
             path: the directory to read from
-            bounds: the bounds of the raster to read
+            projection: the projection to read the raster in.
+            bounds: the bounds to read in the given projection.
+            resampling: resampling method to use in case resampling is needed.
             fname: override the filename to read from
 
         Returns:
-            the raster data, or None if no image content is found
+            the raster data
         """
         if fname is None:
             fname = self.fname
 
+        # Construct the transform to use for the warped dataset.
+        wanted_transform = get_transform_from_projection_and_bounds(projection, bounds)
         with open_rasterio_upath_reader(path / fname) as src:
-            transform = src.transform
-            x_resolution = transform.a
-            y_resolution = transform.e
-            offset = (
-                int(transform.c / x_resolution),
-                int(transform.f / y_resolution),
-            )
-            # bounds is in global pixel coordinates.
-            # We first convert that to pixels relative to top-left of the raster.
-            relative_bounds = [
-                bounds[0] - offset[0],
-                bounds[1] - offset[1],
-                bounds[2] - offset[0],
-                bounds[3] - offset[1],
-            ]
-
-            # Make sure the requested bounds intersects the raster, otherwise the
-            # windowed read cannot be performed.
-            if (
-                relative_bounds[2] < 0
-                or relative_bounds[3] < 0
-                or relative_bounds[0] >= src.width
-                or relative_bounds[1] >= src.height
-            ):
-                # Assume all of the bands have the same dtype, so just use first
-                # one (src.dtypes is list of dtype per band).
-                return np.zeros(
-                    (src.count, bounds[3] - bounds[1], bounds[2] - bounds[0]),
-                    dtype=src.dtypes[0],
-                )
-
-            # Now get the actual pixels we will read, which must be contained in
-            # the GeoTIFF.
-            # Padding is (before_x, before_y, after_x, after_y) and will be used to
-            # pad the output back to the originally requested bounds.
-            padding = [0, 0, 0, 0]
-            if relative_bounds[0] < 0:
-                padding[0] = -relative_bounds[0]
-                relative_bounds[0] = 0
-            if relative_bounds[1] < 0:
-                padding[1] = -relative_bounds[1]
-                relative_bounds[1] = 0
-            if relative_bounds[2] > src.width:
-                padding[2] = relative_bounds[2] - src.width
-                relative_bounds[2] = src.width
-            if relative_bounds[3] > src.height:
-                padding[3] = relative_bounds[3] - src.height
-                relative_bounds[3] = src.height
-
-            window = rasterio.windows.Window(
-                relative_bounds[0],
-                relative_bounds[1],
-                relative_bounds[2] - relative_bounds[0],
-                relative_bounds[3] - relative_bounds[1],
-            )
-            array = src.read(window=window)
-            array = np.pad(
-                array, ((0, 0), (padding[1], padding[3]), (padding[0], padding[2]))
-            )
-            return array
+            with rasterio.vrt.WarpedVRT(
+                src,
+                crs=projection.crs,
+                transform=wanted_transform,
+                width=bounds[2] - bounds[0],
+                height=bounds[3] - bounds[1],
+                resampling=resampling,
+            ) as vrt:
+                return vrt.read()
 
     def get_raster_bounds(self, path: UPath) -> PixelBounds:
         """Returns the bounds of the stored raster.
@@ -564,35 +583,57 @@ class SingleImageRasterFormat(RasterFormat):
             if array.shape[2] == 1:
                 array = array[:, :, 0]
             Image.fromarray(array).save(f, format=self.format.upper())
+
+        # Since the image file doesn't include the georeferencing, we store it in an
+        # auxiliary metadata file.
         with (path / "metadata.json").open("w") as f:
             json.dump(
                 {
+                    "projection": projection.serialize(),
                     "bounds": bounds,
                 },
                 f,
             )
 
     def decode_raster(
-        self, path: UPath, bounds: PixelBounds
-    ) -> npt.NDArray[Any] | None:
+        self,
+        path: UPath,
+        projection: Projection,
+        bounds: PixelBounds,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> npt.NDArray[Any]:
         """Decodes raster data.
 
         Args:
             path: the directory to read from
-            bounds: the bounds of the raster to read
+            projection: the projection to read the raster in.
+            bounds: the bounds to read in the given projection.
+            resampling: resampling method to use in case resampling is needed.
 
         Returns:
-            the raster data, or None if no image content is found
+            the raster data
         """
-        image_fname = path / ("image." + self.get_extension())
+        # Try to get the bounds of the saved image from the metadata file.
+        # In old versions, the file may be missing the projection key.
         metadata_fname = path / "metadata.json"
-        if metadata_fname.exists():
-            with metadata_fname.open() as f:
-                image_bounds = json.load(f)["bounds"]
-        else:
-            # Backwards compatibility -- assume that requested bounds matches the window bounds.
-            image_bounds = bounds
+        with metadata_fname.open() as f:
+            image_metadata = json.load(f)
 
+        image_bounds = image_metadata["bounds"]
+
+        # If the projection key is set, verify that it matches the requested projection
+        # since SingleImageRasterFormat currently does not support re-projecting.
+        if "projection" in image_metadata:
+            source_data_projection = Projection.deserialize(
+                image_metadata["projection"]
+            )
+            if projection != source_data_projection:
+                raise NotImplementedError(
+                    "not implemented to re-project source data "
+                    + f"(source projection {source_data_projection} does not match requested projection {projection})"
+                )
+
+        image_fname = path / ("image." + self.get_extension())
         with image_fname.open("rb") as f:
             array = np.array(Image.open(f, formats=[self.format.upper()]))
 

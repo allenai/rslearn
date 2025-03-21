@@ -3,7 +3,6 @@ import pathlib
 import shutil
 import subprocess
 import sys
-import tempfile
 from datetime import datetime, timezone
 from typing import Any
 
@@ -364,6 +363,7 @@ class TestMaterialization:
 
     @pytest.fixture
     def ingested_dataset(self, tmp_path: pathlib.Path, monkeypatch: Any) -> Dataset:
+        print("tmp_path for ingested dataset", tmp_path)
         prepared_dataset = self.prepared_dataset(tmp_path)
         logger.info("prepared_dataset: %s", prepared_dataset.path)
         mock_args = [
@@ -411,75 +411,59 @@ class TestMaterialization:
         assert self.expected_materialized_fname(ingested_dataset.path).exists()
 
     def test_materialization_errors_on_bad_geojson(
-        self, ingested_dataset: Dataset, monkeypatch: Any
+        self, ingested_dataset: Dataset, monkeypatch: Any, tmp_path: pathlib.Path
     ) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            # Copy the ingested dataset to a new location.
-            new_path = UPath(tmp_dir) / "dataset"
-            logger.info("copying dataset to %s", new_path)
-            shutil.copytree(ingested_dataset.path, new_path)
+        # Copy the ingested dataset to a new location.
+        new_path = UPath(tmp_path) / "new_dataset"
+        logger.info("copying dataset to %s", new_path)
+        shutil.copytree(ingested_dataset.path, new_path)
 
-            # Modify the dataset configuration to use a bad data source.
-            logger.info("modify dataset configuration")
-            # Corrupt the data.geojson file by writing invalid JSON
-            data_file = (
-                new_path
-                / "tiles"
-                / "local_files"
-                / "foo"
-                / "data.geojson"
-                / "data.geojson"
-            )
-            with data_file.open("w") as f:
-                f.write("invalid json{")
+        # Modify the dataset configuration to use a bad data source.
+        logger.info("modify dataset configuration")
+        # Corrupt the data.geojson file by writing invalid JSON
+        data_file = new_path / "tiles" / "local_files" / "foo" / "data.geojson"
+        with data_file.open("w") as f:
+            f.write("invalid json{")
 
-            # Try to materialize the dataset.
-            mock_args = [
-                "rslearn",
-                "dataset",
-                "materialize",
-                "--root",
-                str(new_path),
-            ]
-            # from time import sleep
-            # sleep(10000)
-            monkeypatch.setattr(sys, "argv", mock_args)
-            with pytest.raises(json.decoder.JSONDecodeError):
-                rslearn.main.main()
+        # Try to materialize the dataset.
+        mock_args = [
+            "rslearn",
+            "dataset",
+            "materialize",
+            "--root",
+            str(new_path),
+        ]
+        monkeypatch.setattr(sys, "argv", mock_args)
+        with pytest.raises(json.decoder.JSONDecodeError):
+            rslearn.main.main()
 
     def test_ignore_errors(
         self,
         ingested_dataset: Dataset,
+        tmp_path: pathlib.Path,
         monkeypatch: Any,
     ) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            # Copy the ingested dataset to a new location.
-            new_path = UPath(tmp_dir) / "dataset"
-            logger.info("copying dataset to %s", new_path)
-            shutil.copytree(ingested_dataset.path, new_path)
-            # Corrupt the data.geojson file by writing invalid JSON
-            data_file = (
-                new_path
-                / "tiles"
-                / "local_files"
-                / "bar"
-                / "data.geojson"
-                / "data.geojson"
-            )
-            with data_file.open("w") as f:
-                f.write("invalid json{")
+        print("test_ignore_errors tmp_path", tmp_path)
+        # Copy the ingested dataset to a new location.
+        new_path = UPath(tmp_path) / "new_dataset"
+        logger.info("copying dataset to %s", new_path)
+        shutil.copytree(ingested_dataset.path, new_path)
+        # Corrupt the data.geojson file by writing invalid JSON
+        data_file = new_path / "tiles" / "local_files" / "bar" / "data.geojson"
+        with data_file.open("w") as f:
+            f.write("invalid json{")
 
-            # Try to materialize the dataset.
-            mock_args = [
-                "rslearn",
-                "dataset",
-                "materialize",
-                "--root",
-                str(new_path),
-                "--ignore-errors",
-                "--workers",
-                "0",
-            ]
-            monkeypatch.setattr(sys, "argv", mock_args)
-            rslearn.main.main()
-            assert self.expected_materialized_fname(new_path).exists()
+        # Try to materialize the dataset.
+        mock_args = [
+            "rslearn",
+            "dataset",
+            "materialize",
+            "--root",
+            str(new_path),
+            "--ignore-errors",
+            "--workers",
+            "0",
+        ]
+        monkeypatch.setattr(sys, "argv", mock_args)
+        rslearn.main.main()
+        assert self.expected_materialized_fname(new_path).exists()

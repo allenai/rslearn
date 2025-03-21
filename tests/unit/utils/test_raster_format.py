@@ -46,27 +46,34 @@ def test_geotiff_tiling(tmp_path: pathlib.Path) -> None:
 
 
 class TestGeotiffInOrOutOfBounds:
+    PROJECTION = Projection(CRS.from_epsg(3857), 1, -1)
+
     @pytest.fixture
     def encoded_raster_path(self, tmp_path: pathlib.Path) -> UPath:
         path = UPath(tmp_path)
-        projection = Projection(CRS.from_epsg(3857), 1, -1)
         array = np.ones((1, 8, 8), dtype=np.uint8)
-        GeotiffRasterFormat().encode_raster(path, projection, (0, 0, 8, 8), array)
+        GeotiffRasterFormat().encode_raster(path, self.PROJECTION, (0, 0, 8, 8), array)
         return path
 
     def test_geotiff_in_bounds(self, encoded_raster_path: UPath) -> None:
-        array = GeotiffRasterFormat().decode_raster(encoded_raster_path, (2, 2, 6, 6))
+        array = GeotiffRasterFormat().decode_raster(
+            encoded_raster_path, self.PROJECTION, (2, 2, 6, 6)
+        )
         assert array.shape == (1, 4, 4)
         assert np.all(array == 1)
 
     def test_geotiff_partial_overlap(self, encoded_raster_path: UPath) -> None:
-        array = GeotiffRasterFormat().decode_raster(encoded_raster_path, (4, 4, 12, 12))
+        array = GeotiffRasterFormat().decode_raster(
+            encoded_raster_path, self.PROJECTION, (4, 4, 12, 12)
+        )
         assert array.shape == (1, 8, 8)
         assert np.all(array[:, 0:4, 0:4] == 1)
         assert np.all(array[:, 0:8, 4:8] == 0)
 
     def test_geotiff_out_of_bounds(self, encoded_raster_path: UPath) -> None:
-        array = GeotiffRasterFormat().decode_raster(encoded_raster_path, (8, 8, 12, 12))
+        array = GeotiffRasterFormat().decode_raster(
+            encoded_raster_path, self.PROJECTION, (8, 8, 12, 12)
+        )
         assert array.shape == (1, 4, 4)
         assert np.all(array == 0)
 

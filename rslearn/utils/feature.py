@@ -11,7 +11,7 @@ from .geometry import Projection, STGeometry
 class Feature:
     """A GeoJSON-like feature that contains one vector geometry."""
 
-    def __init__(self, geometry: STGeometry, properties: dict[str, Any] | None = {}):
+    def __init__(self, geometry: STGeometry, properties: dict[str, Any] = {}):
         """Initialize a new Feature.
 
         Args:

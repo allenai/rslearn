@@ -5,12 +5,10 @@ import multiprocessing
 import random
 import sys
 from collections.abc import Callable
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from typing import Any, TypeVar
 
 import tqdm
-import wandb
 from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
 from rasterio.crs import CRS
 from upath import UPath
@@ -20,7 +18,11 @@ from rslearn.const import WGS84_EPSG
 from rslearn.data_sources import Item, data_source_from_config
 from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
-from rslearn.dataset.manage import materialize_dataset_windows, prepare_dataset_windows
+from rslearn.dataset.manage import (
+    materialize_dataset_windows,
+    prepare_dataset_windows,
+    retry,
+)
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import get_tile_store_with_layer
 from rslearn.train.data_module import RslearnDataModule
@@ -357,14 +359,24 @@ def apply_on_windows_args(f: Callable[..., None], args: argparse.Namespace) -> N
 class PrepareHandler:
     """apply_on_windows handler for the rslearn dataset prepare command."""
 
-    def __init__(self, force: bool) -> None:
+    def __init__(
+        self,
+        force: bool,
+        retry_max_attempts: int = 0,
+        retry_backoff: timedelta = timedelta(minutes=1),
+    ) -> None:
         """Initialize a new PrepareHandler.
 
         Args:
             force: force prepare
+            retry_max_attempts: set greater than zero to retry for this many attempts in
+                case of error.
+            retry_backoff: how long to wait before retrying (see retry).
         """
         self.force = force
         self.dataset: Dataset | None = None
+        self.retry_max_attempts = retry_max_attempts
+        self.retry_backoff = retry_backoff
 
     def set_dataset(self, dataset: Dataset) -> None:
         """Captures the dataset from apply_on_windows_args.
@@ -379,7 +391,13 @@ class PrepareHandler:
         logger.info(f"Running prepare on {len(windows)} windows")
         if self.dataset is None:
             raise ValueError("dataset not set")
-        prepare_dataset_windows(self.dataset, windows, self.force)
+        prepare_dataset_windows(
+            self.dataset,
+            windows,
+            self.force,
+            retry_max_attempts=self.retry_max_attempts,
+            retry_backoff=self.retry_backoff,
+        )
 
 
 @register_handler("dataset", "prepare")
@@ -402,10 +420,26 @@ def dataset_prepare() -> None:
         default="",
         help="List of layers to disable e.g 'layer1,layer2'",
     )
+    parser.add_argument(
+        "--retry-max-attempts",
+        type=int,
+        default=0,
+        help="Retry for this many attempts",
+    )
+    parser.add_argument(
+        "--retry-backoff-seconds",
+        type=int,
+        default=0,
+        help="Backoff time (seconds) between retries",
+    )
     add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
 
-    fn = PrepareHandler(args.force)
+    fn = PrepareHandler(
+        args.force,
+        retry_max_attempts=args.retry_max_attempts,
+        retry_backoff=timedelta(seconds=args.retry_backoff_seconds),
+    )
     apply_on_windows_args(fn, args)
 
 
@@ -419,10 +453,17 @@ def _load_window_layer_datas(
 class IngestHandler:
     """apply_on_windows handler for the rslearn dataset ingest command."""
 
-    def __init__(self, ignore_errors: bool = False) -> None:
+    def __init__(
+        self,
+        ignore_errors: bool = False,
+        retry_max_attempts: int = 0,
+        retry_backoff: timedelta = timedelta(minutes=1),
+    ) -> None:
         """Initialize a new IngestHandler."""
         self.dataset: Dataset | None = None
         self.ignore_errors = ignore_errors
+        self.retry_max_attempts = retry_max_attempts
+        self.retry_backoff = retry_backoff
 
     def set_dataset(self, dataset: Dataset) -> None:
         """Captures the dataset from apply_on_windows_args.
@@ -466,10 +507,16 @@ class IngestHandler:
             data_source = data_source_from_config(layer_cfg, self.dataset.path)
 
             try:
-                data_source.ingest(
-                    tile_store=layer_tile_store,
-                    items=[item for item, _ in items_and_geometries],
-                    geometries=[geometries for _, geometries in items_and_geometries],
+                retry(
+                    lambda: data_source.ingest(
+                        tile_store=layer_tile_store,
+                        items=[item for item, _ in items_and_geometries],
+                        geometries=[
+                            geometries for _, geometries in items_and_geometries
+                        ],
+                    ),
+                    retry_max_attempts=self.retry_max_attempts,
+                    retry_backoff=self.retry_backoff,
                 )
             except Exception as e:
                 if not self.ignore_errors:
@@ -566,20 +613,43 @@ def dataset_ingest() -> None:
         help="Ignore ingestion errors in individual jobs",
         action=argparse.BooleanOptionalAction,
     )
+    parser.add_argument(
+        "--retry-max-attempts",
+        type=int,
+        default=0,
+        help="Retry for this many attempts",
+    )
+    parser.add_argument(
+        "--retry-backoff-seconds",
+        type=int,
+        default=0,
+        help="Backoff time (seconds) between retries",
+    )
     add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
 
-    fn = IngestHandler(ignore_errors=args.ignore_errors)
+    fn = IngestHandler(
+        ignore_errors=args.ignore_errors,
+        retry_max_attempts=args.retry_max_attempts,
+        retry_backoff=timedelta(seconds=args.retry_backoff_seconds),
+    )
     apply_on_windows_args(fn, args)
 
 
 class MaterializeHandler:
     """apply_on_windows handler for the rslearn dataset materialize command."""
 
-    def __init__(self, ignore_errors: bool = False) -> None:
+    def __init__(
+        self,
+        ignore_errors: bool = False,
+        retry_max_attempts: int = 0,
+        retry_backoff: timedelta = timedelta(minutes=1),
+    ) -> None:
         """Initialize a MaterializeHandler."""
         self.dataset: Dataset | None = None
         self.ignore_errors = ignore_errors
+        self.retry_max_attempts = retry_max_attempts
+        self.retry_backoff = retry_backoff
 
     def set_dataset(self, dataset: Dataset) -> None:
         """Captures the dataset from apply_on_windows_args.
@@ -595,7 +665,12 @@ class MaterializeHandler:
         if self.dataset is None:
             raise ValueError("dataset not set")
         try:
-            materialize_dataset_windows(self.dataset, windows)
+            materialize_dataset_windows(
+                self.dataset,
+                windows,
+                retry_max_attempts=self.retry_max_attempts,
+                retry_backoff=self.retry_backoff,
+            )
         except Exception as e:
             if not self.ignore_errors:
                 logger.error(f"Error materializing windows: {e}")
@@ -626,9 +701,25 @@ def dataset_materialize() -> None:
         help="Ignore errors in individual jobs",
         action=argparse.BooleanOptionalAction,
     )
+    parser.add_argument(
+        "--retry-max-attempts",
+        type=int,
+        default=0,
+        help="Retry for this many attempts",
+    )
+    parser.add_argument(
+        "--retry-backoff-seconds",
+        type=int,
+        default=0,
+        help="Backoff time (seconds) between retries",
+    )
     add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
-    fn = MaterializeHandler(ignore_errors=args.ignore_errors)
+    fn = MaterializeHandler(
+        ignore_errors=args.ignore_errors,
+        retry_max_attempts=args.retry_max_attempts,
+        retry_backoff=timedelta(seconds=args.retry_backoff_seconds),
+    )
     apply_on_windows_args(fn, args)
 
 
@@ -644,39 +735,14 @@ class RslearnLightningCLI(LightningCLI):
         parser.link_arguments(
             "data.init_args.task", "model.init_args.task", apply_on="instantiate"
         )
-        parser.add_argument(
-            "--wandb_run_id",
-            default="",
-            type=str,
-            help="W&B run ID to load checkpoint from",
-        )
-        parser.add_argument(
-            "--wandb_resume",
-            default=False,
-            type=bool,
-            help="Whether to resume from specified wandb_run_id",
-        )
 
     def before_instantiate_classes(self) -> None:
         """Called before Lightning class initialization.
 
-        Sets up wandb_run_id / wandb_resume arguments.
+        Sets the dataset path for any configured RslearnPredictionWriter callbacks.
         """
         subcommand = self.config.subcommand
         c = self.config[subcommand]
-
-        if c.wandb_run_id:
-            api = wandb.Api()
-            artifact_id = (
-                f"{c.trainer.logger.init_args.project}/model-{c.wandb_run_id}:latest"
-            )
-            logger.info(f"restoring from artifact {artifact_id} on wandb")
-            artifact = api.artifact(artifact_id, type="model")
-            artifact_dir = artifact.download()
-            c.ckpt_path = str(Path(artifact_dir) / "model.ckpt")
-
-        if c.wandb_resume:
-            c.trainer.logger.init_args.id = c.wandb_run_id
 
         # If there is a RslearnPredictionWriter, set its path.
         prediction_writer_callback = None
