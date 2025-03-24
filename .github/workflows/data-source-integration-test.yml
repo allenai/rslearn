@@ -106,10 +106,10 @@ jobs:
             -e TEST_USGS_LANDSAT_TOKEN="${TEST_USGS_LANDSAT_TOKEN}" \
             -e PL_API_KEY="${PL_API_KEY}" \
             -e CDSAPI_KEY="${CDSAPI_KEY}" \
-            -e COPERNICUS_USERNAME="${COPERNICUS_USERNAME}" \
-            -e COPERNICUS_PASSWORD="${COPERNICUS_PASSWORD}" \
             -e NASA_EARTHDATA_USERNAME="${NASA_EARTHDATA_USERNAME}" \
             -e NASA_EARTHDATA_PASSWORD="${NASA_EARTHDATA_PASSWORD}" \
+            -e COPERNICUS_USERNAME="${COPERNICUS_USERNAME}" \
+            -e COPERNICUS_PASSWORD="${COPERNICUS_PASSWORD}" \
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
@@ -124,10 +124,10 @@ jobs:
           TEST_USGS_LANDSAT_TOKEN: ${{ secrets.TEST_USGS_LANDSAT_TOKEN }}
           PL_API_KEY: ${{ secrets.PL_API_KEY }}
           CDSAPI_KEY: ${{ secrets.CDSAPI_KEY }}
-          COPERNICUS_USERNAME: ${{ secrets.COPERNICUS_USERNAME }}
-          COPERNICUS_PASSWORD: ${{ secrets.COPERNICUS_PASSWORD }}
           NASA_EARTHDATA_USERNAME: ${{ secrets.NASA_EARTHDATA_USERNAME }}
           NASA_EARTHDATA_PASSWORD: ${{ secrets.NASA_EARTHDATA_PASSWORD }}
+          COPERNICUS_USERNAME: ${{ secrets.COPERNICUS_USERNAME }}
+          COPERNICUS_PASSWORD: ${{ secrets.COPERNICUS_PASSWORD }}
 
       - name: Clean up
         if: always()
