@@ -4,16 +4,15 @@ import math
 import shutil
 from typing import Any
 
-import affine
 import numpy.typing as npt
 import rasterio.vrt
-import shapely
 from rasterio.enums import Resampling
 from upath import UPath
 
-from rslearn.utils import Feature, PixelBounds, Projection, STGeometry
+from rslearn.utils import Feature, PixelBounds, Projection
 from rslearn.utils.fsspec import (
     join_upath,
+    open_atomic,
     open_rasterio_upath_reader,
     open_rasterio_upath_writer,
 )
@@ -22,6 +21,7 @@ from rslearn.utils.raster_format import (
 )
 from rslearn.utils.vector_format import (
     GeojsonVectorFormat,
+    VectorFormat,
 )
 
 from .tile_store import TileStore
@@ -29,14 +29,16 @@ from .tile_store import TileStore
 # Special filename to indicate writing is done.
 COMPLETED_FNAME = "completed"
 
-# Filename to use for vector data.
-VECTOR_FNAME = "data.geojson"
-
 
 class DefaultTileStore(TileStore):
     """Default TileStore implementation.
 
     It stores raster and vector data under the provided UPath.
+
+    Raster data is always stored as a geo-referenced image, while vector data can use
+    any provided VectorFormat. This is because for raster data we support reading in an
+    arbitrary projection, but this is not supported in GeotiffRasterFormat, so we
+    directly use rasterio to access the file.
     """
 
     def __init__(
@@ -45,6 +47,7 @@ class DefaultTileStore(TileStore):
         convert_rasters_to_cogs: bool = True,
         tile_size: int = 256,
         geotiff_options: dict[str, Any] = {},
+        vector_format: VectorFormat = GeojsonVectorFormat(),
     ):
         """Create a new DefaultTileStore.
 
@@ -56,11 +59,13 @@ class DefaultTileStore(TileStore):
                 GeoTIFFs.
             tile_size: if converting to COGs, the tile size to use.
             geotiff_options: other options to pass to rasterio.open (for writes).
+            vector_format: format to use for storing vector data.
         """
         self.path_suffix = path_suffix
         self.convert_rasters_to_cogs = convert_rasters_to_cogs
         self.tile_size = tile_size
         self.geotiff_options = geotiff_options
+        self.vector_format = vector_format
 
         self.path: UPath | None = None
 
@@ -75,10 +80,47 @@ class DefaultTileStore(TileStore):
     def _get_raster_dir(
         self, layer_name: str, item_name: str, bands: list[str]
     ) -> UPath:
+        """Get the directory where the specified raster is stored.
+
+        Args:
+            layer_name: the name of the dataset layer.
+            item_name: the name of the item from the data source.
+            bands: list of band names that are expected to be stored together.
+
+        Returns:
+            the UPath directory where the raster should be stored.
+        """
         assert self.path is not None
         if any(["_" in band for band in bands]):
             raise ValueError("band names must not contain '_'")
         return self.path / layer_name / item_name / "_".join(bands)
+
+    def _get_raster_fname(
+        self, layer_name: str, item_name: str, bands: list[str]
+    ) -> UPath:
+        """Get the filename of the specified raster.
+
+        Args:
+            layer_name: the name of the dataset layer.
+            item_name: the name of the item from the data source.
+            bands: list of band names that are expected to be stored together.
+
+        Returns:
+            the UPath filename of the raster, which should be readable by rasterio.
+
+        Raises:
+            ValueError: if no file is found.
+        """
+        raster_dir = self._get_raster_dir(layer_name, item_name, bands)
+        for fname in raster_dir.iterdir():
+            # Ignore completed sentinel files as well as temporary files created by
+            # open_atomic (in case this tile store is on local filesystem).
+            if fname.name == COMPLETED_FNAME:
+                continue
+            if ".tmp." in fname.name:
+                continue
+            return fname
+        raise ValueError(f"no raster found in {raster_dir}")
 
     def is_raster_ready(
         self, layer_name: str, item_name: str, bands: list[str]
@@ -134,12 +176,7 @@ class DefaultTileStore(TileStore):
         Returns:
             the bounds of the raster in the projection.
         """
-        raster_dir = self._get_raster_dir(layer_name, item_name, bands)
-        fnames = [
-            fname for fname in raster_dir.iterdir() if fname.name != COMPLETED_FNAME
-        ]
-        assert len(fnames) == 1
-        raster_fname = fnames[0]
+        raster_fname = self._get_raster_fname(layer_name, item_name, bands)
 
         with open_rasterio_upath_reader(raster_fname) as src:
             with rasterio.vrt.WarpedVRT(src, crs=projection.crs) as vrt:
@@ -179,32 +216,14 @@ class DefaultTileStore(TileStore):
         Returns:
             the raster data
         """
-        raster_dir = self._get_raster_dir(layer_name, item_name, bands)
-        fnames = [
-            fname for fname in raster_dir.iterdir() if fname.name != COMPLETED_FNAME
-        ]
-        assert len(fnames) == 1
-        raster_fname = fnames[0]
-
-        # Construct the transform to use for the warped dataset.
-        wanted_transform = affine.Affine(
-            projection.x_resolution,
-            0,
-            bounds[0] * projection.x_resolution,
-            0,
-            projection.y_resolution,
-            bounds[1] * projection.y_resolution,
+        raster_fname = self._get_raster_fname(layer_name, item_name, bands)
+        return GeotiffRasterFormat().decode_raster(
+            path=raster_fname.parent,
+            fname=raster_fname.name,
+            projection=projection,
+            bounds=bounds,
+            resampling=resampling,
         )
-        with open_rasterio_upath_reader(raster_fname) as src:
-            with rasterio.vrt.WarpedVRT(
-                src,
-                crs=projection.crs,
-                transform=wanted_transform,
-                width=bounds[2] - bounds[0],
-                height=bounds[3] - bounds[1],
-                resampling=resampling,
-            ) as vrt:
-                return vrt.read()
 
     def write_raster(
         self,
@@ -275,7 +294,7 @@ class DefaultTileStore(TileStore):
             # Just copy the file directly.
             dst_fname = raster_dir / fname.name
             with fname.open("rb") as src:
-                with dst_fname.open("wb") as dst:
+                with open_atomic(dst_fname, "wb") as dst:
                     shutil.copyfileobj(src, dst)
 
         (raster_dir / COMPLETED_FNAME).touch()
@@ -316,30 +335,7 @@ class DefaultTileStore(TileStore):
             the vector data
         """
         vector_dir = self._get_vector_dir(layer_name, item_name)
-        features = GeojsonVectorFormat().decode_vector(
-            vector_dir / VECTOR_FNAME, bounds
-        )
-
-        # Filter for vector data that intersects the requested projection and bounds.
-        if len(features) == 0:
-            return features
-        feat_projection = features[0].geometry.projection
-        requested_geom = STGeometry(projection, shapely.box(*bounds), None)
-        # We could re-project the features to the requested projection and then match
-        # against requested_geom, but we instead project the requested geometry to the
-        # projection of the features. This helps to:
-        # (a) Avoid unnecessary re-projection of features that don't match the
-        #     requested bounds, which is compute-intensive.
-        # (b) Avoid re-projection errors when there is a large GeoJSON and some
-        #     features are outside the projection bounds.
-        requested_geom = requested_geom.to_projection(feat_projection)
-        reprojected_features = []
-        for feat in features:
-            if not requested_geom.intersects(feat.geometry):
-                continue
-            reprojected_features.append(feat.to_projection(projection))
-
-        return reprojected_features
+        return self.vector_format.decode_vector(vector_dir, projection, bounds)
 
     def write_vector(
         self, layer_name: str, item_name: str, features: list[Feature]
@@ -353,7 +349,5 @@ class DefaultTileStore(TileStore):
         """
         vector_dir = self._get_vector_dir(layer_name, item_name)
         vector_dir.mkdir(parents=True, exist_ok=True)
-        GeojsonVectorFormat().encode_vector(
-            vector_dir / VECTOR_FNAME, features[0].geometry.projection, features
-        )
+        self.vector_format.encode_vector(vector_dir, features)
         (vector_dir / COMPLETED_FNAME).touch()
