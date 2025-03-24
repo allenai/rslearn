@@ -190,8 +190,8 @@ class BandSetConfig:
         return BandSetConfig(**kwargs)  # type: ignore
 
     def get_final_projection_and_bounds(
-        self, projection: Projection, bounds: PixelBounds | None
-    ) -> tuple[Projection, PixelBounds | None]:
+        self, projection: Projection, bounds: PixelBounds
+    ) -> tuple[Projection, PixelBounds]:
         """Gets the final projection/bounds based on band set config.
 
         The band set config may apply a non-zero zoom offset that modifies the window's
@@ -212,15 +212,14 @@ class BandSetConfig:
             projection.x_resolution / (2**self.zoom_offset),
             projection.y_resolution / (2**self.zoom_offset),
         )
-        if bounds is not None:
-            if self.zoom_offset > 0:
-                zoom_factor = 2**self.zoom_offset
-                bounds = tuple(x * zoom_factor for x in bounds)  # type: ignore
-            else:
-                bounds = tuple(
-                    x // (2 ** (-self.zoom_offset))
-                    for x in bounds  # type: ignore
-                )
+        if self.zoom_offset > 0:
+            zoom_factor = 2**self.zoom_offset
+            bounds = tuple(x * zoom_factor for x in bounds)  # type: ignore
+        else:
+            bounds = tuple(
+                x // (2 ** (-self.zoom_offset))
+                for x in bounds  # type: ignore
+            )
         return projection, bounds
 
 
@@ -467,7 +466,6 @@ class VectorLayerConfig(LayerConfig):
         self,
         layer_type: LayerType,
         data_source: DataSourceConfig | None = None,
-        zoom_offset: int = 0,
         format: VectorFormatConfig = VectorFormatConfig("geojson"),
         alias: str | None = None,
         class_property_name: str | None = None,
@@ -478,7 +476,6 @@ class VectorLayerConfig(LayerConfig):
         Args:
             layer_type: the LayerType (must be vector)
             data_source: optional DataSourceConfig if this layer is retrievable
-            zoom_offset: zoom offset at which to store the vector data
             format: the VectorFormatConfig, default storing as GeoJSON
             alias: alias for this layer to use in the tile store
             class_property_name: optional metadata field indicating that the GeoJSON
@@ -488,7 +485,6 @@ class VectorLayerConfig(LayerConfig):
                 could be set to.
         """
         super().__init__(layer_type, data_source, alias)
-        self.zoom_offset = zoom_offset
         self.format = format
         self.class_property_name = class_property_name
         self.class_names = class_names
@@ -507,7 +503,6 @@ class VectorLayerConfig(LayerConfig):
             kwargs["format"] = VectorFormatConfig.from_config(config["format"])
 
         simple_optionals = [
-            "zoom_offset",
             "alias",
             "class_property_name",
             "class_names",
@@ -515,36 +510,15 @@ class VectorLayerConfig(LayerConfig):
         for k in simple_optionals:
             if k in config:
                 kwargs[k] = config[k]
+
+        # The "zoom_offset" option was removed.
+        # We should change how we create configuration so we can error on all
+        # non-existing config options, but for now we make sure to raise error if
+        # zoom_offset is set since it is no longer supported.
+        if "zoom_offset" in config:
+            raise ValueError("unsupported zoom_offset option in vector layer config")
+
         return VectorLayerConfig(**kwargs)  # type: ignore
-
-    def get_final_projection_and_bounds(
-        self, projection: Projection, bounds: PixelBounds | None
-    ) -> tuple[Projection, PixelBounds | None]:
-        """Gets the final projection/bounds based on zoom offset.
-
-        Args:
-            projection: the window's projection
-            bounds: the window's bounds (optional)
-
-        Returns:
-            tuple of updated projection and bounds with zoom offset applied
-        """
-        if self.zoom_offset == 0:
-            return projection, bounds
-        projection = Projection(
-            projection.crs,
-            projection.x_resolution / (2**self.zoom_offset),
-            projection.y_resolution / (2**self.zoom_offset),
-        )
-        if bounds:
-            if self.zoom_offset > 0:
-                bounds = tuple(x * (2**self.zoom_offset) for x in bounds)  # type: ignore
-            else:
-                bounds = tuple(
-                    x // (2 ** (-self.zoom_offset))
-                    for x in bounds  # type: ignore
-                )
-        return projection, bounds
 
 
 def load_layer_config(config: dict[str, Any]) -> LayerConfig:
