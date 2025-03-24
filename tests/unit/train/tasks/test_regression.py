@@ -25,3 +25,56 @@ def test_process_output() -> None:
     feature = features[0]
     assert isinstance(feature, Feature)
     assert feature.properties[property_name] == pytest.approx(expected_value)
+
+
+def test_accuracy_metric() -> None:
+    """Verify accuracy metric produces the correct accuracy."""
+    # Get the metrics object.
+    task = RegressionTask(
+        property_name="property_name",
+        use_accuracy_metric=True,
+        within_factor=0.1,
+    )
+    metrics = task.get_metrics()
+
+    # Prepare example.
+    targets = [
+        {
+            "value": torch.tensor(100, dtype=torch.float32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+        {
+            "value": torch.tensor(100, dtype=torch.float32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+        {
+            "value": torch.tensor(100, dtype=torch.float32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+        {
+            "value": torch.tensor(100, dtype=torch.float32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+        {
+            "value": torch.tensor(100, dtype=torch.float32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+    ]
+    preds = torch.tensor(
+        [
+            # Exactly correct.
+            100,
+            # Within the right factor.
+            95,
+            109,
+            # Incorrect.
+            89,
+            111,
+        ],
+        dtype=torch.float32,
+    )
+
+    # Accuracy should be 60%.
+    metrics.update(preds, targets)
+    results = metrics.compute()
+    assert results["accuracy"] == pytest.approx(0.6)
