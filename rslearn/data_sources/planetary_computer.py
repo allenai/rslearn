@@ -551,16 +551,13 @@ class Sentinel2(PlanetaryComputer):
             assets=list(needed_assets),
         )
 
+        if "timeout_seconds" in d:
+            kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
+
         if "cache_dir" in d:
             kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
 
-        simple_optionals = [
-            "harmonize",
-            "query",
-            "sort_by",
-            "sort_ascending",
-            "timeout_seconds",
-        ]
+        simple_optionals = ["harmonize", "query", "sort_by", "sort_ascending"]
         for k in simple_optionals:
             if k in d:
                 kwargs[k] = d[k]
@@ -730,10 +727,13 @@ class Sentinel1(PlanetaryComputer):
             band_names=list(band_names),
         )
 
+        if "timeout_seconds" in d:
+            kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
+
         if "cache_dir" in d:
             kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
 
-        simple_optionals = ["query", "sort_by", "sort_ascending", "timeout_seconds"]
+        simple_optionals = ["query", "sort_by", "sort_ascending"]
         for k in simple_optionals:
             if k in d:
                 kwargs[k] = d[k]
