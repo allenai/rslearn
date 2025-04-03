@@ -255,6 +255,12 @@ def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
         help="Number of worker processes (default 0 to use main process only)",
     )
     parser.add_argument(
+        "--load-workers",
+        type=int,
+        default=None,
+        help="Number of workers for loading windows (defaults to --workers)",
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=1,
@@ -280,6 +286,7 @@ def apply_on_windows(
     group: str | None = None,
     window: str | None = None,
     workers: int = 0,
+    load_workers: int | None = None,
     batch_size: int = 1,
     jobs_per_process: int | None = None,
     use_initial_job: bool = True,
@@ -292,6 +299,10 @@ def apply_on_windows(
         group: optional, only apply on windows in this group.
         window: optional, only apply on windows with this name.
         workers: the number of parallel workers to use, default 0 (main thread only).
+        load_workers: optional different number of workers to use for loading the
+            windows. If set, workers controls the number of workers to process the
+            jobs, while load_workers controls the number of workers to use for reading
+            windows from the rslearn dataset.
         batch_size: if workers > 0, the maximum number of windows to pass to the
             function.
         jobs_per_process: optional, terminate processes after they have handled this
@@ -310,13 +321,15 @@ def apply_on_windows(
         groups = [group]
     if window:
         names = [window]
+    if load_workers is None:
+        load_workers = workers
     windows = dataset.load_windows(
-        groups=groups, names=names, workers=workers, show_progress=True
+        groups=groups, names=names, workers=load_workers, show_progress=True
     )
     logger.info(f"found {len(windows)} windows")
 
     if hasattr(f, "get_jobs"):
-        jobs = f.get_jobs(windows, workers)
+        jobs = f.get_jobs(windows, load_workers)
         logger.info(f"got {len(jobs)} jobs")
     else:
         jobs = windows
@@ -350,14 +363,15 @@ def apply_on_windows_args(f: Callable[..., None], args: argparse.Namespace) -> N
     """Call apply_on_windows with arguments passed via command-line interface."""
     dataset = Dataset(UPath(args.root), args.disabled_layers)
     apply_on_windows(
-        f,
-        dataset,
-        args.group,
-        args.window,
-        args.workers,
-        args.batch_size,
-        args.jobs_per_process,
-        args.use_initial_job,
+        f=f,
+        dataset=dataset,
+        group=args.group,
+        window=args.window,
+        workers=args.workers,
+        load_workers=args.load_workers,
+        batch_size=args.batch_size,
+        jobs_per_process=args.jobs_per_process,
+        use_initial_job=args.use_initial_job,
     )
 
 
