@@ -26,7 +26,7 @@ class RegressionTask(BasicTask):
         allow_invalid: bool = False,
         scale_factor: float = 1,
         metric_mode: str = "mse",
-        use_within_factor_metric: bool = False,
+        use_accuracy_metric: bool = False,
         within_factor: float = 0.1,
         **kwargs: Any,
     ) -> None:
@@ -41,9 +41,9 @@ class RegressionTask(BasicTask):
                 at a window, simply mark the example invalid for this task
             scale_factor: multiply the label value by this factor
             metric_mode: what metric to use, either mse or l1
-            use_within_factor_metric: include metric that reports percentage of
+            use_accuracy_metric: include metric that reports percentage of
                 examples where output is within a factor of the ground truth.
-            within_factor: the factor for within factor metric. If it's 0.2, and ground
+            within_factor: the factor for accuracy metric. If it's 0.2, and ground
                 truth is 5.0, then values from 5.0*0.8 to 5.0*1.2 are accepted.
             kwargs: other arguments to pass to BasicTask
         """
@@ -53,7 +53,7 @@ class RegressionTask(BasicTask):
         self.allow_invalid = allow_invalid
         self.scale_factor = scale_factor
         self.metric_mode = metric_mode
-        self.use_within_factor_metric = use_within_factor_metric
+        self.use_accuracy_metric = use_accuracy_metric
         self.within_factor = within_factor
 
         if not self.filters:
@@ -171,9 +171,9 @@ class RegressionTask(BasicTask):
                 metric=torchmetrics.MeanAbsoluteError(), scale_factor=self.scale_factor
             )
 
-        if self.use_within_factor_metric:
-            metric_dict["within_factor"] = RegressionMetricWrapper(
-                metric=WithinFactorMetric(self.within_factor),
+        if self.use_accuracy_metric:
+            metric_dict["accuracy"] = RegressionMetricWrapper(
+                metric=RegressionAccuracy(self.within_factor),
                 scale_factor=self.scale_factor,
             )
 
@@ -252,14 +252,17 @@ class RegressionMetricWrapper(Metric):
         self.metric = metric
         self.scale_factor = scale_factor
 
-    def update(self, preds: list[Any], targets: list[dict[str, Any]]) -> None:
+    def update(
+        self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
+    ) -> None:
         """Update metric.
 
         Args:
             preds: the predictions
             targets: the targets
         """
-        preds = torch.stack(preds)
+        if not isinstance(preds, torch.Tensor):
+            preds = torch.stack(preds)
         labels = torch.stack([target["value"] for target in targets])
 
         # Sub-select the valid labels.
@@ -285,11 +288,11 @@ class RegressionMetricWrapper(Metric):
         return self.metric.plot(*args, **kwargs)
 
 
-class WithinFactorMetric(Metric):
+class RegressionAccuracy(Metric):
     """Percentage of examples with estimate within some factor of ground truth."""
 
     def __init__(self, factor: float) -> None:
-        """Initialize a new RegressionMetricWrapper.
+        """Initialize a new RegressionAccuracy.
 
         Args:
             factor: the factor so if estimate is within this much of ground truth then
