@@ -79,3 +79,62 @@ class TestTimeMode:
             window_geom, item_list, query_config
         )
         assert item_groups == [[item_list[2]], [item_list[3]], [item_list[1]]]
+
+
+class TestMosaic:
+    @pytest.fixture
+    def six_items(self) -> list[Item]:
+        part1 = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 0.5, 1), None)
+        part2 = STGeometry(WGS84_PROJECTION, shapely.box(0.5, 0, 1, 1), None)
+
+        return [
+            Item("part1_item1", part1),
+            Item("part1_item2", part1),
+            Item("part1_item3", part1),
+            Item("part2_item1", part2),
+            Item("part2_item2", part2),
+            Item("part2_item3", part2),
+        ]
+
+    def test_two_mosaics(self, six_items: list[Item]) -> None:
+        """Test mosaic creation.
+
+        We split up overall geometry into two parts, and pass three items for each
+        part. We make sure that the mosaic is created with the first two items for each
+        box (in the same order we pass them.)
+        """
+        window_geom = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), None)
+        query_config = QueryConfig(space_mode=SpaceMode.MOSAIC, max_matches=2)
+        item_groups = match_candidate_items_to_window(
+            window_geom, six_items, query_config
+        )
+        assert item_groups == [
+            [six_items[0], six_items[3]],
+            [six_items[1], six_items[4]],
+        ]
+
+    def test_ten_mosaics(self, six_items: list[Item]) -> None:
+        """Test mosaic creation.
+
+        Like above but ensure that if we ask for ten mosaics, only three groups are
+        returned.
+        """
+        window_geom = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), None)
+        query_config = QueryConfig(space_mode=SpaceMode.MOSAIC, max_matches=10)
+        item_groups = match_candidate_items_to_window(
+            window_geom, six_items, query_config
+        )
+        assert item_groups == [
+            [six_items[0], six_items[3]],
+            [six_items[1], six_items[4]],
+            [six_items[2], six_items[5]],
+        ]
+
+    def test_zero_mosaics(self, six_items: list[Item]) -> None:
+        """Ensure zero mosaics are created when items do not intersect geometry."""
+        window_geom = STGeometry(WGS84_PROJECTION, shapely.box(1, 0, 2, 1), None)
+        query_config = QueryConfig(space_mode=SpaceMode.MOSAIC)
+        item_groups = match_candidate_items_to_window(
+            window_geom, six_items, query_config
+        )
+        assert len(item_groups) == 0
