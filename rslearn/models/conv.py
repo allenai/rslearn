@@ -1,5 +1,7 @@
 """A single convolutional layer."""
 
+from typing import Any
+
 import torch
 
 
@@ -15,7 +17,7 @@ class Conv(torch.nn.Module):
         in_channels: int,
         out_channels: int,
         kernel_size: int,
-        padding: str = "same",
+        padding: str | int = "same",
         stride: int = 1,
         activation: torch.nn.Module = torch.nn.ReLU(inplace=True),
     ):
@@ -24,9 +26,9 @@ class Conv(torch.nn.Module):
         Args:
             in_channels: number of input channels.
             out_channels: number of output channels.
-            kernel_size: kernel size
-            padding: either "same" or "valid" to control padding
-            stride: stride to apply.
+            kernel_size: kernel size, see torch.nn.Conv2D.
+            padding: padding to apply, see torch.nn.Conv2D.
+            stride: stride to apply, see torch.nn.Conv2D.
             activation: activation to apply after convolution
         """
         super().__init__()
@@ -36,9 +38,7 @@ class Conv(torch.nn.Module):
         )
         self.activation = activation
 
-    def forward(
-        self, features: list[torch.Tensor], inputs: list[torch.Tensor]
-    ) -> list[torch.Tensor]:
+    def forward(self, features: list[torch.Tensor], inputs: Any) -> list[torch.Tensor]:
         """Compute flat output vector from multi-scale feature map.
 
         Args:
