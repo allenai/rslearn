@@ -113,6 +113,23 @@ class TestMosaic:
             [six_items[1], six_items[4]],
         ]
 
+    def test_three_mosaics(self, six_items: list[Item]) -> None:
+        """Test mosaic creation.
+
+        Like above but three groups should be returned (we have exactly enough items
+        for those mosaics).
+        """
+        window_geom = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), None)
+        query_config = QueryConfig(space_mode=SpaceMode.MOSAIC, max_matches=3)
+        item_groups = match_candidate_items_to_window(
+            window_geom, six_items, query_config
+        )
+        assert item_groups == [
+            [six_items[0], six_items[3]],
+            [six_items[1], six_items[4]],
+            [six_items[2], six_items[5]],
+        ]
+
     def test_ten_mosaics(self, six_items: list[Item]) -> None:
         """Test mosaic creation.
 
@@ -138,3 +155,29 @@ class TestMosaic:
             window_geom, six_items, query_config
         )
         assert len(item_groups) == 0
+
+    def test_partial_mosaics(self, six_items: list[Item]) -> None:
+        """Ensure partial mosaics are produced.
+
+        Here we will pass three items on the left and one item on the right, requesting
+        three mosaics. We should get three mosaics where the second two only have
+        partial coverage of the window geometry.
+        """
+        items_to_use = [
+            # Left.
+            six_items[0],
+            six_items[1],
+            six_items[2],
+            # Right.
+            six_items[3],
+        ]
+        window_geom = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), None)
+        query_config = QueryConfig(space_mode=SpaceMode.MOSAIC, max_matches=3)
+        item_groups = match_candidate_items_to_window(
+            window_geom, items_to_use, query_config
+        )
+        assert item_groups == [
+            [six_items[0], six_items[3]],
+            [six_items[1]],
+            [six_items[2]],
+        ]
