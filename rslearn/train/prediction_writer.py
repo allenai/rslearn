@@ -4,7 +4,6 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
-import numpy.typing as npt
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from upath import UPath
@@ -15,7 +14,7 @@ from rslearn.config import (
     RasterLayerConfig,
     VectorLayerConfig,
 )
-from rslearn.dataset import Dataset, Window, get_window_layer_dir
+from rslearn.dataset import Dataset, Window
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.raster_format import load_raster_format
 from rslearn.utils.vector_format import load_vector_format
@@ -127,7 +126,7 @@ class RslearnWriter(BasePredictionWriter):
             window_bounds = metadata["window_bounds"]
 
             if self.layer_config.layer_type == LayerType.RASTER:
-                if not isinstance(output, npt.NDArray):
+                if not isinstance(output, np.ndarray):
                     raise ValueError(
                         "expected output for raster layer to be numpy array"
                     )
@@ -173,19 +172,23 @@ class RslearnWriter(BasePredictionWriter):
                 pending_output = self.merger.merge(pending_output)
 
             # This is the last patch so it's time to write it.
-            layer_dir = get_window_layer_dir(
-                window_path=Window.get_window_root(
+            window = Window.load(
+                Window.get_window_root(
                     self.dataset.path, metadata["group"], window_name
-                ),
-                layer_name=self.output_layer,
+                )
             )
 
             if self.layer_config.layer_type == LayerType.RASTER:
                 assert isinstance(self.layer_config, RasterLayerConfig)
-                band_dir = layer_dir / "_".join(self.layer_config.band_sets[0].bands)
+                raster_dir = window.get_raster_dir(
+                    self.output_layer, self.layer_config.band_sets[0].bands
+                )
                 self.format.encode_raster(
-                    band_dir, metadata["projection"], window_bounds, pending_output
+                    raster_dir, metadata["projection"], window_bounds, pending_output
                 )
 
             elif self.layer_config.layer_type == LayerType.VECTOR:
+                layer_dir = window.get_layer_dir(self.output_layer)
                 self.format.encode_vector(layer_dir, pending_output)
+
+            window.mark_layer_completed(self.output_layer)

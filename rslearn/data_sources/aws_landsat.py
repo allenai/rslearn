@@ -109,7 +109,6 @@ class LandsatOliTirs(DataSource, TileStore):
         self.config = config
         self.metadata_cache_dir = metadata_cache_dir
         self.sort_by = sort_by
-        print(self.metadata_cache_dir)
 
         self.client = boto3.client("s3")
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
