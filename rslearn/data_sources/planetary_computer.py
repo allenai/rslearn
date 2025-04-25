@@ -119,8 +119,8 @@ class PlanetaryComputer(DataSource, TileStore):
         self.skip_items_missing_assets = skip_items_missing_assets
         self.cache_dir = cache_dir
 
-        self.client = pystac_client.Client.open(self.STAC_ENDPOINT)
-        self.collection = self.client.get_collection(self.collection_name)
+        self.client: pystac_client.Client | None = None
+        self.collection: pystac_client.CollectionClient | None = None
 
     @staticmethod
     def from_config(config: RasterLayerConfig, ds_path: UPath) -> "PlanetaryComputer":
@@ -145,6 +145,23 @@ class PlanetaryComputer(DataSource, TileStore):
                 kwargs[k] = d[k]
 
         return PlanetaryComputer(**kwargs)
+
+    def _load_client(
+        self,
+    ) -> tuple[pystac_client.Client, pystac_client.CollectionClient]:
+        """Lazily load pystac client.
+
+        We don't load it when creating the data source because it takes time and caller
+        may not be calling get_items. Additionally, loading it during the get_items
+        call enables leveraging the retry loop functionality in
+        prepare_dataset_windows.
+        """
+        if self.client is not None:
+            return self.client, self.collection
+
+        self.client = pystac_client.Client.open(self.STAC_ENDPOINT)
+        self.collection = self.client.get_collection(self.collection_name)
+        return self.client, self.collection
 
     def _stac_item_to_item(self, stac_item: pystac.Item) -> PlanetaryComputerItem:
         shp = shapely.geometry.shape(stac_item.geometry)
@@ -190,7 +207,8 @@ class PlanetaryComputer(DataSource, TileStore):
 
         # No cache or not in cache, so we need to make the STAC request.
         logger.debug("Getting STAC item {name}")
-        stac_item = self.collection.get_item(name)
+        _, collection = self._load_client()
+        stac_item = collection.get_item(name)
         item = self._stac_item_to_item(stac_item)
 
         # Finally we cache it if cache_dir is set.
@@ -212,13 +230,15 @@ class PlanetaryComputer(DataSource, TileStore):
         Returns:
             List of groups of items that should be retrieved for each geometry.
         """
+        client, _ = self._load_client()
+
         groups = []
         for geometry in geometries:
             # Get potentially relevant items from the collection by performing one search
             # for each requested geometry.
             wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
             logger.debug("performing STAC search for geometry %s", wgs84_geometry)
-            result = self.client.search(
+            result = client.search(
                 collections=[self.collection_name],
                 intersects=shapely.to_geojson(wgs84_geometry.shp),
                 datetime=wgs84_geometry.time_range,
