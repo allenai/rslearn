@@ -246,7 +246,7 @@ def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
         "--group", type=str, default=None, help="Only prepare windows in this group"
     )
     parser.add_argument(
-        "--window", type=str, default=None, help="Only prepare this window"
+        "--window", type=str, nargs="*", default=None, help="Only prepare these windows"
     )
     parser.add_argument(
         "--workers",
@@ -284,7 +284,7 @@ def apply_on_windows(
     f: Callable[[list[Window]], None],
     dataset: Dataset,
     group: str | None = None,
-    window: str | None = None,
+    names: list[str] | None = None,
     workers: int = 0,
     load_workers: int | None = None,
     batch_size: int = 1,
@@ -297,7 +297,7 @@ def apply_on_windows(
         f: the function to apply on lists of windows.
         dataset: the dataset.
         group: optional, only apply on windows in this group.
-        window: optional, only apply on windows with this name.
+        names: optional, only apply on windows with these names.
         workers: the number of parallel workers to use, default 0 (main thread only).
         load_workers: optional different number of workers to use for loading the
             windows. If set, workers controls the number of workers to process the
@@ -316,11 +316,8 @@ def apply_on_windows(
         f.set_dataset(dataset)
 
     groups = None
-    names = None
     if group:
         groups = [group]
-    if window:
-        names = [window]
     if load_workers is None:
         load_workers = workers
     windows = dataset.load_windows(
@@ -366,7 +363,7 @@ def apply_on_windows_args(f: Callable[..., None], args: argparse.Namespace) -> N
         f=f,
         dataset=dataset,
         group=args.group,
-        window=args.window,
+        names=args.window,
         workers=args.workers,
         load_workers=args.load_workers,
         batch_size=args.batch_size,
