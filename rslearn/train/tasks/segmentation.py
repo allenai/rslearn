@@ -40,6 +40,9 @@ class SegmentationTask(BasicTask):
         num_classes: int,
         colors: list[tuple[int, int, int]] = DEFAULT_COLORS,
         zero_is_invalid: bool = False,
+        enable_accuracy_metric: bool = True,
+        enable_f1_metric: bool = False,
+        f1_metric_thresholds: list[list[float]] = [[0.5]],
         metric_kwargs: dict[str, Any] = {},
         **kwargs: Any,
     ) -> None:
@@ -49,6 +52,14 @@ class SegmentationTask(BasicTask):
             num_classes: the number of classes to predict
             colors: optional colors for each class
             zero_is_invalid: whether pixels labeled class 0 should be marked invalid
+            enable_accuracy_metric: whether to enable the accuracy metric (default
+                true).
+            enable_f1_metric: whether to enable the F1 metric (default false).
+            f1_metric_thresholds: list of list of thresholds to apply for F1 metric.
+                Each inner list is used to initialize a separate F1 metric where the
+                best F1 across the thresholds within the inner list is computed. If
+                there are multiple inner lists, then multiple F1 scores will be
+                reported.
             metric_kwargs: additional arguments to pass to underlying metric, see
                 torchmetrics.classification.MulticlassAccuracy.
             kwargs: additional arguments to pass to BasicTask
@@ -57,6 +68,9 @@ class SegmentationTask(BasicTask):
         self.num_classes = num_classes
         self.colors = colors
         self.zero_is_invalid = zero_is_invalid
+        self.enable_accuracy_metric = enable_accuracy_metric
+        self.enable_f1_metric = enable_f1_metric
+        self.f1_metric_thresholds = f1_metric_thresholds
         self.metric_kwargs = metric_kwargs
 
     def process_inputs(
@@ -147,11 +161,40 @@ class SegmentationTask(BasicTask):
     def get_metrics(self) -> MetricCollection:
         """Get the metrics for this task."""
         metrics = {}
-        metric_kwargs = dict(num_classes=self.num_classes)
-        metric_kwargs.update(self.metric_kwargs)
-        metrics["accuracy"] = SegmentationMetric(
-            torchmetrics.classification.MulticlassAccuracy(**metric_kwargs)
-        )
+
+        if self.enable_accuracy_metric:
+            accuracy_metric_kwargs = dict(num_classes=self.num_classes)
+            accuracy_metric_kwargs.update(self.metric_kwargs)
+            metrics["accuracy"] = SegmentationMetric(
+                torchmetrics.classification.MulticlassAccuracy(**accuracy_metric_kwargs)
+            )
+
+        if self.enable_f1_metric:
+            for thresholds in self.f1_metric_thresholds:
+                if len(self.f1_metric_thresholds) == 1:
+                    suffix = ""
+                else:
+                    # Metric name can't contain "." so change to ",".
+                    suffix = "_" + str(thresholds[0]).replace(".", ",")
+
+                metrics["F1" + suffix] = SegmentationMetric(
+                    F1Metric(num_classes=self.num_classes, score_thresholds=thresholds)
+                )
+                metrics["precision" + suffix] = SegmentationMetric(
+                    F1Metric(
+                        num_classes=self.num_classes,
+                        score_thresholds=thresholds,
+                        metric_mode="precision",
+                    )
+                )
+                metrics["recall" + suffix] = SegmentationMetric(
+                    F1Metric(
+                        num_classes=self.num_classes,
+                        score_thresholds=thresholds,
+                        metric_mode="recall",
+                    )
+                )
+
         return MetricCollection(metrics)
 
 
@@ -231,3 +274,117 @@ class SegmentationMetric(Metric):
     def plot(self, *args: list[Any], **kwargs: dict[str, Any]) -> Any:
         """Returns a plot of the metric."""
         return self.metric.plot(*args, **kwargs)
+
+
+class F1Metric(Metric):
+    """F1 score for segmentation.
+
+    It treats each class as a separate prediction task, and computes the maximum F1
+    score under the different configured thresholds per-class.
+    """
+
+    def __init__(
+        self,
+        num_classes: int,
+        score_thresholds: list[float],
+        metric_mode: str = "f1",
+    ):
+        """Create a new F1Metric.
+
+        Args:
+            num_classes: number of classes.
+            score_thresholds: list of score thresholds to check F1 score for. The final
+                metric is the best F1 across score thresholds.
+            metric_mode: set to "precision" or "recall" to return that instead of F1
+                (default "f1")
+        """
+        super().__init__()
+        self.num_classes = num_classes
+        self.score_thresholds = score_thresholds
+        self.metric_mode = metric_mode
+
+        assert self.metric_mode in ["f1", "precision", "recall"]
+
+        for cls_idx in range(self.num_classes):
+            for thr_idx in range(len(self.score_thresholds)):
+                cur_prefix = self._get_state_prefix(cls_idx, thr_idx)
+                self.add_state(
+                    cur_prefix + "tp", default=torch.tensor(0), dist_reduce_fx="sum"
+                )
+                self.add_state(
+                    cur_prefix + "fp", default=torch.tensor(0), dist_reduce_fx="sum"
+                )
+                self.add_state(
+                    cur_prefix + "fn", default=torch.tensor(0), dist_reduce_fx="sum"
+                )
+
+    def _get_state_prefix(self, cls_idx: int, thr_idx: int) -> str:
+        return f"{cls_idx}_{thr_idx}_"
+
+    def update(self, preds: torch.Tensor, labels: torch.Tensor) -> None:
+        """Update metric.
+
+        Args:
+            preds: the predictions, NxC.
+            labels: the targets, N, with values from 0 to C-1.
+        """
+        for cls_idx in range(self.num_classes):
+            for thr_idx, score_threshold in enumerate(self.score_thresholds):
+                pred_bin = preds[:, cls_idx] > score_threshold
+                gt_bin = labels == cls_idx
+
+                tp = torch.count_nonzero(pred_bin & gt_bin).item()
+                fp = torch.count_nonzero(pred_bin & torch.logical_not(gt_bin)).item()
+                fn = torch.count_nonzero(torch.logical_not(pred_bin) & gt_bin).item()
+
+                cur_prefix = self._get_state_prefix(cls_idx, thr_idx)
+                setattr(self, cur_prefix + "tp", getattr(self, cur_prefix + "tp") + tp)
+                setattr(self, cur_prefix + "fp", getattr(self, cur_prefix + "fp") + fp)
+                setattr(self, cur_prefix + "fn", getattr(self, cur_prefix + "fn") + fn)
+
+    def compute(self) -> Any:
+        """Compute metric.
+
+        Returns:
+            the best F1 score across score thresholds and classes.
+        """
+        best_scores = []
+
+        for cls_idx in range(self.num_classes):
+            best_score = None
+
+            for thr_idx in range(len(self.score_thresholds)):
+                cur_prefix = self._get_state_prefix(cls_idx, thr_idx)
+                tp = getattr(self, cur_prefix + "tp")
+                fp = getattr(self, cur_prefix + "fp")
+                fn = getattr(self, cur_prefix + "fn")
+                device = tp.device
+
+                if tp + fp == 0:
+                    precision = torch.tensor(0, dtype=torch.float32, device=device)
+                else:
+                    precision = tp / (tp + fp)
+
+                if tp + fn == 0:
+                    recall = torch.tensor(0, dtype=torch.float32, device=device)
+                else:
+                    recall = tp / (tp + fn)
+
+                if precision + recall < 0.001:
+                    f1 = torch.tensor(0, dtype=torch.float32, device=device)
+                else:
+                    f1 = 2 * precision * recall / (precision + recall)
+
+                if self.metric_mode == "f1":
+                    score = f1
+                elif self.metric_mode == "precision":
+                    score = precision
+                elif self.metric_mode == "recall":
+                    score = recall
+
+                if best_score is None or score > best_score:
+                    best_score = score
+
+            best_scores.append(best_score)
+
+        return torch.mean(torch.stack(best_scores))
