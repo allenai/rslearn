@@ -19,5 +19,5 @@ def test_molmo(model_name: str) -> None:
     # Should yield one feature map since there's only one output scale.
     assert len(feature_list) == 1
     features = feature_list[0]
-    # features should be BxHxWxC.
+    # features should be BxCxHxW.
     assert features.shape[0] == 1 and len(features.shape) == 4
