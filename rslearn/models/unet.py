@@ -19,6 +19,7 @@ class UNetDecoder(torch.nn.Module):
         out_channels: int,
         conv_layers_per_resolution: int = 1,
         kernel_size: int = 3,
+        num_channels: dict[int, int] = {},
     ) -> None:
         """Initialize a UNetDecoder.
 
@@ -30,6 +31,8 @@ class UNetDecoder(torch.nn.Module):
             conv_layers_per_resolution: number of convolutional layers to apply after
                 each up-sampling operation
             kernel_size: kernel size to use in convolutional layers
+            num_channels: override number of output channels to use at different
+                downsample factors.
         """
         super().__init__()
 
@@ -62,28 +65,39 @@ class UNetDecoder(torch.nn.Module):
             # concatenating with.
             if cur_factor in channels_by_factor:
                 layers.append(torch.nn.Sequential(*cur_layers))
+                # Number of output channels for this layer can be configured
+                # per-resolution by the user, otherwise we default to the feature map
+                # channels at the corresponding downsample factor.
+                cur_out_channels = num_channels.get(
+                    cur_factor, channels_by_factor[cur_factor]
+                )
                 cur_layers = [
                     torch.nn.Conv2d(
                         in_channels=cur_channels + channels_by_factor[cur_factor],
-                        out_channels=channels_by_factor[cur_factor],
+                        out_channels=cur_out_channels,
                         kernel_size=kernel_size,
                         padding="same",
                     ),
                     torch.nn.ReLU(inplace=True),
                 ]
-                cur_channels = channels_by_factor[cur_factor]
+                cur_channels = cur_out_channels
             else:
+                # Since there is no feature map at the next downsample factor, the
+                # default is to keep the same number of channels (but the user can
+                # still override it with num_channels).
+                cur_out_channels = num_channels.get(cur_factor, cur_channels)
                 cur_layers.extend(
                     [
                         torch.nn.Conv2d(
                             in_channels=cur_channels,
-                            out_channels=cur_channels,
+                            out_channels=cur_out_channels,
                             kernel_size=kernel_size,
                             padding="same",
                         ),
                         torch.nn.ReLU(inplace=True),
                     ]
                 )
+                cur_channels = cur_out_channels
 
             # Add remaining conv layers.
             for _ in range(conv_layers_per_resolution - 1):
