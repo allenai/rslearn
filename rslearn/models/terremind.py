@@ -6,8 +6,10 @@ from typing import Any
 import torch
 from terratorch.registry import BACKBONE_REGISTRY
 
+from rslearn.transforms import Transform
 
-# create size for terramind as enum
+
+# TerraMind v1 provides two sizes: base and large
 class TerramindSize(str, Enum):
     """Size of the Terramind model."""
 
@@ -182,3 +184,54 @@ class Terramind(torch.nn.Module):
         else:
             raise ValueError(f"Invalid model size: {self.model_size}")
         return [(PATCH_SIZE, depth)]
+
+
+class TerramindNormalize(Transform):
+    """Normalize inputs using Terramind normalization.
+
+    It will apply normalization to the modalities that are specified in the model configuration.
+    """
+
+    def __init__(self) -> None:
+        """Initialize a new TerramindNormalize."""
+        super().__init__()
+
+    def apply_image(
+        self, image: torch.Tensor, means: list[float], stds: list[float]
+    ) -> torch.Tensor:
+        """Normalize the specified image with Terramind normalization.
+
+        Args:
+            image: the image to normalize.
+            means: the means to use for the normalization.
+            stds: the standard deviations to use for the normalization.
+
+        Returns:
+            The normalized image.
+        """
+        images = image.float()  # (C, H, W)
+        for i in range(images.shape[0]):
+            images[i] = (images[i] - means[i]) / stds[i]
+        return images
+
+    def forward(
+        self, input_dict: dict[str, Any], target_dict: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Normalize the specified image with Terramind normalization.
+
+        Args:
+            input_dict: the input dictionary.
+            target_dict: the target dictionary.
+
+        Returns:
+            normalized (input_dicts, target_dicts) tuple
+        """
+        for modality in TERRAMIND_MODALITIES:
+            if modality not in input_dict:
+                continue
+            input_dict[modality] = self.apply_image(
+                input_dict[modality],
+                TERRAMIND_MEANS[modality],
+                TERRAMIND_STDS[modality],
+            )
+        return input_dict, target_dict
