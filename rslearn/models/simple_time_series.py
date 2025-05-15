@@ -24,6 +24,7 @@ class SimpleTimeSeries(torch.nn.Module):
         op: str = "max",
         groups: list[list[int]] | None = None,
         num_layers: int | None = None,
+        image_key: str = "image",
     ) -> None:
         """Create a new SimpleTimeSeries.
 
@@ -42,12 +43,14 @@ class SimpleTimeSeries(torch.nn.Module):
                 combined before features and the combined after features. groups is a
                 list of sets, and each set is a list of image indices.
             num_layers: the number of layers for convrnn, conv3d, and conv1d ops.
+            image_key: the key to access the images.
         """
         super().__init__()
         self.encoder = encoder
         self.image_channels = image_channels
         self.op = op
         self.groups = groups
+        self.image_key = image_key
 
         out_channels = self.encoder.get_backbone_channels()
         if self.groups:
@@ -146,7 +149,7 @@ class SimpleTimeSeries(torch.nn.Module):
         """
         # First get features of each image.
         # To do so, we need to split up each grouped image into its component images (which have had their channels stacked).
-        images = torch.stack([inp["image"] for inp in inputs], dim=0)
+        images = torch.stack([inp[self.image_key] for inp in inputs], dim=0)
         n_batch = images.shape[0]
         n_images = images.shape[1] // self.image_channels
         n_height = images.shape[2]
@@ -154,7 +157,7 @@ class SimpleTimeSeries(torch.nn.Module):
         batched_images = images.reshape(
             n_batch * n_images, self.image_channels, n_height, n_width
         )
-        batched_inputs = [{"image": image} for image in batched_images]
+        batched_inputs = [{self.image_key: image} for image in batched_images]
         all_features = [
             feat_map.reshape(
                 n_batch,
