@@ -13,15 +13,18 @@ import rasterio.warp
 import shapely
 from PIL import Image
 from rasterio.crs import CRS
+from rasterio.enums import Resampling
 from upath import UPath
 
 from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
 from rslearn.dataset import Window
+from rslearn.dataset.materialize import RasterMaterializer
+from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils import PixelBounds, Projection, STGeometry
 from rslearn.utils.array import copy_spatial_array
+from rslearn.utils.raster_format import get_transform_from_projection_and_bounds
 
 from .data_source import DataSource, Item
-from .raster_source import ArrayWithTransform, materialize_raster
 from .utils import match_candidate_items_to_window
 
 WEB_MERCATOR_EPSG = 3857
@@ -81,48 +84,12 @@ def read_from_tile_callback(
     return data
 
 
-class XyzItem(Item):
-    """An item in the XyzTiles data source.
-
-    Each item represents one layer of tiles. Often there is only one itm in the data
-    source, but if there are multiple then they should correspond to different time
-    ranges.
-    """
-
-    def __init__(self, name: str, geometry: STGeometry, url_template: str):
-        """Creates a new XyzItem.
-
-        Args:
-            name: unique name of the item
-            geometry: the spatial and temporal extent of the item
-            url_template: the URL template for an xyz tile.
-        """
-        super().__init__(name, geometry)
-        self.url_template = url_template
-
-    def serialize(self) -> dict:
-        """Serializes the item to a JSON-encodable dictionary."""
-        d = super().serialize()
-        d["url_template"] = self.url_template
-        return d
-
-    @staticmethod
-    def deserialize(d: dict) -> Item:
-        """Deserializes an item from a JSON-decoded dictionary."""
-        item = super(XyzItem, XyzItem).deserialize(d)
-        return XyzItem(
-            name=item.name, geometry=item.geometry, url_template=d["url_template"]
-        )
-
-
-class XyzTiles(DataSource):
+class XyzTiles(DataSource, TileStore):
     """A data source for web xyz image tiles.
 
     These tiles are usually in WebMercator projection, but different CRS can be
     configured here.
     """
-
-    item_name = "xyz_tiles"
 
     def __init__(
         self,
@@ -133,6 +100,7 @@ class XyzTiles(DataSource):
         total_units: float = WEB_MERCATOR_UNITS,
         offset: float = WEB_MERCATOR_UNITS / 2,
         tile_size: int = 256,
+        band_names: list[str] = ["R", "G", "B"],
     ):
         """Initialize an XyzTiles instance.
 
@@ -152,6 +120,7 @@ class XyzTiles(DataSource):
                 the pixel size to map from projection coordinates to pixel coordinates.
             offset: offset added to projection units when converting to tile positions.
             tile_size: size in pixels of each tile. Tiles must be square.
+            band_names: what to name the bands that we read.
         """
         self.url_templates = url_templates
         self.time_ranges = time_ranges
@@ -160,6 +129,7 @@ class XyzTiles(DataSource):
         self.total_units = total_units
         self.offset = offset
         self.tile_size = tile_size
+        self.band_names = band_names
 
         # Compute total number of pixels (a function of the zoom level and tile size).
         self.total_pixels = tile_size * (2**zoom)
@@ -169,7 +139,7 @@ class XyzTiles(DataSource):
         self.pixel_offset = int(self.offset / self.pixel_size)
         # Compute the extent in pixel coordinates as an STGeometry.
         # Note that pixel coordinates are prior to applying the offset.
-        shp = shapely.box(
+        self.shp = shapely.box(
             -self.total_pixels // 2,
             -self.total_pixels // 2,
             self.total_pixels // 2,
@@ -179,8 +149,8 @@ class XyzTiles(DataSource):
 
         self.items = []
         for url_template, time_range in zip(self.url_templates, self.time_ranges):
-            geometry = STGeometry(self.projection, shp, time_range)
-            item = XyzItem(self.item_name, geometry, url_template)
+            geometry = STGeometry(self.projection, self.shp, time_range)
+            item = Item(url_template, geometry)
             self.items.append(item)
 
     @staticmethod
@@ -209,7 +179,7 @@ class XyzTiles(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[XyzItem]]]:
+    ) -> list[list[list[Item]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         In XyzTiles we treat the data source as containing a single item, i.e., the
@@ -234,7 +204,7 @@ class XyzTiles(DataSource):
 
     def deserialize_item(self, serialized_item: Any) -> Item:
         """Deserializes an item from JSON-decoded data."""
-        return XyzItem.deserialize(serialized_item)
+        return Item.deserialize(serialized_item)
 
     def read_tile(self, url_template: str, col: int, row: int) -> npt.NDArray[Any]:
         """Read the tile at specified column and row.
@@ -251,8 +221,11 @@ class XyzTiles(DataSource):
         url = url.replace("{x}", str(col))
         url = url.replace("{y}", str(row))
         url = url.replace("{z}", str(self.zoom))
-        image = Image.open(urllib.request.urlopen(url))
-        return np.array(image).transpose(2, 0, 1)
+        image = np.array(Image.open(urllib.request.urlopen(url)))
+        # Handle grayscale images (add single-band channel dimension).
+        if len(image.shape) == 2:
+            image = image[:, :, None]
+        return image.transpose(2, 0, 1)
 
     def read_bounds(self, url_template: str, bounds: PixelBounds) -> npt.NDArray[Any]:
         """Reads the portion of the raster in the specified bounds.
@@ -277,10 +250,126 @@ class XyzTiles(DataSource):
             self.tile_size,
         )
 
+    def is_raster_ready(
+        self, layer_name: str, item_name: str, bands: list[str]
+    ) -> bool:
+        """Checks if this raster has been written to the store.
+
+        Args:
+            layer_name: the layer name or alias.
+            item_name: the item.
+            bands: the list of bands identifying which specific raster to read.
+
+        Returns:
+            whether there is a raster in the store matching the source, item, and
+                bands.
+        """
+        # Always ready since we wrap accesses to the XYZ tile URL.
+        return True
+
+    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
+        """Get the sets of bands that have been stored for the specified item.
+
+        Args:
+            layer_name: the layer name or alias.
+            item_name: the item.
+
+        Returns:
+            a list of lists of bands that are in the tile store (with one raster
+                stored corresponding to each inner list). If no rasters are ready for
+                this item, returns empty list.
+        """
+        return [self.band_names]
+
+    def get_raster_bounds(
+        self, layer_name: str, item_name: str, bands: list[str], projection: Projection
+    ) -> PixelBounds:
+        """Get the bounds of the raster in the specified projection.
+
+        Args:
+            layer_name: the layer name or alias.
+            item_name: the item to check.
+            bands: the list of bands identifying which specific raster to read. These
+                bands must match the bands of a stored raster.
+            projection: the projection to get the raster's bounds in.
+
+        Returns:
+            the bounds of the raster in the projection.
+        """
+        geom = STGeometry(self.projection, self.shp, None).to_projection(projection)
+        return (
+            int(geom.shp.bounds[0]),
+            int(geom.shp.bounds[1]),
+            int(geom.shp.bounds[2]),
+            int(geom.shp.bounds[3]),
+        )
+
+    def read_raster(
+        self,
+        layer_name: str,
+        item_name: str,
+        bands: list[str],
+        projection: Projection,
+        bounds: PixelBounds,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> npt.NDArray[Any]:
+        """Read raster data from the store.
+
+        Args:
+            layer_name: the layer name or alias.
+            item_name: the item to read.
+            bands: the list of bands identifying which specific raster to read. These
+                bands must match the bands of a stored raster.
+            projection: the projection to read in.
+            bounds: the bounds to read.
+            resampling: the resampling method to use in case reprojection is needed.
+
+        Returns:
+            the raster data
+        """
+        # Validate bands.
+        if bands != self.band_names:
+            raise ValueError(
+                f"expected request for bands {self.band_names} but requested {bands}"
+            )
+
+        # Read a raster matching the given bounds but projected onto the projection of
+        # the xyz tiles.
+        request_geometry = STGeometry(projection, shapely.box(*bounds), None)
+        projected_geometry = request_geometry.to_projection(self.projection)
+        projected_bounds = (
+            math.floor(projected_geometry.shp.bounds[0]),
+            math.floor(projected_geometry.shp.bounds[1]),
+            math.ceil(projected_geometry.shp.bounds[2]),
+            math.ceil(projected_geometry.shp.bounds[3]),
+        )
+        # The item name is the URL template.
+        url_template = item_name
+        array = self.read_bounds(url_template, projected_bounds)
+        # Now project it back to the requested geometry.
+        src_transform = get_transform_from_projection_and_bounds(
+            self.projection, projected_bounds
+        )
+        dst_transform = get_transform_from_projection_and_bounds(projection, bounds)
+        dst_array = np.zeros(
+            (array.shape[0], bounds[3] - bounds[1], bounds[2] - bounds[0]),
+            dtype=array.dtype,
+        )
+        rasterio.warp.reproject(
+            source=array,
+            src_crs=self.projection.crs,
+            src_transform=src_transform,
+            destination=dst_array,
+            dst_crs=projection.crs,
+            dst_transform=dst_transform,
+            resampling=resampling,
+        )
+        return dst_array
+
     def materialize(
         self,
         window: Window,
-        item_groups: list[list[XyzItem]],
+        item_groups: list[list[Item]],
         layer_name: str,
         layer_cfg: LayerConfig,
     ) -> None:
@@ -292,37 +381,11 @@ class XyzTiles(DataSource):
             layer_name: the name of this layer
             layer_cfg: the config of this layer
         """
-        assert len(item_groups) == 1 and len(item_groups[0]) == 1
-        item = item_groups[0][0]
-        assert isinstance(item, XyzItem)
-
-        # Read a raster matching the bounds of the window's bounds projected onto the
-        # projection of the xyz tiles.
         assert isinstance(layer_cfg, RasterLayerConfig)
-        band_cfg = layer_cfg.band_sets[0]
-        window_projection, window_bounds = band_cfg.get_final_projection_and_bounds(
-            window.projection, window.bounds
+        RasterMaterializer().materialize(
+            TileStoreWithLayer(self, layer_name),
+            window,
+            layer_name,
+            layer_cfg,
+            item_groups,
         )
-        window_geometry = STGeometry(
-            window_projection, shapely.box(*window_bounds), None
-        )
-        projected_geometry = window_geometry.to_projection(self.projection)
-        projected_bounds = tuple(
-            math.floor(projected_geometry.shp.bounds[i]) for i in range(4)
-        )
-        projected_raster = self.read_bounds(item.url_template, projected_bounds)  # type: ignore
-
-        # Attach the transform to the raster.
-        src_transform = rasterio.transform.Affine(
-            self.projection.x_resolution,
-            0,
-            projected_bounds[0] * self.projection.x_resolution,
-            0,
-            self.projection.y_resolution,
-            projected_bounds[1] * self.projection.y_resolution,
-        )
-        array_with_transform = ArrayWithTransform(
-            projected_raster, self.projection.crs, src_transform
-        )
-
-        materialize_raster(array_with_transform, window, layer_name, band_cfg)
