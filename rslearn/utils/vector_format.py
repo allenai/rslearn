@@ -12,6 +12,7 @@ from upath import UPath
 from rslearn.config import VectorFormatConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.log_utils import get_logger
+from rslearn.utils.fsspec import open_atomic
 
 from .feature import Feature
 from .geometry import PixelBounds, Projection, STGeometry
@@ -102,7 +103,7 @@ class TileVectorFormat(VectorFormat):
 
         # Save metadata file containing the serialized projection so we can load it
         # when decoding.
-        with (path / "projection.json").open("w") as f:
+        with open_atomic(path / "projection.json", "w") as f:
             json.dump(output_projection.serialize(), f)
 
         # Dictionary from tile (col, row) to the list of features intersecting that
@@ -163,7 +164,7 @@ class TileVectorFormat(VectorFormat):
             }
             cur_fname = path / f"{col}_{row}.geojson"
             logger.debug("writing tile (%d, %d) to %s", col, row, cur_fname)
-            with cur_fname.open("w") as f:
+            with open_atomic(cur_fname, "w") as f:
                 json.dump(fc, f)
 
     def decode_vector(
@@ -200,7 +201,7 @@ class TileVectorFormat(VectorFormat):
                 cur_fname = path / f"{col}_{row}.geojson"
                 if not cur_fname.exists():
                     continue
-                with cur_fname.open("r") as f:
+                with cur_fname.open() as f:
                     fc = json.load(f)
 
                 for geojson_feat in fc["features"]:
@@ -312,7 +313,7 @@ class GeojsonVectorFormat(VectorFormat):
             fname,
             self.coordinate_mode,
         )
-        with fname.open("w") as f:
+        with open_atomic(fname, "w") as f:
             json.dump(fc, f)
 
     def encode_vector(self, path: UPath, features: list[Feature]) -> None:
@@ -334,7 +335,7 @@ class GeojsonVectorFormat(VectorFormat):
         Returns:
             the vector data
         """
-        with fname.open("r") as f:
+        with fname.open() as f:
             fc = json.load(f)
 
         # Detect the projection that the features are stored under.
