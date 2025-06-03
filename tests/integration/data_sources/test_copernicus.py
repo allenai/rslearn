@@ -126,7 +126,6 @@ class TestSentinel1:
 
     def test_ingest(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         """Test ingesting a Sentinel-1 scene corresponding to seattle2020."""
-        band_names = ["vv", "vh"]
         data_source = Sentinel1(
             Sentinel1ProductType.IW_GRDH, Sentinel1Polarisation.VV_VH
         )
@@ -145,4 +144,5 @@ class TestSentinel1:
         data_source.ingest(
             TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
         )
-        assert tile_store.is_raster_ready(layer_name, item.name, band_names)
+        assert tile_store.is_raster_ready(layer_name, item.name, ["vv"])
+        assert tile_store.is_raster_ready(layer_name, item.name, ["vh"])
