@@ -11,7 +11,14 @@ from rslearn.config import (
     QueryConfig,
     SpaceMode,
 )
-from rslearn.data_sources.copernicus import Copernicus, Sentinel2, Sentinel2ProductType
+from rslearn.data_sources.copernicus import (
+    Copernicus,
+    Sentinel1,
+    Sentinel1Polarisation,
+    Sentinel1ProductType,
+    Sentinel2,
+    Sentinel2ProductType,
+)
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils import STGeometry
@@ -112,3 +119,30 @@ class TestSentinel2:
             assert count == 0
         else:
             assert count > 1000
+
+
+class TestSentinel1:
+    """Tests for Sentinel-1 data source."""
+
+    def test_ingest(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
+        """Test ingesting a Sentinel-1 scene corresponding to seattle2020."""
+        band_names = ["vv", "vh"]
+        data_source = Sentinel1(
+            Sentinel1ProductType.IW_GRDH, Sentinel1Polarisation.VV_VH
+        )
+
+        logger.info("get items")
+        query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
+        item_groups = data_source.get_items([seattle2020], query_config)[0]
+        item = item_groups[0][0]
+
+        tile_store_dir = UPath(tmp_path)
+        tile_store = DefaultTileStore(str(tile_store_dir))
+        tile_store.set_dataset_path(tile_store_dir)
+
+        logger.info(f"ingest item {item.name}")
+        layer_name = "layer"
+        data_source.ingest(
+            TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+        )
+        assert tile_store.is_raster_ready(layer_name, item.name, band_names)
