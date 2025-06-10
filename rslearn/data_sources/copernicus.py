@@ -444,6 +444,31 @@ class Copernicus(DataSource):
 
         return all_values
 
+    def _get_product(
+        self, name: str, expand_attributes: bool = False
+    ) -> dict[str, Any]:
+        """Get the product dict from Copernicus API given scene name.
+
+        Args:
+            name: the scene name to get.
+            expand_attributes: whether to request API to provide the attributes of the
+                returned product.
+
+        Returns:
+            the decoded JSON product dict.
+        """
+        filter_string = self._build_filter_string(f"Name eq '{quote(name)}'")
+        path = f"/Products?$filter={filter_string}"
+        if expand_attributes:
+            path += "&$expand=Attributes"
+        response = self._get(path)
+        products = response["value"]
+        if len(products) != 1:
+            raise ValueError(
+                f"expected one product from {path} but got {len(products)}"
+            )
+        return products[0]
+
     def get_item_by_name(self, name: str) -> CopernicusItem:
         """Gets an item by name.
 
@@ -453,17 +478,8 @@ class Copernicus(DataSource):
         Returns:
             the item object
         """
-        if "'" in name:
-            raise ValueError('product name cannot contain "\'"')
-        filter_string = self._build_filter_string(f"Name eq '{quote(name)}'")
-        path = f"/Products?$filter={filter_string}"
-        response = self._get(path)
-        products = response["value"]
-        if len(products) != 1:
-            raise ValueError(
-                f"expected one product from {path} but got {len(products)}"
-            )
-        return self._product_to_item(products[0])
+        product = self._get_product(name)
+        return self._product_to_item(product)
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
