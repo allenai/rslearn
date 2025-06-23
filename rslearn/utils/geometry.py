@@ -14,6 +14,7 @@ from rslearn.log_utils import get_logger
 
 logger = get_logger(__name__)
 PixelBounds = tuple[int, int, int, int]
+FloatBounds = tuple[float, float, float, float]
 
 RESOLUTION_EPSILON = 1e-6
 WGS84_EPSG = 4326
