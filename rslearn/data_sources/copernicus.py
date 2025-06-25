@@ -13,6 +13,7 @@ from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
 from typing import Any
+from urllib.parse import quote
 from zipfile import ZipFile
 
 import numpy as np
@@ -24,7 +25,7 @@ from upath import UPath
 
 from rslearn.config import QueryConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources.data_source import Item
+from rslearn.data_sources.data_source import DataSource, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
@@ -270,7 +271,7 @@ class CopernicusItem(Item):
         )
 
 
-class Copernicus:
+class Copernicus(DataSource):
     """Scenes from the ESA Copernicus OData API.
 
     See https://documentation.dataspace.copernicus.eu/APIs/OData.html for details about
@@ -374,6 +375,11 @@ class Copernicus:
 
         return Copernicus(**kwargs)
 
+    def deserialize_item(self, serialized_item: Any) -> CopernicusItem:
+        """Deserializes an item from JSON-decoded data."""
+        assert isinstance(serialized_item, dict)
+        return CopernicusItem.deserialize(serialized_item)
+
     def _get(self, path: str) -> dict[str, Any]:
         """Get the API path and return JSON content."""
         url = self.BASE_URL + path
@@ -454,6 +460,31 @@ class Copernicus:
 
         return all_values
 
+    def _get_product(
+        self, name: str, expand_attributes: bool = False
+    ) -> dict[str, Any]:
+        """Get the product dict from Copernicus API given scene name.
+
+        Args:
+            name: the scene name to get.
+            expand_attributes: whether to request API to provide the attributes of the
+                returned product.
+
+        Returns:
+            the decoded JSON product dict.
+        """
+        filter_string = self._build_filter_string(f"Name eq '{quote(name)}'")
+        path = f"/Products?$filter={filter_string}"
+        if expand_attributes:
+            path += "&$expand=Attributes"
+        response = self._get(path)
+        products = response["value"]
+        if len(products) != 1:
+            raise ValueError(
+                f"expected one product from {path} but got {len(products)}"
+            )
+        return products[0]
+
     def get_item_by_name(self, name: str) -> CopernicusItem:
         """Gets an item by name.
 
@@ -463,17 +494,8 @@ class Copernicus:
         Returns:
             the item object
         """
-        if "'" in name:
-            raise ValueError('product name cannot contain "\'"')
-        filter_string = self._build_filter_string(f"Name eq '{name}")
-        path = f"/Products?$filter={filter_string}"
-        response = self._get(path)
-        products = response["value"]
-        if len(products) != 1:
-            raise ValueError(
-                f"expected one product from {path} but got {len(products)}"
-            )
-        return self._product_to_item(products[0])
+        product = self._get_product(name)
+        return self._product_to_item(product)
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
@@ -761,7 +783,7 @@ class Sentinel2(Copernicus):
             glob_to_bands[glob_pattern] = band_names
 
         # Create query filter based on the product type.
-        query_filter = f"Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'productType' and att/OData.CSC.StringAttribute/Value eq '{product_type.value}')"
+        query_filter = f"Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'productType' and att/OData.CSC.StringAttribute/Value eq '{quote(product_type.value)}')"
 
         super().__init__(
             glob_to_bands=glob_to_bands,
@@ -860,3 +882,92 @@ class Sentinel2(Copernicus):
                         tile_store.write_raster(
                             item.name, band_names, projection, bounds, array
                         )
+
+
+class Sentinel1ProductType(str, Enum):
+    """The Sentinel-1 product type."""
+
+    IW_GRDH = "IW_GRDH_1S"
+
+
+class Sentinel1Polarisation(str, Enum):
+    """The Sentinel-1 polarisation."""
+
+    VV_VH = "VV&VH"
+
+
+class Sentinel1OrbitDirection(str, Enum):
+    """The Sentinel-1 orbit direction."""
+
+    ASCENDING = "ASCENDING"
+    DESCENDING = "DESCENDING"
+
+
+class Sentinel1(Copernicus):
+    """A data source for Sentinel-1 data from the Copernicus API."""
+
+    GLOB_TO_BANDS = {
+        Sentinel1Polarisation.VV_VH: {
+            "*/measurement/*-vh-*.tiff": ["vh"],
+            "*/measurement/*-vv-*.tiff": ["vv"],
+        }
+    }
+
+    # Pattern of XML file within the product zip file.
+    METADATA_PATTERN = "*/MTD_MSIL*.xml"
+
+    def __init__(
+        self,
+        product_type: Sentinel1ProductType,
+        polarisation: Sentinel1Polarisation,
+        orbit_direction: Sentinel1OrbitDirection | None = None,
+        **kwargs: Any,
+    ):
+        """Create a new Sentinel1.
+
+        Args:
+            product_type: desired product type.
+            polarisation: desired polarisation(s).
+            orbit_direction: optional orbit direction to filter by.
+            kwargs: additional arguments to pass to Copernicus.
+        """
+        # Create query filter based on the product type.
+        query_filter = (
+            f"Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'productType' and att/OData.CSC.StringAttribute/Value eq '{quote(product_type.value)}')"
+            + f" and Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'polarisationChannels' and att/OData.CSC.StringAttribute/Value eq '{quote(polarisation.value)}')"
+        )
+        if orbit_direction:
+            query_filter += f" and Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'orbitDirection' and att/OData.CSC.StringAttribute/Value eq '{quote(orbit_direction.value)}')"
+
+        super().__init__(
+            glob_to_bands=self.GLOB_TO_BANDS[polarisation],
+            query_filter=query_filter,
+            **kwargs,
+        )
+
+    @staticmethod
+    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Sentinel1":
+        """Creates a new Sentinel1 instance from a configuration dictionary."""
+        if config.data_source is None:
+            raise ValueError("config.data_source is required")
+        d = config.data_source.config_dict
+
+        kwargs: dict[str, Any] = dict(
+            product_type=Sentinel1ProductType[d["product_type"]],
+            polarisation=Sentinel1Polarisation[d["polarisation"]],
+        )
+
+        if "orbit_direction" in d:
+            kwargs["orbit_direction"] = Sentinel1OrbitDirection[d["orbit_direction"]]
+
+        simple_optionals = [
+            "access_token",
+            "order_by",
+            "sort_by",
+            "sort_desc",
+        ]
+        for k in simple_optionals:
+            if k in d:
+                kwargs[k] = d[k]
+
+        return Sentinel1(**kwargs)
