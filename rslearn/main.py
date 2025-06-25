@@ -772,6 +772,10 @@ class RslearnLightningCLI(LightningCLI):
         if prediction_writer_callback:
             prediction_writer_callback.init_args.path = c.data.init_args.path
 
+        # Disable the sampler replacement, since the rslearn data module will set the
+        # sampler as needed.
+        c.trainer.use_distributed_sampler = False
+
 
 def model_handler() -> None:
     """Handler for any rslearn model X commands."""
