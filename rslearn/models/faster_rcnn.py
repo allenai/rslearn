@@ -14,6 +14,12 @@ class NoopTransform(torch.nn.Module):
         """Create a new NoopTransform."""
         super().__init__()
 
+        # We initialize a GeneralizedRCNNTransform just to use its batch_images
+        # function, which concatenates the images (padding to the dimensions of the
+        # largest image as needed) to the form needed by the Faster R-CNN head.
+        # We pass an arbitrary min_size and max_size here, but these are ignored since
+        # we call GeneralizedRCNNTransform.batch_images directly rather than calling
+        # its forward function.
         self.transform = (
             torchvision.models.detection.transform.GeneralizedRCNNTransform(
                 min_size=800,
@@ -39,7 +45,9 @@ class NoopTransform(torch.nn.Module):
         Returns:
             wrapped images and unmodified targets
         """
+        # See comment above, this just pads/concatenates the images without resizing.
         images = self.transform.batch_images(images, size_divisible=32)
+        # Now convert to ImageList object needed by Faster R-CNN head.
         image_sizes = [(image.shape[1], image.shape[2]) for image in images]
         image_list = torchvision.models.detection.image_list.ImageList(
             images, image_sizes

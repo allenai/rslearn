@@ -29,7 +29,12 @@ from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import open_atomic
-from rslearn.utils.geometry import STGeometry, flatten_shape
+from rslearn.utils.geometry import (
+    FloatBounds,
+    STGeometry,
+    flatten_shape,
+    split_shape_at_prime_meridian,
+)
 from rslearn.utils.grid_index import GridIndex
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
@@ -84,10 +89,11 @@ def get_harmonize_callback(
     return callback
 
 
-def get_sentinel2_tile_index() -> dict[str, tuple[float, float, float, float]]:
+def get_sentinel2_tile_index() -> dict[str, list[FloatBounds]]:
     """Get the Sentinel-2 tile index.
 
-    This is a map from tile name to the WGS84 bounds of the tile.
+    This is a map from tile name to a list of WGS84 bounds of the tile. A tile may have
+    multiple bounds if it crosses the antimeridian.
     """
     # Identify the Sentinel-2 tile names and bounds using the KML file.
     # First, download the zip file and extract and parse the KML.
@@ -105,8 +111,8 @@ def get_sentinel2_tile_index() -> dict[str, tuple[float, float, float, float]]:
         with zipf.open(member_names[0]) as memberf:
             tree = ET.parse(memberf)
 
-    # Map from the tile name to the longitude/latitude bounds.
-    tile_index: dict[str, tuple[float, float, float, float]] = {}
+    # Map from the tile name to a list of the longitude/latitude bounds.
+    tile_index: dict[str, list[FloatBounds]] = {}
 
     # The KML is list of Placemark so iterate over those.
     for placemark_node in tree.iter(SENTINEL2_KML_NAMESPACE + "Placemark"):
@@ -118,11 +124,13 @@ def get_sentinel2_tile_index() -> dict[str, tuple[float, float, float, float]]:
         tile_name = name_node.text
 
         # There may be one or more <coordinates> nodes depending on whether it is a
-        # MultiGeometry. Here we just iterate over all of the coordinates since we are
-        # only interested in the bounds in WGS-84 coordinates.
-        lons = []
-        lats = []
+        # MultiGeometry. Some are polygons and some are points, but generally the
+        # points just seem to be the center of the tile. So we create one polygon for
+        # each coordinate list that is not a point, union them, and then split the
+        # union geometry over the antimeridian.
+        shapes = []
         for coord_node in placemark_node.iter(SENTINEL2_KML_NAMESPACE + "coordinates"):
+            points = []
             # It is list of space-separated coordinates like:
             #   180,-73.0597374076,0 176.8646237862,-72.9914734628,0 ...
             if coord_node.text is None:
@@ -136,19 +144,26 @@ def get_sentinel2_tile_index() -> dict[str, tuple[float, float, float, float]]:
 
                 lon = float(parts[0])
                 lat = float(parts[1])
-                lons.append(lon)
-                lats.append(lat)
+                points.append((lon, lat))
 
-        if len(lons) == 0 or len(lats) == 0:
+            # At least three points to get a polygon.
+            if len(points) < 3:
+                continue
+
+            shapes.append(shapely.Polygon(points))
+
+        if len(shapes) == 0:
             raise ValueError("Sentinel-2 KML has Placemark with no coordinates")
 
-        bounds = (
-            min(lons),
-            min(lats),
-            max(lons),
-            max(lats),
-        )
-        tile_index[tile_name] = bounds
+        # Now we union the shapes and split them at the antimeridian. This avoids
+        # issues where the tile bounds go from -180 to 180 longitude and thus match
+        # with anything at the same latitude.
+        union_shp = shapely.unary_union(shapes)
+        split_shapes = flatten_shape(split_shape_at_prime_meridian(union_shp))
+        bounds_list: list[FloatBounds] = []
+        for shp in split_shapes:
+            bounds_list.append(shp.bounds)
+        tile_index[tile_name] = bounds_list
 
     return tile_index
 
@@ -187,8 +202,9 @@ def load_sentinel2_tile_index(cache_dir: UPath) -> GridIndex:
         json_data = json.load(f)
 
     grid_index = GridIndex(0.5)
-    for tile_name, bounds in json_data.items():
-        grid_index.insert(bounds, tile_name)
+    for tile_name, bounds_list in json_data.items():
+        for bounds in bounds_list:
+            grid_index.insert(bounds, tile_name)
 
     return grid_index
 
