@@ -204,6 +204,7 @@ class RslearnLightningModule(L.LightningModule):
             prog_bar=True,
             on_step=False,
             on_epoch=True,
+            sync_dist=True,
         )
         self.log(
             "train_loss",
@@ -211,6 +212,7 @@ class RslearnLightningModule(L.LightningModule):
             batch_size=batch_size,
             on_step=False,
             on_epoch=True,
+            sync_dist=True,
         )
         return train_loss
 
@@ -233,6 +235,7 @@ class RslearnLightningModule(L.LightningModule):
             batch_size=batch_size,
             on_step=False,
             on_epoch=True,
+            sync_dist=True,
         )
         self.log(
             "val_loss",
@@ -241,9 +244,12 @@ class RslearnLightningModule(L.LightningModule):
             prog_bar=True,
             on_step=False,
             on_epoch=True,
+            sync_dist=True,
         )
         self.val_metrics.update(outputs, targets)
-        self.log_dict(self.val_metrics, batch_size=batch_size, on_epoch=True)
+        self.log_dict(
+            self.val_metrics, batch_size=batch_size, on_epoch=True, sync_dist=True
+        )
 
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         """Compute the test loss and additional metrics.
@@ -262,12 +268,20 @@ class RslearnLightningModule(L.LightningModule):
             batch_size=batch_size,
             on_step=False,
             on_epoch=True,
+            sync_dist=True,
         )
         self.log(
-            "test_loss", test_loss, batch_size=batch_size, on_step=False, on_epoch=True
+            "test_loss",
+            test_loss,
+            batch_size=batch_size,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
         )
         self.test_metrics.update(outputs, targets)
-        self.log_dict(self.test_metrics, batch_size=batch_size, on_epoch=True)
+        self.log_dict(
+            self.test_metrics, batch_size=batch_size, on_epoch=True, sync_dist=True
+        )
 
         if self.visualize_dir:
             for idx, (inp, target, output, metadata) in enumerate(
