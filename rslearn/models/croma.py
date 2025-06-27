@@ -40,9 +40,38 @@ PRETRAINED_URLS: dict[CromaSize, str] = {
     CromaSize.BASE: "https://huggingface.co/antofuller/CROMA/resolve/main/CROMA_base.pt",
     CromaSize.LARGE: "https://huggingface.co/antofuller/CROMA/resolve/main/CROMA_large.pt",
 }
-MEAN_AND_STD_BY_MODALITY: dict[str, tuple[float, float]] = {
-    "sentinel1": (-15, 10),
-    "sentinel2": (1500, 1500),
+MEAN_AND_STD_BY_BAND: dict[tuple[str, str], tuple[float, float]] = {
+    ("sentinel1", "vv"): (0.15, 0.82),
+    ("sentinel1", "vh"): (0.03, 0.15),
+    ("sentinel2", "B01"): (1116, 1956),
+    ("sentinel2", "B02"): (1189, 1859),
+    ("sentinel2", "B03"): (1408, 1728),
+    ("sentinel2", "B04"): (1513, 1741),
+    ("sentinel2", "B05"): (1891, 1755),
+    ("sentinel2", "B06"): (2484, 1622),
+    ("sentinel2", "B07"): (2723, 1622),
+    ("sentinel2", "B08"): (2755, 1612),
+    ("sentinel2", "B8A"): (2886, 1611),
+    ("sentinel2", "B09"): (3270, 2651),
+    ("sentinel2", "B11"): (2563, 1442),
+    ("sentinel2", "B12"): (1914, 1329),
+}
+MODALITY_BANDS = {
+    "sentinel1": ["vv", "vh"],
+    "sentinel2": [
+        "B01",
+        "B02",
+        "B03",
+        "B04",
+        "B05",
+        "B06",
+        "B07",
+        "B08",
+        "B8A",
+        "B09",
+        "B11",
+        "B12",
+    ],
 }
 
 
@@ -181,7 +210,7 @@ class CromaNormalize(Transform):
         """Initialize a new CromaNormalize."""
         super().__init__()
 
-    def apply_image(self, image: torch.Tensor, mean: float, std: float) -> torch.Tensor:
+    def apply_image(self, image: torch.Tensor, modality: str) -> torch.Tensor:
         """Normalize the specified image with CROMA normalization.
 
         CROMA normalized based on batch statistics, but we may apply the model with
@@ -193,13 +222,25 @@ class CromaNormalize(Transform):
 
         Args:
             image: the image to transform.
+            modality: the modality of the image.
             mean: the mean to use for the normalization.
             std: the standard deviation to use for the normalization.
         """
         image = image.float()
 
+        # Number of channels must be a multiple of the expected number of bands for
+        # this modality. It can be a multiple since we accept stacked time series.
+        band_names = MODALITY_BANDS[modality]
+        if image.shape[0] % len(band_names) != 0:
+            raise ValueError(
+                f"image has {image.shape[0]} channels for modality {modality} which is not a multiple of expected number of bands {len(band_names)}"
+            )
+
         normalized_bands = []
         for band_idx in range(image.shape[0]):
+            band_name = band_names[band_idx % len(band_names)]
+            mean, std = MEAN_AND_STD_BY_BAND[(modality, band_name)]
+
             orig = image[band_idx, :, :]
             min_value = mean - 2 * std
             max_value = mean + 2 * std
@@ -222,9 +263,8 @@ class CromaNormalize(Transform):
         Returns:
             normalized (input_dicts, target_dicts) tuple
         """
-        for k in ["sentinel1", "sentinel2"]:
-            if k not in input_dict:
+        for modality in MODALITY_BANDS.keys():
+            if modality not in input_dict:
                 continue
-            mean, std = MEAN_AND_STD_BY_MODALITY[k]
-            input_dict[k] = self.apply_image(input_dict[k], mean, std)
+            input_dict[modality] = self.apply_image(input_dict[modality], modality)
         return input_dict, target_dict
