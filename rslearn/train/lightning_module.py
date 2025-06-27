@@ -247,11 +247,9 @@ class RslearnLightningModule(L.LightningModule):
             sync_dist=True,
         )
         self.val_metrics.update(outputs, targets)
-
-    def on_validation_epoch_end(self) -> None:
-        """Log test metrics on epoch end."""
-        self.log_dict(self.val_metrics.compute(), sync_dist=True)
-        self.val_metrics.reset()
+        self.log_dict(
+            self.val_metrics, batch_size=batch_size, on_epoch=True, sync_dist=True
+        )
 
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         """Compute the test loss and additional metrics.
@@ -281,6 +279,9 @@ class RslearnLightningModule(L.LightningModule):
             sync_dist=True,
         )
         self.test_metrics.update(outputs, targets)
+        self.log_dict(
+            self.test_metrics, batch_size=batch_size, on_epoch=True, sync_dist=True
+        )
 
         if self.visualize_dir:
             for idx, (inp, target, output, metadata) in enumerate(
@@ -293,11 +294,6 @@ class RslearnLightningModule(L.LightningModule):
                         f'{metadata["window_name"]}_{metadata["bounds"][0]}_{metadata["bounds"][1]}_{image_suffix}.png',
                     )
                     Image.fromarray(image).save(out_fname)
-
-    def on_test_epoch_end(self) -> None:
-        """Log test metrics on epoch end."""
-        self.log_dict(self.test_metrics.compute(), sync_dist=True)
-        self.test_metrics.reset()
 
     def predict_step(
         self, batch: Any, batch_idx: int, dataloader_idx: int = 0
