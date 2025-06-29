@@ -130,6 +130,7 @@ class BandSetConfig:
         zoom_offset: int = 0,
         remap: dict[str, Any] | None = None,
         class_names: list[list[str]] | None = None,
+        nodata_vals: list[float] | None = None,
     ) -> None:
         """Creates a new BandSetConfig instance.
 
@@ -150,6 +151,9 @@ class BandSetConfig:
                 each band. The length of this list must equal the number of bands. For
                 example, [["forest", "desert"]] means that it is a single-band raster
                 where values can be 0 (forest) or 1 (desert).
+            nodata_vals: the nodata values for this band set. This is used during
+                materialization when creating mosaics, to determine which parts of the
+                source images should be copied.
         """
         if class_names is not None and len(bands) != len(class_names):
             raise ValueError(
@@ -162,6 +166,7 @@ class BandSetConfig:
         self.zoom_offset = zoom_offset
         self.remap = remap
         self.class_names = class_names
+        self.nodata_vals = nodata_vals
 
         if format is None:
             self.format = {"name": "geotiff"}
@@ -184,7 +189,7 @@ class BandSetConfig:
             dtype=DType(config["dtype"]),
             bands=config["bands"],
         )
-        for k in ["format", "zoom_offset", "remap", "class_names"]:
+        for k in ["format", "zoom_offset", "remap", "class_names", "nodata_vals"]:
             if k in config:
                 kwargs[k] = config[k]
         return BandSetConfig(**kwargs)  # type: ignore

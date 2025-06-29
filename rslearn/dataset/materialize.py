@@ -60,6 +60,7 @@ def read_raster_window_from_tiles(
     bounds: PixelBounds,
     src_indexes: list[int],
     dst_indexes: list[int],
+    nodata_vals: list[float],
     remapper: Remapper | None = None,
     resampling: Resampling = Resampling.bilinear,
 ) -> None:
@@ -76,6 +77,8 @@ def read_raster_window_from_tiles(
         bounds: the bounds of the dst array.
         src_indexes: the source band indexes to use
         dst_indexes: corresponding destination band indexes for each source band index
+        nodata_vals: the nodata values for each band, to determine which parts of dst
+            should be overwritten.
         remapper: optional remapper to apply on the source pixel values
         resampling: how to resample the pixels in case re-projection is needed.
     """
@@ -107,7 +110,12 @@ def read_raster_window_from_tiles(
         dst_row_offset : dst_row_offset + src.shape[1],
         dst_col_offset : dst_col_offset + src.shape[2],
     ]
-    mask = dst_crop[dst_indexes, :, :].max(axis=0) == 0
+
+    # Create mask indicating where dst has no data (based on nodata_vals).
+    # We overwrite dst at pixels where all the bands are nodata.
+    nodata_vals_arr = np.array(nodata_vals)[:, None, None]
+    mask = (dst_crop[dst_indexes, :, :] == nodata_vals_arr).min(axis=0)
+
     for src_index, dst_index in enumerate(dst_indexes):
         dst_crop[dst_index, mask] = src[src_index, mask]
 
@@ -152,10 +160,18 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
             )
 
             for group_id, group in enumerate(item_groups):
+                # Initialize the destination array to the nodata values.
+                # We default the nodata value to 0.
+                nodata_vals = band_cfg.nodata_vals
+                if nodata_vals is None:
+                    nodata_vals = [0 for _ in band_cfg.bands]
                 dst = np.zeros(
                     (len(band_cfg.bands), bounds[3] - bounds[1], bounds[2] - bounds[0]),
                     dtype=band_cfg.dtype.value,
                 )
+                for idx, nodata_val in enumerate(nodata_vals):
+                    dst[idx] = nodata_val
+
                 for item in group:
                     # Identify which tile store layer(s) to read to get the configured
                     # bands.
@@ -165,10 +181,10 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
 
                     available_bands = tile_store.get_raster_bands(item.name)
                     needed_band_sets_and_indexes = []
-                    for band_set in available_bands:
+                    for src_bands in available_bands:
                         needed_src_indexes = []
                         needed_dst_indexes = []
-                        for i, band in enumerate(band_set):
+                        for i, band in enumerate(src_bands):
                             if band not in wanted_band_indexes:
                                 continue
                             needed_src_indexes.append(i)
@@ -177,27 +193,29 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
                         if len(needed_src_indexes) == 0:
                             continue
                         needed_band_sets_and_indexes.append(
-                            (band_set, needed_src_indexes, needed_dst_indexes)
+                            (src_bands, needed_src_indexes, needed_dst_indexes)
                         )
                     if len(wanted_band_indexes) > 0:
                         # This item doesn't have all the needed bands, so skip it.
                         continue
 
                     for (
-                        band_set,
+                        src_bands,
                         src_indexes,
                         dst_indexes,
                     ) in needed_band_sets_and_indexes:
+                        cur_nodata_vals = [nodata_vals[idx] for idx in dst_indexes]
                         read_raster_window_from_tiles(
-                            dst,
-                            tile_store,
-                            item.name,
-                            band_set,
-                            projection,
-                            bounds,
-                            src_indexes,
-                            dst_indexes,
-                            remapper,
+                            dst=dst,
+                            tile_store=tile_store,
+                            item_name=item.name,
+                            bands=src_bands,
+                            projection=projection,
+                            bounds=bounds,
+                            src_indexes=src_indexes,
+                            dst_indexes=dst_indexes,
+                            nodata_vals=cur_nodata_vals,
+                            remapper=remapper,
                             resampling=layer_cfg.resampling_method,
                         )
 
