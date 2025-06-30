@@ -34,7 +34,6 @@ from .copernicus import get_harmonize_callback, get_sentinel2_tiles
 logger = get_logger(__name__)
 
 
-# TODO: this is a copy of the Sentinel2Item class in aws_open_data.py
 class Sentinel2Item(Item):
     """An item in the Sentinel2 data source."""
 
@@ -165,6 +164,7 @@ class Sentinel2(DataSource):
         harmonize: bool = False,
         rtree_time_range: tuple[datetime, datetime] | None = None,
         rtree_cache_dir: UPath | None = None,
+        use_bigquery: bool | None = None,
     ):
         """Initialize a new Sentinel2 instance.
 
@@ -175,10 +175,8 @@ class Sentinel2(DataSource):
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
             use_rtree_index: whether to create an rtree index to enable faster lookups
-                (default true). Note that the rtree is populated from a BigQuery table
-                where Google maintains an index, and this requires GCP credentials to
-                query; additionally, rtree creation can take several minutes/hours. Use
-                use_rtree_index=False to avoid the need for credentials.
+                (default true). rtree will take several hours if it is not restricted
+                to a short time range using rtree_time_range.
             harmonize: harmonize pixel values across different processing baselines,
                 see https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
             rtree_time_range: only populate the rtree index with scenes within this
@@ -188,11 +186,26 @@ class Sentinel2(DataSource):
                 stored in index_cache_dir (where product XML files are also stored). If
                 rtree_cache_dir is set, then the rtree is stored here instead (so
                 index_cache_dir is only used to cache product XML files).
+            use_bigquery: whether to use the BigQuery index over the scenes in the
+                bucket. This must be enabled if use_rtree_index is enabled, since we
+                only support populating the rtree index from BigQuery. Note that
+                BigQuery requires GCP credentials to be setup; to avoid the need for
+                credentials, set use_bigquery=False and use_rtree_index=False. The
+                default value is None which enables BigQuery when use_rtree_index=True
+                and disables when use_rtree_index=False.
         """
+        if use_bigquery is None:
+            use_bigquery = use_rtree_index
+        if not use_bigquery and use_rtree_index:
+            raise ValueError(
+                "use_bigquery must be enabled if use_rtree_index is enabled"
+            )
+
         self.config = config
         self.index_cache_dir = index_cache_dir
         self.sort_by = sort_by
         self.harmonize = harmonize
+        self.use_bigquery = use_bigquery
 
         self.index_cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -207,7 +220,7 @@ class Sentinel2(DataSource):
 
             def build_fn(index: RtreeIndex) -> None:
                 """Build the RtreeIndex from items in the data source."""
-                for item in self._read_index(
+                for item in self._read_bigquery(
                     desc="Building rtree index", time_range=rtree_time_range
                 ):
                     for shp in flatten_shape(item.geometry.shp):
@@ -235,15 +248,18 @@ class Sentinel2(DataSource):
         if "rtree_cache_dir" in d:
             kwargs["rtree_cache_dir"] = join_upath(ds_path, d["rtree_cache_dir"])
 
-        simple_optionals = ["sort_by", "use_rtree_index", "harmonize"]
+        simple_optionals = ["sort_by", "use_rtree_index", "harmonize", "use_bigquery"]
         for k in simple_optionals:
             if k in d:
                 kwargs[k] = d[k]
 
         return Sentinel2(**kwargs)
 
-    def _read_index(
-        self, desc: str, time_range: tuple[datetime, datetime] | None = None
+    def _read_bigquery(
+        self,
+        desc: str | None = None,
+        time_range: tuple[datetime, datetime] | None = None,
+        wgs84_bbox: tuple[float, float, float, float] | None = None,
     ) -> Generator[Sentinel2Item, None, None]:
         """Read Sentinel-2 scenes from BigQuery table.
 
@@ -254,21 +270,35 @@ class Sentinel2(DataSource):
         Args:
             desc: description to include with tqdm progress bar.
             time_range: optional time_range to restrict the reading.
+            wgs84_bbox: optional bounding box in WGS-84 coordinates to restrict the
+                reading.
         """
         query_str = f"""
             SELECT  source_url, base_url, product_id, sensing_time, granule_id,
                     east_lon, south_lat, west_lon, north_lat, cloud_cover
             FROM    `{self.TABLE_NAME}`
         """
+        clauses = []
         if time_range is not None:
-            query_str += f"""
-                WHERE sensing_time >= "{time_range[0]}" AND sensing_time <= "{time_range[1]}"
-            """
+            clauses.append(f"""(
+                sensing_time >= "{time_range[0]}" AND sensing_time <= "{time_range[1]}"
+            )""")
+        if wgs84_bbox is not None:
+            clauses.append(f"""(
+                west_lon < {wgs84_bbox[2]} AND
+                east_lon > {wgs84_bbox[0]} AND
+                south_lat < {wgs84_bbox[3]} AND
+                north_lat > {wgs84_bbox[1]}
+            )""")
+        if clauses:
+            query_str += " WHERE " + " AND ".join(clauses)
 
         client = bigquery.Client()
         result = client.query(query_str)
+        if desc is not None:
+            result = tqdm.tqdm(result, desc=desc)
 
-        for row in tqdm.tqdm(result, desc=desc):
+        for row in result:
             # Validate product ID has correct number of sections and that it is MSIL1C.
             # Example product IDs:
             # - S2B_MSIL1C_20180210T200549_N0206_R128_T08VPK_20180210T215722
@@ -320,9 +350,9 @@ class Sentinel2(DataSource):
 
             # Extract the spatial and temporal bounds of the image.
             bounds = (
-                float(row["east_lon"]),
-                float(row["south_lat"]),
                 float(row["west_lon"]),
+                float(row["south_lat"]),
+                float(row["east_lon"]),
                 float(row["north_lat"]),
             )
             shp = shapely.box(*bounds)
@@ -384,6 +414,7 @@ class Sentinel2(DataSource):
         if not cache_xml_fname.exists():
             product_folder = self._build_product_folder_name(name)
             metadata_blob_path = product_folder + self.METADATA_FILENAME
+            logger.debug("reading metadata XML from %s", metadata_blob_path)
             blob = self.bucket.blob(metadata_blob_path)
             if not blob.exists():
                 raise MissingXMLException(name)
@@ -679,7 +710,7 @@ class Sentinel2(DataSource):
     def _get_candidate_items_direct(
         self, wgs84_geometries: list[STGeometry]
     ) -> list[list[Sentinel2Item]]:
-        """Use _read_products to list relevant items.
+        """Use _read_products to list matching items directly from the bucket.
 
         Args:
             wgs84_geometries: the geometries to query.
@@ -715,6 +746,24 @@ class Sentinel2(DataSource):
 
         return candidates
 
+    def _get_candidate_items_bigquery(
+        self, wgs84_geometries: list[STGeometry]
+    ) -> list[list[Sentinel2Item]]:
+        """Use _read_bigquery to list matching items by querying the BigQuery table.
+
+        Args:
+            wgs84_geometries: the geometries to query.
+        """
+        candidates: list[list[Sentinel2Item]] = [[] for _ in wgs84_geometries]
+        for idx, geometry in enumerate(wgs84_geometries):
+            wgs84_bbox = geometry.shp.bounds
+            for item in self._read_bigquery(
+                time_range=geometry.time_range, wgs84_bbox=wgs84_bbox
+            ):
+                candidates[idx].append(item)
+
+        return candidates
+
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
     ) -> list[list[list[Sentinel2Item]]]:
@@ -733,6 +782,8 @@ class Sentinel2(DataSource):
 
         if self.rtree_index:
             candidates = self._get_candidate_items_index(wgs84_geometries)
+        elif self.use_bigquery:
+            candidates = self._get_candidate_items_bigquery(wgs84_geometries)
         else:
             candidates = self._get_candidate_items_direct(wgs84_geometries)
 
