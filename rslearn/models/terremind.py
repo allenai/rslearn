@@ -6,7 +6,7 @@ from typing import Any
 import torch
 from terratorch.registry import BACKBONE_REGISTRY
 
-from rslearn.transforms import Transform
+from rslearn.train.transforms.transform import Transform
 
 
 # TerraMind v1 provides two sizes: base and large
@@ -22,6 +22,8 @@ DEFAULT_IMAGE_SIZE = 256
 
 # TerraMind modalities
 TERRAMIND_MODALITIES = ["S2L1C", "S2L2A", "S1GRD", "S1RTC", "RGB", "DEM"]
+
+# TerraMind band orders: see https://github.com/IBM/terratorch/blob/da5082a248d5ce9446bf1ef4a84696e669bbc9e4/terratorch/models/backbones/terramind/model/terramind_register.py#L58C1-L58C17
 
 # TerraMind standardization values
 TERRAMIND_MEANS = {
