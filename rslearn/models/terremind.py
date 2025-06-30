@@ -160,7 +160,7 @@ class Terramind(torch.nn.Module):
 
         # By default, the patch embeddings are averaged over all modalities to reduce output tokens
         # So the output shape is (B, N, D), where N is the number of patches and D is the embedding dimension
-        image_features = self.model(model_inputs)
+        image_features = self.model(model_inputs)[-1]
         batch_size = image_features.shape[0]
         # Image features are (B, D, H, W)
         return [
