@@ -138,6 +138,7 @@ class Terramind(torch.nn.Module):
             raise ValueError(f"Invalid model size: {model_size}")
 
         self.image_size = image_size
+        self.model_size = model_size
         self.modalities = modalities
         self.height, self.width = image_size // PATCH_SIZE, image_size // PATCH_SIZE
 
@@ -160,6 +161,7 @@ class Terramind(torch.nn.Module):
 
         # By default, the patch embeddings are averaged over all modalities to reduce output tokens
         # So the output shape is (B, N, D), where N is the number of patches and D is the embedding dimension
+        # Get the output of the last layer
         image_features = self.model(model_inputs)[-1]
         batch_size = image_features.shape[0]
         # Image features are (B, D, H, W)
