@@ -68,9 +68,17 @@ class TestSentinel2:
         )
         assert tile_store.is_raster_ready(layer_name, item.name, [TEST_BAND])
 
-    @pytest.mark.parametrize("use_rtree_index", [False, True])
+    # use_rtree_index=True and use_bigquery=False is not supported, so we test all the
+    # other combinations.
+    @pytest.mark.parametrize(
+        "use_rtree_index,use_bigquery", [(False, False), (False, True), (True, True)]
+    )
     def test_local(
-        self, tmp_path: pathlib.Path, seattle2020: STGeometry, use_rtree_index: bool
+        self,
+        tmp_path: pathlib.Path,
+        seattle2020: STGeometry,
+        use_rtree_index: bool,
+        use_bigquery: bool,
     ) -> None:
         """Test ingesting to local filesystem."""
         tile_store_dir = UPath(tmp_path) / "tiles"
@@ -82,6 +90,7 @@ class TestSentinel2:
             seattle2020,
             index_cache_dir=index_cache_dir,
             use_rtree_index=use_rtree_index,
+            use_bigquery=use_bigquery,
         )
 
     @pytest.mark.parametrize("use_rtree_index", [False, True])
@@ -192,7 +201,7 @@ def test_search_intersecting_product_with_missing_xml(
         tzinfo=timezone.utc,
     )
     time_range = (sense_day, sense_day + timedelta(days=1))
-    cell_bounds = get_sentinel2_tile_index()[cell_id]
+    cell_bounds = get_sentinel2_tile_index()[cell_id][0]
     center = (
         (cell_bounds[0] + cell_bounds[2]) / 2,
         (cell_bounds[1] + cell_bounds[3]) / 2,
