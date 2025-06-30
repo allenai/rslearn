@@ -18,7 +18,7 @@ class TerramindSize(str, Enum):
 
 
 PATCH_SIZE = 16
-DEFAULT_IMAGE_SIZE = 264
+DEFAULT_IMAGE_SIZE = 256
 
 # TerraMind modalities
 TERRAMIND_MODALITIES = ["S2L1C", "S2L2A", "S1GRD", "S1RTC", "RGB", "DEM"]
@@ -176,7 +176,6 @@ class Terramind(torch.nn.Module):
         Returns:
             the output channels of the backbone as a list of (patch_size, depth) tuples.
         """
-        # We need to
         if self.model_size == TerramindSize.BASE:
             depth = 768
         elif self.model_size == TerramindSize.LARGE:
