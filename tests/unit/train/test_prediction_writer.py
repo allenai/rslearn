@@ -67,11 +67,12 @@ def test_write_raster(tmp_path: pathlib.Path) -> None:
         "bounds": window.bounds,
         "window_bounds": window.bounds,
         "projection": window.projection,
+        "time_range": window.time_range,
         "patch_idx": 0,
         "num_patches": 1,
     }
     # batch is (inputs, targets, metadatas) but writer only uses the metadatas.
-    batch = (None, None, [metadata])
+    batch = ([None], [None], [metadata])
     # output for segmentation task is CHW where C axis contains per-class
     # probabilities.
     output = torch.zeros((2, 5, 5), dtype=torch.float32)
