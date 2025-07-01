@@ -335,11 +335,13 @@ class ModelDataset(torch.utils.data.Dataset):
             # Filter the window.options.
             new_windows = []
             for window in windows:
+                tags_passed = True
                 for k, v in split_config.tags.items():
                     if k not in window.options:
-                        continue
-                    if v and window.options[k] != v:
-                        continue
+                        tags_passed = False
+                    elif v and window.options[k] != v:
+                        tags_passed = False
+                if tags_passed:
                     new_windows.append(window)
             windows = new_windows
 

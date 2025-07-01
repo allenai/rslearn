@@ -19,6 +19,7 @@ import fiona.transform
 import numpy.typing as npt
 import rasterio
 import shapely
+import shapely.geometry
 import tqdm
 from rasterio.enums import Resampling
 from upath import UPath
@@ -31,8 +32,11 @@ from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
+from rslearn.utils.grid_index import GridIndex
 
 from .data_source import DataSource, Item, QueryConfig
+
+WRS2_GRID_SIZE = 1.0
 
 
 class LandsatOliTirsItem(Item):
@@ -109,11 +113,12 @@ class LandsatOliTirs(DataSource, TileStore):
         self.config = config
         self.metadata_cache_dir = metadata_cache_dir
         self.sort_by = sort_by
-        print(self.metadata_cache_dir)
 
         self.client = boto3.client("s3")
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
         self.metadata_cache_dir.mkdir(parents=True, exist_ok=True)
+
+        self.wrs2_index: GridIndex | None = None
 
     @staticmethod
     def from_config(config: RasterLayerConfig, ds_path: UPath) -> "LandsatOliTirs":
@@ -133,7 +138,7 @@ class LandsatOliTirs(DataSource, TileStore):
     def _read_products(
         self, needed_year_pathrows: set[tuple[int, str, str]]
     ) -> Generator[LandsatOliTirsItem, None, None]:
-        """Read _MTL.json files and yield relevant LandsatOliTirsItems.
+        """Read _stac.json files and yield relevant LandsatOliTirsItems.
 
         Args:
             needed_year_pathrows: set of (year, path, row) where we need to search for
@@ -152,7 +157,10 @@ class LandsatOliTirs(DataSource, TileStore):
                 for obj in self.bucket.objects.filter(
                     Prefix=prefix, RequestPayer="requester"
                 ):
-                    if not obj.key.endswith("_MTL.json"):
+                    # Only read the _stac.json files.
+                    # Previously we used _MTL.json but those files don't have the full
+                    # geometry of the Landsat scene, only the bounding box.
+                    if not obj.key.endswith("_stac.json"):
                         continue
                     # Load JSON data.
                     buf = io.BytesIO()
@@ -160,34 +168,32 @@ class LandsatOliTirs(DataSource, TileStore):
                         obj.key, buf, ExtraArgs={"RequestPayer": "requester"}
                     )
                     buf.seek(0)
-                    product = json.load(buf)
-                    metadata = product["LANDSAT_METADATA_FILE"]
-                    image_attributes = metadata["IMAGE_ATTRIBUTES"]
-                    projection_attributes = metadata["PROJECTION_ATTRIBUTES"]
+                    stac_data = json.load(buf)
 
                     # Get polygon coordinates.
-                    coordinates = []
-                    for corner_id in ["UL", "UR", "LR", "LL"]:
-                        lon = projection_attributes[f"CORNER_{corner_id}_LON_PRODUCT"]
-                        lat = projection_attributes[f"CORNER_{corner_id}_LAT_PRODUCT"]
-                        coordinates.append((lon, lat))
+                    shp = shapely.geometry.shape(stac_data["geometry"])
 
                     # Get datetime.
-                    date_str = image_attributes["DATE_ACQUIRED"]
-                    time_str = image_attributes["SCENE_CENTER_TIME"]
-                    ts = dateutil.parser.isoparse(date_str + "T" + time_str)
+                    ts = dateutil.parser.isoparse(stac_data["properties"]["datetime"])
 
-                    blob_path = obj.key.split("MTL.json")[0]
+                    blob_path = obj.key.split("stac.json")[0]
                     time_range: tuple[datetime, datetime] = (ts, ts)
-                    geometry = STGeometry(
-                        WGS84_PROJECTION, shapely.Polygon(coordinates), time_range
-                    )
+                    geometry = STGeometry(WGS84_PROJECTION, shp, time_range)
+                    cloud_cover: float
+                    if "eo:cloud_cover" in stac_data["properties"]:
+                        cloud_cover = stac_data["properties"]["eo:cloud_cover"]
+                    elif "landsat:cloud_cover_land" in stac_data["properties"]:
+                        cloud_cover = stac_data["properties"][
+                            "landsat:cloud_cover_land"
+                        ]
+                    else:
+                        cloud_cover = -1
                     items.append(
                         LandsatOliTirsItem(
-                            name=metadata["PRODUCT_CONTENTS"]["LANDSAT_PRODUCT_ID"],
+                            name=stac_data["id"],
                             geometry=geometry,
                             blob_path=blob_path,
-                            cloud_cover=float(image_attributes["CLOUD_COVER"]),
+                            cloud_cover=cloud_cover,
                         )
                     )
 
@@ -203,7 +209,7 @@ class LandsatOliTirs(DataSource, TileStore):
 
             yield from items
 
-    def get_wrs2_polygons(self) -> list[tuple[shapely.Geometry, str, str]]:
+    def _get_wrs2_polygons(self) -> list[tuple[shapely.Geometry, str, str]]:
         """Get polygons for each (path, row) in the WRS2 grid.
 
         Returns:
@@ -256,6 +262,19 @@ class LandsatOliTirs(DataSource, TileStore):
                     polygons.append((shp, path, row))
                 return polygons
 
+    def _get_wrs2_index(self) -> GridIndex:
+        """Get a grid index over the WRS2 polygons."""
+        if self.wrs2_index is not None:
+            return self.wrs2_index
+
+        # Index doesn't exist so we need to build it.
+        # We cache it with the object since it takes a bit of time to create it.
+        polygons = self._get_wrs2_polygons()
+        self.wrs2_index = GridIndex(WRS2_GRID_SIZE)
+        for polygon, path, row in polygons:
+            self.wrs2_index.insert(polygon.bounds, (polygon, path, row))
+        return self.wrs2_index
+
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
     ) -> list[list[list[LandsatOliTirsItem]]]:
@@ -268,7 +287,7 @@ class LandsatOliTirs(DataSource, TileStore):
         Returns:
             List of groups of items that should be retrieved for each geometry.
         """
-        wrs2_polygons = self.get_wrs2_polygons()
+        wrs2_index = self._get_wrs2_index()
         needed_year_pathrows = set()
         wgs84_geometries = [
             geometry.to_projection(WGS84_PROJECTION) for geometry in geometries
@@ -279,7 +298,7 @@ class LandsatOliTirs(DataSource, TileStore):
                     "Landsat on AWS requires geometry time ranges to be set"
                 )
             cur_pathrows = set()
-            for polygon, path, row in wrs2_polygons:
+            for polygon, path, row in wrs2_index.query(wgs84_geometry.shp.bounds):
                 if wgs84_geometry.shp.intersects(polygon):
                     cur_pathrows.add((path, row))
             for path, row in cur_pathrows:
@@ -300,7 +319,9 @@ class LandsatOliTirs(DataSource, TileStore):
                 cur_items.append(item)
 
             if self.sort_by == "cloud_cover":
-                cur_items.sort(key=lambda item: item.cloud_cover)
+                cur_items.sort(
+                    key=lambda item: item.cloud_cover if item.cloud_cover >= 0 else 100
+                )
             elif self.sort_by is not None:
                 raise ValueError(f"invalid sort_by setting ({self.sort_by})")
 
