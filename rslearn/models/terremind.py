@@ -137,6 +137,7 @@ class Terramind(torch.nn.Module):
         else:
             raise ValueError(f"Invalid model size: {model_size}")
 
+        self.model_size = model_size
         self.image_size = image_size
         self.modalities = modalities
         self.height, self.width = image_size // PATCH_SIZE, image_size // PATCH_SIZE
@@ -211,8 +212,13 @@ class TerramindNormalize(Transform):
             The normalized image.
         """
         images = image.float()  # (C, H, W)
+        if images.shape[0] % len(means) != 0:
+            raise ValueError(
+                f"the number of image channels {images.shape[0]} is not multiple of expected number of bands {len(means)}"
+            )
         for i in range(images.shape[0]):
-            images[i] = (images[i] - means[i]) / stds[i]
+            band_idx = i % len(means)
+            images[i] = (images[i] - means[band_idx]) / stds[band_idx]
         return images
 
     def forward(
