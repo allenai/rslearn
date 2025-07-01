@@ -71,10 +71,10 @@ class TestReadRasterWindowFromTiles:
 
         nodata_vals = [1.0, 2.0]
         dst = np.zeros((2, 4, 4), dtype=np.uint8)
-        # Set top 1 and left 2.
+        # Set first band 1 in top half, and second band 2 in left half.
         # So then only topleft has both bands matching nodata.
-        dst[:, 0:2, 0:4] = nodata_vals[0]
-        dst[:, 0:4, 0:2] = nodata_vals[1]
+        dst[0, 0:2, 0:4] = nodata_vals[0]
+        dst[1, 0:4, 0:2] = nodata_vals[1]
         read_raster_window_from_tiles(
             dst=dst,
             tile_store=TileStoreWithLayer(tile_store, self.LAYER_NAME),
@@ -86,7 +86,13 @@ class TestReadRasterWindowFromTiles:
             dst_indexes=[0, 1],
             nodata_vals=nodata_vals,
         )
-        assert np.all(dst[:, 0:2, 2:4] == nodata_vals[0])
-        assert np.all(dst[:, 2:4, 0:2] == nodata_vals[1])
+        # Top-right should be unchanged.
+        assert np.all(dst[0, 0:2, 2:4] == nodata_vals[0])
+        assert np.all(dst[1, 0:2, 2:4] == 0)
+        # Bottom-left should be unchanged.
+        assert np.all(dst[0, 2:4, 0:2] == 0)
+        assert np.all(dst[1, 2:4, 0:2] == nodata_vals[1])
+        # Top-left is updated to 3.
         assert np.all(dst[:, 0:2, 0:2] == 3)
+        # Bottom-right should be unchanged (still 0).
         assert np.all(dst[:, 2:4, 2:4] == 0)
