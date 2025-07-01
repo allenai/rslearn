@@ -1,5 +1,6 @@
 """Default LightningModule for rslearn."""
 
+import json
 import os
 from typing import Any
 
@@ -89,6 +90,7 @@ class RslearnLightningModule(L.LightningModule):
         plateau_min_lr: float = 0,
         plateau_cooldown: int = 0,
         visualize_dir: str | None = None,
+        metrics_file: str | None = None,
         restore_config: RestoreConfig | None = None,
         print_parameters: bool = False,
         print_model: bool = False,
@@ -108,6 +110,7 @@ class RslearnLightningModule(L.LightningModule):
                 resetting plateau scheduler
             visualize_dir: during validation or testing, output visualizations to this
                 directory
+            metrics_file: file to save metrics to
             restore_config: specification of configuration to restore parameters from
                 a non-Lightning checkpoint.
             print_parameters: whether to print the list of model parameters after model
@@ -124,6 +127,7 @@ class RslearnLightningModule(L.LightningModule):
         self.plateau_min_lr = plateau_min_lr
         self.plateau_cooldown = plateau_cooldown
         self.visualize_dir = visualize_dir
+        self.metrics_file = metrics_file
         self.restore_config = restore_config
 
         if print_parameters:
@@ -250,6 +254,14 @@ class RslearnLightningModule(L.LightningModule):
         self.log_dict(
             self.val_metrics, batch_size=batch_size, on_epoch=True, sync_dist=True
         )
+
+    def on_test_epoch_end(self) -> None:
+        """Optionally save the test metrics to a file."""
+        if self.metrics_file:
+            with open(self.metrics_file, "w+") as f:
+                metrics = self.test_metrics.compute()
+                metrics_dict = {k: v.item() for k, v in metrics.items()}
+                json.dump(metrics_dict, f, indent=4)
 
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         """Compute the test loss and additional metrics.
