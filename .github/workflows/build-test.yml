@@ -104,8 +104,7 @@ jobs:
           docker run --rm \
             ${{ needs.build.outputs.ghcr_docker_image }} \
             pytest -n auto tests/ -vv \
-            --ignore tests/integration/ \
-            --ignore tests/unit/models/
+            --ignore tests/integration/
 
       - name: Authenticate into gcp
         uses: "google-github-actions/auth@v2"
