@@ -1,6 +1,5 @@
 """Data source for Copernicus Climate Data Store."""
 
-import math
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -16,7 +15,7 @@ from rasterio.transform import from_origin
 from upath import UPath
 
 from rslearn.config import QueryConfig, RasterLayerConfig, SpaceMode
-from rslearn.const import WGS84_BOUNDS, WGS84_EPSG, WGS84_PROJECTION
+from rslearn.const import WGS84_EPSG, WGS84_PROJECTION
 from rslearn.data_sources import DataSource, Item
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
@@ -40,12 +39,9 @@ class ERA5LandMonthlyMeans(DataSource):
 
     This data source corresponds to the reanalysis-era5-land-monthly-means product.
 
-    All requests to the API will be for patches corresponding to the specified patch
-    size (defaulting to 10x10 degrees). The patch size defines a grid in WGS84
-    coordinates, and windows are matched to items that correspond to these grid cells.
-    (Temporally, the items are gridded by month.) Although the API supports arbitrary
-    bounds in the requests, using the fixed grid helps to minimize duplicative requests
-    across windows.
+    All requests to the API will be for the whole globe. Although the API supports arbitrary
+    bounds in the requests, using the whole available area helps to reduce the total number of
+    requests.
     """
 
     api_url = "https://cds.climate.copernicus.eu/api"
@@ -61,7 +57,6 @@ class ERA5LandMonthlyMeans(DataSource):
         self,
         band_names: list[str],
         api_key: str | None = None,
-        patch_size: float = 10,
     ):
         """Initialize a new ERA5LandMonthlyMeans instance.
 
@@ -70,10 +65,8 @@ class ERA5LandMonthlyMeans(DataSource):
                 variable names but with "_" replaced with "-".
             api_key: the API key. If not set, it should be set via the CDSAPI_KEY
                 environment variable.
-            patch_size: the size of items to request from the data store, in degrees.
         """
         self.band_names = band_names
-        self.patch_size = patch_size
 
         self.client = cdsapi.Client(
             url=self.api_url,
@@ -108,48 +101,12 @@ class ERA5LandMonthlyMeans(DataSource):
             band_names=band_names,
         )
 
-        simple_optionals = ["api_key", "patch_size"]
+        simple_optionals = ["api_key"]
         for k in simple_optionals:
             if k in d:
                 kwargs[k] = d[k]
 
         return ERA5LandMonthlyMeans(**kwargs)
-
-    def _tile_to_item(self, col: int, row: int, year: int, month: int) -> Item:
-        """Get the Item for the given column and row on our fixed grid.
-
-        Args:
-            col: the column.
-            row: the row.
-            year: the year.
-            month: the month.
-
-        Returns:
-            the corresponding Item.
-        """
-        item_name = f"{col}_{row}_{year}_{month}"
-
-        # The bounds is based on the grid.
-        bounds = (
-            col * self.patch_size,
-            row * self.patch_size,
-            (col + 1) * self.patch_size,
-            (row + 1) * self.patch_size,
-        )
-
-        # Time is just the given month.
-        start_date = datetime(year, month, 1, tzinfo=timezone.utc)
-        time_range = (
-            start_date,
-            start_date + relativedelta(months=1),
-        )
-
-        geometry = STGeometry(
-            WGS84_PROJECTION,
-            shapely.box(*bounds),
-            time_range,
-        )
-        return Item(item_name, geometry)
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
@@ -191,25 +148,27 @@ class ERA5LandMonthlyMeans(DataSource):
                 month_dates.append(cur_date)
                 cur_date += relativedelta(months=1)
 
-            # Determine which patches on our fixed grid that this geometry intersects.
-            wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
-            shp_bounds = wgs84_geometry.shp.bounds
-            cell_bounds = (
-                math.floor(shp_bounds[0] / self.patch_size),
-                math.floor(shp_bounds[1] / self.patch_size),
-                math.floor(shp_bounds[2] / self.patch_size) + 1,
-                math.floor(shp_bounds[3] / self.patch_size) + 1,
-            )
-
             cur_groups = []
             for cur_date in month_dates:
-                # Collect Item list corresponding to the patches and the current month.
+                # Collect Item list corresponding to the current month.
                 items = []
-                for col in range(cell_bounds[0], cell_bounds[2]):
-                    for row in range(cell_bounds[1], cell_bounds[3]):
-                        items.append(
-                            self._tile_to_item(col, row, cur_date.year, cur_date.month)
-                        )
+                item_name = f"era5land_monthlymean_{cur_date.year}_{cur_date.month}"
+                # Space is the whole globe.
+                bounds = (-180, -90, 180, 90)
+                # Time is just the given month.
+                start_date = datetime(
+                    cur_date.year, cur_date.month, 1, tzinfo=timezone.utc
+                )
+                time_range = (
+                    start_date,
+                    start_date + relativedelta(months=1),
+                )
+                geometry = STGeometry(
+                    WGS84_PROJECTION,
+                    shapely.box(*bounds),
+                    time_range,
+                )
+                items.append(Item(item_name, geometry))
                 cur_groups.append(items)
             all_groups.append(cur_groups)
 
@@ -309,25 +268,8 @@ class ERA5LandMonthlyMeans(DataSource):
             if tile_store.is_raster_ready(item.name, self.band_names):
                 continue
 
-            # Compute the bounds to request.
-            # Given that ERA5 is at a very coarse resolution, we add a buffer of half a pixel size
-            # to the bounds to ensure that we fully cover the geometries
-            # But we don't go beyond the valid WGS84 bounds.
-            bounds = (
-                item.geometry.shp.bounds[0] - self.PIXEL_SIZE / 2,
-                item.geometry.shp.bounds[1] - self.PIXEL_SIZE / 2,
-                item.geometry.shp.bounds[2] - self.PIXEL_SIZE / 2,
-                item.geometry.shp.bounds[3] - self.PIXEL_SIZE / 2,
-            )
-            bounds = (
-                max(bounds[0], WGS84_BOUNDS[0]),
-                max(bounds[1], WGS84_BOUNDS[1]),
-                min(bounds[2], WGS84_BOUNDS[2]),
-                min(bounds[3], WGS84_BOUNDS[3]),
-            )
-
             # Send the request to the CDS API
-            bounds = item.geometry.shp.bounds
+            # If area is not specified, the whole globe will be requested
             request = {
                 "product_type": [self.PRODUCT_TYPE],
                 "variable": variable_names,
@@ -336,17 +278,11 @@ class ERA5LandMonthlyMeans(DataSource):
                     f"{item.geometry.time_range[0].month:02d}"  # type: ignore
                 ],
                 "time": ["00:00"],
-                "area": [
-                    bounds[3],  # North
-                    bounds[0],  # West
-                    bounds[1],  # South
-                    bounds[2],  # East
-                ],
                 "data_format": self.DATA_FORMAT,
                 "download_format": self.DOWNLOAD_FORMAT,
             }
             logger.debug(
-                f"CDS API request for bounds {request['area']} and year={request['year']} month={request['month']}"
+                f"CDS API request for the whole globe for year={request['year']} month={request['month']}"
             )
             with tempfile.TemporaryDirectory() as tmp_dir:
                 local_nc_fname = os.path.join(tmp_dir, f"{item.name}.nc")
