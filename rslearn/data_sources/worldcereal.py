@@ -78,6 +78,14 @@ class WorldCerealConfidences(LocalFiles):
         _, _, season, product, confidence = filename[:-4].split("_")
         return f"{prefix}/{season}/{product}/{aez_name}/{confidence}"
 
+    @staticmethod
+    def all_aezs_from_tifs(filepath: UPath) -> set[int]:
+        """Given a filepath containing many tif files, extract all the AEZs."""
+        all_tifs = filepath.glob("*.tif")
+        aezs: set = set()
+        for tif_file in all_tifs:
+            aezs.add(int(tif_file.name.split("_")[0]))
+        return aezs
 
     @classmethod
     def download_and_process_worldcereal_data(cls, worldcereal_dir: UPath) -> UPath:
@@ -135,6 +143,7 @@ class WorldCerealConfidences(LocalFiles):
             if not zip_fname.exists():
                 print(f"Skipping {zip_fname}")
                 continue
+
             completed_fname = zip_dir / (filename + ".extraction_complete")
             if completed_fname.exists():
                 logger.debug("%s has already been extracted", filename)
@@ -165,5 +174,8 @@ class WorldCerealConfidences(LocalFiles):
 
         # finally, for each AEZ we will combine the bands so that they
         # are stored in a single tif file
+        for file_info in ordered_files:
+            filename = file_info["filename"]
+            path_to_tifs = tif_dir / cls.zip_filepath_from_filename(filename)
 
         return tif_dir
