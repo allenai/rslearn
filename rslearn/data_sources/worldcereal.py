@@ -68,6 +68,17 @@ class WorldCerealConfidences(LocalFiles):
             config=config, worldcereal_dir=join_upath(ds_path, d["worldcereal_dir"])
         )
 
+    @staticmethod
+    def zip_filepath_from_filename(filename: str) -> str:
+        """Given a filename, return the filepath of the extracted tifs.
+        """
+        prefix = "data/worldcereal_data/MAP-v3/2021"
+        aez_name = "aez_downsampled"
+        # [:-4] to remove ".zip"
+        _, _, season, product, confidence = filename[:-4].split("_")
+        return f"{prefix}/{season}/{product}/{aez_name}/{confidence}"
+
+
     @classmethod
     def download_and_process_worldcereal_data(cls, worldcereal_dir: UPath) -> UPath:
         """Download and extract the WorldCereal data.
@@ -88,7 +99,11 @@ class WorldCerealConfidences(LocalFiles):
         response = requests.get(cls.ZENODO_URL)
         response.raise_for_status()
         files_data = response.json()
-        for file_info in files_data:
+
+        files_as_dict = {f["filename"]: f for f in files_data}
+        # now its also in the right order for when we generate the files
+        ordered_files = [files_as_dict[z_f] for z_f in cls.ZIP_FILENAMES]
+        for file_info in ordered_files:
             filename: str = file_info['filename']
             if filename not in cls.ZIP_FILENAMES:
                 logger.info(f"Skipping {filename}, which is not a confidence layer")
@@ -112,9 +127,11 @@ class WorldCerealConfidences(LocalFiles):
         # We use a .extraction_complete file to indicate that the extraction is done.
         tif_dir = worldcereal_dir / "tifs_intermediate"
         tif_dir.mkdir(parents=True, exist_ok=True)
-        for file_info in files_data:
+        for file_info in ordered_files:
             filename: str = file_info['filename']
             zip_fname = zip_dir / filename
+
+            # THIS IS JUST FOR TESTING. REMOVE BEFORE MERGING
             if not zip_fname.exists():
                 print(f"Skipping {zip_fname}")
                 continue
@@ -148,6 +165,5 @@ class WorldCerealConfidences(LocalFiles):
 
         # finally, for each AEZ we will combine the bands so that they
         # are stored in a single tif file
-
 
         return tif_dir
