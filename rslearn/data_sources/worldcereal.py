@@ -8,6 +8,7 @@ import zipfile
 import requests
 from fsspec.implementations.local import LocalFileSystem
 from upath import UPath
+import numpy as np
 import hashlib
 
 from rslearn.config import LayerConfig
@@ -21,7 +22,13 @@ logger = get_logger(__name__)
 class WorldCerealConfidences(LocalFiles):
     """A data source for the ESA WorldCereal 2021 agricultural land cover map.
 
-    For details about the land cover map, see https://esa-worldcereal.org/en.
+    For details about the land cover map, see https://esa-worldcereal.org/en.\
+
+    the data source config can have a "item_specs" key (which is an attribute of the layer config).
+    this is a config dict which contains arbitrary key values
+
+    group the tifs according to a item spec attribute (raster item spec) RasterItemSpec is the key
+    its not provided directly but via this config dict.
     """
     ZENODO_RECORD_ID = 7875105
     ZENODO_URL = f"https://zenodo.org/api/deposit/depositions/{ZENODO_RECORD_ID}/files"
@@ -55,7 +62,7 @@ class WorldCerealConfidences(LocalFiles):
                 remote, prefix with a protocol ("file://") to use a local directory
                 instead of a path relative to the dataset path.
         """
-        tif_dir = self.download_and_process_worldcereal_data(worldcereal_dir)
+        tif_dir = self.download_worldcereal_data(worldcereal_dir)
         super().__init__(config, tif_dir)
 
     @staticmethod
@@ -88,7 +95,16 @@ class WorldCerealConfidences(LocalFiles):
         return aezs
 
     @classmethod
-    def download_and_process_worldcereal_data(cls, worldcereal_dir: UPath) -> UPath:
+    def filepath_for_product_aez(path_to_tifs: UPath, aez: int) -> UPath | None:
+        aez_file = path_to_tifs.glob(f"{aez}_*.tif")
+        if len(aez_file) == 0:
+            return None
+        elif len(aez_file) == 1:
+            return aez_file[0]
+        raise ValueError(f"Got more than one tif for {aez} in {path_to_tifs}")
+
+    @classmethod
+    def download_worldcereal_data(cls, worldcereal_dir: UPath) -> UPath:
         """Download and extract the WorldCereal data.
 
         If the data was previously downloaded, this function returns quickly.
@@ -131,18 +147,13 @@ class WorldCerealConfidences(LocalFiles):
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
 
-        # Extract the zip files.
-        # We use a .extraction_complete file to indicate that the extraction is done.
-        tif_dir = worldcereal_dir / "tifs_intermediate"
+        # # Extract the zip files.
+        # # We use a .extraction_complete file to indicate that the extraction is done.
+        tif_dir = worldcereal_dir / "tifs"
         tif_dir.mkdir(parents=True, exist_ok=True)
         for file_info in ordered_files:
             filename: str = file_info['filename']
             zip_fname = zip_dir / filename
-
-            # THIS IS JUST FOR TESTING. REMOVE BEFORE MERGING
-            if not zip_fname.exists():
-                print(f"Skipping {zip_fname}")
-                continue
 
             completed_fname = zip_dir / (filename + ".extraction_complete")
             if completed_fname.exists():
@@ -171,11 +182,5 @@ class WorldCerealConfidences(LocalFiles):
 
             # Mark the extraction complete.
             completed_fname.touch()
-
-        # finally, for each AEZ we will combine the bands so that they
-        # are stored in a single tif file
-        for file_info in ordered_files:
-            filename = file_info["filename"]
-            path_to_tifs = tif_dir / cls.zip_filepath_from_filename(filename)
 
         return tif_dir
