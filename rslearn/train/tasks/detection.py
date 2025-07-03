@@ -53,6 +53,7 @@ class DetectionTask(BasicTask):
         score_threshold: float = 0.5,
         enable_map_metric: bool = True,
         enable_f1_metric: bool = False,
+        enable_precision_recall: bool = False,
         f1_metric_thresholds: list[list[float]] = [
             [
                 0.05,
@@ -93,11 +94,12 @@ class DetectionTask(BasicTask):
             score_threshold: confidence threshold for visualization and prediction.
             enable_map_metric: whether to compute mAP (default true)
             enable_f1_metric: whether to compute F1 (default false)
-            f1_metric_thresholds: list of list of thresholds to apply for F1 metric.
-                Each inner list is used to initialize a separate F1 metric where the
-                best F1 across the thresholds within the inner list is computed. If
-                there are multiple inner lists, then multiple F1 scores will be
-                reported.
+            enable_precision_recall: whether to compute precision and recall.
+            f1_metric_thresholds: list of list of thresholds to apply for F1 metric, as
+                well as for precision and recall if enabled. Each inner list is used to
+                initialize a separate F1 metric where the best F1 across the thresholds
+                within the inner list is computed. If there are multiple inner lists,
+                then multiple F1 scores will be reported.
             f1_metric_kwargs: extra arguments to pass to F1 metric.
             kwargs: additional arguments to pass to BasicTask
         """
@@ -115,6 +117,7 @@ class DetectionTask(BasicTask):
         self.score_threshold = score_threshold
         self.enable_map_metric = enable_map_metric
         self.enable_f1_metric = enable_f1_metric
+        self.enable_precision_recall = enable_precision_recall
         self.f1_metric_thresholds = f1_metric_thresholds
         self.f1_metric_kwargs = f1_metric_kwargs
 
@@ -342,7 +345,7 @@ class DetectionTask(BasicTask):
                 output_key="map",
             )
 
-        if self.enable_f1_metric:
+        if self.enable_f1_metric or self.enable_precision_recall:
             kwargs = dict(
                 num_classes=len(self.classes),
             )
@@ -355,23 +358,25 @@ class DetectionTask(BasicTask):
                     # Metric name can't contain "." so change to ",".
                     suffix = "_" + str(thresholds[0]).replace(".", ",")
 
-                metrics["F1" + suffix] = DetectionMetric(
-                    F1Metric(score_thresholds=thresholds, **kwargs)  # type: ignore
-                )
-                metrics["precision" + suffix] = DetectionMetric(
-                    F1Metric(
-                        score_thresholds=thresholds,
-                        metric_mode="precision",
-                        **kwargs,  # type: ignore
+                if self.enable_f1_metric:
+                    metrics["F1" + suffix] = DetectionMetric(
+                        F1Metric(score_thresholds=thresholds, **kwargs)  # type: ignore
                     )
-                )
-                metrics["recall" + suffix] = DetectionMetric(
-                    F1Metric(
-                        score_thresholds=thresholds,
-                        metric_mode="recall",
-                        **kwargs,  # type: ignore
+                if self.enable_precision_recall:
+                    metrics["precision" + suffix] = DetectionMetric(
+                        F1Metric(
+                            score_thresholds=thresholds,
+                            metric_mode="precision",
+                            **kwargs,  # type: ignore
+                        )
                     )
-                )
+                    metrics["recall" + suffix] = DetectionMetric(
+                        F1Metric(
+                            score_thresholds=thresholds,
+                            metric_mode="recall",
+                            **kwargs,  # type: ignore
+                        )
+                    )
 
         return MetricCollection(metrics)
 
