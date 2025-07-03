@@ -7,7 +7,7 @@ from rslearn.models.terramind import Terramind, TerramindNormalize, TerramindSiz
 
 
 @pytest.mark.parametrize("model_size", [TerramindSize.BASE, TerramindSize.LARGE])
-def test_terramind_forward(model_size: TerramindSize) -> None:
+def test_terramind(model_size: TerramindSize) -> None:
     terramind = Terramind(model_size=model_size, modalities=["RGB"])
     inputs = [
         {
