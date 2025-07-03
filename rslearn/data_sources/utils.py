@@ -1,7 +1,7 @@
 """Utilities shared by data sources."""
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TypeVar
 
 import shapely
@@ -37,6 +37,163 @@ class PendingMosaic:
     completed: bool = False
 
 
+def mosaic_matching(
+    window_geometry: STGeometry,
+    items: list[ItemType],
+    item_shps: list[shapely.Geometry],
+    max_matches: int,
+) -> list[list[ItemType]]:
+    """Spatial item matching for mosaic space mode.
+
+    This attempts to piece together items into mosaics that fully cover the window
+    geometry. If there are items leftover that only partially cover the window
+    geometry, they are returned as partial mosaics.
+
+    Args:
+        window_geometry: the geometry of the window.
+        items: list of items.
+        item_shps: the item shapes projected to the window's projection.
+        max_matches: the maximum number of matches (mosaics) to create.
+
+    Returns:
+        list of item groups, each one corresponding to a different mosaic.
+    """
+    # To create mosaics, we iterate over the items in order, and add each item to
+    # the first mosaic that the new item adds coverage to.
+
+    # max_matches could be very high if the user just wants us to create as many
+    # mosaics as possible, so we initialize the list here as empty and just add
+    # more pending mosaics when it is necessary.
+    pending_mosaics: list[PendingMosaic] = []
+
+    for item, item_shp in zip(items, item_shps):
+        # See if the item can match with any existing mosaic.
+        item_matched = False
+
+        for pending_mosaic in pending_mosaics:
+            if pending_mosaic.completed:
+                continue
+            if not shp_intersects(item_shp, pending_mosaic.remainder):
+                continue
+
+            # Check if the intersection area is too small.
+            # If it is a sizable part of the item or of the geometry, then proceed.
+            intersect_area = item_shp.intersection(pending_mosaic.remainder).area
+            if (
+                intersect_area / item_shp.area < MOSAIC_MIN_ITEM_COVERAGE
+                and intersect_area / pending_mosaic.remainder.area
+                < MOSAIC_MIN_ITEM_COVERAGE
+            ):
+                continue
+
+            pending_mosaic.remainder = pending_mosaic.remainder - item_shp
+            pending_mosaic.items.append(item)
+            item_matched = True
+
+            # Mark the mosaic completed if it has sufficient coverage of the
+            # geometry.
+            if (
+                pending_mosaic.remainder.area / window_geometry.shp.area
+                < MOSAIC_REMAINDER_EPSILON
+            ):
+                pending_mosaic.completed = True
+
+            break
+
+        if item_matched:
+            continue
+
+        # See if we can add a new mosaic based on this item. There must be room for
+        # more mosaics, but the item must also intersect the requested geometry.
+        if len(pending_mosaics) >= max_matches:
+            continue
+        intersect_area = item_shp.intersection(window_geometry.shp).area
+        if (
+            intersect_area / item_shp.area < MOSAIC_MIN_ITEM_COVERAGE
+            and intersect_area / window_geometry.shp.area < MOSAIC_MIN_ITEM_COVERAGE
+        ):
+            continue
+
+        pending_mosaics.append(
+            PendingMosaic(
+                items=[item],
+                remainder=window_geometry.shp - item_shp,
+            )
+        )
+
+    return [pending_mosaic.items for pending_mosaic in pending_mosaics]
+
+
+def per_period_mosaic_matching(
+    window_geometry: STGeometry,
+    item_list: list[ItemType],
+    period_duration: timedelta,
+    max_matches: int,
+) -> list[list[ItemType]]:
+    """Match items to the geometry with one mosaic per period.
+
+    We divide the time range of the geometry into shorter periods. Within each period,
+    we use the items corresponding to that period to create a mosaic. The returned item
+    groups include one group per period, starting from the most recent periods, up to
+    the provided max_matches.
+
+    This is used e.g. when a model should process three mosaics, where each mosaic
+    should come from a different month. This gives more diversity of images, since
+    simply searching for the least cloudy images could result in selecting all of the
+    images from the same month.
+
+    max_matches may be smaller than the total number of periods in the given time
+    range. In this case, we prefer to use mosaics of the most recent periods. However,
+    sometimes there may be no items in a period; in that case, the older periods are
+    used as a fallback.
+
+    Args:
+        window_geometry: the window geometry to match items to.
+        item_list: the list of items.
+        period_duration: the duration of one period.
+        max_matches: the number of per-period mosaics to create.
+
+    Returns:
+        the matched item groups, where each group contains items that yield a
+            per-period mosaic.
+    """
+    if window_geometry.time_range is None:
+        raise ValueError(
+            "all windows must have time range for per period mosaic matching"
+        )
+
+    # For each period, we create an STGeometry with modified time range matching that
+    # period, and use it with match_candidate_items_to_window to get a mosaic.
+    cur_groups: list[list[ItemType]] = []
+    period_end = window_geometry.time_range[1]
+    while period_end > window_geometry.time_range[0] and len(cur_groups) < max_matches:
+        period_time_range = (
+            period_end - period_duration,
+            period_end,
+        )
+        period_end -= period_duration
+        period_geom = STGeometry(
+            window_geometry.projection, window_geometry.shp, period_time_range
+        )
+
+        # We modify the QueryConfig here since caller should be asking for
+        # multiple mosaics, but we just want one mosaic per period.
+        period_groups = match_candidate_items_to_window(
+            period_geom,
+            item_list,
+            QueryConfig(space_mode=SpaceMode.MOSAIC, max_matches=1),
+        )
+
+        # There should be zero or one group depending on whether there were
+        # any items that matched. We keep the group if it is there.
+        if len(period_groups) == 0 or len(period_groups[0]) == 0:
+            # No matches for this period.
+            continue
+        cur_groups.append(period_groups[0])
+
+    return cur_groups
+
+
 def match_candidate_items_to_window(
     geometry: STGeometry, items: list[ItemType], query_config: QueryConfig
 ) -> list[list[ItemType]]:
@@ -46,7 +203,7 @@ def match_candidate_items_to_window(
     extent.
 
     Args:
-        geometry: the window projected to the same projection as the items
+        geometry: the window's geometry
         items: all items from the data source that intersect spatially with the geometry
         query_config: the query configuration to use for matching
 
@@ -92,9 +249,8 @@ def match_candidate_items_to_window(
                 item_geom = item_geom.to_projection(geometry.projection)
         item_shps.append(item_geom.shp)
 
-    groups = []
-
     if query_config.space_mode == SpaceMode.CONTAINS:
+        groups = []
         for item, item_shp in zip(items, item_shps):
             if not item_shp.contains(geometry.shp):
                 continue
@@ -103,6 +259,7 @@ def match_candidate_items_to_window(
                 break
 
     elif query_config.space_mode == SpaceMode.INTERSECTS:
+        groups = []
         for item, item_shp in zip(items, item_shps):
             if not shp_intersects(item_shp, geometry.shp):
                 continue
@@ -111,70 +268,18 @@ def match_candidate_items_to_window(
                 break
 
     elif query_config.space_mode == SpaceMode.MOSAIC:
-        # To create mosaics, we iterate over the items in order, and add each item to
-        # the first mosaic that the new item adds coverage to.
+        groups = mosaic_matching(geometry, items, item_shps, query_config.max_matches)
 
-        # max_matches could be very high if the user just wants us to create as many
-        # mosaics as possible, so we initialize the list here as empty and just add
-        # more pending mosaics when it is necessary.
-        pending_mosaics: list[PendingMosaic] = []
+    elif query_config.space_mode == SpaceMode.PER_PERIOD_MOSAIC:
+        groups = per_period_mosaic_matching(
+            geometry, items, query_config.period_duration, query_config.max_matches
+        )
 
-        for item, item_shp in zip(items, item_shps):
-            # See if the item can match with any existing mosaic.
-            item_matched = False
+    else:
+        raise ValueError(f"invalid space mode {query_config.space_mode}")
 
-            for pending_mosaic in pending_mosaics:
-                if pending_mosaic.completed:
-                    continue
-                if not shp_intersects(item_shp, pending_mosaic.remainder):
-                    continue
-
-                # Check if the intersection area is too small.
-                # If it is a sizable part of the item or of the geometry, then proceed.
-                intersect_area = item_shp.intersection(pending_mosaic.remainder).area
-                if (
-                    intersect_area / item_shp.area < MOSAIC_MIN_ITEM_COVERAGE
-                    and intersect_area / pending_mosaic.remainder.area
-                    < MOSAIC_MIN_ITEM_COVERAGE
-                ):
-                    continue
-
-                pending_mosaic.remainder = pending_mosaic.remainder - item_shp
-                pending_mosaic.items.append(item)
-                item_matched = True
-
-                # Mark the mosaic completed if it has sufficient coverage of the
-                # geometry.
-                if (
-                    pending_mosaic.remainder.area / geometry.shp.area
-                    < MOSAIC_REMAINDER_EPSILON
-                ):
-                    pending_mosaic.completed = True
-
-                break
-
-            if item_matched:
-                continue
-
-            # See if we can add a new mosaic based on this item. There must be room for
-            # more mosaics, but the item must also intersect the requested geometry.
-            if len(pending_mosaics) >= query_config.max_matches:
-                continue
-            intersect_area = item_shp.intersection(geometry.shp).area
-            if (
-                intersect_area / item_shp.area < MOSAIC_MIN_ITEM_COVERAGE
-                and intersect_area / geometry.shp.area < MOSAIC_MIN_ITEM_COVERAGE
-            ):
-                continue
-
-            pending_mosaics.append(
-                PendingMosaic(
-                    items=[item],
-                    remainder=geometry.shp - item_shp,
-                )
-            )
-
-        for pending_mosaic in pending_mosaics:
-            groups.append(pending_mosaic.items)
+    # Enforce minimum matches if set.
+    if len(groups) < query_config.min_matches:
+        return []
 
     return groups
