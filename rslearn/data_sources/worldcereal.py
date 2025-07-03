@@ -11,7 +11,7 @@ from upath import UPath
 import numpy as np
 import hashlib
 
-from rslearn.config import LayerConfig
+from rslearn.config import LayerConfig, DataSourceConfig
 from rslearn.data_sources.local_files import LocalFiles
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
@@ -62,7 +62,35 @@ class WorldCerealConfidences(LocalFiles):
                 remote, prefix with a protocol ("file://") to use a local directory
                 instead of a path relative to the dataset path.
         """
-        tif_dir = self.download_worldcereal_data(worldcereal_dir)
+        tif_dir, tif_filepaths = self.download_worldcereal_data(worldcereal_dir)
+        all_aezs: set[int] = set()
+        for _, tif_path in tif_filepaths.items():
+            # firstly, go through all the files to collect the AEZs
+            # then, go through the AEZs and get the files
+            # then, fill the missing ones with 0s
+            all_aezs.update(self.all_aezs_from_tifs(tif_path))
+
+        # now that we have all our aezs, lets match them to the bands
+        spec_dicts: list[dict] = []
+        for aez in all_aezs:
+            spec_dict = {
+                "name": aez,
+                "fnames": [],
+                "bands": [],
+            }
+            for band, tif_path in tif_filepaths.items():
+                aez_band_filepath = self.filepath_for_product_aez(tif_path, aez)
+                if aez_band_filepath is not None:
+                    spec_dict["fnames"].append(aez_band_filepath)
+                    spec_dict["bands"].append([band])
+            spec_dicts.append(spec_dict)
+
+        # add this to the config
+        if config.data_source is not None:
+            config.data_source.config_dict["item_specs"] = spec_dicts
+        else:
+            config.data_source = DataSourceConfig(name="rslearn.data_sources.WorldCerealConfidence", query_config={}, config_dict={"item_specs": spec_dicts})
+
         super().__init__(config, tif_dir)
 
     @staticmethod
@@ -74,6 +102,12 @@ class WorldCerealConfidences(LocalFiles):
         return WorldCerealConfidences(
             config=config, worldcereal_dir=join_upath(ds_path, d["worldcereal_dir"])
         )
+
+    @staticmethod
+    def band_from_zipfilename(filename: str) -> str:
+        # [:-4] to remove ".zip"
+        _, _, season, product, confidence = filename[:-4].split("_")
+        return "_".join([season, product, confidence])
 
     @staticmethod
     def zip_filepath_from_filename(filename: str) -> str:
@@ -104,7 +138,7 @@ class WorldCerealConfidences(LocalFiles):
         raise ValueError(f"Got more than one tif for {aez} in {path_to_tifs}")
 
     @classmethod
-    def download_worldcereal_data(cls, worldcereal_dir: UPath) -> UPath:
+    def download_worldcereal_data(cls, worldcereal_dir: UPath) -> tuple[UPath, dict[str, UPath]]:
         """Download and extract the WorldCereal data.
 
         If the data was previously downloaded, this function returns quickly.
@@ -113,7 +147,10 @@ class WorldCerealConfidences(LocalFiles):
             worldcereal_dir: the directory to download to.
 
         Returns:
-            the sub-directory containing GeoTIFFs
+            tif_dir: the sub-directory containing GeoTIFFs
+            tif_filepaths: tif dir is nested (i.e. tif_dir points to "data" while the tifs
+                are actually in "data/worldcereal/MAP-v3/2021..."). This points to the
+                specific directories containing the tifs for each band.
         """
         # Download the zip files (if they don't already exist).
         zip_dir = worldcereal_dir / "zips"
@@ -123,7 +160,7 @@ class WorldCerealConfidences(LocalFiles):
         response = requests.get(cls.ZENODO_URL)
         response.raise_for_status()
         files_data = response.json()
-
+        # f["filename"] maps to the ZIP_FILENAMES
         files_as_dict = {f["filename"]: f for f in files_data}
         # now its also in the right order for when we generate the files
         ordered_files = [files_as_dict[z_f] for z_f in cls.ZIP_FILENAMES]
@@ -183,4 +220,6 @@ class WorldCerealConfidences(LocalFiles):
             # Mark the extraction complete.
             completed_fname.touch()
 
-        return tif_dir
+        tif_filepaths = {cls.band_from_zipfilename(file_info["filename"]): tif_dir / cls.zip_filepath_from_filename(file_info["filename"]) for file_info in ordered_files}
+
+        return tif_dir, tif_filepaths
