@@ -81,6 +81,10 @@ class WorldCerealConfidences(LocalFiles):
 
         # add this to the config
         if config.data_source is not None:
+            if "item_specs" in config.data_source.config_dict:
+                logger.warning(
+                    "Overwriting item_specs in WorldCereal config.data_source"
+                )
             config.data_source.config_dict["item_specs"] = spec_dicts
         else:
             config.data_source = DataSourceConfig(
