@@ -22,6 +22,14 @@ class TerramindSize(str, Enum):
 PATCH_SIZE = 16
 
 # Modalities supported by Terramind
+# S2L1C: Sentinel-2 Level 1C (Top-of-atmosphere reflectance), range: 1000 – 11000 DN
+# S2L2A: Sentinel-2 Level 2A (Bottom-of-atmosphere reflectance), range: 1000 – 11000 DN
+# S1GRD: Sentinel-1 GRD (Calibrated SAR backscatter), range: -50 – +10 dB
+# S1RTC: Sentinel-1 RTC (Radiometrically terrain corrected), range: -50 – +10 dB
+# RGB: Processed RGB images based on S2L2A, range: 0-255
+# DEM: Digital Elevation Model (Copernicus DEM, 30m), range: -400 – 8800 meters
+
+# More details in the TerraMesh paper: https://arxiv.org/pdf/2504.11172v1
 TERRAMIND_MODALITIES = ["S2L1C", "S2L2A", "S1GRD", "S1RTC", "RGB", "DEM"]
 
 # TerraMind band orders and standardization values
