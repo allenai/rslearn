@@ -1,9 +1,10 @@
-"""Terremind models."""
+"""Terramind models."""
 
 from enum import Enum
 from typing import Any
 
 import torch
+from einops import rearrange
 from terratorch.registry import BACKBONE_REGISTRY
 
 from rslearn.train.transforms.transform import Transform
@@ -17,14 +18,13 @@ class TerramindSize(str, Enum):
     LARGE = "large"
 
 
+# Default patch size for Terramind
 PATCH_SIZE = 16
-DEFAULT_IMAGE_SIZE = 256
 
-# TerraMind modalities
+# Modalities supported by Terramind
 TERRAMIND_MODALITIES = ["S2L1C", "S2L2A", "S1GRD", "S1RTC", "RGB", "DEM"]
 
 # TerraMind band orders: see https://github.com/IBM/terratorch/blob/da5082a248d5ce9446bf1ef4a84696e669bbc9e4/terratorch/models/backbones/terramind/model/terramind_register.py#L58C1-L58C17
-
 # TerraMind standardization values
 TERRAMIND_MEANS = {
     "S2L1C": [
@@ -100,19 +100,17 @@ TERRAMIND_STDS = {
 
 
 class Terramind(torch.nn.Module):
-    """Terremind backbones."""
+    """Terramind backbones."""
 
     def __init__(
         self,
         model_size: TerramindSize,
-        image_size: int = DEFAULT_IMAGE_SIZE,
         modalities: list[str] = ["S2L2A"],
     ) -> None:
         """Initialize the Terramind model.
 
         Args:
             model_size: The size of the Terramind model.
-            image_size: The size of the input image.
             modalities: The modalities to use.
         """
         super().__init__()
@@ -121,10 +119,6 @@ class Terramind(torch.nn.Module):
         for modality in modalities:
             if modality not in TERRAMIND_MODALITIES:
                 raise ValueError(f"Invalid modality: {modality}")
-
-        # Check if image size is valid
-        if image_size < PATCH_SIZE:
-            raise ValueError(f"Image size must be at least {PATCH_SIZE}x{PATCH_SIZE}")
 
         if model_size == TerramindSize.BASE:
             self.model = BACKBONE_REGISTRY.build(
@@ -137,10 +131,8 @@ class Terramind(torch.nn.Module):
         else:
             raise ValueError(f"Invalid model size: {model_size}")
 
-        self.image_size = image_size
         self.model_size = model_size
         self.modalities = modalities
-        self.height, self.width = image_size // PATCH_SIZE, image_size // PATCH_SIZE
 
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Forward pass for the Terramind model.
@@ -163,13 +155,9 @@ class Terramind(torch.nn.Module):
         # So the output shape is (B, N, D), where N is the number of patches and D is the embedding dimension
         # Get the output of the last layer
         image_features = self.model(model_inputs)[-1]
-        batch_size = image_features.shape[0]
-        # Image features are (B, D, H, W)
-        return [
-            image_features.reshape(batch_size, self.height, self.width, -1).permute(
-                0, 3, 1, 2
-            )
-        ]
+        batch_size, num_patches, _ = image_features.shape
+        height, width = int(num_patches**0.5), int(num_patches**0.5)
+        return [rearrange(image_features, "b (h w) d -> b d h w", h=height, w=width)]
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.
