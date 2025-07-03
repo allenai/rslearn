@@ -152,8 +152,8 @@ class Terramind(torch.nn.Module):
             model_inputs[modality] = cur
 
         # By default, the patch embeddings are averaged over all modalities to reduce output tokens
-        # So the output shape is (B, N, D), where N is the number of patches and D is the embedding dimension
-        # Get the output of the last layer
+        # The output is a list of tensors (B, N, D) from each layer of the transformer
+        # We only get the last layer's output
         image_features = self.model(model_inputs)[-1]
         batch_size, num_patches, _ = image_features.shape
         height, width = int(num_patches**0.5), int(num_patches**0.5)
