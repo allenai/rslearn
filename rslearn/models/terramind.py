@@ -24,78 +24,53 @@ PATCH_SIZE = 16
 # Modalities supported by Terramind
 TERRAMIND_MODALITIES = ["S2L1C", "S2L2A", "S1GRD", "S1RTC", "RGB", "DEM"]
 
-# TerraMind band orders: see https://github.com/IBM/terratorch/blob/da5082a248d5ce9446bf1ef4a84696e669bbc9e4/terratorch/models/backbones/terramind/model/terramind_register.py#L58C1-L58C17
-# TerraMind standardization values
-TERRAMIND_MEANS = {
-    "S2L1C": [
-        2357.089,
-        2137.385,
-        2018.788,
-        2082.986,
-        2295.651,
-        2854.537,
-        3122.849,
-        3040.560,
-        3306.481,
-        1473.847,
-        506.070,
-        2472.825,
-        1838.929,
-    ],
-    "S2L2A": [
-        1390.458,
-        1503.317,
-        1718.197,
-        1853.910,
-        2199.100,
-        2779.975,
-        2987.011,
-        3083.234,
-        3132.220,
-        3162.988,
-        2424.884,
-        1857.648,
-    ],
-    "S1GRD": [-12.599, -20.293],
-    "S1RTC": [-10.93, -17.329],
-    "RGB": [87.271, 80.931, 66.667],
-    "DEM": [670.665],
-}
-
-TERRAMIND_STDS = {
-    "S2L1C": [
-        1624.683,
-        1675.806,
-        1557.708,
-        1833.702,
-        1823.738,
-        1733.977,
-        1732.131,
-        1679.732,
-        1727.26,
-        1024.687,
-        442.165,
-        1331.411,
-        1160.419,
-    ],
-    "S2L2A": [
-        2106.761,
-        2141.107,
-        2038.973,
-        2134.138,
-        2085.321,
-        1889.926,
-        1820.257,
-        1871.918,
-        1753.829,
-        1797.379,
-        1434.261,
-        1334.311,
-    ],
-    "S1GRD": [5.195, 5.890],
-    "S1RTC": [4.391, 4.459],
-    "RGB": [58.767, 47.663, 42.631],
-    "DEM": [951.272],
+# TerraMind band orders and standardization values
+PRETRAINED_BANDS = {
+    "S2L2A": {
+        "B01": [1390.458, 2106.761],
+        "B02": [1503.317, 2141.107],
+        "B03": [1718.197, 2038.973],
+        "B04": [1853.910, 2134.138],
+        "B05": [2199.100, 2085.321],
+        "B06": [2779.975, 1889.926],
+        "B07": [2987.011, 1820.257],
+        "B08": [3083.234, 1871.918],
+        "B8A": [3132.220, 1753.829],
+        "B09": [3162.988, 1797.379],
+        "B11": [2424.884, 1434.261],
+        "B12": [1857.648, 1334.311],
+    },
+    "S2L1C": {
+        "B01": [2357.089, 1624.683],
+        "B02": [2137.385, 1675.806],
+        "B03": [2018.788, 1557.708],
+        "B04": [2082.986, 1833.702],
+        "B05": [2295.651, 1823.738],
+        "B06": [2854.537, 1733.977],
+        "B07": [3122.849, 1732.131],
+        "B08": [3040.560, 1679.732],
+        "B8A": [3306.481, 1727.26],
+        "B09": [1473.847, 1024.687],
+        "B10": [506.070, 442.165],
+        "B11": [2472.825, 1331.411],
+        "B12": [1838.929, 1160.419],
+    },
+    "RGB": {
+        "Red": [87.271, 58.767],
+        "Green": [80.931, 47.663],
+        "Blue": [66.667, 42.631],
+    },
+    "S1GRD": {
+        "vv": [-12.599, 5.195],
+        "vh": [-20.293, 5.890],
+    },
+    "S1RTC": {
+        "vv": [-10.93, 4.391],
+        "vh": [-17.329, 4.459],
+    },
+    "DEM": {
+        "DEM": [670.665, 951.272],
+    },
 }
 
 
@@ -201,8 +176,13 @@ class TerramindNormalize(Transform):
             The normalized image.
         """
         images = image.float()  # (C, H, W)
+        if images.shape[0] % len(means) != 0:
+            raise ValueError(
+                f"the number of image channels {images.shape[0]} is not multiple of expected number of bands {len(means)}"
+            )
         for i in range(images.shape[0]):
-            images[i] = (images[i] - means[i]) / stds[i]
+            band_idx = i % len(means)
+            images[i] = (images[i] - means[band_idx]) / stds[band_idx]
         return images
 
     def forward(
@@ -220,9 +200,12 @@ class TerramindNormalize(Transform):
         for modality in TERRAMIND_MODALITIES:
             if modality not in input_dict:
                 continue
+            band_info = PRETRAINED_BANDS[modality]
+            means = [band_info[band][0] for band in band_info]
+            stds = [band_info[band][1] for band in band_info]
             input_dict[modality] = self.apply_image(
                 input_dict[modality],
-                TERRAMIND_MEANS[modality],
-                TERRAMIND_STDS[modality],
+                means,
+                stds,
             )
         return input_dict, target_dict
