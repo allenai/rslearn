@@ -5,7 +5,7 @@ from rslearn.models.croma import PATCH_SIZE, Croma, CromaModality, CromaSize
 
 
 @pytest.mark.parametrize("size", [CromaSize.BASE, CromaSize.LARGE])
-def test_molmo(size: CromaSize) -> None:
+def test_croma(size: CromaSize) -> None:
     # Make sure the forward pass works.
     input_hw = 32
     croma = Croma(
