@@ -78,7 +78,6 @@ class RslearnDataModule(L.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.name = name
-
         self.split_configs = {
             "train": default_config.update(train_config),
             "val": default_config.update(val_config),
@@ -115,7 +114,7 @@ class RslearnDataModule(L.LightningDataModule):
     def set_name(self, name: str) -> None:
         self.name = name
         for dataset in self.datasets.values():
-            dataset.dataset.name = name
+            dataset.set_name(name)
 
     def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:
         dataset = self.datasets[split]
@@ -251,15 +250,11 @@ class MultiDatasetDataModule(L.LightningDataModule):
         self,
         dataset_configs: Dict[str, RslearnDataModule],
         task: MultiTask,
-        batch_size: int = 16,
-        num_workers: int = 32,
         **kwargs
     ):
         super().__init__()
         self.tasks = list(dataset_configs.keys())
         self.data_modules = dataset_configs
-        self.global_batch_size = batch_size
-        self.global_num_workers = num_workers
 
     def setup(self, stage: Optional[str] = None):
         """Set up the datasets for the given stage. Also assign dataset-specific names.

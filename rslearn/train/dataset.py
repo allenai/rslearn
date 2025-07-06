@@ -156,6 +156,7 @@ class SplitConfig:
         names: list[str] | None = None,
         tags: dict[str, str] | None = None,
         num_samples: int | None = None,
+        num_patches: int | None = None,
         transforms: list[torch.nn.Module] | None = None,
         sampler: SamplerFactory | None = None,
         patch_size: int | tuple[int, int] | None = None,
@@ -173,6 +174,7 @@ class SplitConfig:
                 value. If value is empty, then only the existince of the key in the
                 window options is checked.
             num_samples: limit this split to this many examples
+            num_patches: limit this split to this many patches
             transforms: transforms to apply
             sampler: SamplerFactory for this split
             patch_size: an optional square size or (width, height) tuple. If set, read
@@ -188,6 +190,7 @@ class SplitConfig:
         self.names = names
         self.tags = tags
         self.num_samples = num_samples
+        self.num_patches = num_patches
         self.transforms = transforms
         self.sampler = sampler
         self.patch_size = patch_size
@@ -209,6 +212,7 @@ class SplitConfig:
             names=self.names,
             tags=self.tags,
             num_samples=self.num_samples,
+            num_patches=self.num_patches,
             transforms=self.transforms,
             sampler=self.sampler,
             patch_size=self.patch_size,
@@ -224,6 +228,8 @@ class SplitConfig:
             result.tags = other.tags
         if other.num_samples:
             result.num_samples = other.num_samples
+        if other.num_patches:
+            result.num_patches = other.num_patches
         if other.transforms:
             result.transforms = other.transforms
         if other.sampler:
@@ -433,6 +439,8 @@ class ModelDataset(torch.utils.data.Dataset):
                 for i, patch_bounds in enumerate(cur_patches):
                     patches.append((window, patch_bounds, (i, len(cur_patches))))
             self.windows = patches
+            if split_config.num_patches:
+                self.windows = self.windows[0 : split_config.num_patches]
 
     def __len__(self) -> int:
         """Returns the dataset length."""
@@ -636,12 +644,15 @@ class ModelDataset(torch.utils.data.Dataset):
         """Returns a list of windows in this dataset."""
         return self.windows
 
+    def set_name(self, name: str) -> None:
+        self.name = name
+
 
 class RetryDataset(torch.utils.data.Dataset):
     """A dataset wrapper that retries getitem upon encountering error."""
 
     def __init__(
-        self, dataset: torch.utils.data.Dataset, retries: int = 3, delay: float = 5
+        self, dataset: ModelDataset, retries: int = 3, delay: float = 5
     ) -> None:
         """Create a new RetryDataset.
 
@@ -654,6 +665,9 @@ class RetryDataset(torch.utils.data.Dataset):
         self.retries = retries
         self.delay = delay
 
+    def set_name(self, name: str) -> None:
+        self.dataset.set_name(name)
+ 
     def __len__(self) -> int:
         """Return length of the dataset."""
         return len(self.dataset)
@@ -674,7 +688,6 @@ class RetryDataset(torch.utils.data.Dataset):
             try:
                 return self.dataset[idx]
             except Exception as e:
-                raise e
                 logger.warning("warning: caught exception loading item %d: %s", idx, e)
             time.sleep(self.delay)
 
