@@ -289,6 +289,7 @@ class ModelDataset(torch.utils.data.Dataset):
         inputs: dict[str, DataInput],
         task: Task,
         workers: int,
+        name: str | None = None,
     ) -> None:
         """Instantiate a new ModelDataset.
 
@@ -298,12 +299,13 @@ class ModelDataset(torch.utils.data.Dataset):
             inputs: data to read from the dataset for training
             task: the task to train on
             workers: number of workers to use for initializing the dataset
+            name: name of the dataset (default: None)
         """
         self.dataset = dataset
         self.split_config = split_config
         self.inputs = inputs
         self.task = task
-
+        self.name = name
         if split_config.transforms:
             self.transforms = Sequential(*split_config.transforms)
         else:
@@ -609,6 +611,7 @@ class ModelDataset(torch.utils.data.Dataset):
             "bounds": bounds,
             "time_range": window.time_range,
             "projection": window.projection,
+            "task": self.name,
         }
         if self.split_config.get_load_all_patches():
             metadata["patch_idx"] = patch_idx
@@ -671,6 +674,7 @@ class RetryDataset(torch.utils.data.Dataset):
             try:
                 return self.dataset[idx]
             except Exception as e:
+                raise e
                 logger.warning("warning: caught exception loading item %d: %s", idx, e)
             time.sleep(self.delay)
 

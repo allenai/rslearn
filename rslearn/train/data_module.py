@@ -52,6 +52,7 @@ class RslearnDataModule(L.LightningDataModule):
         val_config: SplitConfig = SplitConfig(),
         test_config: SplitConfig = SplitConfig(),
         predict_config: SplitConfig = SplitConfig(),
+        name: str | None = None,
     ) -> None:
         """Initialize a new RslearnDataModule.
 
@@ -68,6 +69,7 @@ class RslearnDataModule(L.LightningDataModule):
             val_config: split config for val split
             test_config: split config for test split
             predict_config: split config for predict split
+            name: name of the dataset (default: None)
         """
         super().__init__()
         self.inputs = inputs
@@ -75,6 +77,7 @@ class RslearnDataModule(L.LightningDataModule):
         self.path = UPath(path, **path_options)
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.name = name
 
         self.split_configs = {
             "train": default_config.update(train_config),
@@ -103,10 +106,16 @@ class RslearnDataModule(L.LightningDataModule):
                 inputs=self.inputs,
                 task=self.task,
                 workers=self.num_workers,
+                name=self.name
             )
             dataset = RetryDataset(dataset)
             self.datasets[split] = dataset
             print(f"got {len(self.datasets[split])} examples in split {split}")
+    
+    def set_name(self, name: str) -> None:
+        self.name = name
+        for dataset in self.datasets.values():
+            dataset.dataset.name = name
 
     def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:
         dataset = self.datasets[split]
@@ -195,6 +204,9 @@ class MultiWrapperDataset(IterableDataset):
         self.strategy = strategy
         self.tasks = tasks.copy()
 
+    def __len__(self):
+        return sum(len(dl) for dl in self.dataloaders)
+
     def __iter__(self):
         self.iterators = [iter(dl) for dl in self.dataloaders]
         while True:
@@ -209,7 +221,7 @@ class MultiWrapperDataset(IterableDataset):
 
             try:
                 batch = next(self.iterators[idx])
-                for instance in batch[0]:
+                for instance in batch[0]:  # modify the inputs directly
                     instance["dataset_source"] = self.tasks[idx]
                 yield batch
             except StopIteration:
@@ -244,27 +256,33 @@ class MultiDatasetDataModule(L.LightningDataModule):
         **kwargs
     ):
         super().__init__()
-        
         self.tasks = list(dataset_configs.keys())
         self.data_modules = dataset_configs
         self.global_batch_size = batch_size
         self.global_num_workers = num_workers
 
     def setup(self, stage: Optional[str] = None):
-        """Set up the datasets for the given stage.
+        """Set up the datasets for the given stage. Also assign dataset-specific names.
         
         Args:
             stage: The stage to set up ('fit', 'validate', 'test', 'predict')
         """
-        for data_module in self.data_modules.values():
+        for name, data_module in self.data_modules.items():
             data_module.setup(stage)
+            data_module.set_name(name)
 
     def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:
         dataloaders = []
         for data_module in self.data_modules.values():
             dataloaders.append(data_module._get_dataloader(split))
+        dataset = MultiWrapperDataset(
+            dataloaders,
+            self.tasks,
+            strategy="random" if split == "train" else "round_robin",
+            # ensure that during testing, we see all datasets
+        )
         return DataLoader(
-            MultiWrapperDataset(dataloaders, self.tasks),
+            dataset,
             batch_size=None,
             num_workers=0,    # handle splitting and multiprocessing in the 
             shuffle=False,    # individual dataloaders spawned by rslearn

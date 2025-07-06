@@ -46,7 +46,14 @@ class MultiTask(Task):
         """
         input_dict = {}
         target_dict = {}
-        for task_name, task in self.tasks.items():
+        if metadata["task"] is None:
+            # No multi-dataset, so always compute across all tasks
+            task_iter = self.tasks.items()
+        else:
+            # Multi-dataset, so only compute for the task in this dataset
+            task_iter = [(metadata["task"], self.tasks[metadata["task"]])]
+
+        for task_name, task in task_iter:
             cur_raw_inputs = {}
             for k, v in self.input_mapping[task_name].items():
                 if k not in raw_inputs:
@@ -75,9 +82,14 @@ class MultiTask(Task):
         """
         processed_output = {}
         for task_name, task in self.tasks.items():
-            processed_output[task_name] = task.process_output(
-                raw_output[task_name], metadata
-            )
+            try:
+                processed_output[task_name] = task.process_output(
+                    raw_output[task_name], metadata
+                )
+            except KeyError:
+                # this happens if during multi-task training, all tasks are not
+                # represented in the batch (which is expected) 
+                pass
         return processed_output
 
     def visualize(
@@ -146,10 +158,15 @@ class MetricWrapper(Metric):
             preds: the predictions
             targets: the targets
         """
-        self.metric.update(
-            [pred[self.task_name] for pred in preds],
-            [target[self.task_name] for target in targets],
-        )
+        try:
+            self.metric.update(
+                [pred[self.task_name] for pred in preds],
+                [target[self.task_name] for target in targets],
+            )
+        except KeyError:
+            # this happens if during multi-task training, all tasks are not
+            # represented in the batch (which is expected) 
+            pass
 
     def compute(self) -> Any:
         """Returns the computed metric."""
