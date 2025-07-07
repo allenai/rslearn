@@ -208,6 +208,7 @@ class MultiWrapperDataset(IterableDataset):
 
     def __iter__(self):
         self.iterators = [iter(dl) for dl in self.dataloaders]
+        tasks = self.tasks.copy()  # allow restart on new iter call
         while True:
             if self.strategy == "random":
                 idx = random.randint(0, len(self.iterators) - 1)
@@ -221,11 +222,11 @@ class MultiWrapperDataset(IterableDataset):
             try:
                 batch = next(self.iterators[idx])
                 for instance in batch[0]:  # modify the inputs directly
-                    instance["dataset_source"] = self.tasks[idx]
+                    instance["dataset_source"] = tasks[idx]
                 yield batch
             except StopIteration:
                 self.iterators.pop(idx)
-                self.tasks.pop(idx)
+                tasks.pop(idx)
                 if len(self.iterators) == 0:
                     break
                 if self.strategy == "round_robin":
