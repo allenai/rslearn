@@ -130,7 +130,14 @@ class RslearnDataModule(L.LightningDataModule):
         should_shuffle = split == "train"
         if sampler_factory:
             kwargs["sampler"] = sampler_factory.get_sampler(dataset)
-        elif self.trainer.world_size is not None and self.trainer.world_size > 1:
+        elif (
+            self.trainer is not None
+            and self.trainer.world_size is not None
+            and self.trainer.world_size > 1
+        ):
+            # NOTE: when doing single-gpu multi-dataset training, self.trainer is None
+            # unsure if this is only for single-gpu setting or multi-dataset
+            # is broken for distributed traning
             # Use distributed sampler in case ddp is enabled.
             kwargs["sampler"] = DistributedSampler(
                 dataset,
