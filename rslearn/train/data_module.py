@@ -5,7 +5,7 @@ from typing import Any
 
 import lightning as L
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, DistributedSampler
 from upath import UPath
 
 from rslearn.dataset import Dataset
@@ -127,10 +127,19 @@ class RslearnDataModule(L.LightningDataModule):
             persistent_workers=persistent_workers,
         )
         sampler_factory = self.split_configs[split].sampler
+        should_shuffle = split == "train"
         if sampler_factory:
             kwargs["sampler"] = sampler_factory.get_sampler(dataset)
-        elif split == "train":
-            kwargs["shuffle"] = True
+        elif self.trainer.world_size is not None and self.trainer.world_size > 1:
+            # Use distributed sampler in case ddp is enabled.
+            kwargs["sampler"] = DistributedSampler(
+                dataset,
+                num_replicas=self.trainer.world_size,
+                rank=self.trainer.global_rank,
+                shuffle=should_shuffle,
+            )
+        else:
+            kwargs["shuffle"] = should_shuffle
         return DataLoader(**kwargs)
 
     def train_dataloader(self) -> DataLoader[dict[str, torch.Tensor]]:

@@ -106,6 +106,8 @@ class Naip(DataSource):
         self.states = states
         self.years = years
 
+        self.index_cache_dir.mkdir(parents=True, exist_ok=True)
+
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
         self.rtree_index: Any | None = None
         if use_rtree_index:
