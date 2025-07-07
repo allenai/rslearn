@@ -139,10 +139,8 @@ def test_with_worldcereal_dir(
 
     print("get items")
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    print(item_groups)
     item = item_groups[0][0]
-    print(item)
-    tile_store_dir = UPath(tmp_path) / "tile_store"
+    tile_store_dir = UPath(worldcereal_dir) / "tile_store"
     tile_store = DefaultTileStore(str(tile_store_dir))
     tile_store.set_dataset_path(tile_store_dir)
 
@@ -151,8 +149,8 @@ def test_with_worldcereal_dir(
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, bands)
-
+    for band in bands:
+        assert tile_store.is_raster_ready(layer_name, item.name, [band])
     # Double check that the data intersected our example GeoTIFF and isn't just all 0.
     bounds = (
         int(seattle2020.shp.bounds[0]),
@@ -160,7 +158,8 @@ def test_with_worldcereal_dir(
         int(seattle2020.shp.bounds[2]),
         int(seattle2020.shp.bounds[3]),
     )
-    raster_data = tile_store.read_raster(
-        layer_name, item.name, bands, seattle2020.projection, bounds
-    )
-    assert raster_data.max() == 1
+    for band in bands:
+        raster_data = tile_store.read_raster(
+            layer_name, item.name, [band], seattle2020.projection, bounds
+        )
+        assert raster_data.max() == 1

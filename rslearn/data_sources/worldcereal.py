@@ -221,7 +221,6 @@ class WorldCerealConfidences(LocalFiles):
 
             # Mark the extraction complete.
             completed_fname.touch()
-
         tif_filepaths = {
             cls.band_from_zipfilename(file_info["filename"]): tif_dir
             / cls.zip_filepath_from_filename(file_info["filename"])

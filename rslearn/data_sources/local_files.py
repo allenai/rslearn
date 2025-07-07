@@ -93,8 +93,15 @@ class RasterItemSpec:
         Returns:
             the RasterItemSpec.
         """
+
+        def fname_from_src_suffix(src_dir: UPath, suffix: str | UPath) -> UPath:
+            if isinstance(suffix, UPath):
+                return suffix
+            else:
+                return join_upath(src_dir, suffix)
+
         kwargs = dict(
-            fnames=[join_upath(src_dir, str(suffix)) for suffix in d["fnames"]],
+            fnames=[fname_from_src_suffix(src_dir, suffix) for suffix in d["fnames"]],
             bands=d["bands"],
         )
         if "name" in d:
