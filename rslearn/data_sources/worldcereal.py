@@ -63,12 +63,12 @@ class WorldCerealConfidences(LocalFiles):
             # then, go through the AEZs and get the files
             # then, fill the missing ones with 0s
             all_aezs.update(self.all_aezs_from_tifs(tif_path))
-
         # now that we have all our aezs, lets match them to the bands
         spec_dicts: list[dict] = []
         for aez in all_aezs:
             spec_dict = {
-                "name": aez,
+                # must be a str since we / with a posix path later
+                "name": str(aez),
                 "fnames": [],
                 "bands": [],
             }
@@ -78,7 +78,6 @@ class WorldCerealConfidences(LocalFiles):
                     cast(list, spec_dict["fnames"]).append(aez_band_filepath)
                     cast(list, spec_dict["bands"]).append([band])
             spec_dicts.append(spec_dict)
-
         # add this to the config
         if config.data_source is not None:
             if "item_specs" in config.data_source.config_dict:
@@ -110,7 +109,8 @@ class WorldCerealConfidences(LocalFiles):
         """Return the band name given the zipfilename."""
         # [:-4] to remove ".zip"
         _, _, season, product, confidence = filename[:-4].split("_")
-        return "_".join([season, product, confidence])
+        # band names must not contain '_'
+        return "-".join([season, product, confidence])
 
     @staticmethod
     def zip_filepath_from_filename(filename: str) -> str:
@@ -133,7 +133,7 @@ class WorldCerealConfidences(LocalFiles):
     @staticmethod
     def filepath_for_product_aez(path_to_tifs: UPath, aez: int) -> UPath | None:
         """Given a path for the tifs for a band and an aez, return the tif file if it exists."""
-        aez_file = path_to_tifs.glob(f"{aez}_*.tif")
+        aez_file = list(path_to_tifs.glob(f"{aez}_*.tif"))
         if len(aez_file) == 0:
             return None
         elif len(aez_file) == 1:
@@ -173,9 +173,6 @@ class WorldCerealConfidences(LocalFiles):
             filename: str = file_info["filename"]
             if filename not in cls.ZIP_FILENAMES:
                 logger.info(f"Skipping {filename}, which is not a confidence layer")
-                continue
-            if not filename.startswith("WorldCereal") and filename.endswith(".zip"):
-                logger.info(f"Skipping download for {filename}")
                 continue
             file_url = file_info["links"]["download"]
             # Determine full filepath and create necessary folders for nested structure

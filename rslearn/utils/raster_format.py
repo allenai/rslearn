@@ -423,6 +423,8 @@ class GeotiffRasterFormat(RasterFormat):
         """
         if fname is None:
             fname = self.fname
+        else:
+            self.fname = fname
 
         crs = projection.crs
         transform = affine.Affine(

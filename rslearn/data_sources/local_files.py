@@ -94,7 +94,7 @@ class RasterItemSpec:
             the RasterItemSpec.
         """
         kwargs = dict(
-            fnames=[join_upath(src_dir, suffix) for suffix in d["fnames"]],
+            fnames=[join_upath(src_dir, str(suffix)) for suffix in d["fnames"]],
             bands=d["bands"],
         )
         if "name" in d:
