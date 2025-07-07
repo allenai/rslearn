@@ -21,9 +21,6 @@ from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
-# WorldCereal is based on LocalFiles so it names the bands in order from B1, B2, ...
-TEST_BAND = "B1"
-
 # Degrees per pixel to use in the GeoTIFF.
 # This roughly corresponds to 10 m/pixel.
 DEGREES_PER_PIXEL = 0.0001
