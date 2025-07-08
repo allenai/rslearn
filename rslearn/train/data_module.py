@@ -2,6 +2,7 @@
 
 import os
 import random
+from collections.abc import Iterator
 from typing import Any
 
 import lightning as L
@@ -111,6 +112,11 @@ class RslearnDataModule(L.LightningDataModule):
             print(f"got {len(self.datasets[split])} examples in split {split}")
 
     def set_name(self, name: str) -> None:
+        """Set the name of the dataset.
+
+        Args:
+            name: the name of the dataset
+        """
         self.name = name
         for dataset in self.datasets.values():
             dataset.set_name(name)
@@ -210,8 +216,8 @@ class RslearnDataModule(L.LightningDataModule):
 
 class MultiWrapperDataset(IterableDataset):
     """Multi-dataset data module for training on multiple datasets with different modalities.
-    Manually shards if we are doing multi-dataset training.
-    Basic data flow:
+
+    Manually shards if we are doing multi-dataset training. Basic data flow:
     1. Build individual RslearnDataModule instances from dataset configs
     2. Build a MultiWrapperDataset from the DataLoaders of these RslearnDataModule instances
     3. Wrap the MultiWrapperDataset in a DataLoader shell
@@ -225,12 +231,15 @@ class MultiWrapperDataset(IterableDataset):
         split: str = "train",
         rank: int = 0,
         world_size: int = 1,
-    ):
-        """data_modules: dict mapping dataset names to RslearnDataModule objects
-        strategy: "random" or "round_robin"
-        split: "train", "val", "test", or "predict"
-        rank: rank of the current process
-        world_size: total number of processes
+    ) -> None:
+        """Initialize a new MultiWrapperDataset.
+
+        Args:
+            data_modules: dict mapping dataset names to RslearnDataModule objects
+            strategy: "random" or "round_robin"
+            split: "train", "val", "test", or "predict"
+            rank: rank of the current process
+            world_size: total number of processes
         """
         self.data_modules = data_modules
         self.strategy = strategy
@@ -239,6 +248,7 @@ class MultiWrapperDataset(IterableDataset):
         self.world_size = world_size
 
     def _get_dataloaders(self, split: str) -> list[DataLoader]:
+        """Get the dataloaders for the given split."""
         return [
             dm._get_dataloader(split, is_inner_process=True)
             for dm in self.data_modules.values()
@@ -255,12 +265,14 @@ class MultiWrapperDataset(IterableDataset):
         uid = self.rank * num_workers + worker_id
         return uid, num_workers * self.world_size
 
-    def __len__(self):
+    def __len__(self) -> int:
+        """Get the length of the dataset."""
         return (
             sum(len(dl) for dl in self._get_dataloaders(self.split)) // self.world_size
         )
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
+        """Iterate over the dataset."""
         # Must reconstruct tasks and dataloaders on each new epoch to allow fresh
         # shuffling and exhausted generators to be re-initialized
         self.iterators = [iter(dl) for dl in self._get_dataloaders(self.split)]
@@ -315,12 +327,22 @@ class MultiDatasetDataModule(L.LightningDataModule):
     """
 
     def __init__(
-        self, dataset_configs: dict[str, RslearnDataModule], task: MultiTask, **kwargs
-    ):
+        self,
+        dataset_configs: dict[str, RslearnDataModule],
+        task: MultiTask,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize a new MultiDatasetDataModule.
+
+        Args:
+            dataset_configs: dict mapping dataset names to RslearnDataModule objects
+            task: the task to train on
+            kwargs: additional keyword arguments
+        """
         super().__init__()
         self.data_modules = dataset_configs
 
-    def setup(self, stage: str | None = None):
+    def setup(self, stage: str | None = None) -> None:
         """Set up the datasets for the given stage. Also assign dataset-specific names.
 
         Args:
@@ -331,7 +353,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
             data_module.set_name(name)
 
     def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:
-        num_workers = os.cpu_count() // self.trainer.world_size  # type: ignore
+        num_workers = min(len(os.sched_getaffinity(0)) // self.trainer.world_size, 32)  # type: ignore
         print(f"INFO: using num_workers={num_workers} for {split} split")
         return DataLoader(
             dataset=MultiWrapperDataset(
@@ -350,13 +372,17 @@ class MultiDatasetDataModule(L.LightningDataModule):
         )
 
     def train_dataloader(self) -> DataLoader:
+        """Get the training dataloader."""
         return self._get_dataloader("train")
 
     def val_dataloader(self) -> DataLoader:
+        """Get the validation dataloader."""
         return self._get_dataloader("val")
 
     def test_dataloader(self) -> DataLoader:
+        """Get the test dataloader."""
         return self._get_dataloader("test")
 
     def predict_dataloader(self) -> DataLoader:
+        """Get the predict dataloader."""
         return self._get_dataloader("predict")

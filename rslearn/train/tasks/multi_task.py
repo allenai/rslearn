@@ -48,7 +48,7 @@ class MultiTask(Task):
         target_dict = {}
         if metadata["task"] is None:
             # No multi-dataset, so always compute across all tasks
-            task_iter = self.tasks.items()
+            task_iter = list(self.tasks.items())
         else:
             # Multi-dataset, so only compute for the task in this dataset
             task_iter = [(metadata["task"], self.tasks[metadata["task"]])]
@@ -88,7 +88,7 @@ class MultiTask(Task):
                 )
             except KeyError:
                 # this happens if during multi-task training, all tasks are not
-                # represented in the batch (which is expected) 
+                # represented in the batch (which is expected)
                 pass
         return processed_output
 
@@ -165,7 +165,7 @@ class MetricWrapper(Metric):
             )
         except KeyError:
             # this happens if during multi-task training, all tasks are not
-            # represented in the batch (which is expected) 
+            # represented in the batch (which is expected)
             pass
 
     def compute(self) -> Any:
