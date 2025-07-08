@@ -5,17 +5,22 @@ import shutil
 from typing import Any
 
 import numpy.typing as npt
+import rasterio.transform
 import rasterio.vrt
+import shapely
 from rasterio.enums import Resampling
 from upath import UPath
 
-from rslearn.utils import Feature, PixelBounds, Projection
+from rslearn.const import WGS84_PROJECTION
+from rslearn.utils.feature import Feature
 from rslearn.utils.fsspec import (
     join_upath,
     open_atomic,
     open_rasterio_upath_reader,
     open_rasterio_upath_writer,
 )
+from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
+from rslearn.utils.get_utm_ups_crs import get_utm_ups_crs
 from rslearn.utils.raster_format import (
     GeotiffRasterFormat,
 )
@@ -268,6 +273,31 @@ class DefaultTileStore(TileStore):
                 profile = src.profile
                 array = src.read()
 
+                # If raster specifies ground control points, use WarpedVRT to get it in
+                # an appropriate projection.
+                # Previously we used rasterio.transform.from_gcps(gcps) but I think the
+                # problem is that it computes one transform for the entire raster but
+                # the raster might actually need warping.
+                if profile["crs"] is None and src.gcps:
+                    gcps, gcp_crs = src.gcps
+                    # Use the first ground control point to pick a UTM/UPS projection.
+                    first_gcp_orig = STGeometry(
+                        Projection(gcp_crs, 1, 1),
+                        shapely.Point(gcps[0].x, gcps[0].y),
+                        None,
+                    )
+                    first_gcp_wgs84 = first_gcp_orig.to_projection(WGS84_PROJECTION)
+                    crs = get_utm_ups_crs(first_gcp_wgs84.shp.x, first_gcp_wgs84.shp.y)
+                    with rasterio.vrt.WarpedVRT(
+                        src, crs=crs, resampling=Resampling.cubic
+                    ) as vrt:
+                        array = vrt.read()
+                        transform = vrt.transform
+
+                else:
+                    crs = profile["crs"]
+                    transform = profile["transform"]
+
             output_profile = {
                 "driver": "GTiff",
                 "compress": "lzw",
@@ -275,8 +305,8 @@ class DefaultTileStore(TileStore):
                 "height": array.shape[1],
                 "count": array.shape[0],
                 "dtype": array.dtype.name,
-                "crs": profile["crs"],
-                "transform": profile["transform"],
+                "crs": crs,
+                "transform": transform,
                 "BIGTIFF": "IF_SAFER",
                 "tiled": True,
                 "blockxsize": self.tile_size,
