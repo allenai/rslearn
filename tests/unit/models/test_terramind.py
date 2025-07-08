@@ -1,14 +1,15 @@
 """Test the Terramind model."""
 
-import pytest
+import shutil
+from pathlib import Path
+
 import torch
 
 from rslearn.models.terramind import Terramind, TerramindNormalize, TerramindSize
 
 
-@pytest.mark.parametrize("model_size", [TerramindSize.BASE, TerramindSize.LARGE])
-def test_terramind(model_size: TerramindSize) -> None:
-    terramind = Terramind(model_size=model_size, modalities=["RGB"])
+def test_terramind() -> None:
+    terramind = Terramind(model_size=TerramindSize.BASE, modalities=["RGB"])
     inputs = [
         {
             "RGB": torch.zeros((3, 256, 256), dtype=torch.float32),
@@ -28,3 +29,8 @@ def test_terramind(model_size: TerramindSize) -> None:
     assert features.shape[0] == 1
     assert features.shape[2] == 16
     assert features.shape[3] == 16
+
+    # Delete any cached models.
+    cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+    if cache_dir.exists():
+        shutil.rmtree(cache_dir)

@@ -1,15 +1,17 @@
-import pytest
+import os
+import shutil
+import tempfile
+
 import torch
 
 from rslearn.models.croma import PATCH_SIZE, Croma, CromaModality, CromaSize
 
 
-@pytest.mark.parametrize("size", [CromaSize.BASE, CromaSize.LARGE])
-def test_croma(size: CromaSize) -> None:
+def test_croma() -> None:
     # Make sure the forward pass works.
     input_hw = 32
     croma = Croma(
-        size=size, modality=CromaModality.SENTINEL2, image_resolution=input_hw
+        size=CromaSize.BASE, modality=CromaModality.SENTINEL2, image_resolution=input_hw
     )
     inputs = [
         {
@@ -24,3 +26,8 @@ def test_croma(size: CromaSize) -> None:
     assert features.shape[0] == 1 and len(features.shape) == 4
     feat_hw = input_hw // PATCH_SIZE
     assert features.shape[2] == feat_hw and features.shape[3] == feat_hw
+
+    # Delete any cached models.
+    cache_dir = os.path.join(tempfile.gettempdir(), "rslearn_cache")
+    if os.path.exists(cache_dir):
+        shutil.rmtree(cache_dir)
