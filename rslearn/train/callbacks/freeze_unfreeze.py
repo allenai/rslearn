@@ -70,10 +70,10 @@ class FreezeUnfreeze(BaseFinetuning):
                 optimizer=optimizer,
                 initial_denom_lr=self.unfreeze_lr_factor,
             )
-            if "plateau" in pl_module.schedulers:
-                scheduler = pl_module.schedulers["plateau"]
+            if "scheduler" in pl_module.schedulers:
+                scheduler = pl_module.schedulers["scheduler"]
                 while len(scheduler.min_lrs) < len(optimizer.param_groups):
-                    print("appending to plateau scheduler min_lrs")
+                    print("appending to scheduler min_lrs")
                     scheduler.min_lrs.append(scheduler.min_lrs[0])
         elif current_epoch > self.unfreeze_at_epoch:
             # always do this because overhead is minimal, and it allows restoring

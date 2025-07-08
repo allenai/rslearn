@@ -195,7 +195,7 @@ class RslearnLightningModule(L.LightningModule):
                 "monitor": "train_loss",
                 "interval": "epoch",
             }
-            self.schedulers["plateau"] = scheduler
+            self.schedulers["scheduler"] = scheduler
         return d
 
     def training_step(
