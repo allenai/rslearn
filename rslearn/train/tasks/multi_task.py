@@ -47,16 +47,7 @@ class MultiTask(Task):
         """
         input_dict = {}
         target_dict = {}
-        if metadata["dataset_source"] is None:
-            # No multi-dataset, so always compute across all tasks
-            task_iter = self.tasks.items()
-        else:
-            # Multi-dataset, so only compute for the task in this dataset
-            task_iter = [
-                (metadata["dataset_source"], self.tasks[metadata["dataset_source"]])
-            ]
-
-        for task_name, task in task_iter:
+        for task_name, task in self.tasks.items():
             cur_raw_inputs = {}
             for k, v in self.input_mapping[task_name].items():
                 if k not in raw_inputs:
@@ -85,14 +76,9 @@ class MultiTask(Task):
         """
         processed_output = {}
         for task_name, task in self.tasks.items():
-            try:
-                processed_output[task_name] = task.process_output(
-                    raw_output[task_name], metadata
-                )
-            except KeyError:
-                # this happens if during multi-task training, all tasks are not
-                # represented in the batch (which is expected)
-                pass
+            processed_output[task_name] = task.process_output(
+                raw_output[task_name], metadata
+            )
         return processed_output
 
     def visualize(
@@ -289,15 +275,10 @@ class MetricWrapper(Metric):
             preds: the predictions
             targets: the targets
         """
-        try:
-            self.metric.update(
-                [pred[self.task_name] for pred in preds],
-                [target[self.task_name] for target in targets],
-            )
-        except KeyError:
-            # this happens if during multi-task training, all tasks are not
-            # represented in the batch (which is expected)
-            pass
+        self.metric.update(
+            [pred[self.task_name] for pred in preds],
+            [target[self.task_name] for target in targets],
+        )
 
     def compute(self) -> Any:
         """Returns the computed metric."""
@@ -336,10 +317,14 @@ class MultiDatasetMetricWrapper(Metric):
             preds: the predictions
             targets: the targets
         """
-        self.metric.update(
-            [pred[self.dataset_source][self.task_name] for pred in preds],
-            [target[self.dataset_source][self.task_name] for target in targets],
-        )
+        try:
+            self.metric.update(
+                [pred[self.dataset_source][self.task_name] for pred in preds],
+                [target[self.dataset_source][self.task_name] for target in targets],
+            )
+        except KeyError:
+            # expect only one dataset per batch, so this metric may not be useful
+            pass
 
     def compute(self) -> Any:
         """Returns the computed metric."""

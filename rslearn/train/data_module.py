@@ -248,7 +248,6 @@ class MultiWrapperDataset(IterableDataset):
                 raise ValueError("Unknown strategy")
 
             try:
-                print("ABOUT TO GET NEXT BATCH!", idx, datasets[idx])
                 batch = next(self.iterators[idx])
                 for instance in batch[0]:  # modify the inputs directly
                     instance["dataset_source"] = datasets[idx]
