@@ -1,19 +1,18 @@
 """Default LightningDataModule for rslearn."""
 
+import os
 import random
 from typing import Any
 
 import lightning as L
 import torch
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader, DistributedSampler, IterableDataset
 from upath import UPath
 
 from rslearn.dataset import Dataset
 from rslearn.train.tasks import Task
-
-from typing import Dict, Optional, List
-from torch.utils.data import DataLoader, IterableDataset
 from rslearn.train.tasks.multi_task import MultiTask
+
 from .dataset import DataInput, ModelDataset, RetryDataset, SplitConfig
 
 
@@ -105,18 +104,24 @@ class RslearnDataModule(L.LightningDataModule):
                 inputs=self.inputs,
                 task=self.task,
                 workers=self.num_workers,
-                name=self.name
+                name=self.name,
             )
             dataset = RetryDataset(dataset)
             self.datasets[split] = dataset
             print(f"got {len(self.datasets[split])} examples in split {split}")
-    
+
     def set_name(self, name: str) -> None:
         self.name = name
         for dataset in self.datasets.values():
             dataset.set_name(name)
 
-    def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:
+    def _get_dataloader(
+        self,
+        split: str,
+        is_inner_process: bool = False,
+    ) -> DataLoader[dict[str, torch.Tensor]]:
+        # is_inner_process is used if we are in a multi dataset setting, and this dataloader
+        # is one of a set instantiated PER process (so we don't want to spawn nested processes)
         dataset = self.datasets[split]
         persistent_workers = self.num_workers > 0
         kwargs = dict(
@@ -126,20 +131,25 @@ class RslearnDataModule(L.LightningDataModule):
             collate_fn=collate_fn,
             persistent_workers=persistent_workers,
         )
-        sampler_factory = self.split_configs[split].sampler
+        # Can still shuffle in inner process since we rebuild dataloaderes
         should_shuffle = split == "train"
+        if is_inner_process:
+            kwargs["num_workers"] = 0
+            kwargs["persistent_workers"] = False
+            kwargs["shuffle"] = should_shuffle
+            kwargs["pin_memory"] = False
+            return DataLoader(**kwargs)  # type: ignore
+
+        sampler_factory = self.split_configs[split].sampler
         if sampler_factory:
-            kwargs["sampler"] = sampler_factory.get_sampler(dataset)
+            kwargs["sampler"] = sampler_factory.get_sampler(dataset)  # type: ignore
         elif (
             self.trainer is not None
             and self.trainer.world_size is not None
             and self.trainer.world_size > 1
         ):
-            # NOTE: when doing single-gpu multi-dataset training, self.trainer is None
-            # unsure if this is only for single-gpu setting or multi-dataset
-            # is broken for distributed traning
             # Use distributed sampler in case ddp is enabled.
-            kwargs["sampler"] = DistributedSampler(
+            kwargs["sampler"] = DistributedSampler(  # type: ignore
                 dataset,
                 num_replicas=self.trainer.world_size,
                 rank=self.trainer.global_rank,
@@ -147,7 +157,7 @@ class RslearnDataModule(L.LightningDataModule):
             )
         else:
             kwargs["shuffle"] = should_shuffle
-        return DataLoader(**kwargs)
+        return DataLoader(**kwargs)  # type: ignore
 
     def train_dataloader(self) -> DataLoader[dict[str, torch.Tensor]]:
         """Implement one or more PyTorch DataLoaders for training.
@@ -199,8 +209,8 @@ class RslearnDataModule(L.LightningDataModule):
 
 
 class MultiWrapperDataset(IterableDataset):
-    """
-    Multi-dataset data module for training on multiple datasets with different modalities.
+    """Multi-dataset data module for training on multiple datasets with different modalities.
+    Manually shards if we are doing multi-dataset training.
     Basic data flow:
     1. Build individual RslearnDataModule instances from dataset configs
     2. Build a MultiWrapperDataset from the DataLoaders of these RslearnDataModule instances
@@ -208,28 +218,68 @@ class MultiWrapperDataset(IterableDataset):
     4. Pass the DataLoader to the LightningDataModule and use as normal
     """
 
-    def __init__(self, dataloaders: List[DataLoader], tasks: List[str], strategy: str = "random"):
-        """
-        dataloaders: list of DataLoader objects
-        tasks: list of task names, one for each dataloader
+    def __init__(
+        self,
+        data_modules: dict[str, RslearnDataModule],
+        strategy: str = "random",
+        split: str = "train",
+        rank: int = 0,
+        world_size: int = 1,
+    ):
+        """data_modules: dict mapping dataset names to RslearnDataModule objects
         strategy: "random" or "round_robin"
+        split: "train", "val", "test", or "predict"
+        rank: rank of the current process
+        world_size: total number of processes
         """
-        assert len(dataloaders) == len(tasks), "number of dataloaders and tasks must match"
-        self.dataloaders = dataloaders
+        self.data_modules = data_modules
         self.strategy = strategy
-        self.tasks = tasks.copy()
+        self.split = split
+        self.rank = rank
+        self.world_size = world_size
+
+    def _get_dataloaders(self, split: str) -> list[DataLoader]:
+        return [
+            dm._get_dataloader(split, is_inner_process=True)
+            for dm in self.data_modules.values()
+        ]
+
+    def _get_world_info(self) -> tuple[int, int]:
+        """Get the worker-process index and total number of worker-process spawns."""
+        worker_info = torch.utils.data.get_worker_info()
+        if worker_info is None:
+            worker_id, num_workers = 0, 1
+        else:
+            worker_id = worker_info.id
+            num_workers = worker_info.num_workers
+        uid = self.rank * num_workers + worker_id
+        return uid, num_workers * self.world_size
 
     def __len__(self):
-        return sum(len(dl) for dl in self.dataloaders)
+        return (
+            sum(len(dl) for dl in self._get_dataloaders(self.split)) // self.world_size
+        )
 
     def __iter__(self):
-        self.iterators = [iter(dl) for dl in self.dataloaders]
-        tasks = self.tasks.copy()  # allow restart on new iter call
+        # Must reconstruct tasks and dataloaders on each new epoch to allow fresh
+        # shuffling and exhausted generators to be re-initialized
+        self.iterators = [iter(dl) for dl in self._get_dataloaders(self.split)]
+        datasets = list(self.data_modules.keys())
+
+        # Since we use multiple workers, make sure to appropriately shard data
+        # across both worker and ddp process
+        batch_idx = 0
+        curr_id, total_workers = self._get_world_info()
         while True:
+            # Only return batches that belong to this worker/process group
+            if batch_idx % total_workers != curr_id:
+                batch_idx += 1
+                continue
+
             if self.strategy == "random":
                 idx = random.randint(0, len(self.iterators) - 1)
             elif self.strategy == "round_robin":
-                idx = getattr(self, 'last_idx', -1) + 1
+                idx = getattr(self, "last_idx", -1) + 1
                 idx %= len(self.iterators)
                 self.last_idx = idx
             else:
@@ -238,11 +288,12 @@ class MultiWrapperDataset(IterableDataset):
             try:
                 batch = next(self.iterators[idx])
                 for instance in batch[0]:  # modify the inputs directly
-                    instance["dataset_source"] = tasks[idx]
+                    instance["dataset_source"] = datasets[idx]
                 yield batch
+                batch_idx += 1
             except StopIteration:
                 self.iterators.pop(idx)
-                tasks.pop(idx)
+                datasets.pop(idx)
                 if len(self.iterators) == 0:
                     break
                 if self.strategy == "round_robin":
@@ -251,11 +302,11 @@ class MultiWrapperDataset(IterableDataset):
 
 class MultiDatasetDataModule(L.LightningDataModule):
     """Data module that manages multiple RslearnDataModule instances.
-    
+
     This module creates and manages multiple RslearnDataModule instances, each handling
     a different dataset. It provides a unified interface for training on multiple datasets
     with different modalities and labels.
-    
+
     Each dataset can have different:
     - Input modalities (e.g., Sentinel-2 vs Landsat)
     - Label schemas (e.g., different classification classes)
@@ -264,41 +315,38 @@ class MultiDatasetDataModule(L.LightningDataModule):
     """
 
     def __init__(
-        self,
-        dataset_configs: Dict[str, RslearnDataModule],
-        task: MultiTask,
-        **kwargs
+        self, dataset_configs: dict[str, RslearnDataModule], task: MultiTask, **kwargs
     ):
         super().__init__()
-        self.tasks = list(dataset_configs.keys())
         self.data_modules = dataset_configs
 
-    def setup(self, stage: Optional[str] = None):
+    def setup(self, stage: str | None = None):
         """Set up the datasets for the given stage. Also assign dataset-specific names.
-        
+
         Args:
             stage: The stage to set up ('fit', 'validate', 'test', 'predict')
         """
         for name, data_module in self.data_modules.items():
-            data_module.setup(stage)
+            data_module.setup(stage)  # type: ignore
             data_module.set_name(name)
 
     def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:
-        dataloaders = []
-        for data_module in self.data_modules.values():
-            dataloaders.append(data_module._get_dataloader(split))
-        dataset = MultiWrapperDataset(
-            dataloaders,
-            self.tasks,
-            strategy="random" if split == "train" else "round_robin",
-            # ensure that during testing, we see all datasets
-        )
+        num_workers = os.cpu_count() // self.trainer.world_size  # type: ignore
+        print(f"INFO: using num_workers={num_workers} for {split} split")
         return DataLoader(
-            dataset,
+            dataset=MultiWrapperDataset(
+                self.data_modules,
+                split=split,
+                rank=self.trainer.global_rank,  # type: ignore
+                world_size=self.trainer.world_size,  # type: ignore
+                strategy="random" if split == "train" else "round_robin",
+                # ensure that during testing, we see all datasets
+            ),
             batch_size=None,
-            num_workers=0,    # handle splitting and multiprocessing in the 
-            shuffle=False,    # individual dataloaders spawned by rslearn
-            pin_memory=True,  # unclear if we need this, haven't checked properly
+            pin_memory=True,
+            num_workers=num_workers,
+            shuffle=False,  # already randomly chose next dataloader + per-dataloader shuffler
+            persistent_workers=True,  # won't do much since we rebuild dataloaders on each epoch
         )
 
     def train_dataloader(self) -> DataLoader:
