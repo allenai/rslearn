@@ -23,6 +23,7 @@ from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.get_utm_ups_crs import get_utm_ups_crs
 from rslearn.utils.raster_format import (
     GeotiffRasterFormat,
+    get_bandset_dirname,
 )
 from rslearn.utils.vector_format import (
     GeojsonVectorFormat,
@@ -96,9 +97,7 @@ class DefaultTileStore(TileStore):
             the UPath directory where the raster should be stored.
         """
         assert self.path is not None
-        if any(["_" in band for band in bands]):
-            raise ValueError("band names must not contain '_'")
-        return self.path / layer_name / item_name / "_".join(bands)
+        return self.path / layer_name / item_name / get_bandset_dirname(bands)
 
     def _get_raster_fname(
         self, layer_name: str, item_name: str, bands: list[str]

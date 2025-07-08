@@ -10,6 +10,7 @@ from upath import UPath
 from rslearn.log_utils import get_logger
 from rslearn.utils import Projection, STGeometry
 from rslearn.utils.fsspec import open_atomic
+from rslearn.utils.raster_format import get_bandset_dirname
 
 logger = get_logger(__name__)
 
@@ -52,7 +53,8 @@ def get_window_raster_dir(
     Returns:
         the directory containing the raster.
     """
-    return get_window_layer_dir(window_path, layer_name, group_idx) / "_".join(bands)
+    dirname = get_bandset_dirname(bands)
+    return get_window_layer_dir(window_path, layer_name, group_idx) / dirname
 
 
 class WindowLayerData:
