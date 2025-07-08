@@ -612,6 +612,7 @@ class ModelDataset(torch.utils.data.Dataset):
             if data_input.passthrough:
                 passthrough_inputs[name] = raw_inputs[name]
 
+        print("HERE!!!! AT MODELDATASET.__GETITEM__")
         metadata = {
             "group": window.group,
             "window_name": window.name,
@@ -619,7 +620,7 @@ class ModelDataset(torch.utils.data.Dataset):
             "bounds": bounds,
             "time_range": window.time_range,
             "projection": window.projection,
-            "task": self.name,
+            "dataset_source": self.name,
         }
         if self.split_config.get_load_all_patches():
             metadata["patch_idx"] = patch_idx
@@ -633,11 +634,16 @@ class ModelDataset(torch.utils.data.Dataset):
             metadata=metadata,
             load_targets=not self.split_config.get_skip_targets(),
         )
+        print("FINISHED PROCESSING INPUTS IN __GETITEM__!")
         input_dict.update(passthrough_inputs)
         input_dict, target_dict = self.transforms(input_dict, target_dict)
 
         logger.debug("__getitem__ finish pid=%d item_idx=%d", os.getpid(), idx)
 
+        print("returning from __getitem__ now...", idx, metadata)
+        print("input_dict: ", input_dict)
+        print("target_dict: ", target_dict)
+        print("--------------------------------")
         return input_dict, target_dict, metadata
 
     def get_windows(self) -> list[Window]:
@@ -667,7 +673,7 @@ class RetryDataset(torch.utils.data.Dataset):
 
     def set_name(self, name: str) -> None:
         self.dataset.set_name(name)
- 
+
     def __len__(self) -> int:
         """Return length of the dataset."""
         return len(self.dataset)

@@ -5,15 +5,13 @@ from typing import Any
 
 import lightning as L
 import torch
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader, DistributedSampler, IterableDataset
 from upath import UPath
 
 from rslearn.dataset import Dataset
 from rslearn.train.tasks import Task
+from rslearn.train.tasks.multi_task import MultiDatasetTask
 
-from typing import Dict, Optional, List
-from torch.utils.data import DataLoader, IterableDataset
-from rslearn.train.tasks.multi_task import MultiTask
 from .dataset import DataInput, ModelDataset, RetryDataset, SplitConfig
 
 
@@ -105,13 +103,18 @@ class RslearnDataModule(L.LightningDataModule):
                 inputs=self.inputs,
                 task=self.task,
                 workers=self.num_workers,
-                name=self.name
+                name=self.name,
             )
             dataset = RetryDataset(dataset)
             self.datasets[split] = dataset
             print(f"got {len(self.datasets[split])} examples in split {split}")
-    
+
     def set_name(self, name: str) -> None:
+        """Set the name of the dataset.
+
+        Args:
+            name: the name of the dataset
+        """
         self.name = name
         for dataset in self.datasets.values():
             dataset.set_name(name)
@@ -135,6 +138,9 @@ class RslearnDataModule(L.LightningDataModule):
             and self.trainer.world_size is not None
             and self.trainer.world_size > 1
         ):
+            print(
+                f"INFO: using distributed sampler with {self.trainer.world_size} replicas and rank {self.trainer.global_rank}"
+            )
             # NOTE: when doing single-gpu multi-dataset training, self.trainer is None
             # unsure if this is only for single-gpu setting or multi-dataset
             # is broken for distributed traning
@@ -199,8 +205,7 @@ class RslearnDataModule(L.LightningDataModule):
 
 
 class MultiWrapperDataset(IterableDataset):
-    """
-    Multi-dataset data module for training on multiple datasets with different modalities.
+    """Multi-dataset data module for training on multiple datasets with different modalities.
     Basic data flow:
     1. Build individual RslearnDataModule instances from dataset configs
     2. Build a MultiWrapperDataset from the DataLoaders of these RslearnDataModule instances
@@ -208,41 +213,49 @@ class MultiWrapperDataset(IterableDataset):
     4. Pass the DataLoader to the LightningDataModule and use as normal
     """
 
-    def __init__(self, dataloaders: List[DataLoader], tasks: List[str], strategy: str = "random"):
-        """
+    def __init__(
+        self,
+        dataloaders: list[DataLoader],
+        datasets: list[str],
+        strategy: str = "random",
+    ):
+        """Args:
         dataloaders: list of DataLoader objects
-        tasks: list of task names, one for each dataloader
+        tasks: list of dataset names, one for each dataloader
         strategy: "random" or "round_robin"
         """
-        assert len(dataloaders) == len(tasks), "number of dataloaders and tasks must match"
+        assert len(dataloaders) == len(
+            datasets
+        ), "number of dataloaders and tasks must match"
         self.dataloaders = dataloaders
         self.strategy = strategy
-        self.tasks = tasks.copy()
+        self.datasets = datasets.copy()
 
     def __len__(self):
         return sum(len(dl) for dl in self.dataloaders)
 
     def __iter__(self):
         self.iterators = [iter(dl) for dl in self.dataloaders]
-        tasks = self.tasks.copy()  # allow restart on new iter call
+        datasets = self.datasets.copy()  # allow restart on new iter call
         while True:
             if self.strategy == "random":
                 idx = random.randint(0, len(self.iterators) - 1)
             elif self.strategy == "round_robin":
-                idx = getattr(self, 'last_idx', -1) + 1
+                idx = getattr(self, "last_idx", -1) + 1
                 idx %= len(self.iterators)
                 self.last_idx = idx
             else:
                 raise ValueError("Unknown strategy")
 
             try:
+                print("ABOUT TO GET NEXT BATCH!", idx, datasets[idx])
                 batch = next(self.iterators[idx])
                 for instance in batch[0]:  # modify the inputs directly
-                    instance["dataset_source"] = tasks[idx]
+                    instance["dataset_source"] = datasets[idx]
                 yield batch
             except StopIteration:
                 self.iterators.pop(idx)
-                tasks.pop(idx)
+                datasets.pop(idx)
                 if len(self.iterators) == 0:
                     break
                 if self.strategy == "round_robin":
@@ -251,11 +264,11 @@ class MultiWrapperDataset(IterableDataset):
 
 class MultiDatasetDataModule(L.LightningDataModule):
     """Data module that manages multiple RslearnDataModule instances.
-    
+
     This module creates and manages multiple RslearnDataModule instances, each handling
     a different dataset. It provides a unified interface for training on multiple datasets
     with different modalities and labels.
-    
+
     Each dataset can have different:
     - Input modalities (e.g., Sentinel-2 vs Landsat)
     - Label schemas (e.g., different classification classes)
@@ -265,22 +278,22 @@ class MultiDatasetDataModule(L.LightningDataModule):
 
     def __init__(
         self,
-        dataset_configs: Dict[str, RslearnDataModule],
-        task: MultiTask,
-        **kwargs
+        dataset_configs: dict[str, RslearnDataModule],
+        task: MultiDatasetTask,
+        **kwargs,
     ):
         super().__init__()
-        self.tasks = list(dataset_configs.keys())
+        self.datasets = list(dataset_configs.keys())
         self.data_modules = dataset_configs
 
-    def setup(self, stage: Optional[str] = None):
+    def setup(self, stage: str | None = None):
         """Set up the datasets for the given stage. Also assign dataset-specific names.
-        
+
         Args:
             stage: The stage to set up ('fit', 'validate', 'test', 'predict')
         """
         for name, data_module in self.data_modules.items():
-            data_module.setup(stage)
+            data_module.setup(stage)  # type: ignore
             data_module.set_name(name)
 
     def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:
@@ -289,26 +302,46 @@ class MultiDatasetDataModule(L.LightningDataModule):
             dataloaders.append(data_module._get_dataloader(split))
         dataset = MultiWrapperDataset(
             dataloaders,
-            self.tasks,
+            self.datasets,
             strategy="random" if split == "train" else "round_robin",
             # ensure that during testing, we see all datasets
         )
         return DataLoader(
             dataset,
             batch_size=None,
-            num_workers=0,    # handle splitting and multiprocessing in the 
-            shuffle=False,    # individual dataloaders spawned by rslearn
+            num_workers=0,  # handle splitting/multiprocessing in RslearnDataModule
             pin_memory=True,  # unclear if we need this, haven't checked properly
+            shuffle=False,
         )
 
     def train_dataloader(self) -> DataLoader:
+        """Get the training dataloader.
+
+        Returns:
+            A DataLoader for the training set.
+        """
         return self._get_dataloader("train")
 
     def val_dataloader(self) -> DataLoader:
+        """Get the validation dataloader.
+
+        Returns:
+            A DataLoader for the validation set.
+        """
         return self._get_dataloader("val")
 
     def test_dataloader(self) -> DataLoader:
+        """Get the test dataloader.
+
+        Returns:
+            A DataLoader for the test set.
+        """
         return self._get_dataloader("test")
 
     def predict_dataloader(self) -> DataLoader:
+        """Get the predict dataloader.
+
+        Returns:
+            A DataLoader for the predict set.
+        """
         return self._get_dataloader("predict")
