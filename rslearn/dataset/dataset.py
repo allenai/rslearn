@@ -10,6 +10,7 @@ from rslearn.config import load_layer_config
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, load_tile_store
 
+from .index import DatasetIndex
 from .window import Window
 
 logger = get_logger(__name__)
@@ -50,7 +51,6 @@ class Dataset:
         self.path = path
 
         # Load dataset configuration.
-
         with (self.path / "config.json").open("r") as f:
             config = json.load(f)
             self.layers = {}
@@ -65,6 +65,12 @@ class Dataset:
 
             self.tile_store_config = config.get("tile_store", None)
             self.materializer_name = config.get("materialize")
+
+    def _get_index(self) -> DatasetIndex | None:
+        index_fname = self.path / DatasetIndex.FNAME
+        if not index_fname.exists():
+            return None
+        return DatasetIndex.load_index(self.path)
 
     def load_windows(
         self,
@@ -81,6 +87,11 @@ class Dataset:
             show_progress: whether to show tqdm progress bar
             workers: number of parallel workers, default 0 (use main thread only to load windows)
         """
+        # Load from index if it exists.
+        dataset_index = self._get_index()
+        if dataset_index is not None:
+            return dataset_index.get_windows(groups=groups, names=names)
+
         window_dirs = []
         if not groups:
             groups = []
