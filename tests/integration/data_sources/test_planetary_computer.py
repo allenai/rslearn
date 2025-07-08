@@ -59,3 +59,14 @@ def test_sentinel2(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
     )
     assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+
+
+def test_cache_dir(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
+    """Make sure cache directory is populated when set."""
+    # Use a subdirectory so we also ensure the directory is automatically created.
+    cache_dir = UPath(tmp_path / "cache_dir")
+    band_name = "B04"
+    data_source = Sentinel2(assets=[band_name], cache_dir=cache_dir)
+    query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
+    data_source.get_items([seattle2020], query_config)[0]
+    assert len(list(cache_dir.iterdir())) > 0

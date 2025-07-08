@@ -105,7 +105,7 @@ jobs:
             ${{ needs.build.outputs.ghcr_docker_image }} \
             pytest -n auto tests/ -vv \
             --ignore tests/integration/ \
-            --ignore tests/unit/models/
+            --ignore tests/unit/models/test_molmo.py
 
       - name: Authenticate into gcp
         uses: "google-github-actions/auth@v2"
