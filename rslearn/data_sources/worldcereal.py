@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 class WorldCerealConfidences(LocalFiles):
     """A data source for the ESA WorldCereal 2021 agricultural land cover map.
 
-    For details about the land cover map, see https://esa-worldcereal.org/en.\
+    For details about the land cover map, see https://esa-worldcereal.org/en.
     """
 
     ZENODO_RECORD_ID = 7875105
@@ -75,7 +75,9 @@ class WorldCerealConfidences(LocalFiles):
             for band, tif_path in tif_filepaths.items():
                 aez_band_filepath = self.filepath_for_product_aez(tif_path, aez)
                 if aez_band_filepath is not None:
-                    cast(list, spec_dict["fnames"]).append(aez_band_filepath)
+                    cast(list, spec_dict["fnames"]).append(
+                        aez_band_filepath.absolute().as_uri()
+                    )
                     cast(list, spec_dict["bands"]).append([band])
             spec_dicts.append(spec_dict)
         # add this to the config

@@ -341,25 +341,7 @@ class DataSourceConfig:
 
     def serialize(self) -> dict[str, Any]:
         """Serialize this DataSourceConfig to a config dict."""
-        config_dict = self.config_dict.copy()
-
-        def serialize_item_specs(item_spec: dict) -> dict:
-            if "fnames" not in item_spec:
-                return item_spec
-            else:
-                return_dict = {
-                    k: item_spec[k] for k in item_spec.keys() if k != "fnames"
-                }
-                # we are assuming fnames is a list of Paths
-                return_dict["fnames"] = [str(p) for p in item_spec["fnames"]]
-            return return_dict
-
-        if "item_specs" in config_dict:
-            config_dict["item_specs"] = [
-                serialize_item_specs(item_spec)
-                for item_spec in config_dict["item_specs"]
-            ]
-        return config_dict
+        return self.config_dict
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "DataSourceConfig":
