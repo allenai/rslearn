@@ -341,7 +341,13 @@ class DataSourceConfig:
 
     def serialize(self) -> dict[str, Any]:
         """Serialize this DataSourceConfig to a config dict."""
-        return self.config_dict
+        config_dict = self.config_dict
+        if "item_specs" in config_dict:
+            if "fnames" in config_dict["item_specs"]:
+                config_dict["item_specs"]["fnames"] = [
+                    str(p) for p in config_dict["item_specs"]["fnames"]
+                ]
+        return config_dict
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "DataSourceConfig":
