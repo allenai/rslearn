@@ -1,5 +1,6 @@
 """Test the Terramind model."""
 
+import os
 import shutil
 from pathlib import Path
 
@@ -30,7 +31,8 @@ def test_terramind() -> None:
     assert features.shape[2] == 16
     assert features.shape[3] == 16
 
-    # Delete any cached models.
+    # Delete any cached models if running in CI.
     cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
-    if cache_dir.exists():
+    if cache_dir.exists() and os.environ.get("CI") == "true":
+        raise Exception(f"yes it will delete {cache_dir}")
         shutil.rmtree(cache_dir)

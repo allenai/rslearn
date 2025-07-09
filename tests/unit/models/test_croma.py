@@ -27,7 +27,7 @@ def test_croma() -> None:
     feat_hw = input_hw // PATCH_SIZE
     assert features.shape[2] == feat_hw and features.shape[3] == feat_hw
 
-    # Delete any cached models.
+    # Delete any cached models if running in CI.
     cache_dir = os.path.join(tempfile.gettempdir(), "rslearn_cache")
-    if os.path.exists(cache_dir):
+    if os.path.exists(cache_dir) and os.environ.get("CI") == "true":
         shutil.rmtree(cache_dir)
