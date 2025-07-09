@@ -34,5 +34,4 @@ def test_terramind() -> None:
     # Delete any cached models if running in CI.
     cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
     if cache_dir.exists() and os.environ.get("CI") == "true":
-        raise Exception(f"yes it will delete {cache_dir}")
         shutil.rmtree(cache_dir)
