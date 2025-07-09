@@ -17,5 +17,6 @@ rtree>=1.2
 s3fs==2025.2.0
 satlaspretrain_models>=0.3
 scipy>=1.13
+terratorch>=1.0.2
 transformers>=4.45
 wandb>=0.17
