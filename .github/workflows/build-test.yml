@@ -102,6 +102,7 @@ jobs:
       - name: Run Unit Tests
         run: |
           docker run --rm \
+            -e CI="true" \
             ${{ needs.build.outputs.ghcr_docker_image }} \
             pytest -n auto tests/ -vv \
             --ignore tests/integration/ \
