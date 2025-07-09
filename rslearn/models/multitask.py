@@ -1,8 +1,10 @@
 """MultiTaskModel for rslearn."""
 
-from typing import Any, Tuple
+from typing import Any
 
 import torch
+
+from rslearn.models.pooling import AveragePool, BasePool
 
 
 def apply_decoder(
@@ -13,11 +15,20 @@ def apply_decoder(
     name: str,
     outputs: list[dict[str, Any]],
     losses: dict[str, torch.Tensor],
-) -> Tuple[list[dict[str, Any]], dict[str, torch.Tensor]]:
-    """
-    Apply a decoder to a list of inputs and targets.
-    name is the name of the decoder/task (which must match).
-    Return the output and loss dictionary.
+) -> tuple[list[dict[str, Any]], dict[str, torch.Tensor]]:
+    """Apply a decoder to a list of inputs and targets.
+
+    Args:
+        features: list of features
+        inputs: list of input dicts
+        targets: list of target dicts
+        decoder: list of decoder modules
+        name: the name of the decoder/task (which must match)
+        outputs: list of output dicts
+        losses: dictionary of loss values
+
+    Returns:
+        tuple of (outputs, losses)
     """
     # First, apply all but the last module in the decoder to the features
     cur = features
@@ -62,12 +73,24 @@ class MultiTaskModel(torch.nn.Module):
         """
         super().__init__()
         self.encoder = torch.nn.Sequential(*encoder)
+        for name, decoder in decoders.items():
+            if not isinstance(decoder[0], BasePool):
+                # Add a default pool module for backwards compatibility with old configs
+                print(
+                    f"INFO: pooling decoder not found for {name}, using default average pool"
+                )
+                decoders[name].insert(0, AveragePool())
+            else:
+                print(f"INFO: using {decoder[0].__class__.__name__} for {name} pooling")
+
         self.decoders = torch.nn.ModuleDict(
             {name: torch.nn.ModuleList(decoder) for name, decoder in decoders.items()}
         )
         self.lazy_decode = lazy_decode
         if lazy_decode:
-            print("INFO: lazy decoding enabled, check source is consistent across batch")
+            print(
+                "INFO: lazy decoding enabled, check source is consistent across batch"
+            )
 
     def forward(
         self,
@@ -83,15 +106,16 @@ class MultiTaskModel(torch.nn.Module):
         Returns:
             tuple (outputs, loss_dict) from the last module.
         """
-
         features = self.encoder(inputs)
         outputs: list[dict[str, Any]] = [{} for _ in inputs]
-        losses = {}
+        losses: dict[str, torch.Tensor] = {}
         if self.lazy_decode:
             # Assume that all inputs have the same dataset_source
             dataset_source = inputs[0]["dataset_source"]
             decoder = self.decoders[dataset_source]
-            apply_decoder(features, inputs, targets, decoder, dataset_source, outputs, losses)
+            apply_decoder(
+                features, inputs, targets, decoder, dataset_source, outputs, losses
+            )
         else:
             for name, decoder in self.decoders.items():
                 apply_decoder(features, inputs, targets, decoder, name, outputs, losses)
