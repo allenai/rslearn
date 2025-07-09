@@ -487,6 +487,8 @@ class GeotiffRasterFormat(RasterFormat):
         """
         if fname is None:
             fname = self.fname
+        else:
+            print(f"fname is {fname}")
 
         # Construct the transform to use for the warped dataset.
         wanted_transform = get_transform_from_projection_and_bounds(projection, bounds)
