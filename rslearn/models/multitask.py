@@ -62,6 +62,7 @@ class MultiTaskModel(torch.nn.Module):
         self,
         encoder: list[torch.nn.Module],
         decoders: dict[str, list[torch.nn.Module]],
+        checkpoint_path: str | None = None,
         lazy_decode: bool = False,
     ):
         """Initialize a new MultiTaskModel.
@@ -69,10 +70,25 @@ class MultiTaskModel(torch.nn.Module):
         Args:
             encoder: modules to compute intermediate feature representations.
             decoders: modules to compute outputs and loss, should match number of tasks.
+            checkpoint_path: path to checkpoint to load decoder weights from
             lazy_decode: if True, only decode the outputs specified in the batch.
         """
         super().__init__()
+        self.lazy_decode = lazy_decode
         self.encoder = torch.nn.Sequential(*encoder)
+
+        if lazy_decode:
+            print(
+                "INFO: lazy decoding enabled, check source is consistent across batch"
+            )
+
+        if checkpoint_path is not None:
+            print(f"INFO: loading full model weights from {checkpoint_path}")
+            state_dict = torch.load(checkpoint_path)["state_dict"]
+            self.load_state_dict(
+                {k.replace("model.", "", 1): v for k, v in state_dict.items()}
+            )
+
         for name, decoder in decoders.items():
             if not isinstance(decoder[0], BasePool):
                 # Add a default pool module for backwards compatibility with old configs
@@ -86,11 +102,6 @@ class MultiTaskModel(torch.nn.Module):
         self.decoders = torch.nn.ModuleDict(
             {name: torch.nn.ModuleList(decoder) for name, decoder in decoders.items()}
         )
-        self.lazy_decode = lazy_decode
-        if lazy_decode:
-            print(
-                "INFO: lazy decoding enabled, check source is consistent across batch"
-            )
 
     def forward(
         self,

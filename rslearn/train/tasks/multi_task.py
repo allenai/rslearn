@@ -46,12 +46,14 @@ class MultiTask(Task):
         """
         input_dict = {}
         target_dict = {}
-        if metadata["task"] is None:
+        if metadata["dataset_source"] is None:
             # No multi-dataset, so always compute across all tasks
             task_iter = list(self.tasks.items())
         else:
             # Multi-dataset, so only compute for the task in this dataset
-            task_iter = [(metadata["task"], self.tasks[metadata["task"]])]
+            task_iter = [
+                (metadata["dataset_source"], self.tasks[metadata["dataset_source"]])
+            ]
 
         for task_name, task in task_iter:
             cur_raw_inputs = {}
