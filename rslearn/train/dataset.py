@@ -645,6 +645,7 @@ class ModelDataset(torch.utils.data.Dataset):
         return self.windows
 
     def set_name(self, name: str) -> None:
+        """Set the name of the dataset."""
         self.name = name
 
 
@@ -666,8 +667,9 @@ class RetryDataset(torch.utils.data.Dataset):
         self.delay = delay
 
     def set_name(self, name: str) -> None:
+        """Set the name of the dataset."""
         self.dataset.set_name(name)
- 
+
     def __len__(self) -> int:
         """Return length of the dataset."""
         return len(self.dataset)
