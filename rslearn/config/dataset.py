@@ -411,6 +411,7 @@ class LayerConfig:
 
     def __hash__(self) -> int:
         """Return a hash of this LayerConfig."""
+        print(self.serialize())
         return hash(json.dumps(self.serialize(), sort_keys=True))
 
     def __eq__(self, other: Any) -> bool:
