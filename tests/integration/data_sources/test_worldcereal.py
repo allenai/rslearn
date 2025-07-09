@@ -80,7 +80,7 @@ def make_test_zips(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
         zip_fname = tmp_path / "zips" / zip_file
         zipf = zipfile.ZipFile(zip_fname, "w")
         zipf.write(
-            raster_path / raster_format.fname,
+            raster_path / f"{seattle_aez}_{raster_path.stem}_confidence.tif",
             arcname=UPath(filepath)
             / f"{seattle_aez}_{raster_path.stem}_confidence.tif",
         )
