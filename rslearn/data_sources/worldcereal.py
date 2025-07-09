@@ -4,7 +4,7 @@ import os
 import shutil
 import tempfile
 import zipfile
-from typing import cast
+from typing import Any
 
 import requests
 from fsspec.implementations.local import LocalFileSystem
@@ -66,7 +66,7 @@ class WorldCerealConfidences(LocalFiles):
         # now that we have all our aezs, lets match them to the bands
         spec_dicts: list[dict] = []
         for aez in all_aezs:
-            spec_dict = {
+            spec_dict: dict[str, Any] = {
                 # must be a str since we / with a posix path later
                 "name": str(aez),
                 "fnames": [],
@@ -75,10 +75,8 @@ class WorldCerealConfidences(LocalFiles):
             for band, tif_path in tif_filepaths.items():
                 aez_band_filepath = self.filepath_for_product_aez(tif_path, aez)
                 if aez_band_filepath is not None:
-                    cast(list, spec_dict["fnames"]).append(
-                        aez_band_filepath.absolute().as_uri()
-                    )
-                    cast(list, spec_dict["bands"]).append([band])
+                    spec_dict["fnames"].append(aez_band_filepath.absolute().as_uri())
+                    spec_dict["bands"].append([band])
             spec_dicts.append(spec_dict)
         # add this to the config
         if config.data_source is not None:
