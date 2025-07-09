@@ -125,7 +125,20 @@ class RslearnDataModule(L.LightningDataModule):
         self,
         split: str,
         is_inner_process: bool = False,
+        generator: torch.Generator | None = None,
     ) -> DataLoader[dict[str, torch.Tensor]]:
+        """Get a dataloader for the given split.
+
+        If is_inner_process is True, then this dataloader is in an inner process, and we
+        don't want to spawn nested processes. In this case, we use a generator to shuffle
+        the data, and we don't use a sampler. We need a generator to ensure that each
+        child dataloader gets the same shuffle, otherwise rank/processes won't synch.
+
+        Args:
+            split: the split to get a dataloader for
+            is_inner_process: whether this dataloader is in an inner process
+            generator: a generator to use for shuffling (only used if is_inner_process is True)
+        """
         # is_inner_process is used if we are in a multi dataset setting, and this dataloader
         # is one of a set instantiated PER process (so we don't want to spawn nested processes)
         dataset = self.datasets[split]
@@ -137,13 +150,15 @@ class RslearnDataModule(L.LightningDataModule):
             collate_fn=collate_fn,
             persistent_workers=persistent_workers,
         )
-        # Can still shuffle in inner process since we rebuild dataloaderes
+        # Can still shuffle in inner process since we rebuild dataloaders
         should_shuffle = split == "train"
         if is_inner_process:
+            assert generator is not None, "generator must be provided for inner process"
             kwargs["num_workers"] = 0
             kwargs["persistent_workers"] = False
             kwargs["shuffle"] = should_shuffle
             kwargs["pin_memory"] = False
+            kwargs["generator"] = generator  # type: ignore
             return DataLoader(**kwargs)  # type: ignore
 
         sampler_factory = self.split_configs[split].sampler
@@ -215,9 +230,13 @@ class RslearnDataModule(L.LightningDataModule):
 
 
 class MultiWrapperDataset(IterableDataset):
-    """Multi-dataset data module for training on multiple datasets with different modalities.
+    """IterableDataset that wraps several RslearnDataModule DataLoaders.
 
-    Manually shards if we are doing multi-dataset training. Basic data flow:
+    Wraps several RslearnDataModule DataLoaders and emits batches in random order
+    with correct sharding across DDP ranks (GPU) and DataLoader workers (CPU).
+    Manual sharding only (seems to be faster).
+
+    Basic data flow:
     1. Build individual RslearnDataModule instances from dataset configs
     2. Build a MultiWrapperDataset from the DataLoaders of these RslearnDataModule instances
     3. Wrap the MultiWrapperDataset in a DataLoader shell
@@ -226,90 +245,125 @@ class MultiWrapperDataset(IterableDataset):
 
     def __init__(
         self,
-        data_modules: dict[str, RslearnDataModule],
-        strategy: str = "random",
+        data_modules: dict[str, "RslearnDataModule"],
+        rank: int,
+        world_size: int,
         split: str = "train",
-        rank: int = 0,
-        world_size: int = 1,
+        epoch: int = 0,
     ) -> None:
         """Initialize a new MultiWrapperDataset.
 
         Args:
             data_modules: dict mapping dataset names to RslearnDataModule objects
-            strategy: "random" or "round_robin"
+            rank: the rank of the current process
+            world_size: the total number of processes
             split: "train", "val", "test", or "predict"
-            rank: rank of the current process
-            world_size: total number of processes
+            epoch: the current epoch
         """
+        super().__init__()
         self.data_modules = data_modules
-        self.strategy = strategy
         self.split = split
         self.rank = rank
         self.world_size = world_size
+        self.epoch = epoch
 
-    def _get_dataloaders(self, split: str) -> list[DataLoader]:
-        """Get the dataloaders for the given split."""
-        return [
-            dm._get_dataloader(split, is_inner_process=True)
-            for dm in self.data_modules.values()
-        ]
+    def _build_dataloaders(self, seed: int = 0) -> list[DataLoader]:
+        """Build the dataloaders for the given split.
 
-    def _get_world_info(self) -> tuple[int, int]:
-        """Get the worker-process index and total number of worker-process spawns."""
-        worker_info = torch.utils.data.get_worker_info()
-        if worker_info is None:
-            worker_id, num_workers = 0, 1
-        else:
-            worker_id = worker_info.id
-            num_workers = worker_info.num_workers
-        uid = self.rank * num_workers + worker_id
-        return uid, num_workers * self.world_size
+        Lightning will call this every epoch when it re‑creates the DataLoaders.
+        Note that the base seed should be consistent across all ranks/processes,
+        but is modified for each spawn's dataloader.
+
+        The seed argument is only used for shuffling (needs to be identical across
+        all the child dataloaders), but is not used to seed transforms.
+
+        Args:
+            seed: a seed to use for shuffling across all dataloaders
+
+        Returns:
+            A list of DataLoaders for the given split.
+        """
+        dataloaders = []
+        for i, dm in enumerate(self.data_modules.values()):
+            generator = torch.Generator()
+            generator.manual_seed(seed + i)
+            dataloaders.append(
+                dm._get_dataloader(
+                    self.split,
+                    is_inner_process=True,
+                    generator=generator,
+                )
+            )
+        return dataloaders
+
+    def _worker(self) -> tuple[int, int]:
+        """Get the worker id and number of workers for the current process."""
+        w = torch.utils.data.get_worker_info()
+        return (w.id, w.num_workers) if w else (0, 1)
 
     def __len__(self) -> int:
-        """Get the length of the dataset."""
-        return (
-            sum(len(dl) for dl in self._get_dataloaders(self.split)) // self.world_size
+        """Get the length of the dataset.
+
+        This information is per rank, after sharding. It's not exact (may be off
+        due to uneven splits - see docs in __iter__) but is okay for logging.
+
+        Do NOT use this for operations that require exact counts (e.g. anything
+        with distributed training)!
+
+        Returns:
+            The length of the dataset.
+        """
+        total_batches = sum(
+            int(len(dm.datasets[self.split]) / dm.batch_size)
+            for dm in self.data_modules.values()
         )
+        return int(total_batches / self.world_size)
 
     def __iter__(self) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
-        """Iterate over the dataset."""
-        # Must reconstruct tasks and dataloaders on each new epoch to allow fresh
-        # shuffling and exhausted generators to be re-initialized
-        self.iterators = [iter(dl) for dl in self._get_dataloaders(self.split)]
-        datasets = list(self.data_modules.keys())
+        """Iterate over the dataset.
 
-        # Since we use multiple workers, make sure to appropriately shard data
-        # across both worker and ddp process
-        batch_idx = 0
-        curr_id, total_workers = self._get_world_info()
-        while True:
-            # Only return batches that belong to this worker/process group
-            if batch_idx % total_workers != curr_id:
-                batch_idx += 1
-                continue
+        For each GPU rank (process), we have a pool of workers. For each worker in each
+        rank, we have a disjoint set of batches we will route to the data queue.
+        We need to ensure that 1) each worker per rank gets a unique set of batches, and
+        2) all batches are routed, 3) shuffling is consistent across workers in all ranks.
 
-            if self.strategy == "random":
-                idx = random.randint(0, len(self.iterators) - 1)
-            elif self.strategy == "round_robin":
-                idx = getattr(self, "last_idx", -1) + 1
-                idx %= len(self.iterators)
-                self.last_idx = idx
-            else:
-                raise ValueError("Unknown strategy")
+        NOTE: Condition 2 is not really satisfied, since we need to enforce exact batch
+        counts across ranks/workers to prevent hangs. There might be a few dropped batches.
 
-            try:
-                batch = next(self.iterators[idx])
-                for instance in batch[0]:  # modify the inputs directly
-                    instance["dataset_source"] = datasets[idx]
+        Returns:
+            An iterator over the dataset for this particular rank/worker.
+        """
+        # Set a consistent seed across all ranks and all workers
+        rng = random.Random(self.epoch)
+        loaders = self._build_dataloaders(self.epoch)
+        total_raw_batches = sum(len(dl) for dl in loaders)
+
+        # Compute this rank/worker's id compared to the global batch counter
+        wid, num_w = self._worker()
+        my_id = self.rank * num_w + wid
+        parts = self.world_size * num_w
+        iters = [iter(dl) for dl in loaders]
+        local_yielded = 0
+        max_local = total_raw_batches // parts
+        self.epoch += 1
+
+        # Only yield batches that belong to this rank/worker
+        for global_idx in range(total_raw_batches):
+            if not iters or local_yielded >= max_local:
+                # Ensure that all ranks/workers yield the same number of batches
+                # Otherwise, NCCL hangs waiting for an all-reduce (gather?) even
+                # though some dataloaders have already quit the yield loop
+                break
+            batch = None
+            while batch is None and iters:
+                child_i = rng.randrange(len(iters))
+                try:
+                    batch = next(iters[child_i])
+                except StopIteration:
+                    iters.pop(child_i)
+            if batch is not None and global_idx % parts == my_id:
                 yield batch
-                batch_idx += 1
-            except StopIteration:
-                self.iterators.pop(idx)
-                datasets.pop(idx)
-                if len(self.iterators) == 0:
-                    break
-                if self.strategy == "round_robin":
-                    self.last_idx -= 1
+                local_yielded += 1
 
 
 class MultiDatasetDataModule(L.LightningDataModule):
@@ -330,6 +384,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
         self,
         dataset_configs: dict[str, RslearnDataModule],
         task: MultiTask,
+        max_num_workers: int = 32,
         **kwargs: Any,
     ) -> None:
         """Initialize a new MultiDatasetDataModule.
@@ -337,10 +392,12 @@ class MultiDatasetDataModule(L.LightningDataModule):
         Args:
             dataset_configs: dict mapping dataset names to RslearnDataModule objects
             task: the task to train on
+            max_num_workers: the maximum number of workers to use for the dataloader
             kwargs: additional keyword arguments
         """
         super().__init__()
         self.data_modules = dataset_configs
+        self.max_num_workers = max_num_workers
 
     def setup(self, stage: str | None = None) -> None:
         """Set up the datasets for the given stage. Also assign dataset-specific names.
@@ -353,16 +410,16 @@ class MultiDatasetDataModule(L.LightningDataModule):
             data_module.set_name(name)
 
     def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:
-        num_workers = min(len(os.sched_getaffinity(0)) // self.trainer.world_size, 32)  # type: ignore
+        num_workers = min(len(os.sched_getaffinity(0)), self.max_num_workers)
         print(f"INFO: using num_workers={num_workers} for {split} split")
+        print(f"INFO: restarting shuffling from epoch {self.trainer.current_epoch}")  # type: ignore
         return DataLoader(
             dataset=MultiWrapperDataset(
                 self.data_modules,
                 split=split,
                 rank=self.trainer.global_rank,  # type: ignore
                 world_size=self.trainer.world_size,  # type: ignore
-                strategy="random" if split == "train" else "round_robin",
-                # ensure that during testing, we see all datasets
+                epoch=self.trainer.current_epoch,  # type: ignore
             ),
             batch_size=None,
             pin_memory=True,
