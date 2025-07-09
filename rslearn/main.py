@@ -8,8 +8,8 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any, TypeVar
 
-import tqdm
 import lightning as L
+import tqdm
 from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
 from rasterio.crs import CRS
 from upath import UPath

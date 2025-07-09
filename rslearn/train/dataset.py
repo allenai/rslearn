@@ -619,7 +619,7 @@ class ModelDataset(torch.utils.data.Dataset):
             "bounds": bounds,
             "time_range": window.time_range,
             "projection": window.projection,
-            "task": self.name,
+            "dataset_source": self.name,
         }
         if self.split_config.get_load_all_patches():
             metadata["patch_idx"] = patch_idx
@@ -635,6 +635,7 @@ class ModelDataset(torch.utils.data.Dataset):
         )
         input_dict.update(passthrough_inputs)
         input_dict, target_dict = self.transforms(input_dict, target_dict)
+        input_dict["dataset_source"] = self.name
 
         logger.debug("__getitem__ finish pid=%d item_idx=%d", os.getpid(), idx)
 
@@ -645,6 +646,11 @@ class ModelDataset(torch.utils.data.Dataset):
         return self.windows
 
     def set_name(self, name: str) -> None:
+        """Set the name of the dataset.
+
+        Args:
+            name: the name to set.
+        """
         self.name = name
 
 
@@ -666,8 +672,13 @@ class RetryDataset(torch.utils.data.Dataset):
         self.delay = delay
 
     def set_name(self, name: str) -> None:
+        """Set the name of the dataset.
+
+        Args:
+            name: the name to set.
+        """
         self.dataset.set_name(name)
- 
+
     def __len__(self) -> int:
         """Return length of the dataset."""
         return len(self.dataset)
