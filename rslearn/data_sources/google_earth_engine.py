@@ -1,6 +1,7 @@
 """Data source for raster or vector data in local files."""
 
 import csv
+import io
 import json
 import os
 import tempfile
@@ -9,7 +10,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 import ee
-import ee.ee_types
+import numpy as np
+import numpy.typing as npt
 import rasterio
 import rasterio.merge
 import shapely
@@ -18,13 +20,20 @@ from google.cloud import storage
 from upath import UPath
 
 import rslearn.data_sources.utils
-from rslearn.config import DType, RasterLayerConfig
+from rslearn.config import DType, LayerConfig, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
+from rslearn.dataset.materialize import RasterMaterializer
+from rslearn.dataset.window import Window
 from rslearn.log_utils import get_logger
-from rslearn.tile_stores import TileStoreWithLayer
-from rslearn.utils import STGeometry
+from rslearn.tile_stores import TileStore, TileStoreWithLayer
+from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.fsspec import join_upath
-from rslearn.utils.raster_format import get_raster_projection_and_bounds_from_transform
+from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
+from rslearn.utils.raster_format import (
+    Resampling,
+    get_raster_projection_and_bounds_from_transform,
+    get_transform_from_projection_and_bounds,
+)
 from rslearn.utils.rtree_index import RtreeIndex, get_cached_rtree
 
 from .data_source import DataSource, Item, QueryConfig
@@ -32,7 +41,7 @@ from .data_source import DataSource, Item, QueryConfig
 logger = get_logger(__name__)
 
 
-class GEE(DataSource):
+class GEE(DataSource, TileStore):
     """A data source for ingesting images from Google Earth Engine."""
 
     def __init__(
@@ -159,6 +168,26 @@ class GEE(DataSource):
                 item = Item(row["system:index"], geometry)
                 rtree_index.insert(shp.bounds, json.dumps(item.serialize()))
 
+    def get_item_by_name(self, name: str) -> Item:
+        """Gets an item by name.
+
+        Args:
+            name: the name of the item to get
+
+        Returns:
+            the item object
+        """
+        filtered = self.get_collection().filter(ee.Filter.eq("system:index", name))
+        image = filtered.first()
+        shp = shapely.geometry.shape(
+            image.geometry().transform(proj="EPSG:4326", maxError=0.001).getInfo()
+        )
+        ts = datetime.fromisoformat(image.date().format().getInfo()).replace(
+            tzinfo=timezone.utc
+        )
+        geometry = STGeometry(WGS84_PROJECTION, shp, (ts, ts))
+        return Item(name, geometry)
+
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
     ) -> list[list[list[Item]]]:
@@ -210,30 +239,61 @@ class GEE(DataSource):
         image = image.select(self.bands)
         return image
 
-    def export_item(self, item: Item, blob_prefix: str) -> None:
+    def export_item(
+        self,
+        item: Item,
+        blob_prefix: str,
+        projection_and_bounds: tuple[Projection, PixelBounds] | None = None,
+    ) -> None:
         """Export the item to the specified folder.
 
         Args:
             item: the item to export.
             blob_prefix: the prefix (folder) to use.
+            projection_and_bounds: optionally use this projection and bounds instead of
+                the extent of the image.
         """
-        # Use the native projection of the image to obtain the raster.
-        # We pass scale instead of crsTransform since some images have positive y
-        # resolution which means they are upside down and rasterio cannot merge
-        # them.
         image = self.item_to_image(item)
         projection = image.select(self.bands[0]).projection().getInfo()
         logger.info("Starting task to retrieve image %s", item.name)
+
+        extent_kwargs: dict[str, Any]
+        if projection_and_bounds is not None:
+            projection, bounds = projection_and_bounds
+            transform = get_transform_from_projection_and_bounds(projection, bounds)
+            width = bounds[2] - bounds[0]
+            height = bounds[3] - bounds[1]
+            extent_kwargs = dict(
+                crs=str(projection.crs),
+                crsTransform=[
+                    transform.a,
+                    transform.b,
+                    transform.c,
+                    transform.d,
+                    transform.e,
+                    transform.f,
+                ],
+                dimensions=f"{width}x{height}",
+            )
+        else:
+            # Use the native projection of the image.
+            # We pass scale instead of crsTransform since some images have positive y
+            # resolution which means they are upside down and rasterio cannot merge
+            # them.
+            extent_kwargs = dict(
+                crs=projection["crs"],
+                scale=projection["transform"][0],
+            )
+
         task = ee.batch.Export.image.toCloudStorage(
             image=image,
             description=item.name,
             bucket=self.gcs_bucket_name,
             fileNamePrefix=blob_prefix,
-            crs=projection["crs"],
-            scale=projection["transform"][0],
             maxPixels=10000000000,
             fileFormat="GeoTIFF",
             skipEmptyTiles=True,
+            **extent_kwargs,
         )
         task.start()
         while True:
@@ -243,6 +303,55 @@ class GEE(DataSource):
                 continue
             assert status_dict["state"] == "COMPLETED"
             break
+
+    def _merge_rasters(
+        self,
+        blobs: list[storage.Blob],
+        crs_bounds: tuple[float, float, float, float] | None = None,
+        res: float | None = None,
+    ) -> tuple[npt.NDArray, Projection, PixelBounds]:
+        """Merge multiple rasters split up during export by GEE.
+
+        GEE can produce multiple rasters if it determines the file size exceeds its
+        internal limit. So in this case we stitch them back together.
+
+        Args:
+            blobs: the list of GCS blobs where the rasters were written.
+            crs_bounds: generate merged output under this bounds, in CRS coordinates
+                (not pixel units).
+            res: generate merged output under this resolution.
+
+        Returns:
+            a tuple (array, projection, bounds) where the projection and bounds
+                indicate the extent of the array.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir_name:
+            rasterio_datasets = []
+            for blob in blobs:
+                local_fname = os.path.join(tmp_dir_name, blob.name.split("/")[-1])
+                blob.download_to_filename(local_fname)
+                src = rasterio.open(local_fname)
+                rasterio_datasets.append(src)
+
+            merge_kwargs: dict[str, Any] = dict(
+                sources=rasterio_datasets,
+                bounds=crs_bounds,
+                res=res,
+            )
+            if self.dtype:
+                merge_kwargs["dtype"] = self.dtype.value
+            array, transform = rasterio.merge.merge(**merge_kwargs)
+            projection, bounds = get_raster_projection_and_bounds_from_transform(
+                rasterio_datasets[0].crs,
+                transform,
+                array.shape[2],
+                array.shape[1],
+            )
+
+            for ds in rasterio_datasets:
+                ds.close()
+
+        return array, projection, bounds
 
     def ingest(
         self,
@@ -281,37 +390,168 @@ class GEE(DataSource):
                     )
 
                 else:
-                    rasterio_datasets = []
-                    for blob in blobs:
-                        local_fname = os.path.join(
-                            tmp_dir_name, blob.name.split("/")[-1]
-                        )
-                        blob.download_to_filename(local_fname)
-                        src = rasterio.open(local_fname)
-                        rasterio_datasets.append(src)
-
-                    merge_kwargs: dict[str, Any] = {"sources": rasterio_datasets}
-                    if self.dtype:
-                        merge_kwargs["dtype"] = self.dtype.value
-                    array, transform = rasterio.merge.merge(**merge_kwargs)
-                    projection, bounds = (
-                        get_raster_projection_and_bounds_from_transform(
-                            rasterio_datasets[0].crs,
-                            transform,
-                            array.shape[2],
-                            array.shape[1],
-                        )
-                    )
-
-                    for ds in rasterio_datasets:
-                        ds.close()
-
+                    array, projection, bounds = self._merge_rasters(blobs)
                     tile_store.write_raster(
                         item.name, self.bands, projection, bounds, array
                     )
 
             for blob in blobs:
                 blob.delete()
+
+    def is_raster_ready(
+        self, layer_name: str, item_name: str, bands: list[str]
+    ) -> bool:
+        """Checks if this raster has been written to the store.
+
+        Args:
+            layer_name: the layer name or alias.
+            item_name: the item.
+            bands: the list of bands identifying which specific raster to read.
+
+        Returns:
+            whether there is a raster in the store matching the source, item, and
+                bands.
+        """
+        # Always ready since we wrap accesses to Planetary Computer.
+        return True
+
+    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
+        """Get the sets of bands that have been stored for the specified item.
+
+        Args:
+            layer_name: the layer name or alias.
+            item_name: the item.
+
+        Returns:
+            a list of lists of bands that are in the tile store (with one raster
+                stored corresponding to each inner list). If no rasters are ready for
+                this item, returns empty list.
+        """
+        return [self.bands]
+
+    def get_raster_bounds(
+        self, layer_name: str, item_name: str, bands: list[str], projection: Projection
+    ) -> PixelBounds:
+        """Get the bounds of the raster in the specified projection.
+
+        Args:
+            layer_name: the layer name or alias.
+            item_name: the item to check.
+            bands: the list of bands identifying which specific raster to read. These
+                bands must match the bands of a stored raster.
+            projection: the projection to get the raster's bounds in.
+
+        Returns:
+            the bounds of the raster in the projection.
+        """
+        item = self.get_item_by_name(item_name)
+        geom = item.geometry.to_projection(projection)
+        return (
+            int(geom.shp.bounds[0]),
+            int(geom.shp.bounds[1]),
+            int(geom.shp.bounds[2]),
+            int(geom.shp.bounds[3]),
+        )
+
+    def read_raster(
+        self,
+        layer_name: str,
+        item_name: str,
+        bands: list[str],
+        projection: Projection,
+        bounds: PixelBounds,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> npt.NDArray[Any]:
+        """Read raster data from the store.
+
+        Args:
+            layer_name: the layer name or alias.
+            item_name: the item to read.
+            bands: the list of bands identifying which specific raster to read. These
+                bands must match the bands of a stored raster.
+            projection: the projection to read in.
+            bounds: the bounds to read.
+            resampling: the resampling method to use in case reprojection is needed.
+
+        Returns:
+            the raster data
+        """
+        # Extract the requested extent and export to GCS.
+        bounds_str = f"{bounds[0]}_{bounds[1]}_{bounds[2]}_{bounds[3]}"
+        item = self.get_item_by_name(item_name)
+        blob_prefix = f"{self.collection_name}/{item.name}.{bounds_str}.{os.getpid()}/"
+        self.export_item(item, blob_prefix, projection_and_bounds=(projection, bounds))
+
+        wanted_transform = get_transform_from_projection_and_bounds(projection, bounds)
+        crs_bounds = (
+            bounds[0] * projection.x_resolution,
+            bounds[3] * projection.y_resolution,
+            bounds[2] * projection.x_resolution,
+            bounds[1] * projection.y_resolution,
+        )
+
+        blobs = list(self.bucket.list_blobs(prefix=blob_prefix))
+
+        if len(blobs) == 1:
+            # With a single output, we can simply read it with vrt.
+            buf = io.BytesIO()
+            blobs[0].download_to_file(buf)
+            buf.seek(0)
+            with rasterio.open(buf) as src:
+                with rasterio.vrt.WarpedVRT(
+                    src,
+                    crs=projection.crs,
+                    transform=wanted_transform,
+                    width=bounds[2] - bounds[0],
+                    height=bounds[3] - bounds[1],
+                    resampling=resampling,
+                ) as vrt:
+                    return vrt.read()
+
+        else:
+            # With multiple outputs, we need to merge them together.
+            # We can set the bounds in CRS coordinates when we do the merging.
+            if projection.x_resolution != -projection.y_resolution:
+                raise NotImplementedError(
+                    "Only projection with x_res=-y_res is supported for GEE direct materialization"
+                )
+            src_array, _, src_bounds = self._merge_rasters(
+                blobs, crs_bounds=crs_bounds, res=projection.x_resolution
+            )
+
+            # We copy the array if its bounds don't match exactly.
+            if src_bounds == bounds:
+                return src_array
+            dst_array = np.zeros(
+                (src_array.shape[0], bounds[3] - bounds[1], bounds[2] - bounds[0]),
+                dtype=src_array.dtype,
+            )
+            copy_spatial_array(src_array, dst_array, src_bounds[0:2], bounds[0:2])
+            return dst_array
+
+    def materialize(
+        self,
+        window: Window,
+        item_groups: list[list[Item]],
+        layer_name: str,
+        layer_cfg: LayerConfig,
+    ) -> None:
+        """Materialize data for the window.
+
+        Args:
+            window: the window to materialize
+            item_groups: the items from get_items
+            layer_name: the name of this layer
+            layer_cfg: the config of this layer
+        """
+        assert isinstance(layer_cfg, RasterLayerConfig)
+        RasterMaterializer().materialize(
+            TileStoreWithLayer(self, layer_name),
+            window,
+            layer_name,
+            layer_cfg,
+            item_groups,
+        )
 
 
 class GoogleSatelliteEmbeddings(GEE):
