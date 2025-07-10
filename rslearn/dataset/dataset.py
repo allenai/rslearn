@@ -78,6 +78,7 @@ class Dataset:
         names: list[str] | None = None,
         show_progress: bool = False,
         workers: int = 0,
+        no_index: bool = False,
     ) -> list[Window]:
         """Load the windows in the dataset.
 
@@ -86,11 +87,15 @@ class Dataset:
             names: an optional list of window names to filter loading
             show_progress: whether to show tqdm progress bar
             workers: number of parallel workers, default 0 (use main thread only to load windows)
+            no_index: don't use the dataset index even if it exists.
         """
         # Load from index if it exists.
-        dataset_index = self._get_index()
-        if dataset_index is not None:
-            return dataset_index.get_windows(groups=groups, names=names)
+        # We never use the index if names is set since loading the index will likely be
+        # slower than loading a few windows.
+        if not no_index and names is None:
+            dataset_index = self._get_index()
+            if dataset_index is not None:
+                return dataset_index.get_windows(groups=groups, names=names)
 
         window_dirs = []
         if not groups:

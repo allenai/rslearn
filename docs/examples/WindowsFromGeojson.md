@@ -61,7 +61,7 @@ with open(os.path.join(ds_path, "source_data/subset/latest.geojson"), "w") as f:
 Now we can use the `dataset add_windows` command to create the windows.
 
 ```
-rslearn dataset add_windows --group default --fname $DATASET_PATH/source_data/subset/latest.geojson --grid_size 256 --utm --resolution 10 --start 2024-01-01T00:00:00+00:00 --end 2024-07-01T00:00:00+00:00 --root dataset/
+rslearn dataset add_windows --group default --fname $DATASET_PATH/source_data/subset/latest.geojson --grid_size 256 --utm --resolution 10 --start 2024-01-01T00:00:00+00:00 --end 2024-07-01T00:00:00+00:00 --root $DATASET_PATH
 ```
 
 Here, we create windows along a 256x256 grid by passing `--grid_size 256`; windows are

@@ -1,10 +1,13 @@
 """Default Dataset for rslearn."""
 
 import hashlib
+import json
 import multiprocessing
 import os
 import random
+import tempfile
 import time
+import uuid
 from typing import Any
 
 import torch
@@ -353,11 +356,17 @@ class ModelDataset(torch.utils.data.Dataset):
 
         # Eliminate windows that are missing either a requisite input layer, or missing
         # all target layers.
+        # We use only main thread if the index is set, since that can take a long time
+        # to send to the worker threads, it may get serialized for each window.
         new_windows = []
-        if workers == 0:
+        if workers == 0 or windows[0].index is not None:
             for window in windows:
                 if check_window(self.inputs, window) is None:
                     continue
+                # The index may be set, but now that this check is done, from here on
+                # we no longer need it. We set it None so that we don't end up passing
+                # it later to the dataloader workers.
+                window.index = None
                 new_windows.append(window)
         else:
             p = multiprocessing.Pool(workers)
@@ -396,9 +405,10 @@ class ModelDataset(torch.utils.data.Dataset):
             # be representative of the population.
             windows = windows[0 : split_config.num_samples]
 
-        self.windows: list = windows
+        dataset_examples: list = windows
 
         # If we're loading all patches, we need to include the patch details.
+        # In this case, dataset_examples is a list of (window, bounds, (patch_idx, # patches)).
         if split_config.get_load_all_patches() and self.patch_size is not None:
             patches = []
             overlap_size = int(
@@ -430,11 +440,68 @@ class ModelDataset(torch.utils.data.Dataset):
                         )
                 for i, patch_bounds in enumerate(cur_patches):
                     patches.append((window, patch_bounds, (i, len(cur_patches))))
-            self.windows = patches
+            dataset_examples = patches
+
+        # Write dataset_examples to a file so that we can load it lazily in the worker
+        # processes. Otherwise it takes a long time to transmit it when spawning each
+        # process.
+        self.dataset_examples_fname = os.path.join(
+            tempfile.gettempdir(),
+            "rslearn_dataset_examples",
+            f"{os.getpid()}_{uuid.uuid4()}.json",
+        )
+        self.num_dataset_examples = len(dataset_examples)
+        self.dataset_examples: list | None = None
+        logger.info(
+            f"Writing {len(dataset_examples)} dataset examples to {self.dataset_examples_fname}"
+        )
+        os.makedirs(os.path.dirname(self.dataset_examples_fname), exist_ok=True)
+        with open(self.dataset_examples_fname, "w") as f:
+            json.dump(
+                [self._serialize_item(example) for example in dataset_examples], f
+            )
+
+    def _serialize_item(self, example: Window | tuple) -> dict[str, Any]:
+        if isinstance(example, Window):
+            return {
+                "window": example.get_metadata(),
+            }
+        else:
+            window, patch_bounds, indices = example
+            return {
+                "window": window.get_metadata(),
+                "patch_bounds": patch_bounds,
+                "indices": indices,
+            }
+
+    def _deserialize_item(self, d: dict[str, Any]) -> Window | tuple:
+        window_metadata = d["window"]
+        window = Window.from_metadata(
+            Window.get_window_root(
+                self.dataset.path, window_metadata["group"], window_metadata["name"]
+            ),
+            window_metadata,
+        )
+        if "patch_bounds" in d:
+            return (window, tuple(d["patch_bounds"]), tuple(d["indices"]))
+        else:
+            return window
+
+    def _get_dataset_examples(self) -> list:
+        if self.dataset_examples is None:
+            logger.info(
+                f"Loading dataset examples from {self.dataset_examples_fname} in process {os.getpid()}"
+            )
+            with open(self.dataset_examples_fname) as f:
+                self.dataset_examples = [
+                    self._deserialize_item(d) for d in json.load(f)
+                ]
+            logger.info(f"Finished loading dataset examples in process {os.getpid()}")
+        return self.dataset_examples
 
     def __len__(self) -> int:
         """Returns the dataset length."""
-        return len(self.windows)
+        return self.num_dataset_examples
 
     def __getitem__(
         self, idx: int
@@ -447,13 +514,16 @@ class ModelDataset(torch.utils.data.Dataset):
         Returns:
             a tuple (input_dict, target_dict)
         """
+        dataset_examples = self._get_dataset_examples()
         logger.debug("__getitem__ start pid=%d item_idx=%d", os.getpid(), idx)
-        window = self.windows[idx]
+        example = dataset_examples[idx]
 
         # Select bounds to read.
         if self.split_config.get_load_all_patches():
-            window, bounds, (patch_idx, num_patches) = window
+            window, bounds, (patch_idx, num_patches) = example
+
         elif self.patch_size:
+            window = example
 
             def get_patch_range(n_patch: int, n_window: int) -> list[int]:
                 if n_patch > n_window:
@@ -481,7 +551,9 @@ class ModelDataset(torch.utils.data.Dataset):
                 window.bounds[0] + patch_ranges[0][1],
                 window.bounds[1] + patch_ranges[1][1],
             ]
+
         else:
+            window = example
             bounds = window.bounds
 
         # Read the inputs and targets.

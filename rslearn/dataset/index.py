@@ -27,8 +27,12 @@ def get_window_completed_layers(window: Window) -> list[tuple[str, int]]:
     """Helper function for multiprocessing to load window completed layers."""
     # We don't know the range of possible groups a priori, so we instead look in the
     # layers directory.
+    layers_directory = window.path / LAYERS_DIRECTORY_NAME
+    if not layers_directory.exists():
+        return []
+
     completed_layers = []
-    for layer_dir in (window.path / LAYERS_DIRECTORY_NAME).iterdir():
+    for layer_dir in layers_directory.iterdir():
         layer_name, group_idx = get_layer_and_group_from_dir_name(layer_dir.name)
         if not window.is_layer_completed(layer_name, group_idx):
             continue
@@ -154,7 +158,7 @@ class DatasetIndex:
     def build_index(dataset: "Dataset", workers: int) -> "DatasetIndex":
         """Build a new DatasetIndex for the specified dataset."""
         # Load windows.
-        windows = dataset.load_windows(workers=workers)
+        windows = dataset.load_windows(workers=workers, no_index=True)
 
         # Load layer datas.
         p = multiprocessing.Pool(workers)

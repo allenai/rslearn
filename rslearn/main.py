@@ -748,7 +748,7 @@ def dataset_build_index() -> None:
         description=("rslearn dataset build_index: " + "create a dataset index file"),
     )
     parser.add_argument(
-        "--ds_path",
+        "--root",
         type=str,
         required=True,
         help="Dataset path",
@@ -760,11 +760,13 @@ def dataset_build_index() -> None:
         help="Number of workers",
     )
     args = parser.parse_args(args=sys.argv[3:])
-    dataset = Dataset(UPath(args.ds_path))
-    DatasetIndex.build_index(
+    ds_path = UPath(args.root)
+    dataset = Dataset(ds_path)
+    index = DatasetIndex.build_index(
         dataset=dataset,
         workers=args.workers,
     )
+    index.save_index(ds_path)
 
 
 class RslearnLightningCLI(LightningCLI):
