@@ -36,11 +36,8 @@ class AveragePool(BasePool):
         Returns:
             1-list of BCHW tensor averaged over the modalities, and optional weights tensor
         """
-        print("FEATURES SHAPE:", features[0].shape)
         x = features[0].mean(dim=0)  # BCHW
-        print("X SHAPE:", x.shape)
         weights = torch.ones(features[0].shape[-1]) / features[0].shape[-1]
-        print("WEIGHTS SHAPE:", weights.shape)
         if return_weights:
             return [x], weights
         return [x]

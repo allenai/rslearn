@@ -15,7 +15,10 @@ def apply_decoder(
     name: str,
     outputs: list[dict[str, Any]],
     losses: dict[str, torch.Tensor],
-) -> tuple[list[dict[str, Any]], dict[str, torch.Tensor]]:
+    weights_dict: dict[str, torch.Tensor] | None = None,
+) -> tuple[
+    list[dict[str, Any]], dict[str, torch.Tensor], dict[str, torch.Tensor] | None
+]:
     """Apply a decoder to a list of inputs and targets.
 
     Args:
@@ -26,6 +29,7 @@ def apply_decoder(
         name: the name of the decoder/task (which must match)
         outputs: list of output dicts
         losses: dictionary of loss values
+        weights_dict: output dict for pool weights (if None, don't save)
 
     Returns:
         tuple of (outputs, losses)
@@ -34,13 +38,9 @@ def apply_decoder(
     cur = features
     for module in decoder[:-1]:
         if isinstance(module, BasePool):
-            cur, weights = module(cur, inputs, return_weights=True)
+            cur, pool_weights = module(cur, inputs, return_weights=True)
         else:
             cur = module(cur, inputs)
-    print("=" * 100)
-    print("ATTN MEAN:", weights.mean(0))
-    print("ATTN 0:", weights[0, :])
-    print("=" * 100)
 
     if targets is None:
         cur_targets = None
@@ -53,7 +53,9 @@ def apply_decoder(
         outputs[idx][name] = entry
     for loss_name, loss_value in cur_loss_dict.items():
         losses[f"{name}_{loss_name}"] = loss_value
-    return outputs, losses
+    if weights_dict is not None:
+        weights_dict[name] = pool_weights
+    return outputs, losses, weights_dict
 
 
 class MultiTaskModel(torch.nn.Module):
@@ -114,27 +116,53 @@ class MultiTaskModel(torch.nn.Module):
         self,
         inputs: list[dict[str, Any]],
         targets: list[dict[str, Any]] | None = None,
-    ) -> tuple[list[dict[str, Any]], dict[str, torch.Tensor]]:
+        return_weights: bool = False,
+    ) -> (
+        tuple[list[dict[str, Any]], dict[str, torch.Tensor]]
+        | tuple[list[dict[str, Any]], dict[str, torch.Tensor], dict[str, torch.Tensor]]
+    ):
         """Apply the sequence of modules on the inputs.
 
         Args:
             inputs: list of input dicts
             targets: optional list of target dicts
+            return_weights: whether to return the weights dict from pooling
 
         Returns:
-            tuple (outputs, loss_dict) from the last module.
+            tuple (outputs, loss_dict) from the last module, and optional weights dict.
         """
         features = self.encoder(inputs)
         outputs: list[dict[str, Any]] = [{} for _ in inputs]
         losses: dict[str, torch.Tensor] = {}
+        weights_dict: dict[str, torch.Tensor] = {}
+
         if self.lazy_decode:
             # Assume that all inputs have the same dataset_source
             dataset_source = inputs[0]["dataset_source"]
             decoder = self.decoders[dataset_source]
             apply_decoder(
-                features, inputs, targets, decoder, dataset_source, outputs, losses
+                features,
+                inputs,
+                targets,
+                decoder,
+                dataset_source,
+                outputs,
+                losses,
+                weights_dict,
             )
         else:
             for name, decoder in self.decoders.items():
-                apply_decoder(features, inputs, targets, decoder, name, outputs, losses)
+                apply_decoder(
+                    features,
+                    inputs,
+                    targets,
+                    decoder,
+                    name,
+                    outputs,
+                    losses,
+                    weights_dict,
+                )
+
+        if return_weights:
+            return outputs, losses, weights_dict
         return outputs, losses
