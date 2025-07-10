@@ -178,6 +178,7 @@ class DatasetIndex:
         completed_layers = {}  # window name -> list of (layer name, group idx)
         for window, cur_completed_layers in zip(windows, completed_layer_outputs):
             completed_layers[window.name] = cur_completed_layers
+        p.close()
 
         return DatasetIndex(
             windows=windows,

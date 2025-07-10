@@ -304,12 +304,19 @@ class Window:
         Returns:
             the Window
         """
+        # Ensure bounds is converted from list to tuple.
+        bounds = (
+            metadata["bounds"][0],
+            metadata["bounds"][1],
+            metadata["bounds"][2],
+            metadata["bounds"][3],
+        )
         return Window(
             path=path,
             group=metadata["group"],
             name=metadata["name"],
             projection=Projection.deserialize(metadata["projection"]),
-            bounds=metadata["bounds"],
+            bounds=bounds,
             time_range=(
                 (
                     datetime.fromisoformat(metadata["time_range"][0]),

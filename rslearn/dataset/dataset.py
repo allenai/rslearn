@@ -97,6 +97,10 @@ class Dataset:
             if dataset_index is not None:
                 return dataset_index.get_windows(groups=groups, names=names)
 
+        # Avoid directory does not exist errors later.
+        if not (self.path / "windows").exists():
+            return []
+
         window_dirs = []
         if not groups:
             groups = []
@@ -104,6 +108,11 @@ class Dataset:
                 groups.append(p.name)
         for group in groups:
             group_dir = self.path / "windows" / group
+            if not group_dir.exists():
+                logger.warning(
+                    f"Skipping group directory {group_dir} since it does not exist"
+                )
+                continue
             if names:
                 cur_names = names
             else:
