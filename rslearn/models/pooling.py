@@ -21,106 +21,77 @@ class AveragePool(BasePool):
         super().__init__()
 
     def forward(
-        self, features: list[torch.Tensor], inputs: list[dict[str, Any]]
-    ) -> list[torch.Tensor]:
+        self,
+        features: list[torch.Tensor],
+        inputs: list[dict[str, Any]],
+        return_weights: bool = False,
+    ) -> tuple[list[torch.Tensor], torch.Tensor] | list[torch.Tensor]:
         """Pool over the modalities.
 
         Args:
-            features: 1-list of MBCHW tensor
+            features: 1-list of M x B x C x H x W tensor
             inputs: list of input dicts (not used)
+            return_weights: whether to return the weights (always uniform)
 
         Returns:
-            1-list of BCHW tensor averaged over the modalities
+            1-list of BCHW tensor averaged over the modalities, and optional weights tensor
         """
-        return [features[0].mean(dim=0)]
+        print("FEATURES SHAPE:", features[0].shape)
+        x = features[0].mean(dim=0)  # BCHW
+        print("X SHAPE:", x.shape)
+        weights = torch.ones(features[0].shape[-1]) / features[0].shape[-1]
+        print("WEIGHTS SHAPE:", weights.shape)
+        if return_weights:
+            return [x], weights
+        return [x]
 
 
 class AttentivePool(BasePool):
     """Attentive pooling over the modalities, so we get one BCHW feature map."""
 
-    def __init__(self, n_channels: int, height: int, width: int) -> None:
+    def __init__(
+        self, n_bandsets: int, n_channels: int, height: int, width: int
+    ) -> None:
         """Initialize a new AttentivePool.
 
         Args:
+            n_bandsets: number of bandset features across all modalities
             n_channels: number of channels in the input features
             height: height of the input features
             width: width of the input features
         """
         super().__init__()
-        self.linear = torch.nn.Linear(n_channels * height * width, 1)
-        self.softmax = torch.nn.Softmax(dim=0)
+        self.linear = torch.nn.Linear(
+            n_bandsets * n_channels * height * width, n_bandsets
+        )
+        self.softmax = torch.nn.Softmax(dim=1)
 
     def forward(
         self,
         features: list[torch.Tensor],
         inputs: list[dict[str, Any]],
-    ) -> list[torch.Tensor]:
+        return_weights: bool = False,
+    ) -> tuple[list[torch.Tensor], torch.Tensor] | list[torch.Tensor]:
         """Pool over the modalities via attentive pooling.
 
-        Given the MBCHW features, we compute a linear projection MBCHW -> MB
-        and apply softmax over M axis. We use the resulting MB tensor to linearly
+        Given the MBCHW tensor, compute attention weights by projecting the features
+        to MB and applying softmax over M axis. We use the resulting MB tensor to linearly
         combine the MBCHW tensor along M axis, giving us a BCHW tensor.
 
         Args:
             features: 1-list of MBCHW tensor
             inputs: list of input dicts (not used)
+            return_weights: whether to return the attention weights
 
         Returns:
-            1-list of BCHW tensor
+            1-list of BCHW tensor, and optional weights tensor
         """
-        x = features[0]
-        M, B, *_ = x.shape
-        flattened = x.flatten(start_dim=2)  # M, B, CHW
-        out = self.softmax(self.linear(flattened))  # M, B
-        weighted = out.view(M, B, 1, 1, 1) * x  # M, B, C, H, W
-        pooled = weighted.sum(dim=0)  # B, C, H, W
+        x_in = features[0]  # M, B, C, H, W
+        x_in = x_in.permute(1, 0, 2, 3, 4)  # B, M, C, H, W
+        x = x_in.flatten(start_dim=1)  # B, MCHW
+        x = self.softmax(self.linear(x))  # B, M
+        weights = x.view(*x.shape, 1, 1, 1)  # B, M, 1, 1, 1
+        pooled = (weights * x_in).sum(dim=1)  # B, C, H, W
+        if return_weights:
+            return [pooled], weights[:, :, 0, 0, 0]
         return [pooled]
-
-
-class DoubleAttentivePool(BasePool):
-    """Attentive pooling over the modalities and multi-headed attention over the channels."""
-
-    def __init__(
-        self, n_channels: int, height: int, width: int, num_heads: int
-    ) -> None:
-        """Initialize a new DoubleAttentivePool.
-
-        Args:
-            n_channels: number of channels in the input features
-            height: height of the input features
-            width: width of the input features
-            num_heads: number of heads in the multi-headed attention
-        """
-        super().__init__()
-        self.pool = AttentivePool(n_channels, height, width)
-        self.mha = torch.nn.MultiheadAttention(
-            embed_dim=height * width,
-            num_heads=num_heads,
-            batch_first=True,
-        )
-
-    def forward(
-        self,
-        features: list[torch.Tensor],
-        inputs: list[dict[str, Any]],
-    ) -> list[torch.Tensor]:
-        """Attentive pool over the modalities, then MHA over the channels.
-
-        We first pool over the modalities to get a BCHW tensor.
-        Then, we compute multi-headed self attention over the channels.
-
-        Unclear whether it's better to compute MHA over channels over space.
-
-        Args:
-            features: 1-list of MBCHW tensor
-            inputs: list of input dicts (not used)
-
-        Returns:
-            1-list of BCHW tensor
-        """
-        x = self.pool(features, inputs)[0]  # B, C, H, W
-        B, C, H, W = x.shape
-        x = x.flatten(start_dim=2)  # B, C, HW
-        x, _ = self.mha(x, x, x)  # B, C, HW
-        x = x.view(B, C, H, W)  # B, C, H, W
-        return [x]

@@ -33,7 +33,14 @@ def apply_decoder(
     # First, apply all but the last module in the decoder to the features
     cur = features
     for module in decoder[:-1]:
-        cur = module(cur, inputs)
+        if isinstance(module, BasePool):
+            cur, weights = module(cur, inputs, return_weights=True)
+        else:
+            cur = module(cur, inputs)
+    print("=" * 100)
+    print("ATTN MEAN:", weights.mean(0))
+    print("ATTN 0:", weights[0, :])
+    print("=" * 100)
 
     if targets is None:
         cur_targets = None
