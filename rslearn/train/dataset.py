@@ -105,7 +105,7 @@ class WeightedRandomSamplerFactory(SamplerFactory):
             a RandomSampler
         """
         weights = []
-        for window in dataset.get_windows():
+        for window in dataset.get_dataset_examples():
             weights.append(window.options[self.option_key])
         return torch.utils.data.WeightedRandomSampler(
             weights, self.num_samples, replacement=self.replacement
@@ -487,7 +487,12 @@ class ModelDataset(torch.utils.data.Dataset):
         else:
             return window
 
-    def _get_dataset_examples(self) -> list:
+    def get_dataset_examples(self) -> list:
+        """Get a list of examples in the dataset.
+
+        If load_all_patches is False, this is a list of Windows. Otherwise, this is a
+        list of (window, patch_bounds, (patch_idx, # patches)) tuples.
+        """
         if self.dataset_examples is None:
             logger.info(
                 f"Loading dataset examples from {self.dataset_examples_fname} in process {os.getpid()}"
@@ -514,7 +519,7 @@ class ModelDataset(torch.utils.data.Dataset):
         Returns:
             a tuple (input_dict, target_dict)
         """
-        dataset_examples = self._get_dataset_examples()
+        dataset_examples = self.get_dataset_examples()
         logger.debug("__getitem__ start pid=%d item_idx=%d", os.getpid(), idx)
         example = dataset_examples[idx]
 
@@ -701,10 +706,6 @@ class ModelDataset(torch.utils.data.Dataset):
 
         return input_dict, target_dict, metadata
 
-    def get_windows(self) -> list[Window]:
-        """Returns a list of windows in this dataset."""
-        return self.windows
-
 
 class RetryDataset(torch.utils.data.Dataset):
     """A dataset wrapper that retries getitem upon encountering error."""
@@ -749,6 +750,6 @@ class RetryDataset(torch.utils.data.Dataset):
         # One last try -- but don't catch any more errors.
         return self.dataset[idx]
 
-    def get_windows(self) -> list[Window]:
+    def get_dataset_examples(self) -> list:
         """Returns a list of windows in this dataset."""
-        return self.dataset.get_windows()
+        return self.dataset.get_dataset_examples()
