@@ -8,7 +8,6 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any, TypeVar
 
-import lightning as L
 import tqdm
 from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
 from rasterio.crs import CRS
@@ -26,6 +25,8 @@ from rslearn.dataset.manage import (
 )
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import get_tile_store_with_layer
+from rslearn.train.data_module import RslearnDataModule
+from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.utils import Projection, STGeometry
 
 logger = get_logger(__name__)
@@ -778,11 +779,9 @@ class RslearnLightningCLI(LightningCLI):
 
 def model_handler() -> None:
     """Handler for any rslearn model X commands."""
-    # Decreased strictness of type checking for model and datamodule classes
-    # to allow for multiple dataset training tasks
     RslearnLightningCLI(
-        model_class=L.LightningModule,
-        datamodule_class=L.LightningDataModule,
+        model_class=RslearnLightningModule,
+        datamodule_class=RslearnDataModule,
         args=sys.argv[2:],
         subclass_mode_model=True,
         subclass_mode_data=True,

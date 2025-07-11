@@ -1,20 +1,19 @@
 """Default LightningDataModule for rslearn."""
 
-import os
 import random
 from collections.abc import Iterator
 from typing import Any
 
 import lightning as L
 import torch
-from torch.utils.data import DataLoader, DistributedSampler, IterableDataset
+from torch.utils.data import DataLoader, DistributedSampler
 from upath import UPath
 
 from rslearn.dataset import Dataset
 from rslearn.train.tasks import Task
 from rslearn.train.tasks.multi_task import MultiTask
 
-from .dataset import DataInput, ModelDataset, RetryDataset, SplitConfig
+from .dataset import DataInput, ModelDataset, MultiDataset, RetryDataset, SplitConfig
 
 
 def collate_fn(
@@ -124,23 +123,12 @@ class RslearnDataModule(L.LightningDataModule):
     def _get_dataloader(
         self,
         split: str,
-        is_inner_process: bool = False,
-        generator: torch.Generator | None = None,
     ) -> DataLoader[dict[str, torch.Tensor]]:
         """Get a dataloader for the given split.
 
-        If is_inner_process is True, then this dataloader is in an inner process, and we
-        don't want to spawn nested processes. In this case, we use a generator to shuffle
-        the data, and we don't use a sampler. We need a generator to ensure that each
-        child dataloader gets the same shuffle, otherwise rank/processes won't synch.
-
         Args:
             split: the split to get a dataloader for
-            is_inner_process: whether this dataloader is in an inner process
-            generator: a generator to use for shuffling (only used if is_inner_process is True)
         """
-        # is_inner_process is used if we are in a multi dataset setting, and this dataloader
-        # is one of a set instantiated PER process (so we don't want to spawn nested processes)
         dataset = self.datasets[split]
         persistent_workers = self.num_workers > 0
         kwargs = dict(
@@ -150,16 +138,7 @@ class RslearnDataModule(L.LightningDataModule):
             collate_fn=collate_fn,
             persistent_workers=persistent_workers,
         )
-        # Can still shuffle in inner process since we rebuild dataloaders
         should_shuffle = split == "train"
-        if is_inner_process:
-            assert generator is not None, "generator must be provided for inner process"
-            kwargs["num_workers"] = 0
-            kwargs["persistent_workers"] = False
-            kwargs["shuffle"] = should_shuffle
-            kwargs["pin_memory"] = False
-            kwargs["generator"] = generator  # type: ignore
-            return DataLoader(**kwargs)  # type: ignore
 
         sampler_factory = self.split_configs[split].sampler
         if sampler_factory:
@@ -229,143 +208,6 @@ class RslearnDataModule(L.LightningDataModule):
         return self._get_dataloader("predict")
 
 
-class MultiWrapperDataset(IterableDataset):
-    """IterableDataset that wraps several RslearnDataModule DataLoaders.
-
-    Wraps several RslearnDataModule DataLoaders and emits batches in random order
-    with correct sharding across DDP ranks (GPU) and DataLoader workers (CPU).
-    Manual sharding only (seems to be faster).
-
-    Basic data flow:
-    1. Build individual RslearnDataModule instances from dataset configs
-    2. Build a MultiWrapperDataset from the DataLoaders of these RslearnDataModule instances
-    3. Wrap the MultiWrapperDataset in a DataLoader shell
-    4. Pass the DataLoader to the LightningDataModule and use as normal
-    """
-
-    def __init__(
-        self,
-        data_modules: dict[str, "RslearnDataModule"],
-        rank: int,
-        world_size: int,
-        split: str = "train",
-        epoch: int = 0,
-    ) -> None:
-        """Initialize a new MultiWrapperDataset.
-
-        Args:
-            data_modules: dict mapping dataset names to RslearnDataModule objects
-            rank: the rank of the current process
-            world_size: the total number of processes
-            split: "train", "val", "test", or "predict"
-            epoch: the current epoch
-        """
-        super().__init__()
-        self.data_modules = data_modules
-        self.split = split
-        self.rank = rank
-        self.world_size = world_size
-        self.epoch = epoch
-
-    def _build_dataloaders(self, seed: int = 0) -> list[DataLoader]:
-        """Build the dataloaders for the given split.
-
-        Lightning will call this every epoch when it re‑creates the DataLoaders.
-        Note that the base seed should be consistent across all ranks/processes,
-        but is modified for each spawn's dataloader.
-
-        The seed argument is only used for shuffling (needs to be identical across
-        all the child dataloaders), but is not used to seed transforms.
-
-        Args:
-            seed: a seed to use for shuffling across all dataloaders
-
-        Returns:
-            A list of DataLoaders for the given split.
-        """
-        dataloaders = []
-        for i, dm in enumerate(self.data_modules.values()):
-            generator = torch.Generator()
-            generator.manual_seed(seed + i)
-            dataloaders.append(
-                dm._get_dataloader(
-                    self.split,
-                    is_inner_process=True,
-                    generator=generator,
-                )
-            )
-        return dataloaders
-
-    def _worker(self) -> tuple[int, int]:
-        """Get the worker id and number of workers for the current process."""
-        w = torch.utils.data.get_worker_info()
-        return (w.id, w.num_workers) if w else (0, 1)
-
-    def __len__(self) -> int:
-        """Get the length of the dataset.
-
-        This information is per rank, after sharding. It's not exact (may be off
-        due to uneven splits - see docs in __iter__) but is okay for logging.
-
-        Do NOT use this for operations that require exact counts (e.g. anything
-        with distributed training)!
-
-        Returns:
-            The length of the dataset.
-        """
-        total_batches = sum(
-            int(len(dm.datasets[self.split]) / dm.batch_size)
-            for dm in self.data_modules.values()
-        )
-        return int(total_batches / self.world_size)
-
-    def __iter__(self) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
-        """Iterate over the dataset.
-
-        For each GPU rank (process), we have a pool of workers. For each worker in each
-        rank, we have a disjoint set of batches we will route to the data queue.
-        We need to ensure that 1) each worker per rank gets a unique set of batches, and
-        2) all batches are routed, 3) shuffling is consistent across workers in all ranks.
-
-        NOTE: Condition 2 is not really satisfied, since we need to enforce exact batch
-        counts across ranks/workers to prevent hangs. There might be a few dropped batches.
-
-        Returns:
-            An iterator over the dataset for this particular rank/worker.
-        """
-        # Set a consistent seed across all ranks and all workers
-        rng = random.Random(self.epoch)
-        loaders = self._build_dataloaders(self.epoch)
-        total_raw_batches = sum(len(dl) for dl in loaders)
-
-        # Compute this rank/worker's id compared to the global batch counter
-        wid, num_w = self._worker()
-        my_id = self.rank * num_w + wid
-        parts = self.world_size * num_w
-        iters = [iter(dl) for dl in loaders]
-        local_yielded = 0
-        max_local = total_raw_batches // parts
-        self.epoch += 1
-
-        # Only yield batches that belong to this rank/worker
-        for global_idx in range(total_raw_batches):
-            if not iters or local_yielded >= max_local:
-                # Ensure that all ranks/workers yield the same number of batches
-                # Otherwise, NCCL hangs waiting for an all-reduce (gather?) even
-                # though some dataloaders have already quit the yield loop
-                break
-            batch = None
-            while batch is None and iters:
-                child_i = rng.randrange(len(iters))
-                try:
-                    batch = next(iters[child_i])
-                except StopIteration:
-                    iters.pop(child_i)
-            if batch is not None and global_idx % parts == my_id:
-                yield batch
-                local_yielded += 1
-
-
 class MultiDatasetDataModule(L.LightningDataModule):
     """Data module that manages multiple RslearnDataModule instances.
 
@@ -384,7 +226,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
         self,
         dataset_configs: dict[str, RslearnDataModule],
         task: MultiTask,
-        max_num_workers: int = 32,
+        num_workers: int = 32,
         **kwargs: Any,
     ) -> None:
         """Initialize a new MultiDatasetDataModule.
@@ -392,12 +234,12 @@ class MultiDatasetDataModule(L.LightningDataModule):
         Args:
             dataset_configs: dict mapping dataset names to RslearnDataModule objects
             task: the task to train on
-            max_num_workers: the maximum number of workers to use for the dataloader
+            num_workers: the maximum number of workers to use for the dataloader
             kwargs: additional keyword arguments
         """
         super().__init__()
         self.data_modules = dataset_configs
-        self.max_num_workers = max_num_workers
+        self.num_workers = num_workers
 
     def setup(self, stage: str | None = None) -> None:
         """Set up the datasets for the given stage. Also assign dataset-specific names.
@@ -410,22 +252,26 @@ class MultiDatasetDataModule(L.LightningDataModule):
             data_module.set_name(name)
 
     def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:
-        num_workers = min(len(os.sched_getaffinity(0)), self.max_num_workers)
-        print(f"INFO: using num_workers={num_workers} for {split} split")
-        print(f"INFO: restarting shuffling from epoch {self.trainer.current_epoch}")  # type: ignore
+        datasets = {name: dm.datasets[split] for name, dm in self.data_modules.items()}
+        batch_size = max(
+            self.data_modules.values(), key=lambda dm: dm.batch_size
+        ).batch_size
+        print(f"INFO: using batch_size {batch_size} for split {split}")
+        dataset = MultiDataset(datasets)
         return DataLoader(
-            dataset=MultiWrapperDataset(
-                self.data_modules,
-                split=split,
-                rank=self.trainer.global_rank,  # type: ignore
-                world_size=self.trainer.world_size,  # type: ignore
-                epoch=self.trainer.current_epoch,  # type: ignore
-            ),
-            batch_size=None,
+            dataset=dataset,
             pin_memory=True,
-            num_workers=num_workers,
-            shuffle=False,  # already randomly chose next dataloader + per-dataloader shuffler
-            persistent_workers=True,  # won't do much since we rebuild dataloaders on each epoch
+            num_workers=self.num_workers,
+            persistent_workers=True,
+            collate_fn=collate_fn,
+            batch_sampler=DistributedPerDatasetBatchSampler(
+                multi_dataset=dataset,
+                batch_size=batch_size,
+                shuffle=(split == "train"),
+                drop_last=True,  # should already be handled but in case
+                num_replicas=self.trainer.world_size,  # type: ignore
+                rank=self.trainer.global_rank,  # type: ignore
+            ),
         )
 
     def train_dataloader(self) -> DataLoader:
@@ -443,3 +289,101 @@ class MultiDatasetDataModule(L.LightningDataModule):
     def predict_dataloader(self) -> DataLoader:
         """Get the predict dataloader."""
         return self._get_dataloader("predict")
+
+
+class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
+    """Distributed batch sampler yielding batches from one sub-dataset per rank.
+
+    Wraps torch DistributedSampler to first split indices across ranks,
+    then does "one-subdataset-per-batch" sampling in each process.
+    """
+
+    def __init__(
+        self,
+        multi_dataset: MultiDataset,
+        batch_size: int,
+        shuffle: bool = True,
+        drop_last: bool = True,
+        num_replicas: int | None = None,
+        rank: int | None = None,
+    ) -> None:
+        """Initialize a new DistributedPerDatasetBatchSampler.
+
+        Args:
+            multi_dataset: the MultiDataset to sample from
+            batch_size: the batch size
+            shuffle: whether to shuffle the indices
+            drop_last: whether to drop the last batch if it's not full
+            num_replicas: the number of replicas
+            rank: the rank
+        """
+        self.dist_sampler = DistributedSampler(
+            multi_dataset,  # get indices across all datasets, flattened
+            num_replicas=num_replicas,
+            rank=rank,
+            shuffle=shuffle,
+            drop_last=False,  # we handle drop_last in our own sampler
+        )
+        self.buckets = list(multi_dataset.buckets.items())
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+
+    def set_epoch(self, epoch: int) -> None:
+        """Set the epoch for the distributed sampler.
+
+        Args:
+            epoch: the epoch to set
+        """
+        self.dist_sampler.set_epoch(epoch)
+
+    def __iter__(self) -> Iterator[list[int]]:
+        """Iterate over the batches."""
+        # Get the per-rank, per-epoch list of (shuffled) indices
+        all_idxs = list(iter(self.dist_sampler))
+
+        # Partition this rank's indices into sub-dataset buckets
+        partitioned: dict[str, list[int]] = {name: [] for name, _ in self.buckets}
+        for idx in all_idxs:
+            for name, rng in self.buckets:
+                if idx in rng:
+                    partitioned[name].append(idx)
+                    break
+
+        # Pick a non-empty bucket each time
+        while True:
+            # Which buckets can still yield at least 1 (or a full batch if drop_last)?
+            available = [
+                name
+                for name, idxs in partitioned.items()
+                if len(idxs) >= (self.batch_size if self.drop_last else 1)
+            ]
+            if not available:
+                break
+
+            name = random.choice(available)
+            idxs = partitioned[name]
+
+            if len(idxs) >= self.batch_size:
+                batch, partitioned[name] = (
+                    idxs[: self.batch_size],
+                    idxs[self.batch_size :],
+                )
+            else:
+                batch, partitioned[name] = idxs[:], []
+
+            yield batch
+
+    def __len__(self) -> int:
+        """Return the number of batches."""
+        total = 0
+        world_size = self.dist_sampler.num_replicas
+        for _, rng in self.buckets:
+            size = rng.stop - rng.start
+            per_rank = size // world_size
+            if not self.drop_last and size % world_size != 0:
+                per_rank += 1
+            if self.drop_last:
+                total += per_rank // self.batch_size
+            else:
+                total += (per_rank + self.batch_size - 1) // self.batch_size
+        return total

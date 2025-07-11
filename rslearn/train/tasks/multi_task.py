@@ -166,8 +166,11 @@ class MetricWrapper(Metric):
                 [target[self.task_name] for target in targets],
             )
         except KeyError:
-            # this happens if during multi-task training, all tasks are not
+            # This happens if during multi-task training, all tasks are not
             # represented in the batch (which is expected)
+            # NOTE: This causes a warning about computing update on no data
+            # if the number of sanity steps at the start of training is less than
+            # the number of datasets we're training on
             pass
 
     def compute(self) -> Any:

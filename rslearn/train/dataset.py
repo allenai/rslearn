@@ -708,3 +708,45 @@ class RetryDataset(torch.utils.data.Dataset):
     def get_windows(self) -> list[Window]:
         """Returns a list of windows in this dataset."""
         return self.dataset.get_windows()
+
+
+class MultiDataset(torch.utils.data.Dataset):
+    """A dataset that combines multiple datasets."""
+
+    def __init__(self, datasets: dict[str, RetryDataset]) -> None:
+        """Create a new MultiDataset.
+
+        Args:
+            datasets: map of dataset name to dataset.
+        """
+        self.datasets = datasets
+        self.buckets = {}
+        curr_offset = 0
+        for name, ds in datasets.items():
+            self.buckets[name] = range(curr_offset, curr_offset + len(ds))
+            curr_offset += len(ds)
+
+    def __len__(self) -> int:
+        """Return length of the dataset."""
+        return sum(len(ds) for ds in self.datasets.values())
+
+    def __getitem__(self, idx: int) -> Any:
+        """Get item from the dataset.
+
+        Args:
+            idx: the item index.
+
+        Returns:
+            the item data.
+        """
+        dataset_name = None
+        bucket = None
+        for name, bucket in self.buckets.items():
+            if idx in bucket:
+                dataset_name = name
+                bucket = bucket
+                break
+        else:
+            raise IndexError(f"Index {idx} out of range (len={len(self)})")
+        dataset_idx = idx - bucket.start
+        return self.datasets[dataset_name][dataset_idx]
