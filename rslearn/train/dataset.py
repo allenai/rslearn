@@ -484,6 +484,8 @@ class ModelDataset(torch.utils.data.Dataset):
         else:
             bounds = window.bounds
 
+        assert isinstance(window, Window)
+
         # Read the inputs and targets.
         def read_input(data_input: DataInput) -> torch.Tensor:
             # First enumerate all options of individual layers to read.
@@ -498,7 +500,6 @@ class ModelDataset(torch.utils.data.Dataset):
             # In the future we need to support different configuration for how to pick
             # the options, as well as picking multiple for series inputs.
             layer = random.choice(layer_options)
-            layer_dir = window.get_layer_dir(layer)
 
             # The model config may reference a specific group within a layer, like
             # "image.2" in a dataset that has a layer "image" with max_matches > 1.
@@ -557,9 +558,9 @@ class ModelDataset(torch.utils.data.Dataset):
                     raster_format = load_raster_format(
                         RasterFormatConfig(band_set.format["name"], band_set.format)
                     )
-                    cur_path = layer_dir / "_".join(band_set.bands)
+                    raster_dir = window.get_raster_dir(layer, band_set.bands)
                     src = raster_format.decode_raster(
-                        cur_path, final_projection, final_bounds
+                        raster_dir, final_projection, final_bounds
                     )
                     if src is None:
                         raise ValueError(f"Source is None for {data_input}")
@@ -587,6 +588,7 @@ class ModelDataset(torch.utils.data.Dataset):
             elif data_input.data_type == "vector":
                 assert isinstance(layer_config, VectorLayerConfig)
                 vector_format = load_vector_format(layer_config.format)
+                layer_dir = window.get_layer_dir(layer)
                 features = vector_format.decode_vector(
                     layer_dir, window.projection, window.bounds
                 )
