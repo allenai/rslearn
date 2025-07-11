@@ -268,7 +268,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
                 multi_dataset=dataset,
                 batch_size=batch_size,
                 shuffle=(split == "train"),
-                drop_last=False,
+                drop_last=True,  # should already be handled but in case
                 num_replicas=self.trainer.world_size,  # type: ignore
                 rank=self.trainer.global_rank,  # type: ignore
             ),
