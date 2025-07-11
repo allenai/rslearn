@@ -226,7 +226,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
         self,
         dataset_configs: dict[str, RslearnDataModule],
         task: MultiTask,
-        max_num_workers: int = 32,
+        num_workers: int = 32,
         **kwargs: Any,
     ) -> None:
         """Initialize a new MultiDatasetDataModule.
@@ -234,12 +234,12 @@ class MultiDatasetDataModule(L.LightningDataModule):
         Args:
             dataset_configs: dict mapping dataset names to RslearnDataModule objects
             task: the task to train on
-            max_num_workers: the maximum number of workers to use for the dataloader
+            num_workers: the maximum number of workers to use for the dataloader
             kwargs: additional keyword arguments
         """
         super().__init__()
         self.data_modules = dataset_configs
-        self.max_num_workers = max_num_workers
+        self.num_workers = num_workers
 
     def setup(self, stage: str | None = None) -> None:
         """Set up the datasets for the given stage. Also assign dataset-specific names.
@@ -261,7 +261,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
         return DataLoader(
             dataset=dataset,
             pin_memory=True,
-            num_workers=self.max_num_workers,
+            num_workers=self.num_workers,
             persistent_workers=True,
             collate_fn=collate_fn,
             batch_sampler=DistributedPerDatasetBatchSampler(
