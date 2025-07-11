@@ -268,7 +268,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
                 multi_dataset=dataset,
                 batch_size=batch_size,
                 shuffle=(split == "train"),
-                drop_last=True,  # should already be handled but in case
+                drop_last=True,
                 num_replicas=self.trainer.world_size,  # type: ignore
                 rank=self.trainer.global_rank,  # type: ignore
             ),
@@ -322,7 +322,7 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
             num_replicas=num_replicas,
             rank=rank,
             shuffle=shuffle,
-            drop_last=False,  # we handle drop_last in our own sampler
+            drop_last=True,  # should already be handled but in case
         )
         self.buckets = list(multi_dataset.buckets.items())
         self.batch_size = batch_size
