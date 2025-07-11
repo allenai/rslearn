@@ -41,6 +41,227 @@ class WorldCerealConfidences(LocalFiles):
     ]
     TIMEOUT_SECONDS = 10
 
+    # this can be obtained using the following code:
+    # ```
+    # response = requests.get(cls.ZENODO_URL)
+    # response.raise_for_status()
+    # ZENODO_FILES_DATA = response.json()
+    # ```
+    # we hardcode it here because othewerwise we get complaints from
+    # zenodo about repeatedly asking for it.
+    ZENODO_FILES_DATA: list[dict] = [
+        {
+            "id": "79bb4cbc-7f5f-4fe3-bd41-ca6e13efeee9",
+            "filename": "WorldCereal_AEZ.geojson",
+            "filesize": 762000.0,
+            "checksum": "cf1125f617b48703756329ded6e79456",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/79bb4cbc-7f5f-4fe3-bd41-ca6e13efeee9",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_AEZ.geojson/content",
+            },
+        },
+        {
+            "id": "e34100f1-33c2-4091-bf87-d492974ee8ba",
+            "filename": "QGIS_stylefiles.zip",
+            "filesize": 16084.0,
+            "checksum": "6d36b5fa3417b1036d973ae285adc5aa",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/e34100f1-33c2-4091-bf87-d492974ee8ba",
+                "download": "https://zenodo.org/api/records/7875105/files/QGIS_stylefiles.zip/content",
+            },
+        },
+        {
+            "id": "21551c80-0df9-4add-abaa-b66fff68179c",
+            "filename": "WorldCereal_2021_tc-annual_temporarycrops_classification.zip",
+            "filesize": 15500797967.0,
+            "checksum": "c006c34fca0253251a8d1ea73cf837a8",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/21551c80-0df9-4add-abaa-b66fff68179c",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-annual_temporarycrops_classification.zip/content",
+            },
+        },
+        {
+            "id": "2fed6859-5729-4ab1-9d33-e15464c99a5b",
+            "filename": "WorldCereal_2021_tc-annual_temporarycrops_confidence.zip",
+            "filesize": 24969180828.0,
+            "checksum": "84a953be71292d02cceb6c64b2008ad7",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/2fed6859-5729-4ab1-9d33-e15464c99a5b",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-annual_temporarycrops_confidence.zip/content",
+            },
+        },
+        {
+            "id": "7c83a2fd-edf1-4a3b-8209-054908c59ed0",
+            "filename": "WorldCereal_2021_tc-maize-main_activecropland_classification.zip",
+            "filesize": 20121459543.0,
+            "checksum": "1967eb0b84fab95879e730f9095911d2",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/7c83a2fd-edf1-4a3b-8209-054908c59ed0",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-main_activecropland_classification.zip/content",
+            },
+        },
+        {
+            "id": "2cab95a8-24d9-45cf-ac70-67fa4b6bda64",
+            "filename": "WorldCereal_2021_tc-maize-main_irrigation_classification.zip",
+            "filesize": 17247922829.0,
+            "checksum": "ceaf240dc4bba5e19491dd3c9893ae34",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/2cab95a8-24d9-45cf-ac70-67fa4b6bda64",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-main_irrigation_classification.zip/content",
+            },
+        },
+        {
+            "id": "54d63601-cda8-4f10-8710-a2068e697418",
+            "filename": "WorldCereal_2021_tc-maize-main_irrigation_confidence.zip",
+            "filesize": 11327157543.0,
+            "checksum": "c509ee2cb8b6fc44383788ffaa248950",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/54d63601-cda8-4f10-8710-a2068e697418",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-main_irrigation_confidence.zip/content",
+            },
+        },
+        {
+            "id": "b2278b6c-c2f5-49c1-8ebc-e828dbf8c27d",
+            "filename": "WorldCereal_2021_tc-maize-main_maize_classification.zip",
+            "filesize": 18210475632.0,
+            "checksum": "ff298db1b654b91fcfa27495d878932d",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/b2278b6c-c2f5-49c1-8ebc-e828dbf8c27d",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-main_maize_classification.zip/content",
+            },
+        },
+        {
+            "id": "277c0d06-b5ae-4748-bad1-c135084276ef",
+            "filename": "WorldCereal_2021_tc-maize-main_maize_confidence.zip",
+            "filesize": 10442831518.0,
+            "checksum": "0e6bb70209a83b526ec146e5e4ed3451",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/277c0d06-b5ae-4748-bad1-c135084276ef",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-main_maize_confidence.zip/content",
+            },
+        },
+        {
+            "id": "e79ea14b-cdb3-4a8f-bd2c-2bd0a5815653",
+            "filename": "WorldCereal_2021_tc-maize-second_activecropland_classification.zip",
+            "filesize": 7978543572.0,
+            "checksum": "2c90000f52a1356485353c5150a6b3ca",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/e79ea14b-cdb3-4a8f-bd2c-2bd0a5815653",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-second_activecropland_classification.zip/content",
+            },
+        },
+        {
+            "id": "d9c5dbe4-d027-47aa-bb6e-806c9964f73e",
+            "filename": "WorldCereal_2021_tc-maize-second_irrigation_classification.zip",
+            "filesize": 6703649764.0,
+            "checksum": "7221b40181835c5226d357ae3fec434f",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/d9c5dbe4-d027-47aa-bb6e-806c9964f73e",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-second_irrigation_classification.zip/content",
+            },
+        },
+        {
+            "id": "f47baf24-27d9-4913-a483-ec86ae87e60a",
+            "filename": "WorldCereal_2021_tc-maize-second_irrigation_confidence.zip",
+            "filesize": 3813149175.0,
+            "checksum": "cb8b91155c8fcf38f869875f2cb35200",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/f47baf24-27d9-4913-a483-ec86ae87e60a",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-second_irrigation_confidence.zip/content",
+            },
+        },
+        {
+            "id": "93ae9f7f-f989-4fc5-837a-d27652b761f7",
+            "filename": "WorldCereal_2021_tc-maize-second_maize_classification.zip",
+            "filesize": 6917008439.0,
+            "checksum": "aa883b52451f878e6b4462d27410707e",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/93ae9f7f-f989-4fc5-837a-d27652b761f7",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-second_maize_classification.zip/content",
+            },
+        },
+        {
+            "id": "d3a0df02-8034-463f-a923-2bfe0c2719ac",
+            "filename": "WorldCereal_2021_tc-maize-second_maize_confidence.zip",
+            "filesize": 3752378387.0,
+            "checksum": "8a819762b7f3950839b0e832cb346e30",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/d3a0df02-8034-463f-a923-2bfe0c2719ac",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-second_maize_confidence.zip/content",
+            },
+        },
+        {
+            "id": "7a257437-89fe-4278-94fe-90a66e81e1bd",
+            "filename": "WorldCereal_2021_tc-springcereals_springcereals_classification.zip",
+            "filesize": 7008931281.0,
+            "checksum": "bb6e1124938e3a68b6e47d156f17bf86",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/7a257437-89fe-4278-94fe-90a66e81e1bd",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-springcereals_springcereals_classification.zip/content",
+            },
+        },
+        {
+            "id": "a0b91677-f110-4df5-a5fd-7b1849895a02",
+            "filename": "WorldCereal_2021_tc-springcereals_springcereals_confidence.zip",
+            "filesize": 4708773375.0,
+            "checksum": "fd8dec8de691738df520c1ab451c7870",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/a0b91677-f110-4df5-a5fd-7b1849895a02",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-springcereals_springcereals_confidence.zip/content",
+            },
+        },
+        {
+            "id": "a5774a05-ee8e-42df-bf06-68ebc6c14426",
+            "filename": "WorldCereal_2021_tc-wintercereals_activecropland_classification.zip",
+            "filesize": 20001277863.0,
+            "checksum": "3933653452a2e0b821c35091b6f4a035",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/a5774a05-ee8e-42df-bf06-68ebc6c14426",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-wintercereals_activecropland_classification.zip/content",
+            },
+        },
+        {
+            "id": "5a4adaa6-e50a-469a-b401-6ccca02de443",
+            "filename": "WorldCereal_2021_tc-wintercereals_irrigation_classification.zip",
+            "filesize": 18019534510.0,
+            "checksum": "5032b11cf380d8cef07767e86ef4ee54",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/5a4adaa6-e50a-469a-b401-6ccca02de443",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-wintercereals_irrigation_classification.zip/content",
+            },
+        },
+        {
+            "id": "23301576-64d2-48a1-9b19-0c126158c24d",
+            "filename": "WorldCereal_2021_tc-wintercereals_irrigation_confidence.zip",
+            "filesize": 11447731232.0,
+            "checksum": "f84c4088ac42bb67f308be50159ca778",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/23301576-64d2-48a1-9b19-0c126158c24d",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-wintercereals_irrigation_confidence.zip/content",
+            },
+        },
+        {
+            "id": "9ab67c40-9072-44dc-8f6b-892fcaa3c079",
+            "filename": "WorldCereal_2021_tc-wintercereals_wintercereals_classification.zip",
+            "filesize": 18523882137.0,
+            "checksum": "386ce3fca8ba5577e2b62d6f3ea45b27",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/9ab67c40-9072-44dc-8f6b-892fcaa3c079",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-wintercereals_wintercereals_classification.zip/content",
+            },
+        },
+        {
+            "id": "b4ce9cc1-a745-450a-b2e9-c4fb08059a93",
+            "filename": "WorldCereal_2021_tc-wintercereals_wintercereals_confidence.zip",
+            "filesize": 10174751452.0,
+            "checksum": "5870da83aaa4b3761cad3750feb73e43",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/b4ce9cc1-a745-450a-b2e9-c4fb08059a93",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-wintercereals_wintercereals_confidence.zip/content",
+            },
+        },
+    ]
+
     def __init__(
         self,
         config: LayerConfig,
@@ -162,11 +383,8 @@ class WorldCerealConfidences(LocalFiles):
         zip_dir.mkdir(parents=True, exist_ok=True)
 
         # Fetch list of files from Zenodo's Deposition Files API
-        response = requests.get(cls.ZENODO_URL)
-        response.raise_for_status()
-        files_data = response.json()
         # f["filename"] maps to the ZIP_FILENAMES
-        files_as_dict = {f["filename"]: f for f in files_data}
+        files_as_dict = {f["filename"]: f for f in cls.ZENODO_FILES_DATA}
         # now its also in the right order for when we generate the files
         ordered_files = [files_as_dict[z_f] for z_f in cls.ZIP_FILENAMES]
         for file_info in ordered_files:
