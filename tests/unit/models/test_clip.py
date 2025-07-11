@@ -7,7 +7,7 @@ from rslearn.models.clip import CLIP
 @pytest.mark.parametrize(
     "model_name", ["openai/clip-vit-base-patch32", "openai/clip-vit-large-patch14-336"]
 )
-def test_molmo(model_name: str) -> None:
+def test_clip(model_name: str) -> None:
     # Make sure the forward pass works.
     clip = CLIP(model_name=model_name)
     inputs = [
