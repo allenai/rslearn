@@ -416,7 +416,7 @@ class ModelDataset(torch.utils.data.Dataset):
                 if split_config.overlap_ratio
                 else 0
             )
-            for window in self.windows:
+            for window in dataset_examples:
                 cur_patches = []
                 if window is None:
                     raise ValueError("Window is None in load_all_patches")
