@@ -271,6 +271,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
                 drop_last=True,
                 num_replicas=self.trainer.world_size,  # type: ignore
                 rank=self.trainer.global_rank,  # type: ignore
+                uniform_sample=(split == "train"),  # TODO: make configurable
             ),
         )
 
@@ -306,6 +307,7 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         drop_last: bool = True,
         num_replicas: int | None = None,
         rank: int | None = None,
+        uniform_sample: bool = True,
     ) -> None:
         """Initialize a new DistributedPerDatasetBatchSampler.
 
@@ -316,6 +318,9 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
             drop_last: whether to drop the last batch if it's not full
             num_replicas: the number of replicas
             rank: the rank
+            uniform_sample: whether to sample uniformly across all datasets during
+                an epoch (in which case the end of the epoch will consist only of
+                batches from the largest datasets)
         """
         self.dist_sampler = DistributedSampler(
             multi_dataset,  # get indices across all datasets, flattened
@@ -327,6 +332,8 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         self.buckets = list(multi_dataset.buckets.items())
         self.batch_size = batch_size
         self.drop_last = drop_last
+        self.uniform_sample = uniform_sample
+        print(f"INFO: using uniform_sample={uniform_sample}")
 
     def set_epoch(self, epoch: int) -> None:
         """Set the epoch for the distributed sampler.
@@ -360,6 +367,15 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
             if not available:
                 break
 
+            if self.uniform_sample:
+                # NOTE: This seems to have significantly better performance than sampling
+                # proportionally to the size of the dataset, though not fully tested.
+                # Hypothesis is that at the beginning of the epoch, equal mixing of
+                # unequally sized datasets gives us a more representation-learning type
+                # objective (learn good embeddings across *all* datasets), and as smaller
+                # datasets are exhausted, we get more "pure" finetuning objectives on the
+                # larger datasets, which benefit from the learned general representations
+                available = list(set(available))
             name = random.choice(available)
             idxs = partitioned[name]
 
