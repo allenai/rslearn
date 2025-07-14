@@ -4,6 +4,8 @@ from typing import Any
 
 import torch
 
+from rslearn.train.lightning_module import RestoreConfig
+
 
 def apply_decoder(
     features: list[torch.Tensor],
@@ -85,11 +87,13 @@ class MultiTaskModel(torch.nn.Module):
 
         if checkpoint_path is not None:
             print(f"INFO: loading full model weights from {checkpoint_path}")
-            state_dict = torch.load(checkpoint_path)["state_dict"]
-            self.load_state_dict(
-                {k.replace("model.", "", 1): v for k, v in state_dict.items()},
-                strict=False,
+            restore_config = RestoreConfig(
+                restore_path=checkpoint_path,
+                selector=["model."],
+                remap_prefixes=[("model.", "")],
             )
+            state_dict = restore_config.get_state_dict()
+            self.load_state_dict(state_dict, strict=False)
 
     def forward(
         self,

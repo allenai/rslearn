@@ -11,7 +11,6 @@ from upath import UPath
 
 from rslearn.dataset import Dataset
 from rslearn.train.tasks import Task
-from rslearn.train.tasks.multi_task import MultiTask
 
 from .dataset import DataInput, ModelDataset, MultiDataset, RetryDataset, SplitConfig
 
@@ -131,7 +130,7 @@ class RslearnDataModule(L.LightningDataModule):
         """
         dataset = self.datasets[split]
         persistent_workers = self.num_workers > 0
-        kwargs = dict(
+        kwargs: dict[str, Any] = dict(
             dataset=dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
@@ -142,14 +141,14 @@ class RslearnDataModule(L.LightningDataModule):
 
         sampler_factory = self.split_configs[split].sampler
         if sampler_factory:
-            kwargs["sampler"] = sampler_factory.get_sampler(dataset)  # type: ignore
+            kwargs["sampler"] = sampler_factory.get_sampler(dataset)
         elif (
             self.trainer is not None
             and self.trainer.world_size is not None
             and self.trainer.world_size > 1
         ):
             # Use distributed sampler in case ddp is enabled.
-            kwargs["sampler"] = DistributedSampler(  # type: ignore
+            kwargs["sampler"] = DistributedSampler(
                 dataset,
                 num_replicas=self.trainer.world_size,
                 rank=self.trainer.global_rank,
@@ -157,7 +156,7 @@ class RslearnDataModule(L.LightningDataModule):
             )
         else:
             kwargs["shuffle"] = should_shuffle
-        return DataLoader(**kwargs)  # type: ignore
+        return DataLoader(**kwargs)
 
     def train_dataloader(self) -> DataLoader[dict[str, torch.Tensor]]:
         """Implement one or more PyTorch DataLoaders for training.
@@ -224,21 +223,19 @@ class MultiDatasetDataModule(L.LightningDataModule):
 
     def __init__(
         self,
-        dataset_configs: dict[str, RslearnDataModule],
-        task: MultiTask,
+        data_modules: dict[str, RslearnDataModule],
         num_workers: int = 32,
         **kwargs: Any,
     ) -> None:
         """Initialize a new MultiDatasetDataModule.
 
         Args:
-            dataset_configs: dict mapping dataset names to RslearnDataModule objects
-            task: the task to train on
+            data_modules: dict mapping dataset names to RslearnDataModule objects
             num_workers: the maximum number of workers to use for the dataloader
             kwargs: additional keyword arguments
         """
         super().__init__()
-        self.data_modules = dataset_configs
+        self.data_modules = data_modules
         self.num_workers = num_workers
 
     def setup(self, stage: str | None = None) -> None:

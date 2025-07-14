@@ -37,7 +37,7 @@ class RestoreConfig:
             restore_path_options: additional options for the restore_path to pass to
                 fsspec.
             selector: path in the torch dict containing the model parameters.
-            ignore_prefixes: prefixes to restore.
+            ignore_prefixes: prefixes to ignore from the state dict.
             remap_prefixes: list of (old_prefix, new_prefix) to rename parameters
                 starting with old_prefix to start with new_prefix instead.
         """
@@ -258,7 +258,7 @@ class RslearnLightningModule(L.LightningModule):
     def on_test_epoch_end(self) -> None:
         """Optionally save the test metrics to a file."""
         if self.metrics_file:
-            with open(self.metrics_file, "w+") as f:
+            with open(self.metrics_file, "w") as f:
                 metrics = self.test_metrics.compute()
                 metrics_dict = {k: v.item() for k, v in metrics.items()}
                 json.dump(metrics_dict, f, indent=4)

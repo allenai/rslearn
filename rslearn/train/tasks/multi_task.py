@@ -84,14 +84,12 @@ class MultiTask(Task):
         """
         processed_output = {}
         for task_name, task in self.tasks.items():
-            try:
+            if task_name in raw_output:
                 processed_output[task_name] = task.process_output(
                     raw_output[task_name], metadata
                 )
-            except KeyError:
-                # this happens if during multi-task training, all tasks are not
+                # will fail during multi-task training, all tasks are not
                 # represented in the batch (which is expected)
-                pass
         return processed_output
 
     def visualize(
@@ -160,18 +158,13 @@ class MetricWrapper(Metric):
             preds: the predictions
             targets: the targets
         """
-        try:
+        if self.task_name in preds:
             self.metric.update(
                 [pred[self.task_name] for pred in preds],
                 [target[self.task_name] for target in targets],
             )
-        except KeyError:
-            # This happens if during multi-task training, all tasks are not
+            # Will fail if during multi-task training, all tasks are not
             # represented in the batch (which is expected)
-            # NOTE: This causes a warning about computing update on no data
-            # if the number of sanity steps at the start of training is less than
-            # the number of datasets we're training on
-            pass
 
     def compute(self) -> Any:
         """Returns the computed metric."""
