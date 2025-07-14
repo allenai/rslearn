@@ -3,6 +3,7 @@
 from typing import Any
 
 import torch
+from einops import rearrange
 
 
 class MultiTaskModel(torch.nn.Module):
@@ -44,6 +45,7 @@ class MultiTaskModel(torch.nn.Module):
             tuple (outputs, loss_dict) from the last module.
         """
         features = self.encoder(inputs)
+        batch_size = len(inputs)
         outputs: list[dict[str, Any]] = [{} for _ in inputs]
         losses = {}
         for name, decoder in self.decoders.items():
@@ -57,6 +59,12 @@ class MultiTaskModel(torch.nn.Module):
                 cur_targets = [target[name] for target in targets]
 
             cur_output, cur_loss_dict = decoder[-1](cur, inputs, cur_targets)
+            # Check if we should output a single value or an array.
+            if batch_size != len(cur_output):
+                h = w = int((cur_output.shape[0] // batch_size) ** 0.5)
+                cur_output = rearrange(
+                    cur_output, "(b h w) c -> b h w c", h=h, w=w, b=batch_size
+                )
 
             for idx, entry in enumerate(cur_output):
                 outputs[idx][name] = entry
