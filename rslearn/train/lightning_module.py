@@ -185,6 +185,14 @@ class RslearnLightningModule(L.LightningModule):
             self.schedulers["plateau"] = scheduler
         return d
 
+    def on_train_epoch_start(self) -> None:
+        """If we are in a multi-dataset distributed strategy, set the epoch."""
+        try:
+            self.trainer.train_dataloader.batch_sampler.set_epoch(self.current_epoch)
+        except AttributeError:
+            # Fail silently for single-dataset case, which is okay
+            pass
+
     def training_step(
         self, batch: Any, batch_idx: int, dataloader_idx: int = 0
     ) -> torch.Tensor:

@@ -85,11 +85,10 @@ class MultiTask(Task):
         processed_output = {}
         for task_name, task in self.tasks.items():
             if task_name in raw_output:
+                # In multi-dataset training, we may not have all datasets in the batch
                 processed_output[task_name] = task.process_output(
                     raw_output[task_name], metadata
                 )
-                # will fail during multi-task training, all tasks are not
-                # represented in the batch (which is expected)
         return processed_output
 
     def visualize(
@@ -158,13 +157,14 @@ class MetricWrapper(Metric):
             preds: the predictions
             targets: the targets
         """
-        if self.task_name in preds:
+        try:
             self.metric.update(
                 [pred[self.task_name] for pred in preds],
                 [target[self.task_name] for target in targets],
             )
-            # Will fail if during multi-task training, all tasks are not
-            # represented in the batch (which is expected)
+        except KeyError:
+            # In multi-dataset training, we may not have all datasets in the batch
+            pass
 
     def compute(self) -> Any:
         """Returns the computed metric."""
