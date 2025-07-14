@@ -166,34 +166,43 @@ class ClassificationTask(BasicTask):
             either raster or vector data.
         """
         probs = raw_output.cpu().numpy()
-        if len(self.classes) == 2 and self.positive_class_threshold != 0.5:
-            positive_class_prob = probs[self.positive_class_id]
-            if positive_class_prob >= self.positive_class_threshold:
-                class_idx = self.positive_class_id
+        # If probs is 1D, output a vector, if 3D (H, W, C), output a raster.
+        if probs.ndim == 1:
+            if len(self.classes) == 2 and self.positive_class_threshold != 0.5:
+                positive_class_prob = probs[self.positive_class_id]
+                if positive_class_prob >= self.positive_class_threshold:
+                    class_idx = self.positive_class_id
+                else:
+                    class_idx = 1 - self.positive_class_id
             else:
-                class_idx = 1 - self.positive_class_id
-        else:
-            # For multiclass classification or when using the default threshold
-            class_idx = probs.argmax()
+                # For multiclass classification or when using the default threshold
+                class_idx = probs.argmax()
 
-        if not self.read_class_id:
-            value = self.classes[class_idx]  # type: ignore
-        else:
-            value = class_idx
+            if not self.read_class_id:
+                value = self.classes[class_idx]  # type: ignore
+            else:
+                value = class_idx
 
-        feature = Feature(
-            STGeometry(
-                metadata["projection"],
-                shapely.Point(metadata["bounds"][0], metadata["bounds"][1]),
-                None,
-            ),
-            {
-                self.property_name: value,
-            },
-        )
-        if self.prob_property is not None and feature.properties is not None:
-            feature.properties[self.prob_property] = probs.tolist()
-        return [feature]
+            feature = Feature(
+                STGeometry(
+                    metadata["projection"],
+                    shapely.Point(metadata["bounds"][0], metadata["bounds"][1]),
+                    None,
+                ),
+                {
+                    self.property_name: value,
+                },
+            )
+            if self.prob_property is not None and feature.properties is not None:
+                feature.properties[self.prob_property] = probs.tolist()
+            return [feature]
+        elif probs.ndim == 3:
+            class_idx = probs.argmax(axis=2).astype(np.uint8)
+            return class_idx[None, :, :]  # type: ignore[index]
+        else:
+            raise ValueError(
+                f"Unexpected output shape {probs.shape} for classification task."
+            )
 
     def visualize(
         self,
