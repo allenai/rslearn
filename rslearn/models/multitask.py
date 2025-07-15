@@ -89,11 +89,15 @@ class MultiTaskModel(torch.nn.Module):
             print(f"INFO: loading full model weights from {checkpoint_path}")
             restore_config = RestoreConfig(
                 restore_path=checkpoint_path,
-                selector=["model."],
+                selector=["state_dict"],
                 remap_prefixes=[("model.", "")],
             )
             state_dict = restore_config.get_state_dict()
-            self.load_state_dict(state_dict, strict=False)
+            result = self.load_state_dict(state_dict, strict=False)
+            if result.missing_keys:
+                print(f"WARNING: missing keys: {result.missing_keys}")
+            if result.unexpected_keys:
+                print(f"WARNING: unexpected keys: {result.unexpected_keys}")
 
     def forward(
         self,
