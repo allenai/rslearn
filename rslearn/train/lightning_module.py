@@ -231,8 +231,12 @@ class RslearnLightningModule(L.LightningModule):
         """
         inputs, targets, _ = batch
         batch_size = len(inputs)
-        _, loss_dict, pool_weights = self(inputs, targets, return_weights=True)
-        self._log_pool_weights(pool_weights, "train", batch_size)
+        if self.model.__class__.__name__ == "MultiTaskModel":
+            # Hacky but avoid circular import
+            _, loss_dict, pool_weights = self(inputs, targets, return_weights=True)
+            self._log_pool_weights(pool_weights, "train", batch_size)
+        else:
+            _, loss_dict = self(inputs, targets)
         train_loss = sum(loss_dict.values())
         self.log_dict(
             {"train_" + k: v for k, v in loss_dict.items()},
@@ -264,8 +268,14 @@ class RslearnLightningModule(L.LightningModule):
         """
         inputs, targets, _ = batch
         batch_size = len(inputs)
-        outputs, loss_dict, pool_weights = self(inputs, targets, return_weights=True)
-        self._log_pool_weights(pool_weights, "val", batch_size)
+        if self.model.__class__.__name__ == "MultiTaskModel":
+            # Hacky but avoid circular import
+            outputs, loss_dict, pool_weights = self(
+                inputs, targets, return_weights=True
+            )
+            self._log_pool_weights(pool_weights, "val", batch_size)
+        else:
+            outputs, loss_dict = self(inputs, targets)
         val_loss = sum(loss_dict.values())
         self.log_dict(
             {"val_" + k: v for k, v in loss_dict.items()},
