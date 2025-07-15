@@ -37,7 +37,7 @@ class RestoreConfig:
             restore_path_options: additional options for the restore_path to pass to
                 fsspec.
             selector: path in the torch dict containing the model parameters.
-            ignore_prefixes: prefixes to restore.
+            ignore_prefixes: prefixes to ignore from the state dict.
             remap_prefixes: list of (old_prefix, new_prefix) to rename parameters
                 starting with old_prefix to start with new_prefix instead.
         """
@@ -208,6 +208,14 @@ class RslearnLightningModule(L.LightningModule):
             sync_dist=True,
         )
 
+    def on_train_epoch_start(self) -> None:
+        """If we are in a multi-dataset distributed strategy, set the epoch."""
+        try:
+            self.trainer.train_dataloader.batch_sampler.set_epoch(self.current_epoch)
+        except AttributeError:
+            # Fail silently for single-dataset case, which is okay
+            pass
+
     def training_step(
         self, batch: Any, batch_idx: int, dataloader_idx: int = 0
     ) -> torch.Tensor:
@@ -283,7 +291,7 @@ class RslearnLightningModule(L.LightningModule):
     def on_test_epoch_end(self) -> None:
         """Optionally save the test metrics to a file."""
         if self.metrics_file:
-            with open(self.metrics_file, "w+") as f:
+            with open(self.metrics_file, "w") as f:
                 metrics = self.test_metrics.compute()
                 metrics_dict = {k: v.item() for k, v in metrics.items()}
                 json.dump(metrics_dict, f, indent=4)

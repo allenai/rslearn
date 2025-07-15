@@ -5,6 +5,7 @@ from typing import Any
 import torch
 
 from rslearn.models.pooling import AveragePool, BasePool
+from rslearn.train.lightning_module import RestoreConfig
 
 
 def apply_decoder(
@@ -93,11 +94,17 @@ class MultiTaskModel(torch.nn.Module):
 
         if checkpoint_path is not None:
             print(f"INFO: loading full model weights from {checkpoint_path}")
-            state_dict = torch.load(checkpoint_path)["state_dict"]
-            self.load_state_dict(
-                {k.replace("model.", "", 1): v for k, v in state_dict.items()},
-                strict=False,
+            restore_config = RestoreConfig(
+                restore_path=checkpoint_path,
+                selector=["state_dict"],
+                remap_prefixes=[("model.", "")],
             )
+            state_dict = restore_config.get_state_dict()
+            result = self.load_state_dict(state_dict, strict=False)
+            if result.missing_keys:
+                print(f"WARNING: missing keys: {result.missing_keys}")
+            if result.unexpected_keys:
+                print(f"WARNING: unexpected keys: {result.unexpected_keys}")
 
         for name, decoder in decoders.items():
             if not isinstance(decoder[0], BasePool):

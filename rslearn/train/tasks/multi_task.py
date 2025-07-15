@@ -84,14 +84,11 @@ class MultiTask(Task):
         """
         processed_output = {}
         for task_name, task in self.tasks.items():
-            try:
+            if task_name in raw_output:
+                # In multi-dataset training, we may not have all datasets in the batch
                 processed_output[task_name] = task.process_output(
                     raw_output[task_name], metadata
                 )
-            except KeyError:
-                # this happens if during multi-task training, all tasks are not
-                # represented in the batch (which is expected)
-                pass
         return processed_output
 
     def visualize(
@@ -166,11 +163,7 @@ class MetricWrapper(Metric):
                 [target[self.task_name] for target in targets],
             )
         except KeyError:
-            # This happens if during multi-task training, all tasks are not
-            # represented in the batch (which is expected)
-            # NOTE: This causes a warning about computing update on no data
-            # if the number of sanity steps at the start of training is less than
-            # the number of datasets we're training on
+            # In multi-dataset training, we may not have all datasets in the batch
             pass
 
     def compute(self) -> Any:
