@@ -1,5 +1,6 @@
 """Default LightningDataModule for rslearn."""
 
+import math
 import random
 from collections.abc import Iterator
 from typing import Any
@@ -265,7 +266,6 @@ class MultiDatasetDataModule(L.LightningDataModule):
                 multi_dataset=dataset,
                 batch_size=batch_size,
                 shuffle=(split == "train"),
-                drop_last=False,
                 num_replicas=self.trainer.world_size,  # type: ignore
                 rank=self.trainer.global_rank,  # type: ignore
             ),
@@ -289,7 +289,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
 
 
 class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
-    """Distributed batch sampler yielding batches from one sub-dataset per rank.
+    """Distributed batch sampler yielding batches from one sub-dataset per batch.
 
     Wraps torch DistributedSampler to first split indices across ranks,
     then does "one-subdataset-per-batch" sampling in each process.
@@ -300,7 +300,6 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         multi_dataset: MultiDataset,
         batch_size: int,
         shuffle: bool = True,
-        drop_last: bool = True,
         num_replicas: int | None = None,
         rank: int | None = None,
     ) -> None:
@@ -310,20 +309,24 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
             multi_dataset: the MultiDataset to sample from
             batch_size: the batch size
             shuffle: whether to shuffle the indices
-            drop_last: whether to drop the last batch if it's not full
             num_replicas: the number of replicas
             rank: the rank
         """
-        self.dist_sampler = DistributedSampler(
-            multi_dataset,  # get indices across all datasets, flattened
-            num_replicas=num_replicas,
-            rank=rank,
-            shuffle=shuffle,
-            drop_last=False,
-        )
-        self.buckets = list(multi_dataset.buckets.items())
+        self.multi_dataset = multi_dataset
         self.batch_size = batch_size
-        self.drop_last = drop_last
+        self.epoch = 0
+        # Using one DistributedSampler per dataset guarantees equal splitting
+        # across all datasets across all ranks
+        self.dist_samplers = {
+            name: DistributedSampler(
+                dataset,
+                num_replicas=num_replicas,
+                rank=rank,
+                shuffle=shuffle,
+                drop_last=False,
+            )
+            for name, dataset in multi_dataset.datasets.items()
+        }
 
     def set_epoch(self, epoch: int) -> None:
         """Set the epoch for the distributed sampler.
@@ -331,33 +334,29 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         Args:
             epoch: the epoch to set
         """
-        self.dist_sampler.set_epoch(epoch)
+        self.epoch = epoch
+        for dist_sampler in self.dist_samplers.values():
+            dist_sampler.set_epoch(epoch)
 
     def __iter__(self) -> Iterator[list[int]]:
         """Iterate over the batches."""
-        # Get the per-rank, per-epoch list of (shuffled) indices
-        all_idxs = list(iter(self.dist_sampler))
+        # Get the per-rank, per-epoch list of properly offset multi-dataset indices
+        partitioned: dict[str, list[int]] = {}
+        for name, sampler in self.dist_samplers.items():
+            offset = self.multi_dataset.buckets[name].start
+            partitioned[name] = [idx + offset for idx in list(iter(sampler))]
 
-        # Partition this rank's indices into sub-dataset buckets
-        partitioned: dict[str, list[int]] = {name: [] for name, _ in self.buckets}
-        for idx in all_idxs:
-            for name, rng in self.buckets:
-                if idx in rng:
-                    partitioned[name].append(idx)
-                    break
+        # Seed is shared aross all ranks but shuffled per epoch
+        rng = random.Random(self.epoch)
 
         # Randomly pick a non-empty (or sufficiently full) bucket each time
         # NOTE: this samples uniformly across all datasets, which may or may not be desirable
         while True:
-            available = [
-                name
-                for name, idxs in partitioned.items()
-                if len(idxs) >= (self.batch_size if self.drop_last else 1)
-            ]
+            available = [name for name, idxs in partitioned.items() if idxs]
             if not available:
                 break
 
-            name = random.choice(available)
+            name = rng.choice(available)
             idxs = partitioned[name]
 
             if len(idxs) >= self.batch_size:
@@ -372,15 +371,7 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
 
     def __len__(self) -> int:
         """Return the number of batches."""
-        total = 0
-        world_size = self.dist_sampler.num_replicas
-        for _, rng in self.buckets:
-            size = rng.stop - rng.start
-            per_rank = size // world_size
-            if not self.drop_last and size % world_size != 0:
-                per_rank += 1
-            if self.drop_last:
-                total += per_rank // self.batch_size
-            else:
-                total += (per_rank + self.batch_size - 1) // self.batch_size
-        return total
+        return sum(
+            math.ceil(len(sampler) / self.batch_size)
+            for sampler in self.dist_samplers.values()
+        )

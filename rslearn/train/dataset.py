@@ -739,14 +739,7 @@ class MultiDataset(torch.utils.data.Dataset):
         Returns:
             the item data.
         """
-        dataset_name = None
-        found_bucket = None
         for name, bucket in self.buckets.items():
             if idx in bucket:
-                dataset_name = name
-                found_bucket = bucket
-                break
-        else:
-            raise IndexError(f"Index {idx} out of range (len={len(self)})")
-        dataset_idx = idx - found_bucket.start
-        return self.datasets[dataset_name][dataset_idx]
+                return self.datasets[name][idx - bucket.start]
+        raise IndexError(f"Index {idx} out of range (len={len(self)})")
