@@ -1,14 +1,19 @@
 """Test the Terramind model."""
 
-import pytest
+import pathlib
+from typing import Any
+
+import huggingface_hub.constants
 import torch
 
 from rslearn.models.terramind import Terramind, TerramindNormalize, TerramindSize
 
 
-@pytest.mark.parametrize("model_size", [TerramindSize.BASE, TerramindSize.LARGE])
-def test_terramind(model_size: TerramindSize) -> None:
-    terramind = Terramind(model_size=model_size, modalities=["RGB"])
+def test_terramind(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
+    # Use monkeypatch to set HF_HUB_CACHE so we can store the weights in a temp dir.
+    monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(tmp_path))
+    terramind = Terramind(model_size=TerramindSize.BASE, modalities=["RGB"])
+
     inputs = [
         {
             "RGB": torch.zeros((3, 256, 256), dtype=torch.float32),

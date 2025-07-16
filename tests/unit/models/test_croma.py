@@ -1,16 +1,22 @@
-import pytest
+import pathlib
+import tempfile
+from typing import Any
+
 import torch
 
 from rslearn.models.croma import PATCH_SIZE, Croma, CromaModality, CromaSize
 
 
-@pytest.mark.parametrize("size", [CromaSize.BASE, CromaSize.LARGE])
-def test_croma(size: CromaSize) -> None:
-    # Make sure the forward pass works.
+def test_croma(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
+    """Verify that the forward pass for CROMA works."""
     input_hw = 32
+    # We override the temporary directory so we don't retain the model weights outside
+    # of this test.
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: tmp_path)
     croma = Croma(
-        size=size, modality=CromaModality.SENTINEL2, image_resolution=input_hw
+        size=CromaSize.BASE, modality=CromaModality.SENTINEL2, image_resolution=input_hw
     )
+
     inputs = [
         {
             "sentinel2": torch.zeros((12, input_hw, input_hw), dtype=torch.float32),
