@@ -4,8 +4,6 @@ from typing import Any
 
 import torch
 
-from rslearn.train.lightning_module import RestoreConfig
-
 
 def apply_decoder(
     features: list[torch.Tensor],
@@ -62,7 +60,6 @@ class MultiTaskModel(torch.nn.Module):
         self,
         encoder: list[torch.nn.Module],
         decoders: dict[str, list[torch.nn.Module]],
-        checkpoint_path: str | None = None,
         lazy_decode: bool = False,
     ):
         """Initialize a new MultiTaskModel.
@@ -70,7 +67,6 @@ class MultiTaskModel(torch.nn.Module):
         Args:
             encoder: modules to compute intermediate feature representations.
             decoders: modules to compute outputs and loss, should match number of tasks.
-            checkpoint_path: path to checkpoint to load decoder weights from
             lazy_decode: if True, only decode the outputs specified in the batch.
         """
         super().__init__()
@@ -84,20 +80,6 @@ class MultiTaskModel(torch.nn.Module):
             print(
                 "INFO: lazy decoding enabled, check source is consistent across batch"
             )
-
-        if checkpoint_path is not None:
-            print(f"INFO: loading full model weights from {checkpoint_path}")
-            restore_config = RestoreConfig(
-                restore_path=checkpoint_path,
-                selector=["state_dict"],
-                remap_prefixes=[("model.", "")],
-            )
-            state_dict = restore_config.get_state_dict()
-            result = self.load_state_dict(state_dict, strict=False)
-            if result.missing_keys:
-                print(f"WARNING: missing keys: {result.missing_keys}")
-            if result.unexpected_keys:
-                print(f"WARNING: unexpected keys: {result.unexpected_keys}")
 
     def forward(
         self,
