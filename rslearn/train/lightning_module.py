@@ -185,6 +185,29 @@ class RslearnLightningModule(L.LightningModule):
             self.schedulers["plateau"] = scheduler
         return d
 
+    def _log_pool_weights(
+        self, pool_weights: dict[str, torch.Tensor], prefix: str, batch_size: int
+    ) -> None:
+        """Log the pool weights to the logger.
+
+        Args:
+            pool_weights: dictionary of pool weights (task name -> B x M tensor)
+            prefix: prefix to add to the log dict (split)
+            batch_size: batch size
+        """
+        to_log = {}
+        for k, v in pool_weights.items():
+            v = v.mean(dim=0)
+            for i in range(v.shape[0]):
+                to_log[f"pool_weights/{prefix}_{k}/weight_{i}"] = v[i].item()
+        self.log_dict(
+            to_log,
+            batch_size=batch_size,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+
     def on_train_epoch_start(self) -> None:
         """If we are in a multi-dataset distributed strategy, set the epoch."""
         try:
@@ -208,7 +231,12 @@ class RslearnLightningModule(L.LightningModule):
         """
         inputs, targets, _ = batch
         batch_size = len(inputs)
-        _, loss_dict = self(inputs, targets)
+        if self.model.__class__.__name__ == "MultiTaskModel":
+            # Hacky but avoid circular import
+            _, loss_dict, pool_weights = self(inputs, targets, return_weights=True)
+            self._log_pool_weights(pool_weights, "train", batch_size)
+        else:
+            _, loss_dict = self(inputs, targets)
         train_loss = sum(loss_dict.values())
         self.log_dict(
             {"train_" + k: v for k, v in loss_dict.items()},
@@ -240,7 +268,14 @@ class RslearnLightningModule(L.LightningModule):
         """
         inputs, targets, _ = batch
         batch_size = len(inputs)
-        outputs, loss_dict = self(inputs, targets)
+        if self.model.__class__.__name__ == "MultiTaskModel":
+            # Hacky but avoid circular import
+            outputs, loss_dict, pool_weights = self(
+                inputs, targets, return_weights=True
+            )
+            self._log_pool_weights(pool_weights, "val", batch_size)
+        else:
+            outputs, loss_dict = self(inputs, targets)
         val_loss = sum(loss_dict.values())
         self.log_dict(
             {"val_" + k: v for k, v in loss_dict.items()},
