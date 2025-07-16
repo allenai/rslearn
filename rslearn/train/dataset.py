@@ -159,6 +159,7 @@ class SplitConfig:
         names: list[str] | None = None,
         tags: dict[str, str] | None = None,
         num_samples: int | None = None,
+        num_patches: int | None = None,
         transforms: list[torch.nn.Module] | None = None,
         sampler: SamplerFactory | None = None,
         patch_size: int | tuple[int, int] | None = None,
@@ -176,6 +177,7 @@ class SplitConfig:
                 value. If value is empty, then only the existince of the key in the
                 window options is checked.
             num_samples: limit this split to this many examples
+            num_patches: limit this split to this many patches
             transforms: transforms to apply
             sampler: SamplerFactory for this split
             patch_size: an optional square size or (width, height) tuple. If set, read
@@ -191,6 +193,7 @@ class SplitConfig:
         self.names = names
         self.tags = tags
         self.num_samples = num_samples
+        self.num_patches = num_patches
         self.transforms = transforms
         self.sampler = sampler
         self.patch_size = patch_size
@@ -212,6 +215,7 @@ class SplitConfig:
             names=self.names,
             tags=self.tags,
             num_samples=self.num_samples,
+            num_patches=self.num_patches,
             transforms=self.transforms,
             sampler=self.sampler,
             patch_size=self.patch_size,
@@ -227,6 +231,8 @@ class SplitConfig:
             result.tags = other.tags
         if other.num_samples:
             result.num_samples = other.num_samples
+        if other.num_patches:
+            result.num_patches = other.num_patches
         if other.transforms:
             result.transforms = other.transforms
         if other.sampler:
@@ -292,6 +298,7 @@ class ModelDataset(torch.utils.data.Dataset):
         inputs: dict[str, DataInput],
         task: Task,
         workers: int,
+        name: str | None = None,
     ) -> None:
         """Instantiate a new ModelDataset.
 
@@ -301,12 +308,13 @@ class ModelDataset(torch.utils.data.Dataset):
             inputs: data to read from the dataset for training
             task: the task to train on
             workers: number of workers to use for initializing the dataset
+            name: name of the dataset (default: None)
         """
         self.dataset = dataset
         self.split_config = split_config
         self.inputs = inputs
         self.task = task
-
+        self.name = name
         if split_config.transforms:
             self.transforms = Sequential(*split_config.transforms)
         else:
@@ -440,6 +448,10 @@ class ModelDataset(torch.utils.data.Dataset):
                         )
                 for i, patch_bounds in enumerate(cur_patches):
                     patches.append((window, patch_bounds, (i, len(cur_patches))))
+
+            if split_config.num_patches:
+                patches = patches[0 : split_config.num_patches]
+
             dataset_examples = patches
 
         # Write dataset_examples to a file so that we can load it lazily in the worker
@@ -686,6 +698,7 @@ class ModelDataset(torch.utils.data.Dataset):
             "bounds": bounds,
             "time_range": window.time_range,
             "projection": window.projection,
+            "dataset_source": self.name,
         }
         if self.split_config.get_load_all_patches():
             metadata["patch_idx"] = patch_idx
@@ -701,17 +714,26 @@ class ModelDataset(torch.utils.data.Dataset):
         )
         input_dict.update(passthrough_inputs)
         input_dict, target_dict = self.transforms(input_dict, target_dict)
+        input_dict["dataset_source"] = self.name
 
         logger.debug("__getitem__ finish pid=%d item_idx=%d", os.getpid(), idx)
 
         return input_dict, target_dict, metadata
+
+    def set_name(self, name: str) -> None:
+        """Set the name of the dataset.
+
+        Args:
+            name: the name to set.
+        """
+        self.name = name
 
 
 class RetryDataset(torch.utils.data.Dataset):
     """A dataset wrapper that retries getitem upon encountering error."""
 
     def __init__(
-        self, dataset: torch.utils.data.Dataset, retries: int = 3, delay: float = 5
+        self, dataset: ModelDataset, retries: int = 3, delay: float = 5
     ) -> None:
         """Create a new RetryDataset.
 
@@ -723,6 +745,14 @@ class RetryDataset(torch.utils.data.Dataset):
         self.dataset = dataset
         self.retries = retries
         self.delay = delay
+
+    def set_name(self, name: str) -> None:
+        """Set the name of the dataset.
+
+        Args:
+            name: the name to set.
+        """
+        self.dataset.set_name(name)
 
     def __len__(self) -> int:
         """Return length of the dataset."""
@@ -753,3 +783,38 @@ class RetryDataset(torch.utils.data.Dataset):
     def get_dataset_examples(self) -> list:
         """Returns a list of windows in this dataset."""
         return self.dataset.get_dataset_examples()
+
+
+class MultiDataset(torch.utils.data.Dataset):
+    """A dataset that combines multiple datasets."""
+
+    def __init__(self, datasets: dict[str, RetryDataset]) -> None:
+        """Create a new MultiDataset.
+
+        Args:
+            datasets: map of dataset name to dataset.
+        """
+        self.datasets = datasets
+        self.buckets = {}
+        curr_offset = 0
+        for name, ds in datasets.items():
+            self.buckets[name] = range(curr_offset, curr_offset + len(ds))
+            curr_offset += len(ds)
+
+    def __len__(self) -> int:
+        """Return length of the dataset."""
+        return sum(len(ds) for ds in self.datasets.values())
+
+    def __getitem__(self, idx: int) -> Any:
+        """Get item from the dataset.
+
+        Args:
+            idx: the item index.
+
+        Returns:
+            the item data.
+        """
+        for name, bucket in self.buckets.items():
+            if idx in bucket:
+                return self.datasets[name][idx - bucket.start]
+        raise IndexError(f"Index {idx} out of range (len={len(self)})")
