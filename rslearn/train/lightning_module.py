@@ -9,7 +9,7 @@ import torch
 from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
 from PIL import Image
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau
 from upath import UPath
 
 from .tasks import Task
@@ -89,6 +89,8 @@ class RslearnLightningModule(L.LightningModule):
         plateau_patience: int = 10,
         plateau_min_lr: float = 0,
         plateau_cooldown: int = 0,
+        cosine_anneal: bool = False,
+        cosine_max_iter: int = 100,
         visualize_dir: str | None = None,
         metrics_file: str | None = None,
         restore_config: RestoreConfig | None = None,
@@ -108,6 +110,8 @@ class RslearnLightningModule(L.LightningModule):
             plateau_min_lr: minimum learning rate to reduce to
             plateau_cooldown: number of iterations after reducing learning rate before
                 resetting plateau scheduler
+            cosine_anneal: whether to enable cosine annealing scheduler
+            cosine_max_iter: maximum number of iterations for cosine annealing
             visualize_dir: during validation or testing, output visualizations to this
                 directory
             metrics_file: file to save metrics to
@@ -126,6 +130,8 @@ class RslearnLightningModule(L.LightningModule):
         self.plateau_patience = plateau_patience
         self.plateau_min_lr = plateau_min_lr
         self.plateau_cooldown = plateau_cooldown
+        self.cosine_anneal = cosine_anneal
+        self.cosine_max_iter = cosine_max_iter
         self.visualize_dir = visualize_dir
         self.metrics_file = metrics_file
         self.restore_config = restore_config
@@ -169,6 +175,8 @@ class RslearnLightningModule(L.LightningModule):
         d = dict(
             optimizer=optimizer,
         )
+        if self.plateau and self.cosine_anneal:
+            raise ValueError("Cannot use both plateau and cosine annealing")
         if self.plateau:
             scheduler = ReduceLROnPlateau(
                 optimizer,
@@ -183,6 +191,16 @@ class RslearnLightningModule(L.LightningModule):
                 "interval": "epoch",
             }
             self.schedulers["plateau"] = scheduler
+        elif self.cosine_anneal:
+            scheduler = CosineAnnealingLR(
+                optimizer,
+                T_max=self.cosine_max_iter,
+            )
+            d["lr_scheduler"] = {
+                "scheduler": scheduler,
+                "interval": "epoch",
+            }
+            self.schedulers["cosine_anneal"] = scheduler
         return d
 
     def on_train_epoch_start(self) -> None:
