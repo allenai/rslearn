@@ -1,4 +1,4 @@
-boto3>=1.35
+boto3==1.38.27  # Hard pin to speed up dependency resolution
 class_registry>=2.1
 fiona>=1.10
 fsspec==2025.2.0
@@ -10,5 +10,6 @@ pytimeparse>=1.1
 rasterio>=1.4
 shapely>=2.0
 torchvision>=0.21.0
+torchmetrics==1.7.4 # Hard pin to speed up dependency resolution
 tqdm>=4.66
 universal_pathlib>=0.2.5
