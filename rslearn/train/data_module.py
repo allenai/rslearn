@@ -11,9 +11,12 @@ from torch.utils.data import DataLoader, DistributedSampler
 from upath import UPath
 
 from rslearn.dataset import Dataset
+from rslearn.log_utils import get_logger
 from rslearn.train.tasks import Task
 
 from .dataset import DataInput, ModelDataset, MultiDataset, RetryDataset, SplitConfig
+
+logger = get_logger(__name__)
 
 
 def collate_fn(
@@ -108,7 +111,7 @@ class RslearnDataModule(L.LightningDataModule):
             )
             dataset = RetryDataset(dataset)
             self.datasets[split] = dataset
-            print(f"got {len(self.datasets[split])} examples in split {split}")
+            logger.info(f"got {len(self.datasets[split])} examples in split {split}")
 
     def set_name(self, name: str) -> None:
         """Set the name of the dataset.
@@ -226,18 +229,20 @@ class MultiDatasetDataModule(L.LightningDataModule):
         self,
         data_modules: dict[str, RslearnDataModule],
         num_workers: int = 32,
-        **kwargs: Any,
+        round_robin: bool = False,
     ) -> None:
         """Initialize a new MultiDatasetDataModule.
 
         Args:
             data_modules: dict mapping dataset names to RslearnDataModule objects
             num_workers: the maximum number of workers to use for the dataloader
-            kwargs: additional keyword arguments
+            round_robin: whether to round-robin through the datasets
+                (default: False = random choice per batch)
         """
         super().__init__()
         self.data_modules = data_modules
         self.num_workers = num_workers
+        self.round_robin = round_robin
 
     def setup(self, stage: str | None = None) -> None:
         """Set up the datasets for the given stage. Also assign dataset-specific names.
@@ -254,7 +259,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
         batch_size = max(
             self.data_modules.values(), key=lambda dm: dm.batch_size
         ).batch_size
-        print(f"INFO: using batch_size {batch_size} for split {split}")
+        logger.info(f"using batch_size {batch_size} for split {split}")
         dataset = MultiDataset(datasets)
         return DataLoader(
             dataset=dataset,
@@ -268,6 +273,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
                 shuffle=(split == "train"),
                 num_replicas=self.trainer.world_size,  # type: ignore
                 rank=self.trainer.global_rank,  # type: ignore
+                round_robin=self.round_robin,
             ),
         )
 
@@ -302,6 +308,7 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         shuffle: bool = True,
         num_replicas: int | None = None,
         rank: int | None = None,
+        round_robin: bool = False,
     ) -> None:
         """Initialize a new DistributedPerDatasetBatchSampler.
 
@@ -311,10 +318,14 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
             shuffle: whether to shuffle the indices
             num_replicas: the number of replicas
             rank: the rank
+            round_robin: whether to round-robin through the datasets
+                (default: False = random choice per batch)
         """
         self.multi_dataset = multi_dataset
         self.batch_size = batch_size
+        self.round_robin = round_robin
         self.epoch = 0
+        logger.info(f"dataloader is using round-robin: {round_robin}")
         # Using one DistributedSampler per dataset guarantees equal splitting
         # across all datasets across all ranks
         self.dist_samplers = {
@@ -344,19 +355,25 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         partitioned: dict[str, list[int]] = {}
         for name, sampler in self.dist_samplers.items():
             offset = self.multi_dataset.buckets[name].start
-            partitioned[name] = [idx + offset for idx in list(iter(sampler))]
+            partitioned[name] = [idx + offset for idx in sampler]
 
         # Seed is shared aross all ranks but shuffled per epoch
         rng = random.Random(self.epoch)
+        picks = list(partitioned.keys())
+        last_picked = -1
 
-        # Randomly pick a non-empty (or sufficiently full) bucket each time
-        # NOTE: this samples uniformly across all datasets, which may or may not be desirable
+        # Random mode samples uniformly across all datasets regardless of size
         while True:
             available = [name for name, idxs in partitioned.items() if idxs]
+            picks = [name for name in picks if name in available]
             if not available:
                 break
 
-            name = rng.choice(available)
+            if self.round_robin:
+                last_picked = (last_picked + 1) % len(picks)
+                name = picks[last_picked]
+            else:
+                name = rng.choice(available)
             idxs = partitioned[name]
 
             if len(idxs) >= self.batch_size:
