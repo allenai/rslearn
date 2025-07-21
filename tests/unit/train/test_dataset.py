@@ -336,5 +336,5 @@ def test_load_two_layers(basic_classification_dataset: Dataset) -> None:
     assert len(dataset) == 1
     inputs, _, _ = dataset[0]
     assert inputs["image"].shape == (2, 4, 4)
-    assert np.all(inputs["image"][0] == 1)
-    assert np.all(inputs["image"][1] == 2)
+    assert torch.all(inputs["image"][0] == 1)
+    assert torch.all(inputs["image"][1] == 2)
