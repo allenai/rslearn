@@ -2,6 +2,7 @@
 
 import math
 import random
+from collections import defaultdict
 from collections.abc import Iterator
 from typing import Any
 
@@ -230,6 +231,8 @@ class MultiDatasetDataModule(L.LightningDataModule):
         data_modules: dict[str, RslearnDataModule],
         num_workers: int = 32,
         round_robin: bool = False,
+        batch_sizes: int | dict[str, int] | None = None,
+        refill_batches: bool = False,
     ) -> None:
         """Initialize a new MultiDatasetDataModule.
 
@@ -238,11 +241,18 @@ class MultiDatasetDataModule(L.LightningDataModule):
             num_workers: the maximum number of workers to use for the dataloader
             round_robin: whether to round-robin through the datasets
                 (default: False = random choice per batch)
+            batch_sizes: the batch size for all datasets, or a dict mapping dataset
+                names to batch sizes, or None to use the batch size of the largest
+                dataset (default: None)
+            refill_batches: whether to refill empty dataset iterators
+                once they run out each epoch (default: False)
         """
         super().__init__()
         self.data_modules = data_modules
         self.num_workers = num_workers
         self.round_robin = round_robin
+        self.batch_sizes = batch_sizes
+        self.refill_batches = refill_batches
 
     def setup(self, stage: str | None = None) -> None:
         """Set up the datasets for the given stage. Also assign dataset-specific names.
@@ -256,10 +266,19 @@ class MultiDatasetDataModule(L.LightningDataModule):
 
     def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:
         datasets = {name: dm.datasets[split] for name, dm in self.data_modules.items()}
-        batch_size = max(
-            self.data_modules.values(), key=lambda dm: dm.batch_size
-        ).batch_size
-        logger.info(f"using batch_size {batch_size} for split {split}")
+        if isinstance(self.batch_sizes, dict):
+            batch_sizes = self.batch_sizes
+        else:
+            batch_size: int | None = self.batch_sizes
+            if batch_size is None:
+                batch_size = max(
+                    self.data_modules.values(), key=lambda dm: dm.batch_size
+                ).batch_size
+            batch_sizes = {name: batch_size for name in self.data_modules.keys()}
+
+        logger.info(f"{split} is using batch_sizes {batch_sizes}")
+        logger.info(f"{split} is using round-robin {self.round_robin}")
+
         dataset = MultiDataset(datasets)
         return DataLoader(
             dataset=dataset,
@@ -269,11 +288,12 @@ class MultiDatasetDataModule(L.LightningDataModule):
             collate_fn=collate_fn,
             batch_sampler=DistributedPerDatasetBatchSampler(
                 multi_dataset=dataset,
-                batch_size=batch_size,
+                batch_sizes=batch_sizes,
                 shuffle=(split == "train"),
                 num_replicas=self.trainer.world_size,  # type: ignore
                 rank=self.trainer.global_rank,  # type: ignore
                 round_robin=self.round_robin,
+                refill_batches=self.refill_batches,
             ),
         )
 
@@ -304,28 +324,37 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
     def __init__(
         self,
         multi_dataset: MultiDataset,
-        batch_size: int,
+        batch_sizes: dict[str, int],
         shuffle: bool = True,
         num_replicas: int | None = None,
         rank: int | None = None,
         round_robin: bool = False,
+        refill_batches: bool = False,
     ) -> None:
         """Initialize a new DistributedPerDatasetBatchSampler.
 
         Args:
             multi_dataset: the MultiDataset to sample from
-            batch_size: the batch size
+            batch_sizes: the batch size for each dataset
             shuffle: whether to shuffle the indices
             num_replicas: the number of replicas
             rank: the rank
             round_robin: whether to round-robin through the datasets
                 (default: False = random choice per batch)
+            refill_batches: whether to refill empty dataset iterators
+                once they run out each epoch
         """
         self.multi_dataset = multi_dataset
-        self.batch_size = batch_size
+        self.batch_sizes = batch_sizes
         self.round_robin = round_robin
+        self.refill_batches = refill_batches
         self.epoch = 0
-        logger.info(f"dataloader is using round-robin: {round_robin}")
+
+        # For now, we just track the total number of batches if refill_batches is True,
+        # so we must the datasets come out balanced during each epoch
+        if refill_batches and not round_robin:
+            raise ValueError("refill_batches is only supported with round_robin")
+
         # Using one DistributedSampler per dataset guarantees equal splitting
         # across all datasets across all ranks
         self.dist_samplers = {
@@ -353,6 +382,7 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         """Iterate over the batches."""
         # Get the per-rank, per-epoch list of properly offset multi-dataset indices
         partitioned: dict[str, list[int]] = {}
+        refill: dict[str, list[int]] = defaultdict(list)
         for name, sampler in self.dist_samplers.items():
             offset = self.multi_dataset.buckets[name].start
             partitioned[name] = [idx + offset for idx in sampler]
@@ -361,12 +391,16 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         rng = random.Random(self.epoch)
         picks = list(partitioned.keys())
         last_picked = -1
+        num_batches = 0
 
         # Random mode samples uniformly across all datasets regardless of size
         while True:
             available = [name for name, idxs in partitioned.items() if idxs]
-            picks = [name for name in picks if name in available]
-            if not available:
+            if not self.refill_batches:
+                # For round-robin, only pick from available datasets, but if
+                # we are refilling batches then all datasets are available
+                picks = [name for name in picks if name in available]
+            if not available or num_batches == len(self):
                 break
 
             if self.round_robin:
@@ -376,19 +410,31 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
                 name = rng.choice(available)
             idxs = partitioned[name]
 
-            if len(idxs) >= self.batch_size:
-                batch, partitioned[name] = (
-                    idxs[: self.batch_size],
-                    idxs[self.batch_size :],
-                )
-            else:
-                batch, partitioned[name] = idxs[:], []
+            batch, partitioned[name] = (
+                idxs[: self.batch_sizes[name]],
+                idxs[self.batch_sizes[name] :],
+            )
 
+            # If we are refilling batches, we just keep adding the indexes
+            if self.refill_batches:
+                refill[name].extend(batch)
+                if len(partitioned[name]) == 0:
+                    # Shuffle batches again once we have to replenish them
+                    partitioned[name], refill[name] = refill[name], []
+                    rng.shuffle(partitioned[name])
+
+            num_batches += 1
             yield batch
 
     def __len__(self) -> int:
         """Return the number of batches."""
-        return sum(
-            math.ceil(len(sampler) / self.batch_size)
-            for sampler in self.dist_samplers.values()
-        )
+        if self.refill_batches:
+            return max(
+                math.ceil(len(sampler) / self.batch_sizes[name])
+                for name, sampler in self.dist_samplers.items()
+            ) * len(self.dist_samplers)
+        else:
+            return sum(
+                math.ceil(len(sampler) / self.batch_sizes[name])
+                for name, sampler in self.dist_samplers.items()
+            )
