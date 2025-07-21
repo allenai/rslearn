@@ -1,16 +1,109 @@
-import numpy as np
-import pytest
-import torch.utils.data
+import json
+import pathlib
 
-from rslearn.dataset import Dataset
+import numpy as np
+import numpy.typing as npt
+import pytest
+import shapely
+import torch.utils.data
+from upath import UPath
+
+from rslearn.const import WGS84_PROJECTION
+from rslearn.dataset import Dataset, Window
 from rslearn.train.dataset import DataInput, ModelDataset, RetryDataset, SplitConfig
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.transforms.concatenate import Concatenate
-from rslearn.utils.raster_format import SingleImageRasterFormat
+from rslearn.utils.feature import Feature
+from rslearn.utils.geometry import STGeometry
+from rslearn.utils.raster_format import GeotiffRasterFormat
+from rslearn.utils.vector_format import GeojsonVectorFormat
 
 
 class TestException(Exception):
     pass
+
+
+@pytest.fixture
+def basic_classification_dataset(tmp_path: pathlib.Path) -> Dataset:
+    """Create an empty dataset setup for image classification."""
+    ds_path = UPath(tmp_path)
+    dataset_config = {
+        "layers": {
+            "image_layer1": {
+                "type": "raster",
+                "band_sets": [
+                    {
+                        "dtype": "uint8",
+                        "bands": ["band"],
+                    }
+                ],
+            },
+            "image_layer2": {
+                "type": "raster",
+                "band_sets": [
+                    {
+                        "dtype": "uint8",
+                        "bands": ["band"],
+                    }
+                ],
+            },
+            "vector_layer": {"type": "vector"},
+        },
+    }
+    ds_path.mkdir(parents=True, exist_ok=True)
+    with (ds_path / "config.json").open("w") as f:
+        json.dump(dataset_config, f)
+    return Dataset(ds_path)
+
+
+def add_window(
+    dataset: Dataset,
+    name: str = "default",
+    group: str = "default",
+    images: dict[tuple[str, int], npt.NDArray] = {},
+) -> Window:
+    """Add a window to the dataset.
+
+    Args:
+        dataset: the dataset to add to.
+        name: the name of the window.
+        group: the group of the window.
+        images: map from (layer_name, group_idx) to the image content, which should be
+            1x4x4 since that is the window size.
+    """
+    window_path = Window.get_window_root(dataset.path, name, group)
+    window = Window(
+        path=window_path,
+        group=name,
+        name=group,
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 4, 4),
+        time_range=None,
+    )
+    window.save()
+
+    for (layer_name, group_idx), image in images.items():
+        raster_dir = window.get_raster_dir(layer_name, ["band"], group_idx=group_idx)
+        GeotiffRasterFormat().encode_raster(
+            raster_dir, window.projection, window.bounds, image
+        )
+        window.mark_layer_completed(layer_name, group_idx=group_idx)
+
+    # Add label.
+    feature = Feature(
+        STGeometry(window.projection, shapely.Point(1, 1), None),
+        {
+            "label": 1,
+        },
+    )
+    layer_dir = window.get_layer_dir("vector_layer")
+    GeojsonVectorFormat().encode_vector(
+        layer_dir,
+        [feature],
+    )
+    window.mark_layer_completed("vector_layer")
+
+    return window
 
 
 class TestDataset(torch.utils.data.Dataset):
@@ -132,27 +225,25 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
     assert all(point_coverage.values())
 
 
-def test_basic_time_series(image_to_class_dataset: Dataset) -> None:
-    # Write another image to the dataset to make sure we'll be able to load it.
-    # This simulates a second item group in the layer (called image.1).
-    window = image_to_class_dataset.load_windows()[0]
+def test_basic_time_series(basic_classification_dataset: Dataset) -> None:
+    # Create a window with two images in the first layer to make sure we will be able
+    # to load it when explicitly adding a DataInput for it.
     image = np.zeros((1, 4, 4), dtype=np.uint8)
-    SingleImageRasterFormat().encode_raster(
-        window.get_raster_dir("image", ["band"], group_idx=1),
-        window.projection,
-        window.bounds,
-        image,
+    add_window(
+        basic_classification_dataset,
+        images={
+            ("image_layer1", 0): image,
+            ("image_layer1", 1): image,
+        },
     )
-    (window.get_layer_dir("image", group_idx=1) / "completed").touch()
-
     dataset = ModelDataset(
-        image_to_class_dataset,
+        basic_classification_dataset,
         split_config=SplitConfig(
             transforms=[
                 Concatenate(
                     {
-                        "image": [],
-                        "image.1": [],
+                        "image0": [],
+                        "image1": [],
                     },
                     "image",
                 )
@@ -161,14 +252,89 @@ def test_basic_time_series(image_to_class_dataset: Dataset) -> None:
         task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
         workers=1,
         inputs={
-            "image": DataInput("raster", ["image"], bands=["band"], passthrough=True),
-            "image.1": DataInput(
-                "raster", ["image.1"], bands=["band"], passthrough=True
+            "image0": DataInput(
+                "raster", ["image_layer1"], bands=["band"], passthrough=True
             ),
-            "targets": DataInput("vector", ["label"]),
+            "image1": DataInput(
+                "raster", ["image_layer1.1"], bands=["band"], passthrough=True
+            ),
+            "targets": DataInput("vector", ["vector_layer"]),
         },
     )
 
     assert len(dataset) == 1
     inputs, _, _ = dataset[0]
     assert inputs["image"].shape == (2, 4, 4)
+
+
+def test_load_all_layers(basic_classification_dataset: Dataset) -> None:
+    """Make sure we can load a time series by using load_all_layers option."""
+    # Create a window with two images in the first layer to make sure we will be able
+    # to load it when explicitly adding a DataInput for it.
+    image = np.zeros((1, 4, 4), dtype=np.uint8)
+    add_window(
+        basic_classification_dataset,
+        images={
+            ("image_layer1", 0): image,
+            ("image_layer1", 1): image,
+        },
+    )
+    dataset = ModelDataset(
+        basic_classification_dataset,
+        split_config=SplitConfig(),
+        task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+        workers=1,
+        inputs={
+            "image": DataInput(
+                "raster",
+                ["image_layer1"],
+                bands=["band"],
+                passthrough=True,
+                load_all_layers=True,
+                load_all_item_groups=True,
+            ),
+            "targets": DataInput("vector", ["vector_layer"]),
+        },
+    )
+
+    assert len(dataset) == 1
+    inputs, _, _ = dataset[0]
+    assert inputs["image"].shape == (2, 4, 4)
+
+
+def test_load_two_layers(basic_classification_dataset: Dataset) -> None:
+    """Make sure when load_all_layers is passed we load all of the layer options."""
+    # We create a window with two images in the first layer and one image in the second
+    # layer. Then in the DataInput we only refer to the second image in the first layer
+    # and the only image in the second layer. With load_all_layers but not
+    # load_all_item_groups, just these two images should be read.
+    add_window(
+        basic_classification_dataset,
+        images={
+            ("image_layer1", 0): 0 * np.ones((1, 4, 4), dtype=np.uint8),
+            ("image_layer1", 1): 1 * np.ones((1, 4, 4), dtype=np.uint8),
+            ("image_layer2", 1): 2 * np.ones((1, 4, 4), dtype=np.uint8),
+        },
+    )
+    dataset = ModelDataset(
+        basic_classification_dataset,
+        split_config=SplitConfig(),
+        task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+        workers=1,
+        inputs={
+            "image": DataInput(
+                "raster",
+                ["image_layer1.1", "image_layer2"],
+                bands=["band"],
+                passthrough=True,
+                load_all_layers=True,
+            ),
+            "targets": DataInput("vector", ["vector_layer"]),
+        },
+    )
+
+    assert len(dataset) == 1
+    inputs, _, _ = dataset[0]
+    assert inputs["image"].shape == (2, 4, 4)
+    assert np.all(inputs["image"][0] == 1)
+    assert np.all(inputs["image"][1] == 2)

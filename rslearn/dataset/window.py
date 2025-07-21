@@ -205,6 +205,25 @@ class Window:
         with open_atomic(items_fname, "w") as f:
             json.dump(json_data, f)
 
+    def list_completed_layers(self) -> list[tuple[str, int]]:
+        """List the layers available for this window that are completed.
+
+        Returns:
+            a list of (layer_name, group_idx) completed layers.
+        """
+        layers_directory = self.path / LAYERS_DIRECTORY_NAME
+        if not layers_directory.exists():
+            return []
+
+        completed_layers = []
+        for layer_dir in layers_directory.iterdir():
+            layer_name, group_idx = get_layer_and_group_from_dir_name(layer_dir.name)
+            if not self.is_layer_completed(layer_name, group_idx):
+                continue
+            completed_layers.append((layer_name, group_idx))
+
+        return completed_layers
+
     def get_layer_dir(self, layer_name: str, group_idx: int = 0) -> UPath:
         """Get the directory containing materialized data for the specified layer.
 

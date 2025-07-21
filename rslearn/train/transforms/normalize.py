@@ -19,6 +19,7 @@ class Normalize(Transform):
         ) = None,
         selectors: list[str] = ["image"],
         bands: list[int] | None = None,
+        num_bands: int | None = None,
     ) -> None:
         """Initialize a new Normalize.
 
@@ -30,6 +31,10 @@ class Normalize(Transform):
             valid_range: optionally clip to a minimum and maximum value
             selectors: image items to transform
             bands: optionally restrict the normalization to these bands
+            num_bands: the number of bands per image, to distinguish different images
+                in a time series. If set, then the bands list is repeated for each
+                image, e.g. if bands=[2] then we apply normalization on images[2],
+                images[2+num_bands], images[2+num_bands*2], etc.
         """
         super().__init__()
         self.mean = torch.tensor(mean)
@@ -43,7 +48,8 @@ class Normalize(Transform):
             self.valid_max = None
 
         self.selectors = selectors
-        self.bands = bands
+        self.bands = torch.tensor(bands) if bands is not None else None
+        self.num_bands = num_bands
 
     def apply_image(self, image: torch.Tensor) -> torch.Tensor:
         """Normalize the specified image.
@@ -51,11 +57,25 @@ class Normalize(Transform):
         Args:
             image: the image to transform.
         """
-        if self.bands:
-            image[self.bands] = (image[self.bands] - self.mean) / self.std
+        if self.bands is not None:
+            # User has provided band indices to normalize.
+            # If num_bands is set, then we repeat these for each image in the input
+            # image time series.
+            band_indices = self.bands
+            if self.num_bands:
+                num_images = image.shape[0] // self.num_bands
+                band_indices = torch.cat(
+                    [
+                        band_indices + image_idx * self.num_bands
+                        for image_idx in range(num_images)
+                    ],
+                    dim=0,
+                )
+
+            image[band_indices] = (image[band_indices] - self.mean) / self.std
             if self.valid_min is not None:
-                image[self.bands] = torch.clamp(
-                    image[self.bands], min=self.valid_min, max=self.valid_max
+                image[band_indices] = torch.clamp(
+                    image[band_indices], min=self.valid_min, max=self.valid_max
                 )
         else:
             image = (image - self.mean) / self.std
