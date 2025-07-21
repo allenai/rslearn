@@ -391,16 +391,16 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         rng = random.Random(self.epoch)
         picks = list(partitioned.keys())
         last_picked = -1
-        num_batches = 0
 
         # Random mode samples uniformly across all datasets regardless of size
-        while True:
+        for n in range(len(self)):
             available = [name for name, idxs in partitioned.items() if idxs]
             if not self.refill_batches:
                 # For round-robin, only pick from available datasets, but if
                 # we are refilling batches then all datasets are available
                 picks = [name for name in picks if name in available]
-            if not available or num_batches == len(self):
+            if not available:
+                logger.warning("Found no available batch on step {n} of {len(self)}")
                 break
 
             if self.round_robin:
@@ -423,7 +423,6 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
                     partitioned[name], refill[name] = refill[name], []
                     rng.shuffle(partitioned[name])
 
-            num_batches += 1
             yield batch
 
     def __len__(self) -> int:
