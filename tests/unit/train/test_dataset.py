@@ -313,7 +313,7 @@ def test_load_two_layers(basic_classification_dataset: Dataset) -> None:
         images={
             ("image_layer1", 0): 0 * np.ones((1, 4, 4), dtype=np.uint8),
             ("image_layer1", 1): 1 * np.ones((1, 4, 4), dtype=np.uint8),
-            ("image_layer2", 1): 2 * np.ones((1, 4, 4), dtype=np.uint8),
+            ("image_layer2", 0): 2 * np.ones((1, 4, 4), dtype=np.uint8),
         },
     )
     dataset = ModelDataset(
