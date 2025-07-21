@@ -1,10 +1,13 @@
 """Default Dataset for rslearn."""
 
 import hashlib
+import json
 import multiprocessing
 import os
 import random
+import tempfile
 import time
+import uuid
 from typing import Any
 
 import torch
@@ -102,7 +105,7 @@ class WeightedRandomSamplerFactory(SamplerFactory):
             a RandomSampler
         """
         weights = []
-        for window in dataset.get_windows():
+        for window in dataset.get_dataset_examples():
             weights.append(window.options[self.option_key])
         return torch.utils.data.WeightedRandomSampler(
             weights, self.num_samples, replacement=self.replacement
@@ -156,6 +159,7 @@ class SplitConfig:
         names: list[str] | None = None,
         tags: dict[str, str] | None = None,
         num_samples: int | None = None,
+        num_patches: int | None = None,
         transforms: list[torch.nn.Module] | None = None,
         sampler: SamplerFactory | None = None,
         patch_size: int | tuple[int, int] | None = None,
@@ -173,6 +177,7 @@ class SplitConfig:
                 value. If value is empty, then only the existince of the key in the
                 window options is checked.
             num_samples: limit this split to this many examples
+            num_patches: limit this split to this many patches
             transforms: transforms to apply
             sampler: SamplerFactory for this split
             patch_size: an optional square size or (width, height) tuple. If set, read
@@ -188,6 +193,7 @@ class SplitConfig:
         self.names = names
         self.tags = tags
         self.num_samples = num_samples
+        self.num_patches = num_patches
         self.transforms = transforms
         self.sampler = sampler
         self.patch_size = patch_size
@@ -209,6 +215,7 @@ class SplitConfig:
             names=self.names,
             tags=self.tags,
             num_samples=self.num_samples,
+            num_patches=self.num_patches,
             transforms=self.transforms,
             sampler=self.sampler,
             patch_size=self.patch_size,
@@ -224,6 +231,8 @@ class SplitConfig:
             result.tags = other.tags
         if other.num_samples:
             result.num_samples = other.num_samples
+        if other.num_patches:
+            result.num_patches = other.num_patches
         if other.transforms:
             result.transforms = other.transforms
         if other.sampler:
@@ -289,6 +298,7 @@ class ModelDataset(torch.utils.data.Dataset):
         inputs: dict[str, DataInput],
         task: Task,
         workers: int,
+        name: str | None = None,
     ) -> None:
         """Instantiate a new ModelDataset.
 
@@ -298,12 +308,13 @@ class ModelDataset(torch.utils.data.Dataset):
             inputs: data to read from the dataset for training
             task: the task to train on
             workers: number of workers to use for initializing the dataset
+            name: name of the dataset (default: None)
         """
         self.dataset = dataset
         self.split_config = split_config
         self.inputs = inputs
         self.task = task
-
+        self.name = name
         if split_config.transforms:
             self.transforms = Sequential(*split_config.transforms)
         else:
@@ -353,11 +364,17 @@ class ModelDataset(torch.utils.data.Dataset):
 
         # Eliminate windows that are missing either a requisite input layer, or missing
         # all target layers.
+        # We use only main thread if the index is set, since that can take a long time
+        # to send to the worker threads, it may get serialized for each window.
         new_windows = []
-        if workers == 0:
+        if workers == 0 or windows[0].index is not None:
             for window in windows:
                 if check_window(self.inputs, window) is None:
                     continue
+                # The index may be set, but now that this check is done, from here on
+                # we no longer need it. We set it None so that we don't end up passing
+                # it later to the dataloader workers.
+                window.index = None
                 new_windows.append(window)
         else:
             p = multiprocessing.Pool(workers)
@@ -396,9 +413,10 @@ class ModelDataset(torch.utils.data.Dataset):
             # be representative of the population.
             windows = windows[0 : split_config.num_samples]
 
-        self.windows: list = windows
+        dataset_examples: list = windows
 
         # If we're loading all patches, we need to include the patch details.
+        # In this case, dataset_examples is a list of (window, bounds, (patch_idx, # patches)).
         if split_config.get_load_all_patches() and self.patch_size is not None:
             patches = []
             overlap_size = int(
@@ -406,7 +424,7 @@ class ModelDataset(torch.utils.data.Dataset):
                 if split_config.overlap_ratio
                 else 0
             )
-            for window in self.windows:
+            for window in dataset_examples:
                 cur_patches = []
                 if window is None:
                     raise ValueError("Window is None in load_all_patches")
@@ -430,11 +448,77 @@ class ModelDataset(torch.utils.data.Dataset):
                         )
                 for i, patch_bounds in enumerate(cur_patches):
                     patches.append((window, patch_bounds, (i, len(cur_patches))))
-            self.windows = patches
+
+            if split_config.num_patches:
+                patches = patches[0 : split_config.num_patches]
+
+            dataset_examples = patches
+
+        # Write dataset_examples to a file so that we can load it lazily in the worker
+        # processes. Otherwise it takes a long time to transmit it when spawning each
+        # process.
+        self.dataset_examples_fname = os.path.join(
+            tempfile.gettempdir(),
+            "rslearn_dataset_examples",
+            f"{os.getpid()}_{uuid.uuid4()}.json",
+        )
+        self.num_dataset_examples = len(dataset_examples)
+        self.dataset_examples: list | None = None
+        logger.info(
+            f"Writing {len(dataset_examples)} dataset examples to {self.dataset_examples_fname}"
+        )
+        os.makedirs(os.path.dirname(self.dataset_examples_fname), exist_ok=True)
+        with open(self.dataset_examples_fname, "w") as f:
+            json.dump(
+                [self._serialize_item(example) for example in dataset_examples], f
+            )
+
+    def _serialize_item(self, example: Window | tuple) -> dict[str, Any]:
+        if isinstance(example, Window):
+            return {
+                "window": example.get_metadata(),
+            }
+        else:
+            window, patch_bounds, indices = example
+            return {
+                "window": window.get_metadata(),
+                "patch_bounds": patch_bounds,
+                "indices": indices,
+            }
+
+    def _deserialize_item(self, d: dict[str, Any]) -> Window | tuple:
+        window_metadata = d["window"]
+        window = Window.from_metadata(
+            Window.get_window_root(
+                self.dataset.path, window_metadata["group"], window_metadata["name"]
+            ),
+            window_metadata,
+        )
+        if "patch_bounds" in d:
+            return (window, tuple(d["patch_bounds"]), tuple(d["indices"]))
+        else:
+            return window
+
+    def get_dataset_examples(self) -> list:
+        """Get a list of examples in the dataset.
+
+        If load_all_patches is False, this is a list of Windows. Otherwise, this is a
+        list of (window, patch_bounds, (patch_idx, # patches)) tuples.
+        """
+        if self.dataset_examples is None:
+            logger.info(
+                f"Loading dataset examples from {self.dataset_examples_fname} in process {os.getpid()}"
+            )
+            with open(self.dataset_examples_fname) as f:
+                self.dataset_examples = [
+                    self._deserialize_item(d) for d in json.load(f)
+                ]
+            logger.info(f"Finished loading dataset examples in process {os.getpid()}")
+        return self.dataset_examples
 
     def __len__(self) -> int:
         """Returns the dataset length."""
-        return len(self.windows)
+        return self.num_dataset_examples
 
     def __getitem__(
         self, idx: int
@@ -447,13 +531,16 @@ class ModelDataset(torch.utils.data.Dataset):
         Returns:
             a tuple (input_dict, target_dict)
         """
+        dataset_examples = self.get_dataset_examples()
         logger.debug("__getitem__ start pid=%d item_idx=%d", os.getpid(), idx)
-        window = self.windows[idx]
+        example = dataset_examples[idx]
 
         # Select bounds to read.
         if self.split_config.get_load_all_patches():
-            window, bounds, (patch_idx, num_patches) = window
+            window, bounds, (patch_idx, num_patches) = example
+
         elif self.patch_size:
+            window = example
 
             def get_patch_range(n_patch: int, n_window: int) -> list[int]:
                 if n_patch > n_window:
@@ -481,7 +568,9 @@ class ModelDataset(torch.utils.data.Dataset):
                 window.bounds[0] + patch_ranges[0][1],
                 window.bounds[1] + patch_ranges[1][1],
             ]
+
         else:
+            window = example
             bounds = window.bounds
 
         assert isinstance(window, Window)
@@ -611,6 +700,7 @@ class ModelDataset(torch.utils.data.Dataset):
             "bounds": bounds,
             "time_range": window.time_range,
             "projection": window.projection,
+            "dataset_source": self.name,
         }
         if self.split_config.get_load_all_patches():
             metadata["patch_idx"] = patch_idx
@@ -626,21 +716,26 @@ class ModelDataset(torch.utils.data.Dataset):
         )
         input_dict.update(passthrough_inputs)
         input_dict, target_dict = self.transforms(input_dict, target_dict)
+        input_dict["dataset_source"] = self.name
 
         logger.debug("__getitem__ finish pid=%d item_idx=%d", os.getpid(), idx)
 
         return input_dict, target_dict, metadata
 
-    def get_windows(self) -> list[Window]:
-        """Returns a list of windows in this dataset."""
-        return self.windows
+    def set_name(self, name: str) -> None:
+        """Set the name of the dataset.
+
+        Args:
+            name: the name to set.
+        """
+        self.name = name
 
 
 class RetryDataset(torch.utils.data.Dataset):
     """A dataset wrapper that retries getitem upon encountering error."""
 
     def __init__(
-        self, dataset: torch.utils.data.Dataset, retries: int = 3, delay: float = 5
+        self, dataset: ModelDataset, retries: int = 3, delay: float = 5
     ) -> None:
         """Create a new RetryDataset.
 
@@ -652,6 +747,14 @@ class RetryDataset(torch.utils.data.Dataset):
         self.dataset = dataset
         self.retries = retries
         self.delay = delay
+
+    def set_name(self, name: str) -> None:
+        """Set the name of the dataset.
+
+        Args:
+            name: the name to set.
+        """
+        self.dataset.set_name(name)
 
     def __len__(self) -> int:
         """Return length of the dataset."""
@@ -679,6 +782,41 @@ class RetryDataset(torch.utils.data.Dataset):
         # One last try -- but don't catch any more errors.
         return self.dataset[idx]
 
-    def get_windows(self) -> list[Window]:
+    def get_dataset_examples(self) -> list:
         """Returns a list of windows in this dataset."""
-        return self.dataset.get_windows()
+        return self.dataset.get_dataset_examples()
+
+
+class MultiDataset(torch.utils.data.Dataset):
+    """A dataset that combines multiple datasets."""
+
+    def __init__(self, datasets: dict[str, RetryDataset]) -> None:
+        """Create a new MultiDataset.
+
+        Args:
+            datasets: map of dataset name to dataset.
+        """
+        self.datasets = datasets
+        self.buckets = {}
+        curr_offset = 0
+        for name, ds in datasets.items():
+            self.buckets[name] = range(curr_offset, curr_offset + len(ds))
+            curr_offset += len(ds)
+
+    def __len__(self) -> int:
+        """Return length of the dataset."""
+        return sum(len(ds) for ds in self.datasets.values())
+
+    def __getitem__(self, idx: int) -> Any:
+        """Get item from the dataset.
+
+        Args:
+            idx: the item index.
+
+        Returns:
+            the item data.
+        """
+        for name, bucket in self.buckets.items():
+            if idx in bucket:
+                return self.datasets[name][idx - bucket.start]
+        raise IndexError(f"Index {idx} out of range (len={len(self)})")

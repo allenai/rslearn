@@ -5,6 +5,48 @@ from typing import Any
 import torch
 
 
+def apply_decoder(
+    features: list[torch.Tensor],
+    inputs: list[dict[str, Any]],
+    targets: list[dict[str, Any]] | None,
+    decoder: list[torch.nn.Module],
+    name: str,
+    outputs: list[dict[str, Any]],
+    losses: dict[str, torch.Tensor],
+) -> tuple[list[dict[str, Any]], dict[str, torch.Tensor]]:
+    """Apply a decoder to a list of inputs and targets.
+
+    Args:
+        features: list of features
+        inputs: list of input dicts
+        targets: list of target dicts
+        decoder: list of decoder modules
+        name: the name of the decoder/task (which must match)
+        outputs: list of output dicts
+        losses: dictionary of loss values
+
+    Returns:
+        tuple of (outputs, losses)
+    """
+    # First, apply all but the last module in the decoder to the features
+    cur = features
+    for module in decoder[:-1]:
+        cur = module(cur, inputs)
+
+    if targets is None:
+        cur_targets = None
+    else:
+        cur_targets = [target[name] for target in targets]
+
+    # Then, apply the last module to the features and targets
+    cur_output, cur_loss_dict = decoder[-1](cur, inputs, cur_targets)
+    for idx, entry in enumerate(cur_output):
+        outputs[idx][name] = entry
+    for loss_name, loss_value in cur_loss_dict.items():
+        losses[f"{name}_{loss_name}"] = loss_value
+    return outputs, losses
+
+
 class MultiTaskModel(torch.nn.Module):
     """MultiTask model wrapper.
 
@@ -15,19 +57,29 @@ class MultiTaskModel(torch.nn.Module):
     """
 
     def __init__(
-        self, encoder: list[torch.nn.Module], decoders: dict[str, list[torch.nn.Module]]
+        self,
+        encoder: list[torch.nn.Module],
+        decoders: dict[str, list[torch.nn.Module]],
+        lazy_decode: bool = False,
     ):
         """Initialize a new MultiTaskModel.
 
         Args:
             encoder: modules to compute intermediate feature representations.
             decoders: modules to compute outputs and loss, should match number of tasks.
+            lazy_decode: if True, only decode the outputs specified in the batch.
         """
         super().__init__()
+        self.lazy_decode = lazy_decode
         self.encoder = torch.nn.Sequential(*encoder)
         self.decoders = torch.nn.ModuleDict(
             {name: torch.nn.ModuleList(decoder) for name, decoder in decoders.items()}
         )
+
+        if lazy_decode:
+            print(
+                "INFO: lazy decoding enabled, check source is consistent across batch"
+            )
 
     def forward(
         self,
@@ -45,21 +97,15 @@ class MultiTaskModel(torch.nn.Module):
         """
         features = self.encoder(inputs)
         outputs: list[dict[str, Any]] = [{} for _ in inputs]
-        losses = {}
-        for name, decoder in self.decoders.items():
-            cur = features
-            for module in decoder[:-1]:
-                cur = module(cur, inputs)
-
-            if targets is None:
-                cur_targets = None
-            else:
-                cur_targets = [target[name] for target in targets]
-
-            cur_output, cur_loss_dict = decoder[-1](cur, inputs, cur_targets)
-
-            for idx, entry in enumerate(cur_output):
-                outputs[idx][name] = entry
-            for loss_name, loss_value in cur_loss_dict.items():
-                losses[f"{name}_{loss_name}"] = loss_value
+        losses: dict[str, torch.Tensor] = {}
+        if self.lazy_decode:
+            # Assume that all inputs have the same dataset_source
+            dataset_source = inputs[0]["dataset_source"]
+            decoder = self.decoders[dataset_source]
+            apply_decoder(
+                features, inputs, targets, decoder, dataset_source, outputs, losses
+            )
+        else:
+            for name, decoder in self.decoders.items():
+                apply_decoder(features, inputs, targets, decoder, name, outputs, losses)
         return outputs, losses
