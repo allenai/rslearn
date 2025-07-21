@@ -3,7 +3,12 @@
 import torch
 from lightning.pytorch import LightningModule
 from lightning.pytorch.callbacks import BaseFinetuning
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.optim.optimizer import Optimizer
+
+from rslearn.log_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class FreezeUnfreeze(BaseFinetuning):
@@ -46,7 +51,7 @@ class FreezeUnfreeze(BaseFinetuning):
         Args:
             pl_module: the LightningModule.
         """
-        print(f"freezing model at {self.module_selector}")
+        logger.info(f"freezing model at {self.module_selector}")
         self.freeze(self._get_target_module(pl_module))
 
     def finetune_function(
@@ -61,19 +66,24 @@ class FreezeUnfreeze(BaseFinetuning):
         """
         if self.unfreeze_at_epoch is None:
             return
-        if current_epoch != self.unfreeze_at_epoch:
-            return
-        print(
-            f"unfreezing model at {self.module_selector} since we are on epoch {current_epoch}"
-        )
-        self.unfreeze_and_add_param_group(
-            modules=self._get_target_module(pl_module),
-            optimizer=optimizer,
-            initial_denom_lr=self.unfreeze_lr_factor,
-        )
-
-        if "plateau" in pl_module.schedulers:
-            scheduler = pl_module.schedulers["plateau"]
-            while len(scheduler.min_lrs) < len(optimizer.param_groups):
-                print("appending to plateau scheduler min_lrs")
-                scheduler.min_lrs.append(scheduler.min_lrs[0])
+        elif current_epoch == self.unfreeze_at_epoch:
+            logger.info(
+                f"unfreezing model at {self.module_selector} since we are on epoch {current_epoch}"
+            )
+            self.unfreeze_and_add_param_group(
+                modules=self._get_target_module(pl_module),
+                optimizer=optimizer,
+                initial_denom_lr=self.unfreeze_lr_factor,
+            )
+            if "scheduler" in pl_module.schedulers:
+                scheduler = pl_module.schedulers["scheduler"]
+                if isinstance(scheduler, ReduceLROnPlateau):
+                    while len(scheduler.min_lrs) < len(optimizer.param_groups):
+                        logger.info(
+                            "appending to ReduceLROnPlateau scheduler min_lrs for unfreeze"
+                        )
+                        scheduler.min_lrs.append(scheduler.min_lrs[0])
+        elif current_epoch > self.unfreeze_at_epoch:
+            # always do this because overhead is minimal, and it allows restoring
+            # from a checkpoint (resuming a run) without messing up unfreezing
+            BaseFinetuning.make_trainable(self._get_target_module(pl_module))
