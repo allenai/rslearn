@@ -55,5 +55,5 @@ class TestDataset:
             workers=4,
         )
         assert len(dataset) == 2
-        window_names = {window.name for window in dataset.get_windows()}
+        window_names = {window.name for window in dataset.get_dataset_examples()}
         assert window_names == {"window3", "window4"}
