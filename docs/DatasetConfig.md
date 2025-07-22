@@ -9,15 +9,9 @@ have one layer for Sentinel-2 images, and another layer for building polygons fr
 OpenStreetMap.
 
 Layers may be populated manually, or populated automatically from data sources. rslearn
-retrieves data from data sources in three steps:
-
-1. Prepare: identify items in the data source that correspond to windows in the
-   dataset.
-2. Ingest: download those items to the dataset's tile store.
-3. Materialize: crop and re-project the items relevant to each window from the tile
-   store as needed to align them with the window.
-
-The tile store is an intermediate storage to store the ingested items.
+retrieves data from data sources in three steps: prepare, ingest, and materialize (see
+[CoreConcepts](CoreConcepts.md)). The tile store is an intermediate storage to store
+the ingested items.
 
 Below, we detail the dataset configuration file specification. See
 [Examples.md](Examples.md) for some examples of dataset configuration files for

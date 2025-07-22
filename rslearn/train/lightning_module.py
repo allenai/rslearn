@@ -1,5 +1,6 @@
 """Default LightningModule for rslearn."""
 
+import json
 import os
 from typing import Any
 
@@ -7,11 +8,15 @@ import lightning as L
 import torch
 from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
 from PIL import Image
-from torch.optim import AdamW
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 from upath import UPath
 
+from rslearn.log_utils import get_logger
+
+from .optimizer import AdamW, OptimizerFactory
+from .scheduler import PlateauScheduler, SchedulerFactory
 from .tasks import Task
+
+logger = get_logger(__name__)
 
 
 class RestoreConfig:
@@ -36,7 +41,7 @@ class RestoreConfig:
             restore_path_options: additional options for the restore_path to pass to
                 fsspec.
             selector: path in the torch dict containing the model parameters.
-            ignore_prefixes: prefixes to restore.
+            ignore_prefixes: prefixes to ignore from the state dict.
             remap_prefixes: list of (old_prefix, new_prefix) to rename parameters
                 starting with old_prefix to start with new_prefix instead.
         """
@@ -82,16 +87,20 @@ class RslearnLightningModule(L.LightningModule):
         self,
         model: torch.nn.Module,
         task: Task,
+        optimizer: OptimizerFactory | None = None,
+        scheduler: SchedulerFactory | None = None,
+        visualize_dir: str | None = None,
+        metrics_file: str | None = None,
+        restore_config: RestoreConfig | None = None,
+        print_parameters: bool = False,
+        print_model: bool = False,
+        # Deprecated options.
         lr: float = 1e-3,
         plateau: bool = False,
         plateau_factor: float = 0.1,
         plateau_patience: int = 10,
         plateau_min_lr: float = 0,
         plateau_cooldown: int = 0,
-        visualize_dir: str | None = None,
-        restore_config: RestoreConfig | None = None,
-        print_parameters: bool = False,
-        print_model: bool = False,
     ):
         """Initialize a new RslearnLightningModule.
 
@@ -99,32 +108,51 @@ class RslearnLightningModule(L.LightningModule):
             model: the model
             task: the task to train on
             lr: the initial learning rate
-            plateau: whether to enable plateau scheduler (default false)
-            plateau_factor: on plateau, factor to multiply learning rate by
-            plateau_patience: number of iterations with no improvement in val loss
-                before reducing learning rate
-            plateau_min_lr: minimum learning rate to reduce to
-            plateau_cooldown: number of iterations after reducing learning rate before
-                resetting plateau scheduler
+            optimizer: the optimizer factory.
+            scheduler: the learning rate scheduler factory.
             visualize_dir: during validation or testing, output visualizations to this
                 directory
+            metrics_file: file to save metrics to
             restore_config: specification of configuration to restore parameters from
                 a non-Lightning checkpoint.
             print_parameters: whether to print the list of model parameters after model
                 initialization
             print_model: whether to print the model after model initialization
+            plateau: deprecated.
+            plateau_factor: deprecated.
+            plateau_patience: deprecated.
+            plateau_min_lr: deprecated.
+            plateau_cooldown: deprecated.
         """
         super().__init__()
         self.model = model
         self.task = task
         self.lr = lr
-        self.plateau = plateau
-        self.plateau_factor = plateau_factor
-        self.plateau_patience = plateau_patience
-        self.plateau_min_lr = plateau_min_lr
-        self.plateau_cooldown = plateau_cooldown
         self.visualize_dir = visualize_dir
+        self.metrics_file = metrics_file
         self.restore_config = restore_config
+
+        self.scheduler_factory: SchedulerFactory | None = None
+        if scheduler:
+            self.scheduler_factory = scheduler
+        elif plateau:
+            logger.warning(
+                "The plateau argument to RslearnLightningModule is deprecated and will be removed in a future version"
+            )
+            self.scheduler_factory = PlateauScheduler(
+                factor=plateau_factor,
+                patience=plateau_patience,
+                min_lr=plateau_min_lr,
+                cooldown=plateau_cooldown,
+            )
+
+        if optimizer:
+            self.optimizer_factory = optimizer
+        else:
+            logger.warning(
+                "Defaulting the optimizer to AdamW since an OptimizerFactory was not provided. In a future version, the optimizer will be a required argument."
+            )
+            self.optimizer_factory = AdamW(lr=lr)
 
         if print_parameters:
             for name, param in self.named_parameters():
@@ -160,26 +188,27 @@ class RslearnLightningModule(L.LightningModule):
         Returns:
             Optimizer and learning rate scheduler.
         """
-        params = [p for p in self.parameters() if p.requires_grad]
-        optimizer = AdamW(params, lr=self.lr)
+        optimizer = self.optimizer_factory.build(self)
         d = dict(
             optimizer=optimizer,
         )
-        if self.plateau:
-            scheduler = ReduceLROnPlateau(
-                optimizer,
-                factor=self.plateau_factor,
-                patience=self.plateau_patience,
-                min_lr=self.plateau_min_lr,
-                cooldown=self.plateau_cooldown,
-            )
+        if self.scheduler_factory is not None:
+            scheduler = self.scheduler_factory.build(optimizer)
             d["lr_scheduler"] = {
                 "scheduler": scheduler,
                 "monitor": "train_loss",
                 "interval": "epoch",
             }
-            self.schedulers["plateau"] = scheduler
+            self.schedulers["scheduler"] = scheduler
         return d
+
+    def on_train_epoch_start(self) -> None:
+        """If we are in a multi-dataset distributed strategy, set the epoch."""
+        try:
+            self.trainer.train_dataloader.batch_sampler.set_epoch(self.current_epoch)
+        except AttributeError:
+            # Fail silently for single-dataset case, which is okay
+            pass
 
     def training_step(
         self, batch: Any, batch_idx: int, dataloader_idx: int = 0
@@ -250,6 +279,14 @@ class RslearnLightningModule(L.LightningModule):
         self.log_dict(
             self.val_metrics, batch_size=batch_size, on_epoch=True, sync_dist=True
         )
+
+    def on_test_epoch_end(self) -> None:
+        """Optionally save the test metrics to a file."""
+        if self.metrics_file:
+            with open(self.metrics_file, "w") as f:
+                metrics = self.test_metrics.compute()
+                metrics_dict = {k: v.item() for k, v in metrics.items()}
+                json.dump(metrics_dict, f, indent=4)
 
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         """Compute the test loss and additional metrics.
