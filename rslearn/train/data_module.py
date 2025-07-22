@@ -233,6 +233,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
         round_robin: bool = False,
         batch_sizes: int | dict[str, int] | None = None,
         refill_batches: bool = False,
+        per_dataset_patch_limit: int | None = None,
     ) -> None:
         """Initialize a new MultiDatasetDataModule.
 
@@ -246,6 +247,8 @@ class MultiDatasetDataModule(L.LightningDataModule):
                 dataset (default: None)
             refill_batches: whether to refill empty dataset iterators
                 once they run out each epoch (default: False)
+            per_dataset_patch_limit: the maximum number of patches to sample from each dataset
+                per epoch during training. Does not affect validation (default: None = no limit)
         """
         super().__init__()
         self.data_modules = data_modules
@@ -253,6 +256,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
         self.round_robin = round_robin
         self.batch_sizes = batch_sizes
         self.refill_batches = refill_batches
+        self.per_dataset_patch_limit = per_dataset_patch_limit
 
     def setup(self, stage: str | None = None) -> None:
         """Set up the datasets for the given stage. Also assign dataset-specific names.
@@ -278,6 +282,10 @@ class MultiDatasetDataModule(L.LightningDataModule):
 
         logger.info(f"{split} is using batch_sizes {batch_sizes}")
         logger.info(f"{split} is using round-robin {self.round_robin}")
+        if self.per_dataset_patch_limit:
+            logger.info(
+                f"{split} is using per_dataset_patch_limit {self.per_dataset_patch_limit}"
+            )
 
         dataset = MultiDataset(datasets)
         return DataLoader(
@@ -294,6 +302,9 @@ class MultiDatasetDataModule(L.LightningDataModule):
                 rank=self.trainer.global_rank,  # type: ignore
                 round_robin=self.round_robin,
                 refill_batches=self.refill_batches,
+                per_dataset_patch_limit=(
+                    self.per_dataset_patch_limit if split == "train" else None
+                ),
             ),
         )
 
@@ -330,6 +341,7 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         rank: int | None = None,
         round_robin: bool = False,
         refill_batches: bool = False,
+        per_dataset_patch_limit: int | None = None,
     ) -> None:
         """Initialize a new DistributedPerDatasetBatchSampler.
 
@@ -343,11 +355,14 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
                 (default: False = random choice per batch)
             refill_batches: whether to refill empty dataset iterators
                 once they run out each epoch
+            per_dataset_patch_limit: the maximum number of patches to sample from each dataset
+                per epoch during training. Does not affect validation (default: None = no limit)
         """
         self.multi_dataset = multi_dataset
         self.batch_sizes = batch_sizes
         self.round_robin = round_robin
         self.refill_batches = refill_batches
+        self.per_dataset_patch_limit = per_dataset_patch_limit
         self.epoch = 0
 
         # For now, we just track the total number of batches if refill_batches is True,
@@ -386,6 +401,8 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         for name, sampler in self.dist_samplers.items():
             offset = self.multi_dataset.buckets[name].start
             partitioned[name] = [idx + offset for idx in sampler]
+            if self.per_dataset_patch_limit:
+                partitioned[name] = partitioned[name][: self.per_dataset_patch_limit]
 
         # Seed is shared aross all ranks but shuffled per epoch
         rng = random.Random(self.epoch)
@@ -400,7 +417,7 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
                 # we are refilling batches then all datasets are available
                 picks = [name for name in picks if name in available]
             if not available:
-                logger.warning("Found no available batch on step {n} of {len(self)}")
+                logger.warning(f"Found no available batch on step {n} of {len(self)}")
                 break
 
             if self.round_robin:
@@ -427,13 +444,16 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
 
     def __len__(self) -> int:
         """Return the number of batches."""
+
+        def len_iter() -> Iterator[int]:
+            """Iterate over the number of batches for each dataset."""
+            for name, sampler in self.dist_samplers.items():
+                length = len(sampler)
+                if self.per_dataset_patch_limit:
+                    length = min(length, self.per_dataset_patch_limit)
+                yield math.ceil(length / self.batch_sizes[name])
+
         if self.refill_batches:
-            return max(
-                math.ceil(len(sampler) / self.batch_sizes[name])
-                for name, sampler in self.dist_samplers.items()
-            ) * len(self.dist_samplers)
+            return max(len_iter()) * len(self.dist_samplers)
         else:
-            return sum(
-                math.ceil(len(sampler) / self.batch_sizes[name])
-                for name, sampler in self.dist_samplers.items()
-            )
+            return sum(len_iter())
