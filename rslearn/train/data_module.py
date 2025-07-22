@@ -230,7 +230,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
         self,
         data_modules: dict[str, RslearnDataModule],
         num_workers: int = 32,
-        round_robin: bool = False,
+        sample_mode: str = "random_cycle",
         batch_sizes: int | dict[str, int] | None = None,
         refill_batches: bool = False,
         per_dataset_patch_limit: int | None = None,
@@ -240,8 +240,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
         Args:
             data_modules: dict mapping dataset names to RslearnDataModule objects
             num_workers: the maximum number of workers to use for the dataloader
-            round_robin: whether to round-robin through the datasets
-                (default: False = random choice per batch)
+            sample_mode: the mode to sample from the datasets ("random", "cycle", "random_cycle")
             batch_sizes: the batch size for all datasets, or a dict mapping dataset
                 names to batch sizes, or None to use the batch size of the largest
                 dataset (default: None)
@@ -253,7 +252,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
         super().__init__()
         self.data_modules = data_modules
         self.num_workers = num_workers
-        self.round_robin = round_robin
+        self.sample_mode = sample_mode
         self.batch_sizes = batch_sizes
         self.refill_batches = refill_batches
         self.per_dataset_patch_limit = per_dataset_patch_limit
@@ -281,7 +280,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
             batch_sizes = {name: batch_size for name in self.data_modules.keys()}
 
         logger.info(f"{split} is using batch_sizes {batch_sizes}")
-        logger.info(f"{split} is using round-robin {self.round_robin}")
+        logger.info(f"{split} is using sample_mode {self.sample_mode}")
         if self.per_dataset_patch_limit:
             logger.info(
                 f"{split} is using per_dataset_patch_limit {self.per_dataset_patch_limit}"
@@ -300,7 +299,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
                 shuffle=(split == "train"),
                 num_replicas=self.trainer.world_size,  # type: ignore
                 rank=self.trainer.global_rank,  # type: ignore
-                round_robin=self.round_robin,
+                sample_mode=self.sample_mode,
                 refill_batches=self.refill_batches,
                 per_dataset_patch_limit=(
                     self.per_dataset_patch_limit if split == "train" else None
@@ -339,7 +338,7 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         shuffle: bool = True,
         num_replicas: int | None = None,
         rank: int | None = None,
-        round_robin: bool = False,
+        sample_mode: str = "random_cycle",
         refill_batches: bool = False,
         per_dataset_patch_limit: int | None = None,
     ) -> None:
@@ -351,8 +350,7 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
             shuffle: whether to shuffle the indices
             num_replicas: the number of replicas
             rank: the rank
-            round_robin: whether to round-robin through the datasets
-                (default: False = random choice per batch)
+            sample_mode: the mode to sample from the datasets ("random", "cycle", "random_cycle")
             refill_batches: whether to refill empty dataset iterators
                 once they run out each epoch
             per_dataset_patch_limit: the maximum number of patches to sample from each dataset
@@ -360,14 +358,20 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         """
         self.multi_dataset = multi_dataset
         self.batch_sizes = batch_sizes
-        self.round_robin = round_robin
+        self.sample_mode = sample_mode
         self.refill_batches = refill_batches
         self.per_dataset_patch_limit = per_dataset_patch_limit
         self.epoch = 0
 
+        assert sample_mode in (
+            "random",
+            "cycle",
+            "random_cycle",
+        ), f"Invalid sample_mode: {sample_mode}"
+
         # For now, we just track the total number of batches if refill_batches is True,
         # so we must the datasets come out balanced during each epoch
-        if refill_batches and not round_robin:
+        if refill_batches and self.sample_mode not in ("cycle", "random_cycle"):
             raise ValueError("refill_batches is only supported with round_robin")
 
         # Using one DistributedSampler per dataset guarantees equal splitting
@@ -413,16 +417,21 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         for n in range(len(self)):
             available = [name for name, idxs in partitioned.items() if idxs]
             if not self.refill_batches:
-                # For round-robin, only pick from available datasets, but if
+                # For cycle, only pick from available datasets, but if
                 # we are refilling batches then all datasets are available
                 picks = [name for name in picks if name in available]
             if not available:
                 logger.warning(f"Found no available batch on step {n} of {len(self)}")
                 break
 
-            if self.round_robin:
+            if self.sample_mode == "cycle":
                 last_picked = (last_picked + 1) % len(picks)
                 name = picks[last_picked]
+            elif self.sample_mode == "random_cycle":
+                name = rng.choice(picks)
+                picks.remove(name)
+                if not picks:
+                    picks = list(partitioned.keys())
             else:
                 name = rng.choice(available)
             idxs = partitioned[name]
