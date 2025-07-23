@@ -18,13 +18,15 @@ class MiniPCGrad(Callback):
     Still quite slow, requiring an extra copy of parameter gradients in memory.
     """
 
-    def __init__(self, selector: str) -> None:
+    def __init__(self, selector: str, only_monitor: bool = False) -> None:
         """Initialize the callback.
 
         Args:
             selector: Prefix for selecting which parameters to operate on.
+            only_monitor: If true, only log gradients, don't clip them.
         """
         self.selector = selector
+        self.only_monitor = only_monitor
         self.prev_grads: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
 
     def on_train_batch_start(
@@ -76,14 +78,18 @@ class MiniPCGrad(Callback):
                     )
                     angles.append(angle)
 
-                    # if angle < 0:
-                    #     # Project the micro grad onto the prev grad's normal plane, and then vice versea
-                    #     micro_projection = micro_grad - norm_prod / (prev_grad_norm ** 2) * prev_grad
-                    #     prev_projection = prev_grad - norm_prod / (micro_grad_norm ** 2) * micro_grad
+                    if not self.only_monitor and angle < 0:
+                        # Project the micro grad onto the prev grad's normal plane, and then vice versea
+                        micro_projection = (
+                            micro_grad - norm_prod / (prev_grad_norm**2) * prev_grad
+                        )
+                        prev_projection = (
+                            prev_grad - norm_prod / (micro_grad_norm**2) * micro_grad
+                        )
 
-                    #     # Since gradient accumulation does not divide by the batch size until
-                    #     # the optimizer step, we can just sum the projected gradients here
-                    #     param.grad = micro_projection + prev_projection
+                        # Since gradient accumulation does not divide by the batch size until
+                        # the optimizer step, we can just sum the projected gradients here
+                        param.grad = micro_projection + prev_projection
 
                 self.prev_grads[name] = (param.grad.clone(), param.grad.norm())
 
