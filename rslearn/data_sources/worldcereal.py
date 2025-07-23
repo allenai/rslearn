@@ -252,6 +252,7 @@ class WorldCerealConfidences(LocalFiles):
         # Download the zip files (if they don't already exist).
         zip_dir = worldcereal_dir / "zips"
         zip_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Worldcereal zipfile: {zip_dir}")
 
         # Fetch list of files from Zenodo's Deposition Files API
         # f["filename"] maps to the ZIP_FILENAMES
@@ -269,6 +270,7 @@ class WorldCerealConfidences(LocalFiles):
             if filepath.exists():
                 continue
             # Download the file with resume support
+            logger.info(f"Downloading {file_url} to {filepath}")
             with requests.get(file_url, stream=True, timeout=cls.TIMEOUT_SECONDS) as r:
                 r.raise_for_status()
                 with open_atomic(filepath, "wb") as f:
