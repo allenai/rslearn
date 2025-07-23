@@ -157,7 +157,7 @@ class SplitConfig:
         self,
         groups: list[str] | None = None,
         names: list[str] | None = None,
-        tags: dict[str, str] | None = None,
+        tags: dict[str, Any] | None = None,
         num_samples: int | None = None,
         num_patches: int | None = None,
         transforms: list[torch.nn.Module] | None = None,
@@ -345,15 +345,19 @@ class ModelDataset(torch.utils.data.Dataset):
         if split_config.tags:
             # Filter the window.options.
             new_windows = []
+            num_removed: dict[str, int] = {}
             for window in windows:
-                tags_passed = True
                 for k, v in split_config.tags.items():
-                    if k not in window.options:
-                        tags_passed = False
-                    elif v and window.options[k] != v:
-                        tags_passed = False
-                if tags_passed:
+                    if k not in window.options or (v and window.options[k] != v):
+                        num_removed[k] = num_removed.get(k, 0) + 1
+                        break
+                else:
                     new_windows.append(window)
+            logger.info(
+                f"Started with {len(windows)} windows, ended with {len(new_windows)} windows"
+            )
+            for k, v in num_removed.items():
+                logger.info(f"Removed {v} windows due to tag {k}")
             windows = new_windows
 
         # If targets are not needed, remove them from the inputs.

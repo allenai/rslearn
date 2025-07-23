@@ -311,6 +311,15 @@ class Window:
             metadata["bounds"][2],
             metadata["bounds"][3],
         )
+
+        # Add information about available ground-truth bbox if available
+        # NOTE: not sure if this is the best place to do this
+        try:
+            with open(path / "gt.json") as f:
+                metadata["options"]["has_objects"] = bool(json.load(f))
+        except FileNotFoundError:
+            pass
+
         return Window(
             path=path,
             group=metadata["group"],
