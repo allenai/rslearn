@@ -8,10 +8,8 @@ import tqdm
 from upath import UPath
 
 from .window import (
-    LAYERS_DIRECTORY_NAME,
     Window,
     WindowLayerData,
-    get_layer_and_group_from_dir_name,
 )
 
 if TYPE_CHECKING:
@@ -25,19 +23,7 @@ def get_window_layer_datas(window: Window) -> list[WindowLayerData]:
 
 def get_window_completed_layers(window: Window) -> list[tuple[str, int]]:
     """Helper function for multiprocessing to load window completed layers."""
-    # We don't know the range of possible groups a priori, so we instead look in the
-    # layers directory.
-    layers_directory = window.path / LAYERS_DIRECTORY_NAME
-    if not layers_directory.exists():
-        return []
-
-    completed_layers = []
-    for layer_dir in layers_directory.iterdir():
-        layer_name, group_idx = get_layer_and_group_from_dir_name(layer_dir.name)
-        if not window.is_layer_completed(layer_name, group_idx):
-            continue
-        completed_layers.append((layer_name, group_idx))
-    return completed_layers
+    return window.list_completed_layers()
 
 
 class DatasetIndex:

@@ -42,7 +42,7 @@ def retry(fn: Callable, retry_max_attempts: int, retry_backoff: timedelta) -> An
         try:
             return fn()
         except Exception as e:
-            logger.debug(f"Retrying after catching error in retry loop: {e}")
+            logger.warning(f"Retrying after catching error in retry loop: {e}")
             sleep_base_seconds = retry_backoff.total_seconds() * (attempt_idx + 1)
             time.sleep(sleep_base_seconds * (1 + random.random()))
 
