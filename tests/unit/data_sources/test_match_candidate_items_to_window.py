@@ -81,6 +81,62 @@ class TestTimeMode:
         assert item_groups == [[item_list[2]], [item_list[3]], [item_list[1]]]
 
 
+class TestSpaceMode:
+    """Test the contains and intersects space modes."""
+
+    START_TIME = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    END_TIME = datetime(2024, 1, 2, tzinfo=timezone.utc)
+
+    @pytest.fixture
+    def window_geometry(self) -> STGeometry:
+        return STGeometry(
+            WGS84_PROJECTION,
+            shapely.box(0, 0, 0.7, 0.7),
+            (self.START_TIME, self.END_TIME),
+        )
+
+    @pytest.fixture
+    def item_list(self) -> list[Item]:
+        def make_item(name: str, geom: shapely.Geometry) -> Item:
+            return Item(
+                name,
+                STGeometry(WGS84_PROJECTION, geom, (self.START_TIME, self.END_TIME)),
+            )
+
+        item0 = make_item("item0", shapely.box(-0.1, -0.1, 0.5, 0.5))
+        item1 = make_item("item1", shapely.box(-0.1, -0.1, 0.75, 0.75))
+        item2 = make_item("item2", shapely.box(0.65, 0.65, 0.75, 0.75))
+        item3 = make_item("item3", shapely.box(0.1, 0.1, 0.2, 0.2))
+        item4 = make_item("item4", shapely.box(1, 1, 2, 2))
+        return [item0, item1, item2, item3, item4]
+
+    def test_contains_mode(
+        self, window_geometry: STGeometry, item_list: list[Item]
+    ) -> None:
+        """Verify that CONTAINS selects only items that fully contain the window."""
+        query_config = QueryConfig(space_mode=SpaceMode.CONTAINS, max_matches=10)
+        item_groups = match_candidate_items_to_window(
+            window_geometry, item_list, query_config
+        )
+        print([group[0].name for group in item_groups])
+        assert item_groups == [[item_list[1]]]
+
+    def test_intersects_mode(
+        self, window_geometry: STGeometry, item_list: list[Item]
+    ) -> None:
+        """Verify that INTERSECTS selects all items that intersect."""
+        query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS, max_matches=10)
+        item_groups = match_candidate_items_to_window(
+            window_geometry, item_list, query_config
+        )
+        assert item_groups == [
+            [item_list[0]],
+            [item_list[1]],
+            [item_list[2]],
+            [item_list[3]],
+        ]
+
+
 class TestMosaic:
     @pytest.fixture
     def six_items(self) -> list[Item]:
@@ -181,3 +237,114 @@ class TestMosaic:
             [six_items[1]],
             [six_items[2]],
         ]
+
+
+class TestPerPeriodMosaic:
+    """Tests for the PER_PERIOD_MOSAIC SpaceMode."""
+
+    def test_three_mosaics(self) -> None:
+        """Test creating two full mosaics and one partial mosaic.
+
+        We provide time range with four time periods, but the full mosaic for first
+        (oldest) time period should not be used due to the max_matches=3.
+        """
+        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        period_duration = timedelta(days=30)
+        periods = [
+            (base_ts, base_ts + period_duration),
+            (base_ts + period_duration, base_ts + period_duration * 2),
+            (base_ts + period_duration * 2, base_ts + period_duration * 3),
+            (base_ts + period_duration * 3, base_ts + period_duration * 4),
+        ]
+        bbox = shapely.box(0, 0, 1, 1)
+        window_geometry = STGeometry(
+            WGS84_PROJECTION, bbox, (base_ts, base_ts + period_duration * 4)
+        )
+        item_list = [
+            # Full first time period.
+            Item("item0", STGeometry(WGS84_PROJECTION, bbox, periods[0])),
+            # Full second time period with two items.
+            Item(
+                "item1",
+                STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 0.5), periods[1]),
+            ),
+            Item(
+                "item2",
+                STGeometry(WGS84_PROJECTION, shapely.box(0, 0.5, 1, 1), periods[1]),
+            ),
+            # Partial third time period.
+            Item(
+                "item3",
+                STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 0.5, 0.5), periods[2]),
+            ),
+            # Full fourth time period.
+            Item("item4", STGeometry(WGS84_PROJECTION, bbox, periods[3])),
+        ]
+        query_config = QueryConfig(
+            space_mode=SpaceMode.PER_PERIOD_MOSAIC, max_matches=3
+        )
+        item_groups = match_candidate_items_to_window(
+            window_geometry, item_list, query_config
+        )
+        assert item_groups == [
+            [item_list[4]],
+            [item_list[3]],
+            [item_list[1], item_list[2]],
+        ]
+
+    def test_skip_empty_period(self) -> None:
+        """Ensure that empty periods are skipped so it falls back to earlier period."""
+        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        period_duration = timedelta(days=30)
+        periods = [
+            (base_ts, base_ts + period_duration),
+            (base_ts + period_duration, base_ts + period_duration * 2),
+            (base_ts + period_duration * 2, base_ts + period_duration * 3),
+            (base_ts + period_duration * 3, base_ts + period_duration * 4),
+        ]
+        bbox = shapely.box(0, 0, 1, 1)
+        window_geometry = STGeometry(
+            WGS84_PROJECTION, bbox, (base_ts, base_ts + period_duration * 4)
+        )
+        item_list = [
+            # Full first time period.
+            Item("item0", STGeometry(WGS84_PROJECTION, bbox, periods[0])),
+            # Full second time period.
+            Item("item1", STGeometry(WGS84_PROJECTION, bbox, periods[1])),
+            # Full third time period.
+            Item("item2", STGeometry(WGS84_PROJECTION, bbox, periods[2])),
+            # Fourth time period has no items within the window geometry so it should be skipped.
+            Item(
+                "item3",
+                STGeometry(WGS84_PROJECTION, shapely.box(2, 2, 3, 3), periods[3]),
+            ),
+        ]
+        query_config = QueryConfig(
+            space_mode=SpaceMode.PER_PERIOD_MOSAIC, max_matches=2
+        )
+        item_groups = match_candidate_items_to_window(
+            window_geometry, item_list, query_config
+        )
+        assert item_groups == [
+            [item_list[2]],
+            [item_list[1]],
+        ]
+
+
+def test_min_matches() -> None:
+    """Ensure that no groups are returned if minimum matches is set."""
+    bbox = shapely.box(0, 0, 1, 1)
+    time_range = (
+        datetime(2024, 1, 1, tzinfo=timezone.utc),
+        datetime(2024, 2, 1, tzinfo=timezone.utc),
+    )
+    geom = STGeometry(WGS84_PROJECTION, bbox, time_range)
+    item_list = [
+        Item("item0", geom),
+        Item("item1", geom),
+    ]
+    query_config = QueryConfig(
+        space_mode=SpaceMode.CONTAINS, max_matches=3, min_matches=3
+    )
+    item_groups = match_candidate_items_to_window(geom, item_list, query_config)
+    assert item_groups == []
