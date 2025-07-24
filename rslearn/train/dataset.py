@@ -354,7 +354,7 @@ class ModelDataset(torch.utils.data.Dataset):
                 else:
                     new_windows.append(window)
             logger.info(
-                f"Started with {len(windows)} windows, ended with {len(new_windows)} windows"
+                f"Started with {len(windows)} windows, ended with {len(new_windows)} windows for {self.dataset.path}"
             )
             for k, v in num_removed.items():
                 logger.info(f"Removed {v} windows due to tag {k}")

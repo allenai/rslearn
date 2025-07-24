@@ -234,13 +234,14 @@ class MultiDatasetDataModule(L.LightningDataModule):
         batch_sizes: int | dict[str, int] | None = None,
         refill_batches: bool = False,
         per_dataset_patch_limit: int | None = None,
+        steps_per_dataset: int | None = None,
     ) -> None:
         """Initialize a new MultiDatasetDataModule.
 
         Args:
             data_modules: dict mapping dataset names to RslearnDataModule objects
             num_workers: the maximum number of workers to use for the dataloader
-            sample_mode: the mode to sample from the datasets ("random", "cycle", "random_cycle")
+            sample_mode: the mode to sample from the datasets ("random", "cycle", "random_cycle", "reptile")
             batch_sizes: the batch size for all datasets, or a dict mapping dataset
                 names to batch sizes, or None to use the batch size of the largest
                 dataset (default: None)
@@ -248,6 +249,8 @@ class MultiDatasetDataModule(L.LightningDataModule):
                 once they run out each epoch (default: False)
             per_dataset_patch_limit: the maximum number of patches to sample from each dataset
                 per epoch during training. Does not affect validation (default: None = no limit)
+            steps_per_dataset: the number of steps to sample from each dataset in a row (requires that
+                sample_mode is "reptile")
         """
         super().__init__()
         self.data_modules = data_modules
@@ -256,6 +259,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
         self.batch_sizes = batch_sizes
         self.refill_batches = refill_batches
         self.per_dataset_patch_limit = per_dataset_patch_limit
+        self.steps_per_dataset = steps_per_dataset
 
     def setup(self, stage: str | None = None) -> None:
         """Set up the datasets for the given stage. Also assign dataset-specific names.
@@ -304,6 +308,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
                 per_dataset_patch_limit=(
                     self.per_dataset_patch_limit if split == "train" else None
                 ),
+                steps_per_dataset=self.steps_per_dataset,
             ),
         )
 
@@ -340,6 +345,7 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         rank: int | None = None,
         sample_mode: str = "random_cycle",
         refill_batches: bool = False,
+        steps_per_dataset: int | None = None,
         per_dataset_patch_limit: int | None = None,
     ) -> None:
         """Initialize a new DistributedPerDatasetBatchSampler.
@@ -350,28 +356,41 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
             shuffle: whether to shuffle the indices
             num_replicas: the number of replicas
             rank: the rank
-            sample_mode: the mode to sample from the datasets ("random", "cycle", "random_cycle")
+            sample_mode: the mode to sample from the datasets ("random", "cycle", "random_cycle", "reptile")
             refill_batches: whether to refill empty dataset iterators
                 once they run out each epoch
+            steps_per_dataset: the number of steps to sample from each dataset
             per_dataset_patch_limit: the maximum number of patches to sample from each dataset
                 per epoch during training. Does not affect validation (default: None = no limit)
+            steps_per_dataset: the number of steps to sample from each dataset in a row (requires that
+                sample_mode is "reptile")
         """
         self.multi_dataset = multi_dataset
         self.batch_sizes = batch_sizes
         self.sample_mode = sample_mode
         self.refill_batches = refill_batches
         self.per_dataset_patch_limit = per_dataset_patch_limit
+        self.steps_per_dataset: int = steps_per_dataset  # type: ignore
         self.epoch = 0
 
+        if sample_mode == "reptile":
+            assert (
+                steps_per_dataset is not None
+            ), "steps_per_dataset must be provided when sample_mode is 'reptile'"
         assert sample_mode in (
             "random",
             "cycle",
             "random_cycle",
+            "reptile",
         ), f"Invalid sample_mode: {sample_mode}"
 
         # For now, we just track the total number of batches if refill_batches is True,
         # so we must the datasets come out balanced during each epoch
-        if refill_batches and self.sample_mode not in ("cycle", "random_cycle"):
+        if refill_batches and self.sample_mode not in (
+            "cycle",
+            "random_cycle",
+            "reptile",
+        ):
             raise ValueError("refill_batches is only supported with round_robin")
 
         # Using one DistributedSampler per dataset guarantees equal splitting
@@ -394,8 +413,9 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
             epoch: the epoch to set
         """
         self.epoch = epoch
-        for dist_sampler in self.dist_samplers.values():
+        for name, dist_sampler in self.dist_samplers.items():
             dist_sampler.set_epoch(epoch)
+            logger.info(f"Dataset {name} has {len(dist_sampler)} patches")
 
     def __iter__(self) -> Iterator[list[int]]:
         """Iterate over the batches."""
@@ -412,6 +432,7 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         rng = random.Random(self.epoch)
         picks = list(partitioned.keys())
         last_picked = -1
+        dataset_counter = 0
 
         # Random mode samples uniformly across all datasets regardless of size
         for n in range(len(self)):
@@ -427,15 +448,33 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
             if self.sample_mode == "cycle":
                 last_picked = (last_picked + 1) % len(picks)
                 name = picks[last_picked]
+
+            elif self.sample_mode == "reptile":
+                # Sample n times from the same dataset before moving onto the next,
+                # but still ensure we sample from all the datasets before repeating
+                # This is so that we can use the refill_batches feature
+                if dataset_counter == 0:
+                    name = rng.choice(picks)
+                    last_picked = picks.index(name)
+                else:
+                    name = picks[last_picked]
+                dataset_counter += 1
+                if dataset_counter >= self.steps_per_dataset:
+                    dataset_counter = 0
+                    picks.remove(name)
+                    if not picks:
+                        picks = list(partitioned.keys())
+
             elif self.sample_mode == "random_cycle":
                 name = rng.choice(picks)
                 picks.remove(name)
                 if not picks:
                     picks = list(partitioned.keys())
+
             else:
                 name = rng.choice(available)
-            idxs = partitioned[name]
 
+            idxs = partitioned[name]
             batch, partitioned[name] = (
                 idxs[: self.batch_sizes[name]],
                 idxs[self.batch_sizes[name] :],

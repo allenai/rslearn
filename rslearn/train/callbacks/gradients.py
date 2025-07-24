@@ -79,7 +79,7 @@ class MiniPCGrad(Callback):
                     angles.append(angle)
 
                     if not self.only_monitor and angle < 0:
-                        # Project the micro grad onto the prev grad's normal plane, and then vice versea
+                        # Project the micro grad onto the prev grad's normal plane, and then vice versa
                         micro_projection = (
                             micro_grad - norm_prod / (prev_grad_norm**2) * prev_grad
                         )
@@ -93,14 +93,17 @@ class MiniPCGrad(Callback):
 
                 self.prev_grads[name] = (param.grad.clone(), param.grad.norm())
 
-        info = {
-            f"grads/{self.dataset_source}_prev_grad_norms": torch.stack(
-                prev_grad_norms
-            ).norm(),
-            f"grads/{self.dataset_source}_micro_grad_norms": torch.stack(
-                micro_grad_norms
-            ).norm(),
-        }
+        log_prev_grad_norms, log_micro_grad_norms, log_angles = 0.0, 0.0, 0.0
+        if len(prev_grad_norms) > 0:
+            log_prev_grad_norms = torch.stack(prev_grad_norms).norm()
+        if len(micro_grad_norms) > 0:
+            log_micro_grad_norms = torch.stack(micro_grad_norms).norm()
         if len(angles) > 0:
-            info[f"grads/{self.dataset_source}_angles"] = torch.stack(angles).mean()
+            log_angles = torch.stack(angles).mean()
+
+        info = {
+            f"grads/{self.dataset_source}_prev_grad_norms": log_prev_grad_norms,
+            f"grads/{self.dataset_source}_micro_grad_norms": log_micro_grad_norms,
+            f"grads/{self.dataset_source}_angles": log_angles,
+        }
         self.log_dict(info, on_step=True, on_epoch=False, batch_size=self.batch_size)

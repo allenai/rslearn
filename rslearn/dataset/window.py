@@ -313,10 +313,15 @@ class Window:
         )
 
         # Add information about available ground-truth bbox if available
-        # NOTE: not sure if this is the best place to do this
+        # NOTE: this is probably not the right way to do this, but it's quick fix
         try:
-            with open(path / "gt.json") as f:
-                metadata["options"]["has_objects"] = bool(json.load(f))
+            if (path / "gt.json").exists():
+                with open(path / "gt.json") as f:
+                    metadata["options"]["has_objects"] = bool(json.load(f))
+            else:
+                with open(path / "layers" / "label" / "data.geojson") as f:
+                    geodata = json.load(f)
+                    metadata["options"]["has_objects"] = len(geodata["features"]) > 0
         except FileNotFoundError:
             pass
 

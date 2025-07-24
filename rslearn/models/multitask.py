@@ -46,6 +46,10 @@ class MultiTaskModel(torch.nn.Module):
             )
         if loss_weights is None:
             loss_weights = {name: 1.0 for name in decoders.keys()}
+        for name in decoders.keys():
+            if name not in loss_weights:
+                logger.warning(f"extra task {name} not in loss_weights, setting to 1.0")
+                loss_weights[name] = 1.0
         self.loss_weights = loss_weights
         logger.info(f"loss_weights: {self.loss_weights}")
 
