@@ -406,6 +406,9 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
             for name, dataset in multi_dataset.datasets.items()
         }
 
+        for k, v in self.dist_samplers.items():
+            logger.info(f"Dataset {k} has {len(v)} samples")
+
     def set_epoch(self, epoch: int) -> None:
         """Set the epoch for the distributed sampler.
 
@@ -413,9 +416,8 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
             epoch: the epoch to set
         """
         self.epoch = epoch
-        for name, dist_sampler in self.dist_samplers.items():
+        for dist_sampler in self.dist_samplers.values():
             dist_sampler.set_epoch(epoch)
-            logger.info(f"Dataset {name} has {len(dist_sampler)} patches")
 
     def __iter__(self) -> Iterator[list[int]]:
         """Iterate over the batches."""
