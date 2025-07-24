@@ -1,5 +1,6 @@
 """Abstract RasterFormat class."""
 
+import hashlib
 import json
 from typing import Any, BinaryIO
 
@@ -22,6 +23,18 @@ from .geometry import PixelBounds, Projection
 
 RasterFormats = ClassRegistry()
 logger = get_logger(__name__)
+
+
+def get_bandset_dirname(bands: list[str]) -> str:
+    """Get the directory name that should be used to store the given group of bands."""
+    if any(["_" in band for band in bands]):
+        raise ValueError("band names must not contain '_'")
+    dirname = "_".join(bands)
+    if len(dirname) > 64:
+        # Previously we simply joined the bands, but this can result in directory name
+        # that is too long. In this case, now we use hash instead.
+        dirname = hashlib.sha256(dirname.encode()).hexdigest()
+    return dirname
 
 
 def get_raster_projection_and_bounds_from_transform(
