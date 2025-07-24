@@ -57,3 +57,17 @@ class TestDataset:
         assert len(dataset) == 2
         window_names = {window.name for window in dataset.get_dataset_examples()}
         assert window_names == {"window3", "window4"}
+
+    def test_empty_dataset(self, tmp_path: pathlib.Path) -> None:
+        """Ensure ModelDataset works with no windows."""
+        ds_path = UPath(tmp_path)
+        with (ds_path / "config.json").open("w") as f:
+            json.dump({"layers": {}}, f)
+        dataset = ModelDataset(
+            dataset=Dataset(ds_path),
+            split_config=SplitConfig(),
+            inputs={},
+            task=ClassificationTask(property_name="prop_name", classes=[]),
+            workers=4,
+        )
+        assert len(dataset) == 0
