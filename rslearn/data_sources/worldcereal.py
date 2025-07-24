@@ -38,8 +38,100 @@ class WorldCerealConfidences(LocalFiles):
         "WorldCereal_2021_tc-maize-second_maize_confidence.zip",
         "WorldCereal_2021_tc-springcereals_springcereals_confidence.zip",
         "WorldCereal_2021_tc-wintercereals_irrigation_confidence.zip",
+        "WorldCereal_2021_tc-wintercereals_wintercereals_confidence.zip",
     ]
     TIMEOUT_SECONDS = 10
+
+    # this can be obtained using the following code:
+    # ```
+    # response = requests.get(cls.ZENODO_URL)
+    # response.raise_for_status()
+    # ZENODO_FILES_DATA = response.json()
+    # ```
+    # we hardcode it here because othewerwise we get complaints from
+    # zenodo about repeatedly asking for it.
+    ZENODO_FILES_DATA: list[dict] = [
+        {
+            "id": "2fed6859-5729-4ab1-9d33-e15464c99a5b",
+            "filename": "WorldCereal_2021_tc-annual_temporarycrops_confidence.zip",
+            "filesize": 24969180828.0,
+            "checksum": "84a953be71292d02cceb6c64b2008ad7",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/2fed6859-5729-4ab1-9d33-e15464c99a5b",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-annual_temporarycrops_confidence.zip/content",
+            },
+        },
+        {
+            "id": "54d63601-cda8-4f10-8710-a2068e697418",
+            "filename": "WorldCereal_2021_tc-maize-main_irrigation_confidence.zip",
+            "filesize": 11327157543.0,
+            "checksum": "c509ee2cb8b6fc44383788ffaa248950",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/54d63601-cda8-4f10-8710-a2068e697418",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-main_irrigation_confidence.zip/content",
+            },
+        },
+        {
+            "id": "277c0d06-b5ae-4748-bad1-c135084276ef",
+            "filename": "WorldCereal_2021_tc-maize-main_maize_confidence.zip",
+            "filesize": 10442831518.0,
+            "checksum": "0e6bb70209a83b526ec146e5e4ed3451",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/277c0d06-b5ae-4748-bad1-c135084276ef",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-main_maize_confidence.zip/content",
+            },
+        },
+        {
+            "id": "f47baf24-27d9-4913-a483-ec86ae87e60a",
+            "filename": "WorldCereal_2021_tc-maize-second_irrigation_confidence.zip",
+            "filesize": 3813149175.0,
+            "checksum": "cb8b91155c8fcf38f869875f2cb35200",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/f47baf24-27d9-4913-a483-ec86ae87e60a",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-second_irrigation_confidence.zip/content",
+            },
+        },
+        {
+            "id": "d3a0df02-8034-463f-a923-2bfe0c2719ac",
+            "filename": "WorldCereal_2021_tc-maize-second_maize_confidence.zip",
+            "filesize": 3752378387.0,
+            "checksum": "8a819762b7f3950839b0e832cb346e30",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/d3a0df02-8034-463f-a923-2bfe0c2719ac",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-second_maize_confidence.zip/content",
+            },
+        },
+        {
+            "id": "a0b91677-f110-4df5-a5fd-7b1849895a02",
+            "filename": "WorldCereal_2021_tc-springcereals_springcereals_confidence.zip",
+            "filesize": 4708773375.0,
+            "checksum": "fd8dec8de691738df520c1ab451c7870",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/a0b91677-f110-4df5-a5fd-7b1849895a02",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-springcereals_springcereals_confidence.zip/content",
+            },
+        },
+        {
+            "id": "23301576-64d2-48a1-9b19-0c126158c24d",
+            "filename": "WorldCereal_2021_tc-wintercereals_irrigation_confidence.zip",
+            "filesize": 11447731232.0,
+            "checksum": "f84c4088ac42bb67f308be50159ca778",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/23301576-64d2-48a1-9b19-0c126158c24d",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-wintercereals_irrigation_confidence.zip/content",
+            },
+        },
+        {
+            "id": "b4ce9cc1-a745-450a-b2e9-c4fb08059a93",
+            "filename": "WorldCereal_2021_tc-wintercereals_wintercereals_confidence.zip",
+            "filesize": 10174751452.0,
+            "checksum": "5870da83aaa4b3761cad3750feb73e43",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/b4ce9cc1-a745-450a-b2e9-c4fb08059a93",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-wintercereals_wintercereals_confidence.zip/content",
+            },
+        },
+    ]
 
     def __init__(
         self,
@@ -160,13 +252,11 @@ class WorldCerealConfidences(LocalFiles):
         # Download the zip files (if they don't already exist).
         zip_dir = worldcereal_dir / "zips"
         zip_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Worldcereal zipfile: {zip_dir}")
 
         # Fetch list of files from Zenodo's Deposition Files API
-        response = requests.get(cls.ZENODO_URL)
-        response.raise_for_status()
-        files_data = response.json()
         # f["filename"] maps to the ZIP_FILENAMES
-        files_as_dict = {f["filename"]: f for f in files_data}
+        files_as_dict = {f["filename"]: f for f in cls.ZENODO_FILES_DATA}
         # now its also in the right order for when we generate the files
         ordered_files = [files_as_dict[z_f] for z_f in cls.ZIP_FILENAMES]
         for file_info in ordered_files:
@@ -180,6 +270,7 @@ class WorldCerealConfidences(LocalFiles):
             if filepath.exists():
                 continue
             # Download the file with resume support
+            logger.info(f"Downloading {file_url} to {filepath}")
             with requests.get(file_url, stream=True, timeout=cls.TIMEOUT_SECONDS) as r:
                 r.raise_for_status()
                 with open_atomic(filepath, "wb") as f:
