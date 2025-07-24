@@ -35,6 +35,8 @@ class FreezeUnfreeze(BaseFinetuning):
         self.module_selector = module_selector
         self.unfreeze_at_epoch = unfreeze_at_epoch
         self.unfreeze_lr_factor = unfreeze_lr_factor
+        if unfreeze_at_epoch == 0:
+            raise ValueError("unfreeze_at_epoch cannot be 0")
 
     def _get_target_module(self, pl_module: LightningModule) -> torch.nn.Module:
         target_module = pl_module

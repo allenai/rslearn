@@ -311,6 +311,7 @@ class Window:
             metadata["bounds"][2],
             metadata["bounds"][3],
         )
+
         return Window(
             path=path,
             group=metadata["group"],
