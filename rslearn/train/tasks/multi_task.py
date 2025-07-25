@@ -6,9 +6,12 @@ import numpy.typing as npt
 import torch
 from torchmetrics import Metric, MetricCollection
 
+from rslearn.log_utils import get_logger
 from rslearn.utils import Feature
 
 from .task import Task
+
+logger = get_logger(__name__)
 
 
 class MultiTask(Task):
@@ -18,8 +21,7 @@ class MultiTask(Task):
         self,
         tasks: dict[str, Task],
         input_mapping: dict[str, dict[str, str]],
-        merge_task_labels: bool = False,
-        unmerged_num_classes: list[dict[str, int]] | None = None,
+        task_label_offsets: dict[str, dict[str, int | str]] | None = None,
     ):
         """Create a new MultiTask.
 
@@ -27,20 +29,29 @@ class MultiTask(Task):
             tasks: map from task name to the task object
             input_mapping: for each task, maps which keys from the raw inputs should
                 appear as potentially different keys for that task
-            merge_task_labels: if specified, for all tasks that have the same decoder head,
-                stack the labels (ie output channels) and predict everything at once
-            unmerged_num_classes: a list of dicts with one entry mapping task name to number
-                of classes, used to determine ordering for the outputs of the merged heads
-                (must be specified if merge_task_labels is True)
+            task_label_offsets: a dictionary mapping task name to a dictionary with
+                "offset" (label offset) and "outputs_key" (key to use for the outputs).
+                If specified, the labels for each task will be offset accordingly
         """
         self.tasks = tasks
         self.input_mapping = input_mapping
-        self.merge_task_labels = merge_task_labels
-        self.unmerged_num_classes: list[dict[str, int]] = unmerged_num_classes or []
-        if merge_task_labels and len(self.unmerged_num_classes) == 0:
-            raise ValueError(
-                "unmerged_num_classes must be specified if merge_task_labels is True"
-            )
+        self.task_label_offsets = task_label_offsets or {}
+
+    def offset_task_labels(
+        self,
+        target_dict: dict[Any, Any],
+        task_name: str,
+    ) -> dict[Any, Any]:
+        """Merge the task labels by adding an offset to the label key.
+
+        Args:
+            target_dict: the target dict
+            task_name: the name of the task
+        """
+        offset = self.task_label_offsets[task_name]["offset"]
+        outputs_key = self.task_label_offsets[task_name]["outputs_key"]
+        target_dict[outputs_key] += offset
+        return target_dict
 
     def process_inputs(
         self,
@@ -81,8 +92,8 @@ class MultiTask(Task):
                 cur_raw_inputs, metadata=metadata, load_targets=load_targets
             )
 
-            if self.merge_task_labels:
-                print("NEED TO IMPLEMENT THIS")
+            if self.task_label_offsets:
+                cur_target_dict = self.offset_task_labels(cur_target_dict, task_name)
 
             input_dict[task_name] = cur_input_dict
             target_dict[task_name] = cur_target_dict
