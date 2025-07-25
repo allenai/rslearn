@@ -1,7 +1,7 @@
 """rslearn PredictionWriter implementation."""
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, overload
 
 import numpy as np
 import numpy.typing as npt
@@ -29,7 +29,15 @@ from .tasks.task import Task
 class PatchPredictionMerger:
     """Base class for merging predictions from multiple patches."""
 
-    def merge(self, outputs: Sequence[Any]) -> tuple[Sequence[Any]]:
+    @overload
+    def merge(self, outputs: list[Feature]) -> list[Feature]:
+        ...
+
+    @overload
+    def merge(self, outputs: npt.NDArray[Any]) -> npt.NDArray[Any]:
+        ...
+
+    def merge(self, outputs: list[Feature] | npt.NDArray[Any]) -> list[Feature] | npt.NDArray[Any]:
         """Merge the outputs.
 
         Args:
