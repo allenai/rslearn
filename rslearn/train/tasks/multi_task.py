@@ -15,7 +15,11 @@ class MultiTask(Task):
     """A task for training on multiple tasks."""
 
     def __init__(
-        self, tasks: dict[str, Task], input_mapping: dict[str, dict[str, str]]
+        self,
+        tasks: dict[str, Task],
+        input_mapping: dict[str, dict[str, str]],
+        merge_task_labels: bool = False,
+        unmerged_num_classes: list[dict[str, int]] | None = None,
     ):
         """Create a new MultiTask.
 
@@ -23,9 +27,20 @@ class MultiTask(Task):
             tasks: map from task name to the task object
             input_mapping: for each task, maps which keys from the raw inputs should
                 appear as potentially different keys for that task
+            merge_task_labels: if specified, for all tasks that have the same decoder head,
+                stack the labels (ie output channels) and predict everything at once
+            unmerged_num_classes: a list of dicts with one entry mapping task name to number
+                of classes, used to determine ordering for the outputs of the merged heads
+                (must be specified if merge_task_labels is True)
         """
         self.tasks = tasks
         self.input_mapping = input_mapping
+        self.merge_task_labels = merge_task_labels
+        self.unmerged_num_classes: list[dict[str, int]] = unmerged_num_classes or []
+        if merge_task_labels and len(self.unmerged_num_classes) == 0:
+            raise ValueError(
+                "unmerged_num_classes must be specified if merge_task_labels is True"
+            )
 
     def process_inputs(
         self,
@@ -65,6 +80,10 @@ class MultiTask(Task):
             cur_input_dict, cur_target_dict = task.process_inputs(
                 cur_raw_inputs, metadata=metadata, load_targets=load_targets
             )
+
+            if self.merge_task_labels:
+                print("NEED TO IMPLEMENT THIS")
+
             input_dict[task_name] = cur_input_dict
             target_dict[task_name] = cur_target_dict
 
