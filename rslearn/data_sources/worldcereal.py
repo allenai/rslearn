@@ -18,7 +18,7 @@ from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 logger = get_logger(__name__)
 
 
-class WorldCerealConfidences(LocalFiles):
+class WorldCereal(LocalFiles):
     """A data source for the ESA WorldCereal 2021 agricultural land cover map.
 
     For details about the land cover map, see https://esa-worldcereal.org/en.
@@ -32,13 +32,21 @@ class WorldCerealConfidences(LocalFiles):
     # final output tif files
     ZIP_FILENAMES = [
         "WorldCereal_2021_tc-annual_temporarycrops_confidence.zip",
+        "WorldCereal_2021_tc-annual_temporarycrops_classification.zip",
         "WorldCereal_2021_tc-maize-main_irrigation_confidence.zip",
+        "WorldCereal_2021_tc-maize-main_irrigation_classification.zip",
         "WorldCereal_2021_tc-maize-main_maize_confidence.zip",
+        "WorldCereal_2021_tc-maize-main_maize_classification.zip",
         "WorldCereal_2021_tc-maize-second_irrigation_confidence.zip",
+        "WorldCereal_2021_tc-maize-second_irrigation_classification.zip",
         "WorldCereal_2021_tc-maize-second_maize_confidence.zip",
+        "WorldCereal_2021_tc-maize-second_maize_classification.zip",
         "WorldCereal_2021_tc-springcereals_springcereals_confidence.zip",
+        "WorldCereal_2021_tc-springcereals_springcereals_classification.zip",
         "WorldCereal_2021_tc-wintercereals_irrigation_confidence.zip",
+        "WorldCereal_2021_tc-wintercereals_irrigation_classification.zip",
         "WorldCereal_2021_tc-wintercereals_wintercereals_confidence.zip",
+        "WorldCereal_2021_tc-wintercereals_wintercereals_classification.zip",
     ]
     TIMEOUT_SECONDS = 10
 
@@ -51,16 +59,6 @@ class WorldCerealConfidences(LocalFiles):
     # we hardcode it here because othewerwise we get complaints from
     # zenodo about repeatedly asking for it.
     ZENODO_FILES_DATA: list[dict] = [
-        {
-            "id": "e34100f1-33c2-4091-bf87-d492974ee8ba",
-            "filename": "QGIS_stylefiles.zip",
-            "filesize": 16084.0,
-            "checksum": "6d36b5fa3417b1036d973ae285adc5aa",
-            "links": {
-                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/e34100f1-33c2-4091-bf87-d492974ee8ba",
-                "download": "https://zenodo.org/api/records/7875105/files/QGIS_stylefiles.zip/content",
-            },
-        },
         {
             "id": "21551c80-0df9-4add-abaa-b66fff68179c",
             "filename": "WorldCereal_2021_tc-annual_temporarycrops_classification.zip",
@@ -79,16 +77,6 @@ class WorldCerealConfidences(LocalFiles):
             "links": {
                 "self": "https://zenodo.org/api/deposit/depositions/7875105/files/2fed6859-5729-4ab1-9d33-e15464c99a5b",
                 "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-annual_temporarycrops_confidence.zip/content",
-            },
-        },
-        {
-            "id": "7c83a2fd-edf1-4a3b-8209-054908c59ed0",
-            "filename": "WorldCereal_2021_tc-maize-main_activecropland_classification.zip",
-            "filesize": 20121459543.0,
-            "checksum": "1967eb0b84fab95879e730f9095911d2",
-            "links": {
-                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/7c83a2fd-edf1-4a3b-8209-054908c59ed0",
-                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-main_activecropland_classification.zip/content",
             },
         },
         {
@@ -129,16 +117,6 @@ class WorldCerealConfidences(LocalFiles):
             "links": {
                 "self": "https://zenodo.org/api/deposit/depositions/7875105/files/277c0d06-b5ae-4748-bad1-c135084276ef",
                 "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-main_maize_confidence.zip/content",
-            },
-        },
-        {
-            "id": "e79ea14b-cdb3-4a8f-bd2c-2bd0a5815653",
-            "filename": "WorldCereal_2021_tc-maize-second_activecropland_classification.zip",
-            "filesize": 7978543572.0,
-            "checksum": "2c90000f52a1356485353c5150a6b3ca",
-            "links": {
-                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/e79ea14b-cdb3-4a8f-bd2c-2bd0a5815653",
-                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-second_activecropland_classification.zip/content",
             },
         },
         {
@@ -299,7 +277,7 @@ class WorldCerealConfidences(LocalFiles):
             config.data_source.config_dict["item_specs"] = spec_dicts
         else:
             config.data_source = DataSourceConfig(
-                name="rslearn.data_sources.WorldCerealConfidence",
+                name="rslearn.data_sources.WorldCereal",
                 query_config=QueryConfig.from_config({}),
                 config_dict={"item_specs": spec_dicts},
             )
@@ -312,7 +290,7 @@ class WorldCerealConfidences(LocalFiles):
         if config.data_source is None:
             raise ValueError("LocalFiles data source requires a data source config")
         d = config.data_source.config_dict
-        return WorldCerealConfidences(
+        return WorldCereal(
             config=config, worldcereal_dir=join_upath(ds_path, d["worldcereal_dir"])
         )
 
@@ -320,9 +298,9 @@ class WorldCerealConfidences(LocalFiles):
     def band_from_zipfilename(filename: str) -> str:
         """Return the band name given the zipfilename."""
         # [:-4] to remove ".zip"
-        _, _, season, product, confidence = filename[:-4].split("_")
+        _, _, season, product, confidence_or_classification = filename[:-4].split("_")
         # band names must not contain '_'
-        return "-".join([season, product, confidence])
+        return "-".join([season, product, confidence_or_classification])
 
     @staticmethod
     def zip_filepath_from_filename(filename: str) -> str:
@@ -330,8 +308,8 @@ class WorldCerealConfidences(LocalFiles):
         prefix = "data/worldcereal_data/MAP-v3/2021"
         aez_name = "aez_downsampled"
         # [:-4] to remove ".zip"
-        _, _, season, product, confidence = filename[:-4].split("_")
-        return f"{prefix}/{season}/{product}/{aez_name}/{confidence}"
+        _, _, season, product, confidence_or_classification = filename[:-4].split("_")
+        return f"{prefix}/{season}/{product}/{aez_name}/{confidence_or_classification}"
 
     @staticmethod
     def all_aezs_from_tifs(filepath: UPath) -> set[int]:
@@ -382,7 +360,7 @@ class WorldCerealConfidences(LocalFiles):
         for file_info in ordered_files:
             filename: str = file_info["filename"]
             if filename not in cls.ZIP_FILENAMES:
-                logger.info(f"Skipping {filename}, which is not a confidence layer")
+                logger.info(f"Skipping {filename}")
                 continue
             file_url = file_info["links"]["download"]
             # Determine full filepath and create necessary folders for nested structure
