@@ -30,14 +30,14 @@ class PatchPredictionMerger:
     """Base class for merging predictions from multiple patches."""
 
     @overload
-    def merge(self, outputs: list[Feature]) -> list[Feature]:
-        ...
+    def merge(self, outputs: list[Feature]) -> list[Feature]: ...
 
     @overload
-    def merge(self, outputs: npt.NDArray[Any]) -> npt.NDArray[Any]:
-        ...
+    def merge(self, outputs: npt.NDArray[Any]) -> npt.NDArray[Any]: ...
 
-    def merge(self, outputs: list[Feature] | npt.NDArray[Any]) -> list[Feature] | npt.NDArray[Any]:
+    def merge(
+        self, outputs: list[Feature] | npt.NDArray[Any]
+    ) -> list[Feature] | npt.NDArray[Any]:
         """Merge the outputs.
 
         Args:
