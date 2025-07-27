@@ -52,7 +52,7 @@ class RestoreConfig:
 
     def get_state_dict(self) -> dict[str, Any]:
         """Returns the state dict configured in this RestoreConfig."""
-        print(f"loading state dict from {self.restore_path}")
+        logger.info(f"loading state dict from {self.restore_path}")
         with self.restore_path.open("rb") as f:
             state_dict = torch.load(f, map_location="cpu")
         for k in self.selector:
@@ -178,8 +178,8 @@ class RslearnLightningModule(L.LightningModule):
                 state_dict, strict=False
             )
             if missing_keys or unexpected_keys:
-                print(
-                    f"warning: restore yielded missing_keys={missing_keys} and unexpected_keys={unexpected_keys}"
+                logger.warning(
+                    f"restore yielded missing_keys={missing_keys} and unexpected_keys={unexpected_keys}"
                 )
 
     def configure_optimizers(self) -> OptimizerLRSchedulerConfig:

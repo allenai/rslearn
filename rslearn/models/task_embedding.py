@@ -1,8 +1,43 @@
 """Task embedding modules."""
 
+import math
 from typing import Any
 
 import torch
+from torch import nn
+
+
+class PositionalEncoding(nn.Module):
+    """Simple sinusoidal positional encoding for the task embedding. From torch docs."""
+
+    def __init__(self, d_model: int, dropout: float = 0.0, max_len: int = 1024):
+        """Initialize the positional encoding module.
+
+        Args:
+            d_model: The dimension of the model.
+            dropout: The dropout rate.
+            max_len: The maximum length of the sequence.
+        """
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model)
+        )
+        pe = torch.zeros(max_len, 1, d_model)
+        pe[:, 0, 0::2] = torch.sin(position * div_term)
+        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        self.register_buffer("pe", pe)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply positional encoding to the input tensor.
+
+        Args:
+            x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
+        """
+        x = x + self.pe[: x.size(0)]
+        return self.dropout(x)
 
 
 class BaseTaskEmbedding(torch.nn.Module):
@@ -81,7 +116,9 @@ class TaskChannelEmbedding(BaseTaskEmbedding):
 class TaskMHAEmbedding(TaskChannelEmbedding):
     """Multi-headed cross-attention over the spatial dimensions.
 
-    (With the task embedding as the query and the features as the key and value.)
+    The task embedding is the query and the features are the key and value.
+    We copy the task embedding over the spatial dimensions, and add a sinusoidal
+    positional embedding before the MHA layer.
     """
 
     def __init__(
@@ -96,7 +133,7 @@ class TaskMHAEmbedding(TaskChannelEmbedding):
             width: width of encoder embeds
         """
         super().__init__(encoder_embedding_size)
-        self.embed_proj = torch.nn.Linear(1, height * width)
+        self.pos_embed = PositionalEncoding(encoder_embedding_size)
         self.mha = torch.nn.MultiheadAttention(
             encoder_embedding_size, num_heads, batch_first=True
         )
@@ -127,11 +164,12 @@ class TaskMHAEmbedding(TaskChannelEmbedding):
         Returns:
             The encoder features with the task-specific embeddings added.
         """
-        x = torch.flatten(features[0], start_dim=2)  # B x C x HW
-        embeds = self._compute_embeds(inputs, x.device).view(-1, 1)  # BC x 1
-        embeds = self.embed_proj(embeds).view(*x.shape)  # B x C x HW
+        x = torch.flatten(features[0], start_dim=2)  # B x C x T, T = HW
+        embeds = self._compute_embeds(inputs, x.device)  # B x C
+        embeds = embeds.unsqueeze(0).repeat(x.shape[-1], 1, 1)  # T x B x C
+        embeds = self.pos_embed(embeds)  # T x B x C
         out = self.mha(
-            torch.einsum("bct->btc", embeds),
+            torch.einsum("tbc->btc", embeds),
             torch.einsum("bct->btc", x),
             torch.einsum("bct->btc", x),
         )[0]  # B x T x C
