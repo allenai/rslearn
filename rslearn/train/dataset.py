@@ -157,7 +157,7 @@ class SplitConfig:
         self,
         groups: list[str] | None = None,
         names: list[str] | None = None,
-        tags: dict[str, str] | None = None,
+        tags: dict[str, Any] | None = None,
         num_samples: int | None = None,
         num_patches: int | None = None,
         transforms: list[torch.nn.Module] | None = None,
@@ -345,15 +345,19 @@ class ModelDataset(torch.utils.data.Dataset):
         if split_config.tags:
             # Filter the window.options.
             new_windows = []
+            num_removed: dict[str, int] = {}
             for window in windows:
-                tags_passed = True
                 for k, v in split_config.tags.items():
-                    if k not in window.options:
-                        tags_passed = False
-                    elif v and window.options[k] != v:
-                        tags_passed = False
-                if tags_passed:
+                    if k not in window.options or (v and window.options[k] != v):
+                        num_removed[k] = num_removed.get(k, 0) + 1
+                        break
+                else:
                     new_windows.append(window)
+            logger.info(
+                f"Started with {len(windows)} windows, ended with {len(new_windows)} windows for {self.dataset.path}"
+            )
+            for k, v in num_removed.items():
+                logger.info(f"Removed {v} windows due to tag {k}")
             windows = new_windows
 
         # If targets are not needed, remove them from the inputs.
@@ -506,14 +510,14 @@ class ModelDataset(torch.utils.data.Dataset):
         list of (window, patch_bounds, (patch_idx, # patches)) tuples.
         """
         if self.dataset_examples is None:
-            logger.info(
+            logger.debug(
                 f"Loading dataset examples from {self.dataset_examples_fname} in process {os.getpid()}"
             )
             with open(self.dataset_examples_fname) as f:
                 self.dataset_examples = [
                     self._deserialize_item(d) for d in json.load(f)
                 ]
-            logger.info(f"Finished loading dataset examples in process {os.getpid()}")
+            logger.debug(f"Finished loading dataset examples in process {os.getpid()}")
         return self.dataset_examples
 
     def __len__(self) -> int:
