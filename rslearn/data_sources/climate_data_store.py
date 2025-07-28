@@ -219,8 +219,14 @@ class ERA5LandMonthlyMeans(DataSource):
         # Get metadata for the GeoTIFF
         lat = nc.variables["latitude"][:]
         lon = nc.variables["longitude"][:]
-        # Convert longitude from 0-360 to -180 to 180
-        lon = np.where(lon > 180, lon - 360, lon)
+        # Convert longitude from 0–360 to -180–180 and sort
+        lon = (lon + 180) % 360 - 180
+        sorted_indices = lon.argsort()
+        lon = lon[sorted_indices]
+
+        # Reorder the data array to match the new longitude order
+        array = array[:, :, sorted_indices]
+
         # Check the spacing of the grid, make sure it's uniform
         for i in range(len(lon) - 1):
             if round(lon[i + 1] - lon[i], 1) != self.PIXEL_SIZE:
