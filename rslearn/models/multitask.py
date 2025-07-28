@@ -42,19 +42,19 @@ class MultiTaskModel(torch.nn.Module):
         """
         super().__init__()
         self.lazy_decode = lazy_decode
-        self.decoder_to_target: dict[str, list[str]] = decoder_to_target or {}
+        self.decoder_to_target: dict[str, list[str]] = decoder_to_target  # type: ignore
         self.encoder = torch.nn.Sequential(*encoder)
         self.decoders = torch.nn.ModuleDict(
             {name: torch.nn.ModuleList(decoder) for name, decoder in decoders.items()}
         )
 
-        if decoder_to_target is None:
+        if self.decoder_to_target is None:
             self.decoder_to_target = {name: [name] for name in decoders.keys()}
         else:
-            logger.info(f"merged decoders: {decoder_to_target}")
+            logger.info(f"merged decoders: {self.decoder_to_target}")
 
         self.target_to_decoder = {}
-        for decoder_id, task_names in decoder_to_target.items():  # type: ignore
+        for decoder_id, task_names in self.decoder_to_target.items():  # type: ignore
             for task_name in task_names:
                 self.target_to_decoder[task_name] = decoder_id
 
@@ -67,9 +67,9 @@ class MultiTaskModel(torch.nn.Module):
         self.loss_weights = loss_weights
         logger.info(f"loss_weights: {self.loss_weights}")
 
+        self.task_embedding = task_embedding
         if task_embedding is not None:
-            self.task_embedding = task_embedding
-            self.task_embedding.register_tasks(list(self.target_to_decoder.keys()))
+            self.task_embedding.register_tasks(list(self.target_to_decoder.keys()))  # type: ignore
             logger.info("registered decoders with task embedding")
 
     def apply_decoder(
