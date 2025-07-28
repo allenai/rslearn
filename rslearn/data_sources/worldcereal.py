@@ -305,10 +305,14 @@ class WorldCereal(LocalFiles):
     @staticmethod
     def zip_filepath_from_filename(filename: str) -> str:
         """Given a filename, return the filepath of the extracted tifs."""
-        prefix = "data/worldcereal_data/MAP-v3/2021"
-        aez_name = "aez_downsampled"
-        # [:-4] to remove ".zip"
         _, _, season, product, confidence_or_classification = filename[:-4].split("_")
+        prefix = "data/worldcereal_data/MAP-v3/2021"
+        if confidence_or_classification == "confidence":
+            aez_name = "aez_downsampled"
+        else:
+            aez_name = "aez"
+        # [:-4] to remove ".zip"
+
         return f"{prefix}/{season}/{product}/{aez_name}/{confidence_or_classification}"
 
     @staticmethod
