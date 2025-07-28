@@ -219,6 +219,8 @@ class ERA5LandMonthlyMeans(DataSource):
         # Get metadata for the GeoTIFF
         lat = nc.variables["latitude"][:]
         lon = nc.variables["longitude"][:]
+        # Convert longitude from 0-360 to -180 to 180
+        lon = np.where(lon > 180, lon - 360, lon)
         # Check the spacing of the grid, make sure it's uniform
         for i in range(len(lon) - 1):
             if round(lon[i + 1] - lon[i], 1) != self.PIXEL_SIZE:
