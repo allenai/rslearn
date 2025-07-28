@@ -152,7 +152,7 @@ class ERA5LandMonthlyMeans(DataSource):
             for cur_date in month_dates:
                 # Collect Item list corresponding to the current month.
                 items = []
-                item_name = f"era5land_monthlymean_{cur_date.year}_{cur_date.month}"
+                item_name = f"era5land_monthlyaveraged_{cur_date.year}_{cur_date.month}"
                 # Space is the whole globe.
                 bounds = (-180, -90, 180, 90)
                 # Time is just the given month.
