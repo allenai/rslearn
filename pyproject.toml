@@ -59,8 +59,8 @@ extra = [
 dev = [
     "pytest>=8.0",
     "pytest_httpserver",
+    "ruff>=0.5",
 ]
-
 
 [build-system]
 requires = ["setuptools>=61"]
