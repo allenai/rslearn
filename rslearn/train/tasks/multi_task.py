@@ -211,9 +211,12 @@ class MetricWrapper(Metric):
             pred: the prediction
             target: the target
         """
-        offset = self.task_label_offsets[self.task_name]["offset"]
-        num_outputs = self.task_label_offsets[self.task_name]["num_outputs"]
-        output_key = self.task_label_offsets[self.task_name]["outputs_key"]
+        try:
+            offset = self.task_label_offsets[self.task_name]["offset"]
+            num_outputs = self.task_label_offsets[self.task_name]["num_outputs"]
+            output_key = self.task_label_offsets[self.task_name]["outputs_key"]
+        except KeyError:
+            return pred if pred is not None else target
 
         with torch.no_grad():
             if pred is not None:
