@@ -54,15 +54,15 @@ class EncoderModuleWrapper(torch.nn.Module):
 
     def __init__(
         self,
-        module: torch.nn.Module,
+        modules: list[torch.nn.Module],
     ):
         """Initialize an EncoderModuleWrapper.
 
         Args:
-            module: the module to wrap
+            modules: list of modules to wrap
         """
         super().__init__()
-        self.module = module
+        self.encoder_modules = torch.nn.ModuleList(modules)
 
     def forward(
         self,
@@ -75,4 +75,7 @@ class EncoderModuleWrapper(torch.nn.Module):
                 process.
         """
         images = torch.stack([inp["image"] for inp in inputs], dim=0)
-        return self.module([images], inputs)
+        cur = [images]
+        for m in self.encoder_modules:
+            cur = m(cur, inputs)
+        return cur
