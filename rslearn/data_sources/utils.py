@@ -137,6 +137,13 @@ def per_period_mosaic_matching(
     groups include one group per period, starting from the most recent periods, up to
     the provided max_matches.
 
+    The periods are also bounded to the window's time range, and aligned with the end
+    of that time range, i.e. the most recent window is
+    (end_time - period_duration, end_time), the next is
+    (end_time - 2*period_duration, end_time - period_duration), and so on. Note that
+    this means that if the window duration is shorter than the period_duration, there
+    will be zero matches.
+
     This is used e.g. when a model should process three mosaics, where each mosaic
     should come from a different month. This gives more diversity of images, since
     simply searching for the least cloudy images could result in selecting all of the
@@ -145,7 +152,8 @@ def per_period_mosaic_matching(
     max_matches may be smaller than the total number of periods in the given time
     range. In this case, we prefer to use mosaics of the most recent periods. However,
     sometimes there may be no items in a period; in that case, the older periods are
-    used as a fallback.
+    used as a fallback. This means that reducing the window duration down to match
+    max_matches*period_duration is not equivalent to a longer window duration.
 
     Args:
         window_geometry: the window geometry to match items to.
@@ -165,13 +173,15 @@ def per_period_mosaic_matching(
     # For each period, we create an STGeometry with modified time range matching that
     # period, and use it with match_candidate_items_to_window to get a mosaic.
     cur_groups: list[list[ItemType]] = []
-    period_end = window_geometry.time_range[1]
-    while period_end > window_geometry.time_range[0] and len(cur_groups) < max_matches:
+    period_start = window_geometry.time_range[1] - period_duration
+    while (
+        period_start >= window_geometry.time_range[0] and len(cur_groups) < max_matches
+    ):
         period_time_range = (
-            period_end - period_duration,
-            period_end,
+            period_start,
+            period_start + period_duration,
         )
-        period_end -= period_duration
+        period_start -= period_duration
         period_geom = STGeometry(
             window_geometry.projection, window_geometry.shp, period_time_range
         )
