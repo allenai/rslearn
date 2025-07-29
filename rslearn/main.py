@@ -18,6 +18,7 @@ from rslearn.const import WGS84_EPSG
 from rslearn.data_sources import Item, data_source_from_config
 from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
+from rslearn.dataset.index import DatasetIndex
 from rslearn.dataset.manage import (
     materialize_dataset_windows,
     prepare_dataset_windows,
@@ -739,6 +740,35 @@ def dataset_materialize() -> None:
     apply_on_windows_args(fn, args)
 
 
+@register_handler("dataset", "build_index")
+def dataset_build_index() -> None:
+    """Handler for the rslearn dataset build_index command."""
+    parser = argparse.ArgumentParser(
+        prog="rslearn dataset build_index",
+        description=("rslearn dataset build_index: " + "create a dataset index file"),
+    )
+    parser.add_argument(
+        "--root",
+        type=str,
+        required=True,
+        help="Dataset path",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=16,
+        help="Number of workers",
+    )
+    args = parser.parse_args(args=sys.argv[3:])
+    ds_path = UPath(args.root)
+    dataset = Dataset(ds_path)
+    index = DatasetIndex.build_index(
+        dataset=dataset,
+        workers=args.workers,
+    )
+    index.save_index(ds_path)
+
+
 class RslearnLightningCLI(LightningCLI):
     """LightningCLI that links data.tasks to model.tasks."""
 
@@ -771,6 +801,10 @@ class RslearnLightningCLI(LightningCLI):
                     prediction_writer_callback = existing_callback
         if prediction_writer_callback:
             prediction_writer_callback.init_args.path = c.data.init_args.path
+
+        # Disable the sampler replacement, since the rslearn data module will set the
+        # sampler as needed.
+        c.trainer.use_distributed_sampler = False
 
 
 def model_handler() -> None:

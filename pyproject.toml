@@ -51,3 +51,4 @@ testpaths = [
 addopts = [
     "--import-mode=importlib",
 ]
+tmp_path_retention_policy = "failed"
