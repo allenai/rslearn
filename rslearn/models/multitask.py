@@ -10,6 +10,21 @@ from rslearn.models.task_embedding import BaseTaskEmbedding
 logger = get_logger(__name__)
 
 
+def sort_keys(d: dict[str, Any]) -> dict[str, Any]:
+    """Recursively (half in place) sort the keys of a dictionary.
+
+    Need this so that the order of task embeddings indexing is consistent.
+
+    Args:
+        d (dict[str, Any]): The dictionary to sort.
+    """
+    d = {k: d[k] for k in sorted(d)}
+    for k, v in d.items():
+        if isinstance(v, dict):
+            d[k] = sort_keys(v)
+    return d
+
+
 class MultiTaskModel(torch.nn.Module):
     """MultiTask model wrapper.
 
@@ -45,18 +60,25 @@ class MultiTaskModel(torch.nn.Module):
         self.decoder_to_target: dict[str, list[str]] = decoder_to_target  # type: ignore
         self.encoder = torch.nn.Sequential(*encoder)
         self.decoders = torch.nn.ModuleDict(
-            {name: torch.nn.ModuleList(decoder) for name, decoder in decoders.items()}
+            sort_keys(
+                {
+                    name: torch.nn.ModuleList(decoder)
+                    for name, decoder in decoders.items()
+                }
+            )
         )
 
         if self.decoder_to_target is None:
             self.decoder_to_target = {name: [name] for name in decoders.keys()}
         else:
+            self.decoder_to_target = sort_keys(self.decoder_to_target)
             logger.info(f"merged decoders: {self.decoder_to_target}")
 
         self.target_to_decoder = {}
         for decoder_id, task_names in self.decoder_to_target.items():  # type: ignore
             for task_name in task_names:
                 self.target_to_decoder[task_name] = decoder_id
+        self.target_to_decoder = sort_keys(self.target_to_decoder)
 
         if loss_weights is None:
             loss_weights = {name: 1.0 for name in self.target_to_decoder.keys()}
@@ -64,7 +86,7 @@ class MultiTaskModel(torch.nn.Module):
             if name not in loss_weights:
                 logger.warning(f"task {name} not in loss_weights, setting to 1.0")
                 loss_weights[name] = 1.0
-        self.loss_weights = loss_weights
+        self.loss_weights = sort_keys(loss_weights)
         logger.info(f"loss_weights: {self.loss_weights}")
 
         self.task_embedding = task_embedding

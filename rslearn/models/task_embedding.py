@@ -70,6 +70,16 @@ class TaskChannelEmbedding(BaseTaskEmbedding):
     Each embedding is learned per-channel and copied over the full spatial dimensions.
     """
 
+    def __init__(self, encoder_embedding_size: int, default_idx: int = 0) -> None:
+        """Initialize the task channel embedding module.
+
+        Args:
+            encoder_embedding_size: The size of the encoder embedding.
+            default_idx: The index of the default task, useful if loading a merged model.
+        """
+        super().__init__(encoder_embedding_size)
+        self.default_idx = default_idx
+
     def register_tasks(self, task_names: list[str]) -> None:
         """Register the tasks.
 
@@ -91,7 +101,10 @@ class TaskChannelEmbedding(BaseTaskEmbedding):
             inputs: The inputs to the model.
             device: The device to compute the embeddings on.
         """
-        idx = [self.target_to_embed_idx[inp["dataset_source"]] for inp in inputs]
+        try:
+            idx = [self.target_to_embed_idx[inp["dataset_source"]] for inp in inputs]
+        except KeyError:
+            idx = [self.default_idx] * len(inputs)
         return self.embed(torch.tensor(idx).to(device))
 
     def forward(
@@ -122,17 +135,16 @@ class TaskMHAEmbedding(TaskChannelEmbedding):
     """
 
     def __init__(
-        self, encoder_embedding_size: int, num_heads: int, height: int, width: int
+        self, encoder_embedding_size: int, num_heads: int, default_idx: int = 0
     ) -> None:
         """Initialize the task MHA embedding module.
 
         Args:
             encoder_embedding_size: The size of the encoder embedding.
             num_heads: The number of attention heads.
-            height: height of encoder embeds
-            width: width of encoder embeds
+            default_idx: The index of the default task, useful if loading a merged model.
         """
-        super().__init__(encoder_embedding_size)
+        super().__init__(encoder_embedding_size, default_idx)
         self.pos_embed = PositionalEncoding(encoder_embedding_size)
         self.mha = torch.nn.MultiheadAttention(
             encoder_embedding_size, num_heads, batch_first=True
