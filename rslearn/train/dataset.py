@@ -371,7 +371,7 @@ class ModelDataset(torch.utils.data.Dataset):
         # We use only main thread if the index is set, since that can take a long time
         # to send to the worker threads, it may get serialized for each window.
         new_windows = []
-        if workers == 0 or windows[0].index is not None:
+        if workers == 0 or (len(windows) >= 1 and windows[0].index is not None):
             for window in windows:
                 if check_window(self.inputs, window) is None:
                     continue
