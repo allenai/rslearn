@@ -92,6 +92,7 @@ class RslearnLightningModule(L.LightningModule):
         visualize_dir: str | None = None,
         metrics_file: str | None = None,
         restore_config: RestoreConfig | None = None,
+        loss_weights: dict[str, float] = {},
         print_parameters: bool = False,
         print_model: bool = False,
         # Deprecated options.
@@ -107,7 +108,6 @@ class RslearnLightningModule(L.LightningModule):
         Args:
             model: the model
             task: the task to train on
-            lr: the initial learning rate
             optimizer: the optimizer factory.
             scheduler: the learning rate scheduler factory.
             visualize_dir: during validation or testing, output visualizations to this
@@ -115,9 +115,11 @@ class RslearnLightningModule(L.LightningModule):
             metrics_file: file to save metrics to
             restore_config: specification of configuration to restore parameters from
                 a non-Lightning checkpoint.
+            loss_weights: weights for each key in the loss dict. Default is 1.
             print_parameters: whether to print the list of model parameters after model
                 initialization
             print_model: whether to print the model after model initialization
+            lr: deprecated.
             plateau: deprecated.
             plateau_factor: deprecated.
             plateau_patience: deprecated.
@@ -127,10 +129,10 @@ class RslearnLightningModule(L.LightningModule):
         super().__init__()
         self.model = model
         self.task = task
-        self.lr = lr
         self.visualize_dir = visualize_dir
         self.metrics_file = metrics_file
         self.restore_config = restore_config
+        self.loss_weights = loss_weights
 
         self.scheduler_factory: SchedulerFactory | None = None
         if scheduler:
@@ -210,6 +212,11 @@ class RslearnLightningModule(L.LightningModule):
             # Fail silently for single-dataset case, which is okay
             pass
 
+    def _combine_loss(self, loss_dict: dict[str, torch.Tensor]) -> torch.Tensor:
+        return sum(
+            [loss * loss_dict.get(name, 1.0) for name, loss in loss_dict.items()]
+        )
+
     def training_step(
         self, batch: Any, batch_idx: int, dataloader_idx: int = 0
     ) -> torch.Tensor:
@@ -226,7 +233,7 @@ class RslearnLightningModule(L.LightningModule):
         inputs, targets, _ = batch
         batch_size = len(inputs)
         _, loss_dict = self(inputs, targets)
-        train_loss = sum(loss_dict.values())
+        train_loss = self._combine_loss(loss_dict)
         self.log_dict(
             {"train_" + k: v for k, v in loss_dict.items()},
             batch_size=batch_size,
@@ -258,7 +265,7 @@ class RslearnLightningModule(L.LightningModule):
         inputs, targets, _ = batch
         batch_size = len(inputs)
         outputs, loss_dict = self(inputs, targets)
-        val_loss = sum(loss_dict.values())
+        val_loss = self._combine_loss(loss_dict)
         self.log_dict(
             {"val_" + k: v for k, v in loss_dict.items()},
             batch_size=batch_size,
@@ -299,7 +306,7 @@ class RslearnLightningModule(L.LightningModule):
         inputs, targets, metadatas = batch
         batch_size = len(inputs)
         outputs, loss_dict = self(inputs, targets)
-        test_loss = sum(loss_dict.values())
+        test_loss = self._combine_loss(loss_dict)
         self.log_dict(
             {"test_" + k: v for k, v in loss_dict.items()},
             batch_size=batch_size,
