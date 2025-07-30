@@ -6,6 +6,7 @@ einops>=0.8
 gcsfs==2025.2.0
 google-cloud-bigquery>=2.18
 google-cloud-storage>=2.18
+huggingface_hub
 interrogate>=1.7
 netCDF4>=1.7.2
 osmium>=3.7
