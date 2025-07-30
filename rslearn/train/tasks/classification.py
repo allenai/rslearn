@@ -285,7 +285,7 @@ class ClassificationHead(torch.nn.Module):
         """
         outputs = torch.nn.functional.softmax(logits, dim=1)
 
-        loss = None
+        losses = {}
         if targets:
             class_labels = torch.stack([target["class"] for target in targets], dim=0)
             mask = torch.stack([target["valid"] for target in targets], dim=0)
@@ -295,9 +295,9 @@ class ClassificationHead(torch.nn.Module):
                 )
                 * mask
             )
-            loss = torch.mean(loss)
+            losses["cls"] = torch.mean(loss)
 
-        return outputs, {"cls": loss}
+        return outputs, losses
 
 
 class ClassificationMetric(Metric):
