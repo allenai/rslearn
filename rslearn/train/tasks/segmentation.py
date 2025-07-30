@@ -246,7 +246,7 @@ class SegmentationHead(torch.nn.Module):
         """
         outputs = torch.nn.functional.softmax(logits, dim=1)
 
-        loss = None
+        losses = {}
         if targets:
             labels = torch.stack([target["classes"] for target in targets], dim=0)
             mask = torch.stack([target["valid"] for target in targets], dim=0)
@@ -254,9 +254,9 @@ class SegmentationHead(torch.nn.Module):
                 torch.nn.functional.cross_entropy(logits, labels, reduction="none")
                 * mask
             )
-            loss = torch.mean(loss)
+            losses["cls"] = torch.mean(loss)
 
-        return outputs, {"cls": loss}
+        return outputs, losses
 
 
 class SegmentationMetric(Metric):

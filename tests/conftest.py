@@ -3,7 +3,11 @@ import multiprocessing
 
 import pytest
 
-from .fixtures.datasets.image_to_class import image_to_class_dataset
+from .fixtures.datasets.image_to_class import (
+    image_to_class_data_module,
+    image_to_class_dataset,
+    image_to_class_model,
+)
 
 logging.basicConfig()
 
@@ -15,4 +19,6 @@ def always_spawn() -> None:
 
 __all__ = [
     "image_to_class_dataset",
+    "image_to_class_data_module",
+    "image_to_class_model",
 ]

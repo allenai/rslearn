@@ -174,7 +174,7 @@ class ClassificationTask(BasicTask):
                 class_idx = 1 - self.positive_class_id
         else:
             # For multiclass classification or when using the default threshold
-            class_idx = probs.argmax()
+            class_idx = probs.argmax().item()
 
         if not self.read_class_id:
             value = self.classes[class_idx]  # type: ignore
@@ -285,7 +285,7 @@ class ClassificationHead(torch.nn.Module):
         """
         outputs = torch.nn.functional.softmax(logits, dim=1)
 
-        loss = None
+        losses = {}
         if targets:
             class_labels = torch.stack([target["class"] for target in targets], dim=0)
             mask = torch.stack([target["valid"] for target in targets], dim=0)
@@ -295,9 +295,9 @@ class ClassificationHead(torch.nn.Module):
                 )
                 * mask
             )
-            loss = torch.mean(loss)
+            losses["cls"] = torch.mean(loss)
 
-        return outputs, {"cls": loss}
+        return outputs, losses
 
 
 class ClassificationMetric(Metric):
