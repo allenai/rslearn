@@ -244,6 +244,12 @@ class SpaceMode(Enum):
     dataset.
     """
 
+    PER_PERIOD_MOSAIC = 4
+    """Create one mosaic per sub-period of the time range.
+
+    The duration of the sub-periods is controlled by another option in QueryConfig.
+    """
+
 
 class TimeMode(Enum):
     """Temporal  matching mode when looking up items corresponding to a window."""
@@ -268,7 +274,9 @@ class QueryConfig:
         self,
         space_mode: SpaceMode = SpaceMode.MOSAIC,
         time_mode: TimeMode = TimeMode.WITHIN,
+        min_matches: int = 0,
         max_matches: int = 1,
+        period_duration: timedelta = timedelta(days=30),
     ):
         """Creates a new query configuration.
 
@@ -278,19 +286,29 @@ class QueryConfig:
         Args:
             space_mode: specifies how items should be matched with windows spatially
             time_mode: specifies how items should be matched with windows temporally
+            min_matches: the minimum number of item groups. If there are fewer than
+                this many matches, then no matches will be returned. This can be used
+                to prevent unnecessary data ingestion if the user plans to discard
+                windows that do not have a sufficient amount of data.
             max_matches: the maximum number of items (or groups of items, if space_mode
                 is MOSAIC) to match
+            period_duration: the duration of the periods, if the space mode is
+                PER_PERIOD_MOSAIC.
         """
         self.space_mode = space_mode
         self.time_mode = time_mode
+        self.min_matches = min_matches
         self.max_matches = max_matches
+        self.period_duration = period_duration
 
     def serialize(self) -> dict[str, Any]:
         """Serialize this QueryConfig to a config dict."""
         return {
             "space_mode": str(self.space_mode),
             "time_mode": str(self.time_mode),
+            "min_matches": self.min_matches,
             "max_matches": self.max_matches,
+            "period_duration": f"{self.period_duration.total_seconds()}s",
         }
 
     @staticmethod
@@ -300,11 +318,20 @@ class QueryConfig:
         Args:
             config: the config dict for this QueryConfig
         """
-        return QueryConfig(
-            space_mode=SpaceMode[config.get("space_mode", "MOSAIC")],
-            time_mode=TimeMode[config.get("time_mode", "WITHIN")],
-            max_matches=config.get("max_matches", 1),
-        )
+        kwargs: dict[str, Any] = dict()
+        if "space_mode" in config:
+            kwargs["space_mode"] = SpaceMode[config["space_mode"]]
+        if "time_mode" in config:
+            kwargs["time_mode"] = TimeMode[config["time_mode"]]
+        if "period_duration" in config:
+            kwargs["period_duration"] = timedelta(
+                seconds=pytimeparse.parse(config["period_duration"])
+            )
+        for k in ["min_matches", "max_matches"]:
+            if k not in config:
+                continue
+            kwargs[k] = config[k]
+        return QueryConfig(**kwargs)
 
 
 class DataSourceConfig:

@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import shapely
 from upath import UPath
@@ -11,6 +11,9 @@ from rslearn.log_utils import get_logger
 from rslearn.utils import Projection, STGeometry
 from rslearn.utils.fsspec import open_atomic
 from rslearn.utils.raster_format import get_bandset_dirname
+
+if TYPE_CHECKING:
+    from .index import DatasetIndex
 
 logger = get_logger(__name__)
 
@@ -36,6 +39,26 @@ def get_window_layer_dir(
     else:
         folder_name = f"{layer_name}.{group_idx}"
     return window_path / LAYERS_DIRECTORY_NAME / folder_name
+
+
+def get_layer_and_group_from_dir_name(layer_dir_name: str) -> tuple[str, int]:
+    """Get the layer name and group index from the layer directory name.
+
+    Args:
+        layer_dir_name: the name of the layer folder.
+
+    Returns:
+        a tuple (layer_name, group_idx)
+    """
+    if "." in layer_dir_name:
+        parts = layer_dir_name.split(".")
+        if len(parts) != 2:
+            raise ValueError(
+                f"expected layer directory name {layer_dir_name} to only contain one '.'"
+            )
+        return (parts[0], int(parts[1]))
+    else:
+        return (layer_dir_name, 0)
 
 
 def get_window_raster_dir(
@@ -122,6 +145,7 @@ class Window:
         bounds: tuple[int, int, int, int],
         time_range: tuple[datetime, datetime] | None,
         options: dict[str, Any] = {},
+        index: "DatasetIndex | None" = None,
     ) -> None:
         """Creates a new Window instance.
 
@@ -136,6 +160,7 @@ class Window:
             bounds: the bounds of the window in pixel coordinates
             time_range: optional time range of the window
             options: additional options (?)
+            index: DatasetIndex if it is available
         """
         self.path = path
         self.group = group
@@ -144,26 +169,7 @@ class Window:
         self.bounds = bounds
         self.time_range = time_range
         self.options = options
-
-    def save(self) -> None:
-        """Save the window metadata to its root directory."""
-        self.path.mkdir(parents=True, exist_ok=True)
-        metadata = {
-            "group": self.group,
-            "name": self.name,
-            "projection": self.projection.serialize(),
-            "bounds": self.bounds,
-            "time_range": (
-                [self.time_range[0].isoformat(), self.time_range[1].isoformat()]
-                if self.time_range
-                else None
-            ),
-            "options": self.options,
-        }
-        metadata_path = self.path / "metadata.json"
-        logger.debug(f"Saving window metadata to {metadata_path}")
-        with open_atomic(metadata_path, "w") as f:
-            json.dump(metadata, f)
+        self.index = index
 
     def get_geometry(self) -> STGeometry:
         """Computes the STGeometry corresponding to this window."""
@@ -175,13 +181,20 @@ class Window:
 
     def load_layer_datas(self) -> dict[str, WindowLayerData]:
         """Load layer datas describing items in retrieved layers from items.json."""
-        items_fname = self.path / "items.json"
-        if not items_fname.exists():
-            return {}
-        with items_fname.open("r") as f:
-            layer_datas = [
-                WindowLayerData.deserialize(layer_data) for layer_data in json.load(f)
-            ]
+        # Load from index if it is available.
+        if self.index is not None:
+            layer_datas = self.index.layer_datas.get(self.name, [])
+
+        else:
+            items_fname = self.path / "items.json"
+            if not items_fname.exists():
+                return {}
+            with items_fname.open("r") as f:
+                layer_datas = [
+                    WindowLayerData.deserialize(layer_data)
+                    for layer_data in json.load(f)
+                ]
+
         return {layer_data.layer_name: layer_data for layer_data in layer_datas}
 
     def save_layer_datas(self, layer_datas: dict[str, WindowLayerData]) -> None:
@@ -218,6 +231,12 @@ class Window:
         Returns:
             whether the layer is completed
         """
+        # Use the index to speed up the completed check if it is available.
+        if self.index is not None:
+            return (layer_name, group_idx) in self.index.completed_layers.get(
+                self.name, []
+            )
+
         layer_dir = self.get_layer_dir(layer_name, group_idx)
         return (layer_dir / "completed").exists()
 
@@ -253,6 +272,65 @@ class Window:
         """
         return get_window_raster_dir(self.path, layer_name, bands, group_idx)
 
+    def get_metadata(self) -> dict[str, Any]:
+        """Returns the window metadata dictionary."""
+        return {
+            "group": self.group,
+            "name": self.name,
+            "projection": self.projection.serialize(),
+            "bounds": self.bounds,
+            "time_range": (
+                [self.time_range[0].isoformat(), self.time_range[1].isoformat()]
+                if self.time_range
+                else None
+            ),
+            "options": self.options,
+        }
+
+    def save(self) -> None:
+        """Save the window metadata to its root directory."""
+        self.path.mkdir(parents=True, exist_ok=True)
+        metadata_path = self.path / "metadata.json"
+        logger.debug(f"Saving window metadata to {metadata_path}")
+        with open_atomic(metadata_path, "w") as f:
+            json.dump(self.get_metadata(), f)
+
+    @staticmethod
+    def from_metadata(path: UPath, metadata: dict[str, Any]) -> "Window":
+        """Create a Window from its path and metadata dictionary.
+
+        Args:
+            path: the root directory of the window.
+            metadata: the window metadata.
+
+        Returns:
+            the Window
+        """
+        # Ensure bounds is converted from list to tuple.
+        bounds = (
+            metadata["bounds"][0],
+            metadata["bounds"][1],
+            metadata["bounds"][2],
+            metadata["bounds"][3],
+        )
+
+        return Window(
+            path=path,
+            group=metadata["group"],
+            name=metadata["name"],
+            projection=Projection.deserialize(metadata["projection"]),
+            bounds=bounds,
+            time_range=(
+                (
+                    datetime.fromisoformat(metadata["time_range"][0]),
+                    datetime.fromisoformat(metadata["time_range"][1]),
+                )
+                if metadata["time_range"]
+                else None
+            ),
+            options=metadata["options"],
+        )
+
     @staticmethod
     def load(path: UPath) -> "Window":
         """Load a Window from a UPath.
@@ -266,22 +344,7 @@ class Window:
         metadata_fname = path / "metadata.json"
         with metadata_fname.open("r") as f:
             metadata = json.load(f)
-        return Window(
-            path=path,
-            group=metadata["group"],
-            name=metadata["name"],
-            projection=Projection.deserialize(metadata["projection"]),
-            bounds=metadata["bounds"],
-            time_range=(
-                (
-                    datetime.fromisoformat(metadata["time_range"][0]),
-                    datetime.fromisoformat(metadata["time_range"][1]),
-                )
-                if metadata["time_range"]
-                else None
-            ),
-            options=metadata["options"],
-        )
+        return Window.from_metadata(path, metadata)
 
     @staticmethod
     def get_window_root(ds_path: UPath, group: str, name: str) -> UPath:
