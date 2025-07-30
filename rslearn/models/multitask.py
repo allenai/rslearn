@@ -23,6 +23,7 @@ class MultiTaskModel(torch.nn.Module):
         encoder: list[torch.nn.Module],
         decoders: dict[str, list[torch.nn.Module]],
         lazy_decode: bool = False,
+        loss_weights: dict[str, float] | None = None,
     ):
         """Initialize a new MultiTaskModel.
 
@@ -30,6 +31,7 @@ class MultiTaskModel(torch.nn.Module):
             encoder: modules to compute intermediate feature representations.
             decoders: modules to compute outputs and loss, should match number of tasks.
             lazy_decode: if True, only decode the outputs specified in the batch.
+            loss_weights: weights for each task's loss (default: None = equal weights)
         """
         super().__init__()
         self.lazy_decode = lazy_decode
@@ -42,6 +44,14 @@ class MultiTaskModel(torch.nn.Module):
             logger.info(
                 "lazy decoding enabled, check source is consistent across batch"
             )
+        if loss_weights is None:
+            loss_weights = {name: 1.0 for name in decoders.keys()}
+        for name in decoders.keys():
+            if name not in loss_weights:
+                logger.warning(f"extra task {name} not in loss_weights, setting to 1.0")
+                loss_weights[name] = 1.0
+        self.loss_weights = loss_weights
+        logger.info(f"loss_weights: {self.loss_weights}")
 
     def apply_decoder(
         self,
@@ -82,7 +92,7 @@ class MultiTaskModel(torch.nn.Module):
         for idx, entry in enumerate(cur_output):
             outputs[idx][name] = entry
         for loss_name, loss_value in cur_loss_dict.items():
-            losses[f"{name}_{loss_name}"] = loss_value
+            losses[f"{name}_{loss_name}"] = loss_value * self.loss_weights[name]
         return outputs, losses
 
     def forward(
