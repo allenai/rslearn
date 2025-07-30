@@ -221,18 +221,18 @@ class RegressionHead(torch.nn.Module):
         else:
             outputs = logits
 
-        loss = None
+        losses = {}
         if targets:
             labels = torch.stack([target["value"] for target in targets])
             mask = torch.stack([target["valid"] for target in targets])
             if self.loss_mode == "mse":
-                loss = torch.mean(torch.square(outputs - labels) * mask)
+                losses["regress"] = torch.mean(torch.square(outputs - labels) * mask)
             elif self.loss_mode == "l1":
-                loss = torch.mean(torch.abs(outputs - labels) * mask)
+                losses["regress"] = torch.mean(torch.abs(outputs - labels) * mask)
             else:
                 assert False
 
-        return outputs, {"regress": loss}
+        return outputs, losses
 
 
 class RegressionMetricWrapper(Metric):
