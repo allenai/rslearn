@@ -157,7 +157,7 @@ class SplitConfig:
         self,
         groups: list[str] | None = None,
         names: list[str] | None = None,
-        tags: dict[str, str] | None = None,
+        tags: dict[str, Any] | None = None,
         num_samples: int | None = None,
         num_patches: int | None = None,
         transforms: list[torch.nn.Module] | None = None,
@@ -345,15 +345,19 @@ class ModelDataset(torch.utils.data.Dataset):
         if split_config.tags:
             # Filter the window.options.
             new_windows = []
+            num_removed: dict[str, int] = {}
             for window in windows:
-                tags_passed = True
                 for k, v in split_config.tags.items():
-                    if k not in window.options:
-                        tags_passed = False
-                    elif v and window.options[k] != v:
-                        tags_passed = False
-                if tags_passed:
+                    if k not in window.options or (v and window.options[k] != v):
+                        num_removed[k] = num_removed.get(k, 0) + 1
+                        break
+                else:
                     new_windows.append(window)
+            logger.info(
+                f"Started with {len(windows)} windows, ended with {len(new_windows)} windows for {self.dataset.path}"
+            )
+            for k, v in num_removed.items():
+                logger.info(f"Removed {v} windows due to tag {k}")
             windows = new_windows
 
         # If targets are not needed, remove them from the inputs.
@@ -367,7 +371,7 @@ class ModelDataset(torch.utils.data.Dataset):
         # We use only main thread if the index is set, since that can take a long time
         # to send to the worker threads, it may get serialized for each window.
         new_windows = []
-        if workers == 0 or windows[0].index is not None:
+        if workers == 0 or (len(windows) >= 1 and windows[0].index is not None):
             for window in windows:
                 if check_window(self.inputs, window) is None:
                     continue
@@ -506,14 +510,14 @@ class ModelDataset(torch.utils.data.Dataset):
         list of (window, patch_bounds, (patch_idx, # patches)) tuples.
         """
         if self.dataset_examples is None:
-            logger.info(
+            logger.debug(
                 f"Loading dataset examples from {self.dataset_examples_fname} in process {os.getpid()}"
             )
             with open(self.dataset_examples_fname) as f:
                 self.dataset_examples = [
                     self._deserialize_item(d) for d in json.load(f)
                 ]
-            logger.info(f"Finished loading dataset examples in process {os.getpid()}")
+            logger.debug(f"Finished loading dataset examples in process {os.getpid()}")
         return self.dataset_examples
 
     def __len__(self) -> int:
@@ -573,6 +577,8 @@ class ModelDataset(torch.utils.data.Dataset):
             window = example
             bounds = window.bounds
 
+        assert isinstance(window, Window)
+
         # Read the inputs and targets.
         def read_input(data_input: DataInput) -> torch.Tensor:
             # First enumerate all options of individual layers to read.
@@ -587,7 +593,6 @@ class ModelDataset(torch.utils.data.Dataset):
             # In the future we need to support different configuration for how to pick
             # the options, as well as picking multiple for series inputs.
             layer = random.choice(layer_options)
-            layer_dir = window.get_layer_dir(layer)
 
             # The model config may reference a specific group within a layer, like
             # "image.2" in a dataset that has a layer "image" with max_matches > 1.
@@ -646,9 +651,9 @@ class ModelDataset(torch.utils.data.Dataset):
                     raster_format = load_raster_format(
                         RasterFormatConfig(band_set.format["name"], band_set.format)
                     )
-                    cur_path = layer_dir / "_".join(band_set.bands)
+                    raster_dir = window.get_raster_dir(layer, band_set.bands)
                     src = raster_format.decode_raster(
-                        cur_path, final_projection, final_bounds
+                        raster_dir, final_projection, final_bounds
                     )
                     if src is None:
                         raise ValueError(f"Source is None for {data_input}")
@@ -676,6 +681,7 @@ class ModelDataset(torch.utils.data.Dataset):
             elif data_input.data_type == "vector":
                 assert isinstance(layer_config, VectorLayerConfig)
                 vector_format = load_vector_format(layer_config.format)
+                layer_dir = window.get_layer_dir(layer)
                 features = vector_format.decode_vector(
                     layer_dir, window.projection, window.bounds
                 )
