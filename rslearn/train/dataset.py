@@ -912,6 +912,9 @@ class AllPatchesDataset(torch.utils.data.IterableDataset):
         # Now we pad our own patches as necessary.
         # We copy from patches assigned to other workers starting from the previous
         # worker.
+        # This ensures that all workers have the same number of samples. This is needed
+        # because the batches must be consistent across ranks, since processing will
+        # stop once any rank has exhausted its batches with DDP.
         my_patches = patches_by_worker[global_worker_id]
         cur_worker_to_pad_from = (global_worker_id - 1) % global_num_workers
         while (
