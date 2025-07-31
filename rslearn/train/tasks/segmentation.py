@@ -46,6 +46,7 @@ class SegmentationTask(BasicTask):
         f1_metric_thresholds: list[list[float]] = [[0.5]],
         metric_kwargs: dict[str, Any] = {},
         miou_metric_kwargs: dict[str, Any] = {},
+        prob_scales: list[float] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize a new SegmentationTask.
@@ -67,6 +68,10 @@ class SegmentationTask(BasicTask):
                 torchmetrics.classification.MulticlassAccuracy.
             miou_metric_kwargs: additional arguments to pass to MeanIoUMetric, if
                 enable_miou_metric is passed.
+            prob_scales: during inference, scale the output probabilities by this much
+                before computing the argmax. There is one scale per class. Note that
+                this is only applied during prediction, not when computing val or test
+                metrics.
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -79,6 +84,7 @@ class SegmentationTask(BasicTask):
         self.f1_metric_thresholds = f1_metric_thresholds
         self.metric_kwargs = metric_kwargs
         self.miou_metric_kwargs = miou_metric_kwargs
+        self.prob_scales = prob_scales
 
     def process_inputs(
         self,
@@ -126,7 +132,11 @@ class SegmentationTask(BasicTask):
         Returns:
             either raster or vector data.
         """
-        classes = raw_output.cpu().numpy().argmax(axis=0).astype(np.uint8)
+        raw_output_np = raw_output.cpu().numpy()
+        if self.prob_scales is not None:
+            # Scale the channel dimension by the provided scales.
+            raw_output_np = raw_output_np * np.array(self.prob_scales)[:, None, None]
+        classes = raw_output_np.argmax(axis=0).astype(np.uint8)
         return classes[None, :, :]
 
     def visualize(
@@ -236,7 +246,7 @@ class SegmentationHead(torch.nn.Module):
         """
         outputs = torch.nn.functional.softmax(logits, dim=1)
 
-        loss = None
+        losses = {}
         if targets:
             labels = torch.stack([target["classes"] for target in targets], dim=0)
             mask = torch.stack([target["valid"] for target in targets], dim=0)
@@ -244,9 +254,9 @@ class SegmentationHead(torch.nn.Module):
                 torch.nn.functional.cross_entropy(logits, labels, reduction="none")
                 * mask
             )
-            loss = torch.mean(loss)
+            losses["cls"] = torch.mean(loss)
 
-        return outputs, {"cls": loss}
+        return outputs, losses
 
 
 class SegmentationMetric(Metric):
