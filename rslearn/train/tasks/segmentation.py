@@ -252,7 +252,7 @@ class SegmentationHead(torch.nn.Module):
         """
         outputs = torch.nn.functional.softmax(logits, dim=1)
 
-        loss = None
+        losses = {}
         if targets:
             labels = torch.stack([target["classes"] for target in targets], dim=0)
             mask = torch.stack([target["valid"] for target in targets], dim=0)
@@ -262,13 +262,13 @@ class SegmentationHead(torch.nn.Module):
             mask_sum = torch.sum(mask)
             if mask_sum > 0:
                 # Compute average loss over valid pixels.
-                loss = torch.sum(per_pixel_loss * mask) / torch.sum(mask)
+                losses["cls"] = torch.sum(per_pixel_loss * mask) / torch.sum(mask)
             else:
                 # If there are no valid pixels, we avoid dividing by zero and just let
                 # the summed mask loss be zero.
-                loss = torch.sum(per_pixel_loss * mask)
+                losses["cls"] = torch.sum(per_pixel_loss * mask)
 
-        return outputs, {"cls": loss}
+        return outputs, losses
 
 
 class SegmentationMetric(Metric):
