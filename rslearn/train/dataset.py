@@ -783,6 +783,9 @@ class AllPatchesDataset(torch.utils.data.IterableDataset):
     This should be used when SplitConfig.load_all_patches is enabled. The ModelDataset
     is configured with no patch size (load entire windows), and the dataset is wrapped
     in an AllPatchesDataset.
+
+    Similar to DistributedSampler, we add extra samples at each rank to ensure
+    consistent number of batches across all ranks.
     """
 
     def __init__(
@@ -813,6 +816,8 @@ class AllPatchesDataset(torch.utils.data.IterableDataset):
         )
         self.rank = rank
         self.world_size = world_size
+
+        self.windows = self.dataset.get_dataset_examples()
 
     def get_patch_options(self, bounds: PixelBounds) -> list[PixelBounds]:
         """Get the bounds of each patch within the overall bounds.
@@ -855,11 +860,17 @@ class AllPatchesDataset(torch.utils.data.IterableDataset):
                 )
         return patch_bounds
 
-    def _get_idx_subset(self) -> Iterable[int]:
-        """Get subset of indices in the underlying dataset that we should iterate over.
+    def _get_worker_patches(self) -> Iterable[tuple[int, list[PixelBounds]]]:
+        """Get patches that we should iterate over.
 
         This is split both by training worker (self.rank) and data loader worker (via
-        get_worker_info).
+        get_worker_info). The data is padded to ensure that each worker has the same
+        number of patches (samples).
+
+        Returns:
+            list of (window_idx, patch list) tuples. For most windows, we return all of
+                the patches. Some additional windows with a subset of patches may be
+                added for padding.
         """
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is None:
@@ -871,23 +882,73 @@ class AllPatchesDataset(torch.utils.data.IterableDataset):
         global_worker_id = self.rank * num_workers + worker_id
         global_num_workers = self.world_size * num_workers
 
-        return range(global_worker_id, len(self.dataset), global_num_workers)
+        # Split up the windows evenly among the workers.
+        window_indexes = range(len(self.windows))
+        num_windows_per_worker = (
+            len(self.windows) + global_num_workers - 1
+        ) // global_num_workers
+        windows_by_worker = [
+            window_indexes[
+                cur_id * num_windows_per_worker : (cur_id + 1) * num_windows_per_worker
+            ]
+            for cur_id in range(global_num_workers)
+        ]
+
+        # Now get the list of patches pertaining to each worker's windows.
+        patches_by_worker: list[list[tuple[int, PixelBounds]]] = [
+            [] for _ in range(global_num_workers)
+        ]
+        for worker_id, worker_windows in enumerate(windows_by_worker):
+            for window_id in worker_windows:
+                window = self.windows[window_id]
+                for patch_bounds in self.get_patch_options(window.bounds):
+                    patches_by_worker[worker_id].append((window_id, patch_bounds))
+
+        # All workers need to return the max number of samples across workers.
+        max_num_patches = max(
+            [len(worker_patches) for worker_patches in patches_by_worker]
+        )
+
+        # Now we pad our own patches as necessary.
+        # We copy from patches assigned to other workers starting from the previous
+        # worker.
+        my_patches = patches_by_worker[global_worker_id]
+        cur_worker_to_pad_from = (global_worker_id - 1) % global_num_workers
+        while (
+            len(my_patches) < max_num_patches
+            and cur_worker_to_pad_from != global_worker_id
+        ):
+            wanted = max_num_patches - len(my_patches)
+            my_patches.extend(patches_by_worker[cur_worker_to_pad_from][0:wanted])
+            cur_worker_to_pad_from = (cur_worker_to_pad_from - 1) % global_num_workers
+
+        # This should always succeed since we can always copy from the worker assigned
+        # the maximum number of patches.
+        assert len(my_patches) == max_num_patches
+
+        # Now we regroup the patches by window ID.
+        my_patches_by_window_id: dict[int, list[PixelBounds]] = {}
+        for window_id, patch_bounds in my_patches:
+            if window_id not in my_patches_by_window_id:
+                my_patches_by_window_id[window_id] = []
+            my_patches_by_window_id[window_id].append(patch_bounds)
+        return my_patches_by_window_id.items()
 
     def __len__(self) -> int:
         """Compute the total number of patches across all windows for this worker."""
         total_num_patches = 0
-        windows = self.dataset.get_dataset_examples()
-        for idx in self._get_idx_subset():
-            patch_options = self.get_patch_options(windows[idx].bounds)
-            total_num_patches += len(patch_options)
+        for _, patches in self._get_worker_patches():
+            total_num_patches += len(patches)
         return total_num_patches
 
     def __iter__(
         self,
     ) -> Iterator[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
         """Iterate over all patches in each element of the underlying ModelDataset."""
-        for idx in self._get_idx_subset():
-            raw_inputs, passthrough_inputs, metadata = self.dataset.get_raw_inputs(idx)
+        for window_id, patches in self._get_worker_patches():
+            raw_inputs, passthrough_inputs, metadata = self.dataset.get_raw_inputs(
+                window_id
+            )
             bounds = metadata["bounds"]
 
             # For simplicity, pad tensors by patch size to ensure that any patch bounds
@@ -904,18 +965,17 @@ class AllPatchesDataset(torch.utils.data.IterableDataset):
             # Now iterate over the patches and extract/yield the crops.
             # Note that, in case user is leveraging RslearnWriter, it is important that
             # the patch_idx be increasing (as we iterate) within one window.
-            patch_options = self.get_patch_options(bounds)
-            for patch_idx, cur_bounds in enumerate(patch_options):
+            for patch_idx, patch_bounds in enumerate(patches):
                 cur_geom = STGeometry(
-                    metadata["projection"], shapely.box(*cur_bounds), None
+                    metadata["projection"], shapely.box(*patch_bounds), None
                 )
                 start_offset = (
-                    cur_bounds[0] - bounds[0],
-                    cur_bounds[1] - bounds[1],
+                    patch_bounds[0] - bounds[0],
+                    patch_bounds[1] - bounds[1],
                 )
                 end_offset = (
-                    cur_bounds[2] - bounds[0],
-                    cur_bounds[3] - bounds[1],
+                    patch_bounds[2] - bounds[0],
+                    patch_bounds[3] - bounds[1],
                 )
 
                 # Define a helper function to handle each input dict.
@@ -946,9 +1006,9 @@ class AllPatchesDataset(torch.utils.data.IterableDataset):
 
                 # Adjust the metadata as well.
                 cur_metadata = metadata.copy()
-                cur_metadata["bounds"] = cur_bounds
+                cur_metadata["bounds"] = patch_bounds
                 cur_metadata["patch_idx"] = patch_idx
-                cur_metadata["num_patches"] = len(patch_options)
+                cur_metadata["num_patches"] = len(patches)
 
                 # Now we can compute input and target dicts via the task.
                 input_dict, target_dict = self.dataset.task.process_inputs(

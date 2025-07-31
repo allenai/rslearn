@@ -1,3 +1,5 @@
+"""Unit tests for rslearn.train.dataset."""
+
 import json
 import pathlib
 
@@ -10,11 +12,17 @@ from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
-from rslearn.train.dataset import DataInput, ModelDataset, RetryDataset, SplitConfig
+from rslearn.train.dataset import (
+    AllPatchesDataset,
+    DataInput,
+    ModelDataset,
+    RetryDataset,
+    SplitConfig,
+)
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.transforms.concatenate import Concatenate
 from rslearn.utils.feature import Feature
-from rslearn.utils.geometry import STGeometry
+from rslearn.utils.geometry import PixelBounds, STGeometry
 from rslearn.utils.raster_format import GeotiffRasterFormat
 from rslearn.utils.vector_format import GeojsonVectorFormat
 
@@ -61,6 +69,7 @@ def add_window(
     name: str = "default",
     group: str = "default",
     images: dict[tuple[str, int], npt.NDArray] = {},
+    bounds: PixelBounds = (0, 0, 4, 4),
 ) -> Window:
     """Add a window to the dataset.
 
@@ -71,13 +80,13 @@ def add_window(
         images: map from (layer_name, group_idx) to the image content, which should be
             1x4x4 since that is the window size.
     """
-    window_path = Window.get_window_root(dataset.path, name, group)
+    window_path = Window.get_window_root(dataset.path, group, name)
     window = Window(
         path=window_path,
-        group=name,
-        name=group,
+        name=name,
+        group=group,
         projection=WGS84_PROJECTION,
-        bounds=(0, 0, 4, 4),
+        bounds=bounds,
         time_range=None,
     )
     window.save()
@@ -91,7 +100,7 @@ def add_window(
 
     # Add label.
     feature = Feature(
-        STGeometry(window.projection, shapely.Point(1, 1), None),
+        STGeometry(window.projection, shapely.box(*bounds), None),
         {
             "label": 1,
         },
@@ -106,7 +115,7 @@ def add_window(
     return window
 
 
-class TestDataset(torch.utils.data.Dataset):
+class DummyTestDataset(torch.utils.data.Dataset):
     def __init__(self, failures: int = 0) -> None:
         # Raise Exception in __getitem__ for the given number of failures before
         # ultimately succeeding.
@@ -128,13 +137,13 @@ class TestDataset(torch.utils.data.Dataset):
 
 def test_retry_dataset() -> None:
     # First try with 3 failures, this should succeed.
-    dataset = TestDataset(failures=3)
+    dataset = DummyTestDataset(failures=3)
     dataset = RetryDataset(dataset, retries=3, delay=0.01)
     for _ in dataset:
         pass
 
     # Now try with 4 failures, it should fail.
-    dataset = TestDataset(failures=4)
+    dataset = DummyTestDataset(failures=4)
     dataset = RetryDataset(dataset, retries=3, delay=0.01)
     with pytest.raises(TestException):
         for _ in dataset:
@@ -146,14 +155,15 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
     # the generated windows.
     # The image_to_class_dataset window is 4x4 so 3x3 patch will ensure irregular window
     # at the border.
+    patch_size = 3
     split_config = SplitConfig(
-        patch_size=3,
+        patch_size=patch_size,
         load_all_patches=True,
     )
     image_data_input = DataInput("raster", ["image"], bands=["band"], passthrough=True)
     target_data_input = DataInput("vector", ["label"])
     task = ClassificationTask("label", ["cls0", "cls1"], read_class_id=True)
-    dataset = ModelDataset(
+    model_dataset = ModelDataset(
         image_to_class_dataset,
         split_config=split_config,
         task=task,
@@ -163,6 +173,7 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
             "targets": target_data_input,
         },
     )
+    dataset = AllPatchesDataset(model_dataset, (patch_size, patch_size))
 
     point_coverage = {}
     for col in range(4):
@@ -171,9 +182,9 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
 
     # There should be 4 windows with top-left at:
     # - (0, 0)
-    # - (0, 3)
-    # - (3, 0)
-    # - (3, 3)
+    # - (0, 1)
+    # - (1, 0)
+    # - (1, 1)
     assert len(dataset) == 4
 
     for _, _, metadata in dataset:
@@ -188,29 +199,15 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
     assert all(point_coverage.values())
 
     # Test with overlap_ratio=0.5 for 2x2 patches
-    split_config_with_overlap = SplitConfig(
-        patch_size=2,
-        load_all_patches=True,
-        overlap_ratio=0.5,
-    )
-    dataset_with_overlap = ModelDataset(
-        image_to_class_dataset,
-        split_config=split_config_with_overlap,
-        task=task,
-        workers=1,
-        inputs={
-            "image": image_data_input,
-            "targets": target_data_input,
-        },
-    )
+    dataset_with_overlap = AllPatchesDataset(model_dataset, (2, 2), overlap_ratio=0.5)
 
     point_coverage = {}
     for col in range(4):
         for row in range(4):
             point_coverage[(col, row)] = False
 
-    # With overlap_ratio=0.5, there should be 16 windows given that overlap is 1 pixel.
-    assert len(dataset_with_overlap) == 16
+    # With overlap_ratio=0.5, there should be 9 windows given that overlap is 1 pixel.
+    assert len(dataset_with_overlap) == 9
 
     for _, _, metadata in dataset:
         bounds = metadata["bounds"]
@@ -338,3 +335,97 @@ def test_load_two_layers(basic_classification_dataset: Dataset) -> None:
     assert inputs["image"].shape == (2, 4, 4)
     assert torch.all(inputs["image"][0] == 1)
     assert torch.all(inputs["image"][1] == 2)
+
+
+class TestAllPatchesDataset:
+    """Tests for AllPatchesDataset."""
+
+    def test_padding_with_one_window(
+        self, basic_classification_dataset: Dataset
+    ) -> None:
+        """Verify that with single-window dataset all ranks get that window.
+
+        This is because all ranks should be padded to the same size.
+        """
+        window = add_window(basic_classification_dataset)
+        model_dataset = ModelDataset(
+            basic_classification_dataset,
+            split_config=SplitConfig(),
+            task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+            workers=1,
+            inputs={
+                "targets": DataInput("vector", ["vector_layer"]),
+            },
+        )
+        world_size = 4
+        for rank in range(world_size):
+            all_patches_dataset = AllPatchesDataset(
+                model_dataset, (4, 4), rank=rank, world_size=world_size
+            )
+            assert len(all_patches_dataset) == 1
+            samples = list(all_patches_dataset)
+            assert len(samples) == 1
+            assert samples[0][2]["window_name"] == window.name
+
+    def test_no_padding(self, basic_classification_dataset: Dataset) -> None:
+        """Verify that with one window per rank, no padding is needed."""
+        add_window(basic_classification_dataset, name="window0")
+        add_window(basic_classification_dataset, name="window1")
+        add_window(basic_classification_dataset, name="window2")
+        add_window(basic_classification_dataset, name="window3")
+        model_dataset = ModelDataset(
+            basic_classification_dataset,
+            split_config=SplitConfig(),
+            task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+            workers=1,
+            inputs={
+                "targets": DataInput("vector", ["vector_layer"]),
+            },
+        )
+        world_size = 4
+        window_names = set()
+        for rank in range(world_size):
+            all_patches_dataset = AllPatchesDataset(
+                model_dataset, (4, 4), rank=rank, world_size=world_size
+            )
+            assert len(all_patches_dataset) == 1
+            samples = list(all_patches_dataset)
+            assert len(samples) == 1
+            window_names.add(samples[0][2]["window_name"])
+        assert len(window_names) == 4
+
+    def test_different_window_sizes(
+        self, basic_classification_dataset: Dataset
+    ) -> None:
+        """Verify that rank padding works with different window sizes."""
+        # One rank should get the second window.
+        # While the other rank should get first window + N-1 patches from second window.
+        add_window(basic_classification_dataset, name="window0", bounds=(0, 0, 4, 4))
+        add_window(basic_classification_dataset, name="window1", bounds=(0, 0, 8, 8))
+        model_dataset = ModelDataset(
+            basic_classification_dataset,
+            split_config=SplitConfig(),
+            task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+            workers=1,
+            inputs={
+                "targets": DataInput("vector", ["vector_layer"]),
+            },
+        )
+        world_size = 2
+        seen_patches: dict[tuple[str, PixelBounds], int] = {}
+        for rank in range(world_size):
+            all_patches_dataset = AllPatchesDataset(
+                model_dataset, (4, 4), rank=rank, world_size=world_size
+            )
+            assert len(all_patches_dataset) == 4
+            samples = list(all_patches_dataset)
+            for sample in samples:
+                patch_id = (sample[2]["window_name"], sample[2]["bounds"])
+                seen_patches[patch_id] = seen_patches.get(patch_id, 0) + 1
+
+        assert len(seen_patches) == 5
+        assert seen_patches[("window0", (0, 0, 4, 4))] == 1
+        assert seen_patches[("window1", (0, 0, 4, 4))] == 2
+        assert seen_patches[("window1", (0, 4, 4, 8))] == 2
+        assert seen_patches[("window1", (4, 0, 8, 4))] == 2
+        assert seen_patches[("window1", (4, 4, 8, 8))] == 1
