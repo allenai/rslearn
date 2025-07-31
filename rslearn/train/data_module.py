@@ -8,14 +8,21 @@ from typing import Any
 
 import lightning as L
 import torch
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader, DistributedSampler, IterableDataset
 from upath import UPath
 
 from rslearn.dataset import Dataset
 from rslearn.log_utils import get_logger
 from rslearn.train.tasks import Task
 
-from .dataset import DataInput, ModelDataset, MultiDataset, RetryDataset, SplitConfig
+from .dataset import (
+    AllPatchesDataset,
+    DataInput,
+    ModelDataset,
+    MultiDataset,
+    RetryDataset,
+    SplitConfig,
+)
 
 logger = get_logger(__name__)
 
@@ -50,12 +57,14 @@ class RslearnDataModule(L.LightningDataModule):
         path_options: dict[str, Any] = {},
         batch_size: int = 1,
         num_workers: int = 0,
+        init_workers: int = 0,
         default_config: SplitConfig = SplitConfig(),
         train_config: SplitConfig = SplitConfig(),
         val_config: SplitConfig = SplitConfig(),
         test_config: SplitConfig = SplitConfig(),
         predict_config: SplitConfig = SplitConfig(),
         name: str | None = None,
+        retries: int = 0,
     ) -> None:
         """Initialize a new RslearnDataModule.
 
@@ -67,12 +76,16 @@ class RslearnDataModule(L.LightningDataModule):
             batch_size: the batch size
             num_workers: number of data loader worker processes, or 0 to use main
                 process only
+            init_workers: number of workers used to initialize the dataset, e.g. for
+                loading the list of windows. Defaults to 0 which uses num_workers for
+                this setting.
             default_config: default split configuration
             train_config: split config for train split
             val_config: split config for val split
             test_config: split config for test split
             predict_config: split config for predict split
             name: name of the dataset (default: None)
+            retries: number of retries to attempt for getitem calls.
         """
         super().__init__()
         self.inputs = inputs
@@ -80,7 +93,9 @@ class RslearnDataModule(L.LightningDataModule):
         self.path = UPath(path, **path_options)
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.init_workers = init_workers if init_workers > 0 else self.num_workers
         self.name = name
+        self.retries = retries
         self.split_configs = {
             "train": default_config.update(train_config),
             "val": default_config.update(val_config),
@@ -102,17 +117,33 @@ class RslearnDataModule(L.LightningDataModule):
         }
         self.datasets = {}
         for split in stage_to_splits[stage]:
+            split_config = self.split_configs[split]
             dataset = ModelDataset(
                 dataset=Dataset(path=self.path),
                 split_config=self.split_configs[split],
                 inputs=self.inputs,
                 task=self.task,
-                workers=self.num_workers,
+                workers=self.init_workers,
                 name=self.name,
             )
-            dataset = RetryDataset(dataset)
+            logger.info(f"got {len(dataset)} examples in split {split}")
+            if split_config.get_load_all_patches():
+                logger.info("using AllPatchesDataset")
+                patch_size = split_config.get_patch_size()
+                if patch_size is None:
+                    raise ValueError(
+                        "patch_size is not set but must be set if load_all_patches is set"
+                    )
+                dataset = AllPatchesDataset(
+                    dataset,
+                    patch_size=patch_size,
+                    overlap_ratio=split_config.get_overlap_ratio(),
+                    rank=self.trainer.global_rank,
+                    world_size=self.trainer.world_size,
+                )
+            if self.retries > 0:
+                dataset = RetryDataset(dataset, retries=self.retries)
             self.datasets[split] = dataset
-            logger.info(f"got {len(self.datasets[split])} examples in split {split}")
 
     def set_name(self, name: str) -> None:
         """Set the name of the dataset.
@@ -151,6 +182,7 @@ class RslearnDataModule(L.LightningDataModule):
             self.trainer is not None
             and self.trainer.world_size is not None
             and self.trainer.world_size > 1
+            and not isinstance(dataset, IterableDataset)
         ):
             # Use distributed sampler in case ddp is enabled.
             kwargs["sampler"] = DistributedSampler(

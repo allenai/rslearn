@@ -5,7 +5,7 @@ from typing import Any
 import torch
 import torchvision
 
-from .transform import Transform
+from .transform import Transform, read_selector
 
 
 class Crop(Transform):
@@ -111,7 +111,7 @@ class Crop(Transform):
         """
         smallest_image_shape = None
         for selector in self.image_selectors:
-            image = self.read_selector(input_dict, target_dict, selector)
+            image = read_selector(input_dict, target_dict, selector)
             if (
                 smallest_image_shape is None
                 or image.shape[-1] < smallest_image_shape[1]

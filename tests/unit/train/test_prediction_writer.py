@@ -3,15 +3,111 @@
 import json
 import pathlib
 
+import numpy as np
 import torch
 from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Window
 from rslearn.train.lightning_module import RslearnLightningModule
-from rslearn.train.prediction_writer import RslearnWriter
+from rslearn.train.prediction_writer import (
+    PendingPatchOutput,
+    RasterMerger,
+    RslearnWriter,
+)
 from rslearn.train.tasks.segmentation import SegmentationTask
 from rslearn.utils.geometry import Projection
+
+
+class TestRasterMerger:
+    """Unit tests for RasterMerger."""
+
+    def test_merge_no_padding(self, tmp_path: pathlib.Path) -> None:
+        """Verify patches are merged when no padding is used.
+
+        We make four 3x3 patches to cover a 4x4 window.
+        """
+        window = Window(
+            path=UPath(tmp_path),
+            group="fake",
+            name="fake",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 4, 4),
+            time_range=None,
+        )
+        outputs = [
+            PendingPatchOutput(
+                bounds=(0, 0, 3, 3),
+                output=0 * np.ones((1, 3, 3), dtype=np.uint8),
+            ),
+            PendingPatchOutput(
+                bounds=(0, 3, 3, 6),
+                output=1 * np.ones((1, 3, 3), dtype=np.uint8),
+            ),
+            PendingPatchOutput(
+                bounds=(3, 0, 6, 3),
+                output=2 * np.ones((1, 3, 3), dtype=np.uint8),
+            ),
+            PendingPatchOutput(
+                bounds=(3, 3, 6, 6),
+                output=3 * np.ones((1, 3, 3), dtype=np.uint8),
+            ),
+        ]
+        merged = RasterMerger().merge(window, outputs)
+        assert merged.shape == (1, 4, 4)
+        assert merged.dtype == np.uint8
+        # The patches were disjoint, so we just check that those portions of the merged
+        # image have the right value.
+        assert np.all(merged[0, 0:3, 0:3] == 0)
+        assert np.all(merged[0, 3:4, 0:3] == 1)
+        assert np.all(merged[0, 0:3, 3:4] == 2)
+        assert np.all(merged[0, 3, 3] == 3)
+
+    def test_merge_with_padding(self, tmp_path: pathlib.Path) -> None:
+        """Verify merging works with padding."""
+        window = Window(
+            path=UPath(tmp_path),
+            group="fake",
+            name="fake",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 4, 4),
+            time_range=None,
+        )
+        # We make four 3x3 patches:
+        # - (0, 0, 3, 3)
+        # - (0, 1, 3, 4)
+        # - (1, 0, 4, 3)
+        # - (1, 1, 4, 4)
+        # There are 2 shared pixels between overlapping patches so we set padding=1.
+        outputs = [
+            PendingPatchOutput(
+                bounds=(0, 0, 3, 3),
+                output=0 * np.ones((1, 3, 3), dtype=np.int32),
+            ),
+            PendingPatchOutput(
+                bounds=(0, 1, 3, 4),
+                output=1 * np.ones((1, 3, 3), dtype=np.int32),
+            ),
+            PendingPatchOutput(
+                bounds=(1, 0, 4, 3),
+                output=2 * np.ones((1, 3, 3), dtype=np.int32),
+            ),
+            PendingPatchOutput(
+                bounds=(1, 1, 4, 4),
+                output=3 * np.ones((1, 3, 3), dtype=np.int32),
+            ),
+        ]
+        merged = RasterMerger(padding=1).merge(window, outputs)
+        assert merged.shape == (1, 4, 4)
+        assert merged.dtype == np.int32
+        # The top-left should use the first patch.
+        assert np.all(merged[0, 0:2, 0:2] == 0)
+        # The bottom-left should use the second patch.
+        assert np.all(merged[0, 2:4, 0:2] == 1)
+        # The top-right should use the third patch.
+        assert np.all(merged[0, 0:2, 2:4] == 2)
+        # And finally the bottom-right should use the fourth patch.
+        assert np.all(merged[0, 2:4, 2:4] == 3)
 
 
 def test_write_raster(tmp_path: pathlib.Path) -> None:

@@ -54,15 +54,25 @@ class EncoderModuleWrapper(torch.nn.Module):
 
     def __init__(
         self,
-        module: torch.nn.Module,
+        module: torch.nn.Module | None = None,
+        modules: list[torch.nn.Module] = [],
     ):
         """Initialize an EncoderModuleWrapper.
 
         Args:
-            module: the module to wrap
+            module: the encoder module to wrap. Exactly one one of module or modules
+                must be set.
+            modules: list of modules to wrap
         """
         super().__init__()
-        self.module = module
+        if module is not None and len(modules) > 0:
+            raise ValueError("only one of module or modules should be set")
+        if module is not None:
+            self.encoder_modules = torch.nn.ModuleList([module])
+        elif len(modules) > 0:
+            self.encoder_modules = torch.nn.ModuleList(modules)
+        else:
+            raise ValueError("one of module or modules must be set")
 
     def forward(
         self,
@@ -75,4 +85,7 @@ class EncoderModuleWrapper(torch.nn.Module):
                 process.
         """
         images = torch.stack([inp["image"] for inp in inputs], dim=0)
-        return self.module([images], inputs)
+        cur = [images]
+        for m in self.encoder_modules:
+            cur = m(cur, inputs)
+        return cur
