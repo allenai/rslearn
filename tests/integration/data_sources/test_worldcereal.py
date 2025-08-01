@@ -65,7 +65,6 @@ def make_test_zips(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
     return_dict = {}
     for zip_file in WorldCereal.ZIP_FILENAMES:
         filepath = WorldCereal.zip_filepath_from_filename(zip_file)
-        print(filepath)
         raster_path = UPath(tmp_path / "zips" / filepath)
         raster_path.mkdir(parents=True)
         raster_format = GeotiffRasterFormat()
@@ -76,7 +75,6 @@ def make_test_zips(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
             array,
             fname=f"{seattle_aez}_{raster_path.stem}.tif",
         )
-        print(f"{seattle_aez}_{raster_path.stem}.tif")
 
         # Create a zip file containing it.
         zip_fname = tmp_path / "zips" / zip_file
@@ -119,6 +117,7 @@ def test_with_worldcereal_dir(
 
     bands = [WorldCereal.band_from_zipfilename(f) for f in WorldCereal.ZIP_FILENAMES]
     for band in bands:
+        print(f"Testing {band}")
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
         layer_config = RasterLayerConfig(
             LayerType.RASTER,
@@ -133,7 +132,6 @@ def test_with_worldcereal_dir(
         print("get items")
         item_groups = data_source.get_items([seattle2020], query_config)
         item = item_groups[0][0][0]
-        print(item)
         tile_store_dir = UPath(worldcereal_dir) / "tile_store"
         tile_store = DefaultTileStore(str(tile_store_dir))
         tile_store.set_dataset_path(tile_store_dir)
@@ -145,6 +143,7 @@ def test_with_worldcereal_dir(
             item_groups[0][0],
             [[seattle2020]],
         )
+        print(list(tile_store_dir.glob("layer/1/*")))
         assert tile_store.is_raster_ready(layer_name, item.name, [band])
         # Double check that the data intersected our example GeoTIFF and isn't just all 0.
         bounds = (
@@ -157,3 +156,4 @@ def test_with_worldcereal_dir(
             layer_name, item.name, [band], seattle2020.projection, bounds
         )
         assert raster_data.max() == 1
+        print(f"Succeeded for {band}")

@@ -1,5 +1,7 @@
 """Data source for ESA WorldCover 2021."""
 
+import functools
+import json
 import os
 import shutil
 import tempfile
@@ -14,6 +16,8 @@ from rslearn.config import DataSourceConfig, LayerConfig, QueryConfig, RasterLay
 from rslearn.data_sources.local_files import LocalFiles
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
+
+from .data_source import Item
 
 logger = get_logger(__name__)
 
@@ -247,6 +251,7 @@ class WorldCereal(LocalFiles):
                 remote, prefix with a protocol ("file://") to use a local directory
                 instead of a path relative to the dataset path.
         """
+        self.band = band
         tif_dir, tif_filepath = self.download_worldcereal_data(band, worldcereal_dir)
         all_aezs: set[int] = self.all_aezs_from_tifs(tif_filepath)
 
@@ -264,6 +269,9 @@ class WorldCereal(LocalFiles):
                 spec_dict["fnames"].append(aez_band_filepath.absolute().as_uri())
                 spec_dict["bands"].append([band])
             spec_dicts.append(spec_dict)
+        if len(spec_dicts) == 0:
+            raise ValueError(f"No AEZ files found for {band}")
+        print(band, spec_dicts)
         # add this to the config
         if config.data_source is not None:
             if "item_specs" in config.data_source.config_dict:
@@ -423,3 +431,27 @@ class WorldCereal(LocalFiles):
         tif_filepath = tif_dir / cls.zip_filepath_from_filename(filename)
 
         return tif_dir, tif_filepath
+
+    @functools.cache
+    def list_items(self) -> list[Item]:
+        """Lists items from the source directory while maintaining a cache file.
+
+        This is identical to LocalFiles.list_items except that a unique summary
+        is made per band (since we treat each band separately now.)
+        """
+        cache_fname = self.src_dir / f"{self.band}_summary.json"
+        if not cache_fname.exists():
+            logger.debug("cache at %s does not exist, listing items", cache_fname)
+            items = self.importer.list_items(self.config, self.src_dir)
+            serialized_items = [item.serialize() for item in items]
+            with cache_fname.open("w") as f:
+                json.dump(serialized_items, f)
+            return items
+
+        logger.debug("loading item list from cache at %s", cache_fname)
+        with cache_fname.open() as f:
+            serialized_items = json.load(f)
+        return [
+            self.deserialize_item(serialized_item)
+            for serialized_item in serialized_items
+        ]
