@@ -1,19 +1,15 @@
-FROM pytorch/pytorch:2.5.0-cuda11.8-cudnn9-runtime@sha256:d15e9803095e462e351f097fb1f5e7cdaa4f5e855d7ff6d6f36ec4c2aa2938ea
+FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime@sha256:7db0e1bf4b1ac274ea09cf6358ab516f8a5c7d3d0e02311bed445f7e236a5d80
 
-# Weirdly this stopped working
-# RUN apt-get update \
-#     &&  apt-get clean \
-#     && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt install -y libpq-dev ffmpeg libsm6 libxext6 git wget \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /rslearn
 
-COPY ./requirements.txt /rslearn/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml /rslearn/pyproject.toml
+COPY uv.lock /rslearn/uv.lock
+RUN uv sync --extra extra --extra dev
 
-COPY ./extra_requirements.txt /rslearn/extra_requirements.txt
-RUN pip install --no-cache-dir -r extra_requirements.txt
-COPY ./test_requirements.txt /rslearn/test_requirements.txt
-RUN pip install --no-cache-dir -r test_requirements.txt
-
+ENV PATH="/rslearn/.venv/bin:$PATH"
 COPY ./ /rslearn
-RUN pip install --no-cache-dir  .

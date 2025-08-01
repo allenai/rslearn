@@ -19,7 +19,7 @@ repos:
         args: ["--autofix"]
       - id: check-case-conflict
       - id: check-added-large-files
-        exclude: wheels/*
+        args: ['--maxkb=1024']
       - id: check-ast
       - id: check-byte-order-marker
       - id: check-executables-have-shebangs
