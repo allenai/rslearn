@@ -52,7 +52,7 @@ class RestoreConfig:
 
     def get_state_dict(self) -> dict[str, Any]:
         """Returns the state dict configured in this RestoreConfig."""
-        print(f"loading state dict from {self.restore_path}")
+        logger.info(f"loading state dict from {self.restore_path}")
         with self.restore_path.open("rb") as f:
             state_dict = torch.load(f, map_location="cpu")
         for k in self.selector:
@@ -177,8 +177,8 @@ class RslearnLightningModule(L.LightningModule):
                 state_dict, strict=False
             )
             if missing_keys or unexpected_keys:
-                print(
-                    f"warning: restore yielded missing_keys={missing_keys} and unexpected_keys={unexpected_keys}"
+                logger.warning(
+                    f"restore yielded missing_keys={missing_keys} and unexpected_keys={unexpected_keys}"
                 )
 
     def configure_optimizers(self) -> OptimizerLRSchedulerConfig:
@@ -224,7 +224,18 @@ class RslearnLightningModule(L.LightningModule):
         """
         inputs, targets, _ = batch
         batch_size = len(inputs)
-        _, loss_dict = self(inputs, targets)
+        _, loss_dict, _, combine_weights = self(inputs, targets)
+        self.log_dict(
+            {
+                f"{inputs[0]['dataset_source']}_combine_weights/layer{i+1}_expert{j+1}": v.item()
+                for i, layer_weights in enumerate(combine_weights)
+                for j, v in enumerate(layer_weights)
+            },
+            batch_size=batch_size,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
         train_loss = sum(loss_dict.values())
         self.log_dict(
             {"train_" + k: v for k, v in loss_dict.items()},
@@ -256,7 +267,7 @@ class RslearnLightningModule(L.LightningModule):
         """
         inputs, targets, _ = batch
         batch_size = len(inputs)
-        outputs, loss_dict = self(inputs, targets)
+        outputs, loss_dict, *_ = self(inputs, targets)
         val_loss = sum(loss_dict.values())
         self.log_dict(
             {"val_" + k: v for k, v in loss_dict.items()},
