@@ -6,6 +6,7 @@ import torch
 
 from rslearn.log_utils import get_logger
 from rslearn.models.task_embedding import BaseTaskEmbedding
+from rslearn.models.trunk import DecoderTrunk
 
 logger = get_logger(__name__)
 
@@ -40,6 +41,7 @@ class MultiTaskModel(torch.nn.Module):
         decoders: dict[str, list[torch.nn.Module]],
         lazy_decode: bool = False,
         loss_weights: dict[str, float] | None = None,
+        trunk: DecoderTrunk | None = None,
         task_embedding: BaseTaskEmbedding | None = None,
         decoder_to_target: dict[str, list[str]] | None = None,
     ):
@@ -50,8 +52,9 @@ class MultiTaskModel(torch.nn.Module):
             decoders: modules to compute outputs and loss, should match number of tasks.
             lazy_decode: if True, only decode the outputs specified in the batch.
             loss_weights: weights for each task's loss (default: None = equal weights)
-            task_embedding: if provided, use this task embedding module to add task-specific
-                embeddings to the features (recommended if merging decoder heads)
+            trunk: if provided, use this trunk module to postprocess the features
+                (recommend including a task-specific embedding module here)
+            task_embedding: task-specific embedding module for multi-task learning.
             decoder_to_target: mapping from decoder id to list of task names
                 (specify if merging heads, otherwise leave as None)
         """
@@ -89,10 +92,10 @@ class MultiTaskModel(torch.nn.Module):
         self.loss_weights = sort_keys(loss_weights)
         logger.info(f"loss_weights: {self.loss_weights}")
 
-        self.task_embedding = task_embedding
-        if task_embedding is not None:
-            self.task_embedding.register_tasks(list(self.target_to_decoder.keys()))  # type: ignore
-            logger.info("registered decoders with task embedding")
+        self.trunk = trunk
+        if self.trunk is not None:
+            self.trunk.register_tasks(list(self.target_to_decoder.keys()))  # type: ignore
+            logger.info("registered decoders with trunk")
 
     def apply_decoder(
         self,
@@ -142,7 +145,7 @@ class MultiTaskModel(torch.nn.Module):
         self,
         inputs: list[dict[str, Any]],
         targets: list[dict[str, Any]] | None = None,
-    ) -> tuple[list[dict[str, Any]], dict[str, torch.Tensor]]:
+    ) -> tuple[list[dict[str, Any]], dict[str, torch.Tensor], Any, Any]:
         """Apply the sequence of modules on the inputs.
 
         Args:
@@ -150,14 +153,20 @@ class MultiTaskModel(torch.nn.Module):
             targets: optional list of target dicts
 
         Returns:
-            tuple (outputs, loss_dict) from the last module.
+            tuple (outputs, loss_dict, dispatch_weights, combine_weights) from the last module.
         """
         features = self.encoder(inputs)
         outputs: list[dict[str, Any]] = [{} for _ in inputs]
         losses: dict[str, torch.Tensor] = {}
+        dispatch_weights, combine_weights = [], []
 
-        if self.task_embedding is not None:
-            features = self.task_embedding(features, inputs)
+        if self.trunk is not None:
+            features, dispatch_weights, combine_weights = self.trunk(
+                features,
+                inputs,
+                return_dispatch_weights=True,
+                return_combine_weights=True,
+            )
 
         if self.lazy_decode:
             # Assume that all inputs have the same dataset_source
@@ -175,4 +184,4 @@ class MultiTaskModel(torch.nn.Module):
                         features, inputs, targets, decoder, task_name, outputs, losses
                     )
 
-        return outputs, losses
+        return outputs, losses, dispatch_weights, combine_weights

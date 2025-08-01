@@ -63,22 +63,48 @@ class BaseTaskEmbedding(torch.nn.Module):
         """
         raise NotImplementedError
 
+    def compute_embeds(
+        self,
+        features: list[torch.tensor],
+        inputs: list[dict[str, Any]],
+    ) -> torch.Tensor:
+        """Compute the task-specific embeddings.
+
+        Args:
+            features: The encoder features.
+            inputs: The inputs to the model.
+
+        Returns:
+            The task-specific embeddings.
+        """
+        raise NotImplementedError
+
 
 class TaskChannelEmbedding(BaseTaskEmbedding):
     """Registers task-specific 'tokens', i.e. embeddings.
 
     Each embedding is learned per-channel and copied over the full spatial dimensions.
+    Optionally, add a spatial sinusoidal positional embedding to the task embedding.
     """
 
-    def __init__(self, encoder_embedding_size: int, default_idx: int = 0) -> None:
+    def __init__(
+        self,
+        encoder_embedding_size: int,
+        default_idx: int = 0,
+        add_spatial_embed: bool = False,
+    ) -> None:
         """Initialize the task channel embedding module.
 
         Args:
             encoder_embedding_size: The size of the encoder embedding.
             default_idx: The index of the default task, useful if loading a merged model.
+            add_spatial_embed: if true, add a spatial sinusoidal positional embedding to the task embedding
         """
         super().__init__(encoder_embedding_size)
         self.default_idx = default_idx
+        self.add_spatial_embed = add_spatial_embed
+        if add_spatial_embed:
+            self.pos_embed = PositionalEncoding(encoder_embedding_size)
 
     def register_tasks(self, task_names: list[str]) -> None:
         """Register the tasks.
@@ -92,50 +118,76 @@ class TaskChannelEmbedding(BaseTaskEmbedding):
         self.embed = torch.nn.Embedding(len(task_names), self.encoder_embedding_size)
         self.target_to_embed_idx = {name: i for i, name in enumerate(task_names)}
 
-    def _compute_embeds(
-        self, inputs: list[dict[str, Any]], device: torch.device
+    def compute_embeds(
+        self,
+        features: list[torch.tensor],
+        inputs: list[dict[str, Any]],
     ) -> torch.Tensor:
         """Compute the task-specific embeddings.
 
         Args:
             inputs: The inputs to the model.
+            features: computed encoder features
             device: The device to compute the embeddings on.
+
+        Returns:
+            The task-specific embeddings, shape (B, T, C), T = HW
+            The embeddings are repeated over the spatial dimensions, and optionally
+            a sinusoidal positional embedding is added.
         """
         try:
             idx = [self.target_to_embed_idx[inp["dataset_source"]] for inp in inputs]
         except KeyError:
             idx = [self.default_idx] * len(inputs)
-        return self.embed(torch.tensor(idx).to(device))
+        embeds = self.embed(torch.tensor(idx).to(features[0].device))
+        seq_len = features[0].shape[-1] * features[0].shape[-2]  # T = HW
+        embeds = embeds.unsqueeze(0).repeat(seq_len, 1, 1)  # T x B x C
+        if self.add_spatial_embed:
+            embeds = self.pos_embed(embeds)
+        embeds = torch.einsum("tbc->btc", embeds)  # B x T x C
+        return embeds
 
     def forward(
-        self, features: list[torch.tensor], inputs: list[dict[str, Any]]
+        self,
+        features: list[torch.tensor],
+        inputs: list[dict[str, Any]],
+        embeds: torch.Tensor | None = None,
     ) -> list[torch.tensor]:
         """Compute and apply task-specific embeddings to encoder features.
+
+        Optionally, add a spatial sinusoidal positional embedding to the task embedding.
+        Otherwise, the task embedding is repeated over the spatial dimensions.
 
         Args:
             features: The encoder features, a 1-list of B x C x H x W features.
             inputs: The inputs to the model.
+            embeds: Already-computed task embeddings, if provided, skip the computation.
 
         Returns:
             The encoder features with the task-specific embeddings added.
         """
-        # Add per-dataset, per-channel task embedding (B x C)
-        x = features[0]
-        embeds = self._compute_embeds(inputs, x.device)
-        x += embeds.unsqueeze(-1).unsqueeze(-1)  # B x C x 1 x 1
-        return [x]
+        height, width = features[0].shape[-2:]
+        if embeds is None:
+            embeds = self.compute_embeds(features, inputs)  # B x HW x C
+        embeds = embeds.unflatten(dim=1, sizes=(height, width))  # B x H x W x C
+        features[0] += torch.einsum("bhwc->bchw", embeds)  # B x C x H x W
+        return features
 
 
 class TaskMHAEmbedding(TaskChannelEmbedding):
     """Multi-headed cross-attention over the spatial dimensions.
 
     The task embedding is the query and the features are the key and value.
-    We copy the task embedding over the spatial dimensions, and add a sinusoidal
-    positional embedding before the MHA layer.
+    We copy the task embedding over the spatial dimensions, and optionally
+    add a sinusoidal positional embedding before the MHA layer.
     """
 
     def __init__(
-        self, encoder_embedding_size: int, num_heads: int, default_idx: int = 0
+        self,
+        encoder_embedding_size: int,
+        num_heads: int,
+        default_idx: int = 0,
+        add_spatial_embed: bool = True,
     ) -> None:
         """Initialize the task MHA embedding module.
 
@@ -143,9 +195,9 @@ class TaskMHAEmbedding(TaskChannelEmbedding):
             encoder_embedding_size: The size of the encoder embedding.
             num_heads: The number of attention heads.
             default_idx: The index of the default task, useful if loading a merged model.
+            add_spatial_embed: if true, add a spatial sinusoidal positional embedding to the task embedding
         """
-        super().__init__(encoder_embedding_size, default_idx)
-        self.pos_embed = PositionalEncoding(encoder_embedding_size)
+        super().__init__(encoder_embedding_size, default_idx, add_spatial_embed)
         self.mha = torch.nn.MultiheadAttention(
             encoder_embedding_size, num_heads, batch_first=True
         )
@@ -162,7 +214,10 @@ class TaskMHAEmbedding(TaskChannelEmbedding):
         super().register_tasks(task_names)
 
     def forward(
-        self, features: list[torch.tensor], inputs: list[dict[str, Any]]
+        self,
+        features: list[torch.tensor],
+        inputs: list[dict[str, Any]],
+        embeds: torch.Tensor | None = None,
     ) -> list[torch.tensor]:
         """Compute and apply task-specific embeddings to encoder features.
 
@@ -172,16 +227,16 @@ class TaskMHAEmbedding(TaskChannelEmbedding):
         Args:
             features: The encoder features, a 1-list of B x C x H x W features.
             inputs: The inputs to the model.
+            embeds: Already-computed task embeddings, if provided, skip the computation.
 
         Returns:
             The encoder features with the task-specific embeddings added.
         """
         x = torch.flatten(features[0], start_dim=2)  # B x C x T, T = HW
-        embeds = self._compute_embeds(inputs, x.device)  # B x C
-        embeds = embeds.unsqueeze(0).repeat(x.shape[-1], 1, 1)  # T x B x C
-        embeds = self.pos_embed(embeds)  # T x B x C
+        if embeds is None:
+            embeds = self.compute_embeds(features, inputs)  # B x T x C
         out = self.mha(
-            torch.einsum("tbc->btc", embeds),
+            embeds,  # B x T x C
             torch.einsum("bct->btc", x),
             torch.einsum("bct->btc", x),
         )[0]  # B x T x C
