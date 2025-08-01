@@ -25,12 +25,14 @@ class SimpleTimeSeries(torch.nn.Module):
         groups: list[list[int]] | None = None,
         num_layers: int | None = None,
         image_key: str = "image",
+        backbone_channels: list[tuple[int, int]] | None = None,
     ) -> None:
         """Create a new SimpleTimeSeries.
 
         Args:
             encoder: the underlying encoder. It must provide get_backbone_channels
-                function that returns the output channels.
+                function that returns the output channels, or backbone_channels must be
+                set.
             image_channels: the number of channels per image of the time series. The
                 input should have multiple images concatenated on the channel axis, so
                 this parameter is used to distinguish the different images.
@@ -44,6 +46,8 @@ class SimpleTimeSeries(torch.nn.Module):
                 list of sets, and each set is a list of image indices.
             num_layers: the number of layers for convrnn, conv3d, and conv1d ops.
             image_key: the key to access the images.
+            backbone_channels: manually specify the backbone channels. Can be set if
+                the encoder does not provide get_backbone_channels function.
         """
         super().__init__()
         self.encoder = encoder
@@ -52,7 +56,10 @@ class SimpleTimeSeries(torch.nn.Module):
         self.groups = groups
         self.image_key = image_key
 
-        out_channels = self.encoder.get_backbone_channels()
+        if backbone_channels is not None:
+            out_channels = backbone_channels
+        else:
+            out_channels = self.encoder.get_backbone_channels()
         if self.groups:
             self.num_groups = len(self.groups)
         else:

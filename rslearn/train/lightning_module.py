@@ -107,7 +107,6 @@ class RslearnLightningModule(L.LightningModule):
         Args:
             model: the model
             task: the task to train on
-            lr: the initial learning rate
             optimizer: the optimizer factory.
             scheduler: the learning rate scheduler factory.
             visualize_dir: during validation or testing, output visualizations to this
@@ -118,6 +117,7 @@ class RslearnLightningModule(L.LightningModule):
             print_parameters: whether to print the list of model parameters after model
                 initialization
             print_model: whether to print the model after model initialization
+            lr: deprecated.
             plateau: deprecated.
             plateau_factor: deprecated.
             plateau_patience: deprecated.
@@ -127,7 +127,6 @@ class RslearnLightningModule(L.LightningModule):
         super().__init__()
         self.model = model
         self.task = task
-        self.lr = lr
         self.visualize_dir = visualize_dir
         self.metrics_file = metrics_file
         self.restore_config = restore_config
