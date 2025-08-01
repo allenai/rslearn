@@ -10,7 +10,7 @@ import requests
 from fsspec.implementations.local import LocalFileSystem
 from upath import UPath
 
-from rslearn.config import DataSourceConfig, LayerConfig, QueryConfig
+from rslearn.config import DataSourceConfig, LayerConfig, QueryConfig, RasterLayerConfig
 from rslearn.data_sources.local_files import LocalFiles
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
@@ -234,25 +234,22 @@ class WorldCereal(LocalFiles):
     def __init__(
         self,
         config: LayerConfig,
+        band: str,
         worldcereal_dir: UPath,
     ) -> None:
         """Create a new WorldCereal.
 
         Args:
-            config: configuration for this layer. It should specify a single band
-                called B1 which will contain the land cover class.
+            config: configuration for this layer.
+            band: the worldcereal band being processed.
             worldcereal_dir: the directory to extract the WorldCereal GeoTIFF files. For
                 high performance, this should be a local directory; if the dataset is
                 remote, prefix with a protocol ("file://") to use a local directory
                 instead of a path relative to the dataset path.
         """
-        tif_dir, tif_filepaths = self.download_worldcereal_data(worldcereal_dir)
-        all_aezs: set[int] = set()
-        for _, tif_path in tif_filepaths.items():
-            # firstly, go through all the files to collect the AEZs
-            # then, go through the AEZs and get the files
-            # then, fill the missing ones with 0s
-            all_aezs.update(self.all_aezs_from_tifs(tif_path))
+        tif_dir, tif_filepath = self.download_worldcereal_data(band, worldcereal_dir)
+        all_aezs: set[int] = self.all_aezs_from_tifs(tif_filepath)
+
         # now that we have all our aezs, lets match them to the bands
         spec_dicts: list[dict] = []
         for aez in all_aezs:
@@ -262,11 +259,10 @@ class WorldCereal(LocalFiles):
                 "fnames": [],
                 "bands": [],
             }
-            for band, tif_path in tif_filepaths.items():
-                aez_band_filepath = self.filepath_for_product_aez(tif_path, aez)
-                if aez_band_filepath is not None:
-                    spec_dict["fnames"].append(aez_band_filepath.absolute().as_uri())
-                    spec_dict["bands"].append([band])
+            aez_band_filepath = self.filepath_for_product_aez(tif_filepath, aez)
+            if aez_band_filepath is not None:
+                spec_dict["fnames"].append(aez_band_filepath.absolute().as_uri())
+                spec_dict["bands"].append([band])
             spec_dicts.append(spec_dict)
         # add this to the config
         if config.data_source is not None:
@@ -290,8 +286,15 @@ class WorldCereal(LocalFiles):
         if config.data_source is None:
             raise ValueError("LocalFiles data source requires a data source config")
         d = config.data_source.config_dict
+        assert isinstance(config, RasterLayerConfig)
+        bandsets = config.band_sets
+        assert len(bandsets) == 1
+        assert len(bandsets[0].bands) == 1
+        band = bandsets[0].bands[0]
         return WorldCereal(
-            config=config, worldcereal_dir=join_upath(ds_path, d["worldcereal_dir"])
+            config=config,
+            band=band,
+            worldcereal_dir=join_upath(ds_path, d["worldcereal_dir"]),
         )
 
     @staticmethod
@@ -336,13 +339,14 @@ class WorldCereal(LocalFiles):
 
     @classmethod
     def download_worldcereal_data(
-        cls, worldcereal_dir: UPath
+        cls, band: str, worldcereal_dir: UPath
     ) -> tuple[UPath, dict[str, UPath]]:
         """Download and extract the WorldCereal data.
 
         If the data was previously downloaded, this function returns quickly.
 
         Args:
+            band: the worldcereal band to download.
             worldcereal_dir: the directory to download to.
 
         Returns:
@@ -354,28 +358,33 @@ class WorldCereal(LocalFiles):
         # Download the zip files (if they don't already exist).
         zip_dir = worldcereal_dir / "zips"
         zip_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Worldcereal zipfile: {zip_dir}")
+        logger.debug(f"Worldcereal zipfile: {zip_dir}")
 
         # Fetch list of files from Zenodo's Deposition Files API
         # f["filename"] maps to the ZIP_FILENAMES
-        files_as_dict = {f["filename"]: f for f in cls.ZENODO_FILES_DATA}
+        files_to_download = [
+            f
+            for f in cls.ZENODO_FILES_DATA
+            if cls.band_from_zipfilename(f["filename"]) == band
+        ]
+        if len(files_to_download) != 1:
+            raise ValueError(
+                f"Got != 1 suitable filenames for {band}: {[f['filename'] for f in files_to_download]}"
+            )
+        file_to_download = files_to_download[0]
         # now its also in the right order for when we generate the files
-        ordered_files = [files_as_dict[z_f] for z_f in cls.ZIP_FILENAMES]
-        for file_info in ordered_files:
-            filename: str = file_info["filename"]
-            if filename not in cls.ZIP_FILENAMES:
-                logger.info(f"Skipping {filename}")
-                continue
-            file_url = file_info["links"]["download"]
-            # Determine full filepath and create necessary folders for nested structure
-            filepath = zip_dir / filename
-            if filepath.exists():
-                continue
+        filename: str = file_to_download["filename"]
+        if filename not in cls.ZIP_FILENAMES:
+            raise ValueError(f"Unsupported filename {filename} for band {band}")
+        file_url = file_to_download["links"]["download"]
+        # Determine full filepath and create necessary folders for nested structure
+        zip_filepath = zip_dir / filename
+        if not zip_filepath.exists():
             # Download the file with resume support
-            logger.info(f"Downloading {file_url} to {filepath}")
+            logger.debug(f"Downloading {file_url} to {zip_filepath}")
             with requests.get(file_url, stream=True, timeout=cls.TIMEOUT_SECONDS) as r:
                 r.raise_for_status()
-                with open_atomic(filepath, "wb") as f:
+                with open_atomic(zip_filepath, "wb") as f:
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
 
@@ -383,15 +392,12 @@ class WorldCereal(LocalFiles):
         # We use a .extraction_complete file to indicate that the extraction is done.
         tif_dir = worldcereal_dir / "tifs"
         tif_dir.mkdir(parents=True, exist_ok=True)
-        for file_info in ordered_files:
-            filename = file_info["filename"]
-            zip_fname = zip_dir / filename
 
-            completed_fname = zip_dir / (filename + ".extraction_complete")
-            if completed_fname.exists():
-                logger.debug("%s has already been extracted", filename)
-                continue
-            logger.info("extracting %s to %s", filename, tif_dir)
+        completed_fname = zip_dir / (filename + ".extraction_complete")
+        if completed_fname.exists():
+            logger.debug("%s has already been extracted", filename)
+        else:
+            logger.debug("extracting %s to %s", filename, tif_dir)
 
             # If the tif_dir is remote, we need to extract to a temporary local
             # directory first and then copy it over.
@@ -401,7 +407,7 @@ class WorldCereal(LocalFiles):
                 tmp_dir = tempfile.TemporaryDirectory()
                 local_dir = tmp_dir.name
 
-            with get_upath_local(zip_fname) as local_fname:
+            with get_upath_local(zip_filepath) as local_fname:
                 with zipfile.ZipFile(local_fname) as zip_f:
                     zip_f.extractall(local_dir)
 
@@ -414,10 +420,6 @@ class WorldCereal(LocalFiles):
 
             # Mark the extraction complete.
             completed_fname.touch()
-        tif_filepaths = {
-            cls.band_from_zipfilename(file_info["filename"]): tif_dir
-            / cls.zip_filepath_from_filename(file_info["filename"])
-            for file_info in ordered_files
-        }
+        tif_filepath = tif_dir / cls.zip_filepath_from_filename(filename)
 
-        return tif_dir, tif_filepaths
+        return tif_dir, tif_filepath
