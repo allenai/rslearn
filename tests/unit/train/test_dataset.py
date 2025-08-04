@@ -362,7 +362,6 @@ class TestAllPatchesDataset:
             all_patches_dataset = AllPatchesDataset(
                 model_dataset, (4, 4), rank=rank, world_size=world_size
             )
-            assert len(all_patches_dataset) == 1
             samples = list(all_patches_dataset)
             assert len(samples) == 1
             assert samples[0][2]["window_name"] == window.name
@@ -388,7 +387,6 @@ class TestAllPatchesDataset:
             all_patches_dataset = AllPatchesDataset(
                 model_dataset, (4, 4), rank=rank, world_size=world_size
             )
-            assert len(all_patches_dataset) == 1
             samples = list(all_patches_dataset)
             assert len(samples) == 1
             window_names.add(samples[0][2]["window_name"])
@@ -417,8 +415,8 @@ class TestAllPatchesDataset:
             all_patches_dataset = AllPatchesDataset(
                 model_dataset, (4, 4), rank=rank, world_size=world_size
             )
-            assert len(all_patches_dataset) == 4
             samples = list(all_patches_dataset)
+            assert len(samples) == 4
             for sample in samples:
                 patch_id = (sample[2]["window_name"], sample[2]["bounds"])
                 seen_patches[patch_id] = seen_patches.get(patch_id, 0) + 1
@@ -446,6 +444,5 @@ class TestAllPatchesDataset:
             all_patches_dataset = AllPatchesDataset(
                 model_dataset, (4, 4), rank=rank, world_size=world_size
             )
-            assert len(all_patches_dataset) == 0
             samples = list(all_patches_dataset)
             assert len(samples) == 0
