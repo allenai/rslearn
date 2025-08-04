@@ -1,6 +1,7 @@
 """Default Dataset for rslearn."""
 
 import hashlib
+import itertools
 import json
 import multiprocessing
 import os
@@ -819,7 +820,7 @@ class AllPatchesDataset(torch.utils.data.IterableDataset):
 
         self.windows = self.dataset.get_dataset_examples()
 
-    def get_patch_options(self, bounds: PixelBounds) -> list[PixelBounds]:
+    def get_window_patch_options(self, bounds: PixelBounds) -> list[PixelBounds]:
         """Get the bounds of each patch within the overall bounds.
 
         Args:
@@ -860,18 +861,47 @@ class AllPatchesDataset(torch.utils.data.IterableDataset):
                 )
         return patch_bounds
 
-    def _get_worker_patches(self) -> Iterable[tuple[int, list[PixelBounds]]]:
-        """Get patches that we should iterate over.
+    def get_window_num_patches(self, bounds: PixelBounds) -> int:
+        """Get the number of patches for these bounds.
+
+        This corresponds to the length of the list returned by get_patch_options.
+        """
+        num_cols = (
+            len(
+                range(
+                    bounds[0],
+                    bounds[2] - self.patch_size[0],
+                    self.patch_size[0] - self.overlap_size[0],
+                )
+            )
+            + 1
+        )
+        num_rows = (
+            len(
+                range(
+                    bounds[1],
+                    bounds[3] - self.patch_size[1],
+                    self.patch_size[1] - self.overlap_size[1],
+                )
+            )
+            + 1
+        )
+        return num_cols * num_rows
+
+    def _get_worker_iteration_data(self) -> tuple[Iterable[int], int]:
+        """Get the windows we should iterate over.
 
         This is split both by training worker (self.rank) and data loader worker (via
-        get_worker_info). The data is padded to ensure that each worker has the same
-        number of patches (samples).
+        get_worker_info).
+
+        We also compute the total number of samples that each data loader worker should
+        yield. This is important for DDP to ensure that all ranks see the same number
+        of batches.
 
         Returns:
-            list of (window_idx, patch list) tuples. For most windows, we return all of
-                the patches. Some additional windows with a subset of patches may be
-                added for padding.
+            a tuple (window_ids, num_samples_per_worker).
         """
+        # Figure out the total number of data loader workers and our worker ID.
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is None:
             worker_id = 0
@@ -880,152 +910,132 @@ class AllPatchesDataset(torch.utils.data.IterableDataset):
             worker_id = worker_info.id
             num_workers = worker_info.num_workers
         global_worker_id = self.rank * num_workers + worker_id
-        global_num_workers = self.world_size * num_workers
 
         # Split up the windows evenly among the workers.
+        # We compute this for all workers since we will need to see the maximum number
+        # of samples under this assignment across workers.
         window_indexes = range(len(self.windows))
-        num_windows_per_worker = (
-            len(self.windows) + global_num_workers - 1
-        ) // global_num_workers
         windows_by_worker = [
-            window_indexes[
-                cur_id * num_windows_per_worker : (cur_id + 1) * num_windows_per_worker
-            ]
-            for cur_id in range(global_num_workers)
+            window_indexes[cur_rank :: self.world_size][cur_worker_id::num_workers]
+            for cur_rank in range(self.world_size)
+            for cur_worker_id in range(num_workers)
         ]
 
-        # Now get the list of patches pertaining to each worker's windows.
-        patches_by_worker: list[list[tuple[int, PixelBounds]]] = [
-            [] for _ in range(global_num_workers)
-        ]
-        for worker_id, worker_windows in enumerate(windows_by_worker):
+        # Now compute the maximum number of samples across workers.
+        max_num_patches = 0
+        for worker_windows in windows_by_worker:
+            worker_num_patches = 0
             for window_id in worker_windows:
-                window = self.windows[window_id]
-                for patch_bounds in self.get_patch_options(window.bounds):
-                    patches_by_worker[worker_id].append((window_id, patch_bounds))
+                worker_num_patches += self.get_window_num_patches(
+                    self.windows[window_id].bounds
+                )
+            max_num_patches = max(max_num_patches, worker_num_patches)
 
-        # All workers need to return the max number of samples across workers.
-        max_num_patches = max(
-            [len(worker_patches) for worker_patches in patches_by_worker]
-        )
+        # Each worker needs at least one window, otherwise it won't be able to pad.
+        # Unless there are zero windows total, which is fine.
+        my_window_indexes: Iterable[int]
+        if len(windows_by_worker[global_worker_id]) == 0 and max_num_patches > 0:
+            my_window_indexes = [global_worker_id % len(self.windows)]
+        else:
+            my_window_indexes = windows_by_worker[global_worker_id]
 
-        # Now we pad our own patches as necessary.
-        # We copy from patches assigned to other workers starting from the previous
-        # worker.
-        # This ensures that all workers have the same number of samples. This is needed
-        # because the batches must be consistent across ranks, since processing will
-        # stop once any rank has exhausted its batches with DDP.
-        my_patches = patches_by_worker[global_worker_id]
-        cur_worker_to_pad_from = (global_worker_id - 1) % global_num_workers
-        while (
-            len(my_patches) < max_num_patches
-            and cur_worker_to_pad_from != global_worker_id
-        ):
-            wanted = max_num_patches - len(my_patches)
-            my_patches.extend(patches_by_worker[cur_worker_to_pad_from][0:wanted])
-            cur_worker_to_pad_from = (cur_worker_to_pad_from - 1) % global_num_workers
-
-        # This should always succeed since we can always copy from the worker assigned
-        # the maximum number of patches.
-        assert len(my_patches) == max_num_patches
-
-        # Now we regroup the patches by window ID.
-        my_patches_by_window_id: dict[int, list[PixelBounds]] = {}
-        for window_id, patch_bounds in my_patches:
-            if window_id not in my_patches_by_window_id:
-                my_patches_by_window_id[window_id] = []
-            my_patches_by_window_id[window_id].append(patch_bounds)
-        return my_patches_by_window_id.items()
-
-    def __len__(self) -> int:
-        """Compute the total number of patches across all windows for this worker."""
-        total_num_patches = 0
-        for _, patches in self._get_worker_patches():
-            total_num_patches += len(patches)
-        return total_num_patches
+        return (my_window_indexes, max_num_patches)
 
     def __iter__(
         self,
     ) -> Iterator[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
         """Iterate over all patches in each element of the underlying ModelDataset."""
-        for window_id, patches in self._get_worker_patches():
-            raw_inputs, passthrough_inputs, metadata = self.dataset.get_raw_inputs(
-                window_id
-            )
-            bounds = metadata["bounds"]
+        # Iterate over the window IDs until we have returned enough samples.
+        window_ids, num_samples_needed = self._get_worker_iteration_data()
+        num_samples_returned = 0
 
-            # For simplicity, pad tensors by patch size to ensure that any patch bounds
-            # extending outside the window bounds will not have issues when we slice
-            # the tensors later.
-            for d in [raw_inputs, passthrough_inputs]:
-                for input_name, value in list(d.items()):
-                    if not isinstance(value, torch.Tensor):
-                        continue
-                    d[input_name] = torch.nn.functional.pad(
-                        value, pad=(0, self.patch_size[0], 0, self.patch_size[1])
+        for iteration_idx in itertools.count():
+            for window_id in window_ids:
+                raw_inputs, passthrough_inputs, metadata = self.dataset.get_raw_inputs(
+                    window_id
+                )
+                bounds = metadata["bounds"]
+
+                # For simplicity, pad tensors by patch size to ensure that any patch bounds
+                # extending outside the window bounds will not have issues when we slice
+                # the tensors later.
+                for d in [raw_inputs, passthrough_inputs]:
+                    for input_name, value in list(d.items()):
+                        if not isinstance(value, torch.Tensor):
+                            continue
+                        d[input_name] = torch.nn.functional.pad(
+                            value, pad=(0, self.patch_size[0], 0, self.patch_size[1])
+                        )
+
+                # Now iterate over the patches and extract/yield the crops.
+                # Note that, in case user is leveraging RslearnWriter, it is important that
+                # the patch_idx be increasing (as we iterate) within one window.
+                patches = self.get_window_patch_options(bounds)
+                for patch_idx, patch_bounds in enumerate(patches):
+                    cur_geom = STGeometry(
+                        metadata["projection"], shapely.box(*patch_bounds), None
+                    )
+                    start_offset = (
+                        patch_bounds[0] - bounds[0],
+                        patch_bounds[1] - bounds[1],
+                    )
+                    end_offset = (
+                        patch_bounds[2] - bounds[0],
+                        patch_bounds[3] - bounds[1],
                     )
 
-            # Now iterate over the patches and extract/yield the crops.
-            # Note that, in case user is leveraging RslearnWriter, it is important that
-            # the patch_idx be increasing (as we iterate) within one window.
-            for patch_idx, patch_bounds in enumerate(patches):
-                cur_geom = STGeometry(
-                    metadata["projection"], shapely.box(*patch_bounds), None
-                )
-                start_offset = (
-                    patch_bounds[0] - bounds[0],
-                    patch_bounds[1] - bounds[1],
-                )
-                end_offset = (
-                    patch_bounds[2] - bounds[0],
-                    patch_bounds[3] - bounds[1],
-                )
+                    # Define a helper function to handle each input dict.
+                    def crop_input_dict(d: dict[str, Any]) -> dict[str, Any]:
+                        cropped = {}
+                        for input_name, value in d.items():
+                            if isinstance(value, torch.Tensor):
+                                # Crop the CHW tensor.
+                                cropped[input_name] = value[
+                                    :,
+                                    start_offset[1] : end_offset[1],
+                                    start_offset[0] : end_offset[0],
+                                ].clone()
+                            elif isinstance(value, list):
+                                cropped[input_name] = [
+                                    feat
+                                    for feat in value
+                                    if cur_geom.intersects(feat.geometry)
+                                ]
+                            else:
+                                raise ValueError(
+                                    "got input that is neither tensor nor feature list"
+                                )
+                        return cropped
 
-                # Define a helper function to handle each input dict.
-                def crop_input_dict(d: dict[str, Any]) -> dict[str, Any]:
-                    cropped = {}
-                    for input_name, value in d.items():
-                        if isinstance(value, torch.Tensor):
-                            # Crop the CHW tensor.
-                            cropped[input_name] = value[
-                                :,
-                                start_offset[1] : end_offset[1],
-                                start_offset[0] : end_offset[0],
-                            ].clone()
-                        elif isinstance(value, list):
-                            cropped[input_name] = [
-                                feat
-                                for feat in value
-                                if cur_geom.intersects(feat.geometry)
-                            ]
-                        else:
-                            raise ValueError(
-                                "got input that is neither tensor nor feature list"
-                            )
-                    return cropped
+                    cur_raw_inputs = crop_input_dict(raw_inputs)
+                    cur_passthrough_inputs = crop_input_dict(passthrough_inputs)
 
-                cur_raw_inputs = crop_input_dict(raw_inputs)
-                cur_passthrough_inputs = crop_input_dict(passthrough_inputs)
+                    # Adjust the metadata as well.
+                    cur_metadata = metadata.copy()
+                    cur_metadata["bounds"] = patch_bounds
+                    cur_metadata["patch_idx"] = patch_idx
+                    cur_metadata["num_patches"] = len(patches)
 
-                # Adjust the metadata as well.
-                cur_metadata = metadata.copy()
-                cur_metadata["bounds"] = patch_bounds
-                cur_metadata["patch_idx"] = patch_idx
-                cur_metadata["num_patches"] = len(patches)
+                    # Now we can compute input and target dicts via the task.
+                    input_dict, target_dict = self.dataset.task.process_inputs(
+                        cur_raw_inputs,
+                        metadata=cur_metadata,
+                        load_targets=not self.dataset.split_config.get_skip_targets(),
+                    )
+                    input_dict.update(cur_passthrough_inputs)
+                    input_dict, target_dict = self.dataset.transforms(
+                        input_dict, target_dict
+                    )
+                    input_dict["dataset_source"] = self.dataset.name
 
-                # Now we can compute input and target dicts via the task.
-                input_dict, target_dict = self.dataset.task.process_inputs(
-                    cur_raw_inputs,
-                    metadata=cur_metadata,
-                    load_targets=not self.dataset.split_config.get_skip_targets(),
-                )
-                input_dict.update(cur_passthrough_inputs)
-                input_dict, target_dict = self.dataset.transforms(
-                    input_dict, target_dict
-                )
-                input_dict["dataset_source"] = self.dataset.name
+                    if num_samples_returned < num_samples_needed:
+                        yield input_dict, target_dict, cur_metadata
+                        num_samples_returned += 1
+                    else:
+                        assert iteration_idx > 0
 
-                yield input_dict, target_dict, cur_metadata
+            if num_samples_returned >= num_samples_needed:
+                break
 
     def get_dataset_examples(self) -> list[Window]:
         """Returns a list of windows in this dataset."""

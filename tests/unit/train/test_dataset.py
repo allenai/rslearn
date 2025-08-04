@@ -399,7 +399,7 @@ class TestAllPatchesDataset:
     ) -> None:
         """Verify that rank padding works with different window sizes."""
         # One rank should get the second window.
-        # While the other rank should get first window + N-1 patches from second window.
+        # While the other rank should get first window and needs to repeat it.
         add_window(basic_classification_dataset, name="window0", bounds=(0, 0, 4, 4))
         add_window(basic_classification_dataset, name="window1", bounds=(0, 0, 8, 8))
         model_dataset = ModelDataset(
@@ -424,8 +424,28 @@ class TestAllPatchesDataset:
                 seen_patches[patch_id] = seen_patches.get(patch_id, 0) + 1
 
         assert len(seen_patches) == 5
-        assert seen_patches[("window0", (0, 0, 4, 4))] == 1
-        assert seen_patches[("window1", (0, 0, 4, 4))] == 2
-        assert seen_patches[("window1", (0, 4, 4, 8))] == 2
-        assert seen_patches[("window1", (4, 0, 8, 4))] == 2
+        assert seen_patches[("window0", (0, 0, 4, 4))] == 4
+        assert seen_patches[("window1", (0, 0, 4, 4))] == 1
+        assert seen_patches[("window1", (0, 4, 4, 8))] == 1
+        assert seen_patches[("window1", (4, 0, 8, 4))] == 1
         assert seen_patches[("window1", (4, 4, 8, 8))] == 1
+
+    def test_empty_dataset(self, basic_classification_dataset: Dataset) -> None:
+        """Verify that AllPatchesDataset works with no windows."""
+        model_dataset = ModelDataset(
+            basic_classification_dataset,
+            split_config=SplitConfig(),
+            task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+            workers=1,
+            inputs={
+                "targets": DataInput("vector", ["vector_layer"]),
+            },
+        )
+        world_size = 2
+        for rank in range(world_size):
+            all_patches_dataset = AllPatchesDataset(
+                model_dataset, (4, 4), rank=rank, world_size=world_size
+            )
+            assert len(all_patches_dataset) == 0
+            samples = list(all_patches_dataset)
+            assert len(samples) == 0
