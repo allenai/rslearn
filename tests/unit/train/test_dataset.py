@@ -185,7 +185,7 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
     # - (0, 1)
     # - (1, 0)
     # - (1, 1)
-    assert len(dataset) == 4
+    assert len(list(dataset)) == 4
 
     for _, _, metadata in dataset:
         bounds = metadata["bounds"]
