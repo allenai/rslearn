@@ -207,7 +207,7 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
             point_coverage[(col, row)] = False
 
     # With overlap_ratio=0.5, there should be 9 windows given that overlap is 1 pixel.
-    assert len(dataset_with_overlap) == 9
+    assert len(list(dataset_with_overlap)) == 9
 
     for _, _, metadata in dataset:
         bounds = metadata["bounds"]
