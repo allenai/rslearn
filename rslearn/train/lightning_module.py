@@ -210,6 +210,14 @@ class RslearnLightningModule(L.LightningModule):
             # Fail silently for single-dataset case, which is okay
             pass
 
+    def on_test_epoch_end(self) -> None:
+        """Optionally save the test metrics to a file."""
+        if self.metrics_file:
+            with open(self.metrics_file, "w") as f:
+                metrics = self.test_metrics.compute()
+                metrics_dict = {k: v.item() for k, v in metrics.items()}
+                json.dump(metrics_dict, f, indent=4)
+
     def training_step(
         self, batch: Any, batch_idx: int, dataloader_idx: int = 0
     ) -> torch.Tensor:
@@ -225,18 +233,10 @@ class RslearnLightningModule(L.LightningModule):
         """
         inputs, targets, _ = batch
         batch_size = len(inputs)
-        _, loss_dict, _, combine_weights = self(inputs, targets)
-        self.log_dict(
-            {
-                f"{inputs[0]['dataset_source']}_combine_weights/layer{i+1}_expert{j+1}": v.item()
-                for i, layer_weights in enumerate(combine_weights)
-                for j, v in enumerate(layer_weights)
-            },
-            batch_size=batch_size,
-            on_step=False,
-            on_epoch=True,
-            sync_dist=True,
-        )
+        model_outputs = self(inputs, targets)
+        self.on_train_forward(inputs, targets, model_outputs)
+
+        loss_dict = model_outputs["loss_dict"]
         train_loss = sum(loss_dict.values())
         self.log_dict(
             {"train_" + k: v for k, v in loss_dict.items()},
@@ -268,7 +268,11 @@ class RslearnLightningModule(L.LightningModule):
         """
         inputs, targets, _ = batch
         batch_size = len(inputs)
-        outputs, loss_dict, *_ = self(inputs, targets)
+        model_outputs = self(inputs, targets)
+        self.on_val_forward(inputs, targets, model_outputs)
+
+        loss_dict = model_outputs["loss_dict"]
+        outputs = model_outputs["outputs"]
         val_loss = sum(loss_dict.values())
         self.log_dict(
             {"val_" + k: v for k, v in loss_dict.items()},
@@ -291,14 +295,6 @@ class RslearnLightningModule(L.LightningModule):
             self.val_metrics, batch_size=batch_size, on_epoch=True, sync_dist=True
         )
 
-    def on_test_epoch_end(self) -> None:
-        """Optionally save the test metrics to a file."""
-        if self.metrics_file:
-            with open(self.metrics_file, "w") as f:
-                metrics = self.test_metrics.compute()
-                metrics_dict = {k: v.item() for k, v in metrics.items()}
-                json.dump(metrics_dict, f, indent=4)
-
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         """Compute the test loss and additional metrics.
 
@@ -309,7 +305,11 @@ class RslearnLightningModule(L.LightningModule):
         """
         inputs, targets, metadatas = batch
         batch_size = len(inputs)
-        outputs, loss_dict = self(inputs, targets)
+        model_outputs = self(inputs, targets)
+        self.on_test_forward(inputs, targets, model_outputs)
+
+        loss_dict = model_outputs["loss_dict"]
+        outputs = model_outputs["outputs"]
         test_loss = sum(loss_dict.values())
         self.log_dict(
             {"test_" + k: v for k, v in loss_dict.items()},
@@ -357,7 +357,7 @@ class RslearnLightningModule(L.LightningModule):
             Output predicted probabilities.
         """
         inputs, _, _ = batch
-        outputs, _ = self(inputs)
+        outputs, *_ = self(inputs)
         return outputs
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
@@ -371,3 +371,48 @@ class RslearnLightningModule(L.LightningModule):
             Output of the model.
         """
         return self.model(*args, **kwargs)
+
+    def on_train_forward(
+        self,
+        inputs: list[dict[str, Any]],
+        targets: list[dict[str, Any]],
+        model_outputs: dict[str, Any],
+    ) -> None:
+        """Hook to run after the forward pass of the model during training.
+
+        Args:
+            inputs: The input batch.
+            targets: The target batch.
+            model_outputs: The output of the model, with keys "outputs" and "loss_dict", and possibly other keys.
+        """
+        pass
+
+    def on_val_forward(
+        self,
+        inputs: list[dict[str, Any]],
+        targets: list[dict[str, Any]],
+        model_outputs: dict[str, Any],
+    ) -> None:
+        """Hook to run after the forward pass of the model during validation.
+
+        Args:
+            inputs: The input batch.
+            targets: The target batch.
+            model_outputs: The output of the model, with keys "outputs" and "loss_dict", and possibly other keys.
+        """
+        pass
+
+    def on_test_forward(
+        self,
+        inputs: list[dict[str, Any]],
+        targets: list[dict[str, Any]],
+        model_outputs: dict[str, Any],
+    ) -> None:
+        """Hook to run after the forward pass of the model during testing.
+
+        Args:
+            inputs: The input batch.
+            targets: The target batch.
+            model_outputs: The output of the model, with keys "outputs" and "loss_dict", and possibly other keys.
+        """
+        pass

@@ -1,6 +1,6 @@
 """Soft MoE (Mixture of Experts) implementation.
 
-Copied from
+Mostly from
 https://raw.githubusercontent.com/lucidrains/soft-moe-pytorch/refs/heads/main/soft_moe_pytorch/soft_moe.py.
 """
 
@@ -563,6 +563,9 @@ class SoftMoE(Module):
             offload_unused_experts_to_cpu=offload_unused_experts_to_cpu,
         )
 
+        self.num_experts = num_experts
+        self.num_slots = num_slots
+
     def forward(
         self,
         x: Tensor,
@@ -570,9 +573,10 @@ class SoftMoE(Module):
         add_noise: bool = False,
         noise_mult: float = 1.0,
         weight_key: Tensor | None = None,
-        return_dispatch_weights: bool = False,
-        return_combine_weights: bool = False,
-    ) -> tuple[Tensor, Tensor | None, Tensor | None]:
+        return_load_balance_loss: bool = True,
+        return_dispatch_weights: bool = True,
+        return_combine_weights: bool = True,
+    ) -> dict[str, Tensor]:
         """Forward pass of the SoftMoE module.
 
         Args:
@@ -582,11 +586,13 @@ class SoftMoE(Module):
             noise_mult: Multiplier for the Gumbel noise.
             weight_key: Tensor of shape (batch, seq_len, dim) with which to compute the dispatch and combine
                 weights. If not specified, use the input tokens.
+            return_load_balance_loss: Whether to return the load balance loss.
             return_dispatch_weights: Whether to return the dispatch weights along with the output.
             return_combine_weights: Whether to return the combine weights along with the output.
 
         Returns:
-            Tuple[Tensor, Tensor | None, Tensor | None]: The output tensor, optionally with dispatch and combine weights.
+            dict with key "outputs" (output tensor) and optionally "load_balance_loss",
+            "dispatch_weights", and "combine_weights".
 
         Note:
             einstein notation
@@ -605,49 +611,46 @@ class SoftMoE(Module):
         elif is_single_token:
             x = rearrange(x, "b d -> b 1 d")
 
-        if weight_key is not None:
-            assert (
-                weight_key.shape == x.shape
-            ), "weight_key must be (batch_size, seq_len, dim)"
-        else:
-            weight_key = x
-
         # following Algorithm 1, with the normalization they proposed, but with scaling of both (the now popular rmsnorm + gamma)
-
         x = self.norm(x)
         slot_embeds = self.slot_norm(self.slot_embeds)
 
-        logits = einsum("b n d, e s d -> b n e s", weight_key, slot_embeds)
+        dispatch_logits = einsum("b n d, e s d -> b n e s", x, slot_embeds)
+        if weight_key is None:
+            combine_logits = dispatch_logits
+        else:
+            assert (
+                weight_key.shape == x.shape
+            ), "weight_key must be (batch_size, seq_len, dim)"
+            combine_logits = einsum("b n d, e s d -> b n e s", weight_key, slot_embeds)
 
         # noised dispatch and combine gate logits, with annealing if needed
-
         if add_noise:
-            noise = gumbel_noise(logits) * noise_mult
-            logits = logits + noise
+            dispatch_logits = (
+                dispatch_logits + gumbel_noise(dispatch_logits) * noise_mult
+            )
+            combine_logits = combine_logits + gumbel_noise(combine_logits) * noise_mult
 
         # account for key padding mask
-
         if exists(mask):
             mask = rearrange(mask, "b n -> b n 1 1")
-            logits = logits.masked_fill(~mask, -torch.finfo(logits.dtype).max)
+            fill_value = -torch.finfo(dispatch_logits.dtype).max
+            dispatch_logits = dispatch_logits.masked_fill(~mask, fill_value)
+            combine_logits = combine_logits.masked_fill(~mask, fill_value)
 
         # get dispatch and combine weights (softmax across right dimensions)
+        dispatch_weights = dispatch_logits.softmax(dim=1)
 
-        dispatch_weights = logits.softmax(dim=1)
-
-        combine_weights = rearrange(logits, "b n e s -> b n (e s)")
+        combine_weights = rearrange(combine_logits, "b n e s -> b n (e s)")
         combine_weights = combine_weights.softmax(dim=-1)
 
         # derive slots by weighted average of input tokens using the dispatch weights from above
-
         slots = einsum("b n d, b n e s -> b e s d", x, dispatch_weights)
 
         # route the slots per expert to each expert
-
         out = self.experts(slots)
 
         # combine back out
-
         out = rearrange(out, " b e s d -> b (e s) d")
         out = einsum("b s d, b n s -> b n d", out, combine_weights)
 
@@ -657,8 +660,17 @@ class SoftMoE(Module):
         elif is_single_token:
             out = rearrange(out, "b 1 d -> b d")
 
-        if not return_dispatch_weights:
-            dispatch_weights = None
-        if not return_combine_weights:
-            combine_weights = None
-        return out, dispatch_weights, combine_weights
+        # compute the load balance loss per layer if requested
+        info = {"outputs": out}
+        if return_load_balance_loss:
+            # penalize negative entropy of the expert combine weights
+            # this is negative, so be careful when adding it to the total loss
+            sizes = (self.num_experts, self.num_slots)
+            unflat = combine_weights.unflatten(dim=-1, sizes=sizes).sum(dim=-1)
+            distr = torch.distributions.Categorical(probs=unflat)
+            info["load_balance_loss"] = -distr.entropy().mean()
+        if return_dispatch_weights:
+            info["dispatch_weights"] = dispatch_weights
+        if return_combine_weights:
+            info["combine_weights"] = combine_weights
+        return info

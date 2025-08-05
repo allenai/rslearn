@@ -124,7 +124,6 @@ class Dataset:
                 window_dir = group_dir / window_name
                 window_dirs.append(window_dir)
 
-        # window_dirs = list(reversed(window_dirs))[:500]
         if workers == 0:
             windows = [Window.load(window_dir) for window_dir in window_dirs]
         else:

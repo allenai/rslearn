@@ -167,10 +167,14 @@ class TaskChannelEmbedding(BaseTaskEmbedding):
             The encoder features with the task-specific embeddings added.
         """
         height, width = features[0].shape[-2:]
+        assert all(
+            f.shape[-2:] == (height, width) for f in features
+        ), "features must have the same spatial dimensions"
         if embeds is None:
             embeds = self.compute_embeds(features, inputs)  # B x HW x C
         embeds = embeds.unflatten(dim=1, sizes=(height, width))  # B x H x W x C
-        features[0] += torch.einsum("bhwc->bchw", embeds)  # B x C x H x W
+        for i in range(len(features)):
+            features[i] += torch.einsum("bhwc->bchw", embeds)  # B x C x H x W
         return features
 
 
@@ -232,6 +236,7 @@ class TaskMHAEmbedding(TaskChannelEmbedding):
         Returns:
             The encoder features with the task-specific embeddings added.
         """
+        assert len(features) == 1, "TaskMHAEmbedding only supports one feature"
         x = torch.flatten(features[0], start_dim=2)  # B x C x T, T = HW
         if embeds is None:
             embeds = self.compute_embeds(features, inputs)  # B x T x C

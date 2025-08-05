@@ -1,28 +1,21 @@
 """Task for wrapping multiple tasks."""
 
-from copy import deepcopy
 from typing import Any
 
 import numpy.typing as npt
 import torch
 from torchmetrics import Metric, MetricCollection
 
-from rslearn.log_utils import get_logger
 from rslearn.utils import Feature
 
 from .task import Task
-
-logger = get_logger(__name__)
 
 
 class MultiTask(Task):
     """A task for training on multiple tasks."""
 
     def __init__(
-        self,
-        tasks: dict[str, Task],
-        input_mapping: dict[str, dict[str, str]],
-        task_label_offsets: dict[str, dict[str, int | str]] | None = None,
+        self, tasks: dict[str, Task], input_mapping: dict[str, dict[str, str]]
     ):
         """Create a new MultiTask.
 
@@ -30,29 +23,9 @@ class MultiTask(Task):
             tasks: map from task name to the task object
             input_mapping: for each task, maps which keys from the raw inputs should
                 appear as potentially different keys for that task
-            task_label_offsets: a dictionary mapping task name to a dictionary with
-                "offset" (label offset) and "outputs_key" (key to use for the outputs).
-                If specified, the labels for each task will be offset accordingly
         """
         self.tasks = tasks
         self.input_mapping = input_mapping
-        self.task_label_offsets = task_label_offsets or {}
-
-    def offset_task_labels(
-        self,
-        target_dict: dict[Any, Any],
-        task_name: str,
-    ) -> dict[Any, Any]:
-        """Merge the task labels by adding an offset to the label key.
-
-        Args:
-            target_dict: the target dict
-            task_name: the name of the task
-        """
-        offset = self.task_label_offsets[task_name]["offset"]
-        outputs_key = self.task_label_offsets[task_name]["outputs_key"]
-        target_dict[outputs_key] += offset
-        return target_dict
 
     def process_inputs(
         self,
@@ -92,10 +65,6 @@ class MultiTask(Task):
             cur_input_dict, cur_target_dict = task.process_inputs(
                 cur_raw_inputs, metadata=metadata, load_targets=load_targets
             )
-
-            if self.task_label_offsets:
-                cur_target_dict = self.offset_task_labels(cur_target_dict, task_name)
-
             input_dict[task_name] = cur_input_dict
             target_dict[task_name] = cur_target_dict
 
@@ -154,9 +123,7 @@ class MultiTask(Task):
         for task_name, task in self.tasks.items():
             cur_metrics = {}
             for metric_name, metric in task.get_metrics().items():
-                cur_metrics[metric_name] = MetricWrapper(
-                    task_name, metric, self.task_label_offsets
-                )
+                cur_metrics[metric_name] = MetricWrapper(task_name, metric)
             metrics.append(MetricCollection(cur_metrics, prefix=f"{task_name}/"))
         return MetricCollection(metrics)
 
@@ -167,12 +134,7 @@ class MetricWrapper(Metric):
     It selects the outputs and targets that are relevant to each task.
     """
 
-    def __init__(
-        self,
-        task_name: str,
-        metric: Metric,
-        task_label_offsets: dict[str, dict[str, int | str]],
-    ):
+    def __init__(self, task_name: str, metric: Metric):
         """Create a new MetricWrapper.
 
         The wrapper passes the task-specific predictions and targets to the metrics of
@@ -181,72 +143,15 @@ class MetricWrapper(Metric):
         Args:
             task_name: the name of the task
             metric: one metric from the task to wrap
-            task_label_offsets: a dictionary mapping task name to a dictionary with
-                "offset" (label offset) and "outputs_key" (key to use for the outputs).
-                If specified, the labels for each task will be offset accordingly.
-                This must be specified if merging label across tasks, so that metrics
-                can be computed correctly.
         """
         super().__init__()
         self.task_name = task_name
         self.metric = metric
-        self.task_label_offsets = task_label_offsets
-
-    def separate_task_labels(
-        self,
-        *,
-        pred: torch.Tensor | dict | None = None,
-        target: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        """Unmerge the task labels by subtracting an offset from the target.
-
-        Also chop off the corresponding label dimensions in preds.
-
-        Since we use the same pred/target tensors for all metrics in the collection,
-        we need to clone them before modifying them.
-
-        Assume first dimension is the number of outputs.
-
-        Args:
-            pred: the prediction
-            target: the target
-        """
-        try:
-            offset = self.task_label_offsets[self.task_name]["offset"]
-            num_outputs = self.task_label_offsets[self.task_name]["num_outputs"]
-            output_key = self.task_label_offsets[self.task_name]["outputs_key"]
-        except KeyError:
-            return pred if pred is not None else target
-
-        with torch.no_grad():
-            if pred is not None:
-                if isinstance(pred, dict):
-                    # For some tasks (eg object detection), we have discrete label
-                    # predictions instead of a distribution over labels
-                    pred = deepcopy(pred)
-                    pred[output_key] -= offset
-                    return pred
-                else:
-                    # For classification/segmentation tasks, we have a distribution
-                    # over labels, so we need to scale the predictions so that they
-                    # sum to 1 since we chop off some of the probability densities
-                    pred = pred.clone()[offset : offset + num_outputs, ...]  # type: ignore
-                    pred /= pred.sum(dim=0, keepdim=True).type(torch.float32)
-                    return pred
-
-            elif target is not None:
-                # Not one-hot encoded, so just subtract the other tasks' offset
-                target = deepcopy(target)
-                target[output_key] -= offset
-                return target
-
-            else:
-                raise ValueError("Either pred or target must be provided")
 
     def update(
         self, preds: list[dict[str, Any]], targets: list[dict[str, Any]]
     ) -> None:
-        """Update metric. Also unmerge task labels if they are merged.
+        """Update metric.
 
         Args:
             preds: the predictions
@@ -254,14 +159,8 @@ class MetricWrapper(Metric):
         """
         try:
             self.metric.update(
-                [
-                    self.separate_task_labels(pred=pred[self.task_name])
-                    for pred in preds
-                ],
-                [
-                    self.separate_task_labels(target=target[self.task_name])
-                    for target in targets
-                ],
+                [pred[self.task_name] for pred in preds],
+                [target[self.task_name] for target in targets],
             )
         except KeyError:
             # In multi-dataset training, we may not have all datasets in the batch
