@@ -119,6 +119,9 @@ class PlanetaryComputer(DataSource, TileStore):
         self.skip_items_missing_assets = skip_items_missing_assets
         self.cache_dir = cache_dir
 
+        if self.cache_dir is not None:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+
         self.client: pystac_client.Client | None = None
         self.collection: pystac_client.CollectionClient | None = None
 

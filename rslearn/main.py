@@ -18,6 +18,7 @@ from rslearn.const import WGS84_EPSG
 from rslearn.data_sources import Item, data_source_from_config
 from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
+from rslearn.dataset.index import DatasetIndex
 from rslearn.dataset.manage import (
     materialize_dataset_windows,
     prepare_dataset_windows,
@@ -243,7 +244,11 @@ def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
         "--root", type=str, required=True, help="Dataset root directory"
     )
     parser.add_argument(
-        "--group", type=str, default=None, help="Only prepare windows in this group"
+        "--group",
+        type=str,
+        nargs="*",
+        default=None,
+        help="Only prepare windows in these groups",
     )
     parser.add_argument(
         "--window", type=str, nargs="*", default=None, help="Only prepare these windows"
@@ -283,7 +288,7 @@ def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
 def apply_on_windows(
     f: Callable[[list[Window]], None],
     dataset: Dataset,
-    group: str | None = None,
+    group: str | list[str] | None = None,
     names: list[str] | None = None,
     workers: int = 0,
     load_workers: int | None = None,
@@ -315,9 +320,14 @@ def apply_on_windows(
     if hasattr(f, "set_dataset"):
         f.set_dataset(dataset)
 
-    groups = None
-    if group:
+    # Handle group. It can be None (load all groups) or list of groups. But it can also
+    # just be group name, in which case we must convert to list.
+    groups: list[str] | None
+    if isinstance(group, str):
         groups = [group]
+    else:
+        groups = group
+
     if load_workers is None:
         load_workers = workers
     windows = dataset.load_windows(
@@ -739,6 +749,35 @@ def dataset_materialize() -> None:
     apply_on_windows_args(fn, args)
 
 
+@register_handler("dataset", "build_index")
+def dataset_build_index() -> None:
+    """Handler for the rslearn dataset build_index command."""
+    parser = argparse.ArgumentParser(
+        prog="rslearn dataset build_index",
+        description=("rslearn dataset build_index: " + "create a dataset index file"),
+    )
+    parser.add_argument(
+        "--root",
+        type=str,
+        required=True,
+        help="Dataset path",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=16,
+        help="Number of workers",
+    )
+    args = parser.parse_args(args=sys.argv[3:])
+    ds_path = UPath(args.root)
+    dataset = Dataset(ds_path)
+    index = DatasetIndex.build_index(
+        dataset=dataset,
+        workers=args.workers,
+    )
+    index.save_index(ds_path)
+
+
 class RslearnLightningCLI(LightningCLI):
     """LightningCLI that links data.tasks to model.tasks."""
 
@@ -771,6 +810,10 @@ class RslearnLightningCLI(LightningCLI):
                     prediction_writer_callback = existing_callback
         if prediction_writer_callback:
             prediction_writer_callback.init_args.path = c.data.init_args.path
+
+        # Disable the sampler replacement, since the rslearn data module will set the
+        # sampler as needed.
+        c.trainer.use_distributed_sampler = False
 
 
 def model_handler() -> None:

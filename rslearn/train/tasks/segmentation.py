@@ -40,7 +40,14 @@ class SegmentationTask(BasicTask):
         num_classes: int,
         colors: list[tuple[int, int, int]] = DEFAULT_COLORS,
         zero_is_invalid: bool = False,
+        enable_accuracy_metric: bool = True,
+        enable_miou_metric: bool = False,
+        enable_f1_metric: bool = False,
+        f1_metric_thresholds: list[list[float]] = [[0.5]],
         metric_kwargs: dict[str, Any] = {},
+        miou_metric_kwargs: dict[str, Any] = {},
+        prob_scales: list[float] | None = None,
+        other_metrics: dict[str, Metric] = {},
         **kwargs: Any,
     ) -> None:
         """Initialize a new SegmentationTask.
@@ -49,15 +56,38 @@ class SegmentationTask(BasicTask):
             num_classes: the number of classes to predict
             colors: optional colors for each class
             zero_is_invalid: whether pixels labeled class 0 should be marked invalid
+            enable_accuracy_metric: whether to enable the accuracy metric (default
+                true).
+            enable_f1_metric: whether to enable the F1 metric (default false).
+            enable_miou_metric: whether to enable the mean IoU metric (default false).
+            f1_metric_thresholds: list of list of thresholds to apply for F1 metric.
+                Each inner list is used to initialize a separate F1 metric where the
+                best F1 across the thresholds within the inner list is computed. If
+                there are multiple inner lists, then multiple F1 scores will be
+                reported.
             metric_kwargs: additional arguments to pass to underlying metric, see
                 torchmetrics.classification.MulticlassAccuracy.
+            miou_metric_kwargs: additional arguments to pass to MeanIoUMetric, if
+                enable_miou_metric is passed.
+            prob_scales: during inference, scale the output probabilities by this much
+                before computing the argmax. There is one scale per class. Note that
+                this is only applied during prediction, not when computing val or test
+                metrics.
+            other_metrics: additional metrics to configure on this task.
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
         self.num_classes = num_classes
         self.colors = colors
         self.zero_is_invalid = zero_is_invalid
+        self.enable_accuracy_metric = enable_accuracy_metric
+        self.enable_f1_metric = enable_f1_metric
+        self.enable_miou_metric = enable_miou_metric
+        self.f1_metric_thresholds = f1_metric_thresholds
         self.metric_kwargs = metric_kwargs
+        self.miou_metric_kwargs = miou_metric_kwargs
+        self.prob_scales = prob_scales
+        self.other_metrics = other_metrics
 
     def process_inputs(
         self,
@@ -105,7 +135,11 @@ class SegmentationTask(BasicTask):
         Returns:
             either raster or vector data.
         """
-        classes = raw_output.cpu().numpy().argmax(axis=0).astype(np.uint8)
+        raw_output_np = raw_output.cpu().numpy()
+        if self.prob_scales is not None:
+            # Scale the channel dimension by the provided scales.
+            raw_output_np = raw_output_np * np.array(self.prob_scales)[:, None, None]
+        classes = raw_output_np.argmax(axis=0).astype(np.uint8)
         return classes[None, :, :]
 
     def visualize(
@@ -147,11 +181,53 @@ class SegmentationTask(BasicTask):
     def get_metrics(self) -> MetricCollection:
         """Get the metrics for this task."""
         metrics = {}
-        metric_kwargs = dict(num_classes=self.num_classes)
-        metric_kwargs.update(self.metric_kwargs)
-        metrics["accuracy"] = SegmentationMetric(
-            torchmetrics.classification.MulticlassAccuracy(**metric_kwargs)
-        )
+
+        if self.enable_accuracy_metric:
+            accuracy_metric_kwargs = dict(num_classes=self.num_classes)
+            accuracy_metric_kwargs.update(self.metric_kwargs)
+            metrics["accuracy"] = SegmentationMetric(
+                torchmetrics.classification.MulticlassAccuracy(**accuracy_metric_kwargs)
+            )
+
+        if self.enable_f1_metric:
+            for thresholds in self.f1_metric_thresholds:
+                if len(self.f1_metric_thresholds) == 1:
+                    suffix = ""
+                else:
+                    # Metric name can't contain "." so change to ",".
+                    suffix = "_" + str(thresholds[0]).replace(".", ",")
+
+                metrics["F1" + suffix] = SegmentationMetric(
+                    F1Metric(num_classes=self.num_classes, score_thresholds=thresholds)
+                )
+                metrics["precision" + suffix] = SegmentationMetric(
+                    F1Metric(
+                        num_classes=self.num_classes,
+                        score_thresholds=thresholds,
+                        metric_mode="precision",
+                    )
+                )
+                metrics["recall" + suffix] = SegmentationMetric(
+                    F1Metric(
+                        num_classes=self.num_classes,
+                        score_thresholds=thresholds,
+                        metric_mode="recall",
+                    )
+                )
+
+        if self.enable_miou_metric:
+            miou_metric_kwargs: dict[str, Any] = dict(num_classes=self.num_classes)
+            if self.zero_is_invalid:
+                miou_metric_kwargs["zero_is_invalid"] = True
+            miou_metric_kwargs.update(self.miou_metric_kwargs)
+            metrics["mean_iou"] = SegmentationMetric(
+                MeanIoUMetric(**miou_metric_kwargs),
+                pass_probabilities=False,
+            )
+
+        if self.other_metrics:
+            metrics.update(self.other_metrics)
+
         return MetricCollection(metrics)
 
 
@@ -176,28 +252,51 @@ class SegmentationHead(torch.nn.Module):
         """
         outputs = torch.nn.functional.softmax(logits, dim=1)
 
-        loss = None
+        losses = {}
         if targets:
             labels = torch.stack([target["classes"] for target in targets], dim=0)
             mask = torch.stack([target["valid"] for target in targets], dim=0)
-            loss = (
-                torch.nn.functional.cross_entropy(logits, labels, reduction="none")
-                * mask
+            per_pixel_loss = torch.nn.functional.cross_entropy(
+                logits, labels, reduction="none"
             )
-            loss = torch.mean(loss)
+            mask_sum = torch.sum(mask)
+            if mask_sum > 0:
+                # Compute average loss over valid pixels.
+                losses["cls"] = torch.sum(per_pixel_loss * mask) / torch.sum(mask)
+            else:
+                # If there are no valid pixels, we avoid dividing by zero and just let
+                # the summed mask loss be zero.
+                losses["cls"] = torch.sum(per_pixel_loss * mask)
 
-        return outputs, {"cls": loss}
+        return outputs, losses
 
 
 class SegmentationMetric(Metric):
     """Metric for segmentation task."""
 
-    def __init__(self, metric: Metric):
-        """Initialize a new SegmentationMetric."""
+    def __init__(
+        self,
+        metric: Metric,
+        pass_probabilities: bool = True,
+        class_idx: int | None = None,
+    ):
+        """Initialize a new SegmentationMetric.
+
+        Args:
+            metric: the metric to wrap. This wrapping class will handle selecting the
+                classes from the targets and masking out invalid pixels.
+            pass_probabilities: whether to pass predicted probabilities to the metric.
+                If False, argmax is applied to pass the predicted classes instead.
+            class_idx: if metric returns value for multiple classes, select this class.
+        """
         super().__init__()
         self.metric = metric
+        self.pass_probablities = pass_probabilities
+        self.class_idx = class_idx
 
-    def update(self, preds: list[Any], targets: list[dict[str, Any]]) -> None:
+    def update(
+        self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
+    ) -> None:
         """Update metric.
 
         Args:
@@ -217,11 +316,17 @@ class SegmentationMetric(Metric):
         if len(preds) == 0:
             return
 
+        if not self.pass_probablities:
+            preds = preds.argmax(dim=1)
+
         self.metric.update(preds, labels)
 
     def compute(self) -> Any:
         """Returns the computed metric."""
-        return self.metric.compute()
+        result = self.metric.compute()
+        if self.class_idx is not None:
+            result = result[self.class_idx]
+        return result
 
     def reset(self) -> None:
         """Reset metric."""
@@ -231,3 +336,212 @@ class SegmentationMetric(Metric):
     def plot(self, *args: list[Any], **kwargs: dict[str, Any]) -> Any:
         """Returns a plot of the metric."""
         return self.metric.plot(*args, **kwargs)
+
+
+class F1Metric(Metric):
+    """F1 score for segmentation.
+
+    It treats each class as a separate prediction task, and computes the maximum F1
+    score under the different configured thresholds per-class.
+    """
+
+    def __init__(
+        self,
+        num_classes: int,
+        score_thresholds: list[float],
+        metric_mode: str = "f1",
+    ):
+        """Create a new F1Metric.
+
+        Args:
+            num_classes: number of classes.
+            score_thresholds: list of score thresholds to check F1 score for. The final
+                metric is the best F1 across score thresholds.
+            metric_mode: set to "precision" or "recall" to return that instead of F1
+                (default "f1")
+        """
+        super().__init__()
+        self.num_classes = num_classes
+        self.score_thresholds = score_thresholds
+        self.metric_mode = metric_mode
+
+        assert self.metric_mode in ["f1", "precision", "recall"]
+
+        for cls_idx in range(self.num_classes):
+            for thr_idx in range(len(self.score_thresholds)):
+                cur_prefix = self._get_state_prefix(cls_idx, thr_idx)
+                self.add_state(
+                    cur_prefix + "tp", default=torch.tensor(0), dist_reduce_fx="sum"
+                )
+                self.add_state(
+                    cur_prefix + "fp", default=torch.tensor(0), dist_reduce_fx="sum"
+                )
+                self.add_state(
+                    cur_prefix + "fn", default=torch.tensor(0), dist_reduce_fx="sum"
+                )
+
+    def _get_state_prefix(self, cls_idx: int, thr_idx: int) -> str:
+        return f"{cls_idx}_{thr_idx}_"
+
+    def update(self, preds: torch.Tensor, labels: torch.Tensor) -> None:
+        """Update metric.
+
+        Args:
+            preds: the predictions, NxC.
+            labels: the targets, N, with values from 0 to C-1.
+        """
+        for cls_idx in range(self.num_classes):
+            for thr_idx, score_threshold in enumerate(self.score_thresholds):
+                pred_bin = preds[:, cls_idx] > score_threshold
+                gt_bin = labels == cls_idx
+
+                tp = torch.count_nonzero(pred_bin & gt_bin).item()
+                fp = torch.count_nonzero(pred_bin & torch.logical_not(gt_bin)).item()
+                fn = torch.count_nonzero(torch.logical_not(pred_bin) & gt_bin).item()
+
+                cur_prefix = self._get_state_prefix(cls_idx, thr_idx)
+                setattr(self, cur_prefix + "tp", getattr(self, cur_prefix + "tp") + tp)
+                setattr(self, cur_prefix + "fp", getattr(self, cur_prefix + "fp") + fp)
+                setattr(self, cur_prefix + "fn", getattr(self, cur_prefix + "fn") + fn)
+
+    def compute(self) -> Any:
+        """Compute metric.
+
+        Returns:
+            the best F1 score across score thresholds and classes.
+        """
+        best_scores = []
+
+        for cls_idx in range(self.num_classes):
+            best_score = None
+
+            for thr_idx in range(len(self.score_thresholds)):
+                cur_prefix = self._get_state_prefix(cls_idx, thr_idx)
+                tp = getattr(self, cur_prefix + "tp")
+                fp = getattr(self, cur_prefix + "fp")
+                fn = getattr(self, cur_prefix + "fn")
+                device = tp.device
+
+                if tp + fp == 0:
+                    precision = torch.tensor(0, dtype=torch.float32, device=device)
+                else:
+                    precision = tp / (tp + fp)
+
+                if tp + fn == 0:
+                    recall = torch.tensor(0, dtype=torch.float32, device=device)
+                else:
+                    recall = tp / (tp + fn)
+
+                if precision + recall < 0.001:
+                    f1 = torch.tensor(0, dtype=torch.float32, device=device)
+                else:
+                    f1 = 2 * precision * recall / (precision + recall)
+
+                if self.metric_mode == "f1":
+                    score = f1
+                elif self.metric_mode == "precision":
+                    score = precision
+                elif self.metric_mode == "recall":
+                    score = recall
+
+                if best_score is None or score > best_score:
+                    best_score = score
+
+            best_scores.append(best_score)
+
+        return torch.mean(torch.stack(best_scores))
+
+
+class MeanIoUMetric(Metric):
+    """Mean IoU for segmentation.
+
+    This is the mean of the per-class intersection-over-union scores. The per-class
+    intersection is the number of pixels across all examples where the predicted label
+    and ground truth label are both that class, and the per-class union is defined
+    similarly.
+
+    This differs from torchmetrics.segmentation.MeanIoU, where the mean IoU is computed
+    per-image, and averaged across images.
+    """
+
+    def __init__(
+        self,
+        num_classes: int,
+        zero_is_invalid: bool = False,
+        ignore_missing_classes: bool = False,
+        class_idx: int | None = None,
+    ):
+        """Create a new MeanIoUMetric.
+
+        Args:
+            num_classes: the number of classes for the task.
+            zero_is_invalid: whether to ignore class 0 in computing mean IoU.
+            ignore_missing_classes: whether to ignore classes that don't appear in
+                either the predictions or the ground truth. If false, the IoU for a
+                missing class will be 0.
+            class_idx: only compute and return the IoU for this class. This option is
+                provided so the user can get per-class IoU results, since Lightning
+                only supports scalar return values from metrics.
+        """
+        super().__init__()
+        self.num_classes = num_classes
+        self.zero_is_invalid = zero_is_invalid
+        self.ignore_missing_classes = ignore_missing_classes
+        self.class_idx = class_idx
+
+        self.add_state(
+            "intersections", default=torch.zeros(self.num_classes), dist_reduce_fx="sum"
+        )
+        self.add_state(
+            "unions", default=torch.zeros(self.num_classes), dist_reduce_fx="sum"
+        )
+
+    def update(self, preds: torch.Tensor, labels: torch.Tensor) -> None:
+        """Update metric.
+
+        Like torchmetrics.segmentation.MeanIoU with input_format="index", we expect
+        predictions and labels to both be class integers. This is achieved by passing
+        pass_probabilities=False to the SegmentationMetric wrapper.
+
+        Args:
+            preds: the predictions, (N,), with values from 0 to C-1.
+            labels: the targets, (N,), with values from 0 to C-1.
+        """
+        if preds.min() < 0 or preds.max() >= self.num_classes:
+            raise ValueError("predicted class outside of expected range")
+        if labels.min() < 0 or labels.max() >= self.num_classes:
+            raise ValueError("label class outside of expected range")
+
+        new_intersections = torch.zeros(
+            self.num_classes, device=self.intersections.device
+        )
+        new_unions = torch.zeros(self.num_classes, device=self.unions.device)
+        for cls_idx in range(self.num_classes):
+            new_intersections[cls_idx] = (
+                (preds == cls_idx) & (labels == cls_idx)
+            ).sum()
+            new_unions[cls_idx] = ((preds == cls_idx) | (labels == cls_idx)).sum()
+        self.intersections += new_intersections
+        self.unions += new_unions
+
+    def compute(self) -> Any:
+        """Compute metric.
+
+        Returns:
+            the mean IoU across classes.
+        """
+        per_class_scores = []
+
+        for cls_idx in range(self.num_classes):
+            if cls_idx == 0 and self.zero_is_invalid:
+                continue
+
+            intersection = self.intersections[cls_idx]
+            union = self.unions[cls_idx]
+
+            if union == 0 and self.ignore_missing_classes:
+                continue
+
+            per_class_scores.append(intersection / union)
+
+        return torch.mean(torch.stack(per_class_scores))

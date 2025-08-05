@@ -1,12 +1,18 @@
 """Default Dataset for rslearn."""
 
 import hashlib
+import itertools
+import json
 import multiprocessing
 import os
 import random
+import tempfile
 import time
+import uuid
+from collections.abc import Iterable, Iterator
 from typing import Any
 
+import shapely
 import torch
 import tqdm
 
@@ -17,14 +23,19 @@ from rslearn.config import (
     RasterLayerConfig,
     VectorLayerConfig,
 )
-from rslearn.dataset import Dataset, Window
+from rslearn.dataset.dataset import Dataset
+from rslearn.dataset.window import Window, get_layer_and_group_from_dir_name
+from rslearn.log_utils import get_logger
 from rslearn.train.tasks import Task
-from rslearn.utils import logger
+from rslearn.utils.feature import Feature
+from rslearn.utils.geometry import PixelBounds, STGeometry
 from rslearn.utils.mp import star_imap_unordered
 from rslearn.utils.raster_format import load_raster_format
 from rslearn.utils.vector_format import load_vector_format
 
 from .transforms import Sequential
+
+logger = get_logger(__name__)
 
 
 class SamplerFactory:
@@ -102,7 +113,7 @@ class WeightedRandomSamplerFactory(SamplerFactory):
             a RandomSampler
         """
         weights = []
-        for window in dataset.get_windows():
+        for window in dataset.get_dataset_examples():
             weights.append(window.options[self.option_key])
         return torch.utils.data.WeightedRandomSampler(
             weights, self.num_samples, replacement=self.replacement
@@ -124,6 +135,8 @@ class DataInput:
         passthrough: bool = False,
         is_target: bool = False,
         dtype: DType = DType.FLOAT32,
+        load_all_layers: bool = False,
+        load_all_item_groups: bool = False,
     ) -> None:
         """Initialize a new DataInput.
 
@@ -137,6 +150,14 @@ class DataInput:
             is_target: whether this DataInput represents a target for the task. Targets
                 are not read during prediction phase.
             dtype: data type to load the raster as
+            load_all_layers: whether to load all of the layers specified in the list of
+                layer names. By default, we randomly pick one layer to read. When
+                reading multiple layers, the images are stacked on the channel
+                dimension.
+            load_all_item_groups: whether to load all item groups in the layer(s) we
+                are reading from. By default, we assume the specified layer name is of
+                the form "{layer_name}.{group_idx}" and read that item group only. With
+                this option enabled, we ignore the group_idx and read all item groups.
         """
         self.data_type = data_type
         self.layers = layers
@@ -145,6 +166,175 @@ class DataInput:
         self.passthrough = passthrough
         self.is_target = is_target
         self.dtype = dtype
+        self.load_all_layers = load_all_layers
+        self.load_all_item_groups = load_all_item_groups
+
+
+def read_raster_layer_for_data_input(
+    window: Window,
+    bounds: PixelBounds,
+    layer_name: str,
+    group_idx: int,
+    layer_config: RasterLayerConfig,
+    data_input: DataInput,
+) -> torch.Tensor:
+    """Read a raster layer for a DataInput.
+
+    This scans the available rasters for the layer at the window to determine which
+    ones are needed to get all of the configured bands.
+
+    Args:
+        window: the window to read from.
+        bounds: the bounds to read.
+        layer_name: the layer.
+        group_idx: the item group.
+        layer_config: the layer configuration.
+        data_input: the DataInput that specifies the bands and dtype.
+
+    Returns:
+        tensor containing raster data.
+    """
+    # See what different sets of bands we need to read to get all the
+    # configured bands.
+    needed_bands = data_input.bands
+    if needed_bands is None:
+        raise ValueError(f"No bands specified for {layer_name}")
+    needed_band_indexes = {}
+    for i, band in enumerate(needed_bands):
+        needed_band_indexes[band] = i
+    needed_sets_and_indexes = []
+    for band_set in layer_config.band_sets:
+        needed_src_indexes = []
+        needed_dst_indexes = []
+        if band_set.bands is None:
+            continue
+        for i, band in enumerate(band_set.bands):
+            if band not in needed_band_indexes:
+                continue
+            needed_src_indexes.append(i)
+            needed_dst_indexes.append(needed_band_indexes[band])
+            del needed_band_indexes[band]
+        if len(needed_src_indexes) == 0:
+            continue
+        needed_sets_and_indexes.append(
+            (band_set, needed_src_indexes, needed_dst_indexes)
+        )
+    if len(needed_band_indexes) > 0:
+        raise ValueError(
+            "could not get all the needed bands from "
+            + f"window {window.name} layer {layer_name} group {group_idx}"
+        )
+
+    image = torch.zeros(
+        (len(needed_bands), bounds[3] - bounds[1], bounds[2] - bounds[0]),
+        dtype=data_input.dtype.get_torch_dtype(),
+    )
+
+    for band_set, src_indexes, dst_indexes in needed_sets_and_indexes:
+        final_projection, final_bounds = band_set.get_final_projection_and_bounds(
+            window.projection, bounds
+        )
+        if band_set.format is None:
+            raise ValueError(f"No format specified for {layer_name}")
+        raster_format = load_raster_format(
+            RasterFormatConfig(band_set.format["name"], band_set.format)
+        )
+        raster_dir = window.get_raster_dir(
+            layer_name, band_set.bands, group_idx=group_idx
+        )
+        src = raster_format.decode_raster(raster_dir, final_projection, final_bounds)
+        if src is None:
+            raise ValueError(f"Source is None for {data_input}")
+        # Resize to patch size if needed.
+        # This is for band sets that are stored at a lower resolution.
+        # Here we assume that it is a multiple.
+        if src.shape[1:3] != image.shape[1:3]:
+            if src.shape[1] < image.shape[1]:
+                factor = image.shape[1] // src.shape[1]
+                src = src.repeat(repeats=factor, axis=1).repeat(repeats=factor, axis=2)
+            else:
+                factor = src.shape[1] // image.shape[1]
+                src = src[:, ::factor, ::factor]
+
+        image[dst_indexes, :, :] = torch.as_tensor(
+            src[src_indexes, :, :].astype(data_input.dtype.get_numpy_dtype())
+        )
+
+    return image
+
+
+def read_data_input(
+    dataset: Dataset, window: Window, bounds: PixelBounds, data_input: DataInput
+) -> torch.Tensor | list[Feature]:
+    """Read the data specified by the DataInput from the window.
+
+    Args:
+        dataset: the dataset, to get layer configs.
+        window: the window to read from.
+        bounds: the bounds of the patch we are reading.
+        data_input: the DataInput that specifies what layers to read.
+
+    Returns:
+        the raster or vector data.
+    """
+    # We first enumerate which layers are available.
+    # If load_all_item_groups is set, we need to check each item group within the
+    # layer.
+    layer_options: list[tuple[str, int]] = []
+    if data_input.load_all_item_groups:
+        wanted_layers = set(data_input.layers)
+        for layer_name, group_idx in window.list_completed_layers():
+            if layer_name not in wanted_layers:
+                continue
+            layer_options.append((layer_name, group_idx))
+    else:
+        for option in data_input.layers:
+            layer_name, group_idx = get_layer_and_group_from_dir_name(option)
+            if not window.is_layer_completed(layer_name, group_idx):
+                continue
+            layer_options.append((layer_name, group_idx))
+
+    # Now determine the layers that we should actually read.
+    # We randomly pick one, unless load_all_layers is set, in which case we read all of
+    # them.
+    layers_to_read: list[tuple[str, int]]
+    if data_input.load_all_layers:
+        # We assume that the user has ensured the layers are compatible, e.g. raster
+        # layers will need to have the same number of bands.
+        layers_to_read = layer_options
+    else:
+        layers_to_read = [random.choice(layer_options)]
+
+    if data_input.data_type == "raster":
+        images: list[torch.Tensor] = []
+        for layer_name, group_idx in layers_to_read:
+            layer_config = dataset.layers[layer_name]
+            assert isinstance(layer_config, RasterLayerConfig)
+            images.append(
+                read_raster_layer_for_data_input(
+                    window, bounds, layer_name, group_idx, layer_config, data_input
+                )
+            )
+        return torch.cat(images, dim=0)
+
+    elif data_input.data_type == "vector":
+        # We don't really support time series for vector data currently, we just
+        # concatenate the features together.
+        features: list[Feature] = []
+        for layer_name, group_idx in layers_to_read:
+            layer_config = dataset.layers[layer_name]
+            assert isinstance(layer_config, VectorLayerConfig)
+            vector_format = load_vector_format(layer_config.format)
+            layer_dir = window.get_layer_dir(layer_name, group_idx=group_idx)
+            cur_features = vector_format.decode_vector(
+                layer_dir, window.projection, window.bounds
+            )
+            features.extend(cur_features)
+
+        return features
+
+    else:
+        raise ValueError(f"unknown data type {data_input.data_type}")
 
 
 class SplitConfig:
@@ -154,8 +344,9 @@ class SplitConfig:
         self,
         groups: list[str] | None = None,
         names: list[str] | None = None,
-        tags: dict[str, str] | None = None,
+        tags: dict[str, Any] | None = None,
         num_samples: int | None = None,
+        num_patches: int | None = None,
         transforms: list[torch.nn.Module] | None = None,
         sampler: SamplerFactory | None = None,
         patch_size: int | tuple[int, int] | None = None,
@@ -173,6 +364,7 @@ class SplitConfig:
                 value. If value is empty, then only the existince of the key in the
                 window options is checked.
             num_samples: limit this split to this many examples
+            num_patches: limit this split to this many patches
             transforms: transforms to apply
             sampler: SamplerFactory for this split
             patch_size: an optional square size or (width, height) tuple. If set, read
@@ -188,15 +380,19 @@ class SplitConfig:
         self.names = names
         self.tags = tags
         self.num_samples = num_samples
+        self.num_patches = num_patches
         self.transforms = transforms
         self.sampler = sampler
         self.patch_size = patch_size
-        self.load_all_patches = load_all_patches
         self.skip_targets = skip_targets
+
+        # Note that load_all_patches are handled by the RslearnDataModule rather than
+        # the ModelDataset.
+        self.load_all_patches = load_all_patches
         self.overlap_ratio = overlap_ratio
-        if self.overlap_ratio is not None:
-            if not (0 < self.overlap_ratio < 1):
-                raise ValueError("overlap_ratio must be between 0 and 1 (exclusive)")
+
+        if self.overlap_ratio is not None and not (0 < self.overlap_ratio < 1):
+            raise ValueError("overlap_ratio must be between 0 and 1 (exclusive)")
 
     def update(self, other: "SplitConfig") -> "SplitConfig":
         """Override settings in this SplitConfig with those in another.
@@ -209,6 +405,7 @@ class SplitConfig:
             names=self.names,
             tags=self.tags,
             num_samples=self.num_samples,
+            num_patches=self.num_patches,
             transforms=self.transforms,
             sampler=self.sampler,
             patch_size=self.patch_size,
@@ -224,6 +421,8 @@ class SplitConfig:
             result.tags = other.tags
         if other.num_samples:
             result.num_samples = other.num_samples
+        if other.num_patches:
+            result.num_patches = other.num_patches
         if other.transforms:
             result.transforms = other.transforms
         if other.sampler:
@@ -237,6 +436,18 @@ class SplitConfig:
         if other.skip_targets is not None:
             result.skip_targets = other.skip_targets
         return result
+
+    def get_patch_size(self) -> tuple[int, int] | None:
+        """Get patch size normalized to int tuple."""
+        if self.patch_size is None:
+            return None
+        if isinstance(self.patch_size, int):
+            return (self.patch_size, self.patch_size)
+        return self.patch_size
+
+    def get_overlap_ratio(self) -> float:
+        """Get the overlap ratio (default 0)."""
+        return self.overlap_ratio if self.overlap_ratio is not None else 0.0
 
     def get_load_all_patches(self) -> bool:
         """Returns whether loading all patches is enabled (default False)."""
@@ -289,6 +500,7 @@ class ModelDataset(torch.utils.data.Dataset):
         inputs: dict[str, DataInput],
         task: Task,
         workers: int,
+        name: str | None = None,
     ) -> None:
         """Instantiate a new ModelDataset.
 
@@ -298,24 +510,25 @@ class ModelDataset(torch.utils.data.Dataset):
             inputs: data to read from the dataset for training
             task: the task to train on
             workers: number of workers to use for initializing the dataset
+            name: name of the dataset (default: None)
         """
         self.dataset = dataset
         self.split_config = split_config
         self.inputs = inputs
         self.task = task
-
+        self.name = name
         if split_config.transforms:
             self.transforms = Sequential(*split_config.transforms)
         else:
             self.transforms = rslearn.train.transforms.transform.Identity()
 
-        # Convert patch size to (width, height) format if needed.
-        if not split_config.patch_size:
+        # Get normalized patch size from the SplitConfig.
+        # But if load all patches is enabled, this is handled by AllPatchesDataset, so
+        # here we instead load the entire windows.
+        if split_config.get_load_all_patches():
             self.patch_size = None
-        elif isinstance(split_config.patch_size, int):
-            self.patch_size = (split_config.patch_size, split_config.patch_size)
         else:
-            self.patch_size = split_config.patch_size
+            self.patch_size = split_config.get_patch_size()
 
         if split_config.names:
             windows = self.dataset.load_windows(
@@ -334,15 +547,19 @@ class ModelDataset(torch.utils.data.Dataset):
         if split_config.tags:
             # Filter the window.options.
             new_windows = []
+            num_removed: dict[str, int] = {}
             for window in windows:
-                tags_passed = True
                 for k, v in split_config.tags.items():
-                    if k not in window.options:
-                        tags_passed = False
-                    elif v and window.options[k] != v:
-                        tags_passed = False
-                if tags_passed:
+                    if k not in window.options or (v and window.options[k] != v):
+                        num_removed[k] = num_removed.get(k, 0) + 1
+                        break
+                else:
                     new_windows.append(window)
+            logger.info(
+                f"Started with {len(windows)} windows, ended with {len(new_windows)} windows for {self.dataset.path}"
+            )
+            for k, v in num_removed.items():
+                logger.info(f"Removed {v} windows due to tag {k}")
             windows = new_windows
 
         # If targets are not needed, remove them from the inputs.
@@ -353,11 +570,17 @@ class ModelDataset(torch.utils.data.Dataset):
 
         # Eliminate windows that are missing either a requisite input layer, or missing
         # all target layers.
+        # We use only main thread if the index is set, since that can take a long time
+        # to send to the worker threads, it may get serialized for each window.
         new_windows = []
-        if workers == 0:
+        if workers == 0 or (len(windows) >= 1 and windows[0].index is not None):
             for window in windows:
                 if check_window(self.inputs, window) is None:
                     continue
+                # The index may be set, but now that this check is done, from here on
+                # we no longer need it. We set it None so that we don't end up passing
+                # it later to the dataloader workers.
+                window.index = None
                 new_windows.append(window)
         else:
             p = multiprocessing.Pool(workers)
@@ -396,64 +619,73 @@ class ModelDataset(torch.utils.data.Dataset):
             # be representative of the population.
             windows = windows[0 : split_config.num_samples]
 
-        self.windows: list = windows
+        # Write dataset_examples to a file so that we can load it lazily in the worker
+        # processes. Otherwise it takes a long time to transmit it when spawning each
+        # process.
+        self.dataset_examples_fname = os.path.join(
+            tempfile.gettempdir(),
+            "rslearn_dataset_examples",
+            f"{os.getpid()}_{uuid.uuid4()}.json",
+        )
+        self.num_dataset_examples = len(windows)
+        self.dataset_examples: list[Window] | None = None
+        logger.info(
+            f"Writing {len(windows)} dataset examples to {self.dataset_examples_fname}"
+        )
+        os.makedirs(os.path.dirname(self.dataset_examples_fname), exist_ok=True)
+        with open(self.dataset_examples_fname, "w") as f:
+            json.dump([self._serialize_item(example) for example in windows], f)
 
-        # If we're loading all patches, we need to include the patch details.
-        if split_config.get_load_all_patches() and self.patch_size is not None:
-            patches = []
-            overlap_size = int(
-                self.patch_size[0] * split_config.overlap_ratio
-                if split_config.overlap_ratio
-                else 0
+    def _serialize_item(self, example: Window) -> dict[str, Any]:
+        return example.get_metadata()
+
+    def _deserialize_item(self, d: dict[str, Any]) -> Window:
+        return Window.from_metadata(
+            Window.get_window_root(self.dataset.path, d["group"], d["name"]),
+            d,
+        )
+
+    def get_dataset_examples(self) -> list[Window]:
+        """Get a list of examples in the dataset.
+
+        If load_all_patches is False, this is a list of Windows. Otherwise, this is a
+        list of (window, patch_bounds, (patch_idx, # patches)) tuples.
+        """
+        if self.dataset_examples is None:
+            logger.debug(
+                f"Loading dataset examples from {self.dataset_examples_fname} in process {os.getpid()}"
             )
-            for window in self.windows:
-                cur_patches = []
-                if window is None:
-                    raise ValueError("Window is None in load_all_patches")
-                for col in range(
-                    window.bounds[0],
-                    window.bounds[2],
-                    self.patch_size[0] - overlap_size,
-                ):
-                    for row in range(
-                        window.bounds[1],
-                        window.bounds[3],
-                        self.patch_size[1] - overlap_size,
-                    ):
-                        cur_patches.append(
-                            (
-                                col,
-                                row,
-                                col + self.patch_size[0],
-                                row + self.patch_size[1],
-                            )
-                        )
-                for i, patch_bounds in enumerate(cur_patches):
-                    patches.append((window, patch_bounds, (i, len(cur_patches))))
-            self.windows = patches
+            with open(self.dataset_examples_fname) as f:
+                self.dataset_examples = [
+                    self._deserialize_item(d) for d in json.load(f)
+                ]
+            logger.debug(f"Finished loading dataset examples in process {os.getpid()}")
+        return self.dataset_examples
 
     def __len__(self) -> int:
         """Returns the dataset length."""
-        return len(self.windows)
+        return self.num_dataset_examples
 
-    def __getitem__(
+    def get_raw_inputs(
         self, idx: int
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-        """Read one training example.
+        """Get the raw inputs and base metadata for this example.
+
+        This is the raster or vector data before being processed by the Task. So it
+        should be a Tensor for raster and list[Feature] for vector.
 
         Args:
             idx: the index in the dataset.
 
         Returns:
-            a tuple (input_dict, target_dict)
+            a tuple (raw_inputs, passthrough_inputs, metadata).
         """
-        logger.debug("__getitem__ start pid=%d item_idx=%d", os.getpid(), idx)
-        window = self.windows[idx]
+        dataset_examples = self.get_dataset_examples()
+        example = dataset_examples[idx]
 
         # Select bounds to read.
-        if self.split_config.get_load_all_patches():
-            window, bounds, (patch_idx, num_patches) = window
-        elif self.patch_size:
+        if self.patch_size:
+            window = example
 
             def get_patch_range(n_patch: int, n_window: int) -> list[int]:
                 if n_patch > n_window:
@@ -475,130 +707,23 @@ class ModelDataset(torch.utils.data.Dataset):
                 get_patch_range(self.patch_size[0], window_size[0]),
                 get_patch_range(self.patch_size[1], window_size[1]),
             ]
-            bounds = [
+            bounds = (
                 window.bounds[0] + patch_ranges[0][0],
                 window.bounds[1] + patch_ranges[1][0],
                 window.bounds[0] + patch_ranges[0][1],
                 window.bounds[1] + patch_ranges[1][1],
-            ]
+            )
+
         else:
+            window = example
             bounds = window.bounds
 
-        # Read the inputs and targets.
-        def read_input(data_input: DataInput) -> torch.Tensor:
-            # First enumerate all options of individual layers to read.
-            layer_options = []
-            for layer_name in data_input.layers:
-                layer_dir = window.get_layer_dir(layer_name)
-                if not (layer_dir / "completed").exists():
-                    continue
-                layer_options.append(layer_name)
-
-            # For now we just randomly pick one option.
-            # In the future we need to support different configuration for how to pick
-            # the options, as well as picking multiple for series inputs.
-            layer = random.choice(layer_options)
-            layer_dir = window.get_layer_dir(layer)
-
-            # The model config may reference a specific group within a layer, like
-            # "image.2" in a dataset that has a layer "image" with max_matches > 1.
-            # So we need to split off the period. Layer names should not contain
-            # period.
-            layer_ds_key = layer.split(".")[0]
-            layer_config = self.dataset.layers[layer_ds_key]
-
-            if data_input.data_type == "raster":
-                assert isinstance(layer_config, RasterLayerConfig)
-
-                # See what different sets of bands we need to read to get all the
-                # configured bands.
-                needed_bands = data_input.bands
-                if needed_bands is None:
-                    raise ValueError(f"No bands specified for {layer}")
-                needed_band_indexes = {}
-                for i, band in enumerate(needed_bands):
-                    needed_band_indexes[band] = i
-                needed_sets_and_indexes = []
-                for band_set in layer_config.band_sets:
-                    needed_src_indexes = []
-                    needed_dst_indexes = []
-                    if band_set.bands is None:
-                        continue
-                    for i, band in enumerate(band_set.bands):
-                        if band not in needed_band_indexes:
-                            continue
-                        needed_src_indexes.append(i)
-                        needed_dst_indexes.append(needed_band_indexes[band])
-                        del needed_band_indexes[band]
-                    if len(needed_src_indexes) == 0:
-                        continue
-                    needed_sets_and_indexes.append(
-                        (band_set, needed_src_indexes, needed_dst_indexes)
-                    )
-                if len(needed_band_indexes) > 0:
-                    raise Exception(
-                        "could not get all the needed bands from "
-                        + f"window {window.name} layer {layer}"
-                    )
-
-                image = torch.zeros(
-                    (len(needed_bands), bounds[3] - bounds[1], bounds[2] - bounds[0]),
-                    dtype=data_input.dtype.get_torch_dtype(),
-                )
-
-                for band_set, src_indexes, dst_indexes in needed_sets_and_indexes:
-                    final_projection, final_bounds = (
-                        band_set.get_final_projection_and_bounds(
-                            window.projection, bounds
-                        )
-                    )
-                    if band_set.format is None:
-                        raise ValueError(f"No format specified for {layer}")
-                    raster_format = load_raster_format(
-                        RasterFormatConfig(band_set.format["name"], band_set.format)
-                    )
-                    cur_path = layer_dir / "_".join(band_set.bands)
-                    src = raster_format.decode_raster(
-                        cur_path, final_projection, final_bounds
-                    )
-                    if src is None:
-                        raise ValueError(f"Source is None for {data_input}")
-                    # Resize to patch size if needed.
-                    # This is for band sets that are stored at a lower resolution.
-                    # Here we assume that it is a multiple.
-                    if src.shape[1:3] != image.shape[1:3]:
-                        if src.shape[1] < image.shape[1]:
-                            factor = image.shape[1] // src.shape[1]
-                            src = src.repeat(repeats=factor, axis=1).repeat(
-                                repeats=factor, axis=2
-                            )
-                        else:
-                            factor = src.shape[1] // image.shape[1]
-                            src = src[:, ::factor, ::factor]
-
-                    image[dst_indexes, :, :] = torch.as_tensor(
-                        src[src_indexes, :, :].astype(
-                            data_input.dtype.get_numpy_dtype()
-                        )
-                    )
-
-                return image
-
-            elif data_input.data_type == "vector":
-                assert isinstance(layer_config, VectorLayerConfig)
-                vector_format = load_vector_format(layer_config.format)
-                features = vector_format.decode_vector(
-                    layer_dir, window.projection, window.bounds
-                )
-                return features
-
-            else:
-                raise Exception(f"unknown data type {data_input.data_type}")
+        assert isinstance(window, Window)
 
         raw_inputs = {}
         passthrough_inputs = {}
         for name, data_input in self.inputs.items():
-            raw_inputs[name] = read_input(data_input)
+            raw_inputs[name] = read_data_input(self.dataset, window, bounds, data_input)
             if data_input.passthrough:
                 passthrough_inputs[name] = raw_inputs[name]
 
@@ -609,13 +734,27 @@ class ModelDataset(torch.utils.data.Dataset):
             "bounds": bounds,
             "time_range": window.time_range,
             "projection": window.projection,
+            "dataset_source": self.name,
         }
-        if self.split_config.get_load_all_patches():
-            metadata["patch_idx"] = patch_idx
-            metadata["num_patches"] = num_patches
-        else:
-            metadata["patch_idx"] = 0
-            metadata["num_patches"] = 1
+
+        return raw_inputs, passthrough_inputs, metadata
+
+    def __getitem__(
+        self, idx: int
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        """Read one training example.
+
+        Args:
+            idx: the index in the dataset.
+
+        Returns:
+            a tuple (input_dict, target_dict, metadata)
+        """
+        logger.debug("__getitem__ start pid=%d item_idx=%d", os.getpid(), idx)
+
+        raw_inputs, passthrough_inputs, metadata = self.get_raw_inputs(idx)
+        metadata["patch_idx"] = 0
+        metadata["num_patches"] = 1
 
         input_dict, target_dict = self.task.process_inputs(
             raw_inputs,
@@ -624,21 +763,290 @@ class ModelDataset(torch.utils.data.Dataset):
         )
         input_dict.update(passthrough_inputs)
         input_dict, target_dict = self.transforms(input_dict, target_dict)
+        input_dict["dataset_source"] = self.name
 
         logger.debug("__getitem__ finish pid=%d item_idx=%d", os.getpid(), idx)
 
         return input_dict, target_dict, metadata
 
-    def get_windows(self) -> list[Window]:
+    def set_name(self, name: str) -> None:
+        """Set the name of the dataset.
+
+        Args:
+            name: the name to set.
+        """
+        self.name = name
+
+
+class AllPatchesDataset(torch.utils.data.IterableDataset):
+    """This wraps a ModelDataset to iterate over all patches in that dataset.
+
+    This should be used when SplitConfig.load_all_patches is enabled. The ModelDataset
+    is configured with no patch size (load entire windows), and the dataset is wrapped
+    in an AllPatchesDataset.
+
+    Similar to DistributedSampler, we add extra samples at each rank to ensure
+    consistent number of batches across all ranks.
+    """
+
+    def __init__(
+        self,
+        dataset: ModelDataset,
+        patch_size: tuple[int, int],
+        overlap_ratio: float = 0.0,
+        rank: int = 0,
+        world_size: int = 1,
+    ):
+        """Create a new AllPatchesDataset.
+
+        Args:
+            dataset: the ModelDataset to wrap.
+            patch_size: the size of the patches to extract.
+            overlap_ratio: whether to include overlap between the patches. Note that
+                the right/bottom-most patches may still overlap since we ensure that
+                all patches are contained in the window bounds.
+            rank: the global rank of this train worker process.
+            world_size: the total number of train worker processes.
+        """
+        super().__init__()
+        self.dataset = dataset
+        self.patch_size = patch_size
+        self.overlap_size = (
+            round(self.patch_size[0] * overlap_ratio),
+            round(self.patch_size[1] * overlap_ratio),
+        )
+        self.rank = rank
+        self.world_size = world_size
+
+        self.windows = self.dataset.get_dataset_examples()
+
+    def get_window_patch_options(self, bounds: PixelBounds) -> list[PixelBounds]:
+        """Get the bounds of each patch within the overall bounds.
+
+        Args:
+            bounds: the window bounds to divide up into smaller patches.
+
+        Returns:
+            a list of patch bounds within the overall bounds. The rightmost and
+                bottommost patches may extend beyond the provided bounds.
+        """
+        # We stride the patches by patch_size - overlap_size until the last patch.
+        # We handle the last patch with a special case to ensure it does not exceed the
+        # window bounds. Instead, it may overlap the previous patch.
+        cols = list(
+            range(
+                bounds[0],
+                bounds[2] - self.patch_size[0],
+                self.patch_size[0] - self.overlap_size[0],
+            )
+        ) + [bounds[2] - self.patch_size[0]]
+        rows = list(
+            range(
+                bounds[1],
+                bounds[3] - self.patch_size[1],
+                self.patch_size[1] - self.overlap_size[1],
+            )
+        ) + [bounds[3] - self.patch_size[1]]
+
+        patch_bounds: list[PixelBounds] = []
+        for col in cols:
+            for row in rows:
+                patch_bounds.append(
+                    (
+                        col,
+                        row,
+                        col + self.patch_size[0],
+                        row + self.patch_size[1],
+                    )
+                )
+        return patch_bounds
+
+    def get_window_num_patches(self, bounds: PixelBounds) -> int:
+        """Get the number of patches for these bounds.
+
+        This corresponds to the length of the list returned by get_patch_options.
+        """
+        num_cols = (
+            len(
+                range(
+                    bounds[0],
+                    bounds[2] - self.patch_size[0],
+                    self.patch_size[0] - self.overlap_size[0],
+                )
+            )
+            + 1
+        )
+        num_rows = (
+            len(
+                range(
+                    bounds[1],
+                    bounds[3] - self.patch_size[1],
+                    self.patch_size[1] - self.overlap_size[1],
+                )
+            )
+            + 1
+        )
+        return num_cols * num_rows
+
+    def _get_worker_iteration_data(self) -> tuple[Iterable[int], int]:
+        """Get the windows we should iterate over.
+
+        This is split both by training worker (self.rank) and data loader worker (via
+        get_worker_info).
+
+        We also compute the total number of samples that each data loader worker should
+        yield. This is important for DDP to ensure that all ranks see the same number
+        of batches.
+
+        Returns:
+            a tuple (window_ids, num_samples_per_worker).
+        """
+        # Figure out the total number of data loader workers and our worker ID.
+        worker_info = torch.utils.data.get_worker_info()
+        if worker_info is None:
+            worker_id = 0
+            num_workers = 1
+        else:
+            worker_id = worker_info.id
+            num_workers = worker_info.num_workers
+        global_worker_id = self.rank * num_workers + worker_id
+
+        # Split up the windows evenly among the workers.
+        # We compute this for all workers since we will need to see the maximum number
+        # of samples under this assignment across workers.
+        window_indexes = range(len(self.windows))
+        windows_by_worker = [
+            window_indexes[cur_rank :: self.world_size][cur_worker_id::num_workers]
+            for cur_rank in range(self.world_size)
+            for cur_worker_id in range(num_workers)
+        ]
+
+        # Now compute the maximum number of samples across workers.
+        max_num_patches = 0
+        for worker_windows in windows_by_worker:
+            worker_num_patches = 0
+            for window_id in worker_windows:
+                worker_num_patches += self.get_window_num_patches(
+                    self.windows[window_id].bounds
+                )
+            max_num_patches = max(max_num_patches, worker_num_patches)
+
+        # Each worker needs at least one window, otherwise it won't be able to pad.
+        # Unless there are zero windows total, which is fine.
+        my_window_indexes: Iterable[int]
+        if len(windows_by_worker[global_worker_id]) == 0 and max_num_patches > 0:
+            my_window_indexes = [global_worker_id % len(self.windows)]
+        else:
+            my_window_indexes = windows_by_worker[global_worker_id]
+
+        return (my_window_indexes, max_num_patches)
+
+    def __iter__(
+        self,
+    ) -> Iterator[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
+        """Iterate over all patches in each element of the underlying ModelDataset."""
+        # Iterate over the window IDs until we have returned enough samples.
+        window_ids, num_samples_needed = self._get_worker_iteration_data()
+        num_samples_returned = 0
+
+        for iteration_idx in itertools.count():
+            for window_id in window_ids:
+                raw_inputs, passthrough_inputs, metadata = self.dataset.get_raw_inputs(
+                    window_id
+                )
+                bounds = metadata["bounds"]
+
+                # For simplicity, pad tensors by patch size to ensure that any patch bounds
+                # extending outside the window bounds will not have issues when we slice
+                # the tensors later.
+                for d in [raw_inputs, passthrough_inputs]:
+                    for input_name, value in list(d.items()):
+                        if not isinstance(value, torch.Tensor):
+                            continue
+                        d[input_name] = torch.nn.functional.pad(
+                            value, pad=(0, self.patch_size[0], 0, self.patch_size[1])
+                        )
+
+                # Now iterate over the patches and extract/yield the crops.
+                # Note that, in case user is leveraging RslearnWriter, it is important that
+                # the patch_idx be increasing (as we iterate) within one window.
+                patches = self.get_window_patch_options(bounds)
+                for patch_idx, patch_bounds in enumerate(patches):
+                    cur_geom = STGeometry(
+                        metadata["projection"], shapely.box(*patch_bounds), None
+                    )
+                    start_offset = (
+                        patch_bounds[0] - bounds[0],
+                        patch_bounds[1] - bounds[1],
+                    )
+                    end_offset = (
+                        patch_bounds[2] - bounds[0],
+                        patch_bounds[3] - bounds[1],
+                    )
+
+                    # Define a helper function to handle each input dict.
+                    def crop_input_dict(d: dict[str, Any]) -> dict[str, Any]:
+                        cropped = {}
+                        for input_name, value in d.items():
+                            if isinstance(value, torch.Tensor):
+                                # Crop the CHW tensor.
+                                cropped[input_name] = value[
+                                    :,
+                                    start_offset[1] : end_offset[1],
+                                    start_offset[0] : end_offset[0],
+                                ].clone()
+                            elif isinstance(value, list):
+                                cropped[input_name] = [
+                                    feat
+                                    for feat in value
+                                    if cur_geom.intersects(feat.geometry)
+                                ]
+                            else:
+                                raise ValueError(
+                                    "got input that is neither tensor nor feature list"
+                                )
+                        return cropped
+
+                    cur_raw_inputs = crop_input_dict(raw_inputs)
+                    cur_passthrough_inputs = crop_input_dict(passthrough_inputs)
+
+                    # Adjust the metadata as well.
+                    cur_metadata = metadata.copy()
+                    cur_metadata["bounds"] = patch_bounds
+                    cur_metadata["patch_idx"] = patch_idx
+                    cur_metadata["num_patches"] = len(patches)
+
+                    # Now we can compute input and target dicts via the task.
+                    input_dict, target_dict = self.dataset.task.process_inputs(
+                        cur_raw_inputs,
+                        metadata=cur_metadata,
+                        load_targets=not self.dataset.split_config.get_skip_targets(),
+                    )
+                    input_dict.update(cur_passthrough_inputs)
+                    input_dict, target_dict = self.dataset.transforms(
+                        input_dict, target_dict
+                    )
+                    input_dict["dataset_source"] = self.dataset.name
+
+                    if num_samples_returned < num_samples_needed:
+                        yield input_dict, target_dict, cur_metadata
+                        num_samples_returned += 1
+                    else:
+                        assert iteration_idx > 0
+
+            if num_samples_returned >= num_samples_needed:
+                break
+
+    def get_dataset_examples(self) -> list[Window]:
         """Returns a list of windows in this dataset."""
-        return self.windows
+        return self.dataset.get_dataset_examples()
 
 
 class RetryDataset(torch.utils.data.Dataset):
     """A dataset wrapper that retries getitem upon encountering error."""
 
     def __init__(
-        self, dataset: torch.utils.data.Dataset, retries: int = 3, delay: float = 5
+        self, dataset: ModelDataset, retries: int = 3, delay: float = 5
     ) -> None:
         """Create a new RetryDataset.
 
@@ -650,6 +1058,14 @@ class RetryDataset(torch.utils.data.Dataset):
         self.dataset = dataset
         self.retries = retries
         self.delay = delay
+
+    def set_name(self, name: str) -> None:
+        """Set the name of the dataset.
+
+        Args:
+            name: the name to set.
+        """
+        self.dataset.set_name(name)
 
     def __len__(self) -> int:
         """Return length of the dataset."""
@@ -677,6 +1093,41 @@ class RetryDataset(torch.utils.data.Dataset):
         # One last try -- but don't catch any more errors.
         return self.dataset[idx]
 
-    def get_windows(self) -> list[Window]:
+    def get_dataset_examples(self) -> list[Window]:
         """Returns a list of windows in this dataset."""
-        return self.dataset.get_windows()
+        return self.dataset.get_dataset_examples()
+
+
+class MultiDataset(torch.utils.data.Dataset):
+    """A dataset that combines multiple datasets."""
+
+    def __init__(self, datasets: dict[str, RetryDataset]) -> None:
+        """Create a new MultiDataset.
+
+        Args:
+            datasets: map of dataset name to dataset.
+        """
+        self.datasets = datasets
+        self.buckets = {}
+        curr_offset = 0
+        for name, ds in datasets.items():
+            self.buckets[name] = range(curr_offset, curr_offset + len(ds))
+            curr_offset += len(ds)
+
+    def __len__(self) -> int:
+        """Return length of the dataset."""
+        return sum(len(ds) for ds in self.datasets.values())
+
+    def __getitem__(self, idx: int) -> Any:
+        """Get item from the dataset.
+
+        Args:
+            idx: the item index.
+
+        Returns:
+            the item data.
+        """
+        for name, bucket in self.buckets.items():
+            if idx in bucket:
+                return self.datasets[name][idx - bucket.start]
+        raise IndexError(f"Index {idx} out of range (len={len(self)})")
