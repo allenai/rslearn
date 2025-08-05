@@ -14,7 +14,9 @@ class PickFeatures(torch.nn.Module):
         Args:
             indexes: the indexes of the input feature map list to select.
             collapse: return one feature map instead of list. If enabled, indexes must
-                consist of one index.
+                consist of one index. This is mainly useful for using PickFeatures as
+                the final module in the decoder, since the final prediction is expected
+                to be one feature map for most tasks like segmentation.
         """
         super().__init__()
         self.indexes = indexes
