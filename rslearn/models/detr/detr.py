@@ -1,4 +1,10 @@
-"""DETR DEtection TRansformer decoder for object detection tasks."""
+"""DETR DEtection TRansformer decoder for object detection tasks.
+
+Most of the modules here are adapted from here:
+https://github.com/facebookresearch/detr/blob/29901c51d7fe8712168b8d0d64351170bc0f83e0/models/detr.py#L258
+The original code is:
+Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+"""
 
 from typing import Any
 
