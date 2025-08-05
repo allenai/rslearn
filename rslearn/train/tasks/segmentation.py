@@ -47,6 +47,7 @@ class SegmentationTask(BasicTask):
         metric_kwargs: dict[str, Any] = {},
         miou_metric_kwargs: dict[str, Any] = {},
         prob_scales: list[float] | None = None,
+        other_metrics: dict[str, Metric] = {},
         **kwargs: Any,
     ) -> None:
         """Initialize a new SegmentationTask.
@@ -72,6 +73,7 @@ class SegmentationTask(BasicTask):
                 before computing the argmax. There is one scale per class. Note that
                 this is only applied during prediction, not when computing val or test
                 metrics.
+            other_metrics: additional metrics to configure on this task.
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -85,6 +87,7 @@ class SegmentationTask(BasicTask):
         self.metric_kwargs = metric_kwargs
         self.miou_metric_kwargs = miou_metric_kwargs
         self.prob_scales = prob_scales
+        self.other_metrics = other_metrics
 
     def process_inputs(
         self,
@@ -222,6 +225,9 @@ class SegmentationTask(BasicTask):
                 pass_probabilities=False,
             )
 
+        if self.other_metrics:
+            metrics.update(self.other_metrics)
+
         return MetricCollection(metrics)
 
 
@@ -250,11 +256,17 @@ class SegmentationHead(torch.nn.Module):
         if targets:
             labels = torch.stack([target["classes"] for target in targets], dim=0)
             mask = torch.stack([target["valid"] for target in targets], dim=0)
-            loss = (
-                torch.nn.functional.cross_entropy(logits, labels, reduction="none")
-                * mask
+            per_pixel_loss = torch.nn.functional.cross_entropy(
+                logits, labels, reduction="none"
             )
-            losses["cls"] = torch.mean(loss)
+            mask_sum = torch.sum(mask)
+            if mask_sum > 0:
+                # Compute average loss over valid pixels.
+                losses["cls"] = torch.sum(per_pixel_loss * mask) / torch.sum(mask)
+            else:
+                # If there are no valid pixels, we avoid dividing by zero and just let
+                # the summed mask loss be zero.
+                losses["cls"] = torch.sum(per_pixel_loss * mask)
 
         return outputs, losses
 
@@ -262,7 +274,12 @@ class SegmentationHead(torch.nn.Module):
 class SegmentationMetric(Metric):
     """Metric for segmentation task."""
 
-    def __init__(self, metric: Metric, pass_probabilities: bool = True):
+    def __init__(
+        self,
+        metric: Metric,
+        pass_probabilities: bool = True,
+        class_idx: int | None = None,
+    ):
         """Initialize a new SegmentationMetric.
 
         Args:
@@ -270,10 +287,12 @@ class SegmentationMetric(Metric):
                 classes from the targets and masking out invalid pixels.
             pass_probabilities: whether to pass predicted probabilities to the metric.
                 If False, argmax is applied to pass the predicted classes instead.
+            class_idx: if metric returns value for multiple classes, select this class.
         """
         super().__init__()
         self.metric = metric
         self.pass_probablities = pass_probabilities
+        self.class_idx = class_idx
 
     def update(
         self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
@@ -304,7 +323,10 @@ class SegmentationMetric(Metric):
 
     def compute(self) -> Any:
         """Returns the computed metric."""
-        return self.metric.compute()
+        result = self.metric.compute()
+        if self.class_idx is not None:
+            result = result[self.class_idx]
+        return result
 
     def reset(self) -> None:
         """Reset metric."""
