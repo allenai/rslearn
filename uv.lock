@@ -3463,7 +3463,7 @@ requires-dist = [
     { name = "earthengine-api", marker = "extra == 'extra'", specifier = ">=0.1" },
     { name = "einops", marker = "extra == 'extra'", specifier = ">=0.8" },
     { name = "fiona", specifier = ">=1.10" },
-    { name = "fsspec", specifier = "==2025.2.0" },
+    { name = "fsspec", specifier = ">=2025.2.0" },
     { name = "gcsfs", marker = "extra == 'extra'", specifier = "==2025.2.0" },
     { name = "google-cloud-bigquery", marker = "extra == 'extra'", specifier = ">=2.18" },
     { name = "google-cloud-storage", marker = "extra == 'extra'", specifier = ">=2.18" },
