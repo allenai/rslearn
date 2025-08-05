@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import shapely
@@ -25,8 +25,8 @@ def test_global_geometry() -> None:
 
 
 class TestTimeMode:
-    START_TIME = datetime(2024, 1, 1, tzinfo=timezone.utc)
-    END_TIME = datetime(2024, 1, 2, tzinfo=timezone.utc)
+    START_TIME = datetime(2024, 1, 1, tzinfo=UTC)
+    END_TIME = datetime(2024, 1, 2, tzinfo=UTC)
     BBOX = shapely.box(0, 0, 1, 1)
 
     @pytest.fixture

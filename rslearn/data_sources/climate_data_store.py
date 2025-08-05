@@ -2,7 +2,7 @@
 
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import cdsapi
@@ -134,13 +134,13 @@ class ERA5LandMonthlyMeans(DataSource):
                 geometry.time_range[0].year,
                 geometry.time_range[0].month,
                 1,
-                tzinfo=timezone.utc,
+                tzinfo=UTC,
             )
             end_date = datetime(
                 geometry.time_range[1].year,
                 geometry.time_range[1].month,
                 1,
-                tzinfo=timezone.utc,
+                tzinfo=UTC,
             )
 
             month_dates: list[datetime] = []
@@ -156,9 +156,7 @@ class ERA5LandMonthlyMeans(DataSource):
                 # Space is the whole globe.
                 bounds = (-180, -90, 180, 90)
                 # Time is just the given month.
-                start_date = datetime(
-                    cur_date.year, cur_date.month, 1, tzinfo=timezone.utc
-                )
+                start_date = datetime(cur_date.year, cur_date.month, 1, tzinfo=UTC)
                 time_range = (
                     start_date,
                     start_date + relativedelta(months=1),

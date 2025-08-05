@@ -3,7 +3,7 @@ import pathlib
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import google.api_core.exceptions
@@ -100,8 +100,8 @@ class TestIngestion:
             projection=WGS84_PROJECTION,
             bounds=(-1, -1, 1, 1),
             time_range=(
-                datetime(2024, 1, 1, tzinfo=timezone.utc),
-                datetime(2024, 2, 1, tzinfo=timezone.utc),
+                datetime(2024, 1, 1, tzinfo=UTC),
+                datetime(2024, 2, 1, tzinfo=UTC),
             ),
         )
         window.save()
@@ -292,8 +292,8 @@ class TestMaterialization:
             projection=WGS84_PROJECTION,
             bounds=(-1, -1, 1, 1),
             time_range=(
-                datetime(2024, 1, 1, tzinfo=timezone.utc),
-                datetime(2024, 2, 1, tzinfo=timezone.utc),
+                datetime(2024, 1, 1, tzinfo=UTC),
+                datetime(2024, 2, 1, tzinfo=UTC),
             ),
         )
         window1.save()
@@ -306,8 +306,8 @@ class TestMaterialization:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 2, 2),  # Different bounds
             time_range=(
-                datetime(2024, 2, 1, tzinfo=timezone.utc),
-                datetime(2024, 3, 1, tzinfo=timezone.utc),  # Different time range
+                datetime(2024, 2, 1, tzinfo=UTC),
+                datetime(2024, 3, 1, tzinfo=UTC),  # Different time range
             ),
         )
         window2.save()

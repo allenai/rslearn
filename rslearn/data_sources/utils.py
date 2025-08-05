@@ -1,7 +1,7 @@
 """Utilities shared by data sources."""
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TypeVar
 
 import shapely
@@ -61,7 +61,7 @@ def match_candidate_items_to_window(
             if geometry.intersects_time_range(item.geometry.time_range)
         ]
 
-        placeholder_datetime = datetime.now(timezone.utc)
+        placeholder_datetime = datetime.now(UTC)
         if query_config.time_mode == TimeMode.BEFORE:
             items.sort(
                 key=lambda item: item.geometry.time_range[0]
