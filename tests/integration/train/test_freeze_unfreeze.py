@@ -1,18 +1,11 @@
-from typing import Any
-
 import lightning.pytorch as pl
 import pytest
 from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
 
-from rslearn.dataset import Dataset
-from rslearn.models.pooling_decoder import PoolingDecoder
 from rslearn.models.singletask import SingleTaskModel
-from rslearn.models.swin import Swin
 from rslearn.train.callbacks.freeze_unfreeze import FreezeUnfreeze
 from rslearn.train.data_module import RslearnDataModule
-from rslearn.train.dataset import DataInput
 from rslearn.train.lightning_module import RslearnLightningModule
-from rslearn.train.tasks.classification import ClassificationHead, ClassificationTask
 
 INITIAL_LR = 1e-3
 
@@ -52,44 +45,17 @@ class LMWithCustomPlateau(RslearnLightningModule):
         return d
 
 
-def get_itc_modules(
-    image_to_class_dataset: Dataset, pl_module_kwargs: dict[str, Any] = {}
-) -> tuple[LMWithCustomPlateau, RslearnDataModule]:
-    """Get the LightningModule and DataModule for the image to class task."""
-    image_data_input = DataInput("raster", ["image"], bands=["band"], passthrough=True)
-    target_data_input = DataInput("vector", ["label"])
-    task = ClassificationTask("label", ["cls0", "cls1"], read_class_id=True)
-    data_module = RslearnDataModule(
-        path=image_to_class_dataset.path,
-        inputs={
-            "image": image_data_input,
-            "targets": target_data_input,
-        },
-        task=task,
-    )
-    model = SingleTaskModel(
-        encoder=[
-            Swin(arch="swin_v2_t", input_channels=1, output_layers=[3]),
-        ],
-        decoder=[
-            PoolingDecoder(in_channels=192, out_channels=2),
-            ClassificationHead(),
-        ],
-    )
-    pl_module = LMWithCustomPlateau(
-        model=model,
-        task=task,
-        print_parameters=True,
-        lr=INITIAL_LR,
-        **pl_module_kwargs,
-    )
-    return pl_module, data_module
-
-
-def test_freeze_unfreeze(image_to_class_dataset: Dataset) -> None:
+def test_freeze_unfreeze(
+    image_to_class_data_module: RslearnDataModule, image_to_class_model: SingleTaskModel
+) -> None:
     """Test the FreezeUnfreeze callback by making sure the weights don't change in the
     first epoch but then unfreeze and do change in the second epoch."""
-    pl_module, data_module = get_itc_modules(image_to_class_dataset)
+    pl_module = LMWithCustomPlateau(
+        model=image_to_class_model,
+        task=image_to_class_data_module.task,
+        print_parameters=True,
+        lr=INITIAL_LR,
+    )
     freeze_unfreeze = FreezeUnfreeze(
         module_selector=["model", "encoder"],
         unfreeze_at_epoch=1,
@@ -102,23 +68,25 @@ def test_freeze_unfreeze(image_to_class_dataset: Dataset) -> None:
             record_callback,
         ],
     )
-    trainer.fit(pl_module, datamodule=data_module)
+    trainer.fit(pl_module, datamodule=image_to_class_data_module)
     assert record_callback.recorded_params[0] == record_callback.recorded_params[1]
     assert record_callback.recorded_params[0] != record_callback.recorded_params[2]
 
 
-def test_unfreeze_lr_factor(image_to_class_dataset: Dataset) -> None:
+def test_unfreeze_lr_factor(
+    image_to_class_data_module: RslearnDataModule, image_to_class_model: SingleTaskModel
+) -> None:
     """Make sure learning rate is set correctly after unfreezing."""
     plateau_factor = 0.5
     unfreeze_lr_factor = 3
-
-    pl_module, data_module = get_itc_modules(
-        image_to_class_dataset,
-        pl_module_kwargs=dict(
-            plateau=True,
-            plateau_factor=plateau_factor,
-            plateau_patience=0,
-        ),
+    pl_module = LMWithCustomPlateau(
+        model=image_to_class_model,
+        task=image_to_class_data_module.task,
+        print_parameters=True,
+        lr=INITIAL_LR,
+        plateau=True,
+        plateau_factor=plateau_factor,
+        plateau_patience=0,
     )
     freeze_unfreeze = FreezeUnfreeze(
         module_selector=["model", "encoder"],
@@ -129,7 +97,7 @@ def test_unfreeze_lr_factor(image_to_class_dataset: Dataset) -> None:
         max_epochs=2,
         callbacks=[freeze_unfreeze],
     )
-    trainer.fit(pl_module, datamodule=data_module)
+    trainer.fit(pl_module, datamodule=image_to_class_data_module)
     param_groups = trainer.optimizers[0].param_groups
     # Default parameters should undergo two plateaus.
     assert param_groups[0]["lr"] == pytest.approx(INITIAL_LR * (plateau_factor**2))

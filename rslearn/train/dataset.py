@@ -20,14 +20,19 @@ from rslearn.config import (
     RasterLayerConfig,
     VectorLayerConfig,
 )
-from rslearn.dataset import Dataset, Window
+from rslearn.dataset.dataset import Dataset
+from rslearn.dataset.window import Window, get_layer_and_group_from_dir_name
+from rslearn.log_utils import get_logger
 from rslearn.train.tasks import Task
-from rslearn.utils import logger
+from rslearn.utils.feature import Feature
+from rslearn.utils.geometry import PixelBounds
 from rslearn.utils.mp import star_imap_unordered
 from rslearn.utils.raster_format import load_raster_format
 from rslearn.utils.vector_format import load_vector_format
 
 from .transforms import Sequential
+
+logger = get_logger(__name__)
 
 
 class SamplerFactory:
@@ -127,6 +132,8 @@ class DataInput:
         passthrough: bool = False,
         is_target: bool = False,
         dtype: DType = DType.FLOAT32,
+        load_all_layers: bool = False,
+        load_all_item_groups: bool = False,
     ) -> None:
         """Initialize a new DataInput.
 
@@ -140,6 +147,14 @@ class DataInput:
             is_target: whether this DataInput represents a target for the task. Targets
                 are not read during prediction phase.
             dtype: data type to load the raster as
+            load_all_layers: whether to load all of the layers specified in the list of
+                layer names. By default, we randomly pick one layer to read. When
+                reading multiple layers, the images are stacked on the channel
+                dimension.
+            load_all_item_groups: whether to load all item groups in the layer(s) we
+                are reading from. By default, we assume the specified layer name is of
+                the form "{layer_name}.{group_idx}" and read that item group only. With
+                this option enabled, we ignore the group_idx and read all item groups.
         """
         self.data_type = data_type
         self.layers = layers
@@ -148,6 +163,175 @@ class DataInput:
         self.passthrough = passthrough
         self.is_target = is_target
         self.dtype = dtype
+        self.load_all_layers = load_all_layers
+        self.load_all_item_groups = load_all_item_groups
+
+
+def read_raster_layer_for_data_input(
+    window: Window,
+    bounds: PixelBounds,
+    layer_name: str,
+    group_idx: int,
+    layer_config: RasterLayerConfig,
+    data_input: DataInput,
+) -> torch.Tensor:
+    """Read a raster layer for a DataInput.
+
+    This scans the available rasters for the layer at the window to determine which
+    ones are needed to get all of the configured bands.
+
+    Args:
+        window: the window to read from.
+        bounds: the bounds to read.
+        layer_name: the layer.
+        group_idx: the item group.
+        layer_config: the layer configuration.
+        data_input: the DataInput that specifies the bands and dtype.
+
+    Returns:
+        tensor containing raster data.
+    """
+    # See what different sets of bands we need to read to get all the
+    # configured bands.
+    needed_bands = data_input.bands
+    if needed_bands is None:
+        raise ValueError(f"No bands specified for {layer_name}")
+    needed_band_indexes = {}
+    for i, band in enumerate(needed_bands):
+        needed_band_indexes[band] = i
+    needed_sets_and_indexes = []
+    for band_set in layer_config.band_sets:
+        needed_src_indexes = []
+        needed_dst_indexes = []
+        if band_set.bands is None:
+            continue
+        for i, band in enumerate(band_set.bands):
+            if band not in needed_band_indexes:
+                continue
+            needed_src_indexes.append(i)
+            needed_dst_indexes.append(needed_band_indexes[band])
+            del needed_band_indexes[band]
+        if len(needed_src_indexes) == 0:
+            continue
+        needed_sets_and_indexes.append(
+            (band_set, needed_src_indexes, needed_dst_indexes)
+        )
+    if len(needed_band_indexes) > 0:
+        raise ValueError(
+            "could not get all the needed bands from "
+            + f"window {window.name} layer {layer_name} group {group_idx}"
+        )
+
+    image = torch.zeros(
+        (len(needed_bands), bounds[3] - bounds[1], bounds[2] - bounds[0]),
+        dtype=data_input.dtype.get_torch_dtype(),
+    )
+
+    for band_set, src_indexes, dst_indexes in needed_sets_and_indexes:
+        final_projection, final_bounds = band_set.get_final_projection_and_bounds(
+            window.projection, bounds
+        )
+        if band_set.format is None:
+            raise ValueError(f"No format specified for {layer_name}")
+        raster_format = load_raster_format(
+            RasterFormatConfig(band_set.format["name"], band_set.format)
+        )
+        raster_dir = window.get_raster_dir(
+            layer_name, band_set.bands, group_idx=group_idx
+        )
+        src = raster_format.decode_raster(raster_dir, final_projection, final_bounds)
+        if src is None:
+            raise ValueError(f"Source is None for {data_input}")
+        # Resize to patch size if needed.
+        # This is for band sets that are stored at a lower resolution.
+        # Here we assume that it is a multiple.
+        if src.shape[1:3] != image.shape[1:3]:
+            if src.shape[1] < image.shape[1]:
+                factor = image.shape[1] // src.shape[1]
+                src = src.repeat(repeats=factor, axis=1).repeat(repeats=factor, axis=2)
+            else:
+                factor = src.shape[1] // image.shape[1]
+                src = src[:, ::factor, ::factor]
+
+        image[dst_indexes, :, :] = torch.as_tensor(
+            src[src_indexes, :, :].astype(data_input.dtype.get_numpy_dtype())
+        )
+
+    return image
+
+
+def read_data_input(
+    dataset: Dataset, window: Window, bounds: PixelBounds, data_input: DataInput
+) -> torch.Tensor | list[Feature]:
+    """Read the data specified by the DataInput from the window.
+
+    Args:
+        dataset: the dataset, to get layer configs.
+        window: the window to read from.
+        bounds: the bounds of the patch we are reading.
+        data_input: the DataInput that specifies what layers to read.
+
+    Returns:
+        the raster or vector data.
+    """
+    # We first enumerate which layers are available.
+    # If load_all_item_groups is set, we need to check each item group within the
+    # layer.
+    layer_options: list[tuple[str, int]] = []
+    if data_input.load_all_item_groups:
+        wanted_layers = set(data_input.layers)
+        for layer_name, group_idx in window.list_completed_layers():
+            if layer_name not in wanted_layers:
+                continue
+            layer_options.append((layer_name, group_idx))
+    else:
+        for option in data_input.layers:
+            layer_name, group_idx = get_layer_and_group_from_dir_name(option)
+            if not window.is_layer_completed(layer_name, group_idx):
+                continue
+            layer_options.append((layer_name, group_idx))
+
+    # Now determine the layers that we should actually read.
+    # We randomly pick one, unless load_all_layers is set, in which case we read all of
+    # them.
+    layers_to_read: list[tuple[str, int]]
+    if data_input.load_all_layers:
+        # We assume that the user has ensured the layers are compatible, e.g. raster
+        # layers will need to have the same number of bands.
+        layers_to_read = layer_options
+    else:
+        layers_to_read = [random.choice(layer_options)]
+
+    if data_input.data_type == "raster":
+        images: list[torch.Tensor] = []
+        for layer_name, group_idx in layers_to_read:
+            layer_config = dataset.layers[layer_name]
+            assert isinstance(layer_config, RasterLayerConfig)
+            images.append(
+                read_raster_layer_for_data_input(
+                    window, bounds, layer_name, group_idx, layer_config, data_input
+                )
+            )
+        return torch.cat(images, dim=0)
+
+    elif data_input.data_type == "vector":
+        # We don't really support time series for vector data currently, we just
+        # concatenate the features together.
+        features: list[Feature] = []
+        for layer_name, group_idx in layers_to_read:
+            layer_config = dataset.layers[layer_name]
+            assert isinstance(layer_config, VectorLayerConfig)
+            vector_format = load_vector_format(layer_config.format)
+            layer_dir = window.get_layer_dir(layer_name, group_idx=group_idx)
+            cur_features = vector_format.decode_vector(
+                layer_dir, window.projection, window.bounds
+            )
+            features.extend(cur_features)
+
+        return features
+
+    else:
+        raise ValueError(f"unknown data type {data_input.data_type}")
 
 
 class SplitConfig:
@@ -157,7 +341,7 @@ class SplitConfig:
         self,
         groups: list[str] | None = None,
         names: list[str] | None = None,
-        tags: dict[str, str] | None = None,
+        tags: dict[str, Any] | None = None,
         num_samples: int | None = None,
         num_patches: int | None = None,
         transforms: list[torch.nn.Module] | None = None,
@@ -345,15 +529,19 @@ class ModelDataset(torch.utils.data.Dataset):
         if split_config.tags:
             # Filter the window.options.
             new_windows = []
+            num_removed: dict[str, int] = {}
             for window in windows:
-                tags_passed = True
                 for k, v in split_config.tags.items():
-                    if k not in window.options:
-                        tags_passed = False
-                    elif v and window.options[k] != v:
-                        tags_passed = False
-                if tags_passed:
+                    if k not in window.options or (v and window.options[k] != v):
+                        num_removed[k] = num_removed.get(k, 0) + 1
+                        break
+                else:
                     new_windows.append(window)
+            logger.info(
+                f"Started with {len(windows)} windows, ended with {len(new_windows)} windows for {self.dataset.path}"
+            )
+            for k, v in num_removed.items():
+                logger.info(f"Removed {v} windows due to tag {k}")
             windows = new_windows
 
         # If targets are not needed, remove them from the inputs.
@@ -367,7 +555,7 @@ class ModelDataset(torch.utils.data.Dataset):
         # We use only main thread if the index is set, since that can take a long time
         # to send to the worker threads, it may get serialized for each window.
         new_windows = []
-        if workers == 0 or windows[0].index is not None:
+        if workers == 0 or (len(windows) >= 1 and windows[0].index is not None):
             for window in windows:
                 if check_window(self.inputs, window) is None:
                     continue
@@ -506,14 +694,14 @@ class ModelDataset(torch.utils.data.Dataset):
         list of (window, patch_bounds, (patch_idx, # patches)) tuples.
         """
         if self.dataset_examples is None:
-            logger.info(
+            logger.debug(
                 f"Loading dataset examples from {self.dataset_examples_fname} in process {os.getpid()}"
             )
             with open(self.dataset_examples_fname) as f:
                 self.dataset_examples = [
                     self._deserialize_item(d) for d in json.load(f)
                 ]
-            logger.info(f"Finished loading dataset examples in process {os.getpid()}")
+            logger.debug(f"Finished loading dataset examples in process {os.getpid()}")
         return self.dataset_examples
 
     def __len__(self) -> int:
@@ -573,121 +761,12 @@ class ModelDataset(torch.utils.data.Dataset):
             window = example
             bounds = window.bounds
 
-        # Read the inputs and targets.
-        def read_input(data_input: DataInput) -> torch.Tensor:
-            # First enumerate all options of individual layers to read.
-            layer_options = []
-            for layer_name in data_input.layers:
-                layer_dir = window.get_layer_dir(layer_name)
-                if not (layer_dir / "completed").exists():
-                    continue
-                layer_options.append(layer_name)
-
-            # For now we just randomly pick one option.
-            # In the future we need to support different configuration for how to pick
-            # the options, as well as picking multiple for series inputs.
-            layer = random.choice(layer_options)
-            layer_dir = window.get_layer_dir(layer)
-
-            # The model config may reference a specific group within a layer, like
-            # "image.2" in a dataset that has a layer "image" with max_matches > 1.
-            # So we need to split off the period. Layer names should not contain
-            # period.
-            layer_ds_key = layer.split(".")[0]
-            layer_config = self.dataset.layers[layer_ds_key]
-
-            if data_input.data_type == "raster":
-                assert isinstance(layer_config, RasterLayerConfig)
-
-                # See what different sets of bands we need to read to get all the
-                # configured bands.
-                needed_bands = data_input.bands
-                if needed_bands is None:
-                    raise ValueError(f"No bands specified for {layer}")
-                needed_band_indexes = {}
-                for i, band in enumerate(needed_bands):
-                    needed_band_indexes[band] = i
-                needed_sets_and_indexes = []
-                for band_set in layer_config.band_sets:
-                    needed_src_indexes = []
-                    needed_dst_indexes = []
-                    if band_set.bands is None:
-                        continue
-                    for i, band in enumerate(band_set.bands):
-                        if band not in needed_band_indexes:
-                            continue
-                        needed_src_indexes.append(i)
-                        needed_dst_indexes.append(needed_band_indexes[band])
-                        del needed_band_indexes[band]
-                    if len(needed_src_indexes) == 0:
-                        continue
-                    needed_sets_and_indexes.append(
-                        (band_set, needed_src_indexes, needed_dst_indexes)
-                    )
-                if len(needed_band_indexes) > 0:
-                    raise Exception(
-                        "could not get all the needed bands from "
-                        + f"window {window.name} layer {layer}"
-                    )
-
-                image = torch.zeros(
-                    (len(needed_bands), bounds[3] - bounds[1], bounds[2] - bounds[0]),
-                    dtype=data_input.dtype.get_torch_dtype(),
-                )
-
-                for band_set, src_indexes, dst_indexes in needed_sets_and_indexes:
-                    final_projection, final_bounds = (
-                        band_set.get_final_projection_and_bounds(
-                            window.projection, bounds
-                        )
-                    )
-                    if band_set.format is None:
-                        raise ValueError(f"No format specified for {layer}")
-                    raster_format = load_raster_format(
-                        RasterFormatConfig(band_set.format["name"], band_set.format)
-                    )
-                    cur_path = layer_dir / "_".join(band_set.bands)
-                    src = raster_format.decode_raster(
-                        cur_path, final_projection, final_bounds
-                    )
-                    if src is None:
-                        raise ValueError(f"Source is None for {data_input}")
-                    # Resize to patch size if needed.
-                    # This is for band sets that are stored at a lower resolution.
-                    # Here we assume that it is a multiple.
-                    if src.shape[1:3] != image.shape[1:3]:
-                        if src.shape[1] < image.shape[1]:
-                            factor = image.shape[1] // src.shape[1]
-                            src = src.repeat(repeats=factor, axis=1).repeat(
-                                repeats=factor, axis=2
-                            )
-                        else:
-                            factor = src.shape[1] // image.shape[1]
-                            src = src[:, ::factor, ::factor]
-
-                    image[dst_indexes, :, :] = torch.as_tensor(
-                        src[src_indexes, :, :].astype(
-                            data_input.dtype.get_numpy_dtype()
-                        )
-                    )
-
-                return image
-
-            elif data_input.data_type == "vector":
-                assert isinstance(layer_config, VectorLayerConfig)
-                vector_format = load_vector_format(layer_config.format)
-                features = vector_format.decode_vector(
-                    layer_dir, window.projection, window.bounds
-                )
-                return features
-
-            else:
-                raise Exception(f"unknown data type {data_input.data_type}")
+        assert isinstance(window, Window)
 
         raw_inputs = {}
         passthrough_inputs = {}
         for name, data_input in self.inputs.items():
-            raw_inputs[name] = read_input(data_input)
+            raw_inputs[name] = read_data_input(self.dataset, window, bounds, data_input)
             if data_input.passthrough:
                 passthrough_inputs[name] = raw_inputs[name]
 
