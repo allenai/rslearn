@@ -51,29 +51,30 @@ class DecoderTrunk(torch.nn.Module):
 
     def __init__(
         self,
-        layers: list[DecoderTrunkLayer],
         task_embedding: BaseTaskEmbedding | None = None,
+        layers: list[DecoderTrunkLayer] | None = None,
     ) -> None:
         """Initialize the DecoderTrunk module.
 
         Args:
+            task_embedding: Task-specific embedding module, or None if not using task embedding.
             layers: List of other shared layers. The first one should expect a
                 B x T x C tensor, and the last should output a B x T x C tensor.
                 All layers must output a dict with key "outputs" (output tensor of shape
                 (B, T, C)) and optionally other keys.
-            task_embedding: Task-specific embedding module, or None if not using task embedding.
         """
         super().__init__()
-        self.layers = torch.nn.ModuleList(layers)
+        self.layers = torch.nn.ModuleList(layers or [])
         self.task_embedding = task_embedding
 
         # If we have multiple instances of the same layer class, output keys will get overwritten
-        types = [type(layer) for layer in layers]
-        if len(set(types)) != len(types):
-            logger.warning(
-                "Multiple instances of the same layer class found in trunk. "
-                "Only the keys from the last instance will be used"
-            )
+        if layers is not None:
+            types = [type(layer) for layer in layers]
+            if len(set(types)) != len(types):
+                logger.warning(
+                    "Multiple instances of the same layer class found in trunk. "
+                    "Only the keys from the last instance will be used"
+                )
 
     def register_tasks(self, task_names: list[str]) -> None:
         """Register tasks.
@@ -103,6 +104,9 @@ class DecoderTrunk(torch.nn.Module):
         if self.task_embedding is not None:
             embeds = self.task_embedding.compute_embeds(features, inputs)
             features = self.task_embedding(features, inputs, embeds=embeds)
+
+        if not self.layers:
+            return {"outputs": features}
 
         assert len(features) == 1, "DecoderTrunk only supports one feature map"
         x = torch.einsum("bchw->bhwc", features[0])
