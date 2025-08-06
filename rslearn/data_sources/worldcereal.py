@@ -271,7 +271,6 @@ class WorldCereal(LocalFiles):
             spec_dicts.append(spec_dict)
         if len(spec_dicts) == 0:
             raise ValueError(f"No AEZ files found for {band}")
-        print(band, spec_dicts)
         # add this to the config
         if config.data_source is not None:
             if "item_specs" in config.data_source.config_dict:

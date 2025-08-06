@@ -14,7 +14,7 @@ __all__ = [
 
 
 # maybe I don't want to explictly autouse this
-# @pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session", autouse=True)
 def test_bucket() -> str:
     os.environ.setdefault("TEST_BUCKET", "test-bucket-rslearn")
     test_bucket = os.environ["TEST_BUCKET"]
