@@ -1,6 +1,6 @@
 """Classes to implement dataset materialization."""
 
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Tuple, TypeVar
 
 import numpy as np
 import numpy.typing as npt
@@ -8,6 +8,8 @@ from class_registry import ClassRegistry
 from rasterio.enums import Resampling
 
 from rslearn.config import (
+    BandSetConfig,
+    CompositingMethod,
     LayerConfig,
     RasterFormatConfig,
     RasterLayerConfig,
@@ -120,6 +122,256 @@ def read_raster_window_from_tiles(
         dst_crop[dst_index, mask] = src[src_index, mask]
 
 
+def get_needed_band_sets_and_indexes(
+    item: ItemType,
+    bands: list[str],
+    tile_store: TileStoreWithLayer,
+) -> list[Tuple[list[str], list[int], list[int]]]:
+    """TODO
+    """
+
+    # Identify which tile store layer(s) to read to get the configured
+    # bands.
+    wanted_band_indexes = {}
+    for i, band in enumerate(bands):
+        wanted_band_indexes[band] = i
+
+    available_bands = tile_store.get_raster_bands(item.name)
+    needed_band_sets_and_indexes = []
+
+    for src_bands in available_bands:
+        needed_src_indexes = []
+        needed_dst_indexes = []
+        for i, band in enumerate(src_bands):
+            if band not in wanted_band_indexes:
+                continue
+            needed_src_indexes.append(i)
+            needed_dst_indexes.append(wanted_band_indexes[band])
+            del wanted_band_indexes[band]
+        if len(needed_src_indexes) == 0:
+            continue
+        needed_band_sets_and_indexes.append(
+            (src_bands, needed_src_indexes, needed_dst_indexes)
+        )
+
+    if len(wanted_band_indexes) > 0:
+        # This item doesn't have all the needed bands, so skip it.
+        return []
+    
+    return needed_band_sets_and_indexes
+
+
+def build_first_valid_composite(
+    group: list[ItemType], 
+    nodata_vals: list[Any],
+    bands: list[str],
+    bounds: PixelBounds,
+    band_dtype: Any,
+    tile_store: TileStoreWithLayer,
+    projection: Projection,
+    remapper: Remapper,
+    resampling_method: Resampling
+) -> npt.NDArray[np.generic]:
+    """Build a composite by selecting the first valid pixel of items in the group.
+    
+    A composite of shape of (bands,bounds) is created by iterating over items in
+    group in order and selecting the first pixel that is not nodata per index.
+
+    Args:
+        group: list of items to composite together
+        nodata_vals: list of nodata values for each band
+        bands: list of band names to include in the composite
+        bounds: pixel bounds defining the spatial extent of the composite
+        band_dtype: data type for the output bands
+        tile_store: tile store containing the actual raster data
+        projection: spatial projection for the composite
+        remapper: remapper to apply to pixel values, or None
+        resampling_method: resampling method to use when reprojecting
+
+    Returns:
+        Composite of shape (bands, bounds) built from all items in the group
+
+    """
+
+    # Initialize the destination array to the nodata values.
+    # We default the nodata value to 0.
+    dst = np.zeros(
+        (len(bands), bounds[3] - bounds[1], bounds[2] - bounds[0]),
+        dtype=band_dtype,
+    )
+
+    for idx, nodata_val in enumerate(nodata_vals):
+        dst[idx] = nodata_val
+    
+    for item in group:
+        needed_band_sets_and_indexes = get_needed_band_sets_and_indexes(
+            item,
+            bands,
+            tile_store
+        )
+
+        for (
+            src_bands,
+            src_indexes,
+            dst_indexes,
+        ) in needed_band_sets_and_indexes:
+            cur_nodata_vals = [nodata_vals[idx] for idx in dst_indexes]
+            read_raster_window_from_tiles(
+                dst=dst,
+                tile_store=tile_store,
+                item_name=item.name,
+                bands=src_bands,
+                projection=projection,
+                bounds=bounds,
+                src_indexes=src_indexes,
+                dst_indexes=dst_indexes,
+                nodata_vals=cur_nodata_vals,
+                remapper=remapper,
+                resampling=resampling_method,
+            )
+    
+    return dst
+
+
+def build_mean_composite(
+    group: list[ItemType], 
+    nodata_vals: list[Any],
+    bands: list[str],
+    bounds: PixelBounds,
+    band_dtype: Any,
+    tile_store: TileStoreWithLayer,
+    projection: Projection,
+    remapper: Remapper,
+    resampling_method: Resampling
+) -> npt.NDArray[np.generic]:
+    """Build a composite by computing the mean of valid pixels across items in the group.
+    
+    A composite of shape (bands, bounds) is created by computing the per-pixel mean of
+    valid (non-nodata) pixels across all items in the group.
+
+    Args:
+        group: list of items to composite together
+        nodata_vals: list of nodata values for each band
+        bands: list of band names to include in the composite
+        bounds: pixel bounds defining the spatial extent of the composite
+        band_dtype: data type for the output bands
+        tile_store: tile store containing the raster data
+        projection: spatial projection for the composite
+        remapper: remapper to apply to pixel values, or None
+        resampling_method: resampling method to use when reprojecting
+
+    Returns:
+        Composite of shape (bands, bounds) having per-pixel mean of all items in the group
+    """
+
+    # TODO: Benchmark against running mean or running sum-count to reduce memory usage
+    # Currently chose this approach to avoid manually dealing with type upcasting
+    # to reduce chances of overflows and to exploit vectorized operations better.
+
+    extent_aligned_raster_windows = []
+    window_shape = (len(bands), bounds[3] - bounds[1], bounds[2] - bounds[0])
+
+    for item in group:
+        # Initialize the destination array to the nodata values.
+        dst = np.zeros(
+            window_shape,
+            dtype=band_dtype,
+        )
+        for idx, nodata_val in enumerate(nodata_vals):
+            dst[idx] = nodata_val
+
+        needed_band_sets_and_indexes = get_needed_band_sets_and_indexes(
+            item,
+            bands,
+            tile_store
+        )
+
+        for (
+            src_bands,
+            src_indexes,
+            dst_indexes,
+        ) in needed_band_sets_and_indexes:
+            cur_nodata_vals = [nodata_vals[idx] for idx in dst_indexes]
+            read_raster_window_from_tiles(
+                dst=dst,
+                tile_store=tile_store,
+                item_name=item.name,
+                bands=src_bands,
+                projection=projection,
+                bounds=bounds,
+                src_indexes=src_indexes,
+                dst_indexes=dst_indexes,
+                nodata_vals=cur_nodata_vals,
+                remapper=remapper,
+                resampling=resampling_method,
+            )
+        
+        extent_aligned_raster_windows.append(dst)
+    
+    # Stack all arrays along a new axis (items axis)
+    stacked_arrays = np.stack(extent_aligned_raster_windows, axis=0)
+
+    # Create mask based on nodata values
+    nodata_vals_array = np.array(nodata_vals).reshape(1, -1, 1, 1)
+    valid_mask = stacked_arrays != nodata_vals_array
+
+    # Create masked array for all bands
+    masked_data = np.ma.masked_where(~valid_mask, stacked_arrays)
+
+    # Compute mean along the items axis for all
+    mean_result = np.ma.mean(masked_data, axis=0)
+
+    # Fill masked values and convert to target dtype
+    result = np.ma.filled(mean_result, nodata_vals_array.squeeze()).astype(band_dtype)
+
+    return result    
+
+
+def build_composite(
+    group: list[ItemType],
+    compositing_method: CompositingMethod,
+    tile_store: TileStoreWithLayer,
+    layer_cfg: RasterLayerConfig,
+    band_cfg: BandSetConfig,
+    projection: Projection,
+    bounds: PixelBounds,
+    remapper: Remapper
+) -> npt.NDArray[np.generic]:
+    """TODO
+    """
+    
+    nodata_vals = band_cfg.nodata_vals
+    if nodata_vals is None:
+        nodata_vals = [0 for _ in band_cfg.bands]
+    
+    if compositing_method == CompositingMethod.FIRST_VALID:
+        return build_first_valid_composite(
+            group=group,
+            nodata_vals=nodata_vals,
+            bands=band_cfg.bands,
+            bounds=bounds,
+            band_dtype=band_cfg.dtype.value,
+            tile_store=tile_store,
+            projection=projection,
+            remapper=remapper,
+            resampling_method=layer_cfg.resampling_method,
+        )
+    elif compositing_method == CompositingMethod.MEAN:
+        return build_mean_composite(
+            group=group,
+            nodata_vals=nodata_vals,
+            bands=band_cfg.bands,
+            bounds=bounds,
+            band_dtype=band_cfg.dtype.value,
+            tile_store=tile_store,
+            projection=projection,
+            remapper=remapper,
+            resampling_method=layer_cfg.resampling_method
+        )
+    elif compositing_method == CompositingMethod.MEDIAN:
+        raise NotImplementedError('MEDIAN compositing is not yet implemented.')
+
+
 @Materializers.register("raster")
 class RasterMaterializer(Materializer[RasterLayerConfig]):
     """A Materializer for raster data."""
@@ -160,70 +412,21 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
             )
 
             for group_id, group in enumerate(item_groups):
-                # Initialize the destination array to the nodata values.
-                # We default the nodata value to 0.
-                nodata_vals = band_cfg.nodata_vals
-                if nodata_vals is None:
-                    nodata_vals = [0 for _ in band_cfg.bands]
-                dst = np.zeros(
-                    (len(band_cfg.bands), bounds[3] - bounds[1], bounds[2] - bounds[0]),
-                    dtype=band_cfg.dtype.value,
+                composite = build_composite(
+                    group=group, 
+                    compositing_method=layer_cfg.compositing_method,
+                    tile_store=tile_store,
+                    layer_cfg=layer_cfg,
+                    band_cfg=band_cfg,
+                    projection=projection,
+                    bounds=bounds,
+                    remapper=remapper,
                 )
-                for idx, nodata_val in enumerate(nodata_vals):
-                    dst[idx] = nodata_val
-
-                for item in group:
-                    # Identify which tile store layer(s) to read to get the configured
-                    # bands.
-                    wanted_band_indexes = {}
-                    for i, band in enumerate(band_cfg.bands):
-                        wanted_band_indexes[band] = i
-
-                    available_bands = tile_store.get_raster_bands(item.name)
-                    needed_band_sets_and_indexes = []
-                    for src_bands in available_bands:
-                        needed_src_indexes = []
-                        needed_dst_indexes = []
-                        for i, band in enumerate(src_bands):
-                            if band not in wanted_band_indexes:
-                                continue
-                            needed_src_indexes.append(i)
-                            needed_dst_indexes.append(wanted_band_indexes[band])
-                            del wanted_band_indexes[band]
-                        if len(needed_src_indexes) == 0:
-                            continue
-                        needed_band_sets_and_indexes.append(
-                            (src_bands, needed_src_indexes, needed_dst_indexes)
-                        )
-                    if len(wanted_band_indexes) > 0:
-                        # This item doesn't have all the needed bands, so skip it.
-                        continue
-
-                    for (
-                        src_bands,
-                        src_indexes,
-                        dst_indexes,
-                    ) in needed_band_sets_and_indexes:
-                        cur_nodata_vals = [nodata_vals[idx] for idx in dst_indexes]
-                        read_raster_window_from_tiles(
-                            dst=dst,
-                            tile_store=tile_store,
-                            item_name=item.name,
-                            bands=src_bands,
-                            projection=projection,
-                            bounds=bounds,
-                            src_indexes=src_indexes,
-                            dst_indexes=dst_indexes,
-                            nodata_vals=cur_nodata_vals,
-                            remapper=remapper,
-                            resampling=layer_cfg.resampling_method,
-                        )
-
                 raster_format.encode_raster(
                     window.get_raster_dir(layer_name, band_cfg.bands, group_id),
                     projection,
                     bounds,
-                    dst,
+                    composite,
                 )
 
         for group_id in range(len(item_groups)):
