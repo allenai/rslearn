@@ -264,7 +264,11 @@ def read_raster_layer_for_data_input(
 
 
 def read_data_input(
-    dataset: Dataset, window: Window, bounds: PixelBounds, data_input: DataInput
+    dataset: Dataset,
+    window: Window,
+    bounds: PixelBounds,
+    data_input: DataInput,
+    rng: random.Random,
 ) -> torch.Tensor | list[Feature]:
     """Read the data specified by the DataInput from the window.
 
@@ -273,6 +277,7 @@ def read_data_input(
         window: the window to read from.
         bounds: the bounds of the patch we are reading.
         data_input: the DataInput that specifies what layers to read.
+        rng: random number generator
 
     Returns:
         the raster or vector data.
@@ -303,7 +308,7 @@ def read_data_input(
         # layers will need to have the same number of bands.
         layers_to_read = layer_options
     else:
-        layers_to_read = [random.choice(layer_options)]
+        layers_to_read = [rng.choice(layer_options)]
 
     if data_input.data_type == "raster":
         images: list[torch.Tensor] = []
@@ -501,6 +506,7 @@ class ModelDataset(torch.utils.data.Dataset):
         task: Task,
         workers: int,
         name: str | None = None,
+        fix_patch_pick: bool = False,
     ) -> None:
         """Instantiate a new ModelDataset.
 
@@ -511,12 +517,15 @@ class ModelDataset(torch.utils.data.Dataset):
             task: the task to train on
             workers: number of workers to use for initializing the dataset
             name: name of the dataset (default: None)
+            fix_patch_pick: if True, fix the patch pick to be the same every time
+                for a given window. Useful for testing (default: False)
         """
         self.dataset = dataset
         self.split_config = split_config
         self.inputs = inputs
         self.task = task
         self.name = name
+        self.fix_patch_pick = fix_patch_pick
         if split_config.transforms:
             self.transforms = Sequential(*split_config.transforms)
         else:
@@ -682,6 +691,7 @@ class ModelDataset(torch.utils.data.Dataset):
         """
         dataset_examples = self.get_dataset_examples()
         example = dataset_examples[idx]
+        rng = random.Random(idx if self.fix_patch_pick else None)
 
         # Select bounds to read.
         if self.patch_size:
@@ -691,12 +701,12 @@ class ModelDataset(torch.utils.data.Dataset):
                 if n_patch > n_window:
                     # Select arbitrary range containing the entire window.
                     # Basically arbitrarily padding the window to get to patch size.
-                    start = random.randint(n_window - n_patch, 0)
+                    start = rng.randint(n_window - n_patch, 0)
                     return [start, start + n_patch]
 
                 else:
                     # Select arbitrary patch within the window.
-                    start = random.randint(0, n_window - n_patch)
+                    start = rng.randint(0, n_window - n_patch)
                     return [start, start + n_patch]
 
             window_size = (
@@ -723,7 +733,9 @@ class ModelDataset(torch.utils.data.Dataset):
         raw_inputs = {}
         passthrough_inputs = {}
         for name, data_input in self.inputs.items():
-            raw_inputs[name] = read_data_input(self.dataset, window, bounds, data_input)
+            raw_inputs[name] = read_data_input(
+                self.dataset, window, bounds, data_input, rng
+            )
             if data_input.passthrough:
                 passthrough_inputs[name] = raw_inputs[name]
 
@@ -807,6 +819,7 @@ class AllPatchesDataset(torch.utils.data.IterableDataset):
                 all patches are contained in the window bounds.
             rank: the global rank of this train worker process.
             world_size: the total number of train worker processes.
+            name: name of this dataset
         """
         super().__init__()
         self.dataset = dataset
@@ -1036,6 +1049,10 @@ class AllPatchesDataset(torch.utils.data.IterableDataset):
 
             if num_samples_returned >= num_samples_needed:
                 break
+
+    def __len__(self) -> int:
+        """Get length of this dataset."""
+        return len(self.dataset)
 
     def get_dataset_examples(self) -> list[Window]:
         """Returns a list of windows in this dataset."""

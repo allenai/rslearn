@@ -162,6 +162,14 @@ class MultiTaskModel(torch.nn.Module):
             )
         return outputs, losses
 
+    def _get_tasks_from_decoder(self, decoder: str) -> list[str]:
+        """Get the tasks corresponding to this decoder.
+
+        Args:
+            decoder: the name of the decoder
+        """
+        return [decoder]
+
     def apply_decoders(
         self,
         features: list[torch.Tensor],
@@ -192,7 +200,7 @@ class MultiTaskModel(torch.nn.Module):
             )
         else:
             for decoder_name, decoder in self.decoders.items():
-                for task_name in self.decoder_to_target.get(decoder_name, decoder_name):
+                for task_name in self._get_tasks_from_decoder(decoder_name):
                     self.apply_decoder(
                         features, inputs, targets, decoder, task_name, outputs, losses
                     )
@@ -373,3 +381,11 @@ class MultiTaskMergedModel(MultiTaskModel):
         outs = super().forward(inputs, targets)
         self.unmerge_output_labels(outs["outputs"], dataset_source)
         return outs
+
+    def _get_tasks_from_decoder(self, decoder: str) -> list[str]:
+        """Get the tasks corresponding to this decoder.
+
+        Args:
+            decoder: the name of the decoder
+        """
+        return self.decoder_to_target[decoder]

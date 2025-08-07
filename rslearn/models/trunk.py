@@ -151,6 +151,7 @@ class MoETransformer(DecoderTrunkLayer):
         disable_moe: bool = False,
         num_experts: int = 16,
         num_slots: int = 256,
+        expert_mult: int = 4,
         load_balance_loss_weight: float = 0.0,
     ):
         """Standard ViT-style transformer, with soft MoE.
@@ -170,6 +171,7 @@ class MoETransformer(DecoderTrunkLayer):
             disable_moe: if True, disable MoE
             num_experts: number of experts in soft MoE
             num_slots: number of slots in soft MoE
+            expert_mult: factor by which to multiply mlp_dim in the hidden layer of experts
             load_balance_loss_weight: weight of the load balance loss
         """
         super().__init__()
@@ -190,6 +192,7 @@ class MoETransformer(DecoderTrunkLayer):
                     num_experts=num_experts,
                     num_slots=num_slots,
                     dropout=dropout,
+                    expert_mult=expert_mult,
                 )
             else:
                 ffn = torch.nn.Sequential(
