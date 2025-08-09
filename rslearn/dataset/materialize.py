@@ -127,9 +127,16 @@ def get_needed_band_sets_and_indexes(
     bands: list[str],
     tile_store: TileStoreWithLayer,
 ) -> list[tuple[list[str], list[int], list[int]]]:
-    """TODO."""
-    # Identify which tile store layer(s) to read to get the configured
-    # bands.
+    """Identify indexes of required bands in tile store.
+
+    Returns:
+        A list for each tile-store layer that contains at least
+        one requested band, a tuple: (src_bands, src_idx, dst_idx) where
+        - src_bands: the full band list for that layer,
+        - src_idx: indexes into src_bands of the bands that were requested,
+        - dst_idx: corresponding indexes in the requested `bands` list.
+    """
+    # Identify which tile store layer(s) to read to get the configured bands.
     wanted_band_indexes = {}
     for i, band in enumerate(bands):
         wanted_band_indexes[band] = i
