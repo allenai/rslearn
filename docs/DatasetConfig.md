@@ -143,7 +143,10 @@ Raster layers have additional configuration:
   // layers with a data source. It is used when there is a difference in CRS or
   // resolution between the item from the data source and the window's target.
   // It is one of "nearest", "bilinear" (default), "cubic", "cubic_spline".
-  "resampling_method": "bilinear"
+  "resampling_method": "bilinear",
+  // Method how to select pixel values when multiple items in a group cover the same
+  // pixel. One of "FIRST_VALID", "MEAN", "MEDIAN". Defaults to "FIRST_VALID".
+  "compositing_method": "FIRST_VALID"
 }
 ```
 
@@ -334,6 +337,11 @@ The space mode defines the spatial matching.
   case, each item group consists of exactly one item.
 - INTERSECTS means that items that intersect the window bounds can be used. In this
   case, each item group consists of exactly one item.
+- COMPOSITE means that one composite covering the window, that combines all elements
+  intersecting the data source during the complete time period should be created. In this case, only a single
+  group containing all intersecting items exists. During materialization these are reduced,
+  such that the complete window is covered and if there are multiple items covering a pixel,
+  the value is computed based on `composite_method` in the layer config. Ignores `max_matches`.
 
 For raster data, with MOSAIC, multiple items may be combined together to materialize a
 raster aligned with the window, while CONTAINS and INTERSECTS means that each
@@ -354,7 +362,8 @@ The time mode defines the temporal matching.
 Finally, max matches is the maximum number of item groups that should be created. The
 default is 1. For MOSAIC, this means to attempt to create one mosaic covering the
 window; zero item groups will be returned only if there are zero items intersecting the
-window. For CONTAINS and INTERSECTS, this means to select the first matching item.
+window. For CONTAINS and INTERSECTS, this means to select the first matching item. For
+COMPOSITE this is currently not used.
 
 If max matches is greater than one, then for MOSAIC, it will attempt to create multiple
 mosaics up to that quantity of mosaics. However, it will only start the next mosaic

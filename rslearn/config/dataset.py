@@ -250,6 +250,16 @@ class SpaceMode(Enum):
     The duration of the sub-periods is controlled by another option in QueryConfig.
     """
 
+    COMPOSITE = 5
+    """Creates one composite covering the entire window.
+
+    During querying all items intersecting the window are placed in one group.
+    The compositing_method in the rasterlayer config specifies how these items are reduced
+    to a single item (e.g MEAN/MEDIAN/FIRST_VALID) during materialization.
+    """
+
+    # TODO add PER_PERIOD_COMPOSITE
+
 
 class TimeMode(Enum):
     """Temporal  matching mode when looking up items corresponding to a window."""
@@ -446,7 +456,7 @@ class LayerConfig:
 
 
 class CompositingMethod(Enum):
-    """Method how to select pixels for the composite/mosaic from corresponding items of a window"""
+    """Method how to select pixels for the composite from corresponding items of a window."""
 
     FIRST_VALID = 1
     """Select first valid pixel in order of corresponding items (might be sorted)"""
@@ -505,7 +515,9 @@ class RasterLayerConfig(LayerConfig):
         if "alias" in config:
             kwargs["alias"] = config["alias"]
         if "compositing_method" in config:
-            kwargs["compositing_method"] = CompositingMethod[config["compositing_method"]]
+            kwargs["compositing_method"] = CompositingMethod[
+                config["compositing_method"]
+            ]
         return RasterLayerConfig(**kwargs)  # type: ignore
 
 

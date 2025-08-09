@@ -354,7 +354,7 @@ def build_mean_composite(
     Returns:
         Composite of shape (bands, bounds) having per-pixel mean of all items in the group
     """
-    # TODO: Might want to add a rurnning sum/count based method to reduce memory utilization
+    # TODO: Might want to add a running sum/count based method to reduce memory utilization
 
     stacked_arrays = read_and_stack_raster_windows(
         group=group,
@@ -487,7 +487,17 @@ def build_composite(
             remapper=remapper,
         )
     elif compositing_method == CompositingMethod.MEDIAN:
-        raise NotImplementedError("MEDIAN compositing is not yet implemented.")
+        return build_median_composite(
+            group=group,
+            nodata_vals=nodata_vals,
+            bands=band_cfg.bands,
+            bounds=bounds,
+            band_dtype=band_cfg.dtype.value,
+            tile_store=tile_store,
+            projection=projection,
+            resampling_method=layer_cfg.resampling_method,
+            remapper=remapper,
+        )
 
 
 @Materializers.register("raster")
