@@ -337,16 +337,21 @@ The space mode defines the spatial matching.
   case, each item group consists of exactly one item.
 - INTERSECTS means that items that intersect the window bounds can be used. In this
   case, each item group consists of exactly one item.
-- COMPOSITE means that one composite covering the window, that combines all elements
-  intersecting the data source during the complete time period should be created. In this case, only a single
-  group containing all intersecting items exists. During materialization these are reduced,
-  such that the complete window is covered and if there are multiple items covering a pixel,
-  the value is computed based on `composite_method` in the layer config. Ignores `max_matches`.
+- COMPOSITE means that one composite-mosaic covering the window should be created.
+  In this case, only a single group containing all intersecting items exists. During
+  materialization these are reduced, such that the complete window is covered. If there
+  are multiple items covering a pixel, the value is computed based on `composite_method`
+  in the layer config. Ignores `max_matches`.
 
 For raster data, with MOSAIC, multiple items may be combined together to materialize a
 raster aligned with the window, while CONTAINS and INTERSECTS means that each
 materialized raster should correspond to one item (possibly after cropping and
 re-projection).
+
+**Composite vs. Mosaic**
+A mosaic stitches adjacent images into one seamless picture, using one pixel value where
+images overlap. A composite combines overlapping images over time (temporal aggregation)
+with a specified method such as the mean or median and also produces a seamless mosaic.
 
 The time mode defines the temporal matching.
 
