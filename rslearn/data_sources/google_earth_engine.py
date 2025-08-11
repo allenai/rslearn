@@ -41,6 +41,19 @@ from .data_source import DataSource, Item, QueryConfig
 logger = get_logger(__name__)
 
 
+class NoValidPixelsException(Exception):
+    """Exception when GEE API reports that export failed due to no valid pixels."""
+
+    # Expected GEE error_message when the task fails.
+    GEE_MESSAGE = "No valid (un-masked) pixels in export region."
+
+
+class ExportException(Exception):
+    """GEE API export error."""
+
+    pass
+
+
 class GEE(DataSource, TileStore):
     """A data source for ingesting images from Google Earth Engine."""
 
@@ -149,7 +162,10 @@ class GEE(DataSource, TileStore):
                 )
                 if status_dict["state"] in ["UNSUBMITTED", "READY", "RUNNING"]:
                     continue
-                assert status_dict["state"] == "COMPLETED"
+                elif status_dict["state"] != "COMPLETED":
+                    raise ValueError(
+                        f"got unexpected GEE task state {status_dict['state']}"
+                    )
                 break
 
         # Read the CSV and add rows into the rtree index.
@@ -301,8 +317,17 @@ class GEE(DataSource, TileStore):
             status_dict = task.status()
             if status_dict["state"] in ["UNSUBMITTED", "READY", "RUNNING"]:
                 continue
-            assert status_dict["state"] == "COMPLETED"
-            break
+            if status_dict["state"] == "COMPLETED":
+                break
+            if status_dict["state"] != "FAILED":
+                raise ValueError(
+                    f"got unexpected GEE task state {status_dict['state']}"
+                )
+            # The task failed. We see if it is an okay failure case or if we need to
+            # raise exception.
+            if status_dict["error_message"] == NoValidPixelsException.GEE_MESSAGE:
+                raise NoValidPixelsException()
+            raise ExportException(f"GEE task failed: {status_dict['error_message']}")
 
     def _merge_rasters(
         self,
@@ -480,7 +505,20 @@ class GEE(DataSource, TileStore):
         bounds_str = f"{bounds[0]}_{bounds[1]}_{bounds[2]}_{bounds[3]}"
         item = self.get_item_by_name(item_name)
         blob_prefix = f"{self.collection_name}/{item.name}.{bounds_str}.{os.getpid()}/"
-        self.export_item(item, blob_prefix, projection_and_bounds=(projection, bounds))
+
+        try:
+            self.export_item(
+                item, blob_prefix, projection_and_bounds=(projection, bounds)
+            )
+        except NoValidPixelsException:
+            # No valid pixels means the result should be empty.
+            logger.info(
+                f"No valid pixels in item {item.name} with projection={projection}, bounds={bounds}, returning empty image"
+            )
+            return np.zeros(
+                (len(bands), bounds[3] - bounds[1], bounds[2] - bounds[0]),
+                dtype=np.float32,
+            )
 
         wanted_transform = get_transform_from_projection_and_bounds(projection, bounds)
         crs_bounds = (
