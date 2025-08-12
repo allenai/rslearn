@@ -443,6 +443,13 @@ def build_median_composite(
     return result
 
 
+compositing_methods = {
+    CompositingMethod.FIRST_VALID: build_first_valid_composite,
+    CompositingMethod.MEAN: build_mean_composite,
+    CompositingMethod.MEDIAN: build_median_composite,
+}
+
+
 def build_composite(
     group: list[ItemType],
     compositing_method: CompositingMethod,
@@ -469,42 +476,17 @@ def build_composite(
     if nodata_vals is None:
         nodata_vals = [0 for _ in band_cfg.bands]
 
-    if compositing_method == CompositingMethod.FIRST_VALID:
-        return build_first_valid_composite(
-            group=group,
-            nodata_vals=nodata_vals,
-            bands=band_cfg.bands,
-            bounds=bounds,
-            band_dtype=band_cfg.dtype.value,
-            tile_store=tile_store,
-            projection=projection,
-            resampling_method=layer_cfg.resampling_method,
-            remapper=remapper,
-        )
-    elif compositing_method == CompositingMethod.MEAN:
-        return build_mean_composite(
-            group=group,
-            nodata_vals=nodata_vals,
-            bands=band_cfg.bands,
-            bounds=bounds,
-            band_dtype=band_cfg.dtype.value,
-            tile_store=tile_store,
-            projection=projection,
-            resampling_method=layer_cfg.resampling_method,
-            remapper=remapper,
-        )
-    elif compositing_method == CompositingMethod.MEDIAN:
-        return build_median_composite(
-            group=group,
-            nodata_vals=nodata_vals,
-            bands=band_cfg.bands,
-            bounds=bounds,
-            band_dtype=band_cfg.dtype.value,
-            tile_store=tile_store,
-            projection=projection,
-            resampling_method=layer_cfg.resampling_method,
-            remapper=remapper,
-        )
+    return compositing_methods[compositing_method](
+        group=group,
+        nodata_vals=nodata_vals,
+        bands=band_cfg.bands,
+        bounds=bounds,
+        band_dtype=band_cfg.dtype.value,
+        tile_store=tile_store,
+        projection=projection,
+        resampling_method=layer_cfg.resampling_method,
+        remapper=remapper,
+    )
 
 
 @Materializers.register("raster")
