@@ -38,8 +38,9 @@ class SegmentationTask(BasicTask):
     def __init__(
         self,
         num_classes: int,
-        colors: list[tuple[int, int, int]] = DEFAULT_COLORS,
+        class_id_mapping: dict[int, int] | None = None,
         zero_is_invalid: bool = False,
+        colors: list[tuple[int, int, int]] = DEFAULT_COLORS,
         enable_accuracy_metric: bool = True,
         enable_miou_metric: bool = False,
         enable_f1_metric: bool = False,
@@ -53,9 +54,11 @@ class SegmentationTask(BasicTask):
         """Initialize a new SegmentationTask.
 
         Args:
-            num_classes: the number of classes to predict
-            colors: optional colors for each class
-            zero_is_invalid: whether pixels labeled class 0 should be marked invalid
+            num_classes: the number of (actual) classes to predict
+            class_id_mapping: optional mapping from original class IDs to new class IDs.
+                If provided, class labels will be remapped according to this dictionary.
+            zero_is_invalid: whether pixels labeled class 0 should be marked invalid.
+            colors: optional colors for each class.
             enable_accuracy_metric: whether to enable the accuracy metric (default
                 true).
             enable_f1_metric: whether to enable the F1 metric (default false).
@@ -78,6 +81,7 @@ class SegmentationTask(BasicTask):
         """
         super().__init__(**kwargs)
         self.num_classes = num_classes
+        self.class_id_mapping = class_id_mapping
         self.colors = colors
         self.zero_is_invalid = zero_is_invalid
         self.enable_accuracy_metric = enable_accuracy_metric
@@ -112,14 +116,19 @@ class SegmentationTask(BasicTask):
         # TODO: List[Feature] is currently not supported
         assert raw_inputs["targets"].shape[0] == 1
         labels = raw_inputs["targets"][0, :, :].long()
+        new_labels = labels.clone()
+
+        if self.class_id_mapping is not None:
+            for old_id, new_id in self.class_id_mapping.items():
+                new_labels[labels == old_id] = new_id
 
         if self.zero_is_invalid:
-            valid = (labels > 0).float()
+            valid = (new_labels > 0).float()
         else:
             valid = torch.ones(labels.shape, dtype=torch.float32)
 
         return {}, {
-            "classes": labels,
+            "classes": new_labels,
             "valid": valid,
         }
 
