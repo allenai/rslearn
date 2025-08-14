@@ -244,6 +244,22 @@ class SpaceMode(Enum):
     dataset.
     """
 
+    PER_PERIOD_MOSAIC = 4
+    """Create one mosaic per sub-period of the time range.
+
+    The duration of the sub-periods is controlled by another option in QueryConfig.
+    """
+
+    COMPOSITE = 5
+    """Creates one composite covering the entire window.
+
+    During querying all items intersecting the window are placed in one group.
+    The compositing_method in the rasterlayer config specifies how these items are reduced
+    to a single item (e.g MEAN/MEDIAN/FIRST_VALID) during materialization.
+    """
+
+    # TODO add PER_PERIOD_COMPOSITE
+
 
 class TimeMode(Enum):
     """Temporal  matching mode when looking up items corresponding to a window."""
@@ -268,7 +284,9 @@ class QueryConfig:
         self,
         space_mode: SpaceMode = SpaceMode.MOSAIC,
         time_mode: TimeMode = TimeMode.WITHIN,
+        min_matches: int = 0,
         max_matches: int = 1,
+        period_duration: timedelta = timedelta(days=30),
     ):
         """Creates a new query configuration.
 
@@ -278,19 +296,29 @@ class QueryConfig:
         Args:
             space_mode: specifies how items should be matched with windows spatially
             time_mode: specifies how items should be matched with windows temporally
+            min_matches: the minimum number of item groups. If there are fewer than
+                this many matches, then no matches will be returned. This can be used
+                to prevent unnecessary data ingestion if the user plans to discard
+                windows that do not have a sufficient amount of data.
             max_matches: the maximum number of items (or groups of items, if space_mode
                 is MOSAIC) to match
+            period_duration: the duration of the periods, if the space mode is
+                PER_PERIOD_MOSAIC.
         """
         self.space_mode = space_mode
         self.time_mode = time_mode
+        self.min_matches = min_matches
         self.max_matches = max_matches
+        self.period_duration = period_duration
 
     def serialize(self) -> dict[str, Any]:
         """Serialize this QueryConfig to a config dict."""
         return {
             "space_mode": str(self.space_mode),
             "time_mode": str(self.time_mode),
+            "min_matches": self.min_matches,
             "max_matches": self.max_matches,
+            "period_duration": f"{self.period_duration.total_seconds()}s",
         }
 
     @staticmethod
@@ -300,11 +328,20 @@ class QueryConfig:
         Args:
             config: the config dict for this QueryConfig
         """
-        return QueryConfig(
-            space_mode=SpaceMode[config.get("space_mode", "MOSAIC")],
-            time_mode=TimeMode[config.get("time_mode", "WITHIN")],
-            max_matches=config.get("max_matches", 1),
-        )
+        kwargs: dict[str, Any] = dict()
+        if "space_mode" in config:
+            kwargs["space_mode"] = SpaceMode[config["space_mode"]]
+        if "time_mode" in config:
+            kwargs["time_mode"] = TimeMode[config["time_mode"]]
+        if "period_duration" in config:
+            kwargs["period_duration"] = timedelta(
+                seconds=pytimeparse.parse(config["period_duration"])
+            )
+        for k in ["min_matches", "max_matches"]:
+            if k not in config:
+                continue
+            kwargs[k] = config[k]
+        return QueryConfig(**kwargs)
 
 
 class DataSourceConfig:
@@ -418,6 +455,19 @@ class LayerConfig:
         return self.serialize() == other.serialize()
 
 
+class CompositingMethod(Enum):
+    """Method how to select pixels for the composite from corresponding items of a window."""
+
+    FIRST_VALID = 1
+    """Select first valid pixel in order of corresponding items (might be sorted)"""
+
+    MEAN = 2
+    """Select per-pixel mean value of corresponding items of a window"""
+
+    MEDIAN = 3
+    """Select per-pixel median value of corresponding items of a window"""
+
+
 class RasterLayerConfig(LayerConfig):
     """Configuration of a raster layer."""
 
@@ -428,6 +478,7 @@ class RasterLayerConfig(LayerConfig):
         data_source: DataSourceConfig | None = None,
         resampling_method: Resampling = Resampling.bilinear,
         alias: str | None = None,
+        compositing_method: CompositingMethod = CompositingMethod.FIRST_VALID,
     ):
         """Initialize a new RasterLayerConfig.
 
@@ -437,10 +488,12 @@ class RasterLayerConfig(LayerConfig):
             data_source: optional DataSourceConfig if this layer is retrievable
             resampling_method: how to resample rasters (if needed), default bilinear resampling
             alias: alias for this layer to use in the tile store
+            compositing_method: how to compute pixel values in the composite of each windows items
         """
         super().__init__(layer_type, data_source, alias)
         self.band_sets = band_sets
         self.resampling_method = resampling_method
+        self.compositing_method = compositing_method
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "RasterLayerConfig":
@@ -461,6 +514,10 @@ class RasterLayerConfig(LayerConfig):
             ]
         if "alias" in config:
             kwargs["alias"] = config["alias"]
+        if "compositing_method" in config:
+            kwargs["compositing_method"] = CompositingMethod[
+                config["compositing_method"]
+            ]
         return RasterLayerConfig(**kwargs)  # type: ignore
 
 

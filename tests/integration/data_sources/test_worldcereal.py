@@ -16,7 +16,7 @@ from rslearn.config import (
     SpaceMode,
 )
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources.worldcereal import WorldCerealConfidences
+from rslearn.data_sources.worldcereal import WorldCereal
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
 from rslearn.utils.raster_format import GeotiffRasterFormat
@@ -63,8 +63,8 @@ def make_test_zips(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
     raster_path = UPath(tmp_path)
 
     return_dict = {}
-    for zip_file in WorldCerealConfidences.ZIP_FILENAMES:
-        filepath = WorldCerealConfidences.zip_filepath_from_filename(zip_file)
+    for zip_file in WorldCereal.ZIP_FILENAMES:
+        filepath = WorldCereal.zip_filepath_from_filename(zip_file)
         raster_path = UPath(tmp_path / "zips" / filepath)
         raster_path.mkdir(parents=True)
         raster_format = GeotiffRasterFormat()
@@ -73,21 +73,19 @@ def make_test_zips(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
             projection,
             bounds,
             array,
-            fname=f"{seattle_aez}_{raster_path.stem}_confidence.tif",
+            fname=f"{seattle_aez}_{raster_path.stem}.tif",
         )
 
         # Create a zip file containing it.
         zip_fname = tmp_path / "zips" / zip_file
         zipf = zipfile.ZipFile(zip_fname, "w")
         zipf.write(
-            raster_path / f"{seattle_aez}_{raster_path.stem}_confidence.tif",
-            arcname=UPath(filepath)
-            / f"{seattle_aez}_{raster_path.stem}_confidence.tif",
+            raster_path / f"{seattle_aez}_{raster_path.stem}.tif",
+            arcname=UPath(filepath) / f"{seattle_aez}_{raster_path.stem}.tif",
         )
         zipf.close()
 
         return_dict[zip_file] = zip_fname
-
     return return_dict
 
 
@@ -117,46 +115,45 @@ def test_with_worldcereal_dir(
             zip_data, content_type="application/zip"
         )
 
-    # Initialize the WorldCover instance.
-    # monkeypatch.setattr(WorldCover, "ZIP_FILENAMES", ["data.zip"])
-
-    bands = [
-        WorldCerealConfidences.band_from_zipfilename(f)
-        for f in WorldCerealConfidences.ZIP_FILENAMES
-    ]
-    query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
-    layer_config = RasterLayerConfig(
-        LayerType.RASTER,
-        [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=bands)],
-    )
-    data_source = WorldCerealConfidences(
-        config=layer_config,
-        worldcereal_dir=worldcereal_dir,
-    )
-
-    print("get items")
-    item_groups = data_source.get_items([seattle2020], query_config)[0]
-    item = item_groups[0][0]
-    tile_store_dir = UPath(worldcereal_dir) / "tile_store"
-    tile_store = DefaultTileStore(str(tile_store_dir))
-    tile_store.set_dataset_path(tile_store_dir)
-
-    print("ingest")
-    layer_name = "layer"
-    data_source.ingest(
-        TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
-    )
+    bands = [WorldCereal.band_from_zipfilename(f) for f in WorldCereal.ZIP_FILENAMES]
     for band in bands:
+        print(f"Testing {band}")
+        query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
+        layer_config = RasterLayerConfig(
+            LayerType.RASTER,
+            [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[band])],
+        )
+        data_source = WorldCereal(
+            band=band,
+            config=layer_config,
+            worldcereal_dir=worldcereal_dir,
+        )
+
+        print("get items")
+        item_groups = data_source.get_items([seattle2020], query_config)
+        item = item_groups[0][0][0]
+        tile_store_dir = UPath(worldcereal_dir) / "tile_store"
+        tile_store = DefaultTileStore(str(tile_store_dir))
+        tile_store.set_dataset_path(tile_store_dir)
+
+        print("ingest")
+        layer_name = "layer"
+        data_source.ingest(
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[0][0],
+            [[seattle2020]],
+        )
+        print(list(tile_store_dir.glob("layer/1/*")))
         assert tile_store.is_raster_ready(layer_name, item.name, [band])
-    # Double check that the data intersected our example GeoTIFF and isn't just all 0.
-    bounds = (
-        int(seattle2020.shp.bounds[0]),
-        int(seattle2020.shp.bounds[1]),
-        int(seattle2020.shp.bounds[2]),
-        int(seattle2020.shp.bounds[3]),
-    )
-    for band in bands:
+        # Double check that the data intersected our example GeoTIFF and isn't just all 0.
+        bounds = (
+            int(seattle2020.shp.bounds[0]),
+            int(seattle2020.shp.bounds[1]),
+            int(seattle2020.shp.bounds[2]),
+            int(seattle2020.shp.bounds[3]),
+        )
         raster_data = tile_store.read_raster(
             layer_name, item.name, [band], seattle2020.projection, bounds
         )
         assert raster_data.max() == 1
+        print(f"Succeeded for {band}")
