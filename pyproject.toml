@@ -17,7 +17,7 @@ dependencies = [
     "boto3>=1.35",
     "class_registry>=2.1",
     "fiona>=1.10",
-    "fsspec==2025.2.0",
+    "fsspec>=2025.2.0",
     "lightning[pytorch-extra]>=2.5.0.post0",
     "Pillow>=11.0",
     "pyproj>=3.7",
