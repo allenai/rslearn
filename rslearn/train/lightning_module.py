@@ -356,8 +356,8 @@ class RslearnLightningModule(L.LightningModule):
             Output predicted probabilities.
         """
         inputs, _, _ = batch
-        outputs, *_ = self(inputs)
-        return outputs
+        model_outputs = self(inputs)
+        return model_outputs
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """Forward pass of the model.
