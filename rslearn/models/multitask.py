@@ -235,14 +235,14 @@ class MultiTaskModel(torch.nn.Module):
 
 
 class MultiTaskMergedModel(MultiTaskModel):
-    """MultiTaskMerged model.
+    """Similar to MultiTaskModel, but allow merging in label space.
 
-    MultiTaskModel first passes its inputs through the sequential encoder models.
+    For example, if you have two classification tasks with N and M labels each, this will
+    handle generating an output layer with N+M layers and the corresponding modification
+    of targets/predictions/metrics.
 
-    Then, it applies one sequential decoder for each configured task. It computes
+    Applies one sequential decoder for each configured task. It computes
     outputs and loss using the final module in the decoder.
-
-    Also, possibly merges labels across a single task type.
     """
 
     def __init__(
