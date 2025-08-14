@@ -59,7 +59,7 @@ extra = [
 dev = [
     "pytest>=8.0",
     "pytest_httpserver",
-    "ruff>=0.5",
+    "ruff>=0.12.9",
 ]
 
 [build-system]

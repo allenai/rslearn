@@ -3735,7 +3735,7 @@ requires-dist = [
     { name = "pytimeparse", specifier = ">=1.1" },
     { name = "rasterio", specifier = ">=1.4" },
     { name = "rtree", marker = "extra == 'extra'", specifier = ">=1.2" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.9" },
     { name = "s3fs", marker = "extra == 'extra'", specifier = "==2025.2.0" },
     { name = "satlaspretrain-models", marker = "extra == 'extra'", specifier = ">=0.3" },
     { name = "scipy", marker = "extra == 'extra'", specifier = ">=1.13" },
