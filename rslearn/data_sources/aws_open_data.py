@@ -706,7 +706,9 @@ class Sentinel2(
             metadata_fname, buf, ExtraArgs={"RequestPayer": "requester"}
         )
         buf.seek(0)
-        tree = ET.ElementTree(ET.fromstring(buf.getvalue()))
+        tree: ET.ElementTree[ET.Element[str]] = ET.ElementTree(
+            ET.fromstring(buf.getvalue())
+        )
         return get_harmonize_callback(tree)
 
     def ingest(
