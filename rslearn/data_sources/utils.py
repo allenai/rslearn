@@ -301,6 +301,14 @@ def match_candidate_items_to_window(
             geometry, items, query_config.period_duration, query_config.max_matches
         )
 
+    elif query_config.space_mode == SpaceMode.COMPOSITE:
+        group = []
+        for item, item_shp in zip(items, item_shps):
+            if not shp_intersects(item_shp, geometry.shp):
+                continue
+            group.append(item)
+        groups = [group]
+
     else:
         raise ValueError(f"invalid space mode {query_config.space_mode}")
 
