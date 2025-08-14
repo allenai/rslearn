@@ -29,19 +29,23 @@ class SingleTaskModel(torch.nn.Module):
         self,
         inputs: list[dict[str, Any]],
         targets: list[dict[str, Any]] | None = None,
-    ) -> tuple[list[Any], dict[str, torch.Tensor]]:
+    ) -> dict[str, Any]:
         """Apply the sequence of modules on the inputs.
 
         Args:
             inputs: list of input dicts
             targets: optional list of target dicts
+            info: optional dictionary of info to pass to the last module
 
         Returns:
-            tuple (outputs, loss_dict) from the last module.
+            dict with keys "outputs" and "loss_dict".
         """
         features = self.encoder(inputs)
         cur = features
         for module in self.decoder[:-1]:
             cur = module(cur, inputs)
-
-        return self.decoder[-1](cur, inputs, targets)
+        outputs, loss_dict = self.decoder[-1](cur, inputs, targets)
+        return {
+            "outputs": outputs,
+            "loss_dict": loss_dict,
+        }
