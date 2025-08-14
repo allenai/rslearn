@@ -75,8 +75,8 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.12.9
     hooks:
-      - id: ruff
-        args: [ --fix ]
+      - id: ruff-check
+        args: [ --fix --verbose ]
         language_version: python3.11
       - id: ruff-format
         language_version: python3.11
