@@ -179,7 +179,7 @@ class RslearnWriter(BasePredictionWriter):
         self,
         trainer: Trainer,
         pl_module: LightningModule,
-        prediction: Sequence,
+        prediction: dict[str, Sequence],
         batch_indices: Sequence,
         batch: tuple[list, list, list],
         batch_idx: int,
@@ -200,7 +200,7 @@ class RslearnWriter(BasePredictionWriter):
         assert isinstance(pl_module, RslearnLightningModule)
         task = pl_module.task
         _, _, metadatas = batch
-        self.process_output_batch(task, prediction, metadatas)
+        self.process_output_batch(task, prediction["outputs"], metadatas)
 
     def process_output_batch(
         self,
