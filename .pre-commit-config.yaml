@@ -77,6 +77,4 @@ repos:
     hooks:
       - id: ruff-check
         args: [ --fix ]
-        language_version: python3.11
       - id: ruff-format
-        language_version: python3.11
