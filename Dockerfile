@@ -6,7 +6,8 @@ WORKDIR /rslearn
 
 COPY pyproject.toml /rslearn/pyproject.toml
 COPY uv.lock /rslearn/uv.lock
-RUN uv sync --extra extra --extra dev
+RUN uv sync --all-extras --no-install-project
 
 ENV PATH="/rslearn/.venv/bin:$PATH"
 COPY ./ /rslearn
+RUN uv sync --all-extras --locked
