@@ -1,9 +1,6 @@
 FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime@sha256:7db0e1bf4b1ac274ea09cf6358ab516f8a5c7d3d0e02311bed445f7e236a5d80
 
-RUN apt-get update \
-    && apt install -y libpq-dev ffmpeg libsm6 libxext6 git wget \
-    && curl -LsSf https://astral.sh/uv/install.sh | sh \
-    && rm -rf /var/lib/apt/lists/*
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 WORKDIR /rslearn
 
