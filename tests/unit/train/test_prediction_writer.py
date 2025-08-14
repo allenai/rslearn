@@ -175,7 +175,7 @@ def test_write_raster(tmp_path: pathlib.Path) -> None:
     writer.write_on_batch_end(
         trainer=None,
         pl_module=pl_module,
-        prediction=[output],
+        prediction={"outputs": [output]},
         batch_indices=[0],
         batch=batch,
         batch_idx=0,
