@@ -1,5 +1,7 @@
 """Data source for ESA WorldCover 2021."""
 
+import functools
+import json
 import os
 import shutil
 import tempfile
@@ -10,15 +12,17 @@ import requests
 from fsspec.implementations.local import LocalFileSystem
 from upath import UPath
 
-from rslearn.config import DataSourceConfig, LayerConfig, QueryConfig
+from rslearn.config import DataSourceConfig, LayerConfig, QueryConfig, RasterLayerConfig
 from rslearn.data_sources.local_files import LocalFiles
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 
+from .data_source import Item
+
 logger = get_logger(__name__)
 
 
-class WorldCerealConfidences(LocalFiles):
+class WorldCereal(LocalFiles):
     """A data source for the ESA WorldCereal 2021 agricultural land cover map.
 
     For details about the land cover map, see https://esa-worldcereal.org/en.
@@ -32,13 +36,21 @@ class WorldCerealConfidences(LocalFiles):
     # final output tif files
     ZIP_FILENAMES = [
         "WorldCereal_2021_tc-annual_temporarycrops_confidence.zip",
+        "WorldCereal_2021_tc-annual_temporarycrops_classification.zip",
         "WorldCereal_2021_tc-maize-main_irrigation_confidence.zip",
+        "WorldCereal_2021_tc-maize-main_irrigation_classification.zip",
         "WorldCereal_2021_tc-maize-main_maize_confidence.zip",
+        "WorldCereal_2021_tc-maize-main_maize_classification.zip",
         "WorldCereal_2021_tc-maize-second_irrigation_confidence.zip",
+        "WorldCereal_2021_tc-maize-second_irrigation_classification.zip",
         "WorldCereal_2021_tc-maize-second_maize_confidence.zip",
+        "WorldCereal_2021_tc-maize-second_maize_classification.zip",
         "WorldCereal_2021_tc-springcereals_springcereals_confidence.zip",
+        "WorldCereal_2021_tc-springcereals_springcereals_classification.zip",
         "WorldCereal_2021_tc-wintercereals_irrigation_confidence.zip",
+        "WorldCereal_2021_tc-wintercereals_irrigation_classification.zip",
         "WorldCereal_2021_tc-wintercereals_wintercereals_confidence.zip",
+        "WorldCereal_2021_tc-wintercereals_wintercereals_classification.zip",
     ]
     TIMEOUT_SECONDS = 10
 
@@ -52,6 +64,16 @@ class WorldCerealConfidences(LocalFiles):
     # zenodo about repeatedly asking for it.
     ZENODO_FILES_DATA: list[dict] = [
         {
+            "id": "21551c80-0df9-4add-abaa-b66fff68179c",
+            "filename": "WorldCereal_2021_tc-annual_temporarycrops_classification.zip",
+            "filesize": 15500797967.0,
+            "checksum": "c006c34fca0253251a8d1ea73cf837a8",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/21551c80-0df9-4add-abaa-b66fff68179c",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-annual_temporarycrops_classification.zip/content",
+            },
+        },
+        {
             "id": "2fed6859-5729-4ab1-9d33-e15464c99a5b",
             "filename": "WorldCereal_2021_tc-annual_temporarycrops_confidence.zip",
             "filesize": 24969180828.0,
@@ -59,6 +81,16 @@ class WorldCerealConfidences(LocalFiles):
             "links": {
                 "self": "https://zenodo.org/api/deposit/depositions/7875105/files/2fed6859-5729-4ab1-9d33-e15464c99a5b",
                 "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-annual_temporarycrops_confidence.zip/content",
+            },
+        },
+        {
+            "id": "2cab95a8-24d9-45cf-ac70-67fa4b6bda64",
+            "filename": "WorldCereal_2021_tc-maize-main_irrigation_classification.zip",
+            "filesize": 17247922829.0,
+            "checksum": "ceaf240dc4bba5e19491dd3c9893ae34",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/2cab95a8-24d9-45cf-ac70-67fa4b6bda64",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-main_irrigation_classification.zip/content",
             },
         },
         {
@@ -72,6 +104,16 @@ class WorldCerealConfidences(LocalFiles):
             },
         },
         {
+            "id": "b2278b6c-c2f5-49c1-8ebc-e828dbf8c27d",
+            "filename": "WorldCereal_2021_tc-maize-main_maize_classification.zip",
+            "filesize": 18210475632.0,
+            "checksum": "ff298db1b654b91fcfa27495d878932d",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/b2278b6c-c2f5-49c1-8ebc-e828dbf8c27d",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-main_maize_classification.zip/content",
+            },
+        },
+        {
             "id": "277c0d06-b5ae-4748-bad1-c135084276ef",
             "filename": "WorldCereal_2021_tc-maize-main_maize_confidence.zip",
             "filesize": 10442831518.0,
@@ -79,6 +121,16 @@ class WorldCerealConfidences(LocalFiles):
             "links": {
                 "self": "https://zenodo.org/api/deposit/depositions/7875105/files/277c0d06-b5ae-4748-bad1-c135084276ef",
                 "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-main_maize_confidence.zip/content",
+            },
+        },
+        {
+            "id": "d9c5dbe4-d027-47aa-bb6e-806c9964f73e",
+            "filename": "WorldCereal_2021_tc-maize-second_irrigation_classification.zip",
+            "filesize": 6703649764.0,
+            "checksum": "7221b40181835c5226d357ae3fec434f",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/d9c5dbe4-d027-47aa-bb6e-806c9964f73e",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-second_irrigation_classification.zip/content",
             },
         },
         {
@@ -92,6 +144,16 @@ class WorldCerealConfidences(LocalFiles):
             },
         },
         {
+            "id": "93ae9f7f-f989-4fc5-837a-d27652b761f7",
+            "filename": "WorldCereal_2021_tc-maize-second_maize_classification.zip",
+            "filesize": 6917008439.0,
+            "checksum": "aa883b52451f878e6b4462d27410707e",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/93ae9f7f-f989-4fc5-837a-d27652b761f7",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-second_maize_classification.zip/content",
+            },
+        },
+        {
             "id": "d3a0df02-8034-463f-a923-2bfe0c2719ac",
             "filename": "WorldCereal_2021_tc-maize-second_maize_confidence.zip",
             "filesize": 3752378387.0,
@@ -99,6 +161,16 @@ class WorldCerealConfidences(LocalFiles):
             "links": {
                 "self": "https://zenodo.org/api/deposit/depositions/7875105/files/d3a0df02-8034-463f-a923-2bfe0c2719ac",
                 "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-maize-second_maize_confidence.zip/content",
+            },
+        },
+        {
+            "id": "7a257437-89fe-4278-94fe-90a66e81e1bd",
+            "filename": "WorldCereal_2021_tc-springcereals_springcereals_classification.zip",
+            "filesize": 7008931281.0,
+            "checksum": "bb6e1124938e3a68b6e47d156f17bf86",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/7a257437-89fe-4278-94fe-90a66e81e1bd",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-springcereals_springcereals_classification.zip/content",
             },
         },
         {
@@ -112,6 +184,26 @@ class WorldCerealConfidences(LocalFiles):
             },
         },
         {
+            "id": "a5774a05-ee8e-42df-bf06-68ebc6c14426",
+            "filename": "WorldCereal_2021_tc-wintercereals_activecropland_classification.zip",
+            "filesize": 20001277863.0,
+            "checksum": "3933653452a2e0b821c35091b6f4a035",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/a5774a05-ee8e-42df-bf06-68ebc6c14426",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-wintercereals_activecropland_classification.zip/content",
+            },
+        },
+        {
+            "id": "5a4adaa6-e50a-469a-b401-6ccca02de443",
+            "filename": "WorldCereal_2021_tc-wintercereals_irrigation_classification.zip",
+            "filesize": 18019534510.0,
+            "checksum": "5032b11cf380d8cef07767e86ef4ee54",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/5a4adaa6-e50a-469a-b401-6ccca02de443",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-wintercereals_irrigation_classification.zip/content",
+            },
+        },
+        {
             "id": "23301576-64d2-48a1-9b19-0c126158c24d",
             "filename": "WorldCereal_2021_tc-wintercereals_irrigation_confidence.zip",
             "filesize": 11447731232.0,
@@ -119,6 +211,16 @@ class WorldCerealConfidences(LocalFiles):
             "links": {
                 "self": "https://zenodo.org/api/deposit/depositions/7875105/files/23301576-64d2-48a1-9b19-0c126158c24d",
                 "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-wintercereals_irrigation_confidence.zip/content",
+            },
+        },
+        {
+            "id": "9ab67c40-9072-44dc-8f6b-892fcaa3c079",
+            "filename": "WorldCereal_2021_tc-wintercereals_wintercereals_classification.zip",
+            "filesize": 18523882137.0,
+            "checksum": "386ce3fca8ba5577e2b62d6f3ea45b27",
+            "links": {
+                "self": "https://zenodo.org/api/deposit/depositions/7875105/files/9ab67c40-9072-44dc-8f6b-892fcaa3c079",
+                "download": "https://zenodo.org/api/records/7875105/files/WorldCereal_2021_tc-wintercereals_wintercereals_classification.zip/content",
             },
         },
         {
@@ -136,25 +238,23 @@ class WorldCerealConfidences(LocalFiles):
     def __init__(
         self,
         config: LayerConfig,
+        band: str,
         worldcereal_dir: UPath,
     ) -> None:
         """Create a new WorldCereal.
 
         Args:
-            config: configuration for this layer. It should specify a single band
-                called B1 which will contain the land cover class.
+            config: configuration for this layer.
+            band: the worldcereal band being processed.
             worldcereal_dir: the directory to extract the WorldCereal GeoTIFF files. For
                 high performance, this should be a local directory; if the dataset is
                 remote, prefix with a protocol ("file://") to use a local directory
                 instead of a path relative to the dataset path.
         """
-        tif_dir, tif_filepaths = self.download_worldcereal_data(worldcereal_dir)
-        all_aezs: set[int] = set()
-        for _, tif_path in tif_filepaths.items():
-            # firstly, go through all the files to collect the AEZs
-            # then, go through the AEZs and get the files
-            # then, fill the missing ones with 0s
-            all_aezs.update(self.all_aezs_from_tifs(tif_path))
+        self.band = band
+        tif_dir, tif_filepath = self.download_worldcereal_data(band, worldcereal_dir)
+        all_aezs: set[int] = self.all_aezs_from_tifs(tif_filepath)
+
         # now that we have all our aezs, lets match them to the bands
         spec_dicts: list[dict] = []
         for aez in all_aezs:
@@ -164,12 +264,13 @@ class WorldCerealConfidences(LocalFiles):
                 "fnames": [],
                 "bands": [],
             }
-            for band, tif_path in tif_filepaths.items():
-                aez_band_filepath = self.filepath_for_product_aez(tif_path, aez)
-                if aez_band_filepath is not None:
-                    spec_dict["fnames"].append(aez_band_filepath.absolute().as_uri())
-                    spec_dict["bands"].append([band])
+            aez_band_filepath = self.filepath_for_product_aez(tif_filepath, aez)
+            if aez_band_filepath is not None:
+                spec_dict["fnames"].append(aez_band_filepath.absolute().as_uri())
+                spec_dict["bands"].append([band])
             spec_dicts.append(spec_dict)
+        if len(spec_dicts) == 0:
+            raise ValueError(f"No AEZ files found for {band}")
         # add this to the config
         if config.data_source is not None:
             if "item_specs" in config.data_source.config_dict:
@@ -179,7 +280,7 @@ class WorldCerealConfidences(LocalFiles):
             config.data_source.config_dict["item_specs"] = spec_dicts
         else:
             config.data_source = DataSourceConfig(
-                name="rslearn.data_sources.WorldCerealConfidence",
+                name="rslearn.data_sources.WorldCereal",
                 query_config=QueryConfig.from_config({}),
                 config_dict={"item_specs": spec_dicts},
             )
@@ -192,26 +293,37 @@ class WorldCerealConfidences(LocalFiles):
         if config.data_source is None:
             raise ValueError("LocalFiles data source requires a data source config")
         d = config.data_source.config_dict
-        return WorldCerealConfidences(
-            config=config, worldcereal_dir=join_upath(ds_path, d["worldcereal_dir"])
+        assert isinstance(config, RasterLayerConfig)
+        bandsets = config.band_sets
+        assert len(bandsets) == 1
+        assert len(bandsets[0].bands) == 1
+        band = bandsets[0].bands[0]
+        return WorldCereal(
+            config=config,
+            band=band,
+            worldcereal_dir=join_upath(ds_path, d["worldcereal_dir"]),
         )
 
     @staticmethod
     def band_from_zipfilename(filename: str) -> str:
         """Return the band name given the zipfilename."""
         # [:-4] to remove ".zip"
-        _, _, season, product, confidence = filename[:-4].split("_")
+        _, _, season, product, confidence_or_classification = filename[:-4].split("_")
         # band names must not contain '_'
-        return "-".join([season, product, confidence])
+        return "-".join([season, product, confidence_or_classification])
 
     @staticmethod
     def zip_filepath_from_filename(filename: str) -> str:
         """Given a filename, return the filepath of the extracted tifs."""
+        _, _, season, product, confidence_or_classification = filename[:-4].split("_")
         prefix = "data/worldcereal_data/MAP-v3/2021"
-        aez_name = "aez_downsampled"
+        if confidence_or_classification == "confidence":
+            aez_name = "aez_downsampled"
+        else:
+            aez_name = "aez"
         # [:-4] to remove ".zip"
-        _, _, season, product, confidence = filename[:-4].split("_")
-        return f"{prefix}/{season}/{product}/{aez_name}/{confidence}"
+
+        return f"{prefix}/{season}/{product}/{aez_name}/{confidence_or_classification}"
 
     @staticmethod
     def all_aezs_from_tifs(filepath: UPath) -> set[int]:
@@ -234,13 +346,14 @@ class WorldCerealConfidences(LocalFiles):
 
     @classmethod
     def download_worldcereal_data(
-        cls, worldcereal_dir: UPath
+        cls, band: str, worldcereal_dir: UPath
     ) -> tuple[UPath, dict[str, UPath]]:
         """Download and extract the WorldCereal data.
 
         If the data was previously downloaded, this function returns quickly.
 
         Args:
+            band: the worldcereal band to download.
             worldcereal_dir: the directory to download to.
 
         Returns:
@@ -252,28 +365,33 @@ class WorldCerealConfidences(LocalFiles):
         # Download the zip files (if they don't already exist).
         zip_dir = worldcereal_dir / "zips"
         zip_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Worldcereal zipfile: {zip_dir}")
+        logger.debug(f"Worldcereal zipfile: {zip_dir}")
 
         # Fetch list of files from Zenodo's Deposition Files API
         # f["filename"] maps to the ZIP_FILENAMES
-        files_as_dict = {f["filename"]: f for f in cls.ZENODO_FILES_DATA}
+        files_to_download = [
+            f
+            for f in cls.ZENODO_FILES_DATA
+            if cls.band_from_zipfilename(f["filename"]) == band
+        ]
+        if len(files_to_download) != 1:
+            raise ValueError(
+                f"Got != 1 suitable filenames for {band}: {[f['filename'] for f in files_to_download]}"
+            )
+        file_to_download = files_to_download[0]
         # now its also in the right order for when we generate the files
-        ordered_files = [files_as_dict[z_f] for z_f in cls.ZIP_FILENAMES]
-        for file_info in ordered_files:
-            filename: str = file_info["filename"]
-            if filename not in cls.ZIP_FILENAMES:
-                logger.info(f"Skipping {filename}, which is not a confidence layer")
-                continue
-            file_url = file_info["links"]["download"]
-            # Determine full filepath and create necessary folders for nested structure
-            filepath = zip_dir / filename
-            if filepath.exists():
-                continue
+        filename: str = file_to_download["filename"]
+        if filename not in cls.ZIP_FILENAMES:
+            raise ValueError(f"Unsupported filename {filename} for band {band}")
+        file_url = file_to_download["links"]["download"]
+        # Determine full filepath and create necessary folders for nested structure
+        zip_filepath = zip_dir / filename
+        if not zip_filepath.exists():
             # Download the file with resume support
-            logger.info(f"Downloading {file_url} to {filepath}")
+            logger.debug(f"Downloading {file_url} to {zip_filepath}")
             with requests.get(file_url, stream=True, timeout=cls.TIMEOUT_SECONDS) as r:
                 r.raise_for_status()
-                with open_atomic(filepath, "wb") as f:
+                with open_atomic(zip_filepath, "wb") as f:
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
 
@@ -281,15 +399,12 @@ class WorldCerealConfidences(LocalFiles):
         # We use a .extraction_complete file to indicate that the extraction is done.
         tif_dir = worldcereal_dir / "tifs"
         tif_dir.mkdir(parents=True, exist_ok=True)
-        for file_info in ordered_files:
-            filename = file_info["filename"]
-            zip_fname = zip_dir / filename
 
-            completed_fname = zip_dir / (filename + ".extraction_complete")
-            if completed_fname.exists():
-                logger.debug("%s has already been extracted", filename)
-                continue
-            logger.info("extracting %s to %s", filename, tif_dir)
+        completed_fname = zip_dir / (filename + ".extraction_complete")
+        if completed_fname.exists():
+            logger.debug("%s has already been extracted", filename)
+        else:
+            logger.debug("extracting %s to %s", filename, tif_dir)
 
             # If the tif_dir is remote, we need to extract to a temporary local
             # directory first and then copy it over.
@@ -299,7 +414,7 @@ class WorldCerealConfidences(LocalFiles):
                 tmp_dir = tempfile.TemporaryDirectory()
                 local_dir = tmp_dir.name
 
-            with get_upath_local(zip_fname) as local_fname:
+            with get_upath_local(zip_filepath) as local_fname:
                 with zipfile.ZipFile(local_fname) as zip_f:
                     zip_f.extractall(local_dir)
 
@@ -312,10 +427,30 @@ class WorldCerealConfidences(LocalFiles):
 
             # Mark the extraction complete.
             completed_fname.touch()
-        tif_filepaths = {
-            cls.band_from_zipfilename(file_info["filename"]): tif_dir
-            / cls.zip_filepath_from_filename(file_info["filename"])
-            for file_info in ordered_files
-        }
+        tif_filepath = tif_dir / cls.zip_filepath_from_filename(filename)
 
-        return tif_dir, tif_filepaths
+        return tif_dir, tif_filepath
+
+    @functools.cache
+    def list_items(self) -> list[Item]:
+        """Lists items from the source directory while maintaining a cache file.
+
+        This is identical to LocalFiles.list_items except that a unique summary
+        is made per band (since we treat each band separately now.)
+        """
+        cache_fname = self.src_dir / f"{self.band}_summary.json"
+        if not cache_fname.exists():
+            logger.debug("cache at %s does not exist, listing items", cache_fname)
+            items = self.importer.list_items(self.config, self.src_dir)
+            serialized_items = [item.serialize() for item in items]
+            with cache_fname.open("w") as f:
+                json.dump(serialized_items, f)
+            return items
+
+        logger.debug("loading item list from cache at %s", cache_fname)
+        with cache_fname.open() as f:
+            serialized_items = json.load(f)
+        return [
+            self.deserialize_item(serialized_item)
+            for serialized_item in serialized_items
+        ]
