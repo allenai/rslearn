@@ -2,6 +2,7 @@
 
 from .dataset import (
     BandSetConfig,
+    CompositingMethod,
     DataSourceConfig,
     DType,
     LayerConfig,
@@ -18,6 +19,7 @@ from .dataset import (
 
 __all__ = [
     "BandSetConfig",
+    "CompositingMethod",
     "DataSourceConfig",
     "DType",
     "LayerConfig",
