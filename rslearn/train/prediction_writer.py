@@ -1,7 +1,8 @@
 """rslearn PredictionWriter implementation."""
 
 from collections.abc import Sequence
-from typing import Any, overload
+from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -19,34 +20,102 @@ from rslearn.dataset import Dataset, Window
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds
-from rslearn.utils.raster_format import load_raster_format
-from rslearn.utils.vector_format import load_vector_format
+from rslearn.utils.raster_format import RasterFormat, load_raster_format
+from rslearn.utils.vector_format import VectorFormat, load_vector_format
 
 from .lightning_module import RslearnLightningModule
 from .tasks.task import Task
 
 
+@dataclass
+class PendingPatchOutput:
+    """A patch output that hasn't been merged yet."""
+
+    bounds: PixelBounds
+    output: Any
+
+
 class PatchPredictionMerger:
     """Base class for merging predictions from multiple patches."""
 
-    @overload
-    def merge(self, outputs: list[Feature]) -> list[Feature]: ...
-
-    @overload
-    def merge(self, outputs: npt.NDArray[Any]) -> npt.NDArray[Any]: ...
-
-    def merge(
-        self, outputs: list[Feature] | npt.NDArray[Any]
-    ) -> list[Feature] | npt.NDArray[Any]:
+    def merge(self, window: Window, outputs: Sequence[PendingPatchOutput]) -> Any:
         """Merge the outputs.
 
         Args:
+            window: the window we are merging the outputs for.
             outputs: the outputs to process.
 
         Returns:
             the merged outputs.
         """
         raise NotImplementedError
+
+
+class VectorMerger(PatchPredictionMerger):
+    """Merger for vector data that simply concatenates the features."""
+
+    def merge(
+        self, window: Window, outputs: Sequence[PendingPatchOutput]
+    ) -> list[Feature]:
+        """Concatenate the vector features."""
+        return [feat for output in outputs for feat in output.output]
+
+
+class RasterMerger(PatchPredictionMerger):
+    """Merger for raster data that copies the rasters to the output."""
+
+    def __init__(self, padding: int | None = None):
+        """Create a new RasterMerger.
+
+        Args:
+            padding: the padding around the individual patch outputs to remove. This is
+                typically used when leveraging overlapping patches. Portions of outputs
+                at the border of the window will still be retained.
+        """
+        self.padding = padding
+
+    def merge(
+        self, window: Window, outputs: Sequence[PendingPatchOutput]
+    ) -> npt.NDArray:
+        """Merge the raster outputs."""
+        num_channels = outputs[0].output.shape[0]
+        dtype = outputs[0].output.dtype
+        merged_image = np.zeros(
+            (
+                num_channels,
+                window.bounds[3] - window.bounds[1],
+                window.bounds[2] - window.bounds[0],
+            ),
+            dtype=dtype,
+        )
+
+        # Ensure the outputs are sorted by height then width.
+        # This way when we merge we can be sure that outputs that are lower or further
+        # to the right will overwrite earlier outputs.
+        sorted_outputs = sorted(
+            outputs, key=lambda output: (output.bounds[0], output.bounds[1])
+        )
+        for output in sorted_outputs:
+            # So now we just need to compute the src_offset to copy.
+            # If the output is not on the left or top boundary, then we should apply
+            # the padding (if set).
+            src = output.output
+            src_offset = (output.bounds[0], output.bounds[1])
+            if self.padding is not None and output.bounds[0] != window.bounds[0]:
+                src = src[:, :, self.padding :]
+                src_offset = (src_offset[0] + self.padding, src_offset[1])
+            if self.padding is not None and output.bounds[1] != window.bounds[1]:
+                src = src[:, self.padding :, :]
+                src_offset = (src_offset[0], src_offset[1] + self.padding)
+
+            copy_spatial_array(
+                src=src,
+                dst=merged_image,
+                src_offset=src_offset,
+                dst_offset=(window.bounds[0], window.bounds[1]),
+            )
+
+        return merged_image
 
 
 class RslearnWriter(BasePredictionWriter):
@@ -80,8 +149,8 @@ class RslearnWriter(BasePredictionWriter):
         self.path = UPath(path, **path_options)
         self.dataset = Dataset(self.path)
         self.layer_config = self.dataset.layers[self.output_layer]
-        # TODO: This is a bit of a hack to get the type checker to be happy.
-        self.format: Any
+
+        self.format: RasterFormat | VectorFormat
         if self.layer_config.layer_type == LayerType.RASTER:
             assert isinstance(self.layer_config, RasterLayerConfig)
             band_cfg = self.layer_config.band_sets[0]
@@ -94,18 +163,23 @@ class RslearnWriter(BasePredictionWriter):
         else:
             raise ValueError(f"invalid layer type {self.layer_config.layer_type}")
 
-        self.merger = merger
+        if merger is not None:
+            self.merger = merger
+        elif self.layer_config.layer_type == LayerType.RASTER:
+            self.merger = RasterMerger()
+        elif self.layer_config.layer_type == LayerType.VECTOR:
+            self.merger = VectorMerger()
 
         # Map from window name to pending data to write.
         # This is used when windows are split up into patches, so the data from all the
         # patches of each window need to be reconstituted.
-        self.pending_outputs: dict[str, Any] = {}
+        self.pending_outputs: dict[str, list[PendingPatchOutput]] = {}
 
     def write_on_batch_end(
         self,
         trainer: Trainer,
         pl_module: LightningModule,
-        prediction: Sequence,
+        prediction: dict[str, Sequence],
         batch_indices: Sequence,
         batch: tuple[list, list, list],
         batch_idx: int,
@@ -126,7 +200,7 @@ class RslearnWriter(BasePredictionWriter):
         assert isinstance(pl_module, RslearnLightningModule)
         task = pl_module.task
         _, _, metadatas = batch
-        self.process_output_batch(task, prediction, metadatas)
+        self.process_output_batch(task, prediction["outputs"], metadatas)
 
     def process_output_batch(
         self,
@@ -192,17 +266,10 @@ class RslearnWriter(BasePredictionWriter):
             cur_bounds: the bounds of the current patch.
             output: the output data.
         """
-        if self.layer_config.layer_type == LayerType.RASTER:
-            if not isinstance(output, np.ndarray):
-                raise ValueError("expected output for raster layer to be numpy array")
-            self._incorporate_raster_output(window, cur_bounds, output)
-
-        elif self.layer_config.layer_type == LayerType.VECTOR:
-            if not isinstance(output, list):
-                raise ValueError(
-                    "expected output for vector layer to be list of features"
-                )
-            self._incorporate_vector_output(window, cur_bounds, output)
+        # Incorporate the output into our list of pending patch outputs.
+        if window.name not in self.pending_outputs:
+            self.pending_outputs[window.name] = []
+        self.pending_outputs[window.name].append(PendingPatchOutput(cur_bounds, output))
 
         if patch_idx < num_patches - 1:
             return
@@ -213,74 +280,21 @@ class RslearnWriter(BasePredictionWriter):
         del self.pending_outputs[window.name]
 
         # Merge outputs from overlapped patches if merger is set.
-        if self.merger is not None:
-            pending_output = self.merger.merge(pending_output)
+        merged_output = self.merger.merge(window, pending_output)
 
         if self.layer_config.layer_type == LayerType.RASTER:
             assert isinstance(self.layer_config, RasterLayerConfig)
             raster_dir = window.get_raster_dir(
                 self.output_layer, self.layer_config.band_sets[0].bands
             )
+            assert isinstance(self.format, RasterFormat)
             self.format.encode_raster(
-                raster_dir, window.projection, window.bounds, pending_output
+                raster_dir, window.projection, window.bounds, merged_output
             )
 
         elif self.layer_config.layer_type == LayerType.VECTOR:
             layer_dir = window.get_layer_dir(self.output_layer)
-            self.format.encode_vector(layer_dir, pending_output)
+            assert isinstance(self.format, VectorFormat)
+            self.format.encode_vector(layer_dir, merged_output)
 
         window.mark_layer_completed(self.output_layer)
-
-    def _incorporate_raster_output(
-        self,
-        window: Window,
-        cur_bounds: PixelBounds,
-        output: npt.NDArray,
-    ) -> None:
-        """Incorporate the partial output into the output for this window.
-
-        Args:
-            window: the window this output corresponds to.
-            cur_bounds: the bounds within the window that this output covers. This
-                could be the entire window, but could also be a patch of the window if
-                the window is processed in patches.
-            output: the output data.
-        """
-        if window.name not in self.pending_outputs:
-            self.pending_outputs[window.name] = np.zeros(
-                (
-                    output.shape[0],
-                    window.bounds[3] - window.bounds[1],
-                    window.bounds[2] - window.bounds[0],
-                ),
-                dtype=output.dtype,
-            )
-
-        # Use copy_spatial_array to handle the copy since, when using patches,
-        # the last column/row of outputs might extend beyond the bounds of the
-        # window.
-        copy_spatial_array(
-            src=output,
-            dst=self.pending_outputs[window.name],
-            src_offset=(cur_bounds[0], cur_bounds[1]),
-            dst_offset=(window.bounds[0], window.bounds[1]),
-        )
-
-    def _incorporate_vector_output(
-        self,
-        window: Window,
-        cur_bounds: PixelBounds,
-        output: list[Feature],
-    ) -> None:
-        """Incorporate the partial output into the output for this window.
-
-        Args:
-            window: the window this output corresponds to.
-            cur_bounds: the bounds within the window that this output covers. This
-                could be the entire window, but could also be a patch of the window if
-                the window is processed in patches.
-            output: the output data.
-        """
-        if window.name not in self.pending_outputs:
-            self.pending_outputs[window.name] = []
-        self.pending_outputs[window.name].extend(output)

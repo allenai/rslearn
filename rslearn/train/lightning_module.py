@@ -52,7 +52,7 @@ class RestoreConfig:
 
     def get_state_dict(self) -> dict[str, Any]:
         """Returns the state dict configured in this RestoreConfig."""
-        print(f"loading state dict from {self.restore_path}")
+        logger.info(f"loading state dict from {self.restore_path}")
         with self.restore_path.open("rb") as f:
             state_dict = torch.load(f, map_location="cpu")
         for k in self.selector:
@@ -107,7 +107,6 @@ class RslearnLightningModule(L.LightningModule):
         Args:
             model: the model
             task: the task to train on
-            lr: the initial learning rate
             optimizer: the optimizer factory.
             scheduler: the learning rate scheduler factory.
             visualize_dir: during validation or testing, output visualizations to this
@@ -118,6 +117,7 @@ class RslearnLightningModule(L.LightningModule):
             print_parameters: whether to print the list of model parameters after model
                 initialization
             print_model: whether to print the model after model initialization
+            lr: deprecated.
             plateau: deprecated.
             plateau_factor: deprecated.
             plateau_patience: deprecated.
@@ -127,7 +127,6 @@ class RslearnLightningModule(L.LightningModule):
         super().__init__()
         self.model = model
         self.task = task
-        self.lr = lr
         self.visualize_dir = visualize_dir
         self.metrics_file = metrics_file
         self.restore_config = restore_config
@@ -178,8 +177,8 @@ class RslearnLightningModule(L.LightningModule):
                 state_dict, strict=False
             )
             if missing_keys or unexpected_keys:
-                print(
-                    f"warning: restore yielded missing_keys={missing_keys} and unexpected_keys={unexpected_keys}"
+                logger.warning(
+                    f"restore yielded missing_keys={missing_keys} and unexpected_keys={unexpected_keys}"
                 )
 
     def configure_optimizers(self) -> OptimizerLRSchedulerConfig:
@@ -210,6 +209,14 @@ class RslearnLightningModule(L.LightningModule):
             # Fail silently for single-dataset case, which is okay
             pass
 
+    def on_test_epoch_end(self) -> None:
+        """Optionally save the test metrics to a file."""
+        if self.metrics_file:
+            with open(self.metrics_file, "w") as f:
+                metrics = self.test_metrics.compute()
+                metrics_dict = {k: v.item() for k, v in metrics.items()}
+                json.dump(metrics_dict, f, indent=4)
+
     def training_step(
         self, batch: Any, batch_idx: int, dataloader_idx: int = 0
     ) -> torch.Tensor:
@@ -225,7 +232,10 @@ class RslearnLightningModule(L.LightningModule):
         """
         inputs, targets, _ = batch
         batch_size = len(inputs)
-        _, loss_dict = self(inputs, targets)
+        model_outputs = self(inputs, targets)
+        self.on_train_forward(inputs, targets, model_outputs)
+
+        loss_dict = model_outputs["loss_dict"]
         train_loss = sum(loss_dict.values())
         self.log_dict(
             {"train_" + k: v for k, v in loss_dict.items()},
@@ -257,7 +267,11 @@ class RslearnLightningModule(L.LightningModule):
         """
         inputs, targets, _ = batch
         batch_size = len(inputs)
-        outputs, loss_dict = self(inputs, targets)
+        model_outputs = self(inputs, targets)
+        self.on_val_forward(inputs, targets, model_outputs)
+
+        loss_dict = model_outputs["loss_dict"]
+        outputs = model_outputs["outputs"]
         val_loss = sum(loss_dict.values())
         self.log_dict(
             {"val_" + k: v for k, v in loss_dict.items()},
@@ -280,14 +294,6 @@ class RslearnLightningModule(L.LightningModule):
             self.val_metrics, batch_size=batch_size, on_epoch=True, sync_dist=True
         )
 
-    def on_test_epoch_end(self) -> None:
-        """Optionally save the test metrics to a file."""
-        if self.metrics_file:
-            with open(self.metrics_file, "w") as f:
-                metrics = self.test_metrics.compute()
-                metrics_dict = {k: v.item() for k, v in metrics.items()}
-                json.dump(metrics_dict, f, indent=4)
-
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         """Compute the test loss and additional metrics.
 
@@ -298,7 +304,11 @@ class RslearnLightningModule(L.LightningModule):
         """
         inputs, targets, metadatas = batch
         batch_size = len(inputs)
-        outputs, loss_dict = self(inputs, targets)
+        model_outputs = self(inputs, targets)
+        self.on_test_forward(inputs, targets, model_outputs)
+
+        loss_dict = model_outputs["loss_dict"]
+        outputs = model_outputs["outputs"]
         test_loss = sum(loss_dict.values())
         self.log_dict(
             {"test_" + k: v for k, v in loss_dict.items()},
@@ -346,8 +356,8 @@ class RslearnLightningModule(L.LightningModule):
             Output predicted probabilities.
         """
         inputs, _, _ = batch
-        outputs, _ = self(inputs)
-        return outputs
+        model_outputs = self(inputs)
+        return model_outputs
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """Forward pass of the model.
@@ -360,3 +370,48 @@ class RslearnLightningModule(L.LightningModule):
             Output of the model.
         """
         return self.model(*args, **kwargs)
+
+    def on_train_forward(
+        self,
+        inputs: list[dict[str, Any]],
+        targets: list[dict[str, Any]],
+        model_outputs: dict[str, Any],
+    ) -> None:
+        """Hook to run after the forward pass of the model during training.
+
+        Args:
+            inputs: The input batch.
+            targets: The target batch.
+            model_outputs: The output of the model, with keys "outputs" and "loss_dict", and possibly other keys.
+        """
+        pass
+
+    def on_val_forward(
+        self,
+        inputs: list[dict[str, Any]],
+        targets: list[dict[str, Any]],
+        model_outputs: dict[str, Any],
+    ) -> None:
+        """Hook to run after the forward pass of the model during validation.
+
+        Args:
+            inputs: The input batch.
+            targets: The target batch.
+            model_outputs: The output of the model, with keys "outputs" and "loss_dict", and possibly other keys.
+        """
+        pass
+
+    def on_test_forward(
+        self,
+        inputs: list[dict[str, Any]],
+        targets: list[dict[str, Any]],
+        model_outputs: dict[str, Any],
+    ) -> None:
+        """Hook to run after the forward pass of the model during testing.
+
+        Args:
+            inputs: The input batch.
+            targets: The target batch.
+            model_outputs: The output of the model, with keys "outputs" and "loss_dict", and possibly other keys.
+        """
+        pass

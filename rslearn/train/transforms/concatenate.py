@@ -4,7 +4,7 @@ from typing import Any
 
 import torch
 
-from .transform import Transform
+from .transform import Transform, read_selector, write_selector
 
 
 class Concatenate(Transform):
@@ -40,10 +40,10 @@ class Concatenate(Transform):
         """
         images = []
         for selector, wanted_bands in self.selections.items():
-            image = self.read_selector(input_dict, target_dict, selector)
+            image = read_selector(input_dict, target_dict, selector)
             if wanted_bands:
                 image = image[wanted_bands, :, :]
             images.append(image)
         result = torch.concatenate(images, dim=0)
-        self.write_selector(input_dict, target_dict, self.output_selector, result)
+        write_selector(input_dict, target_dict, self.output_selector, result)
         return input_dict, target_dict
