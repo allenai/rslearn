@@ -250,6 +250,16 @@ class SpaceMode(Enum):
     The duration of the sub-periods is controlled by another option in QueryConfig.
     """
 
+    COMPOSITE = 5
+    """Creates one composite covering the entire window.
+
+    During querying all items intersecting the window are placed in one group.
+    The compositing_method in the rasterlayer config specifies how these items are reduced
+    to a single item (e.g MEAN/MEDIAN/FIRST_VALID) during materialization.
+    """
+
+    # TODO add PER_PERIOD_COMPOSITE
+
 
 class TimeMode(Enum):
     """Temporal  matching mode when looking up items corresponding to a window."""
@@ -445,6 +455,19 @@ class LayerConfig:
         return self.serialize() == other.serialize()
 
 
+class CompositingMethod(Enum):
+    """Method how to select pixels for the composite from corresponding items of a window."""
+
+    FIRST_VALID = 1
+    """Select first valid pixel in order of corresponding items (might be sorted)"""
+
+    MEAN = 2
+    """Select per-pixel mean value of corresponding items of a window"""
+
+    MEDIAN = 3
+    """Select per-pixel median value of corresponding items of a window"""
+
+
 class RasterLayerConfig(LayerConfig):
     """Configuration of a raster layer."""
 
@@ -455,6 +478,7 @@ class RasterLayerConfig(LayerConfig):
         data_source: DataSourceConfig | None = None,
         resampling_method: Resampling = Resampling.bilinear,
         alias: str | None = None,
+        compositing_method: CompositingMethod = CompositingMethod.FIRST_VALID,
     ):
         """Initialize a new RasterLayerConfig.
 
@@ -464,10 +488,12 @@ class RasterLayerConfig(LayerConfig):
             data_source: optional DataSourceConfig if this layer is retrievable
             resampling_method: how to resample rasters (if needed), default bilinear resampling
             alias: alias for this layer to use in the tile store
+            compositing_method: how to compute pixel values in the composite of each windows items
         """
         super().__init__(layer_type, data_source, alias)
         self.band_sets = band_sets
         self.resampling_method = resampling_method
+        self.compositing_method = compositing_method
 
     @staticmethod
     def from_config(config: dict[str, Any]) -> "RasterLayerConfig":
@@ -488,6 +514,10 @@ class RasterLayerConfig(LayerConfig):
             ]
         if "alias" in config:
             kwargs["alias"] = config["alias"]
+        if "compositing_method" in config:
+            kwargs["compositing_method"] = CompositingMethod[
+                config["compositing_method"]
+            ]
         return RasterLayerConfig(**kwargs)  # type: ignore
 
 
