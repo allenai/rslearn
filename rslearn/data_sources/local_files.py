@@ -205,6 +205,12 @@ class RasterImporter(Importer):
                 if path.name.endswith(".json"):
                     continue
 
+                # Ignore temporary files that may be created by open_atomic.
+                # The suffix should be like "X.tif.tmp.1234".
+                parts = path.name.split(".")
+                if len(parts) >= 4 and parts[-2] == "tmp" and parts[-1].isdigit():
+                    continue
+
                 spec = RasterItemSpec(fnames=[path], bands=None)
                 item_specs.append(spec)
 
