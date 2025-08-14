@@ -29,4 +29,4 @@ jobs:
       - name: Linting
         run: |
           pip install pre-commit interrogate
-          pre-commit run --all-files
+          pre-commit run --all-files -v --show-diff-on-failure
