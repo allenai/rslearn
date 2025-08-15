@@ -401,7 +401,7 @@ class Sentinel2(DataSource):
         cell_id = cell_id_with_prefix[1:]
         return self._build_cell_folder_name(cell_id) + f"{item_name}.SAFE/"
 
-    def _get_xml_by_name(self, name: str) -> ET.ElementTree[ET.Element[str]]:
+    def _get_xml_by_name(self, name: str) -> "ET.ElementTree[ET.Element[str]]":
         """Gets the metadata XML of an item by its name.
 
         Args:
