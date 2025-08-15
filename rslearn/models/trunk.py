@@ -4,9 +4,9 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 import torch
+from helios.nn.moe.soft import SoftMoE
 
 from rslearn.log_utils import get_logger
-from rslearn.models.moe.soft import SoftMoE
 from rslearn.models.task_embedding import BaseTaskEmbedding
 
 logger = get_logger(__name__)
