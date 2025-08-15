@@ -3,7 +3,7 @@
 import os
 import tempfile
 import zipfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import requests
@@ -109,8 +109,8 @@ class CDL(DataSource):
             WGS84_PROJECTION,
             self.BOUNDS,
             (
-                datetime(year, 1, 1, tzinfo=timezone.utc),
-                datetime(year + 1, 1, 1, tzinfo=timezone.utc),
+                datetime(year, 1, 1, tzinfo=UTC),
+                datetime(year + 1, 1, 1, tzinfo=UTC),
             ),
         )
         return Item(name, geometry)
@@ -135,8 +135,8 @@ class CDL(DataSource):
                 WGS84_PROJECTION,
                 self.BOUNDS,
                 (
-                    datetime(year, 1, 1, tzinfo=timezone.utc),
-                    datetime(year + 1, 1, 1, tzinfo=timezone.utc),
+                    datetime(year, 1, 1, tzinfo=UTC),
+                    datetime(year + 1, 1, 1, tzinfo=UTC),
                 ),
             )
             items.append(Item(fname, geometry))

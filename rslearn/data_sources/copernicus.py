@@ -46,7 +46,7 @@ logger = get_logger(__name__)
 
 
 def get_harmonize_callback(
-    tree: ET.ElementTree | ET.Element,
+    tree: "ET.ElementTree[ET.Element[str]] | ET.Element[str]",
 ) -> Callable[[npt.NDArray], npt.NDArray] | None:
     """Gets the harmonization callback based on the metadata XML.
 

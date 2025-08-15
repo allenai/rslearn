@@ -265,7 +265,7 @@ class RasterImporter(Importer):
                 if item.spec.bands:
                     bands = item.spec.bands[file_idx]
                 else:
-                    bands = [f"B{band_idx+1}" for band_idx in range(src.count)]
+                    bands = [f"B{band_idx + 1}" for band_idx in range(src.count)]
 
             if tile_store.is_raster_ready(item.name, bands):
                 continue

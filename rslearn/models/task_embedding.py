@@ -167,9 +167,9 @@ class TaskChannelEmbedding(BaseTaskEmbedding):
             The encoder features with the task-specific embeddings added.
         """
         height, width = features[0].shape[-2:]
-        assert all(
-            f.shape[-2:] == (height, width) for f in features
-        ), "features must have the same spatial dimensions"
+        assert all(f.shape[-2:] == (height, width) for f in features), (
+            "features must have the same spatial dimensions"
+        )
         if embeds is None:
             embeds = self.compute_embeds(features, inputs)  # B x HW x C
         embeds = embeds.unflatten(dim=1, sizes=(height, width))  # B x H x W x C

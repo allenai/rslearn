@@ -11,7 +11,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import Generator
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, BinaryIO
 
 import requests
@@ -376,7 +376,7 @@ class LandsatOliTirs(DataSource):
             ts = datetime.strptime(metadata_dict["Start Time"], "%Y-%m-%d %H:%M:%S.%f")
         else:
             ts = datetime.strptime(metadata_dict["Start Time"], "%Y-%m-%d %H:%M:%S")
-        ts = ts.replace(tzinfo=timezone.utc)
+        ts = ts.replace(tzinfo=UTC)
 
         return LandsatOliTirsItem(
             name=result["displayId"],

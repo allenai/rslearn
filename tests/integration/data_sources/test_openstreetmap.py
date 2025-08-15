@@ -1,7 +1,7 @@
 import os
 import pathlib
 import random
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import shapely
 from upath import UPath
@@ -24,8 +24,8 @@ class TestOpenStreetMap:
             WGS84_PROJECTION,
             shapely.box(-75.6, 39.1, -75.5, 39.2),
             (
-                datetime(2020, 7, 1, tzinfo=timezone.utc),
-                datetime(2020, 8, 1, tzinfo=timezone.utc),
+                datetime(2020, 7, 1, tzinfo=UTC),
+                datetime(2020, 8, 1, tzinfo=UTC),
             ),
         )
 

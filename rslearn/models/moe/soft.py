@@ -387,9 +387,9 @@ class Experts(nn.Module):
 
         if is_distributed:
             seq_sizes = gather_sizes(x, dim=-2)
-            assert has_only_one_value(
-                seq_sizes
-            ), "number of tokens per expert must be the same"
+            assert has_only_one_value(seq_sizes), (
+                "number of tokens per expert must be the same"
+            )
 
             x, batch_sizes = self.all_gather(x)
             total_batch_size = x.shape[0]
@@ -533,9 +533,9 @@ class SoftMoE(Module):
             AssertionError: If neither seq_len nor num_slots is provided, or if both are provided.
         """
         super().__init__()
-        assert exists(seq_len) ^ exists(
-            num_slots
-        ), "either seq_len, or num_slots must be passed into SoftMoE"
+        assert exists(seq_len) ^ exists(num_slots), (
+            "either seq_len, or num_slots must be passed into SoftMoE"
+        )
 
         if exists(seq_len):
             if seq_len is not None:
@@ -619,9 +619,9 @@ class SoftMoE(Module):
         if weight_key is None:
             combine_logits = dispatch_logits
         else:
-            assert (
-                weight_key.shape == x.shape
-            ), "weight_key must be (batch_size, seq_len, dim)"
+            assert weight_key.shape == x.shape, (
+                "weight_key must be (batch_size, seq_len, dim)"
+            )
             combine_logits = einsum("b n d, e s d -> b n e s", weight_key, slot_embeds)
 
         # noised dispatch and combine gate logits, with annealing if needed

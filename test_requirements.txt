@@ -1,4 +1,0 @@
-pytest
-pytest-dotenv
-pytest-httpserver
-pytest-xdist

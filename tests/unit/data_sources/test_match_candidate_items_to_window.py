@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import shapely
@@ -25,8 +25,8 @@ def test_global_geometry() -> None:
 
 
 class TestTimeMode:
-    START_TIME = datetime(2024, 1, 1, tzinfo=timezone.utc)
-    END_TIME = datetime(2024, 1, 2, tzinfo=timezone.utc)
+    START_TIME = datetime(2024, 1, 1, tzinfo=UTC)
+    END_TIME = datetime(2024, 1, 2, tzinfo=UTC)
     BBOX = shapely.box(0, 0, 1, 1)
 
     @pytest.fixture
@@ -84,8 +84,8 @@ class TestTimeMode:
 class TestSpaceMode:
     """Test the contains and intersects space modes."""
 
-    START_TIME = datetime(2024, 1, 1, tzinfo=timezone.utc)
-    END_TIME = datetime(2024, 1, 2, tzinfo=timezone.utc)
+    START_TIME = datetime(2024, 1, 1, tzinfo=UTC)
+    END_TIME = datetime(2024, 1, 2, tzinfo=UTC)
 
     @pytest.fixture
     def window_geometry(self) -> STGeometry:
@@ -248,7 +248,7 @@ class TestPerPeriodMosaic:
         We provide time range with four time periods, but the full mosaic for first
         (oldest) time period should not be used due to the max_matches=3.
         """
-        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        base_ts = datetime(2024, 1, 1, tzinfo=UTC)
         period_duration = timedelta(days=30)
         periods = [
             (base_ts, base_ts + period_duration),
@@ -294,7 +294,7 @@ class TestPerPeriodMosaic:
 
     def test_skip_empty_period(self) -> None:
         """Ensure that empty periods are skipped so it falls back to earlier period."""
-        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        base_ts = datetime(2024, 1, 1, tzinfo=UTC)
         period_duration = timedelta(days=30)
         periods = [
             (base_ts, base_ts + period_duration),
@@ -335,8 +335,8 @@ def test_min_matches() -> None:
     """Ensure that no groups are returned if minimum matches is set."""
     bbox = shapely.box(0, 0, 1, 1)
     time_range = (
-        datetime(2024, 1, 1, tzinfo=timezone.utc),
-        datetime(2024, 2, 1, tzinfo=timezone.utc),
+        datetime(2024, 1, 1, tzinfo=UTC),
+        datetime(2024, 2, 1, tzinfo=UTC),
     )
     geom = STGeometry(WGS84_PROJECTION, bbox, time_range)
     item_list = [

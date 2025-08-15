@@ -1,7 +1,7 @@
 import os
 import pathlib
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -131,8 +131,8 @@ def test_prepare_antimeridian_no_matches(sentinel2_without_rtree: Sentinel2) -> 
     # Make sure get_items works for scenes and geometries near +/- 180 longitude.
     # At (0, 40) there should be no Sentinel-2 coverage.
     time_range = (
-        datetime(2024, 1, 1, tzinfo=timezone.utc),
-        datetime(2024, 2, 1, tzinfo=timezone.utc),
+        datetime(2024, 1, 1, tzinfo=UTC),
+        datetime(2024, 2, 1, tzinfo=UTC),
     )
     negative_geom = STGeometry(
         WGS84_PROJECTION, shapely.box(-179.99, 40.0, -179.9, 40.1), time_range
@@ -153,8 +153,8 @@ def test_prepare_antimeridian_yes_matches(sentinel2_without_rtree: Sentinel2) ->
     # At (0, 63) there should be some Sentinel-2 scenes.
     query_config = QueryConfig(space_mode=SpaceMode.MOSAIC)
     time_range = (
-        datetime(2024, 1, 1, tzinfo=timezone.utc),
-        datetime(2024, 2, 1, tzinfo=timezone.utc),
+        datetime(2024, 1, 1, tzinfo=UTC),
+        datetime(2024, 2, 1, tzinfo=UTC),
     )
     negative_geom = STGeometry(
         WGS84_PROJECTION, shapely.box(-179.99, 63.0, -179.9, 63.1), time_range
@@ -198,7 +198,7 @@ def test_search_intersecting_product_with_missing_xml(
         int(sense_time_str[0:4]),
         int(sense_time_str[4:6]),
         int(sense_time_str[6:8]),
-        tzinfo=timezone.utc,
+        tzinfo=UTC,
     )
     time_range = (sense_day, sense_day + timedelta(days=1))
     cell_bounds = get_sentinel2_tile_index()[cell_id][0]

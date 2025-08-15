@@ -5,7 +5,7 @@ import multiprocessing
 import random
 import sys
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 
 import tqdm
@@ -56,7 +56,7 @@ def parse_time(time_str: str) -> datetime:
     """
     ts = datetime.fromisoformat(time_str)
     if not ts.tzinfo:
-        ts = ts.replace(tzinfo=timezone.utc)
+        ts = ts.replace(tzinfo=UTC)
     return ts
 
 

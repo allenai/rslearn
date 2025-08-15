@@ -1,5 +1,5 @@
 import pathlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import shapely
 from upath import UPath
@@ -27,8 +27,8 @@ class TestGetSentinel2Tiles:
             WGS84_PROJECTION,
             shapely.box(-122, 47, -121, 48),
             (
-                datetime(2024, 1, 1, tzinfo=timezone.utc),
-                datetime(2024, 2, 1, tzinfo=timezone.utc),
+                datetime(2024, 1, 1, tzinfo=UTC),
+                datetime(2024, 2, 1, tzinfo=UTC),
             ),
         )
         tiles = get_sentinel2_tiles(geom, UPath(tmp_path))

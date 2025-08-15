@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import shapely
@@ -10,7 +10,7 @@ from rslearn.utils import Projection, STGeometry
 
 @pytest.fixture
 def seattle2020() -> STGeometry:
-    ts = datetime(2020, 7, 15, tzinfo=timezone.utc)
+    ts = datetime(2020, 7, 15, tzinfo=UTC)
     time_range = (ts, ts + timedelta(days=30))
     wgs84_shp = shapely.Point(-122.33, 47.61)
     wgs84_geom = STGeometry(WGS84_PROJECTION, wgs84_shp, time_range)
@@ -29,7 +29,7 @@ def seattle2020() -> STGeometry:
 
 @pytest.fixture
 def tropical_forest2024() -> STGeometry:
-    ts = datetime(2024, 4, 1, tzinfo=timezone.utc)
+    ts = datetime(2024, 4, 1, tzinfo=UTC)
     time_range = (ts, ts + timedelta(days=1))
 
     wgs84_shp = shapely.Polygon(

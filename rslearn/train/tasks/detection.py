@@ -273,7 +273,7 @@ class DetectionTask(BasicTask):
                 metadata["bounds"][1] + float(box[3]),
             )
             geom = STGeometry(metadata["projection"], shp, None)
-            properties = {
+            properties: dict[str, Any] = {
                 "score": float(score),
             }
 
