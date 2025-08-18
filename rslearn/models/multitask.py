@@ -377,6 +377,7 @@ class MultiTaskMergedModel(MultiTaskModel):
             dict with keys "outputs" and "loss_dict", and possibly other keys.
         """
         dataset_source = inputs[0].get("dataset_source", None)
+        assert isinstance(dataset_source, str)
         targets = self.merge_task_labels(targets, dataset_source)
         outs = super().forward(inputs, targets)
         self.unmerge_output_labels(outs["outputs"], dataset_source)

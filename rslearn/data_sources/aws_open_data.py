@@ -6,7 +6,7 @@ import os
 import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Generator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, BinaryIO
 
@@ -271,7 +271,7 @@ class Naip(DataSource):
                         else:
                             src_img_date = fname_parts[5]
                         time = datetime.strptime(src_img_date, "%Y%m%d").replace(
-                            tzinfo=timezone.utc
+                            tzinfo=UTC
                         )
 
                         geometry = STGeometry(WGS84_PROJECTION, shp, (time, time))
@@ -706,7 +706,9 @@ class Sentinel2(
             metadata_fname, buf, ExtraArgs={"RequestPayer": "requester"}
         )
         buf.seek(0)
-        tree = ET.ElementTree(ET.fromstring(buf.getvalue()))
+        tree: ET.ElementTree[ET.Element[str]] = ET.ElementTree(
+            ET.fromstring(buf.getvalue())
+        )
         return get_harmonize_callback(tree)
 
     def ingest(
