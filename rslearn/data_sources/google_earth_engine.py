@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import ee
@@ -175,11 +175,9 @@ class GEE(DataSource, TileStore):
                 shp = shapely.geometry.shape(json.loads(row[".geo"]))
                 if "E" in row["time"]:
                     unix_time = float(row["time"]) / 1000
-                    ts = datetime.fromtimestamp(unix_time, tz=timezone.utc)
+                    ts = datetime.fromtimestamp(unix_time, tz=UTC)
                 else:
-                    ts = datetime.fromisoformat(row["time"]).replace(
-                        tzinfo=timezone.utc
-                    )
+                    ts = datetime.fromisoformat(row["time"]).replace(tzinfo=UTC)
                 geometry = STGeometry(WGS84_PROJECTION, shp, (ts, ts))
                 item = Item(row["system:index"], geometry)
                 rtree_index.insert(shp.bounds, json.dumps(item.serialize()))
@@ -198,9 +196,7 @@ class GEE(DataSource, TileStore):
         shp = shapely.geometry.shape(
             image.geometry().transform(proj="EPSG:4326", maxError=0.001).getInfo()
         )
-        ts = datetime.fromisoformat(image.date().format().getInfo()).replace(
-            tzinfo=timezone.utc
-        )
+        ts = datetime.fromisoformat(image.date().format().getInfo()).replace(tzinfo=UTC)
         geometry = STGeometry(WGS84_PROJECTION, shp, (ts, ts))
         return Item(name, geometry)
 

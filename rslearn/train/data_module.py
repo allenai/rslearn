@@ -423,9 +423,9 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
                     )
 
         if sample_mode == "reptile":
-            assert (
-                steps_per_dataset is not None
-            ), "steps_per_dataset must be provided when sample_mode is 'reptile'"
+            assert steps_per_dataset is not None, (
+                "steps_per_dataset must be provided when sample_mode is 'reptile'"
+            )
         assert sample_mode in (
             "random",
             "cycle",
