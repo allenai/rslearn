@@ -129,21 +129,21 @@ def test_unfreeze_overrides_freeze(
             continue
         if name.startswith("backbone.encoder"):
             # encoder should be trainable
-            assert all(
-                p.requires_grad for p in mod.parameters()
-            ), f"{name} should be trainable"
+            assert all(p.requires_grad for p in mod.parameters()), (
+                f"{name} should be trainable"
+            )
         elif name == "backbone":
             # parent container: check only its *own* params, not recursive
             own_params = list(mod.parameters(recurse=False))
             if own_params:  # some containers have none
-                assert all(
-                    not p.requires_grad for p in own_params
-                ), f"{name} (own params) should be frozen"
+                assert all(not p.requires_grad for p in own_params), (
+                    f"{name} (own params) should be frozen"
+                )
         elif name.startswith("backbone."):
             # specific non-encoder children should be frozen
-            assert all(
-                not p.requires_grad for p in mod.parameters()
-            ), f"{name} should be frozen"
+            assert all(not p.requires_grad for p in mod.parameters()), (
+                f"{name} should be frozen"
+            )
 
 
 def test_multistage_lora_plus_head_then_all_with_lr_scaling(
@@ -214,27 +214,27 @@ def test_multistage_lora_plus_head_then_all_with_lr_scaling(
     scaled_head_lr = opt.param_groups[0]["lr"]
     assert scaled_head_lr == pytest.approx(init_head_lr * 0.5, rel=1e-6)
     assert sch.min_lrs[0] == pytest.approx(init_min_lr0, rel=1e-6)
-    assert all(
-        m == sch.min_lrs[0] for m in sch.min_lrs
-    ), "All min_lrs should equal the first value"
+    assert all(m == sch.min_lrs[0] for m in sch.min_lrs), (
+        "All min_lrs should equal the first value"
+    )
 
     # Module trainability checks (unchanged)
     for name, mod in model.named_modules():
         if not name:
             continue
         if name.startswith("backbone.lora_adapter") or name.startswith("head"):
-            assert all(
-                p.requires_grad for p in mod.parameters()
-            ), f"{name} should be trainable"
+            assert all(p.requires_grad for p in mod.parameters()), (
+                f"{name} should be trainable"
+            )
         elif name.startswith("backbone") and name != "backbone":
-            assert all(
-                not p.requires_grad for p in mod.parameters()
-            ), f"{name} should be frozen"
+            assert all(not p.requires_grad for p in mod.parameters()), (
+                f"{name} should be frozen"
+            )
 
     # New param groups added for newly trainable modules at LR = scaled_head_lr / 10
-    assert (
-        len(opt.param_groups) > prev_ngroups
-    ), "Expected new param groups for newly trainable modules"
+    assert len(opt.param_groups) > prev_ngroups, (
+        "Expected new param groups for newly trainable modules"
+    )
     new_group_lrs = []
     for g in opt.param_groups:
         if any(id(p) not in init_group_param_ids for p in g["params"]):
@@ -245,15 +245,15 @@ def test_multistage_lora_plus_head_then_all_with_lr_scaling(
 
     # Stage 2
     cb.finetune_function(pl_module=model, current_epoch=6, optimizer=opt)
-    assert all(
-        p.requires_grad for p in model.parameters()
-    ), "All params should be trainable now"
+    assert all(p.requires_grad for p in model.parameters()), (
+        "All params should be trainable now"
+    )
 
     all_param_ids = {id(p) for p in model.parameters()}
     tracked_ids = {id(p) for g in opt.param_groups for p in g["params"]}
-    assert (
-        all_param_ids == tracked_ids
-    ), "All params should be tracked by optimizer after final stage"
+    assert all_param_ids == tracked_ids, (
+        "All params should be tracked by optimizer after final stage"
+    )
 
 
 def test_empty_selectors_are_ignored(
