@@ -51,7 +51,6 @@ extra = [
     "s3fs>=2025.2.0",
     "satlaspretrain_models>=0.3",
     "scipy>=1.13",
-    "terratorch>=1.0.2",
     "transformers>=4.45",
     "wandb>=0.17",
 ]
@@ -62,6 +61,13 @@ dev = [
     "ruff>=0.12.9",
     "pytest-dotenv",
     "pytest-xdist",
+]
+
+# These are requirements that are very specific to individual components and they may
+# introduce dependencies that don't mesh well with pip.
+specific = [
+    # terratorch is here because it pins a bunch of dependencies to specific versions.
+    "terratorch>=1.0.2",
 ]
 
 [build-system]
