@@ -220,6 +220,18 @@ class MultiStageFineTuning(BaseFinetuning):
         self._applied_epochs: set[int] = set()
 
     @staticmethod
+    def _freeze_module_params(mod: torch.nn.Module) -> None:
+        """Freeze all parameters of a module without going through Lightning's flatten logic.
+
+        This is a workaround to avoid infinite recursion on ParameterDicts.
+
+        Args:
+            mod: The module to freeze.
+        """
+        for p in mod.parameters(recurse=True):
+            p.requires_grad = False
+
+    @staticmethod
     def _names_matching(names: Iterable[str], selectors: Sequence[str]) -> set[str]:
         """Return the subset of `names` that contains any of the given selectors.
 
@@ -318,7 +330,7 @@ class MultiStageFineTuning(BaseFinetuning):
                 f"(matched: {sorted(list(to_freeze))[:5]}{'...' if len(to_freeze) > 5 else ''})"
             )
             for m in freeze_modules:
-                self.freeze(m)
+                self._freeze_module_params(m)
 
         # 4) Ensure explicitly unfreezed modules are trainable.
         unfreeze_modules: list[torch.nn.Module] = self._modules_by_names(
