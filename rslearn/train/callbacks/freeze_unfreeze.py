@@ -17,37 +17,6 @@ from rslearn.log_utils import get_logger
 logger = get_logger(__name__)
 
 
-def _existing_param_ids(optimizer: Optimizer) -> set[int]:
-    """Collect ids of all parameters already tracked by the optimizer.
-
-    Args:
-        optimizer: The optimizer to inspect.
-
-    Returns:
-        A set of parameter ids already tracked by the optimizer.
-    """
-    return {id(p) for g in optimizer.param_groups for p in g["params"]}
-
-
-def _iter_module_params(modules: list[torch.nn.Module]) -> list[torch.nn.Parameter]:
-    """Flatten parameters from a list of modules (no duplicates, trainable first).
-
-    Args:
-        modules: A list of modules to inspect.
-
-    Returns:
-        A list of parameters from the modules, in order of appearance.
-    """
-    seen: set[int] = set()
-    ordered: list[torch.nn.Parameter] = []
-    for m in modules:
-        for p in m.parameters():
-            if id(p) not in seen:
-                seen.add(id(p))
-                ordered.append(p)
-    return ordered
-
-
 class FreezeUnfreeze(BaseFinetuning):
     """Freezes a module and optionally unfreezes it after a number of epochs."""
 
@@ -220,16 +189,17 @@ class MultiStageFineTuning(BaseFinetuning):
         self._applied_epochs: set[int] = set()
 
     @staticmethod
-    def _freeze_module_params(mod: torch.nn.Module) -> None:
-        """Freeze all parameters of a module without going through Lightning's flatten logic.
+    def _freeze_unfreeze(mod: torch.nn.Module, freeze: bool) -> None:
+        """Freeze or unfreeze all parameters of a module without going through Lightning's flatten logic.
 
-        This is a workaround to avoid infinite recursion on ParameterDicts.
+        This is a workaround to avoid infinite recursion on ModuleDicts.
 
         Args:
             mod: The module to freeze.
+            freeze: Whether to freeze the module.
         """
         for p in mod.parameters(recurse=True):
-            p.requires_grad = False
+            p.requires_grad = not freeze
 
     @staticmethod
     def _names_matching(names: Iterable[str], selectors: Sequence[str]) -> set[str]:
@@ -271,6 +241,37 @@ class MultiStageFineTuning(BaseFinetuning):
         name_to_module: dict[str, torch.nn.Module] = dict(root.named_modules())
         return [name_to_module[n] for n in wanted if n in name_to_module]
 
+    @staticmethod
+    def _existing_param_ids(optimizer: Optimizer) -> set[int]:
+        """Collect ids of all parameters already tracked by the optimizer.
+
+        Args:
+            optimizer: The optimizer to inspect.
+
+        Returns:
+            A set of parameter ids already tracked by the optimizer.
+        """
+        return {id(p) for g in optimizer.param_groups for p in g["params"]}
+
+    @staticmethod
+    def _iter_module_params(modules: list[torch.nn.Module]) -> list[torch.nn.Parameter]:
+        """Flatten parameters from a list of modules (no duplicates, trainable first).
+
+        Args:
+            modules: A list of modules to inspect.
+
+        Returns:
+            A list of parameters from the modules, in order of appearance.
+        """
+        seen: set[int] = set()
+        ordered: list[torch.nn.Parameter] = []
+        for m in modules:
+            for p in m.parameters():
+                if id(p) not in seen:
+                    seen.add(id(p))
+                    ordered.append(p)
+        return ordered
+
     def _apply_stage(
         self, pl_module: LightningModule, optimizer: Optimizer, stage: FTStage
     ) -> None:
@@ -302,7 +303,7 @@ class MultiStageFineTuning(BaseFinetuning):
         )
 
         # 1) Baseline: everything trainable.
-        BaseFinetuning.make_trainable(model)
+        self._freeze_unfreeze(model, freeze=False)
 
         # 2) Optionally scale existing optimizer groups (e.g., calm down the head).
         if (
@@ -325,31 +326,33 @@ class MultiStageFineTuning(BaseFinetuning):
         to_freeze: set[str] = freeze_names - unfreeze_names
         freeze_modules: list[torch.nn.Module] = self._modules_by_names(model, to_freeze)
         if freeze_modules:
+            to_display = sorted(list(to_freeze))
             logger.info(
                 f"[FT stage @ epoch {stage.at_epoch}] Freezing {len(freeze_modules)} modules "
-                f"(matched: {sorted(list(to_freeze))[:5]}{'...' if len(to_freeze) > 5 else ''})"
+                f"(matched: {to_display[:2] + to_display[-2:]}{'...' if len(to_freeze) > 4 else ''})"
             )
             for m in freeze_modules:
-                self._freeze_module_params(m)
+                self._freeze_unfreeze(m, freeze=True)
 
         # 4) Ensure explicitly unfreezed modules are trainable.
         unfreeze_modules: list[torch.nn.Module] = self._modules_by_names(
             model, unfreeze_names
         )
         if unfreeze_modules:
+            to_display = sorted(list(unfreeze_names))
             logger.info(
                 f"[FT stage @ epoch {stage.at_epoch}] Unfreezing {len(unfreeze_modules)} modules "
-                f"(matched: {sorted(list(unfreeze_names))[:5]}{'...' if len(unfreeze_names) > 5 else ''})"
+                f"(matched: {to_display[:2] + to_display[-2:]}{'...' if len(unfreeze_names) > 4 else ''})"
             )
             for m in unfreeze_modules:
-                BaseFinetuning.make_trainable(m)
+                self._freeze_unfreeze(m, freeze=False)
 
             # 5) Add *newly-trainable* params only (no duplicates)
             denom: float = (
                 stage.unfreeze_lr_factor if stage.unfreeze_lr_factor != 1.0 else 1.0
             )
-            all_params = _iter_module_params(unfreeze_modules)
-            already = _existing_param_ids(optimizer)
+            all_params = self._iter_module_params(unfreeze_modules)
+            already = self._existing_param_ids(optimizer)
             new_params = [
                 p for p in all_params if p.requires_grad and id(p) not in already
             ]
