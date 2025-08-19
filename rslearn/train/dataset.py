@@ -153,7 +153,9 @@ class DataInput:
             load_all_layers: whether to load all of the layers specified in the list of
                 layer names. By default, we randomly pick one layer to read. When
                 reading multiple layers, the images are stacked on the channel
-                dimension.
+                dimension. This option will also cause the dataset to only include
+                windows where all of the layers are materialized (by default, only
+                windows with none of the layers materialized would be excluded).
             load_all_item_groups: whether to load all item groups in the layer(s) we
                 are reading from. By default, we assume the specified layer name is of
                 the form "{layer_name}.{group_idx}" and read that item group only. With
