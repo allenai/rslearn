@@ -25,7 +25,7 @@ def edc_preview_geometry() -> STGeometry:
     )
 
 
-def test_earthdaily_edc_preview(tmp_path: pathlib.Path, edc_preview_geometry: STGeometry) -> None:
+def test_edc_preview(tmp_path: pathlib.Path, edc_preview_geometry: STGeometry) -> None:
     """Test ingesting an item corresponding to test_geometry to local filesystem."""
     band_name = "NIR"
     data_source = EarthDaily(collection_name="edc-preview", asset_bands={"image_file_NIR": [band_name]})
