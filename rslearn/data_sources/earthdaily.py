@@ -63,7 +63,14 @@ class EarthDailyItem(Item):
 
 
 class EarthDaily(DataSource, TileStore):
-    """A data source for EarthDaily data."""
+    """A data source for EarthDaily data.
+
+    This requires the following environment variables to be set:
+    - EDS_CLIENT_ID
+    - EDS_SECRET
+    - EDS_AUTH_URL
+    - EDS_API_URL
+    """
 
     def __init__(
         self,
@@ -75,10 +82,6 @@ class EarthDaily(DataSource, TileStore):
         timeout: timedelta = timedelta(seconds=10),
         skip_items_missing_assets: bool = False,
         cache_dir: UPath | None = None,
-        client_id: str | None = None,
-        client_secret: str | None = None,
-        token_url: str | None = None,
-        api_url: str | None = None,
         service_name: Literal["platform"] = "platform",
     ):
         """Initialize a new EarthDaily instance.
@@ -96,10 +99,6 @@ class EarthDaily(DataSource, TileStore):
             cache_dir: optional directory to cache items by name, including asset URLs.
                 If not set, there will be no cache and instead STAC requests will be
                 needed each time.
-            client_id: the client ID to use for authentication.
-            client_secret: the client secret to use for authentication.
-            token_url: the token URL to use for authentication.
-            api_url: the API URL to use for authentication.
             service_name: the service name, only "platform" is supported, the other
                 services "legacy" and "internal" are not supported.
         """
@@ -112,22 +111,6 @@ class EarthDaily(DataSource, TileStore):
         self.timeout = timeout
         self.skip_items_missing_assets = skip_items_missing_assets
         self.cache_dir = cache_dir
-
-        if client_id is None:
-            client_id = os.environ["EARTHDAILY_CLIENT_ID"]
-        self.client_id = client_id
-
-        if client_secret is None:
-            client_secret = os.environ["EARTHDAILY_CLIENT_SECRET"]
-        self.client_secret = client_secret
-
-        if token_url is None:
-            token_url = os.environ["EARTHDAILY_TOKEN_URL"]
-        self.token_url = token_url
-
-        if api_url is None:
-            api_url = os.environ["EARTHDAILY_API_URL"]
-        self.api_url = api_url
 
         if cache_dir is not None:
             self.cache_dir = cache_dir
@@ -176,14 +159,7 @@ class EarthDaily(DataSource, TileStore):
         if self.eds_client is not None:
             return self.eds_client, self.client, self.collection
 
-        self.eds_client = EDSClient(
-            EDSConfig(
-                client_id=self.client_id,
-                client_secret=self.client_secret,
-                token_url=self.token_url,
-                base_url=self.api_url,
-            )
-        )
+        self.eds_client = EDSClient(EDSConfig())
 
         if self.service_name == "platform":
             self.client = self.eds_client.platform.pystac_client
