@@ -1061,10 +1061,6 @@ class AllPatchesDataset(torch.utils.data.IterableDataset):
             if num_samples_returned >= num_samples_needed:
                 break
 
-    def __len__(self) -> int:
-        """Get length of this dataset."""
-        return len(self.dataset)
-
     def get_dataset_examples(self) -> list[Window]:
         """Returns a list of windows in this dataset."""
         return self.dataset.get_dataset_examples()
