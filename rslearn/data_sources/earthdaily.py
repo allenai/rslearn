@@ -102,7 +102,6 @@ class EarthDaily(DataSource, TileStore):
             service_name: the service name, only "platform" is supported, the other
                 services "legacy" and "internal" are not supported.
         """
-        self.service_name = service_name
         self.collection_name = collection_name
         self.asset_bands = asset_bands
         self.query = query
@@ -111,6 +110,7 @@ class EarthDaily(DataSource, TileStore):
         self.timeout = timeout
         self.skip_items_missing_assets = skip_items_missing_assets
         self.cache_dir = cache_dir
+        self.service_name = service_name
 
         if cache_dir is not None:
             self.cache_dir = cache_dir
