@@ -17,6 +17,8 @@ dependencies = [
     "boto3>=1.39",
     "class_registry>=2.1",
     "fiona>=1.10",
+    # Need this pin since 2025.7.0 has slow performance for exists/ls operations, see
+    # this issue: https://github.com/fsspec/gcsfs/issues/696
     "fsspec==2025.3.0",
     "lightning>=2.5.1.post0",
     "Pillow>=11.3",
