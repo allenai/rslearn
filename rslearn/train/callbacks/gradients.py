@@ -12,10 +12,9 @@ from torch.optim import Optimizer
 class MiniPCGrad(Callback):
     """PCGrad from https://arxiv.org/abs/2001.06782.
 
-    This should be equivalent to PCGrad, but uses gradient accumulation to factorize
+    This is roughly equivalent to PCGrad but uses gradient accumulation to factorize
     projections, so we can keep gradients orthogonal in O(1) memory instead of O(n).
-
-    Still quite slow, requiring an extra copy of parameter gradients in memory.
+    This is still quite slow, requiring an extra copy of parameter gradients in memory.
     """
 
     def __init__(self, selector: str, only_monitor: bool = False) -> None:
@@ -54,6 +53,9 @@ class MiniPCGrad(Callback):
         prev_grad_norms = []
         micro_grad_norms = []
         angles = []
+
+        eps = 1e-12  # numerical stability
+
         for name, param in pl_module.named_parameters():
             if param.grad is None or self.selector not in name:
                 continue
@@ -61,45 +63,45 @@ class MiniPCGrad(Callback):
             try:
                 prev_grad, prev_grad_norm = self.prev_grads[name]
             except KeyError:
-                prev_grad = torch.zeros_like(param.grad).to(param.device)
-                prev_grad_norm = torch.tensor(0.0).to(param.device)
+                prev_grad = torch.zeros_like(param.grad, device=param.device)
+                prev_grad_norm = torch.tensor(0.0, device=param.device)
 
             with torch.no_grad():
+                # current accumulated grad = prev_grad + micro_grad
                 micro_grad = param.grad - prev_grad
                 micro_grad_norm = micro_grad.norm()
 
                 micro_grad_norms.append(micro_grad_norm)
                 prev_grad_norms.append(prev_grad_norm)
 
-                norm_prod = micro_grad_norm * prev_grad_norm
-                if norm_prod != 0:
-                    angle = (
-                        torch.dot(micro_grad.flatten(), prev_grad.flatten()) / norm_prod
-                    )
-                    angles.append(angle)
+                # cosine of angle between micro and prev
+                denom = (micro_grad_norm * prev_grad_norm).clamp_min(eps)
+                if prev_grad_norm > 0 and micro_grad_norm > 0:
+                    dot = torch.dot(micro_grad.flatten(), prev_grad.flatten())
+                    cos_theta = dot / denom
+                    angles.append(cos_theta)
 
-                    if not self.only_monitor and angle < 0:
-                        # Project the micro grad onto the prev grad's normal plane, and then vice versa
-                        micro_projection = (
-                            micro_grad - norm_prod / (prev_grad_norm**2) * prev_grad
-                        )
-                        prev_projection = (
-                            prev_grad - norm_prod / (micro_grad_norm**2) * micro_grad
-                        )
+                    if not self.only_monitor and dot < 0:
+                        # Remove the component of micro_grad along prev_grad
+                        proj_coeff = dot / (prev_grad_norm**2 + eps)
+                        micro_projection = micro_grad - proj_coeff * prev_grad
+                        # keep accumulated gradient as (prev + projected micro)
+                        param.grad = prev_grad + micro_projection
 
-                        # Since gradient accumulation does not divide by the batch size until
-                        # the optimizer step, we can just sum the projected gradients here
-                        param.grad = micro_projection + prev_projection
-
+                # store the latest accumulated gradient and its norm
                 self.prev_grads[name] = (param.grad.clone(), param.grad.norm())
 
-        log_prev_grad_norms, log_micro_grad_norms, log_angles = 0.0, 0.0, 0.0
-        if len(prev_grad_norms) > 0:
-            log_prev_grad_norms = torch.stack(prev_grad_norms).norm()
-        if len(micro_grad_norms) > 0:
-            log_micro_grad_norms = torch.stack(micro_grad_norms).norm()
-        if len(angles) > 0:
-            log_angles = torch.stack(angles).mean()
+        log_prev_grad_norms = (
+            torch.stack(prev_grad_norms).norm()
+            if prev_grad_norms
+            else torch.tensor(0.0)
+        )
+        log_micro_grad_norms = (
+            torch.stack(micro_grad_norms).norm()
+            if micro_grad_norms
+            else torch.tensor(0.0)
+        )
+        log_angles = torch.stack(angles).mean() if angles else torch.tensor(0.0)
 
         info = {
             f"grads/{self.dataset_source}_prev_grad_norms": log_prev_grad_norms,
