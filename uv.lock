@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.13' and platform_machine == 'aarch64' and sys_platform == 'linux'",
@@ -982,11 +982,11 @@ wheels = [
 
 [[package]]
 name = "fsspec"
-version = "2025.7.0"
+version = "2025.3.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/8b/02/0835e6ab9cfc03916fe3f78c0956cfcdb6ff2669ffa6651065d5ebf7fc98/fsspec-2025.7.0.tar.gz", hash = "sha256:786120687ffa54b8283d942929540d8bc5ccfa820deb555a2b5d0ed2b737bf58", size = 304432, upload-time = "2025-07-15T16:05:21.19Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/34/f4/5721faf47b8c499e776bc34c6a8fc17efdf7fdef0b00f398128bc5dcb4ac/fsspec-2025.3.0.tar.gz", hash = "sha256:a935fd1ea872591f2b5148907d103488fc523295e6c64b835cfad8c3eca44972", size = 298491, upload-time = "2025-03-07T21:47:56.461Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2f/e0/014d5d9d7a4564cf1c40b5039bc882db69fd881111e03ab3657ac0b218e2/fsspec-2025.7.0-py3-none-any.whl", hash = "sha256:8b012e39f63c7d5f10474de957f3ab793b47b45ae7d39f2fb735f8bbe25c0e21", size = 199597, upload-time = "2025-07-15T16:05:19.529Z" },
+    { url = "https://files.pythonhosted.org/packages/56/53/eb690efa8513166adef3e0669afd31e95ffde69fb3c52ec2ac7223ed6018/fsspec-2025.3.0-py3-none-any.whl", hash = "sha256:efb87af3efa9103f94ca91a7f8cb7a4df91af9f74fc106c9c7ea0efd7277c1b3", size = 193615, upload-time = "2025-03-07T21:47:54.809Z" },
 ]
 
 [package.optional-dependencies]
@@ -996,7 +996,7 @@ http = [
 
 [[package]]
 name = "gcsfs"
-version = "2025.7.0"
+version = "2025.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -1007,9 +1007,9 @@ dependencies = [
     { name = "google-cloud-storage" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5b/d7/5eafe9f09f1bb09433a473cef7984cd52c398592c8fd09974e0ad87cfea4/gcsfs-2025.7.0.tar.gz", hash = "sha256:ad3ff66cf189ae8fc375ac8a2af409003dbca02357621cb94a66e457e02ba420", size = 82659, upload-time = "2025-07-15T16:49:21.647Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/59/81/441e9f7f8b9b4cabb89ff19cd58da12cebb5e6ea2864920ae8862061fac0/gcsfs-2025.3.0.tar.gz", hash = "sha256:f68d7bc24bd4b944cd55a6963b9fd722c7bd5791f46c6aebacc380e648292c04", size = 81174, upload-time = "2025-03-08T18:33:54.69Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/21/f5/54bccbee01efbc25581db6aafefb6f6c277d880930f7a083b10052382463/gcsfs-2025.7.0-py2.py3-none-any.whl", hash = "sha256:653503331d58cb02bb34e725d4595d166e93f7f2f3ff88e4c66ef535ae66eae5", size = 36815, upload-time = "2025-07-15T16:49:20.333Z" },
+    { url = "https://files.pythonhosted.org/packages/44/dd/874223310565a336820a70727b61e7dd23f7be6cb91006f2cbb634670142/gcsfs-2025.3.0-py2.py3-none-any.whl", hash = "sha256:afbc2b26a481de66519e9cce7762340ef4781ce01c6663af0d63eda10f6d2c9c", size = 36133, upload-time = "2025-03-08T18:33:53.21Z" },
 ]
 
 [[package]]
@@ -3775,10 +3775,10 @@ requires-dist = [
     { name = "earthengine-api", marker = "extra == 'extra'", specifier = ">=1.6.3" },
     { name = "einops", marker = "extra == 'extra'", specifier = ">=0.8" },
     { name = "fiona", specifier = ">=1.10" },
-    { name = "fsspec", specifier = ">=2025.7.0" },
-    { name = "gcsfs", marker = "extra == 'extra'", specifier = ">=2025.7.0" },
+    { name = "fsspec", specifier = "==2025.3.0" },
+    { name = "gcsfs", marker = "extra == 'extra'", specifier = "==2025.3.0" },
     { name = "google-cloud-bigquery", marker = "extra == 'extra'", specifier = ">=3.35" },
-    { name = "google-cloud-storage", marker = "extra == 'extra'", specifier = ">=3.3.0" },
+    { name = "google-cloud-storage", marker = "extra == 'extra'", specifier = ">=2.18" },
     { name = "interrogate", marker = "extra == 'extra'", specifier = ">=1.7" },
     { name = "lightning", specifier = ">=2.5.1.post0" },
     { name = "netcdf4", marker = "extra == 'extra'", specifier = ">=1.7.2" },
@@ -3798,7 +3798,7 @@ requires-dist = [
     { name = "rasterio", specifier = ">=1.4" },
     { name = "rtree", marker = "extra == 'extra'", specifier = ">=1.4" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.9" },
-    { name = "s3fs", marker = "extra == 'extra'", specifier = ">=2025.7.0" },
+    { name = "s3fs", marker = "extra == 'extra'", specifier = "==2025.3.0" },
     { name = "satlaspretrain-models", marker = "extra == 'extra'", specifier = ">=0.3" },
     { name = "scipy", marker = "extra == 'extra'", specifier = ">=1.16" },
     { name = "shapely", specifier = ">=2.1" },
@@ -3856,16 +3856,16 @@ wheels = [
 
 [[package]]
 name = "s3fs"
-version = "2025.7.0"
+version = "2025.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiobotocore" },
     { name = "aiohttp" },
     { name = "fsspec" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bf/13/37438c4672ba1d23ec46df0e4b57e98469e5c5f4f98313cf6842b631652b/s3fs-2025.7.0.tar.gz", hash = "sha256:5e7f9ec0cad7745155e3eb86fae15b1481fa29946bf5b3a4ce3a60701ce6022d", size = 77795, upload-time = "2025-07-15T16:35:22.177Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e4/cd/5dde2fed1699ff48120336249d9857a574e39feb8afaff694568ab1499b3/s3fs-2025.3.0.tar.gz", hash = "sha256:446dd539eb0d0678209723cb7ad1bedbb172185b0d34675b09be1ad81843a644", size = 77153, upload-time = "2025-03-07T21:58:32.114Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ff/c7/30d13b7fd4f866ca3f30e9a6e7ae038f0c45226f6e26b3cc98d6d197f93b/s3fs-2025.7.0-py3-none-any.whl", hash = "sha256:b6b2d3f84b6aa1c2ba5e62e39dd9410cf54f10a2cce1ea6db1ba0d1a6bcce685", size = 30315, upload-time = "2025-07-15T16:35:20.734Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/3f/35f4041a82a68df89fe4af97c8bb44aa492dad924799cbb02078e9e303e6/s3fs-2025.3.0-py3-none-any.whl", hash = "sha256:88d803615baa04945156ca0e1498009b7acd3132c07198bd81b3e874846e0aa2", size = 30454, upload-time = "2025-03-07T21:58:30.998Z" },
 ]
 
 [[package]]
