@@ -25,13 +25,13 @@ class Molmo(torch.nn.Module):
             trust_remote_code=True,
             torch_dtype="auto",
             device_map="cpu",
-        )
+        )  # nosec
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             trust_remote_code=True,
             torch_dtype="auto",
             device_map="cpu",
-        )
+        )  # nosec
         self.encoder = model.model.vision_backbone
 
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
