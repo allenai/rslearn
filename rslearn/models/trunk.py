@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 import torch
-from helios.nn.moe.soft import SoftMoE
 
 from rslearn.log_utils import get_logger
 from rslearn.models.task_embedding import BaseTaskEmbedding
@@ -187,6 +186,8 @@ class MoETransformer(DecoderTrunkLayer):
                 dim, n_heads, dropout=dropout, batch_first=True
             )
             if not disable_moe:
+                from helios.nn.moe.soft import SoftMoE
+
                 ffn = SoftMoE(
                     dim=dim,
                     num_experts=num_experts,
