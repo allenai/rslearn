@@ -1,4 +1,3 @@
-exclude_types: ["*.geojson"]
 ci:
   autofix_prs: false
   autoupdate_branch: ""
@@ -7,7 +6,7 @@ ci:
   skip: [end-of-file-fixer, equirements-txt-fixer]
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v6.0.0
     hooks:
       - id: check-yaml
       - id: end-of-file-fixer
@@ -19,9 +18,9 @@ repos:
         args: ["--autofix"]
       - id: check-case-conflict
       - id: check-added-large-files
-        exclude: wheels/*
+        args: ['--maxkb=1024']
       - id: check-ast
-      - id: check-byte-order-marker
+      - id: fix-byte-order-marker
       - id: check-executables-have-shebangs
       - id: check-merge-conflict
       - id: check-toml
@@ -31,7 +30,7 @@ repos:
       - id: detect-private-key
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.1.1
+    rev: v1.17.1
     hooks:
       - id: mypy
         args: [
@@ -74,8 +73,8 @@ repos:
             --fail-under=80,
           ]
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.4.4
+    rev: v0.12.9
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: [ --fix ]
       - id: ruff-format

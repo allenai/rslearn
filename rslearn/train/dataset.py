@@ -153,7 +153,9 @@ class DataInput:
             load_all_layers: whether to load all of the layers specified in the list of
                 layer names. By default, we randomly pick one layer to read. When
                 reading multiple layers, the images are stacked on the channel
-                dimension.
+                dimension. This option will also cause the dataset to only include
+                windows where all of the layers are materialized (by default, only
+                windows with none of the layers materialized would be excluded).
             load_all_item_groups: whether to load all item groups in the layer(s) we
                 are reading from. By default, we assume the specified layer name is of
                 the form "{layer_name}.{group_idx}" and read that item group only. With
@@ -475,16 +477,25 @@ def check_window(inputs: dict[str, DataInput], window: Window) -> Window | None:
     """
 
     # Make sure window has all the needed layers.
-    def is_any_layer_available(data_input: DataInput) -> bool:
+    def is_available(data_input: DataInput) -> bool:
+        # If load_all_layers is enabled, we should check that all the layers are
+        # present. Otherwise, we just need one layer.
+        is_any_layer_available = False
+        are_all_layers_available = True
         for layer_name in data_input.layers:
             if window.is_layer_completed(layer_name):
-                return True
-        return False
+                is_any_layer_available = True
+            else:
+                are_all_layers_available = False
+        if data_input.load_all_layers:
+            return are_all_layers_available
+        else:
+            return is_any_layer_available
 
     for data_input in inputs.values():
         if not data_input.required:
             continue
-        if not is_any_layer_available(data_input):
+        if not is_available(data_input):
             logger.debug(
                 "Skipping window %s since check for layers %s failed",
                 window.name,
@@ -1049,10 +1060,6 @@ class AllPatchesDataset(torch.utils.data.IterableDataset):
 
             if num_samples_returned >= num_samples_needed:
                 break
-
-    def __len__(self) -> int:
-        """Get length of this dataset."""
-        return len(self.dataset)
 
     def get_dataset_examples(self) -> list[Window]:
         """Returns a list of windows in this dataset."""
