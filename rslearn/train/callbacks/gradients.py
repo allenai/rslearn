@@ -17,14 +17,21 @@ class MiniPCGrad(Callback):
     This is still quite slow, requiring an extra copy of parameter gradients in memory.
     """
 
-    def __init__(self, selector: str, only_monitor: bool = False) -> None:
+    def __init__(
+        self,
+        selectors: list[str],
+        deselectors: list[str] | None = None,
+        only_monitor: bool = False,
+    ) -> None:
         """Initialize the callback.
 
         Args:
-            selector: Prefix for selecting which parameters to operate on.
+            selectors: Prefixes for selecting which parameters to operate on.
+            deselectors: Prefixes for deselecting which parameters to operate on. Applied after selectors.
             only_monitor: If true, only log gradients, don't clip them.
         """
-        self.selector = selector
+        self.selectors = selectors
+        self.deselectors = deselectors or []
         self.only_monitor = only_monitor
         self.prev_grads: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
 
@@ -57,7 +64,11 @@ class MiniPCGrad(Callback):
         eps = 1e-12  # numerical stability
 
         for name, param in pl_module.named_parameters():
-            if param.grad is None or self.selector not in name:
+            if param.grad is None:
+                continue
+            elif all(selector not in name for selector in self.selectors) or any(
+                deselector in name for deselector in self.deselectors
+            ):
                 continue
 
             try:
