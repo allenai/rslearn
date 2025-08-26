@@ -37,7 +37,7 @@ class Ssl4eoS12(torch.nn.Module):
         else:
             raise ValueError(f"unknown SSL4EO-S12 architecture {arch}")
 
-        state_dict = torch.load(backbone_ckpt_path)
+        state_dict = torch.load(backbone_ckpt_path, weights_only=True)
         state_dict = state_dict["teacher"]
         prefix = "module.backbone."
         state_dict = {
