@@ -7,25 +7,25 @@ import torch
 from rslearn.train.callbacks.gradients import MiniPCGrad
 
 
-def test_minipcgrad():
+def test_minipcgrad() -> None:
     """
     Test that MiniPCGrad projects conflicting gradients to be orthogonal.
     """
 
     class Dummy(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.proc_weight = torch.nn.Parameter(torch.zeros(2))
             self.other_weight = torch.nn.Parameter(torch.zeros(2))
             self.proc_blocked_weight = torch.nn.Parameter(torch.zeros(2))
 
-        def forward(self):
+        def forward(self) -> None:
             pass
 
     m = Dummy()
 
     # Stable names for selection logic
-    def named_params():
+    def named_params() -> list[tuple[str, torch.nn.Parameter]]:
         return [
             ("proc.weight", m.proc_weight),
             ("other.weight", m.other_weight),

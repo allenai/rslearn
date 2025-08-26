@@ -8,6 +8,10 @@ from lightning.pytorch.trainer import Trainer
 from torch.nn import Module
 from torch.optim import Optimizer
 
+from rslearn.log_utils import get_logger
+
+logger = get_logger(__name__)
+
 
 class MiniPCGrad(Callback):
     """PCGrad from https://arxiv.org/abs/2001.06782.
@@ -98,6 +102,9 @@ class MiniPCGrad(Callback):
                         micro_projection = micro_grad - proj_coeff * prev_grad
                         # keep accumulated gradient as (prev + projected micro)
                         param.grad = prev_grad + micro_projection
+                        logger.info(
+                            f"{name} (cos={cos_theta:.4f},dot={dot:.4f},prev_grad_norm={prev_grad_norm:.4f},micro_grad_norm={micro_grad_norm:.4f})"
+                        )
 
                 # store the latest accumulated gradient and its norm
                 self.prev_grads[name] = (param.grad.clone(), param.grad.norm())
