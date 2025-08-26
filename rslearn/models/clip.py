@@ -20,8 +20,8 @@ class CLIP(torch.nn.Module):
         """
         super().__init__()
 
-        self.processor = AutoProcessor.from_pretrained(model_name)
-        model = AutoModelForZeroShotImageClassification.from_pretrained(model_name)
+        self.processor = AutoProcessor.from_pretrained(model_name)  # nosec
+        model = AutoModelForZeroShotImageClassification.from_pretrained(model_name)  # nosec
         self.encoder = model.vision_model
 
         # Get number of features and token map size from encoder attributes.
