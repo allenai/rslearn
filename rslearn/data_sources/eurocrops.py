@@ -184,12 +184,11 @@ class EuroCrops(DataSource[EuroCropsItem]):
             with zipfile.ZipFile(zip_fname) as zip_f:
                 zip_f.extractall(path=tmp_dir)
 
-            # The shapefiles can appear at any of three levels in the file hierarchy.
-            shp_fnames = (
-                glob.glob("*.shp", root_dir=tmp_dir)
-                + glob.glob("*/*.shp", root_dir=tmp_dir)
-                + glob.glob("*/*/*.shp", root_dir=tmp_dir)
-            )
+            # The shapefiles or geopackage files can appear at any level in the hierarchy.
+            # Most zip files contain one but some contain multiple (one per region).
+            shp_fnames = glob.glob(
+                "**/*.shp", root_dir=tmp_dir, recursive=True
+            ) + glob.glob("**/*.gpkg", root_dir=tmp_dir, recursive=True)
             if len(shp_fnames) == 0:
                 tmp_dir_fnames = os.listdir(tmp_dir)
                 raise ValueError(
