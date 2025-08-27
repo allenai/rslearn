@@ -212,10 +212,15 @@ class RslearnLightningModule(L.LightningModule):
     def on_test_epoch_end(self) -> None:
         """Optionally save the test metrics to a file."""
         if self.metrics_file:
-            with open(self.metrics_file, "w") as f:
+            with open(self.metrics_file, "w+") as f:
                 metrics = self.test_metrics.compute()
                 metrics_dict = {k: v.item() for k, v in metrics.items()}
-                json.dump(metrics_dict, f, indent=4)
+                try:
+                    old_metrics = json.load(f)
+                except json.JSONDecodeError:
+                    old_metrics = {}
+                old_metrics.update(metrics_dict)
+                json.dump(old_metrics, f, indent=4)
 
     def training_step(
         self, batch: Any, batch_idx: int, dataloader_idx: int = 0
