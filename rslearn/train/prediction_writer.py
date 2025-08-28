@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -125,13 +126,17 @@ class RslearnWriter(BasePredictionWriter):
     for each window being processed.
     """
 
+    layer_config: RasterLayerConfig | VectorLayerConfig
+
     def __init__(
         self,
         path: str,
         output_layer: str,
-        path_options: dict[str, Any] = {},
-        selector: list[str] = [],
+        path_options: dict[str, Any] | None = None,
+        selector: list[str] | None = None,
         merger: PatchPredictionMerger | None = None,
+        output_path: str | Path | None = None,
+        layer_config: RasterLayerConfig | VectorLayerConfig | None = None,
     ):
         """Create a new RslearnWriter.
 
@@ -142,13 +147,40 @@ class RslearnWriter(BasePredictionWriter):
             selector: keys to access the desired output in the output dict if needed.
                 e.g ["key1", "key2"] gets output["key1"]["key2"]
             merger: merger to use to merge outputs from overlapped patches.
+            output_path: optional custom path for writing predictions. If provided,
+                predictions will be written to this path instead of deriving from dataset path.
+            layer_config: optional layer configuration. If provided, this config will be
+                used instead of reading from the dataset config, allowing usage without
+                requiring dataset config at the output path.
         """
         super().__init__(write_interval="batch")
         self.output_layer = output_layer
-        self.selector = selector
-        self.path = UPath(path, **path_options)
-        self.dataset = Dataset(self.path)
-        self.layer_config = self.dataset.layers[self.output_layer]
+        self.selector = selector or []
+        self.path = UPath(path, **path_options or {})
+        self.output_path = (
+            UPath(output_path, **path_options or {})
+            if output_path is not None
+            else None
+        )
+
+        # Handle dataset and layer config
+        if layer_config:
+            self.layer_config = layer_config
+            self.dataset = None if self.output_path else Dataset(self.path)
+        else:
+            self.dataset = Dataset(self.path)
+            if self.output_layer not in self.dataset.layers:
+                raise KeyError(
+                    f"Output layer '{self.output_layer}' not found in dataset layers."
+                )
+            raw_layer_config = self.dataset.layers[self.output_layer]
+            # Type narrowing to ensure compatibility
+            if isinstance(raw_layer_config, (RasterLayerConfig | VectorLayerConfig)):
+                self.layer_config = raw_layer_config
+            else:
+                raise ValueError(
+                    f"Layer config must be RasterLayerConfig or VectorLayerConfig, got {type(raw_layer_config)}"
+                )
 
         self.format: RasterFormat | VectorFormat
         if self.layer_config.layer_type == LayerType.RASTER:
@@ -180,7 +212,7 @@ class RslearnWriter(BasePredictionWriter):
         trainer: Trainer,
         pl_module: LightningModule,
         prediction: dict[str, Sequence],
-        batch_indices: Sequence,
+        batch_indices: Sequence[int] | None,
         batch: tuple[list, list, list],
         batch_idx: int,
         dataloader_idx: int,
@@ -231,9 +263,13 @@ class RslearnWriter(BasePredictionWriter):
             for k in self.selector:
                 output = output[k]
 
+            # # Use custom output_path if provided, otherwise use dataset path
+            window_base_path = (
+                self.output_path if self.output_path is not None else self.path
+            )
             window = Window(
                 path=Window.get_window_root(
-                    self.path, metadata["group"], metadata["window_name"]
+                    window_base_path, metadata["group"], metadata["window_name"]
                 ),
                 group=metadata["group"],
                 name=metadata["window_name"],

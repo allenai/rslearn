@@ -20,6 +20,7 @@ dependencies = [
     # Need this pin since 2025.7.0 has slow performance for exists/ls operations, see
     # this issue: https://github.com/fsspec/gcsfs/issues/696
     "fsspec==2025.3.0",
+    "jsonargparse>=4.35.0",
     "lightning>=2.5.1.post0",
     "Pillow>=11.3",
     "pyproj>=3.7",
@@ -44,7 +45,6 @@ extra = [
     "gcsfs==2025.3.0",
     "google-cloud-bigquery>=3.35",
     "google-cloud-storage>=2.18",
-    "interrogate>=1.7",
     "netCDF4>=1.7.2",
     "osmium>=4.0.2",
     "planet>=3.1",
@@ -61,6 +61,9 @@ extra = [
 ]
 
 dev = [
+    "interrogate>=1.7.0",
+    "mypy>=1.17.1,<2",
+    "pre-commit>=4.3.0",
     "pytest>=8.0",
     "pytest_httpserver",
     "ruff>=0.12.9",
