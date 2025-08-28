@@ -125,7 +125,7 @@ class RslearnDataModule(L.LightningDataModule):
                 task=self.task,
                 workers=self.init_workers,
                 name=self.name,
-                fix_patch_pick=(stage != "fit"),
+                fix_patch_pick=(split != "train"),
             )
             logger.info(f"got {len(dataset)} examples in split {split}")
             if split_config.get_load_all_patches():
