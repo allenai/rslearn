@@ -126,8 +126,6 @@ class RslearnWriter(BasePredictionWriter):
     for each window being processed.
     """
 
-    layer_config: RasterLayerConfig | VectorLayerConfig
-
     def __init__(
         self,
         path: str,
@@ -164,6 +162,7 @@ class RslearnWriter(BasePredictionWriter):
         )
 
         # Handle dataset and layer config
+        self.layer_config: RasterLayerConfig | VectorLayerConfig
         if layer_config:
             self.layer_config = layer_config
             self.dataset = None if self.output_path else Dataset(self.path)
@@ -263,7 +262,7 @@ class RslearnWriter(BasePredictionWriter):
             for k in self.selector:
                 output = output[k]
 
-            # # Use custom output_path if provided, otherwise use dataset path
+            # Use custom output_path if provided, otherwise use dataset path
             window_base_path = (
                 self.output_path if self.output_path is not None else self.path
             )

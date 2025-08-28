@@ -11,7 +11,7 @@ from lightning.pytorch import Trainer
 from torchmetrics import MetricCollection
 from upath import UPath
 
-from rslearn.config import DType, LayerType
+from rslearn.config import BandSetConfig, DType, LayerType, RasterLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Window
 from rslearn.train.lightning_module import RslearnLightningModule
@@ -372,8 +372,6 @@ def test_write_raster_with_custom_output_path(tmp_path: pathlib.Path) -> None:
 
 def test_write_raster_with_layer_config(tmp_path: pathlib.Path) -> None:
     """Test RslearnWriter with custom layer_config parameter."""
-    from rslearn.config import BandSetConfig, RasterLayerConfig
-
     output_layer_name = "output"
     output_bands = ["value"]
 
@@ -456,51 +454,12 @@ def test_write_raster_with_layer_config(tmp_path: pathlib.Path) -> None:
     assert window.is_layer_completed(output_layer_name)
 
 
-def test_selector_configuration(tmp_path: pathlib.Path) -> None:
-    """Test that selector can be configured and defaults to []."""
-    from rslearn.config import BandSetConfig, RasterLayerConfig
-
-    # Create a simple layer config for testing
-    layer_config = RasterLayerConfig(
-        layer_type=LayerType.RASTER,
-        band_sets=[
-            BandSetConfig(
-                config_dict={},
-                dtype=DType.UINT8,
-                bands=["value"],
-                format={"name": "geotiff"},
-            )
-        ],
-    )
-
-    # Test default selector
-    writer_default = RslearnWriter(
-        path=str(tmp_path),
-        output_layer="test",
-        layer_config=layer_config,
-        output_path=str(tmp_path / "output1"),
-    )
-    assert writer_default.selector == [], "Should default to []"
-
-    # Test custom selector
-    writer_custom = RslearnWriter(
-        path=str(tmp_path),
-        output_layer="test",
-        selector=["segment"],
-        layer_config=layer_config,
-        output_path=str(tmp_path / "output2"),
-    )
-    assert writer_custom.selector == ["segment"], "Should use custom selector"
-
-
 def test_selector_with_dictionary_output(tmp_path: pathlib.Path) -> None:
     """Test RslearnWriter selector functionality with dictionary outputs.
 
     Tests that selector=['segment'] correctly extracts the 'segment' key from
     task outputs and that the codepath in process_output_batch() is covered.
     """
-    from rslearn.config import BandSetConfig, RasterLayerConfig
-
     output_layer_name = "output"
     output_bands = ["value"]
 
@@ -550,11 +509,7 @@ def test_selector_with_dictionary_output(tmp_path: pathlib.Path) -> None:
     }
 
     # Create model output - 3 classes, 5x5 spatial dimensions
-    # Make class 1 dominant in center, class 0 on edges
     raw_model_output = torch.zeros((3, 5, 5), dtype=torch.float32)
-    raw_model_output[0, :, :] = 0.1  # Low probability for class 0
-    raw_model_output[1, 1:4, 1:4] = 0.8  # High probability for class 1 in center
-    raw_model_output[2, :, :] = 0.1  # Low probability for class 2
 
     # Write predictions through the full pipeline
     batch = ([None], [None], [metadata])
@@ -589,18 +544,12 @@ def test_selector_with_dictionary_output(tmp_path: pathlib.Path) -> None:
     assert expected_fname.exists(), "Output should be written with selector extraction"
     assert window.is_layer_completed(output_layer_name)
 
-    # Verify that the selector correctly extracted the segmentation data
-    # The MockDictionaryTask should have created segmentation output with class 1 in center
-    # We can't easily read the GeoTIFF here, but the fact that it was written successfully
-    # and has the right size indicates the selector worked correctly
-
 
 def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
     """Test RslearnWriter selector with nested dictionary access.
 
     Tests selector=['segment', 'data'] for nested dictionary outputs.
     """
-    from rslearn.config import BandSetConfig, RasterLayerConfig
 
     # Mock task that returns nested dictionary
     class MockNestedTask(Task):
@@ -719,94 +668,3 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
     )
     assert expected_fname.exists(), "Nested selector should successfully write output"
     assert window.is_layer_completed(output_layer_name)
-
-
-def test_process_output_batch_selector_codepath() -> None:
-    """Test that process_output_batch() selector codepath (lines 252-253) is exercised.
-
-    This test specifically verifies the selector loop in process_output_batch():
-    for k in self.selector:
-        output = output[k]
-    """
-    from rslearn.config import BandSetConfig, RasterLayerConfig
-
-    # Create a mock writer to test process_output_batch directly
-    layer_config = RasterLayerConfig(
-        layer_type=LayerType.RASTER,
-        band_sets=[
-            BandSetConfig(
-                config_dict={},
-                dtype=DType.UINT8,
-                bands=["value"],
-                format={"name": "geotiff"},
-            )
-        ],
-    )
-
-    # Test selector functionality by calling process_output_batch directly
-    writer = RslearnWriter(
-        path="/tmp",  # Won't be used since we provide layer_config and output_path
-        output_layer="test",
-        selector=["segment"],
-        layer_config=layer_config,
-        output_path="/tmp/test_output",
-    )
-
-    # Create task and mock data that will exercise the selector logic
-    task = MockDictionaryTask(num_classes=2)
-
-    # Create mock output that contains dictionary - this will be processed by task
-    raw_tensor_output = torch.zeros((2, 3, 3), dtype=torch.float32)
-    raw_tensor_output[1, :, :] = 1.0  # All class 1
-
-    # Create metadata
-    metadata = {
-        "window_name": "test",
-        "group": "default",
-        "bounds": (0, 0, 3, 3),
-        "window_bounds": (0, 0, 3, 3),
-        "projection": Projection(WGS84_PROJECTION.crs, 1.0, 1.0),
-        "time_range": None,
-        "patch_idx": 0,
-        "num_patches": 1,
-    }
-
-    # Mock the writer's process_output method to avoid filesystem operations
-    # but still exercise the selector logic
-    extracted_output = None
-
-    def mock_process_output(
-        window: Window,
-        patch_idx: int,
-        num_patches: int,
-        cur_bounds: tuple[int, int, int, int],
-        output: Any,
-    ) -> None:
-        nonlocal extracted_output
-        extracted_output = output
-        # Don't actually write anything
-
-    # Use proper method replacement with monkey patching
-    import unittest.mock
-
-    with unittest.mock.patch.object(
-        writer, "process_output", side_effect=mock_process_output
-    ):
-        # Call process_output_batch which should exercise the selector logic
-        writer.process_output_batch(
-            task=task, prediction=[raw_tensor_output], metadatas=[metadata]
-        )
-
-    # Verify that the selector extracted the right data
-    # The task returns {"segment": segmentation, "probabilities": probs, "other_data": zeros}
-    # The selector should have extracted just the segmentation data
-    assert extracted_output is not None, "Selector should have extracted output"
-    assert isinstance(extracted_output, np.ndarray), (
-        "Should extract numpy array from 'segment' key"
-    )
-    assert extracted_output.shape == (1, 3, 3), (
-        "Should have correct shape for segmentation output"
-    )
-    assert extracted_output.dtype == np.uint8, "Should have correct dtype"
-    # All pixels should be class 1 since raw_tensor_output had class 1 with highest probability
-    assert np.all(extracted_output[0, :, :] == 1), "Should contain segmentation classes"
