@@ -259,9 +259,16 @@ def match_candidate_items_to_window(
                 # Windows are usually smaller than items.
                 # So we first clip the item to the window bounds in the item's
                 # projection, then re-project the item to the window's projection.
+                window_bounds = geometry.shp.bounds
+                buffered_window_bounds = (
+                    window_bounds[0] - 1,
+                    window_bounds[1] - 1,
+                    window_bounds[2] + 1,
+                    window_bounds[3] + 1,
+                )
                 buffered_window_geom = STGeometry(
                     geometry.projection,
-                    geometry.shp.buffer(1),
+                    shapely.box(*buffered_window_bounds),
                     geometry.time_range,
                 )
                 window_shp_in_item_proj = buffered_window_geom.to_projection(
