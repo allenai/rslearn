@@ -8,7 +8,7 @@ from rslearn.config import QueryConfig, SpaceMode, TimeMode
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
-from rslearn.utils.geometry import STGeometry, get_global_geometry
+from rslearn.utils.geometry import Projection, STGeometry, get_global_geometry
 
 
 def test_global_geometry() -> None:
@@ -19,6 +19,39 @@ def test_global_geometry() -> None:
     )
     item_groups = match_candidate_items_to_window(
         window_geom, [Item("item", global_geometry)], QueryConfig()
+    )
+    assert len(item_groups) == 1
+    assert len(item_groups[0]) == 1
+
+
+def test_window_geometry_crossing_antimeridian() -> None:
+    """Verify that a window geometry crossing the antimeridian is handled correctly."""
+    item_geom = STGeometry(
+        WGS84_PROJECTION,
+        shapely.Polygon(
+            [
+                (-179.997854, -16.170659),
+                (-179.969444, -16.170659),
+                (-179.969444, -16.143371),
+                (-179.997854, -16.143371),
+                (-179.997854, -16.170659),
+            ]
+        ),
+        (
+            datetime(2025, 1, 27, 9, 5, 59, 24000, tzinfo=UTC),
+            datetime(2025, 1, 27, 9, 5, 59, 24000, tzinfo=UTC),
+        ),
+    )
+    window_geom = STGeometry(
+        Projection(CRS.from_epsg(32701), 1, -1),
+        shapely.box(179162, -8211693, 180177, -8210678),
+        (
+            datetime(2024, 12, 31, 14, 0, tzinfo=UTC),
+            datetime(2025, 8, 27, 14, 0, tzinfo=UTC),
+        ),
+    )
+    item_groups = match_candidate_items_to_window(
+        window_geom, [Item("item", item_geom)], QueryConfig()
     )
     assert len(item_groups) == 1
     assert len(item_groups[0]) == 1
