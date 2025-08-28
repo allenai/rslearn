@@ -13,8 +13,8 @@ from upath import UPath
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
 from rslearn.train.dataset import (
-    AllPatchesDataset,
     DataInput,
+    InMemoryAllPatchesDataset,
     IterableAllPatchesDataset,
     ModelDataset,
     RetryDataset,
@@ -451,11 +451,11 @@ class TestIterableAllPatchesDataset:
             assert len(samples) == 0
 
 
-class TestAllPatchesDataset:
-    """Tests for AllPatchesDataset."""
+class TestInMemoryAllPatchesDataset:
+    """Tests for InMemoryAllPatchesDataset."""
 
     def test_iterable_equal(self, basic_classification_dataset: Dataset) -> None:
-        """Verify that AllPatchesDataset and IterableAllPatchesDataset are equivalent."""
+        """Verify that InMemoryAllPatchesDataset and IterableAllPatchesDataset are equivalent."""
         # Create a couple of windows with different sizes to exercise patching.
         add_window(basic_classification_dataset, name="w0", bounds=(0, 0, 4, 4))
         add_window(basic_classification_dataset, name="w1", bounds=(0, 0, 8, 8))
@@ -476,7 +476,7 @@ class TestAllPatchesDataset:
         iterable_ds = IterableAllPatchesDataset(
             model_dataset, patch_size, rank=0, world_size=1
         )
-        regular_ds = AllPatchesDataset(model_dataset, patch_size)
+        regular_ds = InMemoryAllPatchesDataset(model_dataset, patch_size)
 
         iterable_samples = list(iterable_ds)
         regular_samples = [regular_ds[i] for i in range(len(regular_ds))]

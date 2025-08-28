@@ -16,8 +16,8 @@ from rslearn.log_utils import get_logger
 from rslearn.train.tasks import Task
 
 from .dataset import (
-    AllPatchesDataset,
     DataInput,
+    InMemoryAllPatchesDataset,
     IterableAllPatchesDataset,
     ModelDataset,
     MultiDataset,
@@ -66,7 +66,7 @@ class RslearnDataModule(L.LightningDataModule):
         predict_config: SplitConfig = SplitConfig(),
         name: str | None = None,
         retries: int = 0,
-        use_iterable_all_patches: bool = False,
+        use_in_memory_all_patches_dataset: bool = False,
     ) -> None:
         """Initialize a new RslearnDataModule.
 
@@ -88,8 +88,8 @@ class RslearnDataModule(L.LightningDataModule):
             predict_config: split config for predict split
             name: name of the dataset
             retries: number of retries to attempt for getitem calls
-            use_iterable_all_patches: whether to use IterableAllPatchesDataset instead of AllPatchesDataset
-                if load_all_patches is set to true. Only useful for testing/validation
+            use_in_memory_all_patches_dataset: whether to use InMemoryAllPatchesDataset
+                instead of IterableAllPatchesDataset if load_all_patches is set to true.
         """
         super().__init__()
         self.inputs = inputs
@@ -100,7 +100,7 @@ class RslearnDataModule(L.LightningDataModule):
         self.init_workers = init_workers if init_workers > 0 else self.num_workers
         self.name = name
         self.retries = retries
-        self.use_iterable_all_patches = use_iterable_all_patches
+        self.use_in_memory_all_patches_dataset = use_in_memory_all_patches_dataset
         self.split_configs = {
             "train": default_config.update(train_config),
             "val": default_config.update(val_config),
@@ -135,7 +135,7 @@ class RslearnDataModule(L.LightningDataModule):
             logger.info(f"got {len(dataset)} examples in split {split}")
             if split_config.get_load_all_patches():
                 logger.info(
-                    f"using AllPatchesDataset (iterable={self.use_iterable_all_patches})"
+                    f"using AllPatchesDataset (in_memory={self.use_in_memory_all_patches_dataset})"
                 )
                 patch_size = split_config.get_patch_size()
                 if patch_size is None:
@@ -143,18 +143,19 @@ class RslearnDataModule(L.LightningDataModule):
                         "patch_size is not set but must be set if load_all_patches is set"
                     )
 
-                all_patches_cls = AllPatchesDataset
+                all_patches_cls = IterableAllPatchesDataset
                 kwargs = dict(
                     dataset=dataset,
                     patch_size=patch_size,
                     overlap_ratio=split_config.get_overlap_ratio(),
+                    rank=self.trainer.global_rank if self.trainer else 0,
+                    world_size=self.trainer.world_size if self.trainer else 1,
                 )
-                if self.use_iterable_all_patches:
-                    kwargs["rank"] = self.trainer.global_rank if self.trainer else 0
-                    kwargs["world_size"] = (
-                        self.trainer.world_size if self.trainer else 1
-                    )
-                    all_patches_cls = IterableAllPatchesDataset  # type: ignore
+                if self.use_in_memory_all_patches_dataset:
+                    kwargs.pop("rank")
+                    kwargs.pop("world_size")
+                    all_patches_cls = InMemoryAllPatchesDataset  # type: ignore
+
                 dataset = all_patches_cls(**kwargs)  # type: ignore
 
             if self.retries > 0:
