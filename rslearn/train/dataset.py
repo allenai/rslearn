@@ -15,6 +15,7 @@ from typing import Any
 import shapely
 import torch
 import tqdm
+from rasterio.warp import Resampling
 
 import rslearn.train.transforms.transform
 from rslearn.config import (
@@ -36,6 +37,72 @@ from rslearn.utils.vector_format import load_vector_format
 from .transforms import Sequential
 
 logger = get_logger(__name__)
+
+
+def get_window_patch_options(
+    patch_size: tuple[int, int],
+    overlap_size: tuple[int, int],
+    bounds: PixelBounds,
+) -> list[PixelBounds]:
+    """Get the bounds of each patch within the overall bounds.
+
+    Args:
+        patch_size: the size of the patches to extract.
+        overlap_size: the size of the overlap between patches.
+        bounds: the window bounds to divide up into smaller patches.
+
+    Returns:
+        a list of patch bounds within the overall bounds. The rightmost and
+            bottommost patches may extend beyond the provided bounds.
+    """
+    # We stride the patches by patch_size - overlap_size until the last patch.
+    # We handle the last patch with a special case to ensure it does not exceed the
+    # window bounds. Instead, it may overlap the previous patch.
+    cols = list(
+        range(
+            bounds[0],
+            bounds[2] - patch_size[0],
+            patch_size[0] - overlap_size[0],
+        )
+    ) + [bounds[2] - patch_size[0]]
+    rows = list(
+        range(
+            bounds[1],
+            bounds[3] - patch_size[1],
+            patch_size[1] - overlap_size[1],
+        )
+    ) + [bounds[3] - patch_size[1]]
+
+    patch_bounds: list[PixelBounds] = []
+    for col in cols:
+        for row in rows:
+            patch_bounds.append((col, row, col + patch_size[0], row + patch_size[1]))
+    return patch_bounds
+
+
+def pad_slice_protect(
+    raw_inputs: dict[str, Any],
+    passthrough_inputs: dict[str, Any],
+    patch_size: tuple[int, int],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Pad tensors in-place by patch size to protect slicing near right/bottom edges.
+
+    Args:
+        raw_inputs: the raw inputs to pad.
+        passthrough_inputs: the passthrough inputs to pad.
+        patch_size: the size of the patches to extract.
+
+    Returns:
+        a tuple of (raw_inputs, passthrough_inputs).
+    """
+    for d in [raw_inputs, passthrough_inputs]:
+        for input_name, value in list(d.items()):
+            if not isinstance(value, torch.Tensor):
+                continue
+            d[input_name] = torch.nn.functional.pad(
+                value, pad=(0, patch_size[0], 0, patch_size[1])
+            )
+    return raw_inputs, passthrough_inputs
 
 
 class SamplerFactory:
@@ -244,19 +311,44 @@ def read_raster_layer_for_data_input(
         raster_dir = window.get_raster_dir(
             layer_name, band_set.bands, group_idx=group_idx
         )
-        src = raster_format.decode_raster(raster_dir, final_projection, final_bounds)
-        if src is None:
-            raise ValueError(f"Source is None for {data_input}")
-        # Resize to patch size if needed.
-        # This is for band sets that are stored at a lower resolution.
-        # Here we assume that it is a multiple.
-        if src.shape[1:3] != image.shape[1:3]:
-            if src.shape[1] < image.shape[1]:
-                factor = image.shape[1] // src.shape[1]
-                src = src.repeat(repeats=factor, axis=1).repeat(repeats=factor, axis=2)
-            else:
-                factor = src.shape[1] // image.shape[1]
-                src = src[:, ::factor, ::factor]
+
+        # Previously we always read in the native projection of the data, and then
+        # zoom in or out (the resolution must be a power of two off) to match the
+        # window's resolution.
+        # However, this fails if the bounds are not multiples of the resolution factor.
+        # So we fallback to reading directly in the window projection if that is the
+        # case (which may be a bit slower).
+        is_bounds_zoomable = True
+        if band_set.zoom_offset < 0:
+            zoom_factor = 2 ** (-band_set.zoom_offset)
+            is_bounds_zoomable = (final_bounds[2] - final_bounds[0]) * zoom_factor == (
+                bounds[2] - bounds[0]
+            ) and (final_bounds[3] - final_bounds[1]) * zoom_factor == (
+                bounds[3] - bounds[1]
+            )
+
+        if is_bounds_zoomable:
+            src = raster_format.decode_raster(
+                raster_dir, final_projection, final_bounds
+            )
+
+            # Resize to patch size if needed.
+            # This is for band sets that are stored at a lower resolution.
+            # Here we assume that it is a multiple.
+            if src.shape[1:3] != image.shape[1:3]:
+                if src.shape[1] < image.shape[1]:
+                    factor = image.shape[1] // src.shape[1]
+                    src = src.repeat(repeats=factor, axis=1).repeat(
+                        repeats=factor, axis=2
+                    )
+                else:
+                    factor = src.shape[1] // image.shape[1]
+                    src = src[:, ::factor, ::factor]
+
+        else:
+            src = raster_format.decode_raster(
+                raster_dir, window.projection, bounds, resampling=Resampling.nearest
+            )
 
         image[dst_indexes, :, :] = torch.as_tensor(
             src[src_indexes, :, :].astype(data_input.dtype.get_numpy_dtype())
@@ -821,7 +913,7 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
         world_size: int = 1,
         name: str | None = None,
     ):
-        """Create a new AllPatchesDataset.
+        """Create a new IterableAllPatchesDataset.
 
         Args:
             dataset: the ModelDataset to wrap.
@@ -853,47 +945,6 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
             name: dataset name
         """
         self.name = name
-
-    def get_window_patch_options(self, bounds: PixelBounds) -> list[PixelBounds]:
-        """Get the bounds of each patch within the overall bounds.
-
-        Args:
-            bounds: the window bounds to divide up into smaller patches.
-
-        Returns:
-            a list of patch bounds within the overall bounds. The rightmost and
-                bottommost patches may extend beyond the provided bounds.
-        """
-        # We stride the patches by patch_size - overlap_size until the last patch.
-        # We handle the last patch with a special case to ensure it does not exceed the
-        # window bounds. Instead, it may overlap the previous patch.
-        cols = list(
-            range(
-                bounds[0],
-                bounds[2] - self.patch_size[0],
-                self.patch_size[0] - self.overlap_size[0],
-            )
-        ) + [bounds[2] - self.patch_size[0]]
-        rows = list(
-            range(
-                bounds[1],
-                bounds[3] - self.patch_size[1],
-                self.patch_size[1] - self.overlap_size[1],
-            )
-        ) + [bounds[3] - self.patch_size[1]]
-
-        patch_bounds: list[PixelBounds] = []
-        for col in cols:
-            for row in rows:
-                patch_bounds.append(
-                    (
-                        col,
-                        row,
-                        col + self.patch_size[0],
-                        row + self.patch_size[1],
-                    )
-                )
-        return patch_bounds
 
     def get_window_num_patches(self, bounds: PixelBounds) -> int:
         """Get the number of patches for these bounds.
@@ -993,18 +1044,14 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                 # For simplicity, pad tensors by patch size to ensure that any patch bounds
                 # extending outside the window bounds will not have issues when we slice
                 # the tensors later.
-                for d in [raw_inputs, passthrough_inputs]:
-                    for input_name, value in list(d.items()):
-                        if not isinstance(value, torch.Tensor):
-                            continue
-                        d[input_name] = torch.nn.functional.pad(
-                            value, pad=(0, self.patch_size[0], 0, self.patch_size[1])
-                        )
+                pad_slice_protect(raw_inputs, passthrough_inputs, self.patch_size)
 
                 # Now iterate over the patches and extract/yield the crops.
                 # Note that, in case user is leveraging RslearnWriter, it is important that
                 # the patch_idx be increasing (as we iterate) within one window.
-                patches = self.get_window_patch_options(bounds)
+                patches = get_window_patch_options(
+                    self.patch_size, self.overlap_size, bounds
+                )
                 for patch_idx, patch_bounds in enumerate(patches):
                     cur_geom = STGeometry(
                         metadata["projection"], shapely.box(*patch_bounds), None
@@ -1076,12 +1123,13 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
         return self.dataset.get_dataset_examples()
 
 
-class AllPatchesDataset(torch.utils.data.Dataset):
+class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
     """This wraps a ModelDataset to iterate over all patches in that dataset.
 
-    This should be used when SplitConfig.load_all_patches is enabled. The ModelDataset
-    is configured with no patch size (load entire windows), and the dataset is wrapped
-    in an AllPatchesDataset.
+    This should be used when SplitConfig.load_all_patches is enabled.
+
+    This is a simpler version of IterableAllPatchesDataset that caches all windows in memory.
+    This is useful for small datasets that fit in memory.
     """
 
     def __init__(
@@ -1091,7 +1139,7 @@ class AllPatchesDataset(torch.utils.data.Dataset):
         overlap_ratio: float = 0.0,
         name: str | None = None,
     ):
-        """Create a new AllPatchesDataset.
+        """Create a new InMemoryAllPatchesDataset.
 
         Args:
             dataset: the ModelDataset to wrap.
@@ -1117,45 +1165,11 @@ class AllPatchesDataset(torch.utils.data.Dataset):
         # Precompute the batch boundaries for each window
         self.patches = []
         for window_id, window in enumerate(self.windows):
-            patch_bounds = self.get_window_patch_options(window.bounds)
+            patch_bounds = get_window_patch_options(
+                self.patch_size, self.overlap_size, window.bounds
+            )
             for i, patch_bound in enumerate(patch_bounds):
                 self.patches.append((window_id, patch_bound, (i, len(patch_bounds))))
-
-    def get_window_patch_options(self, bounds: PixelBounds) -> list[PixelBounds]:
-        """Get the bounds of each patch within the overall bounds.
-
-        Args:
-            bounds: the window bounds to divide up into smaller patches.
-
-        Returns:
-            a list of patch bounds within the overall bounds. The rightmost and
-                bottommost patches may extend beyond the provided bounds.
-        """
-        # We stride the patches by patch_size - overlap_size until the last patch.
-        # We handle the last patch with a special case to ensure it does not exceed the
-        # window bounds. Instead, it may overlap the previous patch.
-        cols = list(
-            range(
-                bounds[0],
-                bounds[2] - self.patch_size[0],
-                self.patch_size[0] - self.overlap_size[0],
-            )
-        ) + [bounds[2] - self.patch_size[0]]
-        rows = list(
-            range(
-                bounds[1],
-                bounds[3] - self.patch_size[1],
-                self.patch_size[1] - self.overlap_size[1],
-            )
-        ) + [bounds[3] - self.patch_size[1]]
-
-        patch_bounds: list[PixelBounds] = []
-        for col in cols:
-            for row in rows:
-                patch_bounds.append(
-                    (col, row, col + self.patch_size[0], row + self.patch_size[1])
-                )
-        return patch_bounds
 
     def get_raw_inputs(
         self, index: int
@@ -1173,18 +1187,11 @@ class AllPatchesDataset(torch.utils.data.Dataset):
         if index in self.window_cache:
             return self.window_cache[index]
 
-        # Pad tensors by patch size to protect slicing near right/bottom edges.
-        return_inputs = self.dataset.get_raw_inputs(index)
-        for d in return_inputs[:-1]:
-            for input_name, value in list(d.items()):
-                if not isinstance(value, torch.Tensor):
-                    continue
-                d[input_name] = torch.nn.functional.pad(
-                    value, pad=(0, self.patch_size[0], 0, self.patch_size[1])
-                )
+        raw_inputs, passthrough_inputs, metadata = self.dataset.get_raw_inputs(index)
+        pad_slice_protect(raw_inputs, passthrough_inputs, self.patch_size)
 
-        self.window_cache[index] = return_inputs
-        return return_inputs
+        self.window_cache[index] = (raw_inputs, passthrough_inputs, metadata)
+        return self.window_cache[index]
 
     @staticmethod
     def _crop_input_dict(
