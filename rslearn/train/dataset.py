@@ -932,7 +932,6 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
         )
         self.rank = rank
         self.world_size = world_size
-
         self.windows = self.dataset.get_dataset_examples()
 
     def set_name(self, name: str) -> None:
