@@ -74,7 +74,7 @@ def _run(callback: ActivateLayers, epoch: int, model: ToyModel) -> None:
     """
     trainer = FakeTrainer(current_epoch=epoch)
     # match the signature used in the provided callback
-    callback.on_train_epoch_start(trainer, model, batch=None, batch_idx=0)
+    callback.on_train_epoch_start(trainer, model)
 
 
 def test_activation_progression(

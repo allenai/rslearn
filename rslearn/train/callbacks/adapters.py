@@ -12,7 +12,13 @@ logger = get_logger(__name__)
 
 
 class ActivateLayers(Callback):
-    """Activates adapter layers on a given epoch."""
+    """Activates adapter layers on a given epoch.
+
+    By default, at every epoch, every adapter layer is deactivated.
+    To activate an adapter layer, add a selector with the name of the adapter layer
+    and the epoch at which to activate it. Once an adapter layer is activated, it
+    remains active until the end of training.
+    """
 
     def __init__(self, selectors: list[dict[str, Any]]) -> None:
         """Initialize the callback.
@@ -29,18 +35,14 @@ class ActivateLayers(Callback):
         self,
         trainer: Trainer,
         pl_module: LightningModule,
-        batch: Any,
-        batch_idx: int,
     ) -> None:
         """Activate adapter layers on a given epoch.
 
-        Adapter layers are activated/deactivate by setting the `active` attribute.
+        Adapter layers are activated/deactivated by setting the `active` attribute.
 
         Args:
             trainer: The trainer object.
             pl_module: The LightningModule object.
-            batch: The batch of data.
-            batch_idx: The index of the batch.
         """
         status = {}
         for name, module in pl_module.named_modules():
