@@ -922,7 +922,6 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                 all patches are contained in the window bounds.
             rank: the global rank of this train worker process.
             world_size: the total number of train worker processes.
-            name: name of this dataset
         """
         super().__init__()
         self.dataset = dataset
@@ -935,6 +934,14 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
         self.world_size = world_size
 
         self.windows = self.dataset.get_dataset_examples()
+
+    def set_name(self, name: str) -> None:
+        """Sets dataset name.
+
+        Args:
+            name: dataset name
+        """
+        self.dataset.set_name(name)
 
     def get_window_num_patches(self, bounds: PixelBounds) -> int:
         """Get the number of patches for these bounds.
@@ -1127,7 +1134,6 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
         dataset: ModelDataset,
         patch_size: tuple[int, int],
         overlap_ratio: float = 0.0,
-        name: str | None = None,
     ):
         """Create a new InMemoryAllPatchesDataset.
 
@@ -1137,7 +1143,6 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
             overlap_ratio: whether to include overlap between the patches. Note that
                 the right/bottom-most patches may still overlap since we ensure that
                 all patches are contained in the window bounds.
-            name: name of this dataset
         """
         super().__init__()
         self.dataset = dataset
@@ -1146,7 +1151,6 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
             round(self.patch_size[0] * overlap_ratio),
             round(self.patch_size[1] * overlap_ratio),
         )
-        self.name = name
         self.windows = self.dataset.get_dataset_examples()
         self.window_cache: dict[
             int, tuple[dict[str, Any], dict[str, Any], dict[str, Any]]
@@ -1258,7 +1262,7 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
         Args:
             name: dataset name
         """
-        self.name = name
+        self.dataset.set_name(name)
 
 
 class RetryDataset(torch.utils.data.Dataset):
