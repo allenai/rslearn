@@ -1,6 +1,5 @@
 """Spatiotemporal geometry utilities."""
 
-import warnings
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -374,25 +373,14 @@ def _collect_shapes(shapes: list[shapely.Geometry]) -> shapely.Geometry:
     return shapely.GeometryCollection(flat_list)
 
 
-def split_shape_at_prime_meridian(
-    shp: shapely.Geometry, epsilon: float = 1e-6
-) -> shapely.Geometry:
-    """Deprecated old incorrect name for split_shape_at_antimeridian."""
-    warnings.warn(
-        "split_shape_at_prime_meridian is deprecated; use split_shape_at_antimeridian instead.",
-        DeprecationWarning,
-    )
-    return split_shape_at_antimeridian(shp, epsilon)
-
-
 def split_shape_at_antimeridian(
     shp: shapely.Geometry, epsilon: float = 1e-6
 ) -> shapely.Geometry:
-    """Split the given shape at the prime meridian.
+    """Split the given shape at the antimeridian.
 
     The shape must be in WGS84 coordinates.
 
-    See split_at_prime_meridian for details.
+    See split_at_antimeridian for details.
 
     Args:
         shp: the shape to split.
@@ -404,7 +392,7 @@ def split_shape_at_antimeridian(
     # We assume the shape is fine if:
     # 1. It doesn't need padding (no coordinates close to +/- 180).
     # 2. And all coordinates are either less than 90 or more than -90 (meaning the
-    #    shape approaches the prime meridian on at most one side).
+    #    shape approaches the antimeridian on at most one side).
     bounds = shp.bounds
     if bounds[0] > -180 + epsilon and bounds[2] < 90:
         return shp
@@ -419,7 +407,7 @@ def split_shape_at_antimeridian(
         | shapely.GeometryCollection,
     ):
         return _collect_shapes(
-            [split_shape_at_prime_meridian(component) for component in shp.geoms]
+            [split_shape_at_antimeridian(component) for component in shp.geoms]
         )
 
     if isinstance(shp, shapely.Point):
@@ -451,17 +439,8 @@ def split_shape_at_antimeridian(
     raise TypeError("Unsupported shape type")
 
 
-def split_at_prime_meridian(geometry: STGeometry, epsilon: float = 1e-6) -> STGeometry:
-    """Deprecated old incorrect name for split_at_antimeridian."""
-    warnings.warn(
-        "split_at_prime_meridian is deprecated; use split_at_antimeridian instead.",
-        DeprecationWarning,
-    )
-    return split_at_antimeridian(geometry, epsilon)
-
-
 def split_at_antimeridian(geometry: STGeometry, epsilon: float = 1e-6) -> STGeometry:
-    """Split lines and polygons in the given geometry at the prime meridian.
+    """Split lines and polygons in the given geometry at the antimeridian.
 
     The returned geometry will always be in WGS84 projection.
 
@@ -486,5 +465,5 @@ def split_at_antimeridian(geometry: STGeometry, epsilon: float = 1e-6) -> STGeom
     """
     # Convert to WGS84.
     geometry = geometry.to_projection(Projection(CRS.from_epsg(4326), 1, 1))
-    new_shp = split_shape_at_prime_meridian(geometry.shp, epsilon=epsilon)
+    new_shp = split_shape_at_antimeridian(geometry.shp, epsilon=epsilon)
     return STGeometry(geometry.projection, new_shp, geometry.time_range)
