@@ -93,8 +93,8 @@ def test_duplicate_epoch_raises() -> None:
     with pytest.raises(ValueError):
         MultiStageFineTuning(
             [
-                {"at_epoch": 0, "freeze_selectors": [], "unfreeze_selectors": []},
-                {"at_epoch": 0, "freeze_selectors": [], "unfreeze_selectors": []},
+                FTStage(at_epoch=0, freeze_selectors=[], unfreeze_selectors=[]),
+                FTStage(at_epoch=0, freeze_selectors=[], unfreeze_selectors=[]),
             ]
         )
 
@@ -169,25 +169,25 @@ def test_multistage_lora_plus_head_then_all_with_lr_scaling(
     init_min_lr0 = sch.min_lrs[0]  # 0.02
 
     stages = [
-        {
-            "at_epoch": 0,
-            "freeze_selectors": ["backbone", "encoder"],
-            "unfreeze_selectors": ["head", "decoder"],
-            "unfreeze_lr_factor": 1.0,
-        },
-        {
-            "at_epoch": 3,
-            "freeze_selectors": ["backbone", "encoder"],
-            "unfreeze_selectors": ["lora_adapter", "head", "decoder"],
-            "unfreeze_lr_factor": 10.0,  # new groups at (current base)/10
-            "scale_existing_groups": 0.5,
-        },  # scale head and any existing groups by ×0.5
-        {
-            "at_epoch": 6,
-            "freeze_selectors": [],
-            "unfreeze_selectors": ["backbone", "head"],
-            "unfreeze_lr_factor": 1.0,
-        },
+        FTStage(
+            at_epoch=0,
+            freeze_selectors=["backbone", "encoder"],
+            unfreeze_selectors=["head", "decoder"],
+            unfreeze_lr_factor=1.0,
+        ),
+        FTStage(
+            at_epoch=3,
+            freeze_selectors=["backbone", "encoder"],
+            unfreeze_selectors=["lora_adapter", "head", "decoder"],
+            unfreeze_lr_factor=10.0,  # new groups at (current base)/10
+            scale_existing_groups=0.5,
+        ),  # scale head and any existing groups by ×0.5
+        FTStage(
+            at_epoch=6,
+            freeze_selectors=[],
+            unfreeze_selectors=["backbone", "head"],
+            unfreeze_lr_factor=1.0,
+        ),
     ]
     cb = MultiStageFineTuning(stages)
 
@@ -267,7 +267,7 @@ def test_empty_selectors_are_ignored(
     pl, opt, _ = scheduler_and_pl
     cb = MultiStageFineTuning(
         [
-            {"at_epoch": 0, "freeze_selectors": [""], "unfreeze_selectors": [""]},
+            FTStage(at_epoch=0, freeze_selectors=[""], unfreeze_selectors=[""]),
         ]
     )
 
@@ -291,11 +291,11 @@ def test_reapplying_same_epoch_has_no_effect(
     pl, opt, _ = scheduler_and_pl
     cb = MultiStageFineTuning(
         [
-            {
-                "at_epoch": 0,
-                "freeze_selectors": ["backbone"],
-                "unfreeze_selectors": ["head"],
-            },
+            FTStage(
+                at_epoch=0,
+                freeze_selectors=["backbone"],
+                unfreeze_selectors=["head"],
+            ),
         ]
     )
 
