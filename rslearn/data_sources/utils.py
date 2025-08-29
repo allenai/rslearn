@@ -256,30 +256,7 @@ def match_candidate_items_to_window(
             if item_geom.is_global():
                 item_geom = geometry
             else:
-                # Windows are usually smaller than items.
-                # So we first clip the item to the window bounds in the item's
-                # projection, then re-project the item to the window's projection.
-                window_bounds = geometry.shp.bounds
-                buffered_window_bounds = (
-                    window_bounds[0] - 1,
-                    window_bounds[1] - 1,
-                    window_bounds[2] + 1,
-                    window_bounds[3] + 1,
-                )
-                buffered_window_geom = STGeometry(
-                    geometry.projection,
-                    shapely.box(*buffered_window_bounds),
-                    geometry.time_range,
-                )
-                window_shp_in_item_proj = buffered_window_geom.to_projection(
-                    item_geom.projection
-                ).shp
-                clipped_item_geom = STGeometry(
-                    item_geom.projection,
-                    item_geom.shp.intersection(window_shp_in_item_proj),
-                    item_geom.time_range,
-                )
-                item_geom = clipped_item_geom.to_projection(geometry.projection)
+                item_geom = item_geom.to_projection(geometry.projection)
         item_shps.append(item_geom.shp)
 
     if query_config.space_mode == SpaceMode.CONTAINS:
