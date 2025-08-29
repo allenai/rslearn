@@ -1,5 +1,6 @@
 """Spatiotemporal geometry utilities."""
 
+import warnings
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -376,6 +377,17 @@ def _collect_shapes(shapes: list[shapely.Geometry]) -> shapely.Geometry:
 def split_shape_at_prime_meridian(
     shp: shapely.Geometry, epsilon: float = 1e-6
 ) -> shapely.Geometry:
+    """Deprecated old incorrect name for split_shape_at_antimeridian."""
+    warnings.warn(
+        "split_shape_at_prime_meridian is deprecated; use split_shape_at_antimeridian instead.",
+        DeprecationWarning,
+    )
+    return split_shape_at_antimeridian(shp, epsilon)
+
+
+def split_shape_at_antimeridian(
+    shp: shapely.Geometry, epsilon: float = 1e-6
+) -> shapely.Geometry:
     """Split the given shape at the prime meridian.
 
     The shape must be in WGS84 coordinates.
@@ -440,6 +452,15 @@ def split_shape_at_prime_meridian(
 
 
 def split_at_prime_meridian(geometry: STGeometry, epsilon: float = 1e-6) -> STGeometry:
+    """Deprecated old incorrect name for split_at_antimeridian."""
+    warnings.warn(
+        "split_at_prime_meridian is deprecated; use split_at_antimeridian instead.",
+        DeprecationWarning,
+    )
+    return split_at_antimeridian(geometry, epsilon)
+
+
+def split_at_antimeridian(geometry: STGeometry, epsilon: float = 1e-6) -> STGeometry:
     """Split lines and polygons in the given geometry at the prime meridian.
 
     The returned geometry will always be in WGS84 projection.

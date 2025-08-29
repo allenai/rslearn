@@ -6,7 +6,7 @@ import shapely
 from rasterio import CRS
 
 from rslearn.const import WGS84_PROJECTION
-from rslearn.utils.geometry import Projection, STGeometry, split_shape_at_prime_meridian
+from rslearn.utils.geometry import Projection, STGeometry, split_shape_at_antimeridian
 
 WEB_MERCATOR_EPSG = 3857
 
@@ -124,20 +124,20 @@ class TestSTGeometry:
         assert new_geom.time_range == geom.time_range
 
 
-class TestSplitPrimeMeridian:
+class TestSplitAntiMeridian:
     epsilon = 1e-3
 
     def test_point_unaffected(self) -> None:
         # This point shouldn't be modified.
-        p = split_shape_at_prime_meridian(shapely.Point(0, 0))
+        p = split_shape_at_antimeridian(shapely.Point(0, 0))
         assert p.x == 0 and p.y == 0
 
     def test_point_negative_antimeridian(self) -> None:
-        p = split_shape_at_prime_meridian(shapely.Point(-180, 45), epsilon=self.epsilon)
+        p = split_shape_at_antimeridian(shapely.Point(-180, 45), epsilon=self.epsilon)
         assert abs(p.x - (-180 + self.epsilon)) < self.epsilon / 2 and p.y == 45
 
     def test_point_positive_antimeridian(self) -> None:
-        p = split_shape_at_prime_meridian(shapely.Point(180, 45), epsilon=self.epsilon)
+        p = split_shape_at_antimeridian(shapely.Point(180, 45), epsilon=self.epsilon)
         assert abs(p.x - (180 - self.epsilon)) < self.epsilon / 2 and p.y == 45
 
     def test_line(self) -> None:
@@ -147,7 +147,7 @@ class TestSplitPrimeMeridian:
                 [-175, 2],
             ]
         )
-        output = split_shape_at_prime_meridian(line)
+        output = split_shape_at_antimeridian(line)
         # Should consist of two lines, one from (175, 1) to (180-ish, 1.5).
         # And another from (-180-ish, 1.5) to (-175, 2).
         assert isinstance(output, shapely.MultiLineString)
@@ -171,7 +171,7 @@ class TestSplitPrimeMeridian:
             ]
         )
         expected_area = 2
-        output = split_shape_at_prime_meridian(polygon)
+        output = split_shape_at_antimeridian(polygon)
         assert abs(output.area - expected_area) < self.epsilon
         assert (output.bounds[0] + 180) < self.epsilon and (
             output.bounds[2] - 180
@@ -180,5 +180,5 @@ class TestSplitPrimeMeridian:
     def test_polygon_crossing_zero_longitude(self) -> None:
         # Splitting shouldn't affect shapes that don't need to be split.
         polygon = shapely.box(-1, -1, 1, 1)
-        output = split_shape_at_prime_meridian(polygon)
+        output = split_shape_at_antimeridian(polygon)
         assert output == polygon
