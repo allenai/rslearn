@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any
 
 import torch
 from lightning.pytorch import LightningModule
@@ -106,6 +105,10 @@ class FTStage:
     matches any substring in `freeze_selectors` will be frozen, except those whose
     name matches any substring in `unfreeze_selectors`, which are forced trainable.
 
+    freeze_selectors does not carry over to other stages. That is, if you freeze module
+    A for stage 1, it will not be frozen for stage 2 unless specified again in stage 2.
+    All stages indepedently update trainability of all modules specified or unspecified.
+
     Args:
         at_epoch: Epoch index at which to apply this stage (0-based).
         freeze_selectors: Substrings; any module name containing any of these will
@@ -144,37 +147,17 @@ class MultiStageFineTuning(BaseFinetuning):
     from scratch at each stage to keep behavior predictable on resume.
     """
 
-    def __init__(self, stages: Sequence[dict[str, Any] | FTStage]) -> None:
+    def __init__(self, stages: list[FTStage]) -> None:
         """Multi-stage fine-tuning with flexible name-based selection.
 
         Args:
-            stages: A sequence of stage specifications. Each element may be either an
-                `FTStage` instance or a `dict` with keys:
-                `{"at_epoch", "freeze_selectors", "unfreeze_selectors",
-                  "unfreeze_lr_factor", "scale_existing_groups"}`.
+            stages: A sequence of stage specifications.
 
         Raises:
             ValueError: If two stages specify the same `at_epoch`.
         """
         super().__init__()
-        self.stages: list[FTStage] = []
-        for s in stages:
-            if isinstance(s, FTStage):
-                self.stages.append(s)
-            else:
-                self.stages.append(
-                    FTStage(
-                        at_epoch=int(s.get("at_epoch", 0)),
-                        freeze_selectors=list(s.get("freeze_selectors", [])),
-                        unfreeze_selectors=list(s.get("unfreeze_selectors", [])),
-                        unfreeze_lr_factor=float(s.get("unfreeze_lr_factor", 1.0)),
-                        scale_existing_groups=(
-                            None
-                            if s.get("scale_existing_groups", None) is None
-                            else float(s["scale_existing_groups"])
-                        ),
-                    )
-                )
+        self.stages = stages
 
         # Validate uniqueness of epochs and sort stages.
         seen: set[int] = set()
