@@ -15,6 +15,7 @@ from typing import Any
 import shapely
 import torch
 import tqdm
+from rasterio.warp import Resampling
 
 import rslearn.train.transforms.transform
 from rslearn.config import (
@@ -244,19 +245,44 @@ def read_raster_layer_for_data_input(
         raster_dir = window.get_raster_dir(
             layer_name, band_set.bands, group_idx=group_idx
         )
-        src = raster_format.decode_raster(raster_dir, final_projection, final_bounds)
-        if src is None:
-            raise ValueError(f"Source is None for {data_input}")
-        # Resize to patch size if needed.
-        # This is for band sets that are stored at a lower resolution.
-        # Here we assume that it is a multiple.
-        if src.shape[1:3] != image.shape[1:3]:
-            if src.shape[1] < image.shape[1]:
-                factor = image.shape[1] // src.shape[1]
-                src = src.repeat(repeats=factor, axis=1).repeat(repeats=factor, axis=2)
-            else:
-                factor = src.shape[1] // image.shape[1]
-                src = src[:, ::factor, ::factor]
+
+        # Previously we always read in the native projection of the data, and then
+        # zoom in or out (the resolution must be a power of two off) to match the
+        # window's resolution.
+        # However, this fails if the bounds are not multiples of the resolution factor.
+        # So we fallback to reading directly in the window projection if that is the
+        # case (which may be a bit slower).
+        is_bounds_zoomable = True
+        if band_set.zoom_offset < 0:
+            zoom_factor = 2 ** (-band_set.zoom_offset)
+            is_bounds_zoomable = (final_bounds[2] - final_bounds[0]) * zoom_factor == (
+                bounds[2] - bounds[0]
+            ) and (final_bounds[3] - final_bounds[1]) * zoom_factor == (
+                bounds[3] - bounds[1]
+            )
+
+        if is_bounds_zoomable:
+            src = raster_format.decode_raster(
+                raster_dir, final_projection, final_bounds
+            )
+
+            # Resize to patch size if needed.
+            # This is for band sets that are stored at a lower resolution.
+            # Here we assume that it is a multiple.
+            if src.shape[1:3] != image.shape[1:3]:
+                if src.shape[1] < image.shape[1]:
+                    factor = image.shape[1] // src.shape[1]
+                    src = src.repeat(repeats=factor, axis=1).repeat(
+                        repeats=factor, axis=2
+                    )
+                else:
+                    factor = src.shape[1] // image.shape[1]
+                    src = src[:, ::factor, ::factor]
+
+        else:
+            src = raster_format.decode_raster(
+                raster_dir, window.projection, bounds, resampling=Resampling.nearest
+            )
 
         image[dst_indexes, :, :] = torch.as_tensor(
             src[src_indexes, :, :].astype(data_input.dtype.get_numpy_dtype())
