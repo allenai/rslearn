@@ -911,7 +911,6 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
         overlap_ratio: float = 0.0,
         rank: int = 0,
         world_size: int = 1,
-        name: str | None = None,
     ):
         """Create a new IterableAllPatchesDataset.
 
@@ -933,17 +932,7 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
         )
         self.rank = rank
         self.world_size = world_size
-
         self.windows = self.dataset.get_dataset_examples()
-        self.name = name
-
-    def set_name(self, name: str) -> None:
-        """Sets dataset name.
-
-        Args:
-            name: dataset name
-        """
-        self.name = name
 
     def set_name(self, name: str) -> None:
         """Sets dataset name.
