@@ -135,11 +135,9 @@ class SegmentationTask(BasicTask):
         Returns:
             either raster or vector data.
         """
-        raw_output_np = raw_output.cpu().numpy()
         if self.prob_scales is not None:
-            # Scale the channel dimension by the provided scales.
-            raw_output_np = raw_output_np * np.array(self.prob_scales)[:, None, None]
-        classes = raw_output_np.argmax(axis=0).astype(np.uint8)
+            raw_output = raw_output * torch.tensor(self.prob_scales)[:, None, None]
+        classes = raw_output.argmax(dim=0).cpu().numpy().astype(np.uint8)
         return classes[None, :, :]
 
     def visualize(
