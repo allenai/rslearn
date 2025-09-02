@@ -166,17 +166,27 @@ class RslearnDataModule(L.LightningDataModule):
             split: the split to get a dataloader for
         """
         dataset = self.datasets[split]
+        split_config = self.split_configs[split]
+
+        # Enable persistent workers unless we are using main process.
         persistent_workers = self.num_workers > 0
+
+        # If using all patches, limit number of workers to the number of windows.
+        # Otherwise it has to distribute the same window to different workers which can
+        # cause issues for RslearnWriter.
+        if split_config.load_all_patches:
+            num_workers = min(self.num_workers, len(dataset.get_dataset_examples()))
+
         kwargs: dict[str, Any] = dict(
             dataset=dataset,
             batch_size=self.batch_size,
-            num_workers=self.num_workers,
+            num_workers=num_workers,
             collate_fn=collate_fn,
             persistent_workers=persistent_workers,
         )
         should_shuffle = split == "train"
 
-        sampler_factory = self.split_configs[split].sampler
+        sampler_factory = split_config.sampler
         if sampler_factory:
             kwargs["sampler"] = sampler_factory.get_sampler(dataset)
         elif (
