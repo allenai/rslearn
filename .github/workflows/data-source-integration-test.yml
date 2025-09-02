@@ -132,6 +132,10 @@ jobs:
           NASA_EARTHDATA_PASSWORD: ${{ secrets.NASA_EARTHDATA_PASSWORD }}
           COPERNICUS_USERNAME: ${{ secrets.COPERNICUS_USERNAME }}
           COPERNICUS_PASSWORD: ${{ secrets.COPERNICUS_PASSWORD }}
+          EDS_API_URL: ${{ secrets.EDS_API_URL }}
+          EDS_AUTH_URL: ${{ secrets.EDS_AUTH_URL }}
+          EDS_CLIENT_ID: ${{ secrets.EDS_CLIENT_ID }}
+          EDS_SECRET: ${{ secrets.EDS_SECRET }}
 
       - name: Clean up
         if: always()
