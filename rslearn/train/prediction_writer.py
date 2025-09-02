@@ -18,6 +18,7 @@ from rslearn.config import (
     VectorLayerConfig,
 )
 from rslearn.dataset import Dataset, Window
+from rslearn.log_utils import get_logger
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds
@@ -26,6 +27,8 @@ from rslearn.utils.vector_format import VectorFormat, load_vector_format
 
 from .lightning_module import RslearnLightningModule
 from .tasks.task import Task
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -305,6 +308,9 @@ class RslearnWriter(BasePredictionWriter):
         if window.name not in self.pending_outputs:
             self.pending_outputs[window.name] = []
         self.pending_outputs[window.name].append(PendingPatchOutput(cur_bounds, output))
+        logger.debug(
+            f"Stored PendingPatchOutput for patch #{patch_idx}/{num_patches} at window {window.name}"
+        )
 
         if patch_idx < num_patches - 1:
             return
@@ -315,6 +321,7 @@ class RslearnWriter(BasePredictionWriter):
         del self.pending_outputs[window.name]
 
         # Merge outputs from overlapped patches if merger is set.
+        logger.debug(f"Merging and writing for window {window.name}")
         merged_output = self.merger.merge(window, pending_output)
 
         if self.layer_config.layer_type == LayerType.RASTER:
