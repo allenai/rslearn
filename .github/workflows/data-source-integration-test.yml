@@ -110,6 +110,10 @@ jobs:
             -e NASA_EARTHDATA_PASSWORD="${NASA_EARTHDATA_PASSWORD}" \
             -e COPERNICUS_USERNAME="${COPERNICUS_USERNAME}" \
             -e COPERNICUS_PASSWORD="${COPERNICUS_PASSWORD}" \
+            -e EDS_API_URL="${EDS_API_URL}" \
+            -e EDS_AUTH_URL="${EDS_AUTH_URL}" \
+            -e EDS_CLIENT_ID="${EDS_CLIENT_ID}" \
+            -e EDS_SECRET="${EDS_SECRET}" \
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
