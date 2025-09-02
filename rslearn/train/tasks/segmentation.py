@@ -136,7 +136,12 @@ class SegmentationTask(BasicTask):
             either raster or vector data.
         """
         if self.prob_scales is not None:
-            raw_output = raw_output * torch.tensor(self.prob_scales)[:, None, None]
+            raw_output = (
+                raw_output
+                * torch.tensor(
+                    self.prob_scales, device=raw_output.device, dtype=raw_output.dtype
+                )[:, None, None]
+            )
         classes = raw_output.argmax(dim=0).cpu().numpy().astype(np.uint8)
         return classes[None, :, :]
 
