@@ -28,17 +28,17 @@ logger = get_logger(__name__)
 
 
 def collate_fn(
-    batch: list[tuple[dict[str, Any], dict[str, Any]]],
+    batch: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]],
 ) -> tuple:
     """Collate batch of training examples.
 
     We just make list of the inputs and another of the targets.
 
     Args:
-        batch: list of input/target for each example
+        batch: list of input/target/metadata for each example
 
     Returns:
-        a tuple (inputs, targets)
+        a tuple (inputs, targets, metadatas)
     """
     return tuple(zip(*batch))
 

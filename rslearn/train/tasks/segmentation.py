@@ -109,7 +109,6 @@ class SegmentationTask(BasicTask):
         if not load_targets:
             return {}, {}
 
-        # TODO: List[Feature] is currently not supported
         assert raw_inputs["targets"].shape[0] == 1
         labels = raw_inputs["targets"][0, :, :].long()
 
