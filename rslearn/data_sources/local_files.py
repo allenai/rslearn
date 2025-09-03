@@ -205,6 +205,12 @@ class RasterImporter(Importer):
                 if path.name.endswith(".json"):
                     continue
 
+                # Ignore temporary files that may be created by open_atomic.
+                # The suffix should be like "X.tif.tmp.1234".
+                parts = path.name.split(".")
+                if len(parts) >= 4 and parts[-2] == "tmp" and parts[-1].isdigit():
+                    continue
+
                 spec = RasterItemSpec(fnames=[path], bands=None)
                 item_specs.append(spec)
 
@@ -259,7 +265,7 @@ class RasterImporter(Importer):
                 if item.spec.bands:
                     bands = item.spec.bands[file_idx]
                 else:
-                    bands = [f"B{band_idx+1}" for band_idx in range(src.count)]
+                    bands = [f"B{band_idx + 1}" for band_idx in range(src.count)]
 
             if tile_store.is_raster_ready(item.name, bands):
                 continue

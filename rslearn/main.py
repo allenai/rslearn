@@ -5,7 +5,7 @@ import multiprocessing
 import random
 import sys
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 
 import tqdm
@@ -56,7 +56,7 @@ def parse_time(time_str: str) -> datetime:
     """
     ts = datetime.fromisoformat(time_str)
     if not ts.tzinfo:
-        ts = ts.replace(tzinfo=timezone.utc)
+        ts = ts.replace(tzinfo=UTC)
     return ts
 
 
@@ -244,7 +244,11 @@ def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
         "--root", type=str, required=True, help="Dataset root directory"
     )
     parser.add_argument(
-        "--group", type=str, default=None, help="Only prepare windows in this group"
+        "--group",
+        type=str,
+        nargs="*",
+        default=None,
+        help="Only prepare windows in these groups",
     )
     parser.add_argument(
         "--window", type=str, nargs="*", default=None, help="Only prepare these windows"
@@ -284,7 +288,7 @@ def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
 def apply_on_windows(
     f: Callable[[list[Window]], None],
     dataset: Dataset,
-    group: str | None = None,
+    group: str | list[str] | None = None,
     names: list[str] | None = None,
     workers: int = 0,
     load_workers: int | None = None,
@@ -316,9 +320,14 @@ def apply_on_windows(
     if hasattr(f, "set_dataset"):
         f.set_dataset(dataset)
 
-    groups = None
-    if group:
+    # Handle group. It can be None (load all groups) or list of groups. But it can also
+    # just be group name, in which case we must convert to list.
+    groups: list[str] | None
+    if isinstance(group, str):
         groups = [group]
+    else:
+        groups = group
+
     if load_workers is None:
         load_workers = workers
     windows = dataset.load_windows(

@@ -9,7 +9,8 @@ from collections import OrderedDict as OrderedDictType
 from collections.abc import Sequence
 from enum import Enum
 from pathlib import Path
-from typing import NamedTuple, cast
+from typing import NamedTuple, cast, Any
+from copy import deepcopy
 
 import numpy as np
 import torch
@@ -45,6 +46,8 @@ pretrained_weights: dict[GalileoSize, str] = {
 
 # band information
 S1_BANDS = ["VV", "VH"]
+S1_SHIFT_VALUES = [25.0, 25.0]
+S1_DIV_VALUES = [25.0, 25.0]
 S2_BANDS = [
     "B2",
     "B3",
@@ -57,10 +60,28 @@ S2_BANDS = [
     "B11",
     "B12",
 ]
+S2_SHIFT_VALUES = [float(0.0)] * len(S2_BANDS)
+S2_DIV_VALUES = [float(1e4)] * len(S2_BANDS)
 ERA5_BANDS = ["temperature_2m", "total_precipitation_sum"]
+# for temperature, shift to celcius and then divide by 35 based on notebook (ranges from)
+# 37 to -22 degrees celcius
+# For rainfall, based on
+# https://github.com/nasaharvest/lem/blob/main/notebooks/exploratory_data_analysis.ipynb
+ERA5_SHIFT_VALUES = [-272.15, 0.0]
+ERA5_DIV_VALUES = [35.0, 0.03]
 TC_BANDS = ["def", "soil", "aet"]
+TC_SHIFT_VALUES = [0.0, 0.0, 0.0]
+TC_DIV_VALUES = [4548, 8882, 2000]
 VIIRS_BANDS = ["avg_rad"]
+VIIRS_SHIFT_VALUES = [0.0]
+# visually checked - this seems much more reasonable than
+# the GEE estimate
+VIIRS_DIV_VALUES = [100]
 SRTM_BANDS = ["elevation", "slope"]
+# visually gauged 90th percentile from
+# https://github.com/nasaharvest/lem/blob/main/notebooks/exploratory_data_analysis.ipynb
+SRTM_SHIFT_VALUES = [0.0, 0.0]
+SRTM_DIV_VALUES = [2000.0, 50.0]
 DW_BANDS = [
     "DW_water",
     "DW_trees",
@@ -72,6 +93,9 @@ DW_BANDS = [
     "DW_bare",
     "DW_snow_and_ice",
 ]
+DW_SHIFT_VALUES = [0] * len(DW_BANDS)
+DW_DIV_VALUES = [1] * len(DW_BANDS)
+
 WC_BANDS = [
     "WC_temporarycrops",
     "WC_maize",
@@ -79,10 +103,15 @@ WC_BANDS = [
     "WC_springcereals",
     "WC_irrigation",
 ]
+WC_SHIFT_VALUES = [0] * len(WC_BANDS)
+WC_DIV_VALUES = [100] * len(WC_BANDS)
 STATIC_DW_BANDS = [f"{x}_static" for x in DW_BANDS]
 STATIC_WC_BANDS = [f"{x}_static" for x in WC_BANDS]
 
 LANDSCAN_BANDS = ["b1"]
+# LANDSCAN values range from approximately 0 to 185000 in 2022: https://code.earthengine.google.com/?scriptPath=users/sat-io/awesome-gee-catalog-examples:population-socioeconomics/LANDSCAN-GLOBAL
+LANDSCAN_SHIFT_VALUES = [92500]
+LANDSCAN_DIV_VALUES = [92500]
 LOCATION_BANDS = ["x", "y", "z"]
 
 SPACE_TIME_BANDS = S1_BANDS + S2_BANDS + ["NDVI"]
@@ -90,6 +119,16 @@ TIME_BANDS = ERA5_BANDS + TC_BANDS + VIIRS_BANDS
 SPACE_BANDS = SRTM_BANDS + DW_BANDS + WC_BANDS
 STATIC_BANDS = LANDSCAN_BANDS + LOCATION_BANDS + STATIC_DW_BANDS + STATIC_WC_BANDS
 
+# 0 for NDVI
+SPACE_TIME_SHIFT_VALUES = np.array(S1_SHIFT_VALUES + S2_SHIFT_VALUES + [0])
+SPACE_TIME_DIV_VALUES = np.array(S1_DIV_VALUES + S2_DIV_VALUES + [1])
+TIME_SHIFT_VALUES = np.array(ERA5_SHIFT_VALUES + TC_SHIFT_VALUES + VIIRS_SHIFT_VALUES)
+TIME_DIV_VALUES = np.array(ERA5_DIV_VALUES + TC_DIV_VALUES + VIIRS_DIV_VALUES)
+SPACE_SHIFT_VALUES = np.array(SRTM_SHIFT_VALUES + DW_SHIFT_VALUES + WC_SHIFT_VALUES)
+SPACE_DIV_VALUES = np.array(SRTM_DIV_VALUES + DW_DIV_VALUES + WC_DIV_VALUES)
+# [0s, 1s] for the locations
+STATIC_SHIFT_VALUES = np.array(LANDSCAN_SHIFT_VALUES + [0, 0, 0])
+STATIC_DIV_VALUES = np.array(LANDSCAN_DIV_VALUES + [1, 1, 1])
 
 SPACE_TIME_BANDS_GROUPS_IDX: OrderedDictType[str, list[int]] = OrderedDict(
     {
@@ -287,7 +326,25 @@ class Normalizer:
             len(TIME_BANDS): TIME_BANDS,
             len(STATIC_BANDS): STATIC_BANDS,
         }
-        self.shift_div_dict: dict[int, dict[str, torch.Tensor]] = {}
+        self.shift_div_dict = {
+            len(SPACE_TIME_BANDS): {
+                "shift": deepcopy(SPACE_TIME_SHIFT_VALUES),
+                "div": deepcopy(SPACE_TIME_DIV_VALUES),
+            },
+            len(SPACE_BANDS): {
+                "shift": deepcopy(SPACE_SHIFT_VALUES),
+                "div": deepcopy(SPACE_DIV_VALUES),
+            },
+            len(TIME_BANDS): {
+                "shift": deepcopy(TIME_SHIFT_VALUES),
+                "div": deepcopy(TIME_DIV_VALUES),
+            },
+            len(STATIC_BANDS): {
+                "shift": deepcopy(STATIC_SHIFT_VALUES),
+                "div": deepcopy(STATIC_DIV_VALUES),
+            },
+        }
+
         for key_as_str, val in NORMALIZING_DICT.items():
             if "n" in key_as_str:
                 continue
@@ -304,6 +361,7 @@ class Normalizer:
                     raise ValueError(f"{band} has div value of 0")
                 self.shift_div_dict[key]["shift"][band_idx] = min_value
                 self.shift_div_dict[key]["div"][band_idx] = div
+        print(self.shift_div_dict)
 
     @staticmethod
     def _normalize(
@@ -1623,7 +1681,7 @@ class GalileoModel(nn.Module):
 
     def __init__(
         self,
-        model_size: GalileoSize,
+        size: GalileoSize,
     ) -> None:
         """Initialize the Galileo model.
 
@@ -1633,11 +1691,11 @@ class GalileoModel(nn.Module):
         super().__init__()
         _ = hf_hub_download(
             repo_id=HF_HUB_ID,
-            filename=f"{pretrained_weights[model_size]}/{ENCODER_FILENAME}",
+            filename=f"{pretrained_weights[size]}/{ENCODER_FILENAME}",
         )
         config_file = hf_hub_download(
             repo_id=HF_HUB_ID,
-            filename=f"{pretrained_weights[model_size]}/{CONFIG_FILENAME}",
+            filename=f"{pretrained_weights[size]}/{CONFIG_FILENAME}",
         )
 
         model_folder = Path(config_file).parent
@@ -1884,3 +1942,28 @@ class GalileoModel(nn.Module):
             static_mask=st_m,
             months=months,
         )
+
+    def forward(self, inputs: list[dict[str, Any]]) -> torch.Tensor:
+        """Compute feature maps from the Croma backbone.
+
+        Inputs:
+            inputs: input dicts that must include either/both of "sentinel2" or
+                "sentinel1" keys depending on the configured modality.
+        """
+
+        stacked_inputs = {}
+        for key in inputs[0].keys():
+            # assume all the keys in an input are consistent
+            stacked_inputs[key] = torch.stack([inp[key] for inp in inputs], dim=0)
+        features = self.model(self.construct_galileo_input(**stacked_inputs, normalize=True))
+
+        # # Rearrange from patch embeddings to 2D feature map.
+        # num_patches_per_dim = self.image_resolution // PATCH_SIZE
+        # features = rearrange(
+        #     features,
+        #     "b (h w) d -> b d h w",
+        #     h=num_patches_per_dim,
+        #     w=num_patches_per_dim,
+        # )
+
+        return [features]

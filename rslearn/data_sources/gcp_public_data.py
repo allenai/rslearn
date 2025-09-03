@@ -26,7 +26,7 @@ from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath, open_atomic
-from rslearn.utils.geometry import STGeometry, flatten_shape, split_at_prime_meridian
+from rslearn.utils.geometry import STGeometry, flatten_shape, split_at_antimeridian
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 from .copernicus import get_harmonize_callback, get_sentinel2_tiles
@@ -358,7 +358,7 @@ class Sentinel2(DataSource):
             shp = shapely.box(*bounds)
             sensing_time = row["sensing_time"]
             geometry = STGeometry(WGS84_PROJECTION, shp, (sensing_time, sensing_time))
-            geometry = split_at_prime_meridian(geometry)
+            geometry = split_at_antimeridian(geometry)
 
             cloud_cover = float(row["cloud_cover"])
 
@@ -401,7 +401,7 @@ class Sentinel2(DataSource):
         cell_id = cell_id_with_prefix[1:]
         return self._build_cell_folder_name(cell_id) + f"{item_name}.SAFE/"
 
-    def _get_xml_by_name(self, name: str) -> ET.ElementTree:
+    def _get_xml_by_name(self, name: str) -> "ET.ElementTree[ET.Element[str]]":
         """Gets the metadata XML of an item by its name.
 
         Args:
@@ -511,7 +511,7 @@ class Sentinel2(DataSource):
 
         time_range = (product_xml.start_time, product_xml.start_time)
         geometry = STGeometry(WGS84_PROJECTION, product_xml.shp, time_range)
-        geometry = split_at_prime_meridian(geometry)
+        geometry = split_at_antimeridian(geometry)
 
         # Sometimes the geometry is not valid.
         # We just apply make_valid on it to correct issues.

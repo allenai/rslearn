@@ -1,19 +1,72 @@
 [project]
 name = "rslearn"
-version = "0.0.2"
+version = "0.0.3"
 description = "A library for developing remote sensing datasets and models"
 authors = [
-    {name = "Favyen Bastani", email = "favyenb@allenai.org"},
-    {name = "Yawen Zhang", email = "yawenz@allenai.org"},
-    {name = "Patrick Beukema", email = "patrickb@allenai.org"},
-    {name = "Henry Herzog", email = "henryh@allenai.org"},
-    {name = "Piper Wolters", email = "piperw@allenai.org"},
+    { name = "OlmoEarth Team" },
 ]
 readme = "README.md"
 license = {file = "LICENSE"}
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
-dynamic = ["dependencies", "optional-dependencies"]
+dependencies = [
+    "boto3>=1.39",
+    "class_registry>=2.1",
+    "fiona>=1.10",
+    # Need this pin since 2025.7.0 has slow performance for exists/ls operations, see
+    # this issue: https://github.com/fsspec/gcsfs/issues/696
+    "fsspec==2025.3.0",
+    "jsonargparse>=4.35.0",
+    "lightning>=2.5.1.post0",
+    "Pillow>=11.3",
+    "pyproj>=3.7",
+    "python-dateutil>=2.9",
+    "pytimeparse>=1.1",
+    "rasterio>=1.4",
+    "shapely>=2.1",
+    "torch>=2.7.0",
+    "torchvision>=0.22.0",
+    "tqdm>=4.67",
+    "universal_pathlib>=0.2.6",
+]
+
+[project.optional-dependencies]
+# These are requirements that are specific to a subset of data sources or models.
+extra = [
+    "accelerate>=1.10",
+    "cdsapi>=0.7.6",
+    "earthdaily[platform]>=1.0.0",
+    "earthengine-api>=1.6.3",
+    "einops>=0.8",
+    "gcsfs==2025.3.0",
+    "google-cloud-bigquery>=3.35",
+    "google-cloud-storage>=2.18",
+    "netCDF4>=1.7.2",
+    "osmium>=4.0.2",
+    "planet>=3.1",
+    "planetary_computer>=1.0",
+    "pycocotools>=2.0",
+    "pystac_client>=0.9",
+    "rtree>=1.4",
+    "s3fs==2025.3.0",
+    "satlaspretrain_models>=0.3",
+    "scipy>=1.16",
+    "terratorch>=1.0.2",
+    "transformers>=4.55",
+    "wandb>=0.21",
+    "huggingface_hub",
+]
+
+dev = [
+    "interrogate>=1.7.0",
+    "mypy>=1.17.1,<2",
+    "pre-commit>=4.3.0",
+    "pytest>=8.0",
+    "pytest_httpserver",
+    "ruff>=0.12.9",
+    "pytest-dotenv",
+    "pytest-xdist",
+]
 
 [build-system]
 requires = ["setuptools>=61"]
@@ -24,10 +77,6 @@ rslearn = "rslearn.main:main"
 
 [tool.setuptools.packages.find]
 include = ["rslearn*"]
-
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
-optional-dependencies = {extra = { file = ["extra_requirements.txt"] }}
 
 [tool.setuptools.package-data]
 rslearn = ["py.typed"]

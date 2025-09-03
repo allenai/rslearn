@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import shapely
@@ -8,7 +8,7 @@ from rslearn.config import QueryConfig, SpaceMode, TimeMode
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
-from rslearn.utils.geometry import STGeometry, get_global_geometry
+from rslearn.utils.geometry import Projection, STGeometry, get_global_geometry
 
 
 def test_global_geometry() -> None:
@@ -24,9 +24,42 @@ def test_global_geometry() -> None:
     assert len(item_groups[0]) == 1
 
 
+def test_window_geometry_crossing_antimeridian() -> None:
+    """Verify that a window geometry crossing the antimeridian is handled correctly."""
+    item_geom = STGeometry(
+        WGS84_PROJECTION,
+        shapely.Polygon(
+            [
+                (-179.997854, -16.170659),
+                (-179.969444, -16.170659),
+                (-179.969444, -16.143371),
+                (-179.997854, -16.143371),
+                (-179.997854, -16.170659),
+            ]
+        ),
+        (
+            datetime(2025, 1, 27, 9, 5, 59, 24000, tzinfo=UTC),
+            datetime(2025, 1, 27, 9, 5, 59, 24000, tzinfo=UTC),
+        ),
+    )
+    window_geom = STGeometry(
+        Projection(CRS.from_epsg(32701), 1, -1),
+        shapely.box(179162, -8211693, 180177, -8210678),
+        (
+            datetime(2024, 12, 31, 14, 0, tzinfo=UTC),
+            datetime(2025, 8, 27, 14, 0, tzinfo=UTC),
+        ),
+    )
+    item_groups = match_candidate_items_to_window(
+        window_geom, [Item("item", item_geom)], QueryConfig()
+    )
+    assert len(item_groups) == 1
+    assert len(item_groups[0]) == 1
+
+
 class TestTimeMode:
-    START_TIME = datetime(2024, 1, 1, tzinfo=timezone.utc)
-    END_TIME = datetime(2024, 1, 2, tzinfo=timezone.utc)
+    START_TIME = datetime(2024, 1, 1, tzinfo=UTC)
+    END_TIME = datetime(2024, 1, 2, tzinfo=UTC)
     BBOX = shapely.box(0, 0, 1, 1)
 
     @pytest.fixture
@@ -84,8 +117,8 @@ class TestTimeMode:
 class TestSpaceMode:
     """Test the contains and intersects space modes."""
 
-    START_TIME = datetime(2024, 1, 1, tzinfo=timezone.utc)
-    END_TIME = datetime(2024, 1, 2, tzinfo=timezone.utc)
+    START_TIME = datetime(2024, 1, 1, tzinfo=UTC)
+    END_TIME = datetime(2024, 1, 2, tzinfo=UTC)
 
     @pytest.fixture
     def window_geometry(self) -> STGeometry:
@@ -248,7 +281,7 @@ class TestPerPeriodMosaic:
         We provide time range with four time periods, but the full mosaic for first
         (oldest) time period should not be used due to the max_matches=3.
         """
-        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        base_ts = datetime(2024, 1, 1, tzinfo=UTC)
         period_duration = timedelta(days=30)
         periods = [
             (base_ts, base_ts + period_duration),
@@ -294,7 +327,7 @@ class TestPerPeriodMosaic:
 
     def test_skip_empty_period(self) -> None:
         """Ensure that empty periods are skipped so it falls back to earlier period."""
-        base_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        base_ts = datetime(2024, 1, 1, tzinfo=UTC)
         period_duration = timedelta(days=30)
         periods = [
             (base_ts, base_ts + period_duration),
@@ -335,8 +368,8 @@ def test_min_matches() -> None:
     """Ensure that no groups are returned if minimum matches is set."""
     bbox = shapely.box(0, 0, 1, 1)
     time_range = (
-        datetime(2024, 1, 1, tzinfo=timezone.utc),
-        datetime(2024, 2, 1, tzinfo=timezone.utc),
+        datetime(2024, 1, 1, tzinfo=UTC),
+        datetime(2024, 2, 1, tzinfo=UTC),
     )
     geom = STGeometry(WGS84_PROJECTION, bbox, time_range)
     item_list = [

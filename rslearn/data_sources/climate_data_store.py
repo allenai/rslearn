@@ -2,7 +2,7 @@
 
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import cdsapi
@@ -134,13 +134,13 @@ class ERA5LandMonthlyMeans(DataSource):
                 geometry.time_range[0].year,
                 geometry.time_range[0].month,
                 1,
-                tzinfo=timezone.utc,
+                tzinfo=UTC,
             )
             end_date = datetime(
                 geometry.time_range[1].year,
                 geometry.time_range[1].month,
                 1,
-                tzinfo=timezone.utc,
+                tzinfo=UTC,
             )
 
             month_dates: list[datetime] = []
@@ -152,13 +152,11 @@ class ERA5LandMonthlyMeans(DataSource):
             for cur_date in month_dates:
                 # Collect Item list corresponding to the current month.
                 items = []
-                item_name = f"era5land_monthlymean_{cur_date.year}_{cur_date.month}"
+                item_name = f"era5land_monthlyaveraged_{cur_date.year}_{cur_date.month}"
                 # Space is the whole globe.
                 bounds = (-180, -90, 180, 90)
                 # Time is just the given month.
-                start_date = datetime(
-                    cur_date.year, cur_date.month, 1, tzinfo=timezone.utc
-                )
+                start_date = datetime(cur_date.year, cur_date.month, 1, tzinfo=UTC)
                 time_range = (
                     start_date,
                     start_date + relativedelta(months=1),
@@ -219,6 +217,14 @@ class ERA5LandMonthlyMeans(DataSource):
         # Get metadata for the GeoTIFF
         lat = nc.variables["latitude"][:]
         lon = nc.variables["longitude"][:]
+        # Convert longitude from 0–360 to -180–180 and sort
+        lon = (lon + 180) % 360 - 180
+        sorted_indices = lon.argsort()
+        lon = lon[sorted_indices]
+
+        # Reorder the data array to match the new longitude order
+        array = array[:, :, sorted_indices]
+
         # Check the spacing of the grid, make sure it's uniform
         for i in range(len(lon) - 1):
             if round(lon[i + 1] - lon[i], 1) != self.PIXEL_SIZE:

@@ -32,25 +32,25 @@ class PretrainedCROMA(nn.Module):
         """
         super().__init__()
         # check types
-        assert isinstance(
-            pretrained_path, str
-        ), f"pretrained_path must be a string, not {type(pretrained_path)}"
+        assert isinstance(pretrained_path, str), (
+            f"pretrained_path must be a string, not {type(pretrained_path)}"
+        )
         assert isinstance(size, str), f"size must be a string, not {type(size)}"
-        assert isinstance(
-            modality, str
-        ), f"modality must be a string, not {type(modality)}"
-        assert isinstance(
-            image_resolution, int
-        ), f"image_resolution must be an int, not {type(image_resolution)}"
+        assert isinstance(modality, str), (
+            f"modality must be a string, not {type(modality)}"
+        )
+        assert isinstance(image_resolution, int), (
+            f"image_resolution must be an int, not {type(image_resolution)}"
+        )
 
         # check values
         assert size in [
             "base",
             "large",
         ], f"size must be either base or large, not {size}"
-        assert (
-            image_resolution % 8 == 0
-        ), f"image_resolution must be a multiple of 8, not {image_resolution}"
+        assert image_resolution % 8 == 0, (
+            f"image_resolution must be a multiple of 8, not {image_resolution}"
+        )
         assert modality in [
             "both",
             "SAR",
@@ -106,8 +106,12 @@ class PretrainedCROMA(nn.Module):
             )
 
             # load weights
-            self.s1_encoder.load_state_dict(torch.load(pretrained_path)["s1_encoder"])
-            self.GAP_FFN_s1.load_state_dict(torch.load(pretrained_path)["s1_GAP_FFN"])
+            self.s1_encoder.load_state_dict(
+                torch.load(pretrained_path, weights_only=True)["s1_encoder"]
+            )
+            self.GAP_FFN_s1.load_state_dict(
+                torch.load(pretrained_path, weights_only=True)["s1_GAP_FFN"]
+            )
 
         if modality in ["optical", "both"]:
             print("Initializing optical encoder")
@@ -128,8 +132,12 @@ class PretrainedCROMA(nn.Module):
             )
 
             # load weights
-            self.s2_encoder.load_state_dict(torch.load(pretrained_path)["s2_encoder"])
-            self.GAP_FFN_s2.load_state_dict(torch.load(pretrained_path)["s2_GAP_FFN"])
+            self.s2_encoder.load_state_dict(
+                torch.load(pretrained_path, weights_only=True)["s2_encoder"]
+            )
+            self.GAP_FFN_s2.load_state_dict(
+                torch.load(pretrained_path, weights_only=True)["s2_GAP_FFN"]
+            )
 
         if modality == "both":
             print("Initializing joint SAR-optical encoder")
@@ -141,7 +149,7 @@ class PretrainedCROMA(nn.Module):
 
             # load weights
             self.cross_encoder.load_state_dict(
-                torch.load(pretrained_path)["joint_encoder"]
+                torch.load(pretrained_path, weights_only=True)["joint_encoder"]
             )
 
     def forward(
@@ -152,9 +160,9 @@ class PretrainedCROMA(nn.Module):
         """Forward pass through PretrainedCROMA."""
         return_dict = {}
         if self.modality in ["SAR", "both"]:
-            assert (
-                SAR_images is not None
-            ), f"Modality is set to {self.modality}, but SAR_images are None"
+            assert SAR_images is not None, (
+                f"Modality is set to {self.modality}, but SAR_images are None"
+            )
             SAR_encodings = self.s1_encoder(
                 imgs=SAR_images, attn_bias=self.attn_bias.to(SAR_images.device)
             )  # (bsz, num_patches, encoder_dim)
@@ -163,9 +171,9 @@ class PretrainedCROMA(nn.Module):
             return_dict["SAR_GAP"] = SAR_GAP
 
         if self.modality in ["optical", "both"]:
-            assert (
-                optical_images is not None
-            ), f"Modality is set to {self.modality}, but optical_images are None"
+            assert optical_images is not None, (
+                f"Modality is set to {self.modality}, but optical_images are None"
+            )
             optical_encodings = self.s2_encoder(
                 imgs=optical_images, attn_bias=self.attn_bias.to(optical_images.device)
             )  # (bsz, num_patches, encoder_dim)
