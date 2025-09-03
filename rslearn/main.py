@@ -815,6 +815,12 @@ class RslearnLightningCLI(LightningCLI):
         # sampler as needed.
         c.trainer.use_distributed_sampler = False
 
+        # For predict, make sure that return_predictions is False.
+        # Otherwise all the predictions would be stored in memory which can lead to
+        # high memory consumption.
+        if subcommand == "predict":
+            c.return_predictions = False
+
 
 def model_handler() -> None:
     """Handler for any rslearn model X commands."""
