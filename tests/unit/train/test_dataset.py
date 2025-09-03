@@ -369,8 +369,8 @@ class TestIterableAllPatchesDataset:
             assert len(samples) == 1
             assert samples[0][2]["window_name"] == window.name
 
-    def test_no_padding(self, basic_classification_dataset: Dataset) -> None:
-        """Verify that with one window per rank, no padding is needed."""
+    def test_one_window_per_worker(self, basic_classification_dataset: Dataset) -> None:
+        """Verify that things work with one window per worker."""
         add_window(basic_classification_dataset, name="window0")
         add_window(basic_classification_dataset, name="window1")
         add_window(basic_classification_dataset, name="window2")
