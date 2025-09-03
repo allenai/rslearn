@@ -174,8 +174,9 @@ class RslearnDataModule(L.LightningDataModule):
         # If using all patches, limit number of workers to the number of windows.
         # Otherwise it has to distribute the same window to different workers which can
         # cause issues for RslearnWriter.
+        num_workers = self.num_workers
         if split_config.load_all_patches:
-            num_workers = min(self.num_workers, len(dataset.get_dataset_examples()))
+            num_workers = min(num_workers, len(dataset.get_dataset_examples()))
 
         kwargs: dict[str, Any] = dict(
             dataset=dataset,
