@@ -109,7 +109,6 @@ class SegmentationTask(BasicTask):
         if not load_targets:
             return {}, {}
 
-        # TODO: List[Feature] is currently not supported
         assert raw_inputs["targets"].shape[0] == 1
         labels = raw_inputs["targets"][0, :, :].long()
 
@@ -135,11 +134,14 @@ class SegmentationTask(BasicTask):
         Returns:
             either raster or vector data.
         """
-        raw_output_np = raw_output.cpu().numpy()
         if self.prob_scales is not None:
-            # Scale the channel dimension by the provided scales.
-            raw_output_np = raw_output_np * np.array(self.prob_scales)[:, None, None]
-        classes = raw_output_np.argmax(axis=0).astype(np.uint8)
+            raw_output = (
+                raw_output
+                * torch.tensor(
+                    self.prob_scales, device=raw_output.device, dtype=raw_output.dtype
+                )[:, None, None]
+            )
+        classes = raw_output.argmax(dim=0).cpu().numpy().astype(np.uint8)
         return classes[None, :, :]
 
     def visualize(

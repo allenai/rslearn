@@ -1,4 +1,4 @@
-"""Classification task."""
+"""Regression task."""
 
 from typing import Any
 
