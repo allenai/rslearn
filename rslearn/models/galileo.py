@@ -1805,15 +1805,22 @@ class GalileoModel(nn.Module):
         device = devices[0]
 
         # first, check all the input shapes are consistent
-        timesteps_list = [x.shape[2] for x in space_time_inputs if x is not None] + [
+        batch_list = [x.shape[0] for x in space_time_inputs if x is not None] + [
+            x.shape[0] for x in time_inputs if x is not None
+        ] + [x.shape[0] for x in space_inputs if x is not None] + [x.shape[0] for x in static_inputs if x is not None]
+        timesteps_list = [x.shape[3] for x in space_time_inputs if x is not None] + [
             x.shape[1] for x in time_inputs if x is not None
         ]
-        height_list = [x.shape[0] for x in space_time_inputs if x is not None] + [
+        height_list = [x.shape[1] for x in space_time_inputs if x is not None] + [
             x.shape[0] for x in space_inputs if x is not None
         ]
-        width_list = [x.shape[1] for x in space_time_inputs if x is not None] + [
+        width_list = [x.shape[2] for x in space_time_inputs if x is not None] + [
             x.shape[1] for x in space_inputs if x is not None
         ]
+        if len(batch_list) > 0:
+            if len(set(batch_list)) > 1:
+                raise ValueError("Inconsistent number of batch sizes per input")
+            b = batch_list[0]
 
         if len(timesteps_list) > 0:
             if not all(timesteps_list[0] == timestep for timestep in timesteps_list):
@@ -1834,24 +1841,24 @@ class GalileoModel(nn.Module):
 
         # now, we can construct our empty input tensors. By default, everything is masked
         s_t_x = torch.zeros(
-            (h, w, t, len(SPACE_TIME_BANDS)), dtype=torch.float, device=device
+            (b, h, w, t, len(SPACE_TIME_BANDS)), dtype=torch.float, device=device
         )
         s_t_m = torch.ones(
-            (h, w, t, len(SPACE_TIME_BANDS_GROUPS_IDX)),
+            (b, h, w, t, len(SPACE_TIME_BANDS_GROUPS_IDX)),
             dtype=torch.float,
             device=device,
         )
-        sp_x = torch.zeros((h, w, len(SPACE_BANDS)), dtype=torch.float, device=device)
+        sp_x = torch.zeros((b, h, w, len(SPACE_BANDS)), dtype=torch.float, device=device)
         sp_m = torch.ones(
-            (h, w, len(SPACE_BAND_GROUPS_IDX)), dtype=torch.float, device=device
+            (b, h, w, len(SPACE_BAND_GROUPS_IDX)), dtype=torch.float, device=device
         )
-        t_x = torch.zeros((t, len(TIME_BANDS)), dtype=torch.float, device=device)
+        t_x = torch.zeros((b, t, len(TIME_BANDS)), dtype=torch.float, device=device)
         t_m = torch.ones(
-            (t, len(TIME_BAND_GROUPS_IDX)), dtype=torch.float, device=device
+            (b, t, len(TIME_BAND_GROUPS_IDX)), dtype=torch.float, device=device
         )
-        st_x = torch.zeros((len(STATIC_BANDS)), dtype=torch.float, device=device)
+        st_x = torch.zeros((b, len(STATIC_BANDS)), dtype=torch.float, device=device)
         st_m = torch.ones(
-            (len(STATIC_BAND_GROUPS_IDX)), dtype=torch.float, device=device
+            (b, len(STATIC_BAND_GROUPS_IDX)), dtype=torch.float, device=device
         )
 
         for x, bands_list, group_key in zip(
@@ -1866,8 +1873,8 @@ class GalileoModel(nn.Module):
                     for idx, key in enumerate(SPACE_TIME_BANDS_GROUPS_IDX)
                     if group_key in key
                 ]
-                s_t_x[:, :, :, indices] = x
-                s_t_m[:, :, :, groups_idx] = 0
+                s_t_x[:, :, :, :, indices] = x
+                s_t_m[:, :, :, :, groups_idx] = 0
 
         for x, bands_list, group_key in zip(
             [srtm, dw, wc], [SRTM_BANDS, DW_BANDS, WC_BANDS], ["SRTM", "DW", "WC"]
@@ -1881,8 +1888,8 @@ class GalileoModel(nn.Module):
                     for idx, key in enumerate(SPACE_BAND_GROUPS_IDX)
                     if group_key in key
                 ]
-                sp_x[:, :, indices] = x
-                sp_m[:, :, groups_idx] = 0
+                sp_x[:, :, :, indices] = x
+                sp_m[:, :, :, groups_idx] = 0
 
         for x, bands_list, group_key in zip(
             [era5, tc, viirs],
@@ -1898,8 +1905,8 @@ class GalileoModel(nn.Module):
                     for idx, key in enumerate(TIME_BAND_GROUPS_IDX)
                     if group_key in key
                 ]
-                t_x[:, indices] = x
-                t_m[:, groups_idx] = 0
+                t_x[:, :, indices] = x
+                t_m[:, :, groups_idx] = 0
 
         for x, bands_list, group_key in zip(
             [landscan, latlon], [LANDSCAN_BANDS, LOCATION_BANDS], ["LS", "location"]
@@ -1920,9 +1927,9 @@ class GalileoModel(nn.Module):
                 st_m[groups_idx] = 0
 
         if months is None:
-            months = torch.ones((t), dtype=torch.long, device=device) * DEFAULT_MONTH
+            months = torch.ones((b, t), dtype=torch.long, device=device) * DEFAULT_MONTH
         else:
-            if months.shape[0] != t:
+            if months.shape[1] != t:
                 raise ValueError("Incorrect number of input months")
 
         if normalize:
@@ -1955,8 +1962,16 @@ class GalileoModel(nn.Module):
         for key in inputs[0].keys():
             # assume all the keys in an input are consistent
             stacked_inputs[key] = torch.stack([inp[key] for inp in inputs], dim=0)
-        features = self.model(self.construct_galileo_input(**stacked_inputs, normalize=True))
 
+        for space_time_modality in ["s1", "s2"]:
+            if space_time_modality not in stacked_inputs:
+                continue
+            cur = stacked_inputs[space_time_modality]
+            # Check if it's single or multitemporal, and reshape accordingly
+            num_bands = len(S2_BANDS) if space_time_modality == "s2" else len(S1_BANDS)
+            num_timesteps = cur.shape[1] // num_bands
+            cur = rearrange(cur, "b (t c) h w -> b h w t c", t=num_timesteps)
+            stacked_inputs[space_time_modality] = cur
         # # Rearrange from patch embeddings to 2D feature map.
         # num_patches_per_dim = self.image_resolution // PATCH_SIZE
         # features = rearrange(
@@ -1965,5 +1980,6 @@ class GalileoModel(nn.Module):
         #     h=num_patches_per_dim,
         #     w=num_patches_per_dim,
         # )
+        features = self.model(self.construct_galileo_input(**stacked_inputs, normalize=True))
 
         return [features]
