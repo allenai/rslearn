@@ -127,8 +127,8 @@ TIME_DIV_VALUES = np.array(ERA5_DIV_VALUES + TC_DIV_VALUES + VIIRS_DIV_VALUES)
 SPACE_SHIFT_VALUES = np.array(SRTM_SHIFT_VALUES + DW_SHIFT_VALUES + WC_SHIFT_VALUES)
 SPACE_DIV_VALUES = np.array(SRTM_DIV_VALUES + DW_DIV_VALUES + WC_DIV_VALUES)
 # [0s, 1s] for the locations
-STATIC_SHIFT_VALUES = np.array(LANDSCAN_SHIFT_VALUES + [0, 0, 0])
-STATIC_DIV_VALUES = np.array(LANDSCAN_DIV_VALUES + [1, 1, 1])
+STATIC_SHIFT_VALUES = np.array(LANDSCAN_SHIFT_VALUES + [0, 0, 0] + DW_SHIFT_VALUES + WC_SHIFT_VALUES)
+STATIC_DIV_VALUES = np.array(LANDSCAN_DIV_VALUES + [1, 1, 1] + DW_DIV_VALUES + WC_DIV_VALUES)
 
 SPACE_TIME_BANDS_GROUPS_IDX: OrderedDictType[str, list[int]] = OrderedDict(
     {
@@ -344,7 +344,6 @@ class Normalizer:
                 "div": deepcopy(STATIC_DIV_VALUES),
             },
         }
-
         for key_as_str, val in NORMALIZING_DICT.items():
             if "n" in key_as_str:
                 continue
@@ -361,7 +360,6 @@ class Normalizer:
                     raise ValueError(f"{band} has div value of 0")
                 self.shift_div_dict[key]["shift"][band_idx] = min_value
                 self.shift_div_dict[key]["div"][band_idx] = div
-        print(self.shift_div_dict)
 
     @staticmethod
     def _normalize(
@@ -373,7 +371,8 @@ class Normalizer:
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         """Apply the normalizer."""
         div_values = self.shift_div_dict[x.shape[-1]]["div"]
-        return self._normalize(x, self.shift_div_dict[x.shape[-1]]["shift"], div_values)
+        shift_values = self.shift_div_dict[x.shape[-1]]["shift"]
+        return self._normalize(x, shift_values, div_values)
 
 
 DEFAULT_NORMALIZER = Normalizer()
@@ -388,14 +387,14 @@ class MaskedOutput(NamedTuple):
     2: not seen by the encoder, and processed by the decoder (the decoder's query values)
     """
 
-    space_time_x: torch.Tensor  # [B, H, W, T, len(SPACE_TIME_BANDS)]
-    space_x: torch.Tensor  # [B, H, W, len(SPACE_BANDS)]
-    time_x: torch.Tensor  # [B, T, len(TIME_BANDS)]
-    static_x: torch.Tensor  # [B, len(STATIC_BANDS)]
-    space_time_mask: torch.Tensor  # [B, H, W, T, len(SPACE_TIME_BANDS_GROUPS_IDX)]
-    space_mask: torch.Tensor  # [B, H, W, len(SPACE_BAND_GROUPS_IDX)]
-    time_mask: torch.Tensor  # [B, T, len(TIME_BAND_GROUPS_IDX)]
-    static_mask: torch.Tensor  # [B, len(STATIC_BAND_GROUPS_IDX)]
+    s_t_x: torch.Tensor  # [B, H, W, T, len(SPACE_TIME_BANDS)]
+    sp_x: torch.Tensor  # [B, H, W, len(SPACE_BANDS)]
+    t_x: torch.Tensor  # [B, T, len(TIME_BANDS)]
+    st_x: torch.Tensor  # [B, len(STATIC_BANDS)]
+    s_t_m: torch.Tensor  # [B, H, W, T, len(SPACE_TIME_BANDS_GROUPS_IDX)]
+    sp_m: torch.Tensor  # [B, H, W, len(SPACE_BAND_GROUPS_IDX)]
+    t_m: torch.Tensor  # [B, T, len(TIME_BAND_GROUPS_IDX)]
+    st_m: torch.Tensor  # [B, len(STATIC_BAND_GROUPS_IDX)]
     months: torch.Tensor  # [B, T]
 
 
@@ -1614,7 +1613,7 @@ class Encoder(GalileoBase):
         )
 
         if (exit_after is None) or (exit_after > 0):
-            s_t_x, sp_x, t_x, st_x, s_t_m, st_m, t_m, st_m = self.apply_attn(
+            s_t_x, sp_x, t_x, st_x, s_t_m, sp_m, t_m, st_m = self.apply_attn(
                 s_t_x,
                 sp_x,
                 t_x,
@@ -1635,7 +1634,7 @@ class Encoder(GalileoBase):
             sp_x = self.norm(sp_x)
             t_x = self.norm(t_x)
             st_x = self.norm(st_x)
-        return (
+        return self.average_tokens(
             s_t_x,
             sp_x,
             t_x,
@@ -1644,7 +1643,6 @@ class Encoder(GalileoBase):
             sp_m,
             t_m,
             st_m,
-            months,
         )
 
     @classmethod
@@ -1933,20 +1931,20 @@ class GalileoModel(nn.Module):
                 raise ValueError("Incorrect number of input months")
 
         if normalize:
-            s_t_x = DEFAULT_NORMALIZER(s_t_x.cpu().numpy()).to(device)
-            sp_x = DEFAULT_NORMALIZER(sp_x.cpu().numpy()).to(device)
-            t_x = DEFAULT_NORMALIZER(t_x.cpu().numpy()).to(device)
-            st_x = DEFAULT_NORMALIZER(st_x.cpu().numpy()).to(device)
+            s_t_x = torch.from_numpy(DEFAULT_NORMALIZER(s_t_x.cpu().numpy())).to(device).float()
+            sp_x = torch.from_numpy(DEFAULT_NORMALIZER(sp_x.cpu().numpy())).to(device).float()
+            t_x = torch.from_numpy(DEFAULT_NORMALIZER(t_x.cpu().numpy())).to(device).float()
+            st_x = torch.from_numpy(DEFAULT_NORMALIZER(st_x.cpu().numpy())).to(device).float()
 
         return MaskedOutput(
-            space_time_x=s_t_x,
-            space_time_mask=s_t_m,
-            space_x=sp_x,
-            space_mask=sp_m,
-            time_x=t_x,
-            time_mask=t_m,
-            static_x=st_x,
-            static_mask=st_m,
+            s_t_x=s_t_x,
+            s_t_m=s_t_m,
+            sp_x=sp_x,
+            sp_m=sp_m,
+            t_x=t_x,
+            t_m=t_m,
+            st_x=st_x,
+            st_m=st_m,
             months=months,
         )
 
@@ -1980,6 +1978,19 @@ class GalileoModel(nn.Module):
         #     h=num_patches_per_dim,
         #     w=num_patches_per_dim,
         # )
-        features = self.model(self.construct_galileo_input(**stacked_inputs, normalize=True))
 
-        return [features]
+        galileo_input  = self.construct_galileo_input(**stacked_inputs, normalize=True)
+        features = self.model(
+            s_t_x=galileo_input.s_t_x,
+            s_t_m=galileo_input.s_t_m,
+            sp_x=galileo_input.sp_x,
+            sp_m=galileo_input.sp_m,
+            t_x=galileo_input.t_x,
+            t_m=galileo_input.t_m,
+            st_x=galileo_input.st_x,
+            st_m=galileo_input.st_m,
+            months=galileo_input.months,
+            patch_size=4
+        )
+
+        return features

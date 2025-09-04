@@ -17,7 +17,7 @@ def test_galileo(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
 
     inputs = [
         {
-            "s2": torch.zeros((12, input_hw, input_hw), dtype=torch.float32),
+            "s2": torch.zeros((10, input_hw, input_hw), dtype=torch.float32),
         }
     ]
     features = galileo(inputs)
