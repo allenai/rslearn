@@ -40,6 +40,7 @@ class SegmentationTask(BasicTask):
         num_classes: int,
         colors: list[tuple[int, int, int]] = DEFAULT_COLORS,
         zero_is_invalid: bool = False,
+        nodata_value: int | None = None,
         enable_accuracy_metric: bool = True,
         enable_miou_metric: bool = False,
         enable_f1_metric: bool = False,
@@ -56,6 +57,9 @@ class SegmentationTask(BasicTask):
             num_classes: the number of classes to predict
             colors: optional colors for each class
             zero_is_invalid: whether pixels labeled class 0 should be marked invalid
+                Mutually exclusive with nodata_value.
+            nodata_value: the value to use for nodata pixels. If None, all pixels are
+                considered valid. Mutually exclusive with zero_is_invalid.
             enable_accuracy_metric: whether to enable the accuracy metric (default
                 true).
             enable_f1_metric: whether to enable the F1 metric (default false).
@@ -79,7 +83,15 @@ class SegmentationTask(BasicTask):
         super().__init__(**kwargs)
         self.num_classes = num_classes
         self.colors = colors
-        self.zero_is_invalid = zero_is_invalid
+        self.nodata_value: int | None
+
+        if zero_is_invalid and nodata_value is not None:
+            raise ValueError("zero_is_invalid and nodata_value cannot both be set")
+        if zero_is_invalid:
+            self.nodata_value = 0
+        else:
+            self.nodata_value = nodata_value
+
         self.enable_accuracy_metric = enable_accuracy_metric
         self.enable_f1_metric = enable_f1_metric
         self.enable_miou_metric = enable_miou_metric
@@ -112,8 +124,11 @@ class SegmentationTask(BasicTask):
         assert raw_inputs["targets"].shape[0] == 1
         labels = raw_inputs["targets"][0, :, :].long()
 
-        if self.zero_is_invalid:
-            valid = (labels > 0).float()
+        if self.nodata_value is not None:
+            valid = (labels != self.nodata_value).float()
+            # Labels, even masked ones, must be in the range 0 to num_classes-1
+            if self.nodata_value >= self.num_classes:
+                labels[labels == self.nodata_value] = 0
         else:
             valid = torch.ones(labels.shape, dtype=torch.float32)
 
@@ -219,8 +234,8 @@ class SegmentationTask(BasicTask):
 
         if self.enable_miou_metric:
             miou_metric_kwargs: dict[str, Any] = dict(num_classes=self.num_classes)
-            if self.zero_is_invalid:
-                miou_metric_kwargs["zero_is_invalid"] = True
+            if self.nodata_value is not None:
+                miou_metric_kwargs["nodata_value"] = self.nodata_value
             miou_metric_kwargs.update(self.miou_metric_kwargs)
             metrics["mean_iou"] = SegmentationMetric(
                 MeanIoUMetric(**miou_metric_kwargs),
@@ -469,7 +484,7 @@ class MeanIoUMetric(Metric):
     def __init__(
         self,
         num_classes: int,
-        zero_is_invalid: bool = False,
+        nodata_value: int | None = None,
         ignore_missing_classes: bool = False,
         class_idx: int | None = None,
     ):
@@ -477,7 +492,9 @@ class MeanIoUMetric(Metric):
 
         Args:
             num_classes: the number of classes for the task.
-            zero_is_invalid: whether to ignore class 0 in computing mean IoU.
+            nodata_value: the value to treat as nodata/invalid. If set and is one of the
+                classes, IoU will not be calculated for it. If None, or not one of the
+                classes, IoU is calculated for all classes.
             ignore_missing_classes: whether to ignore classes that don't appear in
                 either the predictions or the ground truth. If false, the IoU for a
                 missing class will be 0.
@@ -487,7 +504,7 @@ class MeanIoUMetric(Metric):
         """
         super().__init__()
         self.num_classes = num_classes
-        self.zero_is_invalid = zero_is_invalid
+        self.nodata_value = nodata_value
         self.ignore_missing_classes = ignore_missing_classes
         self.class_idx = class_idx
 
@@ -535,7 +552,8 @@ class MeanIoUMetric(Metric):
         per_class_scores = []
 
         for cls_idx in range(self.num_classes):
-            if cls_idx == 0 and self.zero_is_invalid:
+            # Check if nodata_value is set and is one of the classes
+            if self.nodata_value is not None and cls_idx == self.nodata_value:
                 continue
 
             intersection = self.intersections[cls_idx]
