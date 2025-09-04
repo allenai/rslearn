@@ -1,4 +1,4 @@
-"""Data source for raster data on public Cloud Storage buckets."""
+"""Data source for OpenStreetMap vector features."""
 
 import json
 import shutil
@@ -392,7 +392,7 @@ class OpenStreetMap(DataSource[OsmItem]):
         bounds_fname: UPath,
         categories: dict[str, Filter],
     ):
-        """Initialize a new Sentinel2 instance.
+        """Initialize a new OpenStreetMap instance.
 
         Args:
             config: the configuration of this layer.
@@ -508,8 +508,6 @@ class OpenStreetMap(DataSource[OsmItem]):
             items: the items to ingest
             geometries: a list of geometries needed for each item
         """
-        item_names = [item.name for item in items]
-        item_names.sort()
         for cur_item, cur_geometries in zip(items, geometries):
             if tile_store.is_vector_ready(cur_item.name):
                 continue
