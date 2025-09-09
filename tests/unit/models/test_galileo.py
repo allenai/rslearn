@@ -20,7 +20,10 @@ def test_galileo(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
             "s2": torch.zeros((10, input_hw, input_hw), dtype=torch.float32),
         }
     ]
-    features = galileo(inputs)
+    feature_list = galileo(inputs)
+    # Should yield one feature map since there's only one output scale.
+    assert len(feature_list) == 1
+    features = feature_list[0]
     # features should be BxCxHxW.
     assert features.shape[0] == 1 and len(features.shape) == 4
     # feat_hw = input_hw // PATCH_SIZE

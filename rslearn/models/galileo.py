@@ -7,10 +7,10 @@ import math
 from collections import OrderedDict
 from collections import OrderedDict as OrderedDictType
 from collections.abc import Sequence
+from copy import deepcopy
 from enum import Enum
 from pathlib import Path
-from typing import NamedTuple, cast, Any
-from copy import deepcopy
+from typing import Any, NamedTuple, cast
 
 import numpy as np
 import torch
@@ -60,8 +60,8 @@ S2_BANDS = [
     "B11",
     "B12",
 ]
-S2_SHIFT_VALUES = [float(0.0)] * len(S2_BANDS)
-S2_DIV_VALUES = [float(1e4)] * len(S2_BANDS)
+S2_SHIFT_VALUES = [0.0] * len(S2_BANDS)
+S2_DIV_VALUES = [1e4] * len(S2_BANDS)
 ERA5_BANDS = ["temperature_2m", "total_precipitation_sum"]
 # for temperature, shift to celcius and then divide by 35 based on notebook (ranges from)
 # 37 to -22 degrees celcius
@@ -127,8 +127,12 @@ TIME_DIV_VALUES = np.array(ERA5_DIV_VALUES + TC_DIV_VALUES + VIIRS_DIV_VALUES)
 SPACE_SHIFT_VALUES = np.array(SRTM_SHIFT_VALUES + DW_SHIFT_VALUES + WC_SHIFT_VALUES)
 SPACE_DIV_VALUES = np.array(SRTM_DIV_VALUES + DW_DIV_VALUES + WC_DIV_VALUES)
 # [0s, 1s] for the locations
-STATIC_SHIFT_VALUES = np.array(LANDSCAN_SHIFT_VALUES + [0, 0, 0] + DW_SHIFT_VALUES + WC_SHIFT_VALUES)
-STATIC_DIV_VALUES = np.array(LANDSCAN_DIV_VALUES + [1, 1, 1] + DW_DIV_VALUES + WC_DIV_VALUES)
+STATIC_SHIFT_VALUES = np.array(
+    LANDSCAN_SHIFT_VALUES + [0, 0, 0] + DW_SHIFT_VALUES + WC_SHIFT_VALUES
+)
+STATIC_DIV_VALUES = np.array(
+    LANDSCAN_DIV_VALUES + [1, 1, 1] + DW_DIV_VALUES + WC_DIV_VALUES
+)
 
 SPACE_TIME_BANDS_GROUPS_IDX: OrderedDictType[str, list[int]] = OrderedDict(
     {
@@ -520,7 +524,7 @@ def adjust_learning_rate(
 def to_2tuple(x: int | tuple[int, int]) -> tuple[int, int]:
     """to_2tuple."""
     if isinstance(x, collections.abc.Iterable) and not isinstance(x, str):
-        return tuple(x)
+        return tuple(x)  # type: ignore
     return tuple(itertools.repeat(x, 2))  # type: ignore
 
 
@@ -1105,9 +1109,9 @@ class GalileoBase(nn.Module):
         token_res = input_res * patch_size
         gsd_ratio = token_res / BASE_GSD
 
-        assert (
-            h == w
-        ), "get_2d_sincos_pos_embed_with_resolution currently requires that h==w"
+        assert h == w, (
+            "get_2d_sincos_pos_embed_with_resolution currently requires that h==w"
+        )
         spatial_embed = get_2d_sincos_pos_embed_with_resolution(
             int(self.embedding_size * 0.25),
             h,
@@ -1634,16 +1638,8 @@ class Encoder(GalileoBase):
             sp_x = self.norm(sp_x)
             t_x = self.norm(t_x)
             st_x = self.norm(st_x)
-        return self.average_tokens(
-            s_t_x,
-            sp_x,
-            t_x,
-            st_x,
-            s_t_m,
-            sp_m,
-            t_m,
-            st_m,
-        )
+
+        return (s_t_x, sp_x, t_x, st_x, s_t_m, sp_m, t_m, st_m, months)
 
     @classmethod
     def load_from_folder(cls, folder: Path, device: torch.device) -> "Encoder":
@@ -1702,18 +1698,25 @@ class GalileoModel(nn.Module):
 
         self.model = Encoder.load_from_folder(model_folder, device=torch.device("cpu"))
 
+        self.s_t_channels_s2 = [
+            idx for idx, key in enumerate(SPACE_TIME_BANDS_GROUPS_IDX) if "S2" in key
+        ]
+        self.s_t_channels_s1 = [
+            idx for idx, key in enumerate(SPACE_TIME_BANDS_GROUPS_IDX) if "S1" in key
+        ]
+
     @staticmethod
     def to_cartesian(
         lat: float | np.ndarray | torch.Tensor, lon: float | np.ndarray | torch.Tensor
     ) -> np.ndarray | torch.Tensor:
         """Transform latitudes and longitudes to cartesian coordinates."""
         if isinstance(lat, float):
-            assert (
-                -90 <= lat <= 90
-            ), f"lat out of range ({lat}). Make sure you are in EPSG:4326"
-            assert (
-                -180 <= lon <= 180
-            ), f"lon out of range ({lon}). Make sure you are in EPSG:4326"
+            assert -90 <= lat <= 90, (
+                f"lat out of range ({lat}). Make sure you are in EPSG:4326"
+            )
+            assert -180 <= lon <= 180, (
+                f"lon out of range ({lon}). Make sure you are in EPSG:4326"
+            )
             assert isinstance(lon, float), f"Expected float got {type(lon)}"
             # transform to radians
             lat = lat * math.pi / 180
@@ -1723,18 +1726,18 @@ class GalileoModel(nn.Module):
             z = math.sin(lat)
             return np.array([x, y, z])
         elif isinstance(lon, np.ndarray):
-            assert (
-                -90 <= lat.min()
-            ), f"lat out of range ({lat.min()}). Make sure you are in EPSG:4326"
-            assert (
-                90 >= lat.max()
-            ), f"lat out of range ({lat.max()}). Make sure you are in EPSG:4326"
-            assert (
-                -180 <= lon.min()
-            ), f"lon out of range ({lon.min()}). Make sure you are in EPSG:4326"
-            assert (
-                180 >= lon.max()
-            ), f"lon out of range ({lon.max()}). Make sure you are in EPSG:4326"
+            assert -90 <= lat.min(), (
+                f"lat out of range ({lat.min()}). Make sure you are in EPSG:4326"
+            )
+            assert 90 >= lat.max(), (
+                f"lat out of range ({lat.max()}). Make sure you are in EPSG:4326"
+            )
+            assert -180 <= lon.min(), (
+                f"lon out of range ({lon.min()}). Make sure you are in EPSG:4326"
+            )
+            assert 180 >= lon.max(), (
+                f"lon out of range ({lon.max()}). Make sure you are in EPSG:4326"
+            )
             assert isinstance(lat, np.ndarray), f"Expected np.ndarray got {type(lat)}"
             # transform to radians
             lat = lat * math.pi / 180
@@ -1744,21 +1747,21 @@ class GalileoModel(nn.Module):
             z_np = np.sin(lat)
             return np.stack([x_np, y_np, z_np], axis=-1)
         elif isinstance(lon, torch.Tensor):
-            assert (
-                -90 <= lat.min()
-            ), f"lat out of range ({lat.min()}). Make sure you are in EPSG:4326"
-            assert (
-                90 >= lat.max()
-            ), f"lat out of range ({lat.max()}). Make sure you are in EPSG:4326"
-            assert (
-                -180 <= lon.min()
-            ), f"lon out of range ({lon.min()}). Make sure you are in EPSG:4326"
-            assert (
-                180 >= lon.max()
-            ), f"lon out of range ({lon.max()}). Make sure you are in EPSG:4326"
-            assert isinstance(
-                lat, torch.Tensor
-            ), f"Expected torch.Tensor got {type(lat)}"
+            assert -90 <= lat.min(), (
+                f"lat out of range ({lat.min()}). Make sure you are in EPSG:4326"
+            )
+            assert 90 >= lat.max(), (
+                f"lat out of range ({lat.max()}). Make sure you are in EPSG:4326"
+            )
+            assert -180 <= lon.min(), (
+                f"lon out of range ({lon.min()}). Make sure you are in EPSG:4326"
+            )
+            assert 180 >= lon.max(), (
+                f"lon out of range ({lon.max()}). Make sure you are in EPSG:4326"
+            )
+            assert isinstance(lat, torch.Tensor), (
+                f"Expected torch.Tensor got {type(lat)}"
+            )
             # transform to radians
             lat = lat * math.pi / 180
             lon = lon * math.pi / 180
@@ -1803,9 +1806,12 @@ class GalileoModel(nn.Module):
         device = devices[0]
 
         # first, check all the input shapes are consistent
-        batch_list = [x.shape[0] for x in space_time_inputs if x is not None] + [
-            x.shape[0] for x in time_inputs if x is not None
-        ] + [x.shape[0] for x in space_inputs if x is not None] + [x.shape[0] for x in static_inputs if x is not None]
+        batch_list = (
+            [x.shape[0] for x in space_time_inputs if x is not None]
+            + [x.shape[0] for x in time_inputs if x is not None]
+            + [x.shape[0] for x in space_inputs if x is not None]
+            + [x.shape[0] for x in static_inputs if x is not None]
+        )
         timesteps_list = [x.shape[3] for x in space_time_inputs if x is not None] + [
             x.shape[1] for x in time_inputs if x is not None
         ]
@@ -1846,7 +1852,9 @@ class GalileoModel(nn.Module):
             dtype=torch.float,
             device=device,
         )
-        sp_x = torch.zeros((b, h, w, len(SPACE_BANDS)), dtype=torch.float, device=device)
+        sp_x = torch.zeros(
+            (b, h, w, len(SPACE_BANDS)), dtype=torch.float, device=device
+        )
         sp_m = torch.ones(
             (b, h, w, len(SPACE_BAND_GROUPS_IDX)), dtype=torch.float, device=device
         )
@@ -1931,10 +1939,26 @@ class GalileoModel(nn.Module):
                 raise ValueError("Incorrect number of input months")
 
         if normalize:
-            s_t_x = torch.from_numpy(DEFAULT_NORMALIZER(s_t_x.cpu().numpy())).to(device).float()
-            sp_x = torch.from_numpy(DEFAULT_NORMALIZER(sp_x.cpu().numpy())).to(device).float()
-            t_x = torch.from_numpy(DEFAULT_NORMALIZER(t_x.cpu().numpy())).to(device).float()
-            st_x = torch.from_numpy(DEFAULT_NORMALIZER(st_x.cpu().numpy())).to(device).float()
+            s_t_x = (
+                torch.from_numpy(DEFAULT_NORMALIZER(s_t_x.cpu().numpy()))
+                .to(device)
+                .float()
+            )
+            sp_x = (
+                torch.from_numpy(DEFAULT_NORMALIZER(sp_x.cpu().numpy()))
+                .to(device)
+                .float()
+            )
+            t_x = (
+                torch.from_numpy(DEFAULT_NORMALIZER(t_x.cpu().numpy()))
+                .to(device)
+                .float()
+            )
+            st_x = (
+                torch.from_numpy(DEFAULT_NORMALIZER(st_x.cpu().numpy()))
+                .to(device)
+                .float()
+            )
 
         return MaskedOutput(
             s_t_x=s_t_x,
@@ -1948,22 +1972,26 @@ class GalileoModel(nn.Module):
             months=months,
         )
 
-    def forward(self, inputs: list[dict[str, Any]]) -> torch.Tensor:
+    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Compute feature maps from the Croma backbone.
 
         Inputs:
             inputs: input dicts that must include either/both of "sentinel2" or
                 "sentinel1" keys depending on the configured modality.
         """
-
         stacked_inputs = {}
         for key in inputs[0].keys():
             # assume all the keys in an input are consistent
             stacked_inputs[key] = torch.stack([inp[key] for inp in inputs], dim=0)
 
+        s_t_channels = []
         for space_time_modality in ["s1", "s2"]:
             if space_time_modality not in stacked_inputs:
                 continue
+            if space_time_modality == "s1":
+                s_t_channels += self.s_t_channels_s1
+            else:
+                s_t_channels += self.s_t_channels_s2
             cur = stacked_inputs[space_time_modality]
             # Check if it's single or multitemporal, and reshape accordingly
             num_bands = len(S2_BANDS) if space_time_modality == "s2" else len(S1_BANDS)
@@ -1979,8 +2007,8 @@ class GalileoModel(nn.Module):
         #     w=num_patches_per_dim,
         # )
 
-        galileo_input  = self.construct_galileo_input(**stacked_inputs, normalize=True)
-        features = self.model(
+        galileo_input = self.construct_galileo_input(**stacked_inputs, normalize=True)
+        s_t_x = self.model(
             s_t_x=galileo_input.s_t_x,
             s_t_m=galileo_input.s_t_m,
             sp_x=galileo_input.sp_x,
@@ -1990,7 +2018,14 @@ class GalileoModel(nn.Module):
             st_x=galileo_input.st_x,
             st_m=galileo_input.st_m,
             months=galileo_input.months,
-            patch_size=4
-        )
-
-        return features
+            patch_size=4,
+        )[0]
+        # we will be assuming we only want s_t_x, and (for now) that we want s1 or s2 bands
+        # s_t_x has shape [b, h, w, t, c_g, d]
+        # and we want [b, d, h, w]
+        return [
+            rearrange(
+                s_t_x[:, :, :, :, s_t_channels, :].mean(dim=3),
+                "b h w c_g d -> b c_g d h w",
+            ).mean(dim=1)
+        ]
