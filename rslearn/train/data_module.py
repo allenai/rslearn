@@ -108,11 +108,16 @@ class RslearnDataModule(L.LightningDataModule):
             "predict": default_config.update(predict_config),
         }
 
-    def setup(self, stage: str) -> None:
+    def setup(
+        self, stage: str, use_in_memory_all_patches_dataset: bool | None = None
+    ) -> None:
         """Set up datasets and samplers.
 
         Args:
             stage: Either 'fit', 'validate', 'test', or 'predict'.
+            use_in_memory_all_patches_dataset: whether to use InMemoryAllPatchesDataset
+                instead of IterableAllPatchesDataset if load_all_patches is set to true.
+                If None, uses the value of self.use_in_memory_all_patches_dataset.
         """
         stage_to_splits = {
             "fit": ["train", "val"],
@@ -134,8 +139,12 @@ class RslearnDataModule(L.LightningDataModule):
             )
             logger.info(f"got {len(dataset)} examples in split {split}")
             if split_config.get_load_all_patches():
+                if use_in_memory_all_patches_dataset is None:
+                    use_in_memory_all_patches_dataset = (
+                        self.use_in_memory_all_patches_dataset
+                    )
                 logger.info(
-                    f"using AllPatchesDataset (in_memory={self.use_in_memory_all_patches_dataset})"
+                    f"using AllPatchesDataset (in_memory={use_in_memory_all_patches_dataset})"
                 )
                 patch_size = split_config.get_patch_size()
                 if patch_size is None:
@@ -151,7 +160,7 @@ class RslearnDataModule(L.LightningDataModule):
                     rank=self.trainer.global_rank if self.trainer else 0,
                     world_size=self.trainer.world_size if self.trainer else 1,
                 )
-                if self.use_in_memory_all_patches_dataset:
+                if use_in_memory_all_patches_dataset:
                     kwargs.pop("rank")
                     kwargs.pop("world_size")
                     all_patches_cls = InMemoryAllPatchesDataset  # type: ignore
@@ -210,6 +219,7 @@ class RslearnDataModule(L.LightningDataModule):
             )
         else:
             kwargs["shuffle"] = should_shuffle
+
         return DataLoader(**kwargs)
 
     def train_dataloader(self) -> DataLoader[dict[str, torch.Tensor]]:
@@ -311,7 +321,14 @@ class MultiDatasetDataModule(L.LightningDataModule):
         self.refill_batches = refill_batches
         self.per_dataset_patch_limit = per_dataset_patch_limit
         self.steps_per_dataset = steps_per_dataset
-        self.disabled_datasets = disabled_datasets
+        self.disabled_datasets = disabled_datasets or []
+
+        for dataset in self.disabled_datasets:
+            if dataset in self.data_modules:
+                del self.data_modules[dataset]
+                logger.info(f"Skipping disabled dataset {dataset}")
+            else:
+                logger.info(f"Could not find dataset {dataset} to skip")
 
     def setup(self, stage: str | None = None) -> None:
         """Set up the datasets for the given stage. Also assign dataset-specific names.
@@ -320,7 +337,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
             stage: The stage to set up ('fit', 'validate', 'test', 'predict')
         """
         for name, data_module in self.data_modules.items():
-            data_module.setup(stage)  # type: ignore
+            data_module.setup(stage, use_in_memory_all_patches_dataset=True)  # type: ignore
             data_module.set_name(name)
 
     def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:
@@ -361,7 +378,6 @@ class MultiDatasetDataModule(L.LightningDataModule):
                     self.per_dataset_patch_limit if split == "train" else None
                 ),
                 steps_per_dataset=self.steps_per_dataset,
-                disabled_datasets=self.disabled_datasets,
             ),
         )
 
@@ -400,7 +416,6 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         refill_batches: bool = False,
         steps_per_dataset: int | None = None,
         per_dataset_patch_limit: int | None = None,
-        disabled_datasets: list[str] | None = None,
     ) -> None:
         """Initialize a new DistributedPerDatasetBatchSampler.
 
@@ -418,7 +433,6 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
                 per epoch during training. Does not affect validation (default: None = no limit)
             steps_per_dataset: the number of steps to sample from each dataset in a row (requires that
                 sample_mode is "reptile")
-            disabled_datasets: list of datasets to disable
         """
         self.multi_dataset = multi_dataset
         self.batch_sizes = batch_sizes
@@ -426,17 +440,7 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         self.refill_batches = refill_batches
         self.per_dataset_patch_limit = per_dataset_patch_limit
         self.steps_per_dataset: int = steps_per_dataset  # type: ignore
-        self.disabled_datasets: list[str] = disabled_datasets or []
         self.epoch = 0
-
-        if self.disabled_datasets:
-            logger.info(f"Disabled datasets: {self.disabled_datasets}")
-            for name in self.disabled_datasets:
-                if name not in self.multi_dataset.datasets:
-                    raise ValueError(
-                        f"Dataset {name} not found in multi_dataset, "
-                        f"available datasets: {list(self.multi_dataset.datasets)}"
-                    )
 
         if sample_mode == "reptile":
             assert steps_per_dataset is not None, (
@@ -490,13 +494,10 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         partitioned: dict[str, list[int]] = {}
         refill: dict[str, list[int]] = defaultdict(list)
         for name, sampler in self.dist_samplers.items():
-            if name not in self.disabled_datasets:
-                offset = self.multi_dataset.buckets[name].start
-                partitioned[name] = [idx + offset for idx in sampler]
-                if self.per_dataset_patch_limit:
-                    partitioned[name] = partitioned[name][
-                        : self.per_dataset_patch_limit
-                    ]
+            offset = self.multi_dataset.buckets[name].start
+            partitioned[name] = [idx + offset for idx in sampler]
+            if self.per_dataset_patch_limit:
+                partitioned[name] = partitioned[name][: self.per_dataset_patch_limit]
 
         # Seed is shared aross all ranks but shuffled per epoch
         rng = random.Random(self.epoch)
@@ -566,11 +567,10 @@ class DistributedPerDatasetBatchSampler(torch.utils.data.Sampler[list[int]]):
         def len_iter() -> Iterator[int]:
             """Iterate over the number of batches for each dataset."""
             for name, sampler in self.dist_samplers.items():
-                if name not in self.disabled_datasets:
-                    length = len(sampler)
-                    if self.per_dataset_patch_limit:
-                        length = min(length, self.per_dataset_patch_limit)
-                    yield math.ceil(length / self.batch_sizes[name])
+                length = len(sampler)
+                if self.per_dataset_patch_limit:
+                    length = min(length, self.per_dataset_patch_limit)
+                yield math.ceil(length / self.batch_sizes[name])
 
         if self.refill_batches:
             return max(len_iter()) * len(self.dist_samplers)

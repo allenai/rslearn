@@ -94,6 +94,7 @@ class RslearnLightningModule(L.LightningModule):
         restore_config: RestoreConfig | None = None,
         print_parameters: bool = False,
         print_model: bool = False,
+        strict_loading: bool = True,
         # Deprecated options.
         lr: float = 1e-3,
         plateau: bool = False,
@@ -117,6 +118,7 @@ class RslearnLightningModule(L.LightningModule):
             print_parameters: whether to print the list of model parameters after model
                 initialization
             print_model: whether to print the model after model initialization
+            strict_loading: whether to strictly load the model parameters.
             lr: deprecated.
             plateau: deprecated.
             plateau_factor: deprecated.
@@ -130,6 +132,7 @@ class RslearnLightningModule(L.LightningModule):
         self.visualize_dir = visualize_dir
         self.metrics_file = metrics_file
         self.restore_config = restore_config
+        self.strict_loading = strict_loading
 
         self.scheduler_factory: SchedulerFactory | None = None
         if scheduler:
