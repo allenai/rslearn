@@ -1976,7 +1976,9 @@ class GalileoModel(nn.Module):
             months=months,
         )
 
-    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
+    def forward(
+        self, inputs: list[dict[str, Any]], patch_size: int = 4
+    ) -> list[torch.Tensor]:
         """Compute feature maps from the Croma backbone.
 
         Inputs:
@@ -2022,7 +2024,7 @@ class GalileoModel(nn.Module):
             st_x=galileo_input.st_x,
             st_m=galileo_input.st_m,
             months=galileo_input.months,
-            patch_size=4,
+            patch_size=patch_size,
         )[0]
         # we will be assuming we only want s_t_x, and (for now) that we want s1 or s2 bands
         # s_t_x has shape [b, h, w, t, c_g, d]
