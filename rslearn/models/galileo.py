@@ -21,6 +21,10 @@ from huggingface_hub import hf_hub_download
 from torch import Tensor, vmap
 from torch.jit import Final
 
+from rslearn.log_utils import get_logger
+
+logger = get_logger(__name__)
+
 # constants
 CONFIG_FILENAME = "config.json"
 ENCODER_FILENAME = "encoder.pt"
@@ -2012,8 +2016,13 @@ class GalileoModel(nn.Module):
         #     h=num_patches_per_dim,
         #     w=num_patches_per_dim,
         # )
-
         galileo_input = self.construct_galileo_input(**stacked_inputs, normalize=True)
+        h = galileo_input.s_t_x.shape[1]
+        if h < patch_size:
+            logger.warning(
+                f"Given patch size {patch_size} < h {h}. Reducing patch size to {h}"
+            )
+            patch_size = h
         s_t_x = self.model(
             s_t_x=galileo_input.s_t_x,
             s_t_m=galileo_input.s_t_m,
