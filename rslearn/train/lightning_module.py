@@ -212,11 +212,11 @@ class RslearnLightningModule(L.LightningModule):
             # Fail silently for single-dataset case, which is okay
             pass
 
-    def on_validation_epoch_end(self) -> None:
+    def on_test_epoch_end(self) -> None:
         """Optionally save the test metrics to a file."""
         if self.metrics_file:
             with open(self.metrics_file, "w") as f:
-                metrics = self.val_metrics.compute()
+                metrics = self.test_metrics.compute()
                 metrics_dict = {k: v.item() for k, v in metrics.items()}
                 json.dump(metrics_dict, f, indent=4)
                 logger.info(f"Saved metrics to {self.metrics_file}")
