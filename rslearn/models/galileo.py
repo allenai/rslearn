@@ -1661,7 +1661,9 @@ class Encoder(GalileoBase):
             encoder_config = model_config["encoder"]
         encoder = cls(**encoder_config)
 
-        state_dict = torch.load(folder / ENCODER_FILENAME, map_location=device)
+        state_dict = torch.load(
+            folder / ENCODER_FILENAME, map_location=device, weights_only=True
+        )
         for key in list(state_dict.keys()):
             # this cleans the state dict, which occasionally had an extra
             # ".backbone" included in the key names
@@ -1680,16 +1682,18 @@ class GalileoModel(nn.Module):
         """Initialize the Galileo model.
 
         Args:
-            model_size: The size of the Terramind model.
+            size: The size of the Terramind model.
         """
         super().__init__()
         _ = hf_hub_download(
             repo_id=HF_HUB_ID,
             filename=f"{pretrained_weights[size]}/{ENCODER_FILENAME}",
+            revision="f039dd5dde966a931baeda47eb680fa89b253e4e",
         )
         config_file = hf_hub_download(
             repo_id=HF_HUB_ID,
             filename=f"{pretrained_weights[size]}/{CONFIG_FILENAME}",
+            revision="f039dd5dde966a931baeda47eb680fa89b253e4e",
         )
 
         model_folder = Path(config_file).parent
