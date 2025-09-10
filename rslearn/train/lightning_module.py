@@ -94,6 +94,7 @@ class RslearnLightningModule(L.LightningModule):
         restore_config: RestoreConfig | None = None,
         print_parameters: bool = False,
         print_model: bool = False,
+        strict_loading: bool = True,
         # Deprecated options.
         lr: float = 1e-3,
         plateau: bool = False,
@@ -117,6 +118,7 @@ class RslearnLightningModule(L.LightningModule):
             print_parameters: whether to print the list of model parameters after model
                 initialization
             print_model: whether to print the model after model initialization
+            strict_loading: whether to strictly load the model parameters.
             lr: deprecated.
             plateau: deprecated.
             plateau_factor: deprecated.
@@ -130,6 +132,7 @@ class RslearnLightningModule(L.LightningModule):
         self.visualize_dir = visualize_dir
         self.metrics_file = metrics_file
         self.restore_config = restore_config
+        self.strict_loading = strict_loading
 
         self.scheduler_factory: SchedulerFactory | None = None
         if scheduler:
@@ -209,11 +212,11 @@ class RslearnLightningModule(L.LightningModule):
             # Fail silently for single-dataset case, which is okay
             pass
 
-    def on_validation_epoch_end(self) -> None:
+    def on_test_epoch_end(self) -> None:
         """Optionally save the test metrics to a file."""
         if self.metrics_file:
             with open(self.metrics_file, "w") as f:
-                metrics = self.val_metrics.compute()
+                metrics = self.test_metrics.compute()
                 metrics_dict = {k: v.item() for k, v in metrics.items()}
                 json.dump(metrics_dict, f, indent=4)
                 logger.info(f"Saved metrics to {self.metrics_file}")
