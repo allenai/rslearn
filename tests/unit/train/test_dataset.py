@@ -13,8 +13,9 @@ from upath import UPath
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
 from rslearn.train.dataset import (
-    AllPatchesDataset,
     DataInput,
+    InMemoryAllPatchesDataset,
+    IterableAllPatchesDataset,
     ModelDataset,
     RetryDataset,
     SplitConfig,
@@ -173,7 +174,7 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
             "targets": target_data_input,
         },
     )
-    dataset = AllPatchesDataset(model_dataset, (patch_size, patch_size))
+    dataset = IterableAllPatchesDataset(model_dataset, (patch_size, patch_size))
 
     point_coverage = {}
     for col in range(4):
@@ -199,7 +200,9 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
     assert all(point_coverage.values())
 
     # Test with overlap_ratio=0.5 for 2x2 patches
-    dataset_with_overlap = AllPatchesDataset(model_dataset, (2, 2), overlap_ratio=0.5)
+    dataset_with_overlap = IterableAllPatchesDataset(
+        model_dataset, (2, 2), overlap_ratio=0.5
+    )
 
     point_coverage = {}
     for col in range(4):
@@ -337,8 +340,8 @@ def test_load_two_layers(basic_classification_dataset: Dataset) -> None:
     assert torch.all(inputs["image"][1] == 2)
 
 
-class TestAllPatchesDataset:
-    """Tests for AllPatchesDataset."""
+class TestIterableAllPatchesDataset:
+    """Tests for IterableAllPatchesDataset."""
 
     def test_one_window_per_worker(self, basic_classification_dataset: Dataset) -> None:
         """Verify that things work with one window per worker."""
@@ -358,7 +361,7 @@ class TestAllPatchesDataset:
         world_size = 4
         window_names = set()
         for rank in range(world_size):
-            all_patches_dataset = AllPatchesDataset(
+            all_patches_dataset = IterableAllPatchesDataset(
                 model_dataset, (4, 4), rank=rank, world_size=world_size
             )
             samples = list(all_patches_dataset)
@@ -386,7 +389,7 @@ class TestAllPatchesDataset:
         world_size = 2
         seen_patches: dict[tuple[str, PixelBounds], int] = {}
         for rank in range(world_size):
-            all_patches_dataset = AllPatchesDataset(
+            all_patches_dataset = IterableAllPatchesDataset(
                 model_dataset, (4, 4), rank=rank, world_size=world_size
             )
             samples = list(all_patches_dataset)
@@ -403,7 +406,7 @@ class TestAllPatchesDataset:
         assert seen_patches[("window1", (4, 4, 8, 8))] == 1
 
     def test_empty_dataset(self, basic_classification_dataset: Dataset) -> None:
-        """Verify that AllPatchesDataset works with no windows."""
+        """Verify that IterableAllPatchesDataset works with no windows."""
         model_dataset = ModelDataset(
             basic_classification_dataset,
             split_config=SplitConfig(),
@@ -415,8 +418,44 @@ class TestAllPatchesDataset:
         )
         world_size = 2
         for rank in range(world_size):
-            all_patches_dataset = AllPatchesDataset(
+            all_patches_dataset = IterableAllPatchesDataset(
                 model_dataset, (4, 4), rank=rank, world_size=world_size
             )
             samples = list(all_patches_dataset)
             assert len(samples) == 0
+
+
+class TestInMemoryAllPatchesDataset:
+    """Tests for InMemoryAllPatchesDataset."""
+
+    def test_iterable_equal(self, basic_classification_dataset: Dataset) -> None:
+        """Verify that InMemoryAllPatchesDataset and IterableAllPatchesDataset are equivalent."""
+        # Create a couple of windows with different sizes to exercise patching.
+        add_window(basic_classification_dataset, name="w0", bounds=(0, 0, 4, 4))
+        add_window(basic_classification_dataset, name="w1", bounds=(0, 0, 8, 8))
+
+        # Build a minimal ModelDataset (only targets needed for this comparison).
+        model_dataset = ModelDataset(
+            basic_classification_dataset,
+            split_config=SplitConfig(),
+            task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+            workers=1,
+            inputs={
+                "targets": DataInput("vector", ["vector_layer"]),
+            },
+        )
+
+        # Construct iterable and regular versions.
+        patch_size = (3, 3)
+        iterable_ds = IterableAllPatchesDataset(
+            model_dataset, patch_size, rank=0, world_size=1
+        )
+        regular_ds = InMemoryAllPatchesDataset(model_dataset, patch_size)
+
+        iterable_samples = list(iterable_ds)
+        regular_samples = [regular_ds[i] for i in range(len(regular_ds))]
+
+        # Compare metadata (last element of each tuple) index-by-index.
+        assert len(iterable_samples) == len(regular_samples)
+        for i in range(len(iterable_samples)):
+            assert iterable_samples[i][-1] == regular_samples[i][-1]
