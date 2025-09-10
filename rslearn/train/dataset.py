@@ -991,6 +991,7 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
             worker_id = worker_info.id
             num_workers = worker_info.num_workers
         global_worker_id = self.rank * num_workers + worker_id
+        global_num_workers = self.world_size * num_workers
 
         # Split up the windows evenly among the workers.
         # We compute this for all workers since we will need to see the maximum number
@@ -1014,13 +1015,18 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
 
         # Each worker needs at least one window, otherwise it won't be able to pad.
         # Unless there are zero windows total, which is fine.
-        my_window_indexes: Iterable[int]
+        # Previously we would address this by borrowing the windows from another
+        # worker, but this causes issues with RslearnWriter: if we yield the same
+        # window from parallel workers, it may end up writing an empty output for that
+        # window in the end.
+        # So now we raise an error instead, and require the number of workers to be
+        # less than the number of windows.
         if len(windows_by_worker[global_worker_id]) == 0 and max_num_patches > 0:
-            my_window_indexes = [global_worker_id % len(self.windows)]
-        else:
-            my_window_indexes = windows_by_worker[global_worker_id]
+            raise ValueError(
+                f"the number of workers {global_num_workers} must be <= the number of windows {len(self.windows)}"
+            )
 
-        return (my_window_indexes, max_num_patches)
+        return (windows_by_worker[global_worker_id], max_num_patches)
 
     def __iter__(
         self,

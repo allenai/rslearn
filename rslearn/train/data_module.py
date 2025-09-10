@@ -29,17 +29,17 @@ logger = get_logger(__name__)
 
 
 def collate_fn(
-    batch: list[tuple[dict[str, Any], dict[str, Any]]],
+    batch: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]],
 ) -> tuple:
     """Collate batch of training examples.
 
     We just make list of the inputs and another of the targets.
 
     Args:
-        batch: list of input/target for each example
+        batch: list of input/target/metadata for each example
 
     Returns:
-        a tuple (inputs, targets)
+        a tuple (inputs, targets, metadatas)
     """
     return tuple(zip(*batch))
 
@@ -191,17 +191,30 @@ class RslearnDataModule(L.LightningDataModule):
             split: the split to get a dataloader for
         """
         dataset = self.datasets[split]
+        split_config = self.split_configs[split]
+
+        # Enable persistent workers unless we are using main process.
         persistent_workers = self.num_workers > 0
+
+        # If using all patches, limit number of workers to the number of windows.
+        # Otherwise it has to distribute the same window to different workers which can
+        # cause issues for RslearnWriter.
+        # If the number of windows is 0, then we can set positive number of workers
+        # since they won't yield anything anyway.
+        num_workers = self.num_workers
+        if split_config.load_all_patches and len(dataset.get_dataset_examples()) > 0:
+            num_workers = min(num_workers, len(dataset.get_dataset_examples()))
+
         kwargs: dict[str, Any] = dict(
             dataset=dataset,
             batch_size=self.batch_size,
-            num_workers=self.num_workers,
+            num_workers=num_workers,
             collate_fn=collate_fn,
             persistent_workers=persistent_workers,
         )
         should_shuffle = split == "train"
 
-        sampler_factory = self.split_configs[split].sampler
+        sampler_factory = split_config.sampler
         if sampler_factory:
             kwargs["sampler"] = sampler_factory.get_sampler(dataset)
         elif (
