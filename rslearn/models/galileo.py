@@ -1679,6 +1679,19 @@ class Encoder(GalileoBase):
 class GalileoModel(nn.Module):
     """Galileo backbones."""
 
+    input_keys = [
+        "s1",
+        "s2",
+        "era5",
+        "tc",
+        "viirs",
+        "srtm",
+        "dw",
+        "wc",
+        "landscan",
+        "latlon",
+    ]
+
     def __init__(
         self,
         size: GalileoSize,
@@ -1995,7 +2008,8 @@ class GalileoModel(nn.Module):
                 print(inputs[0][key].shape)
         for key in inputs[0].keys():
             # assume all the keys in an input are consistent
-            stacked_inputs[key] = torch.stack([inp[key] for inp in inputs], dim=0)
+            if key in self.input_keys:
+                stacked_inputs[key] = torch.stack([inp[key] for inp in inputs], dim=0)
 
         s_t_channels = []
         for space_time_modality in ["s1", "s2"]:
