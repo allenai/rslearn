@@ -1989,7 +1989,10 @@ class GalileoModel(nn.Module):
             inputs
         """
         stacked_inputs = {}
-        print(inputs[0])
+        for key in inputs[0].keys():
+            print(key)
+            if isinstance(inputs[0][key], torch.Tensor):
+                print(inputs[0][key].shape)
         for key in inputs[0].keys():
             # assume all the keys in an input are consistent
             stacked_inputs[key] = torch.stack([inp[key] for inp in inputs], dim=0)
