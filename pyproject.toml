@@ -54,6 +54,7 @@ extra = [
     "terratorch>=1.0.2",
     "transformers>=4.55",
     "wandb>=0.21",
+    "huggingface_hub",
 ]
 
 dev = [
