@@ -1692,14 +1692,12 @@ class GalileoModel(nn.Module):
         "latlon",
     ]
 
-    def __init__(
-        self,
-        size: GalileoSize,
-    ) -> None:
+    def __init__(self, size: GalileoSize, patch_size: int = 4) -> None:
         """Initialize the Galileo model.
 
         Args:
-            size: The size of the Terramind model.
+            size: The size of the Galileo model.
+            patch_size: The patch size to use.
         """
         super().__init__()
         _ = hf_hub_download(
@@ -1725,6 +1723,8 @@ class GalileoModel(nn.Module):
         self.s_t_channels_s1 = [
             idx for idx, key in enumerate(SPACE_TIME_BANDS_GROUPS_IDX) if "S1" in key
         ]
+
+        self.patch_size = patch_size
 
     @staticmethod
     def to_cartesian(
@@ -1993,9 +1993,7 @@ class GalileoModel(nn.Module):
             months=months,
         )
 
-    def forward(
-        self, inputs: list[dict[str, Any]], patch_size: int = 4
-    ) -> list[torch.Tensor]:
+    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Compute feature maps from the Galileo backbone.
 
         Inputs:
@@ -2038,11 +2036,13 @@ class GalileoModel(nn.Module):
 
         galileo_input = self.construct_galileo_input(**stacked_inputs, normalize=True)
         h = galileo_input.s_t_x.shape[1]
-        if h < patch_size:
+        if h < self.patch_size:
             logger.warning(
-                f"Given patch size {patch_size} < h {h}. Reducing patch size to {h}"
+                f"Given patch size {self.patch_size} < h {h}. Reducing patch size to {h}"
             )
             patch_size = h
+        else:
+            patch_size = self.patch_size
 
         outputs = self.model(
             s_t_x=galileo_input.s_t_x,
