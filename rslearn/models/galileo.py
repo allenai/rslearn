@@ -2004,7 +2004,6 @@ class GalileoModel(nn.Module):
             # assume all the keys in an input are consistent
             if key in self.input_keys:
                 stacked_inputs[key] = torch.stack([inp[key] for inp in inputs], dim=0)
-
         s_t_channels = []
         for space_time_modality in ["s1", "s2"]:
             if space_time_modality not in stacked_inputs:
@@ -2032,7 +2031,7 @@ class GalileoModel(nn.Module):
             }[time_modality]
             num_timesteps = cur.shape[1] // num_bands
             cur = rearrange(cur, "b (t c) -> b t c", t=num_timesteps)
-            stacked_inputs[space_time_modality] = cur
+            stacked_inputs[time_modality] = cur
 
         galileo_input = self.construct_galileo_input(**stacked_inputs, normalize=True)
         h = galileo_input.s_t_x.shape[1]
