@@ -1983,13 +1983,13 @@ class GalileoModel(nn.Module):
     def forward(
         self, inputs: list[dict[str, Any]], patch_size: int = 4
     ) -> list[torch.Tensor]:
-        """Compute feature maps from the Croma backbone.
+        """Compute feature maps from the Galileo backbone.
 
         Inputs:
-            inputs: input dicts that must include either/both of "sentinel2" or
-                "sentinel1" keys depending on the configured modality.
+            inputs
         """
         stacked_inputs = {}
+        print(inputs[0])
         for key in inputs[0].keys():
             # assume all the keys in an input are consistent
             stacked_inputs[key] = torch.stack([inp[key] for inp in inputs], dim=0)
