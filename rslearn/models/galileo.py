@@ -2021,14 +2021,21 @@ class GalileoModel(nn.Module):
             num_timesteps = cur.shape[1] // num_bands
             cur = rearrange(cur, "b (t c) h w -> b h w t c", t=num_timesteps)
             stacked_inputs[space_time_modality] = cur
-        # # Rearrange from patch embeddings to 2D feature map.
-        # num_patches_per_dim = self.image_resolution // PATCH_SIZE
-        # features = rearrange(
-        #     features,
-        #     "b (h w) d -> b d h w",
-        #     h=num_patches_per_dim,
-        #     w=num_patches_per_dim,
-        # )
+
+        for time_modality in ["era5", "tc", "viirs"]:
+            if time_modality not in stacked_inputs:
+                continue
+            cur = stacked_inputs[time_modality]
+            # Check if it's single or multitemporal, and reshape accordingly
+            num_bands = {
+                "era5": len(ERA5_BANDS),
+                "tc": len(TC_BANDS),
+                "viirs": len(VIIRS_BANDS),
+            }[time_modality]
+            num_timesteps = cur.shape[1] // num_bands
+            cur = rearrange(cur, "b (t c) -> b t c", t=num_timesteps)
+            stacked_inputs[space_time_modality] = cur
+
         galileo_input = self.construct_galileo_input(**stacked_inputs, normalize=True)
         h = galileo_input.s_t_x.shape[1]
         if h < patch_size:
