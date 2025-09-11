@@ -2043,7 +2043,8 @@ class GalileoModel(nn.Module):
                 f"Given patch size {patch_size} < h {h}. Reducing patch size to {h}"
             )
             patch_size = h
-        s_t_x = self.model(
+
+        outputs = self.model(
             s_t_x=galileo_input.s_t_x,
             s_t_m=galileo_input.s_t_m,
             sp_x=galileo_input.sp_x,
@@ -2054,13 +2055,23 @@ class GalileoModel(nn.Module):
             st_m=galileo_input.st_m,
             months=galileo_input.months,
             patch_size=patch_size,
-        )[0]
-        # we will be assuming we only want s_t_x, and (for now) that we want s1 or s2 bands
-        # s_t_x has shape [b, h, w, t, c_g, d]
-        # and we want [b, d, h, w]
-        return [
-            rearrange(
-                s_t_x[:, :, :, :, s_t_channels, :].mean(dim=3),
-                "b h w c_g d -> b c_g d h w",
-            ).mean(dim=1)
-        ]
+        )
+        if h == patch_size:
+            # only one spatial patch, so we can just take an average
+            # of all the tokens to output b c_g 1 1
+            s_t_x, sp_x, t_x, st_x, s_t_m, sp_m, t_m, st_m, _ = outputs
+            averaged = self.model.average_tokens(
+                s_t_x, sp_x, t_x, st_x, s_t_m, sp_m, t_m, st_m
+            )
+            return [repeat(averaged, "b d -> b d 1 1")]
+        else:
+            s_t_x = outputs[0]
+            # we will be assuming we only want s_t_x, and (for now) that we want s1 or s2 bands
+            # s_t_x has shape [b, h, w, t, c_g, d]
+            # and we want [b, d, h, w]
+            return [
+                rearrange(
+                    s_t_x[:, :, :, :, s_t_channels, :].mean(dim=3),
+                    "b h w c_g d -> b c_g d h w",
+                ).mean(dim=1)
+            ]
