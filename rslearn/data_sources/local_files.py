@@ -232,6 +232,11 @@ class RasterImporter(Importer):
                 projection = Projection(crs, x_resolution, y_resolution)
                 geometry = STGeometry(projection, shp, None)
 
+            # If the raster item has very large spatial coverage, projections with
+            # limited validity (e.g., UTM) can fail spatial tests. Treat as global.
+            if geometry.is_too_large():
+                geometry = get_global_geometry(time_range=None)
+
             if spec.name:
                 item_name = spec.name
             else:
