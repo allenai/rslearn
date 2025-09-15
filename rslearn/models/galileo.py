@@ -1276,7 +1276,7 @@ class Encoder(GalileoBase):
                 )
             else:
                 s_t_l.append(
-                    torch.empty(
+                    torch.zeros(
                         b,
                         new_h,
                         new_w,
@@ -1296,7 +1296,7 @@ class Encoder(GalileoBase):
                 )
             else:
                 sp_l.append(
-                    torch.empty(
+                    torch.zeros(
                         b,
                         new_h,
                         new_w,
@@ -1312,7 +1312,7 @@ class Encoder(GalileoBase):
                 t_l.append(self.time_embed[channel_group](t_x[:, :, channel_idxs]))
             else:
                 t_l.append(
-                    torch.empty(
+                    torch.zeros(
                         b, t, self.embedding_size, dtype=t_x.dtype, device=t_x.device
                     )
                 )
@@ -1323,7 +1323,7 @@ class Encoder(GalileoBase):
                 st_l.append(self.static_embed[channel_group](st_x[:, channel_idxs]))
             else:
                 st_l.append(
-                    torch.empty(
+                    torch.zeros(
                         b, self.embedding_size, dtype=st_x.dtype, device=st_x.device
                     )
                 )
