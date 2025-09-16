@@ -159,7 +159,7 @@ class EarthDaily(DataSource, TileStore):
         if self.eds_client is not None:
             return self.eds_client, self.client, self.collection
 
-        self.eds_client = EDSClient(EDSConfig())
+        self.eds_client = EDSClient(EDSConfig(max_retries=3, retry_backoff_factor=5.0))
 
         if self.service_name == "platform":
             self.client = self.eds_client.platform.pystac_client
