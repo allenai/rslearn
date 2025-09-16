@@ -3,12 +3,14 @@
 import argparse
 import multiprocessing
 import random
+import re
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 
 import tqdm
+from jsonargparse import Namespace
 from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
 from rasterio.crs import CRS
 from upath import UPath
@@ -778,18 +780,158 @@ def dataset_build_index() -> None:
     index.save_index(ds_path)
 
 
+# Template variable arguments configuration
+TEMPLATE_VARIABLE_ARGS = [
+    {
+        "arg_name": "--extra-files-path",
+        "template_var": "EXTRA_FILES_PATH",
+        "type": str,
+    },
+]
+
+
 class RslearnLightningCLI(LightningCLI):
-    """LightningCLI that links data.tasks to model.tasks."""
+    """LightningCLI that links data.tasks to model.tasks and supports template variables."""
 
     def add_arguments_to_parser(self, parser: LightningArgumentParser) -> None:
-        """Link data.tasks to model.tasks.
+        """Add template variable arguments and link data.tasks to model.tasks.
 
         Args:
             parser: the argument parser
         """
+        # Add template variable arguments from configuration
+        for arg_config in TEMPLATE_VARIABLE_ARGS:
+            help_text = f"Value to substitute for ${{{arg_config['template_var']}}} template variables in config files"
+            parser.add_argument(
+                arg_config["arg_name"],
+                type=arg_config["type"],
+                help=help_text,
+            )
+
+        # Link data.tasks to model.tasks
         parser.link_arguments(
             "data.init_args.task", "model.init_args.task", apply_on="instantiate"
         )
+
+    def parse_arguments(self, parser: LightningArgumentParser, args: Any) -> None:
+        """Parse arguments and apply template variable substitution to the config."""
+        # Let Lightning do all the normal parsing, which set self.config
+        super().parse_arguments(parser, args)
+
+        # Apply template substitution to the resulting config
+        if TEMPLATE_VARIABLE_ARGS:
+            template_vars = self._extract_template_variables_from_config()
+            if template_vars:
+                # Apply template substitution with proper typing
+                current_config: Namespace = self.config  # type: ignore[has-type]
+                self.config = self.apply_template_substitution(
+                    current_config, template_vars
+                )
+                logger.info(f"Applied template variables: {template_vars}")
+
+    def _extract_template_variables_from_config(self) -> dict[str, str]:
+        """Extract template variable values from the parsed config."""
+        template_vars: dict[str, str] = {}
+
+        for arg_config in TEMPLATE_VARIABLE_ARGS:
+            arg_name = str(arg_config["arg_name"])
+            template_var_name = str(arg_config["template_var"])
+
+            # Convert --extra-files-path to extra_files_path attribute name
+            attr_name = arg_name.lstrip("-").replace("-", "_")
+
+            # Get the value from the config
+            if hasattr(self.config, attr_name):
+                value = getattr(self.config, attr_name)
+                if value is not None:
+                    template_vars[template_var_name] = value
+
+        return template_vars
+
+    @staticmethod
+    def apply_template_substitution(
+        config: Namespace, template_vars: dict[str, str]
+    ) -> Any:
+        """Apply template variable substitution to the parsed configuration."""
+        if not template_vars:
+            return config
+
+        try:
+            return RslearnLightningCLI.substitute_in_tree(config, template_vars)
+        except Exception as e:
+            logger.warning(f"Failed to apply template substitution to config: {e}")
+            return config
+
+    @staticmethod
+    def substitute_template_variables(content: str, variables: dict[str, str]) -> str:
+        """Substitute template variables in content string.
+
+        Replaces instances of ${VARIABLE_NAME} with values from the variables dict.
+
+        Args:
+            content: The string content containing template variables
+            variables: Dictionary mapping variable names to their values
+
+        Returns:
+            String with template variables replaced
+        """
+        pattern = r"\$\{([^}]+)\}"
+
+        def replace_variable(match: re.Match[str]) -> str:
+            var_name = match.group(1)
+            if var_name in variables:
+                return variables[var_name]
+            else:
+                return match.group(0)
+
+        return re.sub(pattern, replace_variable, content)
+
+    @staticmethod
+    def substitute_in_tree(obj: Any, template_vars: dict[str, str]) -> Any:
+        """Recursively walk the object tree and substitute template variables in string values."""
+        if isinstance(obj, str):
+            # Apply substitution to string values
+            return RslearnLightningCLI.substitute_template_variables(obj, template_vars)
+
+        elif isinstance(obj, dict):
+            # Recursively process dictionary values
+            return {
+                key: RslearnLightningCLI.substitute_in_tree(value, template_vars)
+                for key, value in obj.items()
+            }
+
+        elif isinstance(obj, list):
+            # Recursively process list items
+            return [
+                RslearnLightningCLI.substitute_in_tree(item, template_vars)
+                for item in obj
+            ]
+
+        elif isinstance(obj, tuple):
+            # Recursively process tuple items
+            return tuple(
+                RslearnLightningCLI.substitute_in_tree(item, template_vars)
+                for item in obj
+            )
+
+        elif hasattr(obj, "__dict__"):
+            # Handle objects with attributes (like Namespace)
+            for attr_name in vars(obj):
+                if not attr_name.startswith("_"):  # Skip private attributes
+                    try:
+                        attr_value = getattr(obj, attr_name)
+                        new_value = RslearnLightningCLI.substitute_in_tree(
+                            attr_value, template_vars
+                        )
+                        setattr(obj, attr_name, new_value)
+                    except (AttributeError, TypeError):
+                        # Skip attributes that can't be set
+                        pass
+            return obj
+
+        else:
+            # Return other types unchanged (int, float, bool, None, etc.)
+            return obj
 
     def before_instantiate_classes(self) -> None:
         """Called before Lightning class initialization.
