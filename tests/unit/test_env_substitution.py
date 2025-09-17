@@ -1,4 +1,4 @@
-"""Unit tests for RslearnLightningCLI environment variable substitution."""
+"""Unit tests for environment variable substitution utilities."""
 
 from argparse import Namespace
 from typing import Any
@@ -11,8 +11,8 @@ from rslearn.utils.env_substitution import (
 )
 
 
-class TestRslearnLightningCLIEnvSubstitution:
-    """Test suite for RslearnLightningCLI environment variable substitution functionality."""
+class TestEnvSubstitution:
+    """Test suite for environment variable substitution utilities."""
 
     def test_substitute_env_vars_in_string_basic(
         self, monkeypatch: pytest.MonkeyPatch
