@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 
 import tqdm
+from jsonargparse import Namespace
 from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
 from rasterio.crs import CRS
 from upath import UPath
@@ -29,6 +30,7 @@ from rslearn.tile_stores import get_tile_store_with_layer
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.utils import Projection, STGeometry
+from rslearn.utils.env_substitution import substitute_env_vars_in_tree
 
 logger = get_logger(__name__)
 
@@ -779,7 +781,7 @@ def dataset_build_index() -> None:
 
 
 class RslearnLightningCLI(LightningCLI):
-    """LightningCLI that links data.tasks to model.tasks."""
+    """LightningCLI that links data.tasks to model.tasks and supports environment variables."""
 
     def add_arguments_to_parser(self, parser: LightningArgumentParser) -> None:
         """Link data.tasks to model.tasks.
@@ -787,9 +789,19 @@ class RslearnLightningCLI(LightningCLI):
         Args:
             parser: the argument parser
         """
+        # Link data.tasks to model.tasks
         parser.link_arguments(
             "data.init_args.task", "model.init_args.task", apply_on="instantiate"
         )
+
+    def parse_arguments(self, parser: LightningArgumentParser, args: Any) -> None:
+        """Parse arguments and apply environment variable substitution to the config."""
+        # Let Lightning do all the normal parsing, which sets self.config
+        super().parse_arguments(parser, args)
+
+        # Apply environment variable substitution to the resulting config
+        current_config: Namespace = self.config  # type: ignore[has-type]
+        self.config = substitute_env_vars_in_tree(current_config)
 
     def before_instantiate_classes(self) -> None:
         """Called before Lightning class initialization.
