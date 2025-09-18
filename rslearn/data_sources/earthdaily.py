@@ -82,6 +82,8 @@ class EarthDaily(DataSource, TileStore):
         timeout: timedelta = timedelta(seconds=10),
         skip_items_missing_assets: bool = False,
         cache_dir: UPath | None = None,
+        max_retries: int = 3,
+        retry_backoff_factor: float = 5.0,
         service_name: Literal["platform"] = "platform",
     ):
         """Initialize a new EarthDaily instance.
@@ -99,6 +101,11 @@ class EarthDaily(DataSource, TileStore):
             cache_dir: optional directory to cache items by name, including asset URLs.
                 If not set, there will be no cache and instead STAC requests will be
                 needed each time.
+            max_retries: the maximum number of retry attempts for HTTP requests that fail
+                due to transient errors (e.g., 429, 500, 502, 503, 504 status codes).
+            retry_backoff_factor: backoff factor for exponential retry delays between HTTP
+                request attempts.  The delay between retries is calculated using the formula:
+                `(retry_backoff_factor * (2 ** (retry_count - 1)))` seconds.
             service_name: the service name, only "platform" is supported, the other
                 services "legacy" and "internal" are not supported.
         """
@@ -110,6 +117,8 @@ class EarthDaily(DataSource, TileStore):
         self.timeout = timeout
         self.skip_items_missing_assets = skip_items_missing_assets
         self.cache_dir = cache_dir
+        self.max_retries = max_retries
+        self.retry_backoff_factor = retry_backoff_factor
         self.service_name = service_name
 
         if cache_dir is not None:
@@ -139,6 +148,12 @@ class EarthDaily(DataSource, TileStore):
         if "cache_dir" in d:
             kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
 
+        if "max_retries" in d:
+            kwargs["max_retries"] = d["max_retries"]
+
+        if "retry_backoff_factor" in d:
+            kwargs["retry_backoff_factor"] = d["retry_backoff_factor"]
+
         simple_optionals = ["query", "sort_by", "sort_ascending"]
         for k in simple_optionals:
             if k in d:
@@ -159,7 +174,12 @@ class EarthDaily(DataSource, TileStore):
         if self.eds_client is not None:
             return self.eds_client, self.client, self.collection
 
-        self.eds_client = EDSClient(EDSConfig())
+        self.eds_client = EDSClient(
+            EDSConfig(
+                max_retries=self.max_retries,
+                retry_backoff_factor=self.retry_backoff_factor,
+            )
+        )
 
         if self.service_name == "platform":
             self.client = self.eds_client.platform.pystac_client
