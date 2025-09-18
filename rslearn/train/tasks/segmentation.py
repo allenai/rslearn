@@ -127,11 +127,12 @@ class SegmentationTask(BasicTask):
 
         assert raw_inputs["targets"].shape[0] == 1
         labels = raw_inputs["targets"][0, :, :].long()
-        new_labels = labels.clone()
 
         if self.class_id_mapping is not None:
+            new_labels = labels.clone()
             for old_id, new_id in self.class_id_mapping.items():
                 new_labels[labels == old_id] = new_id
+            labels = new_labels
 
         if self.nodata_value is not None:
             valid = (labels != self.nodata_value).float()
@@ -142,7 +143,7 @@ class SegmentationTask(BasicTask):
             valid = torch.ones(labels.shape, dtype=torch.float32)
 
         return {}, {
-            "classes": new_labels,
+            "classes": labels,
             "valid": valid,
         }
 
