@@ -9,11 +9,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 
 import tqdm
-from jsonargparse import Namespace
 from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
 from rasterio.crs import CRS
 from upath import UPath
 
+from rslearn.arg_parser import RslearnArgumentParser
 from rslearn.config import LayerConfig
 from rslearn.const import WGS84_EPSG
 from rslearn.data_sources import Item, data_source_from_config
@@ -30,7 +30,6 @@ from rslearn.tile_stores import get_tile_store_with_layer
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.utils import Projection, STGeometry
-from rslearn.utils.env_substitution import substitute_env_vars_in_tree
 
 logger = get_logger(__name__)
 
@@ -794,15 +793,6 @@ class RslearnLightningCLI(LightningCLI):
             "data.init_args.task", "model.init_args.task", apply_on="instantiate"
         )
 
-    def parse_arguments(self, parser: LightningArgumentParser, args: Any) -> None:
-        """Parse arguments and apply environment variable substitution to the config."""
-        # Let Lightning do all the normal parsing, which sets self.config
-        super().parse_arguments(parser, args)
-
-        # Apply environment variable substitution to the resulting config
-        current_config: Namespace = self.config  # type: ignore[has-type]
-        self.config = substitute_env_vars_in_tree(current_config)
-
     def before_instantiate_classes(self) -> None:
         """Called before Lightning class initialization.
 
@@ -843,6 +833,7 @@ def model_handler() -> None:
         subclass_mode_model=True,
         subclass_mode_data=True,
         save_config_kwargs={"overwrite": True},
+        parser_class=RslearnArgumentParser,
     )
 
 
