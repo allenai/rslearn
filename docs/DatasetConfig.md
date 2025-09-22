@@ -873,6 +873,50 @@ Available bands:
 - B10
 - B11
 
+### rslearn.data_sources.zarr.ZarrDataSource
+
+This data source reads spatio-temporal cubes that are stored in a Zarr hierarchy. It can
+either ingest items into the dataset tile store or act as the tile store itself when
+`ingest` is set to false. Access to the underlying cube requires the optional
+dependencies installed via `pip install rslearn[extra]`.
+
+```jsonc
+{
+  // Required URI pointing to the root of the Zarr store. Any fsspec-compatible URI is
+  // supported.
+  "store_uri": "s3://bucket/path/to/datacube.zarr",
+  // Optional variable name inside the store. If omitted, the store must contain a
+  // single data variable.
+  "data_variable": "reflectance",
+  // Required CRS of the cube, expressed as an EPSG code or WKT string.
+  "crs": "EPSG:32633",
+  // Required pixel size. Provide either a scalar (identical resolutions) or an object
+  // with explicit x and y values.
+  "pixel_size": 10,
+  // Required origin of pixel (0, 0) expressed as [min_x, max_y] in CRS units.
+  "origin": [500000.0, 4200000.0],
+  // Required mapping from conceptual axes to dimension names in the Zarr array.
+  "axis_names": {"x": "x", "y": "y", "time": "time", "band": "band"},
+  // Required list of bands. The length must match the band dimension when present.
+  "bands": ["B02", "B03", "B04"],
+  // Required numpy dtype string that matches the underlying Zarr array.
+  "dtype": "float32",
+  // Optional nodata value applied when writing tiles and returned during direct reads.
+  "nodata": 0.0,
+  // Optional override for how the cube is broken into items. Each value is the number
+  // of pixels per chunk along that axis.
+  "chunk_shape": {"y": 1024, "x": 1024},
+  // Optional fsspec storage options passed to xarray.open_zarr.
+  "storage_options": {"anon": true},
+  // Optional flag toggling consolidated metadata support. Defaults to true.
+  "consolidated": true
+}
+```
+
+The Zarr data source currently creates one item per time step. When you skip ingestion
+(`"ingest": false` on the layer), the source acts as a read-only tile store so windows
+can be materialized directly from the Zarr cube.
+
 ### rslearn.data_sources.xyz_tiles.XyzTiles
 
 This data source is for web xyz image tiles (slippy tiles).

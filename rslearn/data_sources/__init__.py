@@ -19,6 +19,7 @@ from rslearn.config import LayerConfig
 from rslearn.log_utils import get_logger
 
 from .data_source import DataSource, Item, ItemLookupDataSource, RetrieveItemDataSource
+from .zarr import ZarrDataSource, ZarrItem
 
 logger = get_logger(__name__)
 
@@ -47,5 +48,7 @@ __all__ = (
     "Item",
     "ItemLookupDataSource",
     "RetrieveItemDataSource",
+    "ZarrDataSource",
+    "ZarrItem",
     "data_source_from_config",
 )
