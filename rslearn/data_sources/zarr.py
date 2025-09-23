@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 import numpy as np
@@ -48,28 +48,38 @@ def _import_zarr_deps() -> tuple[Any, Any]:
     return xr, None
 
 
+def _ensure_utc(dt: datetime) -> datetime:
+    """Attach UTC timezone if missing and normalize to UTC."""
+
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _to_datetime(value: Any) -> datetime:
     """Convert various time coordinate values emitted by xarray to datetime."""
 
     if isinstance(value, datetime):
-        return value
+        return _ensure_utc(value)
 
     try:
         import cftime  # type: ignore
 
         if isinstance(value, cftime.datetime):
-            return value.to_datetime()
+            return _ensure_utc(value.to_datetime())
     except ImportError:  # pragma: no cover - optional dependency
         pass
 
     if isinstance(value, np.datetime64):
         iso = np.datetime_as_string(value, timezone="UTC")
         if iso.endswith("Z"):
-            iso = iso[:-1]
-        return datetime.fromisoformat(iso)
+            iso = iso[:-1] + "+00:00"
+        dt = datetime.fromisoformat(iso)
+        return _ensure_utc(dt)
 
     if isinstance(value, str):
-        return datetime.fromisoformat(value)
+        dt = datetime.fromisoformat(value)
+        return _ensure_utc(dt)
 
     raise TypeError(f"Unsupported time coordinate type: {type(value)!r}")
 
@@ -470,6 +480,16 @@ class ZarrDataSource(DataSource[ZarrItem], TileStore):
     ) -> list[list[list[ZarrItem]]]:
         groups: list[list[list[ZarrItem]]] = []
         for geometry in geometries:
+            if geometry.time_range is not None:
+                geometry = STGeometry(
+                    geometry.projection,
+                    geometry.shp,
+                    (
+                        _ensure_utc(geometry.time_range[0]),
+                        _ensure_utc(geometry.time_range[1]),
+                    ),
+                )
+
             candidates = self._iter_candidate_items(geometry)
             geometry_in_projection = geometry.to_projection(self.projection)
             cur_groups = match_candidate_items_to_window(
