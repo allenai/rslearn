@@ -47,6 +47,7 @@ class PrithviV2(nn.Module):
 
     def __init__(self, pretrained_path: str | UPath | None = None):
         """Init."""
+        super().__init__()
         if pretrained_path is None:
             pretrained_path = UPath(
                 tempfile.gettempdir(), "rslearn_cache", "prithvi_v2"
