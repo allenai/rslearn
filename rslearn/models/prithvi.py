@@ -101,7 +101,13 @@ class PrithviV2(nn.Module):
         num_timesteps = x.shape[1] // len(self.bands)
         x = rearrange(x, "b (t c) h w -> b c t h w", t=num_timesteps)
         features = self.model.encoder.forward_features(x)
-        return self.model.encoder.prepare_features_for_image_model(features)
+        # prepare_features_for_image_model was slightly modified since we already
+        # know the number of timesteps and don't need to recompute it.
+        # in addition we average along the time dimension (instead of concatenating)
+        # to keep the embeddings reasonably sized.
+        return self.model.encoder.prepare_features_for_image_model(
+            features, num_timesteps
+        )
 
 
 # Copyright (c) IBM Corp. 2024. All rights reserved.
@@ -634,26 +640,24 @@ class PrithviViT(nn.Module):
         return out
 
     def prepare_features_for_image_model(
-        self, features: list[torch.Tensor]
+        self, features: list[torch.Tensor], t: int
     ) -> list[torch.Tensor]:
         """prepare_features_for_image_model."""
         out = []
-        effective_time_dim = (
-            self.patch_embed.input_size[0] // self.patch_embed.patch_size[0]
-        )
         for x in features:
             x_no_token = x[:, 1:, :]
             number_of_tokens = x_no_token.shape[1]
-            tokens_per_timestep = number_of_tokens // effective_time_dim
+            tokens_per_timestep = number_of_tokens // t
             h = int(np.sqrt(tokens_per_timestep))
             encoded = rearrange(
                 x_no_token,
-                "batch (t h w) e -> batch (t e) h w",
+                "batch (t h w) e -> batch t e h w",
                 e=self.embed_dim,
-                t=effective_time_dim,
+                t=t,
                 h=h,
             )
-            out.append(encoded)
+            # mean along the time dimension
+            out.append(encoded.mean(dim=1))
         return out
 
 
