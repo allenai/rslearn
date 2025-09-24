@@ -4,6 +4,7 @@ import collections.abc
 import itertools
 import json
 import math
+import tempfile
 from collections import OrderedDict
 from collections import OrderedDict as OrderedDictType
 from collections.abc import Sequence
@@ -20,6 +21,7 @@ from einops import rearrange, repeat
 from huggingface_hub import hf_hub_download
 from torch import Tensor, vmap
 from torch.jit import Final
+from upath import UPath
 
 from rslearn.log_utils import get_logger
 
@@ -1692,30 +1694,44 @@ class GalileoModel(nn.Module):
         "latlon",
     ]
 
-    def __init__(self, size: GalileoSize, patch_size: int = 4) -> None:
+    def __init__(
+        self,
+        size: GalileoSize,
+        patch_size: int = 4,
+        pretrained_path: str | UPath | None = None,
+    ) -> None:
         """Initialize the Galileo model.
 
         Args:
             size: The size of the Galileo model.
             patch_size: The patch size to use.
+            pretrained_path: the local path to the pretrained weights. Otherwise it is
+                downloaded and cached in temp directory.
         """
         super().__init__()
-        _ = hf_hub_download(
-            repo_id=HF_HUB_ID,
-            filename=f"{pretrained_weights[size]}/{ENCODER_FILENAME}",
-            revision="f039dd5dde966a931baeda47eb680fa89b253e4e",
-        )
-        config_file = hf_hub_download(
-            repo_id=HF_HUB_ID,
-            filename=f"{pretrained_weights[size]}/{CONFIG_FILENAME}",
-            revision="f039dd5dde966a931baeda47eb680fa89b253e4e",
-        )
+        if pretrained_path is None:
+            pretrained_path = UPath(tempfile.gettempdir(), "rslearn_cache", "galileo")
 
-        model_folder = Path(config_file).parent
-        assert (model_folder / ENCODER_FILENAME).exists()
-        assert (model_folder / CONFIG_FILENAME).exists()
+        if not (UPath(pretrained_path) / CONFIG_FILENAME).exists():
+            _ = hf_hub_download(
+                repo_id=HF_HUB_ID,
+                filename=f"{pretrained_weights[size]}/{CONFIG_FILENAME}",
+                revision="f039dd5dde966a931baeda47eb680fa89b253e4e",
+            )
+        if not (UPath(pretrained_path) / ENCODER_FILENAME).exists():
+            _ = hf_hub_download(
+                local_dir=pretrained_path,
+                repo_id=HF_HUB_ID,
+                filename=f"{pretrained_weights[size]}/{ENCODER_FILENAME}",
+                revision="f039dd5dde966a931baeda47eb680fa89b253e4e",
+            )
 
-        self.model = Encoder.load_from_folder(model_folder, device=torch.device("cpu"))
+        assert (UPath(pretrained_path) / ENCODER_FILENAME).exists()
+        assert (UPath(pretrained_path) / CONFIG_FILENAME).exists()
+
+        self.model = Encoder.load_from_folder(
+            UPath(pretrained_path), device=torch.device("cpu")
+        )
 
         self.s_t_channels_s2 = [
             idx for idx, key in enumerate(SPACE_TIME_BANDS_GROUPS_IDX) if "S2" in key
