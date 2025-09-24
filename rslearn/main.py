@@ -13,6 +13,7 @@ from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
 from rasterio.crs import CRS
 from upath import UPath
 
+from rslearn.arg_parser import RslearnArgumentParser
 from rslearn.config import LayerConfig
 from rslearn.const import WGS84_EPSG
 from rslearn.data_sources import Item, data_source_from_config
@@ -779,7 +780,7 @@ def dataset_build_index() -> None:
 
 
 class RslearnLightningCLI(LightningCLI):
-    """LightningCLI that links data.tasks to model.tasks."""
+    """LightningCLI that links data.tasks to model.tasks and supports environment variables."""
 
     def add_arguments_to_parser(self, parser: LightningArgumentParser) -> None:
         """Link data.tasks to model.tasks.
@@ -787,6 +788,7 @@ class RslearnLightningCLI(LightningCLI):
         Args:
             parser: the argument parser
         """
+        # Link data.tasks to model.tasks
         parser.link_arguments(
             "data.init_args.task", "model.init_args.task", apply_on="instantiate"
         )
@@ -831,6 +833,7 @@ def model_handler() -> None:
         subclass_mode_model=True,
         subclass_mode_data=True,
         save_config_kwargs={"overwrite": True},
+        parser_class=RslearnArgumentParser,
     )
 
 

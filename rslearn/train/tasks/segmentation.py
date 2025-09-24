@@ -38,6 +38,7 @@ class SegmentationTask(BasicTask):
     def __init__(
         self,
         num_classes: int,
+        class_id_mapping: dict[int, int] | None = None,
         colors: list[tuple[int, int, int]] = DEFAULT_COLORS,
         zero_is_invalid: bool = False,
         nodata_value: int | None = None,
@@ -60,6 +61,8 @@ class SegmentationTask(BasicTask):
                 Mutually exclusive with nodata_value.
             nodata_value: the value to use for nodata pixels. If None, all pixels are
                 considered valid. Mutually exclusive with zero_is_invalid.
+            class_id_mapping: optional mapping from original class IDs to new class IDs.
+                If provided, class labels will be remapped according to this dictionary.
             enable_accuracy_metric: whether to enable the accuracy metric (default
                 true).
             enable_f1_metric: whether to enable the F1 metric (default false).
@@ -82,6 +85,7 @@ class SegmentationTask(BasicTask):
         """
         super().__init__(**kwargs)
         self.num_classes = num_classes
+        self.class_id_mapping = class_id_mapping
         self.colors = colors
         self.nodata_value: int | None
 
@@ -123,6 +127,12 @@ class SegmentationTask(BasicTask):
 
         assert raw_inputs["targets"].shape[0] == 1
         labels = raw_inputs["targets"][0, :, :].long()
+
+        if self.class_id_mapping is not None:
+            new_labels = labels.clone()
+            for old_id, new_id in self.class_id_mapping.items():
+                new_labels[labels == old_id] = new_id
+            labels = new_labels
 
         if self.nodata_value is not None:
             valid = (labels != self.nodata_value).float()
