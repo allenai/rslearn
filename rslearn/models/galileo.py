@@ -1712,13 +1712,15 @@ class GalileoModel(nn.Module):
         if pretrained_path is None:
             pretrained_path = UPath(tempfile.gettempdir(), "rslearn_cache", "galileo")
 
-        if not (UPath(pretrained_path) / CONFIG_FILENAME).exists():
+        pretrained_path_for_size = UPath(pretrained_path) / pretrained_weights[size]
+        if not (pretrained_path_for_size / CONFIG_FILENAME).exists():
             _ = hf_hub_download(
+                local_dir=pretrained_path,
                 repo_id=HF_HUB_ID,
                 filename=f"{pretrained_weights[size]}/{CONFIG_FILENAME}",
                 revision="f039dd5dde966a931baeda47eb680fa89b253e4e",
             )
-        if not (UPath(pretrained_path) / ENCODER_FILENAME).exists():
+        if not (pretrained_path_for_size / ENCODER_FILENAME).exists():
             _ = hf_hub_download(
                 local_dir=pretrained_path,
                 repo_id=HF_HUB_ID,
@@ -1726,11 +1728,11 @@ class GalileoModel(nn.Module):
                 revision="f039dd5dde966a931baeda47eb680fa89b253e4e",
             )
 
-        assert (UPath(pretrained_path) / ENCODER_FILENAME).exists()
-        assert (UPath(pretrained_path) / CONFIG_FILENAME).exists()
+        assert (pretrained_path_for_size / ENCODER_FILENAME).exists()
+        assert (pretrained_path_for_size / CONFIG_FILENAME).exists()
 
         self.model = Encoder.load_from_folder(
-            UPath(pretrained_path), device=torch.device("cpu")
+            pretrained_path_for_size, device=torch.device("cpu")
         )
 
         self.s_t_channels_s2 = [
