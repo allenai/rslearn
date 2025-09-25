@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from einops import rearrange
 from upath import UPath
 
-from .copernicusfm.model_vit import vit_base_patch16
+from .copernicusfm_src.model_vit import vit_base_patch16
 
 
 logger = logging.getLogger(__name__)
