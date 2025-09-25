@@ -35,6 +35,7 @@ class Panopticon(nn.Module):
         """Initialize the Panopticon wrapper.
 
         Args:
+            band_order: The band order for the panopticon model, must match the specified order in the data config
             torchhub_id: The torch hub model ID for panopticon
         """
         super().__init__()
