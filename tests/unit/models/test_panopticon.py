@@ -31,7 +31,8 @@ def test_panopticon() -> None:
             "B12",
         ]
     }
-    panopticon = Panopticon(band_order=band_order).to(DEVICE)
+    with torch.no_grad():
+        panopticon = Panopticon(band_order=band_order).to(DEVICE)
 
     input_hw = 32
     inputs = [
