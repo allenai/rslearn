@@ -5,19 +5,18 @@ import logging
 import pytest
 import torch
 
-from rslearn.models.panopticon import Panopticon
+from rslearn.models.panopticon import Panopticon, PanopticonModalities
 
 logger = logging.getLogger(__name__)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-# Should panopticon loop through time sereies internally or not? I think that is handled by the SimpleTimeSeries model
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
 def test_panopticon() -> None:
     """Test the Panopticon model."""
     band_order = {
-        "sentinel2": [
+        PanopticonModalities.SENTINEL2.value: [
             "B01",
             "B02",
             "B03",
@@ -37,15 +36,23 @@ def test_panopticon() -> None:
     input_hw = 32
     inputs = [
         {
-            "sentinel2": torch.randn(
-                (len(band_order["sentinel2"]), input_hw, input_hw),
+            PanopticonModalities.SENTINEL2.value: torch.randn(
+                (
+                    len(band_order[PanopticonModalities.SENTINEL2.value]),
+                    input_hw,
+                    input_hw,
+                ),
                 dtype=torch.float32,
                 device=DEVICE,
             ),
         },
         {
-            "sentinel2": torch.randn(
-                (len(band_order["sentinel2"]), input_hw, input_hw),
+            PanopticonModalities.SENTINEL2.value: torch.randn(
+                (
+                    len(band_order[PanopticonModalities.SENTINEL2.value]),
+                    input_hw,
+                    input_hw,
+                ),
                 dtype=torch.float32,
                 device=DEVICE,
             ),
@@ -62,7 +69,7 @@ def test_panopticon() -> None:
 def test_panopticon_multiple_modalities() -> None:
     """Test the Panopticon model with multiple modalities."""
     band_order = {
-        "sentinel2": [
+        PanopticonModalities.SENTINEL2.value: [
             "B01",
             "B02",
             "B03",
@@ -76,8 +83,8 @@ def test_panopticon_multiple_modalities() -> None:
             "B11",
             "B12",
         ],
-        "sentinel1": ["vv", "vh"],
-        "landsat8": [
+        PanopticonModalities.SENTINEL1.value: ["vv", "vh"],
+        PanopticonModalities.LANDSAT8.value: [
             "B1",
             "B2",
             "B3",
@@ -94,18 +101,30 @@ def test_panopticon_multiple_modalities() -> None:
     input_hw = 32
     inputs = [
         {
-            "sentinel2": torch.randn(
-                (len(band_order["sentinel2"]), input_hw, input_hw),
+            PanopticonModalities.SENTINEL2.value: torch.randn(
+                (
+                    len(band_order[PanopticonModalities.SENTINEL2.value]),
+                    input_hw,
+                    input_hw,
+                ),
                 dtype=torch.float32,
                 device=DEVICE,
             ),
-            "sentinel1": torch.randn(
-                (len(band_order["sentinel1"]), input_hw, input_hw),
+            PanopticonModalities.SENTINEL1.value: torch.randn(
+                (
+                    len(band_order[PanopticonModalities.SENTINEL1.value]),
+                    input_hw,
+                    input_hw,
+                ),
                 dtype=torch.float32,
                 device=DEVICE,
             ),
-            "landsat8": torch.randn(
-                (len(band_order["landsat8"]), input_hw, input_hw),
+            PanopticonModalities.LANDSAT8.value: torch.randn(
+                (
+                    len(band_order[PanopticonModalities.LANDSAT8.value]),
+                    input_hw,
+                    input_hw,
+                ),
                 dtype=torch.float32,
                 device=DEVICE,
             ),
