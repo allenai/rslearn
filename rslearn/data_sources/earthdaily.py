@@ -551,6 +551,22 @@ class Sentinel2(EarthDaily):
         "visual": ["R", "G", "B"],
     }
 
+    _ASSET_KEY_MAP = {
+        "coastal": "B01",
+        "blue": "B02",
+        "green": "B03",
+        "red": "B04",
+        "rededge1": "B05",
+        "rededge2": "B06",
+        "rededge3": "B07",
+        "nir": "B08",
+        "nir08": "B8A",
+        "nir09": "B09",
+        "swir16": "B11",
+        "swir22": "B12",
+        "visual": "visual",
+    }
+
     def __init__(
         self,
         assets: list[str] | None = None,
@@ -566,10 +582,11 @@ class Sentinel2(EarthDaily):
         if collection_name is None:
             collection_name = self.COLLECTION_NAME
 
+        skip_missing = kwargs.pop("skip_items_missing_assets", False)
         super().__init__(
             collection_name=collection_name,
             asset_bands=asset_bands,
-            skip_items_missing_assets=True,
+            skip_items_missing_assets=skip_missing,
             **kwargs,
         )
 
@@ -608,16 +625,23 @@ class Sentinel2(EarthDaily):
         return Sentinel2(**kwargs)
 
     def _canonical_asset_name(self, asset_key: str) -> str | None:
-        normalized = asset_key.lower()
-        for canonical_key in self.asset_bands.keys():
-            if canonical_key.lower() in normalized:
-                return canonical_key
+        normalized = asset_key.lower().replace("-jp2", "")
+
+        if asset_key in self.asset_bands:
+            return asset_key
+
+        mapped = self._ASSET_KEY_MAP.get(normalized)
+        if mapped and mapped in self.asset_bands:
+            return mapped
+
         return None
 
     def _stac_item_to_item(self, stac_item: pystac.Item) -> EarthDailyItem:
         item = super()._stac_item_to_item(stac_item)
         normalized_asset_urls: dict[str, str] = {}
         for asset_key, asset_url in item.asset_urls.items():
+            if asset_key.lower().endswith("-jp2"):
+                continue
             canonical_key = self._canonical_asset_name(asset_key)
             if canonical_key is None:
                 continue

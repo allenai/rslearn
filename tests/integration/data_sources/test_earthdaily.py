@@ -74,13 +74,14 @@ def test_sentinel1(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
     assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
 
 
-def test_sentinel2(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
-    """Test ingesting a Sentinel-2 item corresponding to seattle2020."""
+def test_sentinel2(tmp_path: pathlib.Path, edc_preview_geometry: STGeometry) -> None:
+    """Test ingesting a Sentinel-2 item corresponding to the edc preview region."""
     band_name = "B04"
     data_source = Sentinel2(assets=[band_name])
 
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
-    item_groups = data_source.get_items([seattle2020], query_config)[0]
+    item_groups = data_source.get_items([edc_preview_geometry], query_config)[0]
+    assert item_groups, "Expected at least one matching Sentinel-2 item"
     item = item_groups[0][0]
 
     tile_store_dir = UPath(tmp_path)
@@ -91,7 +92,7 @@ def test_sentinel2(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name),
         item_groups[0],
-        [[seattle2020]],
+        [[edc_preview_geometry]],
     )
     assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
 
