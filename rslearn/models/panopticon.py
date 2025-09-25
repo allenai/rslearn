@@ -108,7 +108,7 @@ class Panopticon(nn.Module):
         processed_data_list: list[torch.Tensor] = []
         for modality in self.supported_modalities:
             if modality not in input_data.keys():
-                logger.warning(f"Modality {modality} not found in input data")
+                logger.debug(f"Modality {modality} not found in input data")
                 continue
             data = input_data[modality]
             device = data.device
@@ -128,13 +128,11 @@ class Panopticon(nn.Module):
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Forward pass through the panopticon model."""
         batch_inputs = {key: torch.stack([inp[key] for inp in inputs], dim=0) for key in inputs[0].keys()}
-        # loop through and log shapes of batch_inputs
-        for key in batch_inputs.keys():
-            logger.info(f"Batch input {key} shape: {batch_inputs[key].shape}")
         panopticon_inputs = self.prepare_input(batch_inputs)
         output_features = self.model.forward_features(panopticon_inputs)[
                 "x_norm_patchtokens"
             ]
+
         num_tokens = output_features.shape[1]
         height = int(math.sqrt(num_tokens))
         output_features = rearrange(
