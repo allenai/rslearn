@@ -4,7 +4,9 @@ import json
 import os
 import tempfile
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 import affine
 import numpy.typing as npt
@@ -13,7 +15,9 @@ import pystac_client
 import rasterio
 import requests
 import shapely
+from dotenv import load_dotenv
 from earthdaily import EDSClient, EDSConfig
+from earthdaily._eds_config import AssetAccessMode
 from rasterio.enums import Resampling
 from upath import UPath
 
@@ -29,6 +33,9 @@ from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 
 logger = get_logger(__name__)
+
+
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
 class EarthDailyItem(Item):
@@ -159,7 +166,21 @@ class EarthDaily(DataSource, TileStore):
         if self.eds_client is not None:
             return self.eds_client, self.client, self.collection
 
-        self.eds_client = EDSClient(EDSConfig())
+        config_kwargs: dict[str, Any] = {}
+        asset_mode = os.getenv("EDS_ASSET_ACCESS_MODE")
+        if asset_mode:
+            try:
+                config_kwargs["asset_access_mode"] = AssetAccessMode(asset_mode)
+            except ValueError:
+                logger.warning(
+                    "Invalid EDS_ASSET_ACCESS_MODE %s; defaulting to proxy URLs",
+                    asset_mode,
+                )
+                config_kwargs["asset_access_mode"] = AssetAccessMode.PROXY_URLS
+        else:
+            config_kwargs["asset_access_mode"] = AssetAccessMode.PROXY_URLS
+
+        self.eds_client = EDSClient(EDSConfig(**config_kwargs))
 
         if self.service_name == "platform":
             self.client = self.eds_client.platform.pystac_client
@@ -186,14 +207,30 @@ class EarthDaily(DataSource, TileStore):
             )
 
         geom = STGeometry(WGS84_PROJECTION, shp, time_range)
-        asset_urls = {
-            asset_key: asset_obj.extra_fields["alternate"]["download"]["href"]
-            for asset_key, asset_obj in stac_item.assets.items()
-            if "alternate" in asset_obj.extra_fields
-            and "download" in asset_obj.extra_fields["alternate"]
-            and "href" in asset_obj.extra_fields["alternate"]["download"]
-        }
+        asset_urls: dict[str, str] = {}
+        for asset_key, asset_obj in stac_item.assets.items():
+            download_href = (
+                asset_obj.extra_fields.get("alternate", {})
+                .get("download", {})
+                .get("href")
+            )
+            href = download_href or asset_obj.href
+            if href is None:
+                continue
+            asset_urls[asset_key] = href
         return EarthDailyItem(stac_item.id, geom, asset_urls)
+
+    def _prepare_asset_href(self, href: str) -> str:
+        parsed = urlparse(href)
+        if parsed.netloc.endswith(".blob.core.windows.net"):
+            try:
+                import planetary_computer
+            except ImportError as exc:  # pragma: no cover - optional dependency.
+                raise RuntimeError(
+                    "planetary_computer is required to access Azure-hosted EarthDaily assets"
+                ) from exc
+            return planetary_computer.sign(href)
+        return href
 
     def get_item_by_name(self, name: str) -> EarthDailyItem:
         """Gets an item by name.
@@ -314,21 +351,23 @@ class EarthDaily(DataSource, TileStore):
                 if tile_store.is_raster_ready(item.name, band_names):
                     continue
 
-                asset_url = item.asset_urls[asset_key]
                 with tempfile.TemporaryDirectory() as tmp_dir:
-                    local_fname = os.path.join(tmp_dir, f"{asset_key}.tif")
+                    download_href = self._prepare_asset_href(item.asset_urls[asset_key])
+                    local_fname = Path(tmp_dir) / Path(urlparse(download_href).path).name
                     logger.debug(
-                        "EarthDaily download item %s asset %s to %s",
+                        "EarthDaily download item %s asset %s from %s",
                         item.name,
                         asset_key,
-                        local_fname,
+                        download_href,
                     )
                     with requests.get(
-                        asset_url, stream=True, timeout=self.timeout.total_seconds()
-                    ) as r:
-                        r.raise_for_status()
+                        download_href,
+                        stream=True,
+                        timeout=self.timeout.total_seconds(),
+                    ) as response:
+                        response.raise_for_status()
                         with open(local_fname, "wb") as f:
-                            for chunk in r.iter_content(chunk_size=8192):
+                            for chunk in response.iter_content(chunk_size=8192):
                                 f.write(chunk)
 
                     logger.debug(
@@ -337,7 +376,9 @@ class EarthDaily(DataSource, TileStore):
                         asset_key,
                     )
                     tile_store.write_raster_file(
-                        item.name, band_names, UPath(local_fname)
+                        item.name,
+                        band_names,
+                        UPath(local_fname),
                     )
 
                 logger.debug(
@@ -487,3 +528,179 @@ class EarthDaily(DataSource, TileStore):
             layer_cfg,
             item_groups,
         )
+
+
+class Sentinel2(EarthDaily):
+    """A data source for Sentinel-2 L2A data on EarthDaily."""
+
+    COLLECTION_NAME = "sentinel-2-l2a"
+
+    BANDS = {
+        "B01": ["B01"],
+        "B02": ["B02"],
+        "B03": ["B03"],
+        "B04": ["B04"],
+        "B05": ["B05"],
+        "B06": ["B06"],
+        "B07": ["B07"],
+        "B08": ["B08"],
+        "B09": ["B09"],
+        "B11": ["B11"],
+        "B12": ["B12"],
+        "B8A": ["B8A"],
+        "visual": ["R", "G", "B"],
+    }
+
+    def __init__(
+        self,
+        assets: list[str] | None = None,
+        collection_name: str | None = None,
+        **kwargs: Any,
+    ):
+        """Initialize a new Sentinel2 instance."""
+        if assets is None:
+            asset_bands = self.BANDS
+        else:
+            asset_bands = {asset_key: self.BANDS[asset_key] for asset_key in assets}
+
+        if collection_name is None:
+            collection_name = self.COLLECTION_NAME
+
+        super().__init__(
+            collection_name=collection_name,
+            asset_bands=asset_bands,
+            skip_items_missing_assets=True,
+            **kwargs,
+        )
+
+    @staticmethod
+    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Sentinel2":
+        """Creates a new Sentinel2 instance from a configuration dictionary."""
+        if config.data_source is None:
+            raise ValueError("config.data_source is required")
+        d = config.data_source.config_dict
+
+        needed_assets: set[str] = set()
+        for asset_key, asset_bands in Sentinel2.BANDS.items():
+            for band_set in config.band_sets:
+                if set(band_set.bands).intersection(asset_bands):
+                    needed_assets.add(asset_key)
+                    break
+
+        if not needed_assets:
+            raise ValueError("config.band_sets does not reference any Sentinel-2 bands")
+
+        kwargs: dict[str, Any] = dict(
+            assets=list(needed_assets),
+        )
+
+        if "timeout_seconds" in d:
+            kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
+
+        if "cache_dir" in d:
+            kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
+
+        optionals = ["query", "sort_by", "sort_ascending", "service_name", "collection_name"]
+        for opt in optionals:
+            if opt in d:
+                kwargs[opt] = d[opt]
+
+        return Sentinel2(**kwargs)
+
+    def _canonical_asset_name(self, asset_key: str) -> str | None:
+        normalized = asset_key.lower()
+        for canonical_key in self.asset_bands.keys():
+            if canonical_key.lower() in normalized:
+                return canonical_key
+        return None
+
+    def _stac_item_to_item(self, stac_item: pystac.Item) -> EarthDailyItem:
+        item = super()._stac_item_to_item(stac_item)
+        normalized_asset_urls: dict[str, str] = {}
+        for asset_key, asset_url in item.asset_urls.items():
+            canonical_key = self._canonical_asset_name(asset_key)
+            if canonical_key is None:
+                continue
+            if canonical_key not in self.asset_bands:
+                continue
+            normalized_asset_urls[canonical_key] = asset_url
+
+        item.asset_urls = normalized_asset_urls
+        return item
+
+
+class Sentinel1(EarthDaily):
+    """A data source for Sentinel-1 RTC data on EarthDaily."""
+
+    COLLECTION_NAME = "sentinel-1-rtc"
+    def __init__(
+        self,
+        band_names: list[str],
+        collection_name: str | None = None,
+        **kwargs: Any,
+    ):
+        """Initialize a new Sentinel1 instance."""
+        asset_bands = {band: [band] for band in band_names}
+
+        if collection_name is None:
+            collection_name = self.COLLECTION_NAME
+
+        super().__init__(
+            collection_name=collection_name,
+            asset_bands=asset_bands,
+            skip_items_missing_assets=True,
+            **kwargs,
+        )
+
+    @staticmethod
+    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Sentinel1":
+        """Creates a new Sentinel1 instance from a configuration dictionary."""
+        if config.data_source is None:
+            raise ValueError("config.data_source is required")
+        d = config.data_source.config_dict
+
+        band_names: set[str] = set()
+        for band_set in config.band_sets:
+            for band in band_set.bands:
+                band_names.add(band)
+
+        if not band_names:
+            raise ValueError("config.band_sets does not reference any Sentinel-1 bands")
+
+        kwargs: dict[str, Any] = dict(
+            band_names=list(band_names),
+        )
+
+        if "timeout_seconds" in d:
+            kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
+
+        if "cache_dir" in d:
+            kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
+
+        optionals = ["query", "sort_by", "sort_ascending", "service_name", "collection_name"]
+        for opt in optionals:
+            if opt in d:
+                kwargs[opt] = d[opt]
+
+        return Sentinel1(**kwargs)
+
+    def _canonical_asset_name(self, asset_key: str) -> str | None:
+        normalized = asset_key.lower()
+        for canonical_key in self.asset_bands.keys():
+            if canonical_key.lower() in normalized:
+                return canonical_key
+        return None
+
+    def _stac_item_to_item(self, stac_item: pystac.Item) -> EarthDailyItem:
+        item = super()._stac_item_to_item(stac_item)
+        normalized_asset_urls: dict[str, str] = {}
+        for asset_key, asset_url in item.asset_urls.items():
+            canonical_key = self._canonical_asset_name(asset_key)
+            if canonical_key is None:
+                continue
+            if canonical_key not in self.asset_bands:
+                continue
+            normalized_asset_urls[canonical_key] = asset_url
+
+        item.asset_urls = normalized_asset_urls
+        return item

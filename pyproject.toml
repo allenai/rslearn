@@ -21,6 +21,7 @@ dependencies = [
     "Pillow>=11.3",
     "pyproj>=3.7",
     "python-dateutil>=2.9",
+    "python-dotenv>=1.0",
     "pytimeparse>=1.1",
     "rasterio>=1.4",
     "shapely>=2.1",

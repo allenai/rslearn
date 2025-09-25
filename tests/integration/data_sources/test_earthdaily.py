@@ -10,7 +10,7 @@ from rslearn.config import (
     SpaceMode,
 )
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources.earthdaily import EarthDaily
+from rslearn.data_sources.earthdaily import EarthDaily, Sentinel1, Sentinel2
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils import STGeometry
 
@@ -48,6 +48,50 @@ def test_edc_preview(tmp_path: pathlib.Path, edc_preview_geometry: STGeometry) -
         TileStoreWithLayer(tile_store, layer_name),
         item_groups[0],
         [[edc_preview_geometry]],
+    )
+    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+
+
+def test_sentinel1(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
+    """Test ingesting a Sentinel-1 item corresponding to seattle2020."""
+    band_name = "vv"
+    data_source = Sentinel1(band_names=[band_name])
+
+    query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
+    item_groups = data_source.get_items([seattle2020], query_config)[0]
+    item = item_groups[0][0]
+
+    tile_store_dir = UPath(tmp_path)
+    tile_store = DefaultTileStore(str(tile_store_dir))
+    tile_store.set_dataset_path(tile_store_dir)
+
+    layer_name = "layer"
+    data_source.ingest(
+        TileStoreWithLayer(tile_store, layer_name),
+        item_groups[0],
+        [[seattle2020]],
+    )
+    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+
+
+def test_sentinel2(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
+    """Test ingesting a Sentinel-2 item corresponding to seattle2020."""
+    band_name = "B04"
+    data_source = Sentinel2(assets=[band_name])
+
+    query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
+    item_groups = data_source.get_items([seattle2020], query_config)[0]
+    item = item_groups[0][0]
+
+    tile_store_dir = UPath(tmp_path)
+    tile_store = DefaultTileStore(str(tile_store_dir))
+    tile_store.set_dataset_path(tile_store_dir)
+
+    layer_name = "layer"
+    data_source.ingest(
+        TileStoreWithLayer(tile_store, layer_name),
+        item_groups[0],
+        [[seattle2020]],
     )
     assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
 
