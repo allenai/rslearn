@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# Should panopticon loop through time sereies internally or not? I think that is handled by the SimpleTimeSeries model
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
 def test_panopticon() -> None:
     """Test the Panopticon model."""
@@ -31,18 +32,17 @@ def test_panopticon() -> None:
     panopticon = Panopticon(band_order=band_order).to(DEVICE)
 
     input_hw = 32
-    timesteps = 2
     inputs = [
         {
             "sentinel2": torch.randn(
-                (input_hw, input_hw, timesteps, len(band_order["sentinel2"])),
+                (input_hw, input_hw, len(band_order["sentinel2"])),
                 dtype=torch.float32,
                 device=DEVICE,
             ),
         },
         {
             "sentinel2": torch.randn(
-                (input_hw, input_hw, timesteps, len(band_order["sentinel2"])),
+                (input_hw, input_hw, len(band_order["sentinel2"])),
                 dtype=torch.float32,
                 device=DEVICE,
             ),
@@ -52,7 +52,7 @@ def test_panopticon() -> None:
     features = feature_list[0]
     logger.info(f"Features shape: {features.shape}")
     # always resizes to 224 with patch size 14
-    assert features.shape == (2, 16, 16, 2, panopticon.output_dim)
+    assert features.shape == (2, 16, 16, panopticon.output_dim)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
@@ -89,12 +89,11 @@ def test_panopticon_multiple_modalities() -> None:
         ],
     }
     input_hw = 32
-    timesteps = 1
     inputs = [
         {
-            "sentinel2": torch.randn((input_hw, input_hw, timesteps, len(band_order["sentinel2"])), dtype=torch.float32, device=DEVICE),
-            "sentinel1": torch.randn((input_hw, input_hw, timesteps, len(band_order["sentinel1"])), dtype=torch.float32, device=DEVICE),
-            "landsat8": torch.randn((input_hw, input_hw, timesteps, len(band_order["landsat8"])), dtype=torch.float32, device=DEVICE),
+            "sentinel2": torch.randn((input_hw, input_hw, len(band_order["sentinel2"])), dtype=torch.float32, device=DEVICE),
+            "sentinel1": torch.randn((input_hw, input_hw, len(band_order["sentinel1"])), dtype=torch.float32, device=DEVICE),
+            "landsat8": torch.randn((input_hw, input_hw, len(band_order["landsat8"])), dtype=torch.float32, device=DEVICE),
         },
     ]
     # move to device if possible
@@ -102,4 +101,4 @@ def test_panopticon_multiple_modalities() -> None:
     feature_list = panopticon(inputs)
     features = feature_list[0]
     logger.info(f"Features shape: {features.shape}")
-    assert features.shape == (1, 16, 16, timesteps, panopticon.output_dim)
+    assert features.shape == (1, 16, 16, panopticon.output_dim)
