@@ -1,13 +1,16 @@
 """Tests for the Panopticon model."""
 
-import torch
-from rslearn.models.panopticon import Panopticon
 import logging
+
 import pytest
+import torch
+
+from rslearn.models.panopticon import Panopticon
 
 logger = logging.getLogger(__name__)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 # Should panopticon loop through time sereies internally or not? I think that is handled by the SimpleTimeSeries model
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
@@ -91,9 +94,21 @@ def test_panopticon_multiple_modalities() -> None:
     input_hw = 32
     inputs = [
         {
-            "sentinel2": torch.randn((len(band_order["sentinel2"]), input_hw, input_hw), dtype=torch.float32, device=DEVICE),
-            "sentinel1": torch.randn((len(band_order["sentinel1"]), input_hw, input_hw), dtype=torch.float32, device=DEVICE),
-            "landsat8": torch.randn((len(band_order["landsat8"]), input_hw, input_hw), dtype=torch.float32, device=DEVICE),
+            "sentinel2": torch.randn(
+                (len(band_order["sentinel2"]), input_hw, input_hw),
+                dtype=torch.float32,
+                device=DEVICE,
+            ),
+            "sentinel1": torch.randn(
+                (len(band_order["sentinel1"]), input_hw, input_hw),
+                dtype=torch.float32,
+                device=DEVICE,
+            ),
+            "landsat8": torch.randn(
+                (len(band_order["landsat8"]), input_hw, input_hw),
+                dtype=torch.float32,
+                device=DEVICE,
+            ),
         },
     ]
     # move to device if possible

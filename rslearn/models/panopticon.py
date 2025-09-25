@@ -1,14 +1,16 @@
 """Wrapper for the Panopticon model."""
 
-import torch
-from torch import nn
-from einops import rearrange, repeat
-import yaml
-import torch.nn.functional as F
-from importlib import resources
 import math
 from enum import StrEnum
+from importlib import resources
 from typing import Any
+
+import torch
+import torch.nn.functional as F
+import yaml
+from einops import rearrange, repeat
+from torch import nn
+
 from rslearn.log_utils import get_logger
 
 logger = get_logger(__name__)
@@ -16,14 +18,20 @@ logger = get_logger(__name__)
 
 class PanopticonModalities(StrEnum):
     """Modalities supported by Panopticon."""
+
     SENTINEL2 = "sentinel2"
     LANDSAT8 = "landsat8"
     SENTINEL1 = "sentinel1"
 
+
 class Panopticon(nn.Module):
     """Class containing the Panopticon model that can ingest MaskedHeliosSample objects."""
 
-    supported_modalities: list[str] = [PanopticonModalities.SENTINEL2, PanopticonModalities.LANDSAT8,PanopticonModalities.SENTINEL1] # also supports others but not set up yet
+    supported_modalities: list[str] = [
+        PanopticonModalities.SENTINEL2,
+        PanopticonModalities.LANDSAT8,
+        PanopticonModalities.SENTINEL1,
+    ]  # also supports others but not set up yet
     patch_size: int = 14
     base_image_size: int = 224
 
@@ -43,6 +51,7 @@ class Panopticon(nn.Module):
         self._load_model(torchhub_id)
         self.output_dim = self.model.embed_dim
         self.band_order = band_order
+
     def _load_model(self, torchhub_id: str) -> None:
         """Load the panopticon model from torch hub."""
         import time
@@ -71,10 +80,10 @@ class Panopticon(nn.Module):
 
         Args:
             data: Input tensor of shape [B, C, H, W]
+
         Returns:
             Processed tensor of shape [B, C, H, W]
         """
-
         original_height = data.shape[2]
         new_height = self.patch_size if original_height == 1 else self.base_image_size
 
@@ -96,14 +105,17 @@ class Panopticon(nn.Module):
             sensor_config = yaml.safe_load(f)
 
         band_order = self.band_order[modality]
-        chn_ids = [sensor_config["bands"][band.upper()]["gaussian"]["mu"] for band in band_order]
+        chn_ids = [
+            sensor_config["bands"][band.upper()]["gaussian"]["mu"]
+            for band in band_order
+        ]
         chn_ids = torch.tensor(chn_ids, dtype=torch.float32, device=device)
         chn_ids = repeat(chn_ids, "c -> b c", b=batch_size)
         return chn_ids
 
     def prepare_input(
         self, input_data: dict[str, torch.Tensor]
-    ) -> list[dict[str, torch.Tensor]]:
+    ) -> dict[str, torch.Tensor]:
         """Prepare input for the panopticon model from MaskedHeliosSample."""
         channel_ids_list: list[torch.Tensor] = []
         processed_data_list: list[torch.Tensor] = []
@@ -128,17 +140,20 @@ class Panopticon(nn.Module):
 
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Forward pass through the panopticon model."""
-        batch_inputs = {key: torch.stack([inp[key] for inp in inputs], dim=0) for key in inputs[0].keys()}
+        batch_inputs = {
+            key: torch.stack([inp[key] for inp in inputs], dim=0)
+            for key in inputs[0].keys()
+        }
         panopticon_inputs = self.prepare_input(batch_inputs)
         output_features = self.model.forward_features(panopticon_inputs)[
-                "x_norm_patchtokens"
-            ]
+            "x_norm_patchtokens"
+        ]
 
         num_tokens = output_features.shape[1]
         height = int(math.sqrt(num_tokens))
         output_features = rearrange(
-                output_features, "b (h w) d -> b d h w", h=height, w=height
-            )
+            output_features, "b (h w) d -> b d h w", h=height, w=height
+        )
         return [output_features]
 
     def get_backbone_channels(self) -> list:
