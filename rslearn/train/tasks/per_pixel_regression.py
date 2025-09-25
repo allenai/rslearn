@@ -1,6 +1,6 @@
 """Per-pixel regression task."""
 
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -19,7 +19,7 @@ class PerPixelRegressionTask(BasicTask):
     def __init__(
         self,
         scale_factor: float = 1,
-        metric_mode: str = "mse",
+        metric_mode: Literal["mse", "l1"] = "mse",
         nodata_value: float | None = None,
         **kwargs: Any,
     ) -> None:
@@ -135,7 +135,9 @@ class PerPixelRegressionTask(BasicTask):
 class PerPixelRegressionHead(torch.nn.Module):
     """Head for per-pixel regression task."""
 
-    def __init__(self, loss_mode: str = "mse", use_sigmoid: bool = False):
+    def __init__(
+        self, loss_mode: Literal["mse", "l1"] = "mse", use_sigmoid: bool = False
+    ):
         """Initialize a new RegressionHead.
 
         Args:
