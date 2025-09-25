@@ -1,4 +1,4 @@
-# type: ignore
+# mypy: ignore-errors
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 

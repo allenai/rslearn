@@ -3,6 +3,7 @@
 from typing import Any
 
 import torch
+import torch.nn.functional as F
 
 
 class UNetDecoder(torch.nn.Module):
@@ -129,7 +130,12 @@ class UNetDecoder(torch.nn.Module):
 
     def _resize(self, features: torch.Tensor) -> torch.Tensor:
         """Interpolate the features to the original size."""
-        return F.interpolate(features, size=self.original_size_to_interpolate, mode="bilinear", align_corners=False)
+        return F.interpolate(
+            features,
+            size=self.original_size_to_interpolate,
+            mode="bilinear",
+            align_corners=False,
+        )
 
     def forward(
         self, in_features: list[torch.Tensor], inputs: list[dict[str, Any]]

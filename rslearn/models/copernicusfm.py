@@ -1,8 +1,8 @@
 """Copernicus FM model."""
 
-from enum import Enum
 import logging
 import math
+from enum import Enum
 
 import torch
 import torch.nn.functional as F
@@ -11,12 +11,15 @@ from upath import UPath
 
 from .copernicusfm_src.model_vit import vit_base_patch16
 
-
 logger = logging.getLogger(__name__)
+
+
 class CopernicusFMModality(Enum):
     """Modality for Copernicus FM."""
+
     SENTINEL2_L2A = "sentinel2_l2a"
     SENTINEL1 = "sentinel1"
+
 
 MODALITY_TO_WAVELENGTH_BANDWIDTHS: dict[str, dict[str, list]] = {
     # https://github.com/zhu-xlab/Copernicus-FM/blob/main/Copernicus-Bench/src/configs/dataset/cobench_eurosat_s2.yaml
@@ -68,14 +71,21 @@ class CopernicusFM(torch.nn.Module):
     image_resolution = 224
     patch_size = 16
     input_mode = "spectral"
-    supported_modalities = [CopernicusFMModality.SENTINEL2_L2A.value, CopernicusFMModality.SENTINEL1.value]
+    # Don't need this as band order is provided
+    supported_modalities = [
+        CopernicusFMModality.SENTINEL2_L2A.value,
+        CopernicusFMModality.SENTINEL1.value,
+    ]
 
     def __init__(
-        self, band_order: dict[str, list[str]], load_directory: str = "/weka/dfive-default/helios/models/copernicusfm"
+        self,
+        band_order: dict[str, list[str]],
+        load_directory: str = "/weka/dfive-default/helios/models/copernicusfm",
     ) -> None:
         """Initialize the Copernicus FM wrapper.
 
         Args:
+            band_order: The band order for each modality
             load_directory: The directory to load from
         """
         super().__init__()
@@ -84,7 +94,7 @@ class CopernicusFM(torch.nn.Module):
         self.band_order = band_order
         self.model = vit_base_patch16(num_classes=10, global_pool=True)
         check_point = torch.load(
-            UPath(load_directory) / "CopernicusFM_ViT_base_varlang_e100.pth"
+            UPath(load_directory) / "CopernicusFM_ViT_base_varlang_e100.pth"  # nosec B614
         )
         if "model" in check_point:
             state_dict = check_point["model"]
@@ -97,14 +107,15 @@ class CopernicusFM(torch.nn.Module):
         self.modality_to_wavelength_bandwidths = {}
         for modality in self.supported_modalities:
             wavelength_bandwidths = MODALITY_TO_WAVELENGTH_BANDWIDTHS[modality]
-            band_order = MODALITY_TO_WAVELENGTH_BANDWIDTHS[modality]["band_names"]
             wavelengths = []
             bandwidths = []
-            band_order = self.band_order.get(modality, None)
-            if band_order is None:
-                logger.warning(f"Band order for modality {modality} not found in band_order dictionary, unable to use this modality unless specified")
+            modality_band_order = self.band_order.get(modality, None)
+            if modality_band_order is None:
+                logger.warning(
+                    f"Band order for modality {modality} not found in band_order dictionary, unable to use this modality unless specified"
+                )
                 continue
-            for b in band_order:
+            for b in modality_band_order:
                 cfm_idx = wavelength_bandwidths["band_names"].index(b)
                 wavelengths.append(wavelength_bandwidths["band_wavelengths"][cfm_idx])
                 bandwidths.append(wavelength_bandwidths["band_bandwidths"][cfm_idx])
@@ -113,9 +124,7 @@ class CopernicusFM(torch.nn.Module):
                 "band_wavelengths": wavelengths,
             }
 
-    def _resize_data(
-        self, data: torch.Tensor
-    ) -> list[torch.Tensor]:
+    def _resize_data(self, data: torch.Tensor) -> list[torch.Tensor]:
         """Process individual modality data.
 
         Args:
@@ -126,9 +135,7 @@ class CopernicusFM(torch.nn.Module):
         """
         # Get original dimensions
         original_height = data.shape[2]
-        new_height = (
-            self.patch_size if original_height == 1 else self.image_resolution
-        )
+        new_height = self.patch_size if original_height == 1 else self.image_resolution
         data = F.interpolate(
             data,
             size=(new_height, new_height),
@@ -140,14 +147,14 @@ class CopernicusFM(torch.nn.Module):
     def prepare_input(
         self,
         inputs: dict[str, torch.Tensor],
-    ) -> tuple[list[torch.Tensor], list[int], list[int]]:
+    ) -> tuple[torch.Tensor, list[int], list[int]]:
         """Prepare input for the CopernicusFM model from MaskedHeliosSample."""
         wavelengths: list[int] = []
         bandwidths: list[int] = []
         all_processed_data: list[list[torch.Tensor]] = []
         for modality in inputs.keys():
             if modality not in self.supported_modalities:
-                logger.warning(
+                logger.debug(
                     f"Skipping modality {modality} as it is not in the supported "
                     f"modalities list {self.supported_modalities}"
                 )
@@ -174,11 +181,12 @@ class CopernicusFM(torch.nn.Module):
         inputs: list[dict[str, torch.Tensor]],
     ) -> torch.Tensor:
         """Forward pass through CopernicusFM model."""
-        batch_inputs = {key: torch.stack([inp[key] for inp in inputs], dim=0) for key in inputs[0].keys()}
+        batch_inputs = {
+            key: torch.stack([inp[key] for inp in inputs], dim=0)
+            for key in inputs[0].keys()
+        }
         # Prepare input
-        data, wavelengths, bandwidths = self.prepare_input(
-            batch_inputs
-        )
+        data, wavelengths, bandwidths = self.prepare_input(batch_inputs)
         meta = torch.full(
             (1, 4), float("nan"), device=data.device
         )  # [lon, lat, delta_time, patch_token_area], assume unknown
@@ -191,7 +199,7 @@ class CopernicusFM(torch.nn.Module):
             None,
             self.input_mode,
             self.patch_size,
-            )
+        )
         # no norm, following
         # https://github.com/zhu-xlab/Copernicus-FM/blob/main/Copernicus-Bench/src/foundation_models/CopernicusFM/models_dwv_seg.py
         side = math.isqrt(timestep_output.shape[1])

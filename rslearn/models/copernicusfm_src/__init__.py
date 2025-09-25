@@ -1,1 +1,1 @@
-# type: ignore
+# mypy: ignore-errors
