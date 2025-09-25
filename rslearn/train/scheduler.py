@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import (
     CosineAnnealingLR,
+    CosineAnnealingWarmRestarts,
     LRScheduler,
     ReduceLROnPlateau,
 )
@@ -60,3 +61,17 @@ class CosineAnnealingScheduler(SchedulerFactory):
         """Build the CosineAnnealingLR scheduler."""
         super().build(optimizer)
         return CosineAnnealingLR(optimizer, **self.get_kwargs())
+
+
+@dataclass
+class CosineAnnealingWarmRestartsScheduler(SchedulerFactory):
+    """Cosine annealing with warm restarts learning rate scheduler."""
+
+    T_0: int
+    T_mult: int = 1
+    eta_min: float = 0.0
+
+    def build(self, optimizer: Optimizer) -> LRScheduler:
+        """Build the CosineAnnealingWarmRestarts scheduler."""
+        super().build(optimizer)
+        return CosineAnnealingWarmRestarts(optimizer, **self.get_kwargs())
