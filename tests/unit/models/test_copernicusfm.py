@@ -8,7 +8,7 @@ from rslearn.models.copernicusfm import CopernicusFM, CopernicusFMModality
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-@pytest.skipif(not torch.cuda.is_available(), reason="Requires a GPU")
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires a GPU")
 def test_copernicusfm() -> None:
     """Verify that the forward pass for CROMA works."""
     input_hw = 32
