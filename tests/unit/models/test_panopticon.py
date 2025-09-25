@@ -35,14 +35,14 @@ def test_panopticon() -> None:
     inputs = [
         {
             "sentinel2": torch.randn(
-                (input_hw, input_hw, len(band_order["sentinel2"])),
+                (len(band_order["sentinel2"]), input_hw, input_hw),
                 dtype=torch.float32,
                 device=DEVICE,
             ),
         },
         {
             "sentinel2": torch.randn(
-                (input_hw, input_hw, len(band_order["sentinel2"])),
+                (len(band_order["sentinel2"]), input_hw, input_hw),
                 dtype=torch.float32,
                 device=DEVICE,
             ),
@@ -91,9 +91,9 @@ def test_panopticon_multiple_modalities() -> None:
     input_hw = 32
     inputs = [
         {
-            "sentinel2": torch.randn((input_hw, input_hw, len(band_order["sentinel2"])), dtype=torch.float32, device=DEVICE),
-            "sentinel1": torch.randn((input_hw, input_hw, len(band_order["sentinel1"])), dtype=torch.float32, device=DEVICE),
-            "landsat8": torch.randn((input_hw, input_hw, len(band_order["landsat8"])), dtype=torch.float32, device=DEVICE),
+            "sentinel2": torch.randn((len(band_order["sentinel2"]), input_hw, input_hw), dtype=torch.float32, device=DEVICE),
+            "sentinel1": torch.randn((len(band_order["sentinel1"]), input_hw, input_hw), dtype=torch.float32, device=DEVICE),
+            "landsat8": torch.randn((len(band_order["landsat8"]), input_hw, input_hw), dtype=torch.float32, device=DEVICE),
         },
     ]
     # move to device if possible

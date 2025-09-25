@@ -4,7 +4,6 @@ from typing import Any
 
 import torch
 
-
 class UNetDecoder(torch.nn.Module):
     """UNet-style decoder.
 
