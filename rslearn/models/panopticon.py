@@ -17,21 +17,20 @@ logger = get_logger(__name__)
 
 
 class PanopticonModalities(StrEnum):
-    """Modalities supported by Panopticon."""
+    """Modalities supported by Panopticon.
+
+    These are the keys needed to load the yaml file from panopticon_data/sensors
+    """
 
     SENTINEL2 = "sentinel2"
     LANDSAT8 = "landsat8"
     SENTINEL1 = "sentinel1"
+    # Add more modalities as needed
 
 
 class Panopticon(nn.Module):
     """Class containing the Panopticon model that can ingest MaskedHeliosSample objects."""
 
-    supported_modalities: list[str] = [
-        PanopticonModalities.SENTINEL2,
-        PanopticonModalities.LANDSAT8,
-        PanopticonModalities.SENTINEL1,
-    ]  # also supports others but not set up yet
     patch_size: int = 14
     base_image_size: int = 224
 
@@ -51,6 +50,7 @@ class Panopticon(nn.Module):
         self._load_model(torchhub_id)
         self.output_dim = self.model.embed_dim
         self.band_order = band_order
+        self.supported_modalities = list(band_order.keys())
 
     def _load_model(self, torchhub_id: str) -> None:
         """Load the panopticon model from torch hub."""
