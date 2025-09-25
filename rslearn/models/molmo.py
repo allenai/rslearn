@@ -63,14 +63,3 @@ class Molmo(torch.nn.Module):
         return [
             image_features[:, 0, :, :].reshape(-1, 24, 24, 2048).permute(0, 3, 1, 2)
         ]
-
-    def get_backbone_channels(self) -> list:
-        """Returns the output channels of this model when used as a backbone.
-
-        The output channels is a list of (patch_size, depth) that corresponds
-        to the feature maps that the backbone returns.
-
-        Returns:
-            the output channels of the backbone as a list of (patch_size, depth) tuples.
-        """
-        pass

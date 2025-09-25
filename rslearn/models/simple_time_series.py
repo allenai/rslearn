@@ -165,8 +165,6 @@ class SimpleTimeSeries(torch.nn.Module):
             n_batch * n_images, self.image_channels, n_height, n_width
         )
         batched_inputs = [{self.image_key: image} for image in batched_images]
-        feat_map_list = self.encoder(batched_inputs)
-        # Expect (batch, images/timeseries, height, width, channels)
         all_features = [
             feat_map.reshape(
                 n_batch,
@@ -175,7 +173,7 @@ class SimpleTimeSeries(torch.nn.Module):
                 feat_map.shape[2],
                 feat_map.shape[3],
             )
-            for feat_map in feat_map_list
+            for feat_map in self.encoder(batched_inputs)
         ]
 
         # Groups defaults to flattening all the feature maps.

@@ -234,11 +234,7 @@ class RslearnWriter(BasePredictionWriter):
         assert isinstance(pl_module, RslearnLightningModule)
         task = pl_module.task
         _, _, metadatas = batch
-        import time
-        start_time = time.time()
         self.process_output_batch(task, prediction["outputs"], metadatas)
-        end_time = time.time()
-        logger.info(f"Time taken to process output batch: {end_time - start_time} seconds")
 
     def process_output_batch(
         self,
@@ -333,7 +329,6 @@ class RslearnWriter(BasePredictionWriter):
             raster_dir = window.get_raster_dir(
                 self.output_layer, self.layer_config.band_sets[0].bands
             )
-            print(f"raster_dir we are writing to : {raster_dir}")
             assert isinstance(self.format, RasterFormat)
             self.format.encode_raster(
                 raster_dir, window.projection, window.bounds, merged_output
