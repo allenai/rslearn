@@ -3,6 +3,7 @@
 from typing import Any
 
 import torch
+import torch.nn.functional as F
 
 
 class UNetDecoder(torch.nn.Module):
@@ -20,6 +21,7 @@ class UNetDecoder(torch.nn.Module):
         conv_layers_per_resolution: int = 1,
         kernel_size: int = 3,
         num_channels: dict[int, int] = {},
+        original_size_to_interpolate: tuple[int, int] | None = None,
     ) -> None:
         """Initialize a UNetDecoder.
 
@@ -33,6 +35,7 @@ class UNetDecoder(torch.nn.Module):
             kernel_size: kernel size to use in convolutional layers
             num_channels: override number of output channels to use at different
                 downsample factors.
+            original_size_to_interpolate: the original size to interpolate the output to.
         """
         super().__init__()
 
@@ -123,6 +126,16 @@ class UNetDecoder(torch.nn.Module):
         )
         layers.append(torch.nn.Sequential(*cur_layers))
         self.layers = torch.nn.ModuleList(layers)
+        self.original_size_to_interpolate = original_size_to_interpolate
+
+    def _resize(self, features: torch.Tensor) -> torch.Tensor:
+        """Interpolate the features to the original size."""
+        return F.interpolate(
+            features,
+            size=self.original_size_to_interpolate,
+            mode="bilinear",
+            align_corners=False,
+        )
 
     def forward(
         self, in_features: list[torch.Tensor], inputs: list[dict[str, Any]]
@@ -141,4 +154,6 @@ class UNetDecoder(torch.nn.Module):
         cur_features = self.layers[0](in_features[0])
         for in_feat, layer in zip(in_features[1:], self.layers[1:]):
             cur_features = layer(torch.cat([cur_features, in_feat], dim=1))
+        if self.original_size_to_interpolate is not None:
+            cur_features = self._resize(cur_features)
         return cur_features
