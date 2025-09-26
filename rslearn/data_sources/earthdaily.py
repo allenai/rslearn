@@ -17,6 +17,7 @@ import requests
 import shapely
 from earthdaily import EDSClient, EDSConfig
 from earthdaily._eds_config import AssetAccessMode
+from earthdaily.platform._stac_item_asset import get_resolver_for_url
 from rasterio.enums import Resampling
 from upath import UPath
 
@@ -340,6 +341,13 @@ class EarthDaily(DataSource, TileStore):
             items: the items to ingest
             geometries: a list of geometries needed for each item
         """
+        api_requester = None
+        if self.eds_client is None:
+            self._load_client()
+        if self.eds_client is not None:
+            # Platform service exposes authenticated requester for proxy downloads.
+            api_requester = getattr(self.eds_client.platform, "api_requester", None)
+
         for item in items:
             for asset_key, band_names in self.asset_bands.items():
                 if asset_key not in item.asset_urls:
@@ -349,16 +357,20 @@ class EarthDaily(DataSource, TileStore):
 
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     download_href = self._prepare_asset_href(item.asset_urls[asset_key])
-                    local_fname = Path(tmp_dir) / Path(urlparse(download_href).path).name
+                    resolver = get_resolver_for_url(download_href, api_requester=api_requester)
+                    download_url = resolver.get_download_url(download_href)
+                    headers = resolver.get_headers(download_href)
+                    local_fname = Path(tmp_dir) / Path(urlparse(download_url).path).name
                     logger.debug(
                         "EarthDaily download item %s asset %s from %s",
                         item.name,
                         asset_key,
-                        download_href,
+                        download_url,
                     )
                     with requests.get(
-                        download_href,
+                        download_url,
                         stream=True,
+                        headers=headers,
                         timeout=self.timeout.total_seconds(),
                     ) as response:
                         response.raise_for_status()
