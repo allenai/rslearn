@@ -13,6 +13,7 @@ import planetary_computer
 import pystac
 import pystac_client
 import rasterio
+from rasterio.errors import RasterioIOError
 import requests
 import shapely
 from rasterio.enums import Resampling
@@ -334,9 +335,32 @@ class PlanetaryComputer(DataSource, TileStore):
                         asset_url, stream=True, timeout=self.timeout.total_seconds()
                     ) as r:
                         r.raise_for_status()
+                        expected_size: int | None = None
+                        header_value = r.headers.get("Content-Length")
+                        if header_value is not None:
+                            try:
+                                expected_size = int(header_value)
+                            except ValueError:
+                                expected_size = None
+
+                        bytes_written = 0
                         with open(local_fname, "wb") as f:
                             for chunk in r.iter_content(chunk_size=8192):
+                                if not chunk:
+                                    continue
                                 f.write(chunk)
+                                bytes_written += len(chunk)
+
+                        if expected_size is not None and bytes_written != expected_size:
+                            raise IOError(
+                                "Incomplete download for %s asset %s: got %s of %s bytes"
+                                % (item.name, asset_key, bytes_written, expected_size)
+                            )
+
+                        if bytes_written == 0:
+                            raise IOError(
+                                f"No data downloaded for {item.name} asset {asset_key}"
+                            )
 
                     logger.debug(
                         "PlanetaryComputer ingest item %s asset %s",
@@ -451,30 +475,128 @@ class PlanetaryComputer(DataSource, TileStore):
         Returns:
             the raster data
         """
-        asset_key = self._get_asset_by_band(bands)
-        item = self.get_item_by_name(item_name)
-        asset_url = planetary_computer.sign(item.asset_urls[asset_key])
-
-        # Construct the transform to use for the warped dataset.
-        wanted_transform = affine.Affine(
-            projection.x_resolution,
-            0,
-            bounds[0] * projection.x_resolution,
-            0,
-            projection.y_resolution,
-            bounds[1] * projection.y_resolution,
+        return self._read_raster_impl(
+            item_name=item_name,
+            bands=bands,
+            projection=projection,
+            bounds=bounds,
+            resampling=resampling,
         )
 
-        with rasterio.open(asset_url) as src:
-            with rasterio.vrt.WarpedVRT(
-                src,
-                crs=projection.crs,
-                transform=wanted_transform,
-                width=bounds[2] - bounds[0],
-                height=bounds[3] - bounds[1],
-                resampling=resampling,
-            ) as vrt:
-                return vrt.read()
+    def _read_raster_impl(
+        self,
+        item_name: str,
+        bands: list[str],
+        projection: Projection,
+        bounds: PixelBounds,
+        resampling: Resampling,
+        allow_refresh: bool = True,
+    ) -> npt.NDArray[Any]:
+        asset_key = self._get_asset_by_band(bands)
+        item = self.get_item_by_name(item_name)
+
+        def _read_from_asset(asset_url: str) -> npt.NDArray[Any]:
+            wanted_transform = affine.Affine(
+                projection.x_resolution,
+                0,
+                bounds[0] * projection.x_resolution,
+                0,
+                projection.y_resolution,
+                bounds[1] * projection.y_resolution,
+            )
+
+            with rasterio.open(asset_url) as src:
+                with rasterio.vrt.WarpedVRT(
+                    src,
+                    crs=projection.crs,
+                    transform=wanted_transform,
+                    width=bounds[2] - bounds[0],
+                    height=bounds[3] - bounds[1],
+                    resampling=resampling,
+                ) as vrt:
+                    return vrt.read()
+
+        asset_url = planetary_computer.sign(item.asset_urls[asset_key])
+
+        try:
+            return _read_from_asset(asset_url)
+        except RasterioIOError as exc:
+            refreshed_item = None
+            if allow_refresh:
+                refreshed_item = self._refresh_item_after_read_failure(
+                    item_name=item_name,
+                    asset_key=asset_key,
+                    error=exc,
+                )
+            if refreshed_item is not None:
+                refreshed_url = planetary_computer.sign(
+                    refreshed_item.asset_urls[asset_key]
+                )
+                return _read_from_asset(refreshed_url)
+            raise
+
+    def _refresh_item_after_read_failure(
+        self,
+        item_name: str,
+        asset_key: str,
+        error: RasterioIOError,
+    ) -> PlanetaryComputerItem | None:
+        """Refresh cached STAC metadata after encountering an IO error."""
+        logger.warning(
+            "Refreshing STAC item %s after read failure: %s", item_name, error
+        )
+
+        cache_fname: UPath | None = None
+        if self.cache_dir is not None:
+            cache_fname = self.cache_dir / f"{item_name}.json"
+            if cache_fname.exists():
+                try:
+                    cache_fname.unlink()
+                except OSError as unlink_err:
+                    logger.warning(
+                        "Failed removing cached STAC item %s: %s",
+                        item_name,
+                        unlink_err,
+                    )
+
+        try:
+            _, collection = self._load_client()
+            stac_item = collection.get_item(item_name)
+        except Exception as refresh_exc:  # pragma: no cover - network failure
+            logger.error(
+                "Unable to refresh STAC item %s after read failure: %s",
+                item_name,
+                refresh_exc,
+            )
+            return None
+
+        if stac_item is None:
+            logger.error(
+                "STAC item %s missing while refreshing after read failure", item_name
+            )
+            return None
+
+        refreshed_item = self._stac_item_to_item(stac_item)
+        if asset_key not in refreshed_item.asset_urls:
+            logger.error(
+                "Refreshed STAC item %s missing expected asset %s",
+                item_name,
+                asset_key,
+            )
+            return None
+
+        if cache_fname is not None:
+            try:
+                with cache_fname.open("w") as f:
+                    json.dump(refreshed_item.serialize(), f)
+            except Exception as cache_exc:  # pragma: no cover - filesystem failure
+                logger.warning(
+                    "Failed to cache refreshed STAC item %s: %s",
+                    item_name,
+                    cache_exc,
+                )
+
+        return refreshed_item
 
     def materialize(
         self,
@@ -625,9 +747,32 @@ class Sentinel2(PlanetaryComputer):
                         asset_url, stream=True, timeout=self.timeout.total_seconds()
                     ) as r:
                         r.raise_for_status()
+                        expected_size: int | None = None
+                        header_value = r.headers.get("Content-Length")
+                        if header_value is not None:
+                            try:
+                                expected_size = int(header_value)
+                            except ValueError:
+                                expected_size = None
+
+                        bytes_written = 0
                         with open(local_fname, "wb") as f:
                             for chunk in r.iter_content(chunk_size=8192):
+                                if not chunk:
+                                    continue
                                 f.write(chunk)
+                                bytes_written += len(chunk)
+
+                        if expected_size is not None and bytes_written != expected_size:
+                            raise IOError(
+                                "Incomplete download for %s asset %s: got %s of %s bytes"
+                                % (item.name, asset_key, bytes_written, expected_size)
+                            )
+
+                        if bytes_written == 0:
+                            raise IOError(
+                                f"No data downloaded for {item.name} asset {asset_key}"
+                            )
 
                     logger.debug(
                         "PlanetaryComputer ingest item %s asset %s",
