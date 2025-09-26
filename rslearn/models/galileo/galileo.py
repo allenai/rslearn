@@ -437,7 +437,9 @@ class GalileoModel(nn.Module):
             # take the average over the h, w bands since Galileo
             # treats it as a pixel-timeseries
             cur = rearrange(
-                cur.mean(dim=-1).mean(dim=-1), "b (t c) -> b t c", t=num_timesteps
+                torch.nanmean(torch.nanmean(cur, dim=-1), dim=-1),
+                "b (t c) -> b t c",
+                t=num_timesteps,
             )
             stacked_inputs[time_modality] = cur
 
