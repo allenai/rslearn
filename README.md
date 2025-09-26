@@ -34,23 +34,6 @@ cd rslearn
 pip install .[extra]
 ```
 
-### Environment Variables
-
-Some integrations (for example EarthDaily) require API credentials. rslearn ships with
-[python-dotenv](https://github.com/theskumar/python-dotenv) support: create a `.env`
-file at the repository root and populate it with any required key-value pairs, e.g.:
-
-```
-EDS_CLIENT_ID=...
-EDS_SECRET=...
-EDS_AUTH_URL=...
-EDS_API_URL=...
-```
-
-These values are loaded automatically when working with EarthDaily data sources and
-when running the test suite, so secrets never need to be exported manually. Remember to
-keep `.env` out of version control (it is already listed in `.gitignore`).
-
 
 Supported Data Sources
 ----------------------
