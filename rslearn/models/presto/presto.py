@@ -14,7 +14,9 @@ from upath import UPath
 from rslearn.models.presto.single_file_presto import (
     ERA5_BANDS,
     NUM_DYNAMIC_WORLD_CLASSES,
+    PRESTO_ADD_BY,
     PRESTO_BANDS,
+    PRESTO_DIV_BY,
     PRESTO_S1_BANDS,
     PRESTO_S2_BANDS,
     SRTM_BANDS,
@@ -180,8 +182,7 @@ class Presto(nn.Module):
             assert months.shape[-1] == t
 
         if normalize:
-            # normalize includes x = x[:, keep_indices]
-            raise NotImplementedError
+            x = (x + PRESTO_ADD_BY) / PRESTO_DIV_BY
         return x, mask, dynamic_world.long(), months.long()
 
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
@@ -215,7 +216,7 @@ class Presto(nn.Module):
             srtm_bands=SRTM_BANDS,
             normalize=True,
         )
-        b, h, w, _, _ = x.shape
+        b, _, h, w, _ = x.shape
         output_features = torch.zeros(
             b, self.model.embedding_size, h, w, device=x.device
         )

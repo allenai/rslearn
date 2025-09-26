@@ -36,46 +36,48 @@ SRTM_BANDS = ["elevation", "slope"]
 PRESTO_BANDS = PRESTO_S1_BANDS + PRESTO_S2_BANDS + ERA5_BANDS + SRTM_BANDS + ["NDVI"]
 
 # used in normalization
-PRESTO_ADD_BY = [
-    25.0,
-    25.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    -272.15,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-]
-PRESTO_DIV_BY = [
-    25.0,
-    25.0,
-    1e4,
-    1e4,
-    1e4,
-    1e4,
-    1e4,
-    1e4,
-    1e4,
-    1e4,
-    1e4,
-    1e4,
-    1e4,
-    35.0,
-    0.03,
-    2000.0,
-    50.0,
-    1.0,
-]
+PRESTO_ADD_BY = torch.Tensor(
+    [
+        25.0,
+        25.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -272.15,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ]
+)
+PRESTO_DIV_BY = torch.Tensor(
+    [
+        25.0,
+        25.0,
+        1e4,
+        1e4,
+        1e4,
+        1e4,
+        1e4,
+        1e4,
+        1e4,
+        1e4,
+        1e4,
+        1e4,
+        35.0,
+        0.03,
+        2000.0,
+        50.0,
+        1.0,
+    ]
+)
 
 
 BANDS_GROUPS_IDX = OrderedDict(
