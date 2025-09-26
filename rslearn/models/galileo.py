@@ -9,7 +9,7 @@ from collections import OrderedDict
 from collections import OrderedDict as OrderedDictType
 from collections.abc import Sequence
 from copy import deepcopy
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
@@ -36,7 +36,7 @@ HF_HUB_ID = "nasaharvest/galileo"
 
 
 # Galileo provides three sizes: nano, tiny, base
-class GalileoSize(str, Enum):
+class GalileoSize(StrEnum):
     """Size of the Galileo model."""
 
     NANO = "nano"
@@ -178,6 +178,11 @@ STATIC_BAND_GROUPS_IDX: OrderedDictType[str, list[int]] = OrderedDict(
 )
 
 
+# this normalizing dict is sourced from
+# https://github.com/nasaharvest/galileo/blob/main/config/normalization.json
+# its used to normalize the data. The keys (e.g. "13") are used to query
+# which tensor (e.g. space_time_x) is associated to the means and stds,
+# where the key represents the number of dimensions in the tensor (i.e. x.shape[-1])
 NORMALIZING_DICT = {
     "total_n": 127155,
     "sampled_n": 10000,
@@ -318,6 +323,8 @@ class Normalizer:
     """Normalize Galileo inputs."""
 
     std_bands: dict[int, list] = {
+        # we exclude NDVI because its already between 0 and 1, so we don't
+        # want to apply further normalization to it.
         len(SPACE_TIME_BANDS): [b for b in SPACE_TIME_BANDS if b != "NDVI"],
         len(SPACE_BANDS): SRTM_BANDS,
         len(TIME_BANDS): TIME_BANDS,
@@ -2048,7 +2055,11 @@ class GalileoModel(nn.Module):
                 "viirs": len(VIIRS_BANDS),
             }[time_modality]
             num_timesteps = cur.shape[1] // num_bands
-            cur = rearrange(cur, "b (t c) -> b t c", t=num_timesteps)
+            # take the average over the h, w bands since Galileo
+            # treats it as a pixel-timeseries
+            cur = rearrange(
+                cur.mean(dim=-1).mean(dim=-1), "b (t c) -> b t c", t=num_timesteps
+            )
             stacked_inputs[time_modality] = cur
 
         galileo_input = self.construct_galileo_input(**stacked_inputs, normalize=True)

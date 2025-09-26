@@ -41,6 +41,7 @@ extra = [
     "gcsfs==2025.3.0",
     "google-cloud-bigquery>=3.35",
     "google-cloud-storage>=2.18",
+    "huggingface_hub>=0.35",
     "netCDF4>=1.7.2",
     "osmium>=4.0.2",
     "planet>=3.1",
@@ -54,7 +55,6 @@ extra = [
     "terratorch>=1.0.2",
     "transformers>=4.55",
     "wandb>=0.21",
-    "huggingface_hub",
 ]
 
 dev = [
