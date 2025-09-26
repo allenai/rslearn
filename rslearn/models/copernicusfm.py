@@ -80,28 +80,29 @@ class CopernicusFM(torch.nn.Module):
     def __init__(
         self,
         band_order: dict[str, list[str]],
-        load_directory: str,
+        load_directory: str | None,
     ) -> None:
         """Initialize the Copernicus FM wrapper.
 
         Args:
             band_order: The band order for each modality
-            load_directory: The directory to load from
+            load_directory: The directory to load from, if None no weights are loaded
         """
         super().__init__()
 
         # global_pool=True so that we initialize the fc_norm layer
         self.band_order = band_order
         self.model = vit_base_patch16(num_classes=10, global_pool=True)
-        check_point = torch.load(
-            UPath(load_directory) / "CopernicusFM_ViT_base_varlang_e100.pth",
-            weights_only=True,
-        )
-        if "model" in check_point:
-            state_dict = check_point["model"]
-        else:
-            state_dict = check_point
-        self.model.load_state_dict(state_dict, strict=False)
+        if load_directory is not None:
+            check_point = torch.load(
+                UPath(load_directory) / "CopernicusFM_ViT_base_varlang_e100.pth",
+                weights_only=True,
+            )
+            if "model" in check_point:
+                state_dict = check_point["model"]
+            else:
+                state_dict = check_point
+            self.model.load_state_dict(state_dict, strict=False)
 
         # take MODALITY_TO_WAVELENGTH_BANDWIDTHS and rearrage it so that it has the same
         # ordering as the Helios band orders, defined by Modality.band_order
