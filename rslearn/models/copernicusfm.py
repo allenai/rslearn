@@ -80,7 +80,7 @@ class CopernicusFM(torch.nn.Module):
     def __init__(
         self,
         band_order: dict[str, list[str]],
-        load_directory: str = "/weka/dfive-default/helios/models/copernicusfm",
+        load_directory: str,
     ) -> None:
         """Initialize the Copernicus FM wrapper.
 
@@ -94,7 +94,8 @@ class CopernicusFM(torch.nn.Module):
         self.band_order = band_order
         self.model = vit_base_patch16(num_classes=10, global_pool=True)
         check_point = torch.load(
-            UPath(load_directory) / "CopernicusFM_ViT_base_varlang_e100.pth"  # nosec B614
+            UPath(load_directory) / "CopernicusFM_ViT_base_varlang_e100.pth",
+            weights_only=True,
         )
         if "model" in check_point:
             state_dict = check_point["model"]
