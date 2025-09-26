@@ -12,12 +12,6 @@ from .aurora.fourier import FourierExpansion
 from .flexivit.patch_embed import pi_resize_patch_embed
 from .util.pos_embed import get_1d_sincos_pos_embed_from_grid_torch
 
-# from torchvision.datasets.utils import download_url
-
-
-random_seed = 1234
-torch.manual_seed(random_seed)
-
 
 class TransformerWeightGenerator(nn.Module):
     def __init__(self, input_dim, output_dim, embed_dim, num_heads=4, num_layers=1):
@@ -82,9 +76,9 @@ class GaussianFourierFeatureTransform(torch.nn.Module):
 
         batches, channels, width, height = x.shape
 
-        assert channels == self._num_input_channels, (
-            f"Expected input to have {self._num_input_channels} channels (got {channels} channels)"
-        )
+        assert (
+            channels == self._num_input_channels
+        ), f"Expected input to have {self._num_input_channels} channels (got {channels} channels)"
 
         # Make shape compatible for matmul with _B.
         # From [B, C, W, H] to [(B*W*H), C].
