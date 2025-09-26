@@ -1,0 +1,236 @@
+"""Presto wrapper to ingest Masked Helios Samples."""
+
+import logging
+import tempfile
+from itertools import product
+from typing import Any
+
+import torch
+from einops import rearrange
+from huggingface_hub import hf_hub_download
+from torch import nn
+from upath import UPath
+
+from rslearn.models.presto.single_file_presto import (
+    ERA5_BANDS,
+    NUM_DYNAMIC_WORLD_CLASSES,
+    PRESTO_BANDS,
+    PRESTO_S1_BANDS,
+    PRESTO_S2_BANDS,
+    SRTM_BANDS,
+)
+from rslearn.models.presto.single_file_presto import Presto as SFPresto
+
+logger = logging.getLogger(__name__)
+
+INPUT_PRESTO_BANDS = [b for b in PRESTO_BANDS if b != "B09"]
+INPUT_PRESTO_S2_BANDS = [b for b in PRESTO_S2_BANDS if b != "B09"]
+
+PRESTO_S1_SUBTRACT_VALUE = -25.0
+PRESTO_S1_DIV_VALUE = 25.0
+PRESTO_S2_SUBTRACT_VALUE = 0.0
+PRESTO_S2_DIV_VALUE = 1e4
+
+HF_HUB_ID = "nasaharvest/presto"
+MODEL_FILENAME = "default_model.pt"
+
+
+class Presto(nn.Module):
+    """Presto."""
+
+    input_keys = [
+        "s1",
+        "s2",
+        "era5",
+        "srtm",
+        "dynamic_world",
+        "latlon",
+    ]
+
+    def __init__(
+        self,
+        pretrained_path: str | UPath | None = None,
+    ):
+        """Initialize the Presto wrapper.
+
+        Args:
+            pretrained_path: The directory to load from
+        """
+        super().__init__()
+
+        if pretrained_path is None:
+            pretrained_path = UPath(tempfile.gettempdir(), "rslearn_cache", "presto")
+        if not (UPath(pretrained_path) / MODEL_FILENAME).exists():
+            _ = hf_hub_download(
+                local_dir=UPath(pretrained_path),
+                repo_id=HF_HUB_ID,
+                filename=MODEL_FILENAME,
+                revision="1b97f885969da4e2d5834ca8c92707c737911464",
+            )
+
+        model = SFPresto.construct()
+        model.load_state_dict(
+            torch.load(
+                UPath(pretrained_path) / MODEL_FILENAME,
+                map_location="cpu",
+                weights_only=True,
+            )
+        )
+
+        self.model = model.encoder
+        self.month = 6  # default month
+
+    def construct_presto_input(
+        self,
+        s1: torch.Tensor | None = None,
+        s1_bands: torch.Tensor | None = None,
+        s2: torch.Tensor | None = None,
+        s2_bands: torch.Tensor | None = None,
+        era5: torch.Tensor | None = None,
+        era5_bands: torch.Tensor | None = None,
+        srtm: torch.Tensor | None = None,
+        srtm_bands: torch.Tensor | None = None,
+        dynamic_world: torch.Tensor | None = None,
+        months: torch.Tensor | None = None,
+        normalize: bool = True,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Inputs are paired into a tensor input <X> and a list <X>_bands, which describes <X>.
+
+        <X> should have shape (b, num_timesteps, h, w len(<X>_bands)), with the following bands possible for
+        each input:
+
+        s1: ["VV", "VH"]
+        s2: ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B9", "B11", "B12"]
+        era5: ["temperature_2m", "total_precipitation"]
+            "temperature_2m": Temperature of air at 2m above the surface of land,
+                sea or in-land waters in Kelvin (K)
+            "total_precipitation": Accumulated liquid and frozen water, including rain and snow,
+                that falls to the Earth's surface. Measured in metres (m)
+        srtm: ["elevation", "slope"]
+
+        dynamic_world is a 1d input of shape (num_timesteps,) representing the dynamic world classes
+            of each timestep for that pixel
+        """
+        bs = [x.shape[0] for x in [s1, s2, era5, srtm] if x is not None]
+        hs = [x.shape[2] for x in [s1, s2, era5, srtm] if x is not None]
+        ws = [x.shape[3] for x in [s1, s2, era5, srtm] if x is not None]
+
+        assert len(bs) > 0
+        assert len(set(bs)) == 1
+        assert len(set(hs)) == 1
+        assert len(set(ws)) == 1
+        b, h, w = bs[0], hs[0], ws[0]
+
+        # these values will be initialized as
+        # we iterate through the data
+        x: torch.Tensor | None = None
+        mask: torch.Tensor | None = None
+        t: int | None = None
+
+        for band_group in [
+            (s1, s1_bands, PRESTO_S1_BANDS),
+            (s2, s2_bands, INPUT_PRESTO_S2_BANDS),
+            (era5, era5_bands, ERA5_BANDS),
+            (srtm, srtm_bands, SRTM_BANDS),
+        ]:
+            data, input_bands, output_bands = band_group
+            if data is not None:
+                assert input_bands is not None
+            else:
+                continue
+
+            m_t = data.shape[1] // len(input_bands)
+            if t is None:
+                t = m_t
+            else:
+                if t != m_t:
+                    raise ValueError("inconsistent values for t")
+
+            data = rearrange(data, "b (t c) h w -> b t h w c", t=m_t)
+            if x is None:
+                x = torch.zeros(b, t, h, w, len(INPUT_PRESTO_BANDS))
+            if mask is None:
+                mask = torch.ones(b, t, h, w, len(INPUT_PRESTO_BANDS))
+
+            # construct a mapping from the input bands to the expected bands
+            kept_input_band_idxs = [
+                i for i, val in enumerate(input_bands) if val in output_bands
+            ]
+            kept_input_band_names = [val for val in input_bands if val in output_bands]
+
+            input_to_output_mapping = [
+                INPUT_PRESTO_BANDS.index(val) for val in kept_input_band_names
+            ]
+
+            x[:, :, :, :, input_to_output_mapping] = data[
+                :, :, :, :, kept_input_band_idxs
+            ]
+            mask[:, :, :, :, input_to_output_mapping] = 0
+
+        assert x is not None
+        assert mask is not None
+        assert t is not None
+
+        if dynamic_world is None:
+            dynamic_world = torch.ones(b, t, h, w) * NUM_DYNAMIC_WORLD_CLASSES
+
+        if months is None:
+            months = torch.ones((b, t), device=x.device) * self.month
+        else:
+            assert months.shape[-1] == t
+
+        if normalize:
+            # normalize includes x = x[:, keep_indices]
+            raise NotImplementedError
+        return x, mask, dynamic_world.long(), months.long()
+
+    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
+        """Compute feature maps from the Presto backbone.
+
+        Inputs:
+            inputs
+        """
+        stacked_inputs = {}
+        latlons: torch.Tensor | None = None
+        for key in inputs[0].keys():
+            # assume all the keys in an input are consistent
+            if key in self.input_keys:
+                if key == "latlon":
+                    latlons = torch.stack([inp[key] for inp in inputs], dim=0)
+                else:
+                    stacked_inputs[key] = torch.stack(
+                        [inp[key] for inp in inputs], dim=0
+                    )
+
+        (
+            x,
+            mask,
+            dynamic_world,
+            months,
+        ) = self.construct_presto_input(
+            **stacked_inputs,
+            s1_bands=PRESTO_S1_BANDS,
+            s2_bands=INPUT_PRESTO_S2_BANDS,
+            era5_bands=ERA5_BANDS,
+            srtm_bands=SRTM_BANDS,
+            normalize=True,
+        )
+        b, h, w, _, _ = x.shape
+        output_features = torch.zeros(
+            b, self.model.embedding_size, h, w, device=x.device
+        )
+
+        for i, j in product(range(h), range(w)):
+            x_ij = x[:, :, i, j, :]
+            m_ij = mask[:, :, i, j, :]
+            dw_ij = dynamic_world[:, :, i, j]
+            output_features_ij = self.model(
+                x=x_ij,
+                dynamic_world=dw_ij,
+                mask=m_ij,
+                month=months,
+                latlons=latlons,
+                eval_task=True,
+            )
+            output_features[:, :, i, j] = output_features_ij
+        return [output_features]
