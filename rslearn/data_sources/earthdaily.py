@@ -6,7 +6,7 @@ import tempfile
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import affine
 import numpy.typing as npt
@@ -86,6 +86,7 @@ class EarthDaily(DataSource, TileStore):
         timeout: timedelta = timedelta(seconds=10),
         skip_items_missing_assets: bool = False,
         cache_dir: UPath | None = None,
+        asset_access_mode: AssetAccessMode | None = None,
         service_name: Literal["platform"] = "platform",
     ):
         """Initialize a new EarthDaily instance.
@@ -103,6 +104,7 @@ class EarthDaily(DataSource, TileStore):
             cache_dir: optional directory to cache items by name, including asset URLs.
                 If not set, there will be no cache and instead STAC requests will be
                 needed each time.
+            asset_access_mode: override the asset access mode passed to EDSConfig.
             service_name: the service name, only "platform" is supported, the other
                 services "legacy" and "internal" are not supported.
         """
@@ -114,6 +116,7 @@ class EarthDaily(DataSource, TileStore):
         self.timeout = timeout
         self.skip_items_missing_assets = skip_items_missing_assets
         self.cache_dir = cache_dir
+        self.asset_access_mode = asset_access_mode
         self.service_name = service_name
 
         if cache_dir is not None:
@@ -136,6 +139,9 @@ class EarthDaily(DataSource, TileStore):
             service_name=d["service_name"],
             asset_bands=d["asset_bands"],
         )
+
+        if "asset_access_mode" in d:
+            kwargs["asset_access_mode"] = AssetAccessMode(d["asset_access_mode"])
 
         if "timeout_seconds" in d:
             kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
@@ -164,18 +170,21 @@ class EarthDaily(DataSource, TileStore):
             return self.eds_client, self.client, self.collection
 
         config_kwargs: dict[str, Any] = {}
-        asset_mode = os.getenv("EDS_ASSET_ACCESS_MODE")
-        if asset_mode:
-            try:
-                config_kwargs["asset_access_mode"] = AssetAccessMode(asset_mode)
-            except ValueError:
-                logger.warning(
-                    "Invalid EDS_ASSET_ACCESS_MODE %s; defaulting to proxy URLs",
-                    asset_mode,
-                )
-                config_kwargs["asset_access_mode"] = AssetAccessMode.PROXY_URLS
+        if self.asset_access_mode is not None:
+            config_kwargs["asset_access_mode"] = self.asset_access_mode
         else:
-            config_kwargs["asset_access_mode"] = AssetAccessMode.PROXY_URLS
+            asset_mode = os.getenv("EDS_ASSET_ACCESS_MODE")
+            if asset_mode:
+                try:
+                    config_kwargs["asset_access_mode"] = AssetAccessMode(asset_mode)
+                except ValueError:
+                    logger.warning(
+                        "Invalid EDS_ASSET_ACCESS_MODE %s; defaulting to proxy URLs",
+                        asset_mode,
+                    )
+                    config_kwargs["asset_access_mode"] = AssetAccessMode.PROXY_URLS
+            else:
+                config_kwargs["asset_access_mode"] = AssetAccessMode.PROXY_URLS
 
         self.eds_client = EDSClient(EDSConfig(**config_kwargs))
 
@@ -360,7 +369,19 @@ class EarthDaily(DataSource, TileStore):
                     resolver = get_resolver_for_url(download_href, api_requester=api_requester)
                     download_url = resolver.get_download_url(download_href)
                     headers = resolver.get_headers(download_href)
-                    local_fname = Path(tmp_dir) / Path(urlparse(download_url).path).name
+                    parsed = urlparse(download_url)
+                    if api_requester is not None and parsed.netloc.endswith("amazonaws.com"):
+                        proxy_url = (
+                            f"{api_requester.base_url}/platform/v1/asset?"
+                            f"asset_path={quote(download_href, safe='')}"
+                            f"&item_id={item.name}&collection_id={self.collection_name}&asset={asset_key}"
+                        )
+                        resolver = get_resolver_for_url(proxy_url, api_requester=api_requester)
+                        download_url = resolver.get_download_url(proxy_url)
+                        headers = resolver.get_headers(proxy_url)
+                        parsed = urlparse(download_url)
+
+                    local_fname = Path(tmp_dir) / Path(parsed.path).name
                     logger.debug(
                         "EarthDaily download item %s asset %s from %s",
                         item.name,
@@ -536,6 +557,92 @@ class EarthDaily(DataSource, TileStore):
             layer_cfg,
             item_groups,
         )
+
+
+class SmapL3Enhanced(EarthDaily):
+    """A data source for the NASA SMAP L3 enhanced soil moisture product."""
+
+    COLLECTION_NAME = "nasa:smap:l3-enhanced:v1"
+    ASSET_KEY = "FILE0"
+    DEFAULT_BANDS = ["soil-moisture"]
+
+    def __init__(
+        self,
+        band_names: list[str] | None = None,
+        asset_key: str | None = None,
+        collection_name: str | None = None,
+        **kwargs: Any,
+    ):
+        """Initialize a new SMAP L3 Enhanced instance."""
+
+        if band_names is None:
+            band_names = list(self.DEFAULT_BANDS)
+
+        if any("_" in band for band in band_names):
+            raise ValueError("SMAP band names must not contain '_' characters")
+
+        resolved_asset_key = asset_key or self.ASSET_KEY
+        if collection_name is None:
+            collection_name = self.COLLECTION_NAME
+
+        access_mode = kwargs.pop(
+            "asset_access_mode", AssetAccessMode.PRESIGNED_URLS
+        )
+
+        super().__init__(
+            collection_name=collection_name,
+            asset_bands={resolved_asset_key: band_names},
+            skip_items_missing_assets=True,
+            asset_access_mode=access_mode,
+            **kwargs,
+        )
+
+    @staticmethod
+    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "SmapL3Enhanced":
+        """Create a SMAP L3 Enhanced instance from configuration."""
+
+        if config.data_source is None:
+            raise ValueError("config.data_source is required")
+
+        d = config.data_source.config_dict
+
+        band_names: set[str] = set()
+        for band_set in config.band_sets:
+            for band in band_set.bands:
+                band_names.add(band)
+
+        if not band_names and "band_names" in d:
+            band_names.update(d["band_names"])
+
+        if not band_names:
+            raise ValueError(
+                "config.band_sets (or data_source.band_names) must reference at least one SMAP band"
+            )
+
+        sanitized_bands = sorted(band_names)
+        if any("_" in band for band in sanitized_bands):
+            raise ValueError("SMAP band names must not contain '_' characters")
+
+        kwargs: dict[str, Any] = dict(band_names=sanitized_bands)
+
+        if "asset_key" in d:
+            kwargs["asset_key"] = d["asset_key"]
+
+        if "timeout_seconds" in d:
+            kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
+
+        if "cache_dir" in d:
+            kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
+
+        if "asset_access_mode" in d:
+            kwargs["asset_access_mode"] = AssetAccessMode(d["asset_access_mode"])
+
+        optionals = ["query", "sort_by", "sort_ascending", "service_name", "collection_name"]
+        for opt in optionals:
+            if opt in d:
+                kwargs[opt] = d[opt]
+
+        return SmapL3Enhanced(**kwargs)
 
 
 class Sentinel2(EarthDaily):

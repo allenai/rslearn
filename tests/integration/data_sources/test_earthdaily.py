@@ -4,6 +4,7 @@ import pathlib
 from datetime import UTC, datetime
 
 import pytest
+import requests
 import shapely
 from upath import UPath
 
@@ -12,7 +13,7 @@ from rslearn.config import (
     SpaceMode,
 )
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources.earthdaily import EarthDaily, Sentinel1, Sentinel2
+from rslearn.data_sources.earthdaily import EarthDaily, Sentinel1, Sentinel2, SmapL3Enhanced
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils import STGeometry
 
@@ -28,6 +29,18 @@ def edc_preview_geometry() -> STGeometry:
         (
             datetime(2022, 8, 9, 18, 3, 33, tzinfo=UTC),
             datetime(2022, 8, 15, 18, 2, 42, tzinfo=UTC),
+        ),
+    )
+
+
+@pytest.fixture()
+def california_smap_geometry() -> STGeometry:
+    return STGeometry(
+        WGS84_PROJECTION,
+        shapely.box(-124.48, 32.53, -114.13, 42.01),
+        (
+            datetime(2023, 12, 1, tzinfo=UTC),
+            datetime(2023, 12, 5, tzinfo=UTC),
         ),
     )
 
@@ -110,6 +123,33 @@ def test_sentinel2(tmp_path: pathlib.Path, edc_preview_geometry: STGeometry) -> 
         TileStoreWithLayer(tile_store, layer_name),
         item_groups[0],
         [[edc_preview_geometry]],
+    )
+    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+
+
+def test_smap_l3_enhanced(
+    tmp_path: pathlib.Path,
+    california_smap_geometry: STGeometry,
+) -> None:
+    """Ensure SMAP L3 enhanced assets ingest correctly via the helper."""
+
+    band_name = "soil-moisture"
+    data_source = SmapL3Enhanced()
+
+    query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
+    item_groups = data_source.get_items([california_smap_geometry], query_config)[0]
+    assert item_groups, "Expected at least one matching SMAP item"
+    item = item_groups[0][0]
+
+    tile_store_dir = UPath(tmp_path)
+    tile_store = DefaultTileStore(str(tile_store_dir))
+    tile_store.set_dataset_path(tile_store_dir)
+
+    layer_name = "layer"
+    data_source.ingest(
+        TileStoreWithLayer(tile_store, layer_name),
+        item_groups[0],
+        [[california_smap_geometry]],
     )
     assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
 
