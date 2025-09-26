@@ -1,3 +1,5 @@
+import logging
+import os
 import pathlib
 from datetime import UTC, datetime
 
@@ -15,6 +17,8 @@ from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils import STGeometry
 
 
+pytestmark = pytest.mark.usefixtures("load_repository_env")
+
 @pytest.fixture()
 def edc_preview_geometry() -> STGeometry:
     return STGeometry(
@@ -25,6 +29,19 @@ def edc_preview_geometry() -> STGeometry:
             datetime(2022, 8, 9, 18, 3, 33, tzinfo=UTC),
             datetime(2022, 8, 15, 18, 2, 42, tzinfo=UTC),
         ),
+    )
+
+
+def test_earthdaily_credentials_present() -> None:
+    required = ("EDS_CLIENT_ID", "EDS_SECRET", "EDS_AUTH_URL", "EDS_API_URL")
+    missing = [key for key in required if not os.getenv(key)]
+    assert not missing, f"Missing EarthDaily credentials: {', '.join(missing)}"
+
+    logger = logging.getLogger(__name__)
+    logger.info(
+        "EarthDaily endpoints: auth=%s, api=%s",
+        os.getenv("EDS_AUTH_URL"),
+        os.getenv("EDS_API_URL"),
     )
 
 

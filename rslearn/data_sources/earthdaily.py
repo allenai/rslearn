@@ -15,7 +15,6 @@ import pystac_client
 import rasterio
 import requests
 import shapely
-from dotenv import load_dotenv
 from earthdaily import EDSClient, EDSConfig
 from earthdaily._eds_config import AssetAccessMode
 from rasterio.enums import Resampling
@@ -33,9 +32,6 @@ from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 
 logger = get_logger(__name__)
-
-
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
 class EarthDailyItem(Item):

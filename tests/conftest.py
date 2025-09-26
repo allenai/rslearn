@@ -1,5 +1,6 @@
 import logging
 import multiprocessing
+import os
 from pathlib import Path
 
 import pytest
@@ -14,9 +15,10 @@ from .fixtures.datasets.image_to_class import (
 logging.basicConfig()
 
 
-# Load environment variables from the repository-level .env so integration tests have
-# access to credentials required by external data sources (e.g., EarthDaily).
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+@pytest.fixture(scope="session")
+def load_repository_env() -> None:
+    """Expose repository-level environment variables to tests that need them."""
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 
 @pytest.fixture(scope="session", autouse=True)
