@@ -26,12 +26,16 @@ Quick links:
 Setup
 -----
 
-rslearn requires Python 3.10+ (Python 3.12 is recommended).
+rslearn requires Python 3.11+ (Python 3.12 is recommended).
 
 ```
 git clone https://github.com/allenai/rslearn.git
 cd rslearn
-pip install .[extra]
+uv venv --python 3.11
+source .venv/bin/activate
+uv sync
+uv pip install -e ".[extra]"
+uv pip install -e ".[dev]"  # If running tests
 ```
 
 

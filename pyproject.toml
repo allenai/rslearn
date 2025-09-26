@@ -47,12 +47,15 @@ extra = [
     "planetary_computer>=1.0",
     "pycocotools>=2.0",
     "pystac_client>=0.9",
+    "rioxarray>=0.15",
     "rtree>=1.4",
     "s3fs==2025.3.0",
     "satlaspretrain_models>=0.3",
     "scipy>=1.16",
     "terratorch>=1.0.2",
     "transformers>=4.55",
+    "xarray>=2024.1",
+    "zarr>=2.17",
     "wandb>=0.21",
 ]
 
