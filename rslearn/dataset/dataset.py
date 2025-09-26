@@ -105,6 +105,8 @@ class Dataset:
         if not groups:
             groups = []
             for p in (self.path / "windows").iterdir():
+                if not p.is_dir():
+                    continue
                 groups.append(p.name)
         for group in groups:
             group_dir = self.path / "windows" / group
@@ -118,6 +120,8 @@ class Dataset:
             else:
                 cur_names = []
                 for p in group_dir.iterdir():
+                    if not p.is_dir():
+                        continue
                     cur_names.append(p.name)
 
             for window_name in cur_names:

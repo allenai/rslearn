@@ -89,3 +89,17 @@ def test_index_used_for_completed_layers(dummy_dataset: Dataset) -> None:
 
     windows = dummy_dataset.load_windows()
     assert not windows[0].is_layer_completed("layer")
+
+
+def test_load_windows_ignores_non_directories(dummy_dataset: Dataset) -> None:
+    """Ensure stray files (e.g. .DS_Store) do not break window discovery."""
+    window = make_window(dummy_dataset, "name")
+
+    # Create Finder artifacts at both group and windows root level.
+    with (dummy_dataset.path / "windows" / ".DS_Store").open("w") as f:
+        f.write("dummy")
+    with (window.path.parent / ".DS_Store").open("w") as f:
+        f.write("dummy")
+
+    windows = dummy_dataset.load_windows(no_index=True)
+    assert [w.name for w in windows] == [window.name]
