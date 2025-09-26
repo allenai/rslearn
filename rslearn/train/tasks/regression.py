@@ -1,6 +1,6 @@
 """Regression task."""
 
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -25,7 +25,7 @@ class RegressionTask(BasicTask):
         filters: list[tuple[str, str]] | None = None,
         allow_invalid: bool = False,
         scale_factor: float = 1,
-        metric_mode: str = "mse",
+        metric_mode: Literal["mse", "l1"] = "mse",
         use_accuracy_metric: bool = False,
         within_factor: float = 0.1,
         **kwargs: Any,
@@ -183,7 +183,9 @@ class RegressionTask(BasicTask):
 class RegressionHead(torch.nn.Module):
     """Head for regression task."""
 
-    def __init__(self, loss_mode: str = "mse", use_sigmoid: bool = False):
+    def __init__(
+        self, loss_mode: Literal["mse", "l1"] = "mse", use_sigmoid: bool = False
+    ):
         """Initialize a new RegressionHead.
 
         Args:
