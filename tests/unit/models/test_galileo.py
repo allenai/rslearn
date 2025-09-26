@@ -1,13 +1,13 @@
 import pathlib
 import tempfile
-from typing import Any
 
 import torch
+from pytest import MonkeyPatch
 
 from rslearn.models.galileo import GalileoModel, GalileoSize
 
 
-def test_galileo(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
+def test_galileo(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
     """Verify that the forward pass for Galileo works."""
     input_hw = 32
     patch_size = 4
@@ -33,7 +33,7 @@ def test_galileo(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
     assert features.shape[2] == feat_hw and features.shape[3] == feat_hw
 
 
-def test_galileo_mt(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
+def test_galileo_mt(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
     """Verify that the forward pass for Galileo works."""
     input_hw = 32
     patch_size = 4
@@ -66,7 +66,9 @@ def test_galileo_mt(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
     assert features.shape[2] == feat_hw and features.shape[3] == feat_hw
 
 
-def test_galileo_hw_less_than_ps(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
+def test_galileo_hw_less_than_ps(
+    tmp_path: pathlib.Path, monkeypatch: MonkeyPatch
+) -> None:
     """Verify that the forward pass for Galileo works."""
     input_hw = 1
     patch_size = 4
