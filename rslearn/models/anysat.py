@@ -27,7 +27,7 @@ MODALITY_BANDS: dict[str, list[str]] = {
     "aerial": ["R", "G", "B", "NiR"],
     "aerial-flair": ["R", "G", "B", "NiR", "Elevation"],
     "spot": ["R", "G", "B"],
-    "naip": ["R", "G", "B"],
+    "naip": ["R", "G", "B", "NiR"],
     "s2": ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"],
     "s1-asc": ["VV", "VH"],
     "s1": ["VV", "VH", "Ratio"],
@@ -199,17 +199,20 @@ class AnySat(torch.nn.Module):
         self._update_effective_patch_size_meters(spatial_shapes)
 
         # Add *_dates
-        for modality, x in batch.items():
+        to_add = {}
+        for modality, x in list(batch.items()):
             if modality in TIME_SERIES_MODALITIES:
-                B, num_dates = x.shape[0], x.shape[1]
-                dates = torch.as_tensor(
+                B, T = x.shape[0], x.shape[1]
+                d = torch.as_tensor(
                     self.dates[modality], dtype=torch.long, device=x.device
                 )
-                if dates.ndim != 1 or dates.numel() != num_dates:
+                if d.ndim != 1 or d.numel() != T:
                     raise ValueError(
-                        f"dates for '{modality}' must be 1D length {num_dates}, got {tuple(dates.shape)}"
+                        f"dates for '{modality}' must be 1D length {T}, got {tuple(d.shape)}"
                     )
-                batch[f"{modality}_dates"] = dates.unsqueeze(0).repeat(B, 1)
+                to_add[f"{modality}_dates"] = d.unsqueeze(0).repeat(B, 1)
+
+        batch.update(to_add)
 
         kwargs = {"patch_size": self.patch_size_meters, "output": self.output}
         if self.output == "dense":
