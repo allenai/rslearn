@@ -1,201 +1,235 @@
-"""AnySat mode."""
+"""AnySat model."""
 
-from __future__ import annotations
-
+import math
 from typing import Any
 
 import torch
-from torch import nn
+from einops import rearrange
 
-from rslearn.train.transforms.transform import Transform
+# AnySat github: https://github.com/gastruc/AnySat
+# Modalities and expected resolutions (meters)
+MODALITY_RESOLUTIONS: dict[str, float] = {
+    "aerial": 0.2,
+    "aerial-flair": 0.2,
+    "spot": 1,
+    "naip": 1.25,
+    "s2": 10,
+    "s1-asc": 10,
+    "s1": 10,
+    "alos": 30,
+    "l7": 30,
+    "l8": 10,  # L8 must be upsampled to 10 m in AnySat
+    "modis": 250,
+}
 
-ANYSAT_SUPPORTED = [
-    # time series
-    "s2",
-    "s1",
-    "s1-asc",
-    "l7",
-    "l8",
-    "modis",
-    "alos",
-    # single-date / VHR
-    "aerial",
-    "aerial-flair",
-    "spot",
-    "naip",
-]
-PATCH_SIZE = 1  # dense per-pixel features
+# Modalities and expected band names
+MODALITY_BANDS: dict[str, list[str]] = {
+    "aerial": ["R", "G", "B", "NiR"],
+    "aerial-flair": ["R", "G", "B", "NiR", "Elevation"],
+    "spot": ["R", "G", "B"],
+    "naip": ["R", "G", "B"],
+    "s2": ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8a", "B11", "B12"],
+    "s1-asc": ["VV", "VH"],
+    "s1": ["VV", "VH", "Ratio"],
+    "alos": ["HH", "HV", "Ratio"],
+    "l7": ["B1", "B2", "B3", "B4", "B5", "B7"],
+    "l8": ["B8", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B9", "B10", "B11"],
+    "modis": ["B1", "B2", "B3", "B4", "B5", "B6", "B7"],
+}
 
-
-class AnySat(nn.Module):
-    """AnySat backbone."""
-
-    def __init__(self, modalities: list[str] = ["s2"]) -> None:
-        """Initialize the AnySat model."""
-        super().__init__()
-        for m in modalities:
-            if m not in ANYSAT_SUPPORTED:
-                raise ValueError(f"Invalid modality: {m}")
-        self.modalities = list(modalities)
-
-        self.model = torch.hub.load(  # nosec B614
-            "gastruc/anysat",
-            "anysat",
-            pretrained=True,
-            flash_attn=False,
-            force_reload=False,
-        )
-        self._last_depth: int | None = None
-
-    @staticmethod
-    def _calc_patch_size(h_pixels: int) -> int:
-        """Calculate patch size based on image height in pixels."""
-        h_in_m = h_pixels * 10
-        return min(40, h_in_m)
-
-    def _stack_imgs(self, items: list[torch.Tensor]) -> torch.Tensor:
-        """Stack image tensors into a batch."""
-        x0 = items[0]
-        if x0.dim() == 3:
-            # (C, H, W) -> (B, C, H, W)
-            if not all(x.dim() == 3 and x.shape == x0.shape for x in items):
-                raise ValueError("All single-date tensors must share (C, H, W)")
-            return torch.stack(items, dim=0)
-        elif x0.dim() == 4:
-            # (T, C, H, W) -> (B, T, C, H, W)
-            T, C, H, W = x0.shape
-            if not all(x.dim() == 4 and x.shape == (T, C, H, W) for x in items):
-                raise ValueError("All time-series tensors must share (T, C, H, W)")
-            return torch.stack(items, dim=0)
-        else:
-            raise ValueError("Expected (C, H, W) or (T, C, H, W)")
-
-    def _stack_dates(self, items: list[torch.Tensor], B: int, T: int) -> torch.Tensor:
-        """Stack date tensors into a batch."""
-        fixed = []
-        for d in items:
-            if d.dim() == 1:  # (T,)
-                d = d.unsqueeze(0)  # (1, T)
-            if d.size(-1) != T:
-                raise ValueError("All *_dates must share T")
-            fixed.append(d)
-        d0 = fixed[0]
-        out = (
-            torch.cat(fixed, dim=0)
-            if d0.size(0) == 1
-            else torch.stack(fixed, dim=0).squeeze(1)
-        )
-        if out.shape != (B, T):
-            raise ValueError("Batched *_dates must be (B,T)")
-        return out.long()
-
-    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
-        """Forward pass for the AnySat model."""
-        if not inputs:
-            raise ValueError("inputs must be non-empty")
-
-        batch: dict[str, torch.Tensor] = {}
-        date_keys: dict[str, torch.Tensor] = {}
-        present: list[str] = []
-
-        for m in self.modalities:
-            if m not in inputs[0]:
-                continue
-            imgs = [s[m] for s in inputs]
-            x = self._stack_imgs(imgs)
-            batch[m] = x
-            present.append(m)
-
-            # TODO: compute dates
-            # time-series modalities require *_dates (B, T)
-            if x.dim() == 5:
-                T = x.shape[1]
-                dkey = f"{m}_dates"
-                if dkey not in inputs[0]:
-                    raise ValueError(f"Missing '{dkey}' for time-series modality '{m}'")
-                dates = [s[dkey] for s in inputs]
-                date_keys[dkey] = self._stack_dates(dates, B=x.shape[0], T=T)
-
-        if not present:
-            raise RuntimeError("No supported modalities found in inputs")
-
-        out_modality = present[0]
-        if batch[out_modality].dim() == 5:
-            _, T, C, H, W = batch[out_modality].shape
-        else:
-            _, C, H, W = batch[out_modality].shape
-        patch_size = self._calc_patch_size(H)
-
-        xdict: dict[str, torch.Tensor] = {}
-        xdict.update(batch)
-        xdict.update(date_keys)
-
-        # TODO: do we want tile too?
-        out = self.model(
-            x=xdict,
-            patch_size=patch_size,
-            output="dense",
-            output_modality=out_modality,
-        )
-        if out.dim() != 4:
-            raise RuntimeError(f"Unexpected AnySat output shape {tuple(out.shape)}")
-        self._last_depth = int(out.shape[1])
-        return [out]
-
-    def get_backbone_channels(self) -> list[tuple[int, int]]:
-        """Returns the output channels of this model when used as a backbone."""
-        depth = self._last_depth
-        return [(PATCH_SIZE, depth)]  # type: ignore
+# Modalities that require *_dates* input
+TIME_SERIES_MODALITIES = {"s2", "s1-asc", "s1", "alos", "l7", "l8", "modis"}
 
 
-class AnySatNormalize(Transform):
-    """Normalize inputs using AnySat normalization."""
+class AnySat(torch.nn.Module):
+    """AnySat backbone (outputs one feature map)."""
 
     def __init__(
-        self, stats: dict[str, tuple[list[float], list[float]]] | None = None
+        self,
+        modalities: list[str],
+        patch_size_meters: int,
+        dates: dict[str, list[int]],
+        output: str = "patch",
+        output_modality: str | None = None,
+        hub_repo: str = "gastruc/anysat",
+        pretrained: bool = True,
+        force_reload: bool = False,
+        flash_attn: bool = False,
     ) -> None:
-        """Initialize a new AnySatNormalize."""
+        """Initialize an AnySat model.
+
+        Args:
+            modalities: list of modalities to use as input (1 or more).
+            patch_size_meters: patch size in meters (must be multiple of 10).
+            dates: dict mapping time-series modalities to list of dates.
+            output: 'patch' (default) or 'dense'. Use 'patch' for classification tasks,
+                'dense' for segmentation tasks.
+            output_modality: required if output='dense', specifies which modality to use
+                for the dense output (one of the input modalities).
+            hub_repo: torch.hub repository to load AnySat from.
+            pretrained: whether to load pretrained weights.
+            force_reload: whether to force re-download of the model.
+            flash_attn: whether to use flash attention (if available).
+        """
         super().__init__()
-        self.stats = stats or {}
+
+        if not modalities:
+            raise ValueError("At least one modality must be specified.")
+        for m in modalities:
+            if m not in MODALITY_RESOLUTIONS:
+                raise ValueError(f"Invalid modality: {m}")
+
+        if not all(m in TIME_SERIES_MODALITIES for m in dates.keys()):
+            raise ValueError("`dates` keys must be time-series modalities only.")
+        for m in modalities:
+            if m in TIME_SERIES_MODALITIES and m not in dates:
+                raise ValueError(
+                    f"Missing required dates for time-series modality '{m}'."
+                )
+
+        if patch_size_meters % 10 != 0:
+            raise ValueError(
+                "In AnySat, `patch_size` is in meters and must be a multiple of 10."
+            )
+
+        output = output.lower()
+        if output not in {"patch", "dense"}:
+            raise ValueError("`output` must be 'patch' or 'dense'.")
+        if output == "dense" and output_modality is None:
+            raise ValueError("`output_modality` is required when output='dense'.")
+
+        self.modalities = modalities
+        self.patch_size_meters = int(patch_size_meters)
+        self.dates = dates
+        self.output = output
+        self.output_modality = output_modality
+
+        self.model = torch.hub.load(  # nosec B614
+            hub_repo,
+            "anysat",
+            pretrained=pretrained,
+            force_reload=force_reload,
+            flash_attn=flash_attn,
+        )
+        self._embed_dim = 768  # base width, 'dense' returns 2x
 
     @staticmethod
-    def _norm(x: torch.Tensor, means: list[float], stds: list[float]) -> torch.Tensor:
-        """Normalize a tensor with given means and stds."""
-        if x.dim() == 3:
-            C, H, W = x.shape
-            m = torch.tensor(means, dtype=x.dtype, device=x.device).view(C, 1, 1)
-            s = (
-                torch.tensor(stds, dtype=x.dtype, device=x.device)
-                .clamp_min(1e-12)
-                .view(C, 1, 1)
-            )
-            return (x - m) / s
-        elif x.dim() == 4:
-            T, C, H, W = x.shape
-            m = torch.tensor(means, dtype=x.dtype, device=x.device).view(1, C, 1, 1)
-            s = (
-                torch.tensor(stds, dtype=x.dtype, device=x.device)
-                .clamp_min(1e-12)
-                .view(1, C, 1, 1)
-            )
-            return (x - m) / s
-        else:
-            raise ValueError("Expected (C, H, W) or (T, C, H, W)")
+    def _ceil_to_multiple(x: int, base: int) -> int:
+        """Round x up to nearest multiple of base."""
+        return ((x + base - 1) // base) * base
 
-    def forward(
-        self, input_dict: dict[str, Any], target_dict: dict[str, Any]
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Apply normalization to the input dict."""
-        for m, tensor in list(input_dict.items()):
-            if not isinstance(tensor, torch.Tensor):
-                continue
-            if m not in self.stats:
-                # allow per-sample override: input_dict['s2_stats']={'means':..., 'stds':...}
-                sstats = input_dict.get(f"{m}_stats")
-                if sstats is None:
-                    continue
-                means, stds = sstats["means"], sstats["stds"]
+    def _update_effective_patch_size_meters(
+        self, spatial_shapes: dict[str, tuple[int, int]]
+    ) -> None:
+        """Update self.patch_size_meters to ensure ≤ 32 * 32 patches for all modalities.
+
+        As noted in the AnySat repo: in general, avoid having more than 1024 patches per tile.
+        Equivalent to ensure:
+          ps_m >= res_m * max(H_m, W_m) / 32
+        Take max across modalities, and round up to nearest 10 m.
+
+        Args:
+            spatial_shapes: dict mapping modality to (H, W) of that modality in the batch.
+        """
+        required_ps_m = self.patch_size_meters
+        for m, (H, W) in spatial_shapes.items():
+            res_m = MODALITY_RESOLUTIONS[m]
+            need_m = math.ceil((res_m * max(H, W)) / 32.0)
+            if need_m > required_ps_m:
+                required_ps_m = need_m
+        self.patch_size_meters = self._ceil_to_multiple(required_ps_m, 10)
+
+    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
+        """Forward pass for the AnySat model.
+
+        Args:
+            inputs: input dicts that must include modalities as keys which are defined in the self.modalities list
+
+        Returns:
+            List[torch.Tensor]: Single-scale feature tensors from the encoder.
+        """
+        if not inputs:
+            raise ValueError("empty inputs")
+
+        batch: dict[str, torch.Tensor] = {}
+        spatial_shapes: dict[str, tuple[int, int]] = {}
+        spatial_extent: tuple[float, float] | None = None
+
+        for modality in self.modalities:
+            if modality not in inputs[0]:
+                raise ValueError(f"Modality '{modality}' not present in inputs.")
+
+            cur = torch.stack(
+                [inp[modality] for inp in inputs], dim=0
+            )  # (B, C, H, W) or (B, T*C, H, W)
+
+            if modality in TIME_SERIES_MODALITIES:
+                num_dates = len(self.dates[modality])
+                num_bands = cur.shape[1] // num_dates
+                cur = rearrange(
+                    cur, "b (t c) h w -> b t c h w", t=num_dates, c=num_bands
+                )
+                H, W = cur.shape[-2], cur.shape[-1]
             else:
-                means, stds = self.stats[m]
-            input_dict[m] = self._norm(tensor, means, stds)
-        return input_dict, target_dict
+                num_bands = cur.shape[1]
+                H, W = cur.shape[-2], cur.shape[-1]
+
+            if num_bands != len(MODALITY_BANDS[modality]):
+                raise ValueError(
+                    f"Modality '{modality}' expected {len(MODALITY_BANDS[modality])} bands, "
+                    f"got {num_bands} (shape {tuple(cur.shape)})"
+                )
+
+            batch[modality] = cur
+            spatial_shapes[modality] = (H, W)
+
+            # Ensure same spatial extent across all modalities (H*res, W*res)
+            extent = (
+                H * MODALITY_RESOLUTIONS[modality],
+                W * MODALITY_RESOLUTIONS[modality],
+            )
+            if spatial_extent is None:
+                spatial_extent = extent
+            elif spatial_extent != extent:
+                raise ValueError(
+                    "All modalities must share the same spatial extent (H*res, W*res)."
+                )
+
+        # Adjust self.patch_size_meters to satisfy all modalities (≤ 32×32 patches)
+        self._update_effective_patch_size_meters(spatial_shapes)
+
+        # Add *_dates
+        for modality, x in batch.items():
+            if modality in TIME_SERIES_MODALITIES:
+                B, num_dates = x.shape[0], x.shape[1]
+                dates = torch.as_tensor(
+                    self.dates[modality], dtype=torch.long, device=x.device
+                )
+                if dates.ndim != 1 or dates.numel() != num_dates:
+                    raise ValueError(
+                        f"dates for '{modality}' must be 1D length {num_dates}, got {tuple(dates.shape)}"
+                    )
+                batch[f"{modality}_dates"] = dates.unsqueeze(0).repeat(B, 1)
+
+        kwargs = {"patch_size": self.patch_size_meters, "output": self.output}
+        if self.output == "dense":
+            kwargs["output_modality"] = self.output_modality
+
+        features = self.model(batch, **kwargs)
+        return rearrange(features, "b h w d -> b d h w")
+
+    def get_backbone_channels(self) -> list:
+        """Returns the output channels of this model when used as a backbone.
+
+        The output channels is a list of (patch_size, depth) that corresponds
+        to the feature maps that the backbone returns.
+
+        Returns:
+            the output channels of the backbone as a list of (patch_size, depth) tuples.
+        """
+        if self.output == "patch":
+            return [(self.patch_size_meters // 10, 768)]
+        elif self.output == "dense":
+            return [(1, 1536)]
+        else:
+            raise ValueError(f"invalid output type: {self.output}")
