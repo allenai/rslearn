@@ -116,7 +116,13 @@ class PrithviV2(nn.Module):
         """Compute feature maps from the Prithvi V2 backbone.
 
         Inputs:
-            inputs
+            inputs: input dicts that must include "sentinel2"
+            keys depending. Prithvi is designed for HLS (Harmonized Landsat-Sentinel);
+            this naming keeps the model consistent with other rslearn models.
+
+        Returns:
+            11 feature maps (one per transformer block in the Prithvi model),
+            of shape [B, H/p_s, W/p_s, D=1024] where p_s=16 is the patch size.
         """
         x = torch.stack([inp["sentinel2"] for inp in inputs], dim=0)
         x = self._resize_data(x)
