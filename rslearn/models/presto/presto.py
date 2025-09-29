@@ -2,11 +2,10 @@
 
 import logging
 import tempfile
-from itertools import product
 from typing import Any
 
 import torch
-from einops import rearrange
+from einops import rearrange, repeat
 from huggingface_hub import hf_hub_download
 from torch import nn
 from upath import UPath
@@ -35,6 +34,8 @@ PRESTO_S2_DIV_VALUE = 1e4
 
 HF_HUB_ID = "nasaharvest/presto"
 MODEL_FILENAME = "default_model.pt"
+# pin the model to a specific hugging face commit
+HF_COMMIT_ID = "1b97f885969da4e2d5834ca8c92707c737911464"
 
 
 class Presto(nn.Module):
@@ -52,11 +53,15 @@ class Presto(nn.Module):
     def __init__(
         self,
         pretrained_path: str | UPath | None = None,
+        pixel_batch_size: int = 128,
     ):
         """Initialize the Presto wrapper.
 
         Args:
             pretrained_path: The directory to load from
+            pixel_batch_size: If the input has a h,w dimension >1, this is
+                flattened into a batch dimension (b h w) before being passed
+                to the model (since Presto is designed for pixel timeseries).
         """
         super().__init__()
 
@@ -78,7 +83,7 @@ class Presto(nn.Module):
                 weights_only=True,
             )
         )
-
+        self.pixel_batch_size = pixel_batch_size
         self.model = model.encoder
         self.month = 6  # default month
 
@@ -217,21 +222,37 @@ class Presto(nn.Module):
             normalize=True,
         )
         b, _, h, w, _ = x.shape
+
         output_features = torch.zeros(
-            b, self.model.embedding_size, h, w, device=x.device
+            b * h * w, self.model.embedding_size, device=x.device
         )
 
-        for i, j in product(range(h), range(w)):
-            x_ij = x[:, :, i, j, :]
-            m_ij = mask[:, :, i, j, :]
-            dw_ij = dynamic_world[:, :, i, j]
-            output_features_ij = self.model(
-                x=x_ij,
-                dynamic_world=dw_ij,
-                mask=m_ij,
-                month=months,
-                latlons=latlons,
+        x = rearrange(x, "b t h w d -> (b h w) t d")
+        mask = rearrange(mask, "b t h w d -> (b h w) t d")
+        dynamic_world = rearrange(dynamic_world, "b t h w -> (b h w) t")
+        months = repeat(months, "b t -> (b h w) t", h=h, w=w)
+        if latlons is not None:
+            latlons = rearrange(latlons, "b c h w -> (b h w) c")
+
+        cur_idx = 0
+        while cur_idx < (b * h * w):
+            x_b = x[cur_idx : cur_idx + self.pixel_batch_size]
+            mask_b = mask[cur_idx : cur_idx + self.pixel_batch_size]
+            dw = dynamic_world[cur_idx : cur_idx + self.pixel_batch_size]
+            months_b = months[cur_idx : cur_idx + self.pixel_batch_size]
+            if latlons is not None:
+                l_b = latlons[cur_idx : cur_idx + self.pixel_batch_size]
+            else:
+                l_b = None
+            output_b = self.model(
+                x=x_b,
+                dynamic_world=dw,
+                mask=mask_b,
+                month=months_b,
+                latlons=l_b,
                 eval_task=True,
             )
-            output_features[:, :, i, j] = output_features_ij
-        return [output_features]
+            output_features[cur_idx : cur_idx + self.pixel_batch_size] = output_b
+            cur_idx += self.pixel_batch_size
+
+        return [rearrange(output_features, "(b h w) d -> b d h w", h=h, w=w, b=b)]
