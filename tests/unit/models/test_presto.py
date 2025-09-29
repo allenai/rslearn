@@ -2,6 +2,7 @@ import pathlib
 import tempfile
 
 import torch
+from einops import rearrange
 from pytest import MonkeyPatch
 
 from rslearn.models.presto import Presto
@@ -13,7 +14,9 @@ def test_presto(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
     # We override the temporary directory so we don't retain the model weights outside
     # of this test.
     monkeypatch.setattr(tempfile, "gettempdir", lambda: tmp_path)
-    presto = Presto()
+    # we use a small pixel batch size here so that we
+    # test the indexing functionality
+    presto = Presto(pixel_batch_size=4)
 
     inputs = [
         {
@@ -29,6 +32,10 @@ def test_presto(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
     # features should be BxCxHxW.
     assert features.shape[0] == 1 and len(features.shape) == 4
     assert features.shape[2] == input_hw and features.shape[3] == input_hw
+    # we initialize the output features to 0. This makes sure no
+    # d is all 0s since this indicates something went wrong with out indexing
+    features = torch.sum(rearrange(features, "b d h w -> (b h w) d"), dim=-1)
+    assert not (features == 0).any()
 
 
 def test_presto_mt(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
@@ -38,7 +45,9 @@ def test_presto_mt(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
     # We override the temporary directory so we don't retain the model weights outside
     # of this test.
     monkeypatch.setattr(tempfile, "gettempdir", lambda: tmp_path)
-    presto = Presto()
+    # we use a small pixel batch size here so that we
+    # test the indexing functionality
+    presto = Presto(pixel_batch_size=4)
     inputs = [
         {
             "s2": torch.zeros(
@@ -59,3 +68,7 @@ def test_presto_mt(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
     # features should be BxCxHxW.
     assert features.shape[0] == 1 and len(features.shape) == 4
     assert features.shape[2] == input_hw and features.shape[3] == input_hw
+    # we initialize the output features to 0. This makes sure no
+    # d is all 0s since this indicates something went wrong with out indexing
+    features = torch.sum(rearrange(features, "b d h w -> (b h w) d"), dim=-1)
+    assert not (features == 0).any()
