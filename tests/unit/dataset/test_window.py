@@ -1,10 +1,12 @@
 import pathlib
 
+import numpy as np
 import pytest
 from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Window
+from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
 @pytest.fixture
@@ -51,3 +53,14 @@ def test_layer_dir_location(empty_window: Window) -> None:
     layer_name = "layer"
     layer_dir = empty_window.get_layer_dir(layer_name)
     assert layer_dir == empty_window.path / "layers" / layer_name
+
+
+def test_underscore_band_name(empty_window: Window) -> None:
+    """Verify that we can have undescore in the raster band name."""
+    raster_dir = empty_window.get_raster_dir("layer", ["_"])
+    GeotiffRasterFormat().encode_raster(
+        raster_dir, WGS84_PROJECTION, (0, 0, 4, 4), np.zeros((1, 4, 4), dtype=np.uint8)
+    )
+    empty_window.mark_layer_completed("layer")
+    assert empty_window.is_layer_completed("layer")
+    assert len(empty_window.get_layer_dir("layer").iterdir()) == 1
