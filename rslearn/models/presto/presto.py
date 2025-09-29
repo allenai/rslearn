@@ -102,7 +102,7 @@ class Presto(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Inputs are paired into a tensor input <X> and a list <X>_bands, which describes <X>.
 
-        <X> should have shape (b, num_timesteps, h, w len(<X>_bands)), with the following bands possible for
+        <X> should have shape (b, num_timesteps, h, w len(<X>_bands)), with the following bands for
         each input:
 
         s1: ["VV", "VH"]
@@ -134,12 +134,12 @@ class Presto(nn.Module):
         t: int | None = None
 
         for band_group in [
-            (s1, s1_bands, PRESTO_S1_BANDS),
-            (s2, s2_bands, INPUT_PRESTO_S2_BANDS),
-            (era5, era5_bands, ERA5_BANDS),
-            (srtm, srtm_bands, SRTM_BANDS),
+            (s1, s1_bands),
+            (s2, s2_bands),
+            (era5, era5_bands),
+            (srtm, srtm_bands),
         ]:
-            data, input_bands, output_bands = band_group
+            data, input_bands = band_group
             if data is not None:
                 assert input_bands is not None
             else:
@@ -158,19 +158,11 @@ class Presto(nn.Module):
             if mask is None:
                 mask = torch.ones(b, t, h, w, len(INPUT_PRESTO_BANDS))
 
-            # construct a mapping from the input bands to the expected bands
-            kept_input_band_idxs = [
-                i for i, val in enumerate(input_bands) if val in output_bands
-            ]
-            kept_input_band_names = [val for val in input_bands if val in output_bands]
-
+            # construct a mapping from the input bands to the presto input bands
             input_to_output_mapping = [
-                INPUT_PRESTO_BANDS.index(val) for val in kept_input_band_names
+                INPUT_PRESTO_BANDS.index(val) for val in input_bands
             ]
-
-            x[:, :, :, :, input_to_output_mapping] = data[
-                :, :, :, :, kept_input_band_idxs
-            ]
+            x[:, :, :, :, input_to_output_mapping] = data
             mask[:, :, :, :, input_to_output_mapping] = 0
 
         assert x is not None
