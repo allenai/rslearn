@@ -1,6 +1,5 @@
 import pathlib
 import zipfile
-from typing import Any
 
 import numpy as np
 import shapely
@@ -93,7 +92,6 @@ def test_with_worldcereal_dir(
     tmp_path: pathlib.Path,
     seattle2020: STGeometry,
     httpserver: HTTPServer,
-    monkeypatch: Any,
 ) -> None:
     """Tests ingesting the example data corresponding to seattle2020.
 
@@ -102,7 +100,6 @@ def test_with_worldcereal_dir(
         tmp_path: temporary path for making zip file and for tile store.
         seattle2020: the geometry to use for prepare.
         httpserver: server for serving the example data.
-        monkeypatch: monkey patch instance.
     """
     worldcereal_dir = UPath(tmp_path) / "worldcereal"
     # The WorldCover data is large so we use test data instead. We need to start a test
