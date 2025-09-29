@@ -13,6 +13,7 @@ from einops import rearrange
 from huggingface_hub import hf_hub_download
 from timm.layers import to_2tuple
 from timm.models.vision_transformer import Block
+from torch.nn import functional as F
 from upath import UPath
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,26 @@ class PrithviV2(nn.Module):
         # patch size is a list [t, h, w], where h == w
         self.patch_size = config["patch_size"][-1]
 
+    def _resize_data(self, data: torch.Tensor) -> torch.Tensor:
+        """Process individual modality data.
+
+        Args:
+            data: Input tensor of shape [B, C, H, W]
+
+        Returns:
+            list of tensors of shape [B, C, H, W]
+        """
+        # Get original dimensions
+        original_height = data.shape[2]
+        new_height = self.patch_size if original_height == 1 else self.image_resolution
+        data = F.interpolate(
+            data,
+            size=(new_height, new_height),
+            mode="bilinear",
+            align_corners=False,
+        )
+        return data
+
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Compute feature maps from the Prithvi V2 backbone.
 
@@ -98,6 +119,7 @@ class PrithviV2(nn.Module):
             inputs
         """
         x = torch.stack([inp["sentinel2"] for inp in inputs], dim=0)
+        x = self._resize_data(x)
         num_timesteps = x.shape[1] // len(self.bands)
         x = rearrange(x, "b (t c) h w -> b c t h w", t=num_timesteps)
         features = self.model.encoder.forward_features(x)

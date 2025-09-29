@@ -22,7 +22,7 @@ def test_prithvi(tmp_path: pathlib.Path) -> None:
     for features in feature_list:
         # features should be BxCxHxW.
         assert features.shape[0] == 1 and len(features.shape) == 4
-        feat_hw = input_hw // prithvi.patch_size
+        feat_hw = prithvi.image_resolution // prithvi.patch_size
         assert features.shape[2] == feat_hw and features.shape[3] == feat_hw
 
 
@@ -45,5 +45,5 @@ def test_prithvi_mt(tmp_path: pathlib.Path) -> None:
     for features in feature_list:
         # features should be BxCxHxW.
         assert features.shape[0] == 1 and len(features.shape) == 4
-        feat_hw = input_hw // prithvi.patch_size
+        feat_hw = prithvi.image_resolution // prithvi.patch_size
         assert features.shape[2] == feat_hw and features.shape[3] == feat_hw
