@@ -34,8 +34,6 @@ PRESTO_S2_DIV_VALUE = 1e4
 
 HF_HUB_ID = "nasaharvest/presto"
 MODEL_FILENAME = "default_model.pt"
-# pin the model to a specific hugging face commit
-HF_COMMIT_ID = "1b97f885969da4e2d5834ca8c92707c737911464"
 
 
 class Presto(nn.Module):
@@ -72,6 +70,7 @@ class Presto(nn.Module):
                 local_dir=UPath(pretrained_path),
                 repo_id=HF_HUB_ID,
                 filename=MODEL_FILENAME,
+                # pin the model to a specific hugging face commit
                 revision="1b97f885969da4e2d5834ca8c92707c737911464",
             )
 
