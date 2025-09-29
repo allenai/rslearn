@@ -241,10 +241,10 @@ class GalileoModel(nn.Module):
             x.shape[1] for x in time_inputs if x is not None
         ]
         height_list = [x.shape[1] for x in space_time_inputs if x is not None] + [
-            x.shape[0] for x in space_inputs if x is not None
+            x.shape[1] for x in space_inputs if x is not None
         ]
         width_list = [x.shape[2] for x in space_time_inputs if x is not None] + [
-            x.shape[1] for x in space_inputs if x is not None
+            x.shape[2] for x in space_inputs if x is not None
         ]
         if len(batch_list) > 0:
             if len(set(batch_list)) > 1:
@@ -257,7 +257,6 @@ class GalileoModel(nn.Module):
             t = timesteps_list[0]
         else:
             t = 1
-
         if len(height_list) > 0:
             if not all(height_list[0] == height for height in height_list):
                 raise ValueError("Inconsistent heights per input")
@@ -422,6 +421,13 @@ class GalileoModel(nn.Module):
             num_timesteps = cur.shape[1] // num_bands
             cur = rearrange(cur, "b (t c) h w -> b h w t c", t=num_timesteps)
             stacked_inputs[space_time_modality] = cur
+
+        for space_modality in ["srtm", "dw", "wc"]:
+            if space_modality not in stacked_inputs:
+                continue
+            stacked_inputs[space_modality] = rearrange(
+                stacked_inputs[space_modality], "b c h w -> b h w c"
+            )
 
         for time_modality in ["era5", "tc", "viirs"]:
             if time_modality not in stacked_inputs:

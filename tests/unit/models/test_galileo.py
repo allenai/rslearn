@@ -21,6 +21,7 @@ def test_galileo(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
             "s2": torch.zeros((10, input_hw, input_hw), dtype=torch.float32),
             "s1": torch.zeros((2, input_hw, input_hw), dtype=torch.float32),
             "era5": torch.zeros((2, input_hw, input_hw), dtype=torch.float32),
+            "srtm": torch.zeros((2, input_hw, input_hw), dtype=torch.float32),
         }
     ]
     feature_list = galileo(inputs)
@@ -54,6 +55,7 @@ def test_galileo_mt(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
             "era5": torch.zeros(
                 (2 * num_timesteps, input_hw, input_hw), dtype=torch.float32
             ),
+            "srtm": torch.zeros((2, input_hw, input_hw), dtype=torch.float32),
         }
     ]
     feature_list = galileo(inputs)
@@ -81,6 +83,7 @@ def test_galileo_hw_less_than_ps(
         {
             "s2": torch.zeros((10, input_hw, input_hw), dtype=torch.float32),
             "s1": torch.zeros((2, input_hw, input_hw), dtype=torch.float32),
+            "srtm": torch.zeros((2, input_hw, input_hw), dtype=torch.float32),
         }
     ]
     feature_list = galileo(inputs)
