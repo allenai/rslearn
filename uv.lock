@@ -728,15 +728,15 @@ wheels = [
 
 [[package]]
 name = "earthdaily"
-version = "1.0.0"
+version = "1.0.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "requests" },
     { name = "toml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/24/2e/028168cd48ca89598af597a522c8110a00caf0950923af68fde9c5aa2d3f/earthdaily-1.0.0.tar.gz", hash = "sha256:8a3ff7050b254609af8f5cd70833387ab367e6df66d4910bca99cfb38ce9afc2", size = 73286, upload-time = "2025-06-25T20:48:20.965Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ed/37/598f5163ee9b5d0bb139ceee5dfc62f0e0db8a52d6c85bf750780b787c7a/earthdaily-1.0.7.tar.gz", hash = "sha256:0f3493fb775544ca8828479b04c6bba06af2ade2c4d0dfd2364015ad37822fa2", size = 75540, upload-time = "2025-09-15T20:43:54.075Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/37/35/e95acef9db45b94b43c53929d5a81e96a293c4ca4ceee27a0211042cd002/earthdaily-1.0.0-py3-none-any.whl", hash = "sha256:323de20b8e40fc971923e9f7d41821a97194f2b525c2a1452f707fb264e25f51", size = 89799, upload-time = "2025-06-25T20:48:19.595Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/ca/4bd090a79dc63038015cb147572e9020084b96a28864254a91eaa5afd9f5/earthdaily-1.0.7-py3-none-any.whl", hash = "sha256:39297207aede4554aa842ab6a36fd0f28a6ad896fa814681a35285e925660a30", size = 91795, upload-time = "2025-09-15T20:43:52.247Z" },
 ]
 
 [package.optional-dependencies]
@@ -3883,7 +3883,7 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.39" },
     { name = "cdsapi", marker = "extra == 'extra'", specifier = ">=0.7.6" },
     { name = "class-registry", specifier = ">=2.1" },
-    { name = "earthdaily", extras = ["platform"], marker = "extra == 'extra'", specifier = ">=1.0.0" },
+    { name = "earthdaily", extras = ["platform"], marker = "extra == 'extra'", specifier = ">=1.0.7" },
     { name = "earthengine-api", marker = "extra == 'extra'", specifier = ">=1.6.3" },
     { name = "einops", marker = "extra == 'extra'", specifier = ">=0.8" },
     { name = "fiona", specifier = ">=1.10" },
