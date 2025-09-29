@@ -14,9 +14,10 @@ def test_presto(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
     # We override the temporary directory so we don't retain the model weights outside
     # of this test.
     monkeypatch.setattr(tempfile, "gettempdir", lambda: tmp_path)
-    # we use a small pixel batch size here so that we
+    # we use a small pixel batch size here that doesn't divide cleanly
+    # into (b * h * w) so that we
     # test the indexing functionality
-    presto = Presto(pixel_batch_size=4)
+    presto = Presto(pixel_batch_size=5)
 
     inputs = [
         {
@@ -45,9 +46,10 @@ def test_presto_mt(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
     # We override the temporary directory so we don't retain the model weights outside
     # of this test.
     monkeypatch.setattr(tempfile, "gettempdir", lambda: tmp_path)
-    # we use a small pixel batch size here so that we
+    # we use a small pixel batch size here that doesn't divide cleanly
+    # into (b * h * w) so that we
     # test the indexing functionality
-    presto = Presto(pixel_batch_size=4)
+    presto = Presto(pixel_batch_size=7)
     inputs = [
         {
             "s2": torch.zeros(
