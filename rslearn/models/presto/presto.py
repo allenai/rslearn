@@ -233,14 +233,13 @@ class Presto(nn.Module):
         if latlons is not None:
             latlons = rearrange(latlons, "b c h w -> (b h w) c")
 
-        cur_idx = 0
-        while cur_idx < (b * h * w):
-            x_b = x[cur_idx : cur_idx + self.pixel_batch_size]
-            mask_b = mask[cur_idx : cur_idx + self.pixel_batch_size]
-            dw = dynamic_world[cur_idx : cur_idx + self.pixel_batch_size]
-            months_b = months[cur_idx : cur_idx + self.pixel_batch_size]
+        for batch_idx in range(0, b * h * w, self.pixel_batch_size):
+            x_b = x[batch_idx : batch_idx + self.pixel_batch_size]
+            mask_b = mask[batch_idx : batch_idx + self.pixel_batch_size]
+            dw = dynamic_world[batch_idx : batch_idx + self.pixel_batch_size]
+            months_b = months[batch_idx : batch_idx + self.pixel_batch_size]
             if latlons is not None:
-                l_b = latlons[cur_idx : cur_idx + self.pixel_batch_size]
+                l_b = latlons[batch_idx : batch_idx + self.pixel_batch_size]
             else:
                 l_b = None
             output_b = self.model(
@@ -251,7 +250,6 @@ class Presto(nn.Module):
                 latlons=l_b,
                 eval_task=True,
             )
-            output_features[cur_idx : cur_idx + self.pixel_batch_size] = output_b
-            cur_idx += self.pixel_batch_size
+            output_features[batch_idx : batch_idx + self.pixel_batch_size] = output_b
 
         return [rearrange(output_features, "(b h w) d -> b d h w", h=h, w=w, b=b)]
