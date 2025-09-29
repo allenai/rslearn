@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import pathlib
 from enum import Enum
 from typing import Any
 
@@ -24,7 +25,8 @@ class ClaySize(str, Enum):
 
 PATCH_SIZE = 8
 CLAY_MODALITIES = ["sentinel-2-l2a", "sentinel-1-rtc", "landsat-c2l1", "naip"]
-CLAY_METADATA_PATH = "configs/metadata.yaml"
+_FILE_DIR = pathlib.Path(__file__).resolve().parent
+CLAY_METADATA_PATH = str(_FILE_DIR / "configs" / "metadata.yaml")
 
 
 def get_clay_checkpoint_path(
@@ -71,7 +73,8 @@ class Clay(torch.nn.Module):
                 shuffle=False,
             )
         elif model_size == ClaySize.BASE:
-            # Keep base path available; v1.5 typically uses large
+            # Failed to load Base model in Clay v1.5
+            raise ValueError("Clay BASE model currently not supported in v1.5.")
             self.model = ClayMAEModule.load_from_checkpoint(
                 checkpoint_path=ckpt,
                 model_size="base",
@@ -102,40 +105,39 @@ class Clay(torch.nn.Module):
         if self.modality not in inputs[0]:
             raise ValueError(f"Missing modality {self.modality} in inputs.")
 
+        param = next(self.model.parameters())
+        device = param.device
+
         chips = torch.stack(
             [inp[self.modality] for inp in inputs], dim=0
         )  # (B, C, H, W)
-        device, dtype = chips.device, chips.dtype
 
         order = self.metadata[self.modality]["band_order"]
-        wavelengths = torch.tensor(
-            [[self.metadata[self.modality]["bands"]["wavelength"][b] for b in order]],
-            device=device,
-            dtype=dtype,
-        )
+        wavelengths = []
+        for band in self.metadata[self.modality]["band_order"]:
+            wavelengths.append(
+                self.metadata[self.modality]["bands"]["wavelength"][band] * 1000
+            )  # Convert to nm
         # Check channel count matches Clay expectation
         if chips.shape[1] != len(order):
             raise ValueError(
                 f"Channel count {chips.shape[1]} does not match expected {len(order)} for {self.modality}"
             )
 
-        # Here, time & latlon zeros are valid placeholders per Clay doc
+        # Time & latlon zeros are valid per Clay doc
         # https://clay-foundation.github.io/model/getting-started/basic_use.html
         datacube = {
             "platform": self.modality,
-            "time": torch.zeros(chips.shape[0], 4, device=device, dtype=dtype),
-            "latlon": torch.zeros(chips.shape[0], 4, device=device, dtype=dtype),
-            "pixels": chips,
-            "gsd": torch.tensor(
-                self.metadata[self.modality]["gsd"], device=device, dtype=dtype
-            ),
-            "waves": wavelengths,
+            "time": torch.zeros(chips.shape[0], 4).to(device),
+            "latlon": torch.zeros(chips.shape[0], 4).to(device),
+            "pixels": chips.to(device),
+            "gsd": torch.tensor(self.metadata[self.modality]["gsd"]).to(device),
+            "waves": torch.tensor(wavelengths).to(device),
         }
 
-        # Encoder lives under the Lightning module's `.model`
         tokens, *_ = self.model.model.encoder(datacube)  # (B, 1 + N, D)
 
-        # Remove CLS token and reshape to (B, D, H, W)
+        # Remove CLS token
         spatial = tokens[:, 1:, :]  # (B, N, D)
         n_tokens = spatial.shape[1]
         side = int(math.isqrt(n_tokens))
