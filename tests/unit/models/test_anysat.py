@@ -86,7 +86,8 @@ def test_anysat_various_modalities(tmp_path: pathlib.Path, monkeypatch: Any) -> 
             output=scenario["mode"],
             output_modality=scenario["output_modality"],
         )
-        features = model.forward(scenario["inputs"])
+        # Only one feature map returned
+        features = model.forward(scenario["inputs"])[0]
 
         assert features.shape == scenario["expected_shape"]  # type: ignore
 

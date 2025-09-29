@@ -219,7 +219,7 @@ class AnySat(torch.nn.Module):
             kwargs["output_modality"] = self.output_modality
 
         features = self.model(batch, **kwargs)
-        return rearrange(features, "b h w d -> b d h w")
+        return [rearrange(features, "b h w d -> b d h w")]
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.
