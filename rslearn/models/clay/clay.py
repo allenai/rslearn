@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import math
 from enum import Enum
 from typing import Any
 
 import torch
 import yaml
 from claymodel.module import ClayMAEModule
+from einops import rearrange
 from huggingface_hub import hf_hub_download
 
 from rslearn.train.transforms.transform import Transform
@@ -22,6 +24,7 @@ class ClaySize(str, Enum):
 
 PATCH_SIZE = 8
 CLAY_MODALITIES = ["sentinel-2-l2a", "sentinel-1-rtc", "landsat-c2l1", "naip"]
+CLAY_METADATA_PATH = "configs/metadata.yaml"
 
 
 def get_clay_checkpoint_path(
@@ -32,125 +35,122 @@ def get_clay_checkpoint_path(
     return hf_hub_download(repo_id=repo_id, filename=filename)  # nosec B615
 
 
-def get_clay_metadata_path(
-    filename: str = "configs/metadata.yaml",
-    repo_id: str = "Clay-foundation/model",
-) -> str:
-    """Return a cached local path to Clay's metadata.yaml from the Hugging Face Hub."""
-    return hf_hub_download(repo_id=repo_id, filename=filename)  # nosec B615
-
-
 class Clay(torch.nn.Module):
     """Clay backbones."""
 
     def __init__(
         self,
         model_size: ClaySize,
-        modalities: list[str] = ["sentinel-2-l2a"],
+        modality: str = "sentinel-2-l2a",
         checkpoint_path: str | None = None,
-        metadata_path: str | None = None,
+        metadata_path: str = CLAY_METADATA_PATH,
     ) -> None:
         """Initialize the Clay model.
 
         Args:
             model_size: The size of the Clay model.
-            modalities: The modalities to use (subset of CLAY_MODALITIES).
-            checkpoint_path: Path to clay-v1.5.ckpt; if None, fetch from HF Hub.
-            metadata_path: Path to metadata.yaml; if None, fetch from HF Hub.
+            modality: The modality to use (subset of CLAY_MODALITIES).
+            checkpoint_path: Path to clay-v1.5.ckpt, if None, fetch from HF Hub.
+            metadata_path: Path to metadata.yaml.
         """
         super().__init__()
 
-        for m in modalities:
-            if m not in CLAY_MODALITIES:
-                raise ValueError(f"Invalid modality: {m}")
+        # Clay only supports single modality input
+        if modality not in CLAY_MODALITIES:
+            raise ValueError(f"Invalid modality: {modality}")
 
+        ckpt = checkpoint_path or get_clay_checkpoint_path()
         if model_size == ClaySize.LARGE:
-            ckpt = checkpoint_path or get_clay_checkpoint_path()
+            self.model = ClayMAEModule.load_from_checkpoint(
+                checkpoint_path=ckpt,
+                model_size="large",
+                metadata_path=metadata_path,
+                dolls=[16, 32, 64, 128, 256, 768, 1024],
+                doll_weights=[1, 1, 1, 1, 1, 1, 1],
+                mask_ratio=0.0,
+                shuffle=False,
+            )
         elif model_size == ClaySize.BASE:
-            raise ValueError("Clay BASE is not supported for v1.5 in this wrapper.")
+            # Keep base path available; v1.5 typically uses large
+            self.model = ClayMAEModule.load_from_checkpoint(
+                checkpoint_path=ckpt,
+                model_size="base",
+                metadata_path=metadata_path,
+                dolls=[16, 32, 64, 128, 256, 768],
+                doll_weights=[1, 1, 1, 1, 1, 1],
+                mask_ratio=0.0,
+                shuffle=False,
+            )
         else:
             raise ValueError(f"Invalid model size: {model_size}")
 
-        md_path = metadata_path or get_clay_metadata_path()
-
-        # Load model + metadata
-        module = ClayMAEModule.load_from_checkpoint(
-            ckpt,
-            model_size="large",
-            metadata_path=md_path,
-            dolls=[16, 32, 64, 128, 256, 768, 1024],
-            doll_weights=[1, 1, 1, 1, 1, 1, 1],
-            mask_ratio=0.0,
-            shuffle=False,
-        )
-        module.eval()
-        self.model = module
-
-        with open(md_path) as f:
+        with open(metadata_path) as f:
             self.metadata = yaml.safe_load(f)
 
         self.model_size = model_size
-        self.modalities = modalities
-        self._depth = 1024  # Clay v1.5 CLS embedding size
+        self.modality = modality
 
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Forward pass for the Clay model.
 
         Args:
-            inputs: input dicts that must include modalities as keys which are defined in the self.modalities list
+            inputs: input dicts that must include `self.modality` as a key
 
         Returns:
             List[torch.Tensor]: Single-scale feature tensors from the encoder.
-                                For Clay, this is a pooled map with shape (B, D, 1, 1).
         """
-        if len(inputs) == 0:
-            raise ValueError("Empty inputs list.")
+        if self.modality not in inputs[0]:
+            raise ValueError(f"Missing modality {self.modality} in inputs.")
 
-        embeddings = []
+        chips = torch.stack(
+            [inp[self.modality] for inp in inputs], dim=0
+        )  # (B, C, H, W)
+        device, dtype = chips.device, chips.dtype
 
-        for modality in self.modalities:
-            if modality not in inputs[0]:
-                continue
-
-            chips = torch.stack([inp[modality] for inp in inputs], dim=0).float()
-            device, dtype = chips.device, chips.dtype
-
-            order = self.metadata[modality]["band_order"]
-            wavelengths = torch.tensor(
-                [[self.metadata[modality]["bands"]["wavelength"][b] for b in order]],
-                device=device,
-                dtype=dtype,
-            )
-
-            # Fill in minimal datacube (time/latlon zeros are valid placeholders)
-            datacube = {
-                "platform": modality,
-                "time": torch.zeros(chips.shape[0], 4, device=device, dtype=dtype),
-                "latlon": torch.zeros(chips.shape[0], 4, device=device, dtype=dtype),
-                "pixels": chips,
-                "gsd": torch.tensor(
-                    self.metadata[modality]["gsd"], device=device, dtype=dtype
-                ),
-                "waves": wavelengths,
-            }
-
-            with torch.no_grad():
-                tokens, *_ = self.model.model.encoder(datacube)  # (B, 1+N, D)
-                emb = tokens[:, 0, :]  # CLS token
-            embeddings.append(emb)
-
-        if not embeddings:
+        order = self.metadata[self.modality]["band_order"]
+        wavelengths = torch.tensor(
+            [[self.metadata[self.modality]["bands"]["wavelength"][b] for b in order]],
+            device=device,
+            dtype=dtype,
+        )
+        # Check channel count matches Clay expectation
+        if chips.shape[1] != len(order):
             raise ValueError(
-                f"No valid modalities present in inputs. Expected one of {self.modalities}."
+                f"Channel count {chips.shape[1]} does not match expected {len(order)} for {self.modality}"
             )
 
-        fused = torch.stack(embeddings, dim=0).mean(dim=0)  # (B, D)
-        return [fused[:, :, None, None]]
+        # Here, time & latlon zeros are valid placeholders per Clay doc
+        # https://clay-foundation.github.io/model/getting-started/basic_use.html
+        datacube = {
+            "platform": self.modality,
+            "time": torch.zeros(chips.shape[0], 4, device=device, dtype=dtype),
+            "latlon": torch.zeros(chips.shape[0], 4, device=device, dtype=dtype),
+            "pixels": chips,
+            "gsd": torch.tensor(
+                self.metadata[self.modality]["gsd"], device=device, dtype=dtype
+            ),
+            "waves": wavelengths,
+        }
+
+        # Encoder lives under the Lightning module's `.model`
+        tokens, *_ = self.model.model.encoder(datacube)  # (B, 1 + N, D)
+
+        # Remove CLS token and reshape to (B, D, H, W)
+        spatial = tokens[:, 1:, :]  # (B, N, D)
+        n_tokens = spatial.shape[1]
+        side = int(math.isqrt(n_tokens))
+        if chips.shape[2] != side * PATCH_SIZE or chips.shape[3] != side * PATCH_SIZE:
+            raise ValueError(
+                f"Input spatial size {(chips.shape[2], chips.shape[3])} is not compatible with patch size {PATCH_SIZE}"
+            )
+
+        features = rearrange(spatial, "b (h w) d -> b d h w", h=side, w=side)
+        return [features]
 
     def get_backbone_channels(self) -> list:
         """Return output channels of this model when used as a backbone."""
         if self.model_size == ClaySize.LARGE:
-            depth = self._depth
+            depth = 1024
         elif self.model_size == ClaySize.BASE:
             depth = 768
         else:
@@ -161,10 +161,11 @@ class Clay(torch.nn.Module):
 class ClayNormalize(Transform):
     """Normalize inputs using Clay metadata."""
 
-    def __init__(self, metadata: dict) -> None:
-        """Initialize a new ClayNormalize."""
+    def __init__(self, metadata_path: str = CLAY_METADATA_PATH) -> None:
+        """Initialize ClayNormalize."""
         super().__init__()
-        self.metadata = metadata
+        with open(metadata_path) as f:
+            self.metadata = yaml.safe_load(f)
 
     def apply_image(
         self, image: torch.Tensor, means: list[float], stds: list[float]
@@ -186,8 +187,14 @@ class ClayNormalize(Transform):
         for modality in CLAY_MODALITIES:
             if modality not in input_dict or modality not in self.metadata:
                 continue
-            meta = self.metadata[modality]
-            means = [meta["bands"]["mean"][b] for b in meta["band_order"]]
-            stds = [meta["bands"]["std"][b] for b in meta["band_order"]]
+            modality_metadata = self.metadata[modality]
+            means = [
+                modality_metadata["bands"]["mean"][b]
+                for b in modality_metadata["band_order"]
+            ]
+            stds = [
+                modality_metadata["bands"]["std"][b]
+                for b in modality_metadata["band_order"]
+            ]
             input_dict[modality] = self.apply_image(input_dict[modality], means, stds)
         return input_dict, target_dict
