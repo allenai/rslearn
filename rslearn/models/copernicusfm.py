@@ -126,7 +126,7 @@ class CopernicusFM(torch.nn.Module):
                 "band_wavelengths": wavelengths,
             }
 
-    def _resize_data(self, data: torch.Tensor) -> list[torch.Tensor]:
+    def _resize_data(self, data: torch.Tensor) -> torch.Tensor:
         """Process individual modality data.
 
         Args:
