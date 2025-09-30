@@ -27,6 +27,7 @@ from rslearn.dataset.manage import (
 )
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import get_tile_store_with_layer
+from rslearn.train.callbacks import RslearnSaveConfigCallback
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.utils import Projection, STGeometry
@@ -832,6 +833,7 @@ def model_handler() -> None:
         args=sys.argv[2:],
         subclass_mode_model=True,
         subclass_mode_data=True,
+        save_config_callback=RslearnSaveConfigCallback,
         save_config_kwargs={"overwrite": True},
         parser_class=RslearnArgumentParser,
     )

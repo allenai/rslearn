@@ -499,7 +499,10 @@ Coming soon
 
 ### Logging to Weights & Biases
 
-Coming soon
+When a [Weights & Biases logger](https://docs.wandb.ai/) is configured, `rslearn model fit`
+automatically uploads the resolved Lightning CLI configuration to the run. By default the
+saved file is `config.yaml` in the logger's output directory and it is also attached to the
+W&B run as an artifact for reproducibility.
 
 
 Contact
