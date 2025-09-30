@@ -60,7 +60,7 @@ class Panopticon(nn.Module):
         torch.hub._validate_not_a_forked_repo = lambda a, b, c: True
         for attempt in range(2):
             try:
-                self.model = torch.hub.load(
+                self.model = torch.hub.load(  # nosec B614
                     "panopticon-FM/panopticon",
                     torchhub_id,
                 )
