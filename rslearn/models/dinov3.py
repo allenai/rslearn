@@ -1,11 +1,14 @@
-import torch
-from typing import Any
-from pathlib import Path
-from enum import StrEnum
-from torchvision.transforms import v2
-from rslearn.train.transforms.transform import Transform
-from einops import rearrange
+"""DinoV3 model."""
 
+from enum import StrEnum
+from pathlib import Path
+from typing import Any
+
+import torch
+from einops import rearrange
+from torchvision.transforms import v2
+
+from rslearn.train.transforms.transform import Transform
 
 
 class DinoV3Models(StrEnum):
@@ -20,33 +23,53 @@ class DinoV3Models(StrEnum):
     LARGE_SATELLITE = "dinov3_vitl16_sat"
     FULL_7B_SATELLITE = "dinov3_vit7b16_sat"
 
-DINOV3_PTHS = {
-    DinoV3Models.LARGE_SATELLITE: 'dinov3_vitl16_pretrain_sat493m-eadcf0ff.pth',
-    DinoV3Models.FULL_7B_SATELLITE: 'dinov3_vit7b16_pretrain_sat493m-a6675841.pth',
-    DinoV3Models.BASE_WEB: 'dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth',
-    DinoV3Models.LARGE_WEB: 'dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth',
-    DinoV3Models.HUGE_PLUS_WEB: 'dinov3_vith16plus_pretrain_lvd1689m-7c1da9a5.pth',
-    DinoV3Models.FULL_7B_WEB: 'dinov3_vit7b16_pretrain_lvd1689m-a955f4.pth',
+
+DINOV3_PTHS: dict[str, str] = {
+    DinoV3Models.LARGE_SATELLITE: "dinov3_vitl16_pretrain_sat493m-eadcf0ff.pth",
+    DinoV3Models.FULL_7B_SATELLITE: "dinov3_vit7b16_pretrain_sat493m-a6675841.pth",
+    DinoV3Models.BASE_WEB: "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth",
+    DinoV3Models.LARGE_WEB: "dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth",
+    DinoV3Models.HUGE_PLUS_WEB: "dinov3_vith16plus_pretrain_lvd1689m-7c1da9a5.pth",
+    DinoV3Models.FULL_7B_WEB: "dinov3_vit7b16_pretrain_lvd1689m-a955f4.pth",
 }
 
-class DinoV3(torch.nn.Module):
-    
-    modalities:list[str] = ['rgb', 's2', 'landsat']
-    image_size:int = 256
 
-    def _load_model(self, size: str, checkpoint_dir: str | None):
+class DinoV3(torch.nn.Module):
+    """DinoV3 Backbones.
+
+    Must have the pretrained weights downloaded in checkpoint_dir for them to be loaded.
+
+    Only takes RGB as input. Expects normalized data (use the below normalizer).
+
+    Uses patch size 16.
+    """
+
+    modalities: list[str] = ["rgb", "s2", "landsat"]
+    image_size: int = 256
+
+    def _load_model(self, size: str, checkpoint_dir: str | None) -> torch.nn.Module:
         model_name = size.replace("_sat", "")
         if checkpoint_dir is not None:
-            weights=Path(checkpoint_dir) / DINOV3_PTHS[model_name]
-            return torch.hub.load("facebookresearch/dinov3", model_name, weights=weights)
+            weights = Path(checkpoint_dir) / DINOV3_PTHS[size]
+            return torch.hub.load(
+                "facebookresearch/dinov3", model_name, weights=weights
+            )
         return torch.hub.load("facebookresearch/dinov3", model_name, pretrained=False)
-            
+
     def __init__(
         self,
         size: str = DinoV3Models.LARGE_SATELLITE,
-        checkpoint_dir: str = '/weka/dfive-default/helios/models/dinov3/repo/dinov3',
         use_cls_token: bool = False,
-    ):
+        checkpoint_dir: str
+        | None = "/weka/dfive-default/helios/models/dinov3/repo/dinov3",
+    ) -> None:
+        """Instantiate a new DinoV3 instance.
+
+        Args:
+            size: the model size, see class for various models.
+            use_cls_token: use pooled class token (for classification), otherwise returns spatial feature map.
+            checkpoint_dir: the local path to the pretrained weight dir.
+        """
         super().__init__()
         self.size = size
         self.checkpoint_dir = checkpoint_dir
@@ -56,13 +79,14 @@ class DinoV3(torch.nn.Module):
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Forward pass for the dinov3 model.
 
+        Features from modalities are pooled together (mean).
+
         Args:
             inputs: input dicts that must include modalities as keys which are defined in the self.modalities list
 
         Returns:
             List[torch.Tensor]: Single-scale feature tensors from the encoder.
         """
-
         output_features = []
         for modality in self.modalities:
             if modality not in inputs[0]:
@@ -78,16 +102,23 @@ class DinoV3(torch.nn.Module):
             print(avg_features.shape)
             batch_size, num_patches, _ = avg_features.shape
             height, width = int(num_patches**0.5), int(num_patches**0.5)
-            avg_features = rearrange(avg_features, "b (h w) d -> b d h w", h=height, w=width)
+            avg_features = rearrange(
+                avg_features, "b (h w) d -> b d h w", h=height, w=width
+            )
         return [avg_features]
+
 
 class DinoV3Normalize(Transform):
     """Normalize inputs using DinoV3 normalization.
 
-    It will apply normalization to the modalities that are specified in the model configuration.
+    All input normalized to [0-1], then normalized according to Dino statistics from pretraining. Satellite pretraining has slightly different normalizing than the base image model so set 'satellite' depending on what pretrained model you are using.
+
+    s2: expected to be [0-2500]
+    landsat: expected to be [5000 - 17000]
+    rgb: expected to be [0-255]
     """
 
-    def __init__(self, satellite:bool = True) -> None:
+    def __init__(self, satellite: bool = True):
         """Initialize a new DinoV3Normalize."""
         super().__init__()
         self.satellite = satellite
@@ -115,5 +146,13 @@ class DinoV3Normalize(Transform):
             normalized (input_dicts, target_dicts) tuple
         """
         for modality in DinoV3.modalities:
+            if modality == "s2":
+                input_dict[modality] = input_dict[modality] / 2500.0
+            elif modality == "rgb":
+                input_dict[modality] = input_dict[modality] / 255.0
+            elif modality == "landsat":
+                input_dict[modality] = (input_dict[modality] - 5000.0) / 12000.0
+            else:
+                raise ValueError(f"No normalization for modality {modality}")
             input_dict[modality] = self.normalize(input_dict[modality])
         return input_dict, target_dict
