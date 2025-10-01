@@ -8,7 +8,6 @@ authors = [
 readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.11"
-
 dependencies = [
     "boto3>=1.39",
     "class_registry>=2.1",
@@ -66,6 +65,11 @@ dev = [
     "pytest-dotenv",
     "pytest-xdist",
 ]
+
+[project.urls]
+homepage = "https://github.com/allenai/rslearn"
+issues = "https://github.com/allenai/rslearn/issues"
+repository = "https://github.com/allenai/rslearn"
 
 [build-system]
 requires = ["setuptools>=61"]
