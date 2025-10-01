@@ -1,6 +1,6 @@
 [project]
 name = "rslearn"
-version = "0.0.5"
+version = "0.0.6"
 description = "A library for developing remote sensing datasets and models"
 authors = [
     { name = "OlmoEarth Team" },
