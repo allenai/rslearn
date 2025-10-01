@@ -8,7 +8,7 @@ from rslearn.models.dinov3 import DinoV3
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-#@pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires a GPU")
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires a GPU")
 def test_dinov3() -> None:
     """Verify that the forward pass for DinoV3 works."""
     input_hw = 32

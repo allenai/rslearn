@@ -34,24 +34,24 @@ class DinoV3(torch.nn.Module):
     modalities:list[str] = ['rgb', 's2', 'landsat']
     image_size:int = 256
 
-    def _load_model(self, model_size: str, checkpoint_dir: str | None):
-        model_name = model_size.replace("_sat", "")
+    def _load_model(self, size: str, checkpoint_dir: str | None):
+        model_name = size.replace("_sat", "")
         if checkpoint_dir is not None:
-            weights=Path(checkpoint_dir) / DINOV3_PTHS[model_size]
+            weights=Path(checkpoint_dir) / DINOV3_PTHS[model_name]
             return torch.hub.load("facebookresearch/dinov3", model_name, weights=weights)
         return torch.hub.load("facebookresearch/dinov3", model_name, pretrained=False)
             
     def __init__(
         self,
-        model_size: str = DinoV3Models.LARGE_SATELLITE,
+        size: str = DinoV3Models.LARGE_SATELLITE,
         checkpoint_dir: str = '/weka/dfive-default/helios/models/dinov3/repo/dinov3',
         use_cls_token: bool = False,
     ):
         super().__init__()
-        self.model_size = model_size
+        self.size = size
         self.checkpoint_dir = checkpoint_dir
         self.use_cls_token = use_cls_token
-        self.model = self._load_model(model_size, checkpoint_dir)
+        self.model = self._load_model(size, checkpoint_dir)
 
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Forward pass for the dinov3 model.
