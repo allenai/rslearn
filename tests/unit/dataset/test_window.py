@@ -63,4 +63,4 @@ def test_underscore_band_name(empty_window: Window) -> None:
     )
     empty_window.mark_layer_completed("layer")
     assert empty_window.is_layer_completed("layer")
-    assert len(empty_window.get_layer_dir("layer").iterdir()) == 1
+    assert len(list(empty_window.get_layer_dir("layer").iterdir())) == 1
