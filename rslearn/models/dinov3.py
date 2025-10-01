@@ -46,11 +46,13 @@ class DinoV3(torch.nn.Module):
 
     modalities: list[str] = ["rgb", "s2", "landsat"]
     image_size: int = 256
+    patch_size: int = 16
+    output_dim: int = 1024
 
     def _load_model(self, size: str, checkpoint_dir: str | None) -> torch.nn.Module:
         model_name = size.replace("_sat", "")
         if checkpoint_dir is not None:
-            weights = Path(checkpoint_dir) / DINOV3_PTHS[size]
+            weights = str(Path(checkpoint_dir) / DINOV3_PTHS[size])
             return torch.hub.load(
                 "facebookresearch/dinov3", model_name, weights=weights
             )
@@ -61,7 +63,7 @@ class DinoV3(torch.nn.Module):
         size: str = DinoV3Models.LARGE_SATELLITE,
         use_cls_token: bool = False,
         checkpoint_dir: str
-        | None = "/weka/dfive-default/helios/models/dinov3/repo/dinov3",
+        | None = "/weka/dfive-default/helios/models/dinov3/checkpoints/",
     ) -> None:
         """Instantiate a new DinoV3 instance.
 
@@ -107,6 +109,16 @@ class DinoV3(torch.nn.Module):
             )
         return [avg_features]
 
+    def get_backbone_channels(self) -> list:
+        """Returns the output channels of this model when used as a backbone.
+
+        The output channels is a list of (downsample_factor, depth) that corresponds
+        to the feature maps that the backbone returns. For example, an element [2, 32]
+        indicates that the corresponding feature map is 1/2 the input resolution and
+        has 32 channels.
+        """
+        return [(self.patch_size, self.output_dim)]
+
 
 class DinoV3Normalize(Transform):
     """Normalize inputs using DinoV3 normalization.
@@ -146,6 +158,8 @@ class DinoV3Normalize(Transform):
             normalized (input_dicts, target_dicts) tuple
         """
         for modality in DinoV3.modalities:
+            if modality not in input_dict:
+                continue
             if modality == "s2":
                 input_dict[modality] = input_dict[modality] / 2500.0
             elif modality == "rgb":
