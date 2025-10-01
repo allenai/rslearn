@@ -481,8 +481,8 @@ def safely_reproject_and_clip(
     The resulting geometries will be clipped to dst_geom. If there is no intersection
     for an src_geom, then the result will be None. The list of results is returned.
 
-    This function addresses issues with directly re-projection (e.g. using
-    src_geom.to_projection(dst_geom.projection), which may fail if the source geometry
+    This function addresses issues with direct re-projection (e.g. using
+    src_geom.to_projection(dst_geom.projection)), which may fail if the source geometry
     is outside the area of use of the destination projection.
 
     It will first check for compatibility in WGS84, and only proceed with re-projection
@@ -495,7 +495,7 @@ def safely_reproject_and_clip(
     # This also makes it so we only have to compute it once.
     dst_geom_wgs84: STGeometry | None = None
 
-    def check_in_wgs84(src_geom: STGeometry) -> bool:
+    def intersects_in_wgs84(src_geom: STGeometry) -> bool:
         """Return False if there is no intersection."""
         nonlocal dst_geom_wgs84
         src_geom_wgs84 = split_at_antimeridian(src_geom.to_projection(WGS84_PROJECTION))
@@ -508,8 +508,9 @@ def safely_reproject_and_clip(
     results: list[STGeometry | None] = []
     for src_geom in src_geoms:
         # Only do the extra check in WGS84 if the projections don't already match.
-        if src_geom.projection.crs != dst_geom.projection.crs and not check_in_wgs84(
-            src_geom
+        if (
+            src_geom.projection.crs != dst_geom.projection.crs
+            and not intersects_in_wgs84(src_geom)
         ):
             results.append(None)
             continue
