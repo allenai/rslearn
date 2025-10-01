@@ -62,11 +62,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Set Environment Variables
-        run: |
-          echo "TEST_BUCKET=test-bucket" >> $GITHUB_ENV
-          echo "TEST_PREFIX=tests/"
-
       - name: Store Image Names
         # We need the docker image name downstream in test & deploy. This saves the full docker image names to outputs
         id: image-names
@@ -94,11 +89,6 @@ jobs:
         run: |
           docker pull ${{ needs.build.outputs.ghcr_docker_image }}
 
-      - name: Set Environment Variables
-        run: |
-          echo "TEST_BUCKET=test-bucket-rslearn" >> $GITHUB_ENV
-          echo "GCSFS_DEFAULT_PROJECT=skylight-proto-1" >> $GITHUB_ENV
-
       - name: Run Unit Tests
         run: |
           docker run --rm \
@@ -119,6 +109,8 @@ jobs:
             -e TEST_BUCKET="${{ env.TEST_BUCKET }}" \
             -v ${{env.GOOGLE_GHA_CREDS_PATH}}:/tmp/gcp-credentials.json:ro \
             -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-credentials.json \
+            -e TEST_BUCKET=test-bucket-rslearn \
+            -e TEST_PREFIX=tests/ \
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \

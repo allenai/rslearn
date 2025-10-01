@@ -34,7 +34,7 @@ from rslearn.utils.geometry import (
     FloatBounds,
     STGeometry,
     flatten_shape,
-    split_shape_at_prime_meridian,
+    split_shape_at_antimeridian,
 )
 from rslearn.utils.grid_index import GridIndex
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
@@ -160,7 +160,7 @@ def get_sentinel2_tile_index() -> dict[str, list[FloatBounds]]:
         # issues where the tile bounds go from -180 to 180 longitude and thus match
         # with anything at the same latitude.
         union_shp = shapely.unary_union(shapes)
-        split_shapes = flatten_shape(split_shape_at_prime_meridian(union_shp))
+        split_shapes = flatten_shape(split_shape_at_antimeridian(union_shp))
         bounds_list: list[FloatBounds] = []
         for shp in split_shapes:
             bounds_list.append(shp.bounds)
@@ -222,10 +222,10 @@ def get_sentinel2_tiles(geometry: STGeometry, cache_dir: UPath) -> list[str]:
     """
     tile_index = load_sentinel2_tile_index(cache_dir)
     wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
-    # If the shape is a collection, it could be cutting across prime meridian.
+    # If the shape is a collection, it could be cutting across antimeridian.
     # So we query each component shape separately and collect the results to avoid
     # issues.
-    # We assume the caller has already applied split_at_prime_meridian.
+    # We assume the caller has already applied split_at_antimeridian.
     results = set()
     for shp in flatten_shape(wgs84_geometry.shp):
         for result in tile_index.query(shp.bounds):

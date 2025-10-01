@@ -602,8 +602,7 @@ main process only) and batch size equal to the number of windows when preparing 
 ERA5LandMonthlyMeans dataset, as it will combine multiple geometries into a single CDS
 API request for each month to speed up dataset ingestion.
 
-Valid bands are the `shortName` of parameters listed at
-https://confluence.ecmwf.int/display/CKB/ERA5-Land%3A+data+documentation.
+Valid bands are the variable names listed [here](https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means?tab=download) - use the **API request** tool to check valid values. Note it is necessary to replace "_" with "-" in the variable names, e.g. `total_precipitation` becomes `total-precipitation`
 
 The additional data source configuration looks like this:
 
