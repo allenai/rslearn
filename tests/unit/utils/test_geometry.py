@@ -2,11 +2,17 @@ import json
 from datetime import datetime
 
 import pytest
+import rasterio
 import shapely
 from rasterio import CRS
 
 from rslearn.const import WGS84_PROJECTION
-from rslearn.utils.geometry import Projection, STGeometry, split_shape_at_antimeridian
+from rslearn.utils.geometry import (
+    Projection,
+    STGeometry,
+    safely_reproject_and_clip,
+    split_shape_at_antimeridian,
+)
 
 WEB_MERCATOR_EPSG = 3857
 
@@ -182,3 +188,79 @@ class TestSplitAntiMeridian:
         polygon = shapely.box(-1, -1, 1, 1)
         output = split_shape_at_antimeridian(polygon)
         assert output == polygon
+
+
+class TestSafelyReprojectAndClip:
+    """Unit tests for safely_reproject_and_clip."""
+
+    def test_invalid_projection(self) -> None:
+        """Test on geometries that would have error with direct re-projection."""
+        src_geom = STGeometry(WGS84_PROJECTION, shapely.Point(104.672, 0.099), None)
+        dst_geom = STGeometry(
+            Projection(CRS.from_epsg(32632), 10, -10),
+            shapely.box(63232, -628224, 63488, -627968),
+            None,
+        )
+
+        # First verify that direct re-projection has error.
+        with pytest.raises(rasterio._err.CPLE_AppDefinedError):
+            src_geom.to_projection(dst_geom.projection)
+
+        # Now verify that it works with safely_reproject_and_clip.
+        # It should return None since these geometries don't actually intersect.
+        result = safely_reproject_and_clip([src_geom], dst_geom)[0]
+        assert result is None
+
+    def test_clipping(self) -> None:
+        """Verify that the source geometry is clipped to the destination geometry."""
+        src_geom = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), None)
+        dst_geom = STGeometry(WGS84_PROJECTION, shapely.box(0.5, 0.5, 1.5, 1.5), None)
+        result = safely_reproject_and_clip([src_geom], dst_geom)[0]
+        assert result is not None
+        assert result.shp.bounds[0] == pytest.approx(0.5)
+        assert result.shp.bounds[1] == pytest.approx(0.5)
+        assert result.shp.bounds[2] == pytest.approx(1)
+        assert result.shp.bounds[3] == pytest.approx(1)
+
+    def test_antimeridian_handling_disjoint(self) -> None:
+        """Verify that antiremidian handling works for non-intersecting geometries."""
+        # Source geometry intersects antimeridian at +10 degrees latitude.
+        # We also include the point from test_invalid_projection that should fail
+        # direct re-projection.
+        # The point is outside the area of use for the CRS but it seems to be okay.
+        box = shapely.box(-180.1, 10, -179.9, 10.1)
+        point = shapely.Point(104.672, 0.099)
+        wgs84_geom = STGeometry(WGS84_PROJECTION, box.union(point), None)
+        src_geom = wgs84_geom.to_projection(Projection(CRS.from_epsg(32601), 1, 1))
+
+        # Destination geometry is at +10 degrees latitude but not on the antimeridian.
+        wgs84_geom = STGeometry(
+            WGS84_PROJECTION, shapely.box(-179.1, 10, -178.9, 10.1), None
+        )
+        dst_geom = wgs84_geom.to_projection(Projection(CRS.from_epsg(32632), 10, -10))
+
+        with pytest.raises(rasterio._err.CPLE_AppDefinedError):
+            src_geom.to_projection(dst_geom.projection)
+
+        result = safely_reproject_and_clip([src_geom], dst_geom)[0]
+        assert result is None
+
+    def test_antimeridian_handling_intersecting(self) -> None:
+        """Verify that antimeridian handling works for intersecting geometries."""
+        wgs84_geom = STGeometry(
+            WGS84_PROJECTION, shapely.box(-180.1, 10, -179.9, 10.1), None
+        )
+        src_geom = wgs84_geom.to_projection(Projection(CRS.from_epsg(32601), 1, 1))
+
+        wgs84_geom = STGeometry(
+            WGS84_PROJECTION, shapely.box(-179.95, 10, -179.85, 10.1), None
+        )
+        dst_geom = wgs84_geom.to_projection(Projection(CRS.from_epsg(32660), 1, 1))
+
+        result = safely_reproject_and_clip([src_geom], dst_geom)[0]
+        assert result is not None
+        result_wgs84 = result.to_projection(WGS84_PROJECTION)
+        assert result_wgs84.shp.bounds[0] == pytest.approx(-179.95)
+        assert result_wgs84.shp.bounds[1] == pytest.approx(10)
+        assert result_wgs84.shp.bounds[2] == pytest.approx(-179.9)
+        assert result_wgs84.shp.bounds[3] == pytest.approx(10.1)
