@@ -112,6 +112,8 @@ class AnySat(torch.nn.Module):
             flash_attn=flash_attn,
         )
         self._embed_dim = 768  # base width, 'dense' returns 2x
+        # Adjust patch size only once using the first batch
+        self.is_patch_size_adjusted = False
 
     @staticmethod
     def _ceil_to_multiple(x: int, base: int) -> int:
@@ -195,8 +197,9 @@ class AnySat(torch.nn.Module):
                     "All modalities must share the same spatial extent (H*res, W*res)."
                 )
 
-        # Adjust self.patch_size_meters to satisfy all modalities (≤ 32×32 patches)
-        self._update_effective_patch_size_meters(spatial_shapes)
+        if not self.is_patch_size_adjusted:
+            self._update_effective_patch_size_meters(spatial_shapes)
+            self.is_patch_size_adjusted = True
 
         # Add *_dates
         to_add = {}
