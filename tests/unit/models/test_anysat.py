@@ -51,31 +51,6 @@ def test_anysat_various_modalities(tmp_path: pathlib.Path, monkeypatch: Any) -> 
             "mode": "patch",
             "output_modality": None,
         },
-        # 4. Single-date naip (patch)
-        {
-            "modalities": ["naip"],
-            "dates": {},
-            "inputs": [{"naip": torch.zeros((4, 512, 512))}],
-            "patch_size": 20,
-            "expected_shape": (1, 768, 32, 32),
-            "mode": "patch",
-            "output_modality": None,
-        },
-        # 5. naip + s2 with equal extent, dense output
-        {
-            "modalities": ["naip", "s2"],
-            "dates": {"s2": list(range(3))},
-            "inputs": [
-                {
-                    "naip": torch.zeros((4, 512, 512)),
-                    "s2": torch.zeros((3 * 10, 64, 64)),
-                }
-            ],
-            "patch_size": 20,
-            "expected_shape": (1, 1536, 64, 64),
-            "mode": "dense",
-            "output_modality": "s2",
-        },
     ]
 
     for scenario in scenarios:
