@@ -4,6 +4,7 @@ import collections.abc
 import itertools
 import json
 import math
+from abc import abstractmethod
 from collections import OrderedDict
 from collections import OrderedDict as OrderedDictType
 from collections.abc import Sequence
@@ -900,8 +901,6 @@ class ModuleListWithInit(nn.ModuleList):
 class GalileoBase(nn.Module):
     """Galileo Base."""
 
-    cross_attn: bool
-
     def __init__(
         self,
         embedding_size: int = 128,
@@ -968,6 +967,12 @@ class GalileoBase(nn.Module):
         )
 
         self.apply(self._init_weights)
+
+    @property
+    @abstractmethod
+    def cross_attn(self) -> bool:
+        """Whether to use cross attention."""
+        pass
 
     def _init_weights(self, m: nn.Module) -> None:
         if isinstance(m, nn.Linear):
