@@ -63,4 +63,10 @@ def test_underscore_band_name(empty_window: Window) -> None:
     )
     empty_window.mark_layer_completed("layer")
     assert empty_window.is_layer_completed("layer")
-    assert len(list(empty_window.get_layer_dir("layer").iterdir())) == 1
+    # There should be one subfolder containing the GeoTIFF.
+    subfolders = [
+        dir_name
+        for dir_name in empty_window.get_layer_dir("layer").iterdir()
+        if dir_name.is_dir()
+    ]
+    assert len(subfolders) == 1
