@@ -10,7 +10,7 @@ from collections import OrderedDict as OrderedDictType
 from collections.abc import Sequence
 from copy import deepcopy
 from pathlib import Path
-from typing import NamedTuple, cast, override
+from typing import NamedTuple, cast
 
 import numpy as np
 import torch
@@ -19,6 +19,7 @@ import torch.nn.functional as F
 from einops import rearrange, repeat
 from torch import Tensor, vmap
 from torch.jit import Final
+from typing_extensions import override
 
 from rslearn.log_utils import get_logger
 
