@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import math
-import pathlib
 from enum import Enum
 from typing import Any
 
 import torch
-import yaml
 from einops import rearrange
 from huggingface_hub import hf_hub_download
 
@@ -27,8 +25,112 @@ class ClaySize(str, Enum):
 
 PATCH_SIZE = 8
 CLAY_MODALITIES = ["sentinel-2-l2a", "sentinel-1-rtc", "landsat-c2l1", "naip"]
-_FILE_DIR = pathlib.Path(__file__).resolve().parent
-CLAY_METADATA_PATH = str(_FILE_DIR / "configs" / "metadata.yaml")
+CLAY_MODALITY_SPECS = {
+    "sentinel-2-l2a": {
+        "band_order": [
+            "blue",
+            "green",
+            "red",
+            "rededge1",
+            "rededge2",
+            "rededge3",
+            "nir",
+            "nir08",
+            "swir16",
+            "swir22",
+        ],
+        "rgb_indices": [2, 1, 0],
+        "gsd": 10,
+        "bands": {
+            "mean": {
+                "blue": 1105.0,
+                "green": 1355.0,
+                "red": 1552.0,
+                "rededge1": 1887.0,
+                "rededge2": 2422.0,
+                "rededge3": 2630.0,
+                "nir": 2743.0,
+                "nir08": 2785.0,
+                "swir16": 2388.0,
+                "swir22": 1835.0,
+            },
+            "std": {
+                "blue": 1809.0,
+                "green": 1757.0,
+                "red": 1888.0,
+                "rededge1": 1870.0,
+                "rededge2": 1732.0,
+                "rededge3": 1697.0,
+                "nir": 1742.0,
+                "nir08": 1648.0,
+                "swir16": 1470.0,
+                "swir22": 1379.0,
+            },
+            "wavelength": {
+                "blue": 0.493,
+                "green": 0.56,
+                "red": 0.665,
+                "rededge1": 0.704,
+                "rededge2": 0.74,
+                "rededge3": 0.783,
+                "nir": 0.842,
+                "nir08": 0.865,
+                "swir16": 1.61,
+                "swir22": 2.19,
+            },
+        },
+    },
+    "sentinel-1-rtc": {
+        "band_order": ["vv", "vh"],
+        "gsd": 10,
+        "bands": {
+            "mean": {"vv": -12.113, "vh": -18.673},
+            "std": {"vv": 8.314, "vh": 8.017},
+            "wavelength": {"vv": 3.5, "vh": 4.0},
+        },
+    },
+    "landsat-c2l1": {
+        "band_order": ["red", "green", "blue", "nir08", "swir16", "swir22"],
+        "rgb_indices": [0, 1, 2],
+        "gsd": 30,
+        "bands": {
+            "mean": {
+                "red": 10678.0,
+                "green": 10563.0,
+                "blue": 11083.0,
+                "nir08": 14792.0,
+                "swir16": 12276.0,
+                "swir22": 10114.0,
+            },
+            "std": {
+                "red": 6025.0,
+                "green": 5411.0,
+                "blue": 5468.0,
+                "nir08": 6746.0,
+                "swir16": 5897.0,
+                "swir22": 4850.0,
+            },
+            "wavelength": {
+                "red": 0.65,
+                "green": 0.56,
+                "blue": 0.48,
+                "nir08": 0.86,
+                "swir16": 1.6,
+                "swir22": 2.2,
+            },
+        },
+    },
+    "naip": {
+        "band_order": ["red", "green", "blue", "nir"],
+        "rgb_indices": [0, 1, 2],
+        "gsd": 1.0,
+        "bands": {
+            "mean": {"red": 110.16, "green": 115.41, "blue": 98.15, "nir": 139.04},
+            "std": {"red": 47.23, "green": 39.82, "blue": 35.43, "nir": 49.86},
+            "wavelength": {"red": 0.65, "green": 0.56, "blue": 0.48, "nir": 0.842},
+        },
+    },
+}
 
 
 def get_clay_checkpoint_path(
@@ -47,7 +149,7 @@ class Clay(torch.nn.Module):
         model_size: ClaySize,
         modality: str = "sentinel-2-l2a",
         checkpoint_path: str | None = None,
-        metadata_path: str = CLAY_METADATA_PATH,
+        metadata: dict[str, dict[str, Any]] = CLAY_MODALITY_SPECS,
     ) -> None:
         """Initialize the Clay model.
 
@@ -55,7 +157,7 @@ class Clay(torch.nn.Module):
             model_size: The size of the Clay model.
             modality: The modality to use (subset of CLAY_MODALITIES).
             checkpoint_path: Path to clay-v1.5.ckpt, if None, fetch from HF Hub.
-            metadata_path: Path to metadata.yaml.
+            metadata: Clay sensor specs (name, band_order, band stats, wavelengths)
         """
         super().__init__()
 
@@ -68,7 +170,6 @@ class Clay(torch.nn.Module):
             self.model = ClayMAEModule.load_from_checkpoint(
                 checkpoint_path=ckpt,
                 model_size="large",
-                metadata_path=metadata_path,
                 dolls=[16, 32, 64, 128, 256, 768, 1024],
                 doll_weights=[1, 1, 1, 1, 1, 1, 1],
                 mask_ratio=0.0,
@@ -80,7 +181,6 @@ class Clay(torch.nn.Module):
             self.model = ClayMAEModule.load_from_checkpoint(
                 checkpoint_path=ckpt,
                 model_size="base",
-                metadata_path=metadata_path,
                 dolls=[16, 32, 64, 128, 256, 768],
                 doll_weights=[1, 1, 1, 1, 1, 1],
                 mask_ratio=0.0,
@@ -89,9 +189,7 @@ class Clay(torch.nn.Module):
         else:
             raise ValueError(f"Invalid model size: {model_size}")
 
-        with open(metadata_path) as f:
-            self.metadata = yaml.safe_load(f)
-
+        self.metadata = metadata
         self.model_size = model_size
         self.modality = modality
 
@@ -165,11 +263,12 @@ class Clay(torch.nn.Module):
 class ClayNormalize(Transform):
     """Normalize inputs using Clay metadata."""
 
-    def __init__(self, metadata_path: str = CLAY_METADATA_PATH) -> None:
+    def __init__(
+        self, metadata: dict[str, dict[str, Any]] = CLAY_MODALITY_SPECS
+    ) -> None:
         """Initialize ClayNormalize."""
         super().__init__()
-        with open(metadata_path) as f:
-            self.metadata = yaml.safe_load(f)
+        self.metadata = metadata
 
     def apply_image(
         self, image: torch.Tensor, means: list[float], stds: list[float]
