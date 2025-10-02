@@ -344,7 +344,7 @@ class GalileoModel(nn.Module):
             if x is not None:
                 if group_key == "location":
                     # transform latlon to cartesian
-                    x = cast(torch.Tensor, cls.to_cartesian(x[0], x[1]))
+                    x = cast(torch.Tensor, cls.to_cartesian(x[:, 0], x[:, 1]))
                 indices = [
                     idx for idx, val in enumerate(STATIC_BANDS) if val in bands_list
                 ]
@@ -353,8 +353,8 @@ class GalileoModel(nn.Module):
                     for idx, key in enumerate(STATIC_BAND_GROUPS_IDX)
                     if group_key in key
                 ]
-                st_x[indices] = x
-                st_m[groups_idx] = 0
+                st_x[:, indices] = x
+                st_m[:, groups_idx] = 0
 
         if months is None:
             months = torch.ones((b, t), dtype=torch.long, device=device) * DEFAULT_MONTH
@@ -400,7 +400,19 @@ class GalileoModel(nn.Module):
         """Compute feature maps from the Galileo backbone.
 
         Inputs:
-            inputs
+            inputs: a dictionary of tensors, where the keys are one of Galileo.input_keys
+                (also documented below) and values are tensors of the following shapes,
+                per input key:
+                    "s1": B (T * C) H W
+                    "s2": B (T * C) H W
+                    "era5": B (T * C) H W  (we will average over the H, W dimensions)
+                    "tc": B (T * C) H W  (we will average over the H, W dimensions)
+                    "viirs": B (T * C) H W  (we will average over the H, W dimensions)
+                    "srtm": B C H W (SRTM has no temporal dimension)
+                    "dw": : B C H W (Dynamic World should be averaged over time)
+                    "wc": B C H W (WorldCereal has no temporal dimension)
+                    "landscan":  B C H W  (we will average over the H, W dimensions)
+                    "latlon":  B C H W  (we will average over the H, W dimensions)
         """
         stacked_inputs = {}
         for key in inputs[0].keys():
@@ -449,6 +461,13 @@ class GalileoModel(nn.Module):
             )
             stacked_inputs[time_modality] = cur
 
+        for static_modality in ["landscan", "latlon"]:
+            if static_modality not in stacked_inputs:
+                continue
+            cur = stacked_inputs[static_modality]
+            stacked_inputs[static_modality] = torch.nanmean(
+                torch.nanmean(cur, dim=-1), dim=-1
+            )
         galileo_input = self.construct_galileo_input(**stacked_inputs, normalize=True)
         h = galileo_input.s_t_x.shape[1]
         if h < self.patch_size:
@@ -458,7 +477,6 @@ class GalileoModel(nn.Module):
             patch_size = h
         else:
             patch_size = self.patch_size
-
         outputs = self.model(
             s_t_x=galileo_input.s_t_x,
             s_t_m=galileo_input.s_t_m,
