@@ -3,7 +3,8 @@
 import pytest
 from lightning.pytorch import LightningDataModule, LightningModule
 
-from rslearn.arg_parser import RslearnArgumentParser, substitute_env_vars_in_string
+from rslearn.arg_parser import RslearnArgumentParser
+from rslearn.template_params import substitute_env_vars_in_string
 
 
 class DummyModel(LightningModule):
