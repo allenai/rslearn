@@ -71,7 +71,7 @@ def test_anysat_various_modalities(tmp_path: pathlib.Path, monkeypatch: Any) -> 
                     "s2": torch.zeros((3 * 10, 64, 64)),
                 }
             ],
-            "patch_size": 10,
+            "patch_size": 20,
             "expected_shape": (1, 1536, 64, 64),
             "mode": "dense",
             "output_modality": "s2",

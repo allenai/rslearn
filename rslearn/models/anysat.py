@@ -1,6 +1,5 @@
 """AnySat model."""
 
-import math
 from typing import Any
 
 import torch
@@ -61,7 +60,7 @@ class AnySat(torch.nn.Module):
         Args:
             modalities: list of modalities to use as input (1 or more).
             patch_size_meters: patch size in meters (must be multiple of 10). Avoid having more than 1024 patches per tile
-                i.e., the height/width in meters should not go beyond 32 * patch_size_meters.
+                ie, the height/width in meters should be <= 32 * patch_size_meters.
             dates: dict mapping time-series modalities to list of dates (day number in a year, 0-255).
             output: 'patch' (default) or 'dense'. Use 'patch' for classification tasks,
                 'dense' for segmentation tasks.
