@@ -61,7 +61,7 @@ class AnySat(torch.nn.Module):
         Args:
             modalities: list of modalities to use as input (1 or more).
             patch_size_meters: patch size in meters (must be multiple of 10).
-            dates: dict mapping time-series modalities to list of dates.
+            dates: dict mapping time-series modalities to list of dates (day number in a year, 0-255).
             output: 'patch' (default) or 'dense'. Use 'patch' for classification tasks,
                 'dense' for segmentation tasks.
             output_modality: required if output='dense', specifies which modality to use
@@ -112,7 +112,7 @@ class AnySat(torch.nn.Module):
             flash_attn=flash_attn,
         )
         self._embed_dim = 768  # base width, 'dense' returns 2x
-        # Adjust patch size only once using the first batch
+        # Assuming all batches have the same spatial shapes, adjust patch size only once
         self.is_patch_size_adjusted = False
 
     @staticmethod
