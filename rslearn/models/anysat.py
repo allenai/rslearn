@@ -126,7 +126,6 @@ class AnySat(torch.nn.Module):
             raise ValueError("empty inputs")
 
         batch: dict[str, torch.Tensor] = {}
-        spatial_shapes: dict[str, tuple[int, int]] = {}
         spatial_extent: tuple[float, float] | None = None
 
         for modality in self.modalities:
@@ -155,7 +154,6 @@ class AnySat(torch.nn.Module):
                 )
 
             batch[modality] = cur
-            spatial_shapes[modality] = (H, W)
 
             # Ensure same spatial extent across all modalities (H*res, W*res)
             extent = (
