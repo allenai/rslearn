@@ -60,7 +60,8 @@ class AnySat(torch.nn.Module):
 
         Args:
             modalities: list of modalities to use as input (1 or more).
-            patch_size_meters: patch size in meters (must be multiple of 10).
+            patch_size_meters: patch size in meters (must be multiple of 10). Avoid having more than 1024 patches per tile
+                i.e., the height/width in meters should not go beyond 32 * patch_size_meters.
             dates: dict mapping time-series modalities to list of dates (day number in a year, 0-255).
             output: 'patch' (default) or 'dense'. Use 'patch' for classification tasks,
                 'dense' for segmentation tasks.
@@ -112,34 +113,6 @@ class AnySat(torch.nn.Module):
             flash_attn=flash_attn,
         )
         self._embed_dim = 768  # base width, 'dense' returns 2x
-        # Assuming all batches have the same spatial shapes, adjust patch size only once
-        self.adjusted_patch_size_meters = 0
-
-    @staticmethod
-    def _ceil_to_multiple(x: int, base: int) -> int:
-        """Round x up to nearest multiple of base."""
-        return int(((x + base - 1) // base) * base)
-
-    def _update_effective_patch_size_meters(
-        self, spatial_shapes: dict[str, tuple[int, int]]
-    ) -> None:
-        """Update self.patch_size_meters to ensure ≤ 32 * 32 patches for all modalities.
-
-        As noted in the AnySat repo: in general, avoid having more than 1024 patches per tile.
-        Equivalent to ensure:
-          ps_m >= res_m * max(H_m, W_m) / 32
-        Take max across modalities, and round up to nearest 10 m.
-
-        Args:
-            spatial_shapes: dict mapping modality to (H, W) of that modality in the batch.
-        """
-        required_ps_m = self.patch_size_meters
-        for m, (H, W) in spatial_shapes.items():
-            res_m = MODALITY_RESOLUTIONS[m]
-            need_m = math.ceil((res_m * max(H, W)) / 32.0)
-            if need_m > required_ps_m:
-                required_ps_m = need_m
-        self.adjusted_patch_size_meters = self._ceil_to_multiple(required_ps_m, 10)
 
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Forward pass for the AnySat model.
@@ -197,9 +170,6 @@ class AnySat(torch.nn.Module):
                     "All modalities must share the same spatial extent (H*res, W*res)."
                 )
 
-        if self.adjusted_patch_size_meters == 0:
-            self._update_effective_patch_size_meters(spatial_shapes)
-
         # Add *_dates
         to_add = {}
         for modality, x in list(batch.items()):
@@ -216,7 +186,7 @@ class AnySat(torch.nn.Module):
 
         batch.update(to_add)
 
-        kwargs = {"patch_size": self.adjusted_patch_size_meters, "output": self.output}
+        kwargs = {"patch_size": self.patch_size_meters, "output": self.output}
         if self.output == "dense":
             kwargs["output_modality"] = self.output_modality
 
@@ -233,7 +203,7 @@ class AnySat(torch.nn.Module):
             the output channels of the backbone as a list of (patch_size, depth) tuples.
         """
         if self.output == "patch":
-            return [(self.adjusted_patch_size_meters // 10, 768)]
+            return [(self.patch_size_meters // 10, 768)]
         elif self.output == "dense":
             return [(1, 1536)]
         else:
