@@ -46,8 +46,18 @@ class PrithviV2(nn.Module):
 
     input_keys = ["sentinel2"]
 
-    def __init__(self, pretrained_path: str | UPath | None = None):
-        """Init."""
+    def __init__(self, pretrained_path: str | UPath | None = None, num_frames: int = 1):
+        """Init.
+
+        Inputs:
+            pretrained_path: The folder in which to download the prithvi config
+                and weights. If None, it downloads to a temporary folder.
+            num_frames: The number of input frames. The model was trained on 3,
+                but if there is just one timestamp examples use 1 (e.g.
+                https://github.com/NASA-IMPACT/Prithvi-EO-2.0/blob/main/examples/
+                example_landslide4sense.ipynb)
+
+        """
         super().__init__()
         if pretrained_path is None:
             pretrained_path = UPath(
@@ -64,7 +74,7 @@ class PrithviV2(nn.Module):
         with (UPath(pretrained_path) / "config.json").open("r") as f:
             config = yaml.safe_load(f)["pretrained_cfg"]
 
-        config["num_frames"] = 1
+        config["num_frames"] = num_frames
 
         self.model = PrithviMAE(**config)
 
