@@ -20,9 +20,9 @@ def test_anysat_various_modalities(tmp_path: pathlib.Path, monkeypatch: Any) -> 
         {
             "modalities": ["s2"],
             "dates": {"s2": list(range(3))},
-            "inputs": [{"s2": torch.zeros((3 * 10, 64, 64))}],
-            "patch_size": 40,
-            "expected_shape": (1, 1536, 64, 64),
+            "inputs": [{"s2": torch.zeros((3 * 10, 16, 16))}],
+            "patch_size": 20,
+            "expected_shape": (1, 1536, 16, 16),
             "mode": "dense",
             "output_modality": "s2",
         },
@@ -32,12 +32,12 @@ def test_anysat_various_modalities(tmp_path: pathlib.Path, monkeypatch: Any) -> 
             "dates": {"s1-asc": list(range(4)), "s2": list(range(3))},
             "inputs": [
                 {
-                    "s1-asc": torch.zeros((4 * 2, 64, 64)),
-                    "s2": torch.zeros((3 * 10, 64, 64)),
+                    "s1-asc": torch.zeros((4 * 2, 16, 16)),
+                    "s2": torch.zeros((3 * 10, 16, 16)),
                 }
             ],
-            "patch_size": 40,
-            "expected_shape": (1, 768, 16, 16),
+            "patch_size": 20,
+            "expected_shape": (1, 768, 8, 8),
             "mode": "patch",
             "output_modality": None,
         },
@@ -45,9 +45,9 @@ def test_anysat_various_modalities(tmp_path: pathlib.Path, monkeypatch: Any) -> 
         {
             "modalities": ["l8"],
             "dates": {"l8": list(range(3))},
-            "inputs": [{"l8": torch.zeros((3 * 11, 64, 64))}],
-            "patch_size": 40,
-            "expected_shape": (1, 768, 16, 16),
+            "inputs": [{"l8": torch.zeros((3 * 11, 16, 16))}],
+            "patch_size": 20,
+            "expected_shape": (1, 768, 8, 8),
             "mode": "patch",
             "output_modality": None,
         },
