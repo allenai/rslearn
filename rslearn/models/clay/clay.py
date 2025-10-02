@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import math
-import pathlib
 from enum import Enum
+from importlib.resources import files
 from typing import Any
 
 import torch
@@ -27,8 +27,8 @@ class ClaySize(str, Enum):
 
 PATCH_SIZE = 8
 CLAY_MODALITIES = ["sentinel-2-l2a", "sentinel-1-rtc", "landsat-c2l1", "naip"]
-_FILE_DIR = pathlib.Path(__file__).resolve().parent
-CLAY_METADATA_PATH = str(_FILE_DIR / "configs" / "metadata.yaml")
+CONFIG_DIR = files("rslearn.models.clay.configs")
+CLAY_METADATA_PATH = str(CONFIG_DIR / "metadata.yaml")
 
 
 def get_clay_checkpoint_path(
