@@ -413,6 +413,13 @@ class GalileoModel(nn.Module):
                     "wc": B C H W (WorldCereal has no temporal dimension)
                     "landscan":  B C H W  (we will average over the H, W dimensions)
                     "latlon":  B C H W  (we will average over the H, W dimensions)
+
+        The output will be an embedding representing the pooled tokens. If there is
+        only a single token per h/w dimension (i.e. patch_size == h,w), then we will take
+        a pool of all the unmasked tokens.
+
+        If there are many spatial tokens per h/w dimension (patch_size > h,w), then we will
+        take a pool of the space_time unmasked tokens (i.e. of the s1 and s2 tokens).
         """
         stacked_inputs = {}
         for key in inputs[0].keys():
