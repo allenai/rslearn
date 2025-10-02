@@ -301,7 +301,7 @@ The data source specification looks like this:
   // The query configuration specifies how items should be matched to windows. It is
   // optional, and the values below are defaults.
   "query_config": {
-    // The space mode must be "MOSAIC" (default), "CONTAINS", or "INTERSECTS".
+    // The space mode must be "MOSAIC" (default), "CONTAINS", "INTERSECTS", or "COMPOSITE".
     "space_mode": "MOSAIC",
     // The time mode must be "WITHIN" (default), "BEFORE", or "AFTER".
     "time_mode": "WITHIN",
@@ -457,6 +457,10 @@ S3 bucket maintained by USGS. It includes Tier 1/2 scenes but not Real-Time scen
 https://aws.amazon.com/marketplace/pp/prodview-ivr4jeq6flk7u for details about the
 bucket.
 
+This data source supports direct materialization: if the "ingest" flag is set false,
+then ingestion will be skipped and windows will be directly populated from windowed
+reads of the underlying cloud-optimized GeoTIFFs on S3.
+
 The additional data source configuration looks like this:
 
 ```jsonc
@@ -564,6 +568,31 @@ Available bands:
 - G (from TCI asset; derived from B03)
 - B (from TCI asset; derived from B02)
 
+### rslearn.data_sources.aws_sentinel1.Sentinel1
+
+This data source is for Sentinel-1 GRD imagery on AWS. It uses the sentinel-s1-l1c S3
+bucket maintained by Sinergise. See
+https://aws.amazon.com/marketplace/pp/prodview-uxrsbvhd35ifw for details about the
+bucket.
+
+Although other Sentinel-1 scenes are available, the data source currently only supports
+the GRD IW DV scenes (vv+vh bands). It uses the Copernicus API for metadata search
+(prepare step).
+
+The additional data source configuration looks like this:
+
+```jsonc
+{
+  // Optional orbit direction to filter by, either "ASCENDING" or "DESCENDING". The
+  // default is to not filter (so both types of scenes are included/mixed).
+  "orbit_direction": null
+}
+```
+
+Available bands:
+- vv
+- vh
+
 ### rslearn.data_sources.climate_data_store.ERA5LandMonthlyMeans
 
 This data source is for ingesting ERA5 land monthly averaged data from the Copernicus Climate Data Store.
@@ -573,8 +602,7 @@ main process only) and batch size equal to the number of windows when preparing 
 ERA5LandMonthlyMeans dataset, as it will combine multiple geometries into a single CDS
 API request for each month to speed up dataset ingestion.
 
-Valid bands are the `shortName` of parameters listed at
-https://confluence.ecmwf.int/display/CKB/ERA5-Land%3A+data+documentation.
+Valid bands are the variable names listed [here](https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means?tab=download) - use the **API request** tool to check valid values. Note it is necessary to replace "_" with "-" in the variable names, e.g. `total_precipitation` becomes `total-precipitation`
 
 The additional data source configuration looks like this:
 
@@ -585,6 +613,159 @@ The additional data source configuration looks like this:
   "api_key": null
 }
 ```
+
+### rslearn.data_sources.copernicus.Copernicus
+
+This data source is for images from the ESA Copernicus OData API. See
+https://documentation.dataspace.copernicus.eu/APIs/OData.html for details about the API
+and how to get an access token.
+
+The additional data source configuration looks like this:
+
+```jsonc
+{
+  // Required dictionary mapping from a filename or glob string of an asset inside the
+  // product zip file, to the list of bands that the asset contains. An example for
+  // Sentinel-2 images is shown.
+  "glob_to_bands": {
+    "*/GRANULE/*/IMG_DATA/*_B01.jp2": ["B01"],
+    "*/GRANULE/*/IMG_DATA/*_TCI.jp2": ["R", "G", "B"]
+  },
+  // Optional API access token. See https://documentation.dataspace.copernicus.eu/APIs/OData.html
+  // for how to get a token. If not set, it is read from the environment variable
+  // COPERNICUS_ACCESS_TOKEN. If that environment variable doesn't exist, then we
+  // attempt to read the username/password from COPERNICUS_USERNAME and
+  // COPERNICUS_PASSWORD (this is useful since access tokens are only valid for an hour).
+  "access_token": null,
+  // Optional query filter string to include when searching for items. This will be
+  // appended to other name, geographic, and sensing time filters where applicable. For
+  // example, "Collection/Name eq 'SENTINEL-2'". See the API documentation for more
+  // examples.
+  "query_filter": null,
+  // Optional order by string to include when searching for items. For example,
+  // "ContentDate/Start asc". See the API documentation for more examples.
+  "order_by": null,
+  // Optional product attribute name to sort returned products by that attribute. If
+  // set, attributes will be expanded when listing products. Note that while order_by
+  // uses the API to order products, the API provides limited options, and sort_by
+  // instead is done after the API call.
+  "sort_by": null,
+  // If sort_by is set, sort in descending order instead of ascending order.
+  "sort_desc": false,
+  // Timeout for requests in seconds.
+  "timeout": 10
+}
+```
+
+### rslearn.data_sources.copernicus.Sentinel2
+
+This data source is for Sentinel-2 images from the ESA Copernicus OData API.
+
+The additional data source configuration looks like this:
+
+```jsonc
+{
+  // Required product type, either "L1C" or "L2A".
+  "product_type": "L1C",
+  // Flag (default false) to harmonize pixel values across different processing
+  // baselines (recommended), see
+  // https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
+  "harmonize": false,
+  // See rslearn.data_sources.copernicus.Copernicus for details about the configuration
+  // options below.
+  "access_token": null,
+  "order_by": null,
+  "sort_by": null,
+  "sort_desc": false,
+  "timeout": 10
+}
+```
+
+Available bands:
+- B01
+- B02
+- B03
+- B04
+- B05
+- B06
+- B07
+- B08
+- B09
+- B11
+- B12
+- B8A
+- TCI
+- B10 (L1C only)
+- AOT (L2A only)
+- WVP (L2A only)
+- SCL (L2A only)
+
+### rslearn.data_sources.copernicus.Sentinel1
+
+This data source is for Sentinel-1 images from the ESA Copernicus OData API. Currently
+only IW GRDH VV+VH products are supported, even though all Sentinel-1 scenes are
+available in the data source.
+
+The additional data source configuration looks like this:
+
+```jsonc
+{
+  // Required product type, must be "IW_GRDH".
+  "product_type": "IW_GRDH",
+  // Required polarisation, must be "VV_VH".
+  "polarisation": "VV_VH",
+  // Optional orbit direction to filter by, either "ASCENDING" or "DESCENDING". The
+  // default is to not filter (so both types of scenes are included/mixed).
+  "orbit_direction": null,
+  // See rslearn.data_sources.copernicus.Copernicus for details about the configuration
+  // options below.
+  "access_token": null,
+  "order_by": null,
+  "sort_by": null,
+  "sort_desc": false,
+  "timeout": 10
+}
+```
+
+### rslearn.data_sources.earthdata_srtm.SRTM
+
+Elevation data from the Shuttle Radar Topography Mission via NASA Earthdata.
+
+A NASA Earthdata account is needed, see https://urs.earthdata.nasa.gov/.
+
+```jsonc
+{
+  // Earthdata account username. It can also be set via the NASA_EARTHDATA_USERNAME
+  // environment variable.
+  "username": null,
+  // Earthdata account password. It can also be set via the NASA_EARTHDATA_PASSWORD
+  // environment variable.
+  "password": null,
+  // Timeout for requests.
+  "timeout_seconds": 10,
+}
+```
+
+The data source should be configured with a single band set containing a single band.
+The band name can be set arbitrarily, but "srtm" or "elevation" is suggested. The data
+type of the band should be set to int16 to match the source data.
+
+### rslearn.data_sources.eurocrops.EuroCrops
+
+This data source is for EuroCrops vector data (v11).
+
+See https://zenodo.org/records/14094196 for details.
+
+While the source data is split into country-level files, this data source uses one item
+per year for simplicity. So each item corresponds to all of the country-level files for
+that year.
+
+Note that the RO_ny.zip file is not used.
+
+There is no data-source-specific configuration.
+
+The vector features should have `EC_hcat_c` and `EC_hcat_n` properties indicating the
+HCAT category code and name respectively.
 
 ### rslearn.data_sources.gcp_public_data.Sentinel2
 
@@ -645,7 +826,112 @@ Available bands:
 
 ### rslearn.data_sources.google_earth_engine.GEE
 
-This data source is still experimental.
+This data source is for ingesting images from Google Earth Engine (GEE).
+
+It must be configured with the name of an ee.ImageCollection on GEE. Each ee.Image in
+the ee.ImageCollection is treated as a different data source item. A Cloud Storage
+bucket is also required to store the intermediate outputs from GEE export jobs.
+
+During the prepare stage, it will first export the metadata (geometry and time range)
+of all ee.Image objects in the ee.ImageCollection. Then it will use this to build an
+rtree from which prepare requests can be satisfied.
+
+During the ingest stage, it will start export jobs to export images to the bucket. Each
+worker will start one job and poll until it finishes before proceeding onto the next
+ee.Image to export. After the export finishes, the resulting GeoTIFF(s) are read and
+processed into the tile store. Note that export jobs can take several minutes to
+complete depending on the size of the image.
+
+This data source does support direct materialization, which can greatly speed up
+materialization for sparse windows. Whereas exporting a 10Kx10K image make take 5000
+EECU-seconds (and potentially several minutes), exporting a 256x256 image should take
+only a few seconds.
+
+```jsonc
+{
+  // Required name of the ee.ImageCollection, e.g. "COPERNICUS/S1_GRD".
+  "collection_name": "COPERNICUS/S1_GRD",
+  // Required name of the GCS bucket to use to store intermediate outputs from export
+  // jobs. You could set up lifecycle rules on this bucket to delete outputs after 1
+  // day.
+  "gcs_bucket_name": "...",
+  // Required service account name.
+  "service_account_name": "...",
+  // Required path to a local file containing the service account credentials.
+  "service_account_credentials": "/etc/credentials/gee_credentials.json",
+  // Required directory to store rtree index over the exported ee.Image metadata.
+  "index_cache_dir": "cache/gee",
+  // Optional filters to aply on the ee.ImageCollection. See Sentinel-1 example below.
+  // Currently only equality filters are supported.
+  "filters": null
+}
+```
+
+The available bands depends on the chosen ee.ImageCollection. Here is an example layer
+configuration for Sentinel-1. The filters match only ee.Image objects where the
+"transmitterReceiverPolarisation" attribute is ["VV", "VH"] and the "instrumentMode"
+attribute is "IW".
+
+```json
+{
+  "sentinel1": {
+    "band_sets": [
+      {
+        "bands": [
+          "VV",
+          "VH"
+        ],
+        "dtype": "uint16",
+        "format": "geotiff"
+      }
+    ],
+    "data_source": {
+      "collection_name": "COPERNICUS/S1_GRD",
+      "dtype": "float32",
+      "filters": [
+        [
+          "transmitterReceiverPolarisation",
+          [
+            "VV",
+            "VH"
+          ]
+        ],
+        [
+          "instrumentMode",
+          "IW"
+        ]
+      ],
+      "gcs_bucket_name": "YOUR_BUCKET_NAME",
+      "index_fname": "cache/sentinel1_index",
+      "name": "rslearn.data_sources.google_earth_engine.GEE",
+      "query_config": {
+        "max_matches": 1
+      },
+      "service_account_credentials": "/etc/credentials/gee_credentials.json",
+      "service_account_name": "YOUR_SERVICE_ACCOUNT_NAME"
+    },
+    "type": "raster"
+  }
+}
+```
+
+### rslearn.data_sources.google_earth_engine.GoogleSatelliteEmbeddings
+
+This data source is for Google Satellite Embeddings (AlphaEarth Embeddings) from Google
+Earth Engine. The embedding values are stored as unsigned 16-bit integers from 0 to
+16383, computed by multiplying the original [-1, 1] floating point values by 8192 and
+adding 8192.
+
+```jsonc
+{
+  // See rslearn.data_sources.google_earth_engine.GEE for details about these
+  // required configuration options.
+  "gcs_bucket_name": "...",
+  "service_account_name": "...",
+  "service_account_credentials": "/etc/credentials/gee_credentials.json",
+  "index_cache_dir": "cache/gee"
+}
+```
 
 ### rslearn.data_sources.local_files.LocalFiles
 
@@ -744,6 +1030,10 @@ This data source is still experimental.
 This data source is for raster data from Microsoft Planetary Computer. See their
 [Data Catalog](https://planetarycomputer.microsoft.com/catalog).
 
+This data source supports direct materialization: if the "ingest" flag is set false,
+then ingestion will be skipped and windows will be directly populated from windowed
+reads of the underlying cloud-optimized GeoTIFFs on Azure Blob Storage.
+
 ```jsonc
 {
   // Required collection name, e.g. "landsat-c2-l2" or "modis-17A2HGF-061".
@@ -768,6 +1058,7 @@ This data source is for raster data from Microsoft Planetary Computer. See their
 ### rslearn.data_sources.planetary_computer.Sentinel1
 
 Sentinel-1 radiometrically-terrain-corrected data on Microsoft Planetary Computer.
+Direct materialization is supported.
 
 It automatically determines the bands to download from the band sets, so all parameters
 are optional. The band names are "hh", "hv", "vv", and "vh" depending on the scene.
@@ -784,7 +1075,8 @@ are optional. The band names are "hh", "hv", "vv", and "vh" depending on the sce
 
 ### rslearn.data_sources.planetary_computer.Sentinel2
 
-Sentinel-2 L2A data on Microsoft Planetary Computer.
+Sentinel-2 L2A data on Microsoft Planetary Computer. Direct materialization is
+supported.
 
 The bands to download are determined from the band sets.
 
@@ -819,28 +1111,26 @@ Available bands:
 
 Note that B10 is not present in L2A.
 
-### rslearn.data_sources.earthdata_srtm.SRTM
+### rslearn.data_sources.usda_cdl.CDL
 
-Elevation data from the Shuttle Radar Topography Mission via NASA Earthdata.
+This data source is for the USDA Cropland Data Layer.
 
-A NASA Earthdata account is needed, see https://urs.earthdata.nasa.gov/.
+The GeoTIFF data will be downloaded from the USDA website. See
+https://www.nass.usda.gov/Research_and_Science/Cropland/SARS1a.php for details about
+the data.
+
+There is one GeoTIFF item per year from 2008. Each GeoTIFF spans the entire continental
+US, and has a single band.
 
 ```jsonc
 {
-  // Earthdata account username. It can also be set via the NASA_EARTHDATA_USERNAME
-  // environment variable.
-  "username": null,
-  // Earthdata account password. It can also be set via the NASA_EARTHDATA_PASSWORD
-  // environment variable.
-  "password": null,
-  // Timeout for requests.
-  "timeout_seconds": 10,
+  // Optional timeout for HTTP requests.
+  "timeout_seconds": 10
 }
 ```
 
-The data source should be configured with a single band set containing a single band.
-The band name can be set arbitrarily, but "srtm" or "elevation" is suggested. The data
-type of the band should be set to int16 to match the source data.
+The data source yields one band, and the name will match whatever is configured in the
+band set. It should be uint8.
 
 ### rslearn.data_sources.usgs_landsat.LandsatOliTirs
 
@@ -872,6 +1162,43 @@ Available bands:
 - B9
 - B10
 - B11
+
+### rslearn.data_sources.worldcover.WorldCover
+
+This data source is for the ESA WorldCover 2021 land cover map.
+
+For details about the land cover map, see https://worldcover2021.esa.int/.
+
+This data source downloads the 18 zip files that contain the map. They are then
+extracted, yielding 2,651 GeoTIFF files. These are then used with
+`rslearn.data_sources.local_files.LocalFiles` to implement the data source.
+
+```jsonc
+{
+  // Required local path to store the downloaded zip files and extracted GeoTIFFs.
+  "worldcover_dir": "cache/worldcover"
+}
+```
+
+Available bands:
+- B1 (uint8)
+
+### rslearn.data_sources.worldpop.WorldPop
+
+This data source is for world population data from worldpop.org.
+
+Currently, this only supports the WorldPop Constrained 2020 100 m Resolution dataset.
+See https://hub.worldpop.org/project/categories?id=3 for details.
+
+The data is split by country. We implement with LocalFiles data source for simplicity,
+but it means that all of the data must be downloaded first.
+
+```jsonc
+{
+  // Required local path to store the downoladed WorldPop data.
+  "worldpop_dir": "cache/worldpop"
+}
+```
 
 ### rslearn.data_sources.xyz_tiles.XyzTiles
 
