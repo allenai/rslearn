@@ -6,7 +6,7 @@ from typing import Any
 import huggingface_hub.constants
 import torch
 
-from rslearn.models.clay.clay import Clay, ClayNormalize, ClaySize
+from rslearn.models.clay import Clay, ClayNormalize, ClaySize
 
 
 def test_clay(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
