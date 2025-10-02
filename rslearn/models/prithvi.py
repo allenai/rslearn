@@ -52,7 +52,7 @@ class PrithviV2(nn.Module):
         Inputs:
             pretrained_path: The folder in which to download the prithvi config
                 and weights. If None, it downloads to a temporary folder.
-            num_frames: The number of input frames. The model was trained on 3,
+            num_frames: The number of input frames (timesteps). The model was trained on 3,
                 but if there is just one timestamp examples use 1 (e.g.
                 https://github.com/NASA-IMPACT/Prithvi-EO-2.0/blob/main/examples/
                 example_landslide4sense.ipynb)
