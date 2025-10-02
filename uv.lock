@@ -4284,6 +4284,7 @@ extra = [
     { name = "satlaspretrain-models" },
     { name = "scipy" },
     { name = "terratorch" },
+    { name = "timm" },
     { name = "transformers" },
     { name = "wandb" },
 ]
@@ -4330,6 +4331,7 @@ requires-dist = [
     { name = "scipy", marker = "extra == 'extra'", specifier = ">=1.16" },
     { name = "shapely", specifier = ">=2.1" },
     { name = "terratorch", marker = "extra == 'extra'", specifier = ">=1.0.2" },
+    { name = "timm", marker = "extra == 'extra'", specifier = ">=0.9.7" },
     { name = "torch", specifier = ">=2.7.0" },
     { name = "torchvision", specifier = ">=0.22.0" },
     { name = "tqdm", specifier = ">=4.67" },
