@@ -9,9 +9,11 @@ from typing import Any
 
 import torch
 import yaml
-from claymodel.module import ClayMAEModule
 from einops import rearrange
 from huggingface_hub import hf_hub_download
+
+# from claymodel.module import ClayMAEModule
+from terratorch.models.backbones.clay_v15.module import ClayMAEModule
 
 from rslearn.train.transforms.transform import Transform
 
