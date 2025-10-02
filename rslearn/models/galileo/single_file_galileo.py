@@ -10,7 +10,7 @@ from collections import OrderedDict as OrderedDictType
 from collections.abc import Sequence
 from copy import deepcopy
 from pathlib import Path
-from typing import NamedTuple, cast
+from typing import NamedTuple, cast, override
 
 import numpy as np
 import torch
@@ -1133,8 +1133,6 @@ class GalileoBase(nn.Module):
 class Encoder(GalileoBase):
     """Galileo Encoder."""
 
-    cross_attn = False
-
     def __init__(
         self,
         max_patch_size: int = 8,
@@ -1202,6 +1200,12 @@ class Encoder(GalileoBase):
         self.norm = nn.LayerNorm(embedding_size)
 
         self.apply(self._init_weights)
+
+    @property
+    @override
+    def cross_attn(self) -> bool:
+        """Whether to use cross attention."""
+        return False
 
     def _init_weights(self, m: nn.Module) -> None:
         if isinstance(m, nn.Linear):
