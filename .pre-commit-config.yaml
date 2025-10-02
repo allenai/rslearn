@@ -45,12 +45,14 @@ repos:
         additional_dependencies:
           - "pydantic>=2.7.1,<3"
           - "types-protobuf"
-        exclude: ./.*_pb2_.*.py
+        exclude: |
+            (?x)^(?:.*_pb2_.*\.py|rslearn/models/copernicusfm_src/.*)$
+
   - repo: https://github.com/PyCQA/bandit
     rev: "1.8.6"
     hooks:
       - id: bandit
-        exclude: ^tests/
+        exclude: ^tests/|^rslearn/models/copernicusfm_src/
         args:
           - -s
           # Skip B113 request_without_timeout because it has false positives e.g. when
@@ -64,17 +66,19 @@ repos:
         entry: interrogate
         types: [python]
         args:
-          [
-            --ignore-init-method,
-            --ignore-init-module,
-            -p,
-            -vv,
-            rslearn,
-            --fail-under=80,
-          ]
+          - --ignore-init-method
+          - --ignore-init-module
+          - --exclude=rslearn/models/copernicusfm_src/
+          - -p
+          - -vv
+          - rslearn
+          - --fail-under=80
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.12.9
     hooks:
       - id: ruff-check
         args: [ --fix ]
+        exclude: ^rslearn/models/copernicusfm_src/
       - id: ruff-format
+        exclude: ^rslearn/models/copernicusfm_src/
