@@ -1,5 +1,6 @@
 """Spatiotemporal geometry utilities."""
 
+import functools
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
@@ -491,19 +492,19 @@ def safely_reproject_and_clip(
     This function may produce unexpected results if the geometries span more than 90
     degrees on either dimension.
     """
-    # Lazily compute dst_geom_wgs84 as an optimization.
-    # This also makes it so we only have to compute it once.
-    dst_geom_wgs84: STGeometry | None = None
+
+    # We cache re-projecting the destination geometry to WGS84 since the re-projection
+    # can be costly. This also avoids re-projecting in case all the src_geoms are
+    # already in the same projection as dst_geom.
+    @functools.cache
+    def get_dst_geom_wgs84() -> STGeometry:
+        """Lazily compute and cache dst_geom in WGS84 projection."""
+        return split_at_antimeridian(dst_geom.to_projection(WGS84_PROJECTION))
 
     def intersects_in_wgs84(src_geom: STGeometry) -> bool:
         """Return False if there is no intersection."""
-        nonlocal dst_geom_wgs84
         src_geom_wgs84 = split_at_antimeridian(src_geom.to_projection(WGS84_PROJECTION))
-        if dst_geom_wgs84 is None:
-            dst_geom_wgs84 = split_at_antimeridian(
-                dst_geom.to_projection(WGS84_PROJECTION)
-            )
-        return src_geom_wgs84.intersects(dst_geom_wgs84)
+        return src_geom_wgs84.intersects(get_dst_geom_wgs84())
 
     results: list[STGeometry | None] = []
     for src_geom in src_geoms:
