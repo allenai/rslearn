@@ -113,12 +113,12 @@ class AnySat(torch.nn.Module):
         )
         self._embed_dim = 768  # base width, 'dense' returns 2x
         # Assuming all batches have the same spatial shapes, adjust patch size only once
-        self.is_patch_size_adjusted = False
+        self.adjusted_patch_size_meters = 0
 
     @staticmethod
     def _ceil_to_multiple(x: int, base: int) -> int:
         """Round x up to nearest multiple of base."""
-        return ((x + base - 1) // base) * base
+        return int(((x + base - 1) // base) * base)
 
     def _update_effective_patch_size_meters(
         self, spatial_shapes: dict[str, tuple[int, int]]
@@ -139,7 +139,7 @@ class AnySat(torch.nn.Module):
             need_m = math.ceil((res_m * max(H, W)) / 32.0)
             if need_m > required_ps_m:
                 required_ps_m = need_m
-        self.patch_size_meters = self._ceil_to_multiple(required_ps_m, 10)
+        self.adjusted_patch_size_meters = self._ceil_to_multiple(required_ps_m, 10)
 
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Forward pass for the AnySat model.
@@ -197,9 +197,8 @@ class AnySat(torch.nn.Module):
                     "All modalities must share the same spatial extent (H*res, W*res)."
                 )
 
-        if not self.is_patch_size_adjusted:
+        if self.adjusted_patch_size_meters == 0:
             self._update_effective_patch_size_meters(spatial_shapes)
-            self.is_patch_size_adjusted = True
 
         # Add *_dates
         to_add = {}
@@ -217,7 +216,7 @@ class AnySat(torch.nn.Module):
 
         batch.update(to_add)
 
-        kwargs = {"patch_size": self.patch_size_meters, "output": self.output}
+        kwargs = {"patch_size": self.adjusted_patch_size_meters, "output": self.output}
         if self.output == "dense":
             kwargs["output_modality"] = self.output_modality
 
@@ -234,7 +233,7 @@ class AnySat(torch.nn.Module):
             the output channels of the backbone as a list of (patch_size, depth) tuples.
         """
         if self.output == "patch":
-            return [(self.patch_size_meters // 10, 768)]
+            return [(self.adjusted_patch_size_meters // 10, 768)]
         elif self.output == "dense":
             return [(1, 1536)]
         else:
