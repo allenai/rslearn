@@ -1,7 +1,7 @@
 import pathlib
-from typing import Any
 
 import numpy as np
+import pytest
 import shapely
 from pytest_httpserver import HTTPServer
 from upath import UPath
@@ -85,7 +85,7 @@ def test_worldpop(
     tmp_path: pathlib.Path,
     seattle2020: STGeometry,
     httpserver: HTTPServer,
-    monkeypatch: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Tests ingesting the example data corresponding to seattle2020.
 

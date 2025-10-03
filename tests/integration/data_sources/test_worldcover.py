@@ -2,9 +2,9 @@ import os
 import pathlib
 import random
 import zipfile
-from typing import Any
 
 import numpy as np
+import pytest
 import shapely
 from pytest_httpserver import HTTPServer
 from upath import UPath
@@ -88,7 +88,7 @@ def run_test_with_worldcover_dir(
     tmp_path: pathlib.Path,
     seattle2020: STGeometry,
     httpserver: HTTPServer,
-    monkeypatch: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Tests ingesting the example data corresponding to seattle2020.
 
@@ -155,7 +155,7 @@ def test_local_worldcover_dir(
     tmp_path: pathlib.Path,
     seattle2020: STGeometry,
     httpserver: HTTPServer,
-    monkeypatch: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Run the WorldCover test with a local directory."""
     worldcover_dir = UPath(tmp_path) / "worldcover"
@@ -172,7 +172,7 @@ def test_gcs_worldcover_dir(
     tmp_path: pathlib.Path,
     seattle2020: STGeometry,
     httpserver: HTTPServer,
-    monkeypatch: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Run the WorldCover test with directory on GCS."""
     test_id = random.randint(10000, 99999)
