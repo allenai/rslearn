@@ -81,3 +81,25 @@ def test_geojson(
                     result = result.to_projection(projection)
                     assert result.shp.x == pytest.approx(geometry.shp.x)
                     assert result.shp.y == pytest.approx(geometry.shp.y)
+
+
+def test_reprojection_issue(tmp_path: pathlib.Path) -> None:
+    """Previously we sometimes get re-projection errors when reading vector features.
+
+    This test verifies that one such former failure case now succeeds.
+
+    The point here cannot be directly re-projected to EPSG:32632, but
+    GeojsonVectorFormat has been updated to only re-project if the geometries intersect
+    in WGS84.
+    """
+    vector_format = GeojsonVectorFormat()
+    feat = Feature(STGeometry(WGS84_PROJECTION, shapely.Point(104.672, 0.099), None))
+    vector_format.encode_vector(UPath(tmp_path), [feat])
+    # We read under some bounds that do not intersect the point.
+    # So the result should be empty.
+    result = vector_format.decode_vector(
+        UPath(tmp_path),
+        Projection(CRS.from_epsg(32632), 1, 1),
+        (63232, -628224, 63488, -627968),
+    )
+    assert len(result) == 0

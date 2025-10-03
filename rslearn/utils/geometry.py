@@ -1,5 +1,7 @@
 """Spatiotemporal geometry utilities."""
 
+import functools
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -455,6 +457,9 @@ def split_at_antimeridian(geometry: STGeometry, epsilon: float = 1e-6) -> STGeom
 
         Polygon([[-179.999999, 10], [-179,999999, 11], [-179, 11], [-179, 10]])
 
+    This function may produce unexpected results if the geometries span more than 90
+    degrees on either dimension.
+
     Args:
         geometry: the geometry to split.
         epsilon: the padding in degrees. It is equivalent to about 1 m at the equator.
@@ -464,6 +469,61 @@ def split_at_antimeridian(geometry: STGeometry, epsilon: float = 1e-6) -> STGeom
         the padded geometry, in WGS84 projection.
     """
     # Convert to WGS84.
-    geometry = geometry.to_projection(Projection(CRS.from_epsg(4326), 1, 1))
+    geometry = geometry.to_projection(WGS84_PROJECTION)
     new_shp = split_shape_at_antimeridian(geometry.shp, epsilon=epsilon)
     return STGeometry(geometry.projection, new_shp, geometry.time_range)
+
+
+def safely_reproject_and_clip(
+    src_geoms: Sequence[STGeometry], dst_geom: STGeometry
+) -> Sequence[STGeometry | None]:
+    """Re-project src_geoms into the projection of dst_geom.
+
+    The resulting geometries will be clipped to dst_geom. If there is no intersection
+    for an src_geom, then the result will be None. The list of results is returned.
+
+    This function addresses issues with direct re-projection (e.g. using
+    src_geom.to_projection(dst_geom.projection)), which may fail if the source geometry
+    is outside the area of use of the destination projection.
+
+    It will first check for compatibility in WGS84, and only proceed with re-projection
+    if the geometries intersect.
+
+    This function may produce unexpected results if the geometries span more than 90
+    degrees on either dimension.
+    """
+
+    # We cache re-projecting the destination geometry to WGS84 since the re-projection
+    # can be costly. This also avoids re-projecting in case all the src_geoms are
+    # already in the same projection as dst_geom.
+    @functools.cache
+    def get_dst_geom_wgs84() -> STGeometry:
+        """Lazily compute and cache dst_geom in WGS84 projection."""
+        return split_at_antimeridian(dst_geom.to_projection(WGS84_PROJECTION))
+
+    def intersects_in_wgs84(src_geom: STGeometry) -> bool:
+        """Return False if there is no intersection."""
+        src_geom_wgs84 = split_at_antimeridian(src_geom.to_projection(WGS84_PROJECTION))
+        return src_geom_wgs84.intersects(get_dst_geom_wgs84())
+
+    results: list[STGeometry | None] = []
+    for src_geom in src_geoms:
+        # Only do the extra check in WGS84 if the projections don't already match.
+        if (
+            src_geom.projection.crs != dst_geom.projection.crs
+            and not intersects_in_wgs84(src_geom)
+        ):
+            results.append(None)
+            continue
+
+        src_geom_in_dst_projection = src_geom.to_projection(dst_geom.projection)
+        if not shp_intersects(src_geom_in_dst_projection.shp, dst_geom.shp):
+            results.append(None)
+            continue
+        intersect_shp = src_geom_in_dst_projection.shp.intersection(dst_geom.shp)
+        intersect_geom = STGeometry(
+            dst_geom.projection, intersect_shp, src_geom.time_range
+        )
+        results.append(intersect_geom)
+
+    return results
