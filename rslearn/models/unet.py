@@ -17,10 +17,11 @@ class UNetDecoder(torch.nn.Module):
     def __init__(
         self,
         in_channels: list[tuple[int, int]],
-        out_channels: int,
+        out_channels: int | None,
         conv_layers_per_resolution: int = 1,
         kernel_size: int = 3,
         num_channels: dict[int, int] = {},
+        target_resolution_factor: int = 1,
         original_size_to_interpolate: tuple[int, int] | None = None,
     ) -> None:
         """Initialize a UNetDecoder.
@@ -29,12 +30,16 @@ class UNetDecoder(torch.nn.Module):
             in_channels: list of (downsample factor, num channels) indicating the
                 resolution (1/downsample_factor of input resolution) and number of
                 channels in each feature map of the multi-scale features.
-            out_channels: channels to output at each pixel.
+            out_channels: channels to output at each pixel, or None to skip the output
+                layer.
             conv_layers_per_resolution: number of convolutional layers to apply after
                 each up-sampling operation
             kernel_size: kernel size to use in convolutional layers
             num_channels: override number of output channels to use at different
                 downsample factors.
+            target_resolution_factor: output features at 1/target_resolution_factor
+                relative to the input resolution. The default is 1 which outputs pixel
+                level features.
             original_size_to_interpolate: the original size to interpolate the output to.
         """
         super().__init__()
@@ -58,7 +63,7 @@ class UNetDecoder(torch.nn.Module):
             ]
         )
         channels_by_factor = {factor: channels for factor, channels in in_channels}
-        while cur_factor > 1:
+        while cur_factor > target_resolution_factor:
             # Add upsampling layer.
             cur_layers.append(torch.nn.Upsample(scale_factor=2))
             cur_factor //= 2
@@ -116,14 +121,15 @@ class UNetDecoder(torch.nn.Module):
                     ]
                 )
 
-        cur_layers.append(
-            torch.nn.Conv2d(
-                in_channels=cur_channels,
-                out_channels=out_channels,
-                kernel_size=kernel_size,
-                padding="same",
-            ),
-        )
+        if out_channels is not None:
+            cur_layers.append(
+                torch.nn.Conv2d(
+                    in_channels=cur_channels,
+                    out_channels=out_channels,
+                    kernel_size=kernel_size,
+                    padding="same",
+                ),
+            )
         layers.append(torch.nn.Sequential(*cur_layers))
         self.layers = torch.nn.ModuleList(layers)
         self.original_size_to_interpolate = original_size_to_interpolate
