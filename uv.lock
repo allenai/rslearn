@@ -4234,6 +4234,7 @@ name = "rslearn"
 version = "0.0.6"
 source = { editable = "." }
 dependencies = [
+    { name = "aiobotocore" },
     { name = "boto3" },
     { name = "class-registry" },
     { name = "fiona" },
@@ -4292,7 +4293,8 @@ extra = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", marker = "extra == 'extra'", specifier = ">=1.10" },
-    { name = "boto3", specifier = ">=1.39" },
+    { name = "aiobotocore", specifier = "==2.24.2" },
+    { name = "boto3", specifier = "==1.40.18" },
     { name = "cdsapi", marker = "extra == 'extra'", specifier = ">=0.7.6" },
     { name = "class-registry", specifier = ">=2.1" },
     { name = "earthdaily", extras = ["platform"], marker = "extra == 'extra'", specifier = ">=1.0.7" },
