@@ -27,12 +27,18 @@ logger = get_logger(__name__)
 
 def get_bandset_dirname(bands: list[str]) -> str:
     """Get the directory name that should be used to store the given group of bands."""
+    # We try to use a human-readable name with underscore as the delimiter, but if that
+    # isn't straightforward then we use hash instead.
     if any(["_" in band for band in bands]):
-        raise ValueError("band names must not contain '_'")
+        # In this case we hash the JSON representation of the bands.
+        return hashlib.sha256(json.dumps(bands).encode()).hexdigest()
     dirname = "_".join(bands)
     if len(dirname) > 64:
         # Previously we simply joined the bands, but this can result in directory name
         # that is too long. In this case, now we use hash instead.
+        # We use a different code path here where we hash the initial directory name
+        # instead of the JSON, for historical reasons (to maintain backwards
+        # compatibility).
         dirname = hashlib.sha256(dirname.encode()).hexdigest()
     return dirname
 
