@@ -85,6 +85,7 @@ include = ["rslearn*"]
 
 [tool.setuptools.package-data]
 rslearn = ["py.typed"]
+"rslearn.models.clay.configs" = ["metadata.yaml"]
 
 [tool.ruff]
 fix = true
