@@ -120,12 +120,13 @@ class Presto(nn.Module):
         bs = [x.shape[0] for x in [s1, s2, era5, srtm] if x is not None]
         hs = [x.shape[2] for x in [s1, s2, era5, srtm] if x is not None]
         ws = [x.shape[3] for x in [s1, s2, era5, srtm] if x is not None]
+        devices = [x.device for x in [s1, s2, era5, srtm] if x is not None]
 
-        assert len(bs) > 0
         assert len(set(bs)) == 1
         assert len(set(hs)) == 1
         assert len(set(ws)) == 1
-        b, h, w = bs[0], hs[0], ws[0]
+        assert len(set(devices)) == 1
+        b, h, w, device = bs[0], hs[0], ws[0], devices[0]
 
         # these values will be initialized as
         # we iterate through the data
@@ -154,9 +155,9 @@ class Presto(nn.Module):
 
             data = rearrange(data, "b (t c) h w -> b t h w c", t=m_t)
             if x is None:
-                x = torch.zeros(b, t, h, w, len(INPUT_PRESTO_BANDS))
+                x = torch.zeros(b, t, h, w, len(INPUT_PRESTO_BANDS), device=device)
             if mask is None:
-                mask = torch.ones(b, t, h, w, len(INPUT_PRESTO_BANDS))
+                mask = torch.ones(b, t, h, w, len(INPUT_PRESTO_BANDS), device=device)
 
             # construct a mapping from the input bands to the presto input bands
             input_to_output_mapping = [
@@ -170,15 +171,17 @@ class Presto(nn.Module):
         assert t is not None
 
         if dynamic_world is None:
-            dynamic_world = torch.ones(b, t, h, w) * NUM_DYNAMIC_WORLD_CLASSES
+            dynamic_world = (
+                torch.ones(b, t, h, w, device=device) * NUM_DYNAMIC_WORLD_CLASSES
+            )
 
         if months is None:
-            months = torch.ones((b, t), device=x.device) * self.month
+            months = torch.ones((b, t), device=device) * self.month
         else:
             assert months.shape[-1] == t
 
         if normalize:
-            x = (x + PRESTO_ADD_BY) / PRESTO_DIV_BY
+            x = (x + PRESTO_ADD_BY.to(device=device)) / PRESTO_DIV_BY.to(device=device)
         return x, mask, dynamic_world.long(), months.long()
 
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
