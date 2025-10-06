@@ -92,15 +92,15 @@ class DinoV3(torch.nn.Module):
             List[torch.Tensor]: Single-scale feature tensors from the encoder.
         """
         cur = torch.stack([inp["image"] for inp in inputs], dim=0)  # (B, C, H, W)
+
         if self.use_cls_token:
             features = self.model(cur)
         else:
             features = self.model.forward_features(cur)["x_norm_patchtokens"]
-
-        if not self.use_cls_token:
             batch_size, num_patches, _ = features.shape
             height, width = int(num_patches**0.5), int(num_patches**0.5)
             features = rearrange(features, "b (h w) d -> b d h w", h=height, w=width)
+
         return [features]
 
     def get_backbone_channels(self) -> list:
