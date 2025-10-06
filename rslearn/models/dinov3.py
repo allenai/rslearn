@@ -37,7 +37,8 @@ DINOV3_PTHS: dict[str, str] = {
 class DinoV3(torch.nn.Module):
     """DinoV3 Backbones.
 
-    Must have the pretrained weights downloaded in checkpoint_dir for them to be loaded. See https://github.com/facebookresearch/dinov3?tab=readme-ov-file#pretrained-models
+    Must have the pretrained weights downloaded in checkpoint_dir for them to be loaded.
+    See https://github.com/facebookresearch/dinov3?tab=readme-ov-file#pretrained-models
 
     Only takes RGB as input. Expects normalized data (use the below normalizer).
 
@@ -70,8 +71,8 @@ class DinoV3(torch.nn.Module):
         Args:
             size: the model size, see class for various models.
             use_cls_token: use pooled class token (for classification), otherwise returns spatial feature map.
-            checkpoint_dir: the local path to the pretrained weight dir. If None, we let torch hub use a
-                default cache directory to store the weights.
+            checkpoint_dir: the local path to the pretrained weight dir. If None, we load the architecture
+                only (randomly initialized).
         """
         super().__init__()
         self.size = size
