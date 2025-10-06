@@ -69,10 +69,10 @@ class DinoV3(torch.nn.Module):
         """Instantiate a new DinoV3 instance.
 
         Args:
-            size: the model size, see class for various models.
-            use_cls_token: use pooled class token (for classification), otherwise returns spatial feature map.
             checkpoint_dir: the local path to the pretrained weight dir. If None, we load the architecture
                 only (randomly initialized).
+            size: the model size, see class for various models.
+            use_cls_token: use pooled class token (for classification), otherwise returns spatial feature map.
         """
         super().__init__()
         self.size = size
