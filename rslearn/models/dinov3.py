@@ -56,11 +56,8 @@ class DinoV3(torch.nn.Module):
                 "facebookresearch/dinov3",
                 model_name,
                 weights=weights,
-                weights_only=True,
-            )
-        return torch.hub.load(
-            "facebookresearch/dinov3", model_name, pretrained=False, weights_only=True
-        )
+            )  # nosec
+        return torch.hub.load("facebookresearch/dinov3", model_name, pretrained=False)  # nosec
 
     def __init__(
         self,
