@@ -24,7 +24,7 @@ dependencies = [
     "torch>=2.7.0",
     "torchvision>=0.22.0",
     "tqdm>=4.67",
-    "universal_pathlib>=0.2.6",
+    "universal_pathlib>=0.2.6", "fsspec" # https://github.com/fsspec/universal_pathlib?tab=readme-ov-file#adding-universal_pathlib-to-your-project
 ]
 
 [project.optional-dependencies]
@@ -35,6 +35,7 @@ extra = [
     "earthdaily[platform]>=1.0.7",
     "earthengine-api>=1.6.3",
     "einops>=0.8",
+    "fsspec[gcs, s3fs,", # https://github.com/fsspec/universal_pathlib?tab=readme-ov-file#adding-universal_pathlib-to-your-project
     "gcsfs>=2025.9.0",
     "google-cloud-bigquery>=3.35",
     "google-cloud-storage>=2.18",
