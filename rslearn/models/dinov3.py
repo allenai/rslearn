@@ -44,7 +44,6 @@ class DinoV3(torch.nn.Module):
     Uses patch size 16.
     """
 
-    modalities: list[str] = ["rgb", "s2", "landsat"]
     image_size: int = 256
     patch_size: int = 16
     output_dim: int = 1024
@@ -86,33 +85,23 @@ class DinoV3(torch.nn.Module):
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Forward pass for the dinov3 model.
 
-        Features from modalities are pooled together (mean).
-
         Args:
-            inputs: input dicts that must include modalities as keys which are defined in the self.modalities list
+            inputs: input dicts that must include "image" key.
 
         Returns:
             List[torch.Tensor]: Single-scale feature tensors from the encoder.
         """
-        output_features = []
-        for modality in self.modalities:
-            if modality not in inputs[0]:
-                continue
-            cur = torch.stack([inp[modality] for inp in inputs], dim=0)  # (B, C, H, W)
-            if self.use_cls_token:
-                features = self.model(cur)
-            else:
-                features = self.model.forward_features(cur)["x_norm_patchtokens"]
-            output_features.append(features)
-        avg_features = torch.stack(output_features, dim=0).mean(dim=0)
+        cur = torch.stack([inp["image"] for inp in inputs], dim=0)  # (B, C, H, W)
+        if self.use_cls_token:
+            features = self.model(cur)
+        else:
+            features = self.model.forward_features(cur)["x_norm_patchtokens"]
+
         if not self.use_cls_token:
-            print(avg_features.shape)
-            batch_size, num_patches, _ = avg_features.shape
+            batch_size, num_patches, _ = features.shape
             height, width = int(num_patches**0.5), int(num_patches**0.5)
-            avg_features = rearrange(
-                avg_features, "b (h w) d -> b d h w", h=height, w=width
-            )
-        return [avg_features]
+            features = rearrange(features, "b (h w) d -> b d h w", h=height, w=width)
+        return [features]
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.
@@ -128,11 +117,9 @@ class DinoV3(torch.nn.Module):
 class DinoV3Normalize(Transform):
     """Normalize inputs using DinoV3 normalization.
 
-    All input normalized to [0-1], then normalized according to Dino statistics from pretraining. Satellite pretraining has slightly different normalizing than the base image model so set 'satellite' depending on what pretrained model you are using.
+    Normalize "image" key in input according to Dino statistics from pretraining. Satellite pretraining has slightly different normalizing than the base image model so set 'satellite' depending on what pretrained model you are using.
 
-    s2: expected to be [0-2500]
-    landsat: expected to be [5000 - 17000]
-    rgb: expected to be [0-255]
+    Input "image" should be RGB-like image between 0-255.
     """
 
     def __init__(self, satellite: bool = True):
@@ -162,16 +149,5 @@ class DinoV3Normalize(Transform):
         Returns:
             normalized (input_dicts, target_dicts) tuple
         """
-        for modality in DinoV3.modalities:
-            if modality not in input_dict:
-                continue
-            if modality == "s2":
-                input_dict[modality] = input_dict[modality] / 2500.0
-            elif modality == "rgb":
-                input_dict[modality] = input_dict[modality] / 255.0
-            elif modality == "landsat":
-                input_dict[modality] = (input_dict[modality] - 5000.0) / 12000.0
-            else:
-                raise ValueError(f"No normalization for modality {modality}")
-            input_dict[modality] = self.normalize(input_dict[modality])
+        input_dict["image"] = self.normalize(input_dict["image"] / 255.0)
         return input_dict, target_dict

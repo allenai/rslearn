@@ -17,16 +17,7 @@ def test_dinov3() -> None:
 
     inputs = [
         {
-            "s2": torch.zeros(
-                (
-                    3,
-                    input_hw,
-                    input_hw,
-                ),
-                dtype=torch.float32,
-                device=DEVICE,
-            ),
-            "landsat": torch.zeros(
+            "image": torch.zeros(
                 (
                     3,
                     input_hw,
