@@ -37,7 +37,7 @@ DINOV3_PTHS: dict[str, str] = {
 class DinoV3(torch.nn.Module):
     """DinoV3 Backbones.
 
-    Must have the pretrained weights downloaded in checkpoint_dir for them to be loaded.
+    Must have the pretrained weights downloaded in checkpoint_dir for them to be loaded. See https://github.com/facebookresearch/dinov3?tab=readme-ov-file#pretrained-models
 
     Only takes RGB as input. Expects normalized data (use the below normalizer).
 
@@ -54,9 +54,14 @@ class DinoV3(torch.nn.Module):
         if checkpoint_dir is not None:
             weights = str(Path(checkpoint_dir) / DINOV3_PTHS[size])
             return torch.hub.load(
-                "facebookresearch/dinov3", model_name, weights=weights, weights_only=True
+                "facebookresearch/dinov3",
+                model_name,
+                weights=weights,
+                weights_only=True,
             )
-        return torch.hub.load("facebookresearch/dinov3", model_name, pretrained=False)
+        return torch.hub.load(
+            "facebookresearch/dinov3", model_name, pretrained=False, weights_only=True
+        )
 
     def __init__(
         self,
