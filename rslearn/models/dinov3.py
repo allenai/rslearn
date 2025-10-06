@@ -63,15 +63,15 @@ class DinoV3(torch.nn.Module):
         self,
         size: str = DinoV3Models.LARGE_SATELLITE,
         use_cls_token: bool = False,
-        checkpoint_dir: str
-        | None = "/weka/dfive-default/helios/models/dinov3/checkpoints/",
+        checkpoint_dir: str | None = None,
     ) -> None:
         """Instantiate a new DinoV3 instance.
 
         Args:
             size: the model size, see class for various models.
             use_cls_token: use pooled class token (for classification), otherwise returns spatial feature map.
-            checkpoint_dir: the local path to the pretrained weight dir.
+            checkpoint_dir: the local path to the pretrained weight dir. If None, we let torch hub use a
+                default cache directory to store the weights.
         """
         super().__init__()
         self.size = size
