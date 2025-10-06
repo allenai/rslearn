@@ -12,9 +12,7 @@ dependencies = [
     "boto3>=1.39",
     "class_registry>=2.1",
     "fiona>=1.10",
-    # Need this pin since 2025.7.0 has slow performance for exists/ls operations, see
-    # this issue: https://github.com/fsspec/gcsfs/issues/696
-    "fsspec==2025.3.0",
+    "fsspec>=2025.9.0",
     "jsonargparse>=4.35.0",
     "lightning>=2.5.1.post0",
     "Pillow>=11.3",
@@ -37,9 +35,10 @@ extra = [
     "earthdaily[platform]>=1.0.7",
     "earthengine-api>=1.6.3",
     "einops>=0.8",
-    "gcsfs==2025.3.0",
+    "gcsfs>=2025.9.0",
     "google-cloud-bigquery>=3.35",
     "google-cloud-storage>=2.18",
+    "huggingface_hub>=0.34.4",
     "netCDF4>=1.7.2",
     "osmium>=4.0.2",
     "planet>=3.1",
@@ -47,7 +46,7 @@ extra = [
     "pycocotools>=2.0",
     "pystac_client>=0.9",
     "rtree>=1.4",
-    "s3fs==2025.3.0",
+    "s3fs>=2025.9.0",
     "satlaspretrain_models>=0.3",
     "scipy>=1.16",
     "terratorch>=1.0.2",
@@ -85,6 +84,7 @@ include = ["rslearn*"]
 [tool.setuptools.package-data]
 rslearn = ["py.typed"]
 "rslearn.models.clay.configs" = ["metadata.yaml"]
+"rslearn.models.panopticon_data.sensors" = ["*.yaml"]
 
 [tool.ruff]
 fix = true
