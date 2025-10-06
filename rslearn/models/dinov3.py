@@ -38,7 +38,7 @@ class DinoV3(torch.nn.Module):
         model_name = size.replace("_sat", "")
         if checkpoint_dir is not None:
             weights=Path(checkpoint_dir) / DINOV3_PTHS[model_name]
-            return torch.hub.load("facebookresearch/dinov3", model_name, weights=weights)
+            return torch.hub.load("facebookresearch/dinov3", model_name, weights=weights, weights_only=True)
         return torch.hub.load("facebookresearch/dinov3", model_name, pretrained=False)
             
     def __init__(
