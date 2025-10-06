@@ -163,7 +163,10 @@ class Clay(torch.nn.Module):
 
 
 class ClayNormalize(Transform):
-    """Normalize inputs using Clay metadata."""
+    """Normalize inputs using Clay metadata.
+
+    For Sentinel-1, the intensities should be converted to decibels.
+    """
 
     def __init__(self, metadata_path: str = CLAY_METADATA_PATH) -> None:
         """Initialize ClayNormalize."""
