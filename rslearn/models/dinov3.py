@@ -62,9 +62,9 @@ class DinoV3(torch.nn.Module):
 
     def __init__(
         self,
+        checkpoint_dir: str | None,
         size: str = DinoV3Models.LARGE_SATELLITE,
         use_cls_token: bool = False,
-        checkpoint_dir: str | None = None,
     ) -> None:
         """Instantiate a new DinoV3 instance.
 
