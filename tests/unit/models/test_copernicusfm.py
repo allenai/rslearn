@@ -52,7 +52,7 @@ def test_copernicusfm() -> None:
             ),
         }
     ]
-    copernicusfm = CopernicusFM(band_order=band_order, load_directory=None).to(DEVICE)
+    copernicusfm = CopernicusFM(band_order=band_order, cache_dir=None).to(DEVICE)
     with torch.no_grad():
         feature_list = copernicusfm(inputs)
     assert (

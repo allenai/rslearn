@@ -1,57 +1,64 @@
 """Prithvi V2."""
 
+import json
 import logging
 import tempfile
 import warnings
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import torch
 import torch.nn as nn
-import yaml
 from einops import rearrange
 from huggingface_hub import hf_hub_download
 from timm.layers import to_2tuple
 from timm.models.vision_transformer import Block
 from torch.nn import functional as F
-from upath import UPath
+
+from rslearn.train.transforms.normalize import Normalize
+from rslearn.train.transforms.transform import Transform
 
 logger = logging.getLogger(__name__)
 
 
-# for Prithvi, true values are ["B02", "B03", "B04", "B05", "B06", "B07"]
-PRITHVI_MEAN = [
-    1087.0,
-    1342.0,
-    1433.0,
-    2734.0,
-    1958.0,
-    1363.0,
-]
-PRITHVI_STD = [
-    2248.0,
-    2179.0,
-    2178.0,
-    1850.0,
-    1242.0,
-    1049.0,
-]
-
-
 HF_HUB_ID = "ibm-nasa-geospatial/Prithvi-EO-2.0-300M"
+HF_HUB_REVISION = "b2f2520ab889f42a25c5361ba18761fcb4ea44ad"
+HF_HUB_CONFIG_FNAME = "config.json"
+HF_HUB_CHECKPOINT_FNAME = "Prithvi_EO_V2_300M.pt"
+DEFAULT_CACHE_DIR = Path(tempfile.gettempdir(), "rslearn_cache", "prithvi_v2")
+
+
+def get_config(cache_dir: Path) -> dict[str, Any]:
+    """Get the JSON config dict.
+
+    Args:
+        cache_dir: the directory to cache the config.json file, which will be
+            downloaded from HF Hub.
+    """
+    cache_fname = cache_dir / HF_HUB_CONFIG_FNAME
+    if not cache_fname.exists():
+        _ = hf_hub_download(
+            local_dir=cache_dir,
+            repo_id=HF_HUB_ID,
+            filename=HF_HUB_CONFIG_FNAME,
+            revision=HF_HUB_REVISION,
+        )  # nosec
+    with cache_fname.open() as f:
+        return json.load(f)["pretrained_cfg"]
 
 
 class PrithviV2(nn.Module):
     """An Rslearn wrapper for Prithvi 2.0."""
 
-    input_keys = ["sentinel2"]
+    INPUT_KEY = "image"
 
-    def __init__(self, pretrained_path: str | UPath | None = None, num_frames: int = 1):
-        """Init.
+    def __init__(self, cache_dir: str | Path | None = None, num_frames: int = 1):
+        """Create a new PrithviV2.
 
-        Inputs:
-            pretrained_path: The folder in which to download the prithvi config
-                and weights. If None, it downloads to a temporary folder.
+        Args:
+            cache_dir: The local folder in which to download the prithvi config and
+                weights. If None, it downloads to a temporary folder.
             num_frames: The number of input frames (timesteps). The model was trained on 3,
                 but if there is just one timestamp examples use 1 (e.g.
                 https://github.com/NASA-IMPACT/Prithvi-EO-2.0/blob/main/examples/
@@ -59,35 +66,24 @@ class PrithviV2(nn.Module):
 
         """
         super().__init__()
-        if pretrained_path is None:
-            pretrained_path = UPath(
-                tempfile.gettempdir(), "rslearn_cache", "prithvi_v2"
-            )
+        if cache_dir is None:
+            cache_dir = DEFAULT_CACHE_DIR
+        cache_dir = Path(cache_dir)
 
-        if not (UPath(pretrained_path) / "config.json").exists():
-            _ = hf_hub_download(
-                local_dir=pretrained_path,
-                repo_id=HF_HUB_ID,
-                filename="config.json",
-                revision="b2f2520ab889f42a25c5361ba18761fcb4ea44ad",
-            )
-        with (UPath(pretrained_path) / "config.json").open("r") as f:
-            config = yaml.safe_load(f)["pretrained_cfg"]
-
+        config = get_config(cache_dir)
         config["num_frames"] = num_frames
-
         self.model = PrithviMAE(**config)
 
-        if not (UPath(pretrained_path) / "Prithvi_EO_V2_300M.pt").exists():
+        if not (cache_dir / HF_HUB_CHECKPOINT_FNAME).exists():
             _ = hf_hub_download(
-                local_dir=pretrained_path,
+                local_dir=cache_dir,
                 repo_id=HF_HUB_ID,
-                filename="Prithvi_EO_V2_300M.pt",
-                revision="b2f2520ab889f42a25c5361ba18761fcb4ea44ad",
-            )
+                filename=HF_HUB_CHECKPOINT_FNAME,
+                revision=HF_HUB_REVISION,
+            )  # nosec
 
         state_dict = torch.load(
-            UPath(pretrained_path) / "Prithvi_EO_V2_300M.pt",
+            cache_dir / HF_HUB_CHECKPOINT_FNAME,
             map_location="cpu",
             weights_only=True,
         )
@@ -125,16 +121,15 @@ class PrithviV2(nn.Module):
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Compute feature maps from the Prithvi V2 backbone.
 
-        Inputs:
-            inputs: input dicts that must include "sentinel2"
-            keys depending. Prithvi is designed for HLS (Harmonized Landsat-Sentinel);
-            this naming keeps the model consistent with other rslearn models.
+        Args:
+            inputs: input dicts that must include "image" key containing HLS
+                (Harmonized Landsat-Sentinel) data.
 
         Returns:
             11 feature maps (one per transformer block in the Prithvi model),
             of shape [B, H/p_s, W/p_s, D=1024] where p_s=16 is the patch size.
         """
-        x = torch.stack([inp["sentinel2"] for inp in inputs], dim=0)
+        x = torch.stack([inp[self.INPUT_KEY] for inp in inputs], dim=0)
         x = self._resize_data(x)
         num_timesteps = x.shape[1] // len(self.bands)
         x = rearrange(x, "b (t c) h w -> b c t h w", t=num_timesteps)
@@ -146,6 +141,47 @@ class PrithviV2(nn.Module):
         return self.model.encoder.prepare_features_for_image_model(
             features, num_timesteps
         )
+
+
+class PrithviNormalize(Transform):
+    """Normalize inputs using Prithvi normalization.
+
+    Similar to the model, the input should be an image time series under the key
+    "image".
+    """
+
+    def __init__(self, cache_dir: str | Path | None = None) -> None:
+        """Initialize a new PrithviNormalize.
+
+        Args:
+            cache_dir: the local directory to cache the config.json which contains the
+                means and standard deviations used in the normalization.
+        """
+        super().__init__()
+        if cache_dir is None:
+            cache_dir = DEFAULT_CACHE_DIR
+        cache_dir = Path(cache_dir)
+        config = get_config(cache_dir)
+        self.normalizer = Normalize(
+            mean=config["mean"],
+            std=config["std"],
+            num_bands=len(config["mean"]),
+            selectors=[PrithviV2.INPUT_KEY],
+        )
+
+    def forward(
+        self, input_dict: dict[str, Any], target_dict: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Apply Prithvi normalization on the image.
+
+        Args:
+            input_dict: the input, which must contain the "image" key.
+            target_dict: the target
+
+        Returns:
+            normalized (input_dicts, target_dicts) tuple
+        """
+        return self.normalizer(input_dict, target_dict)
 
 
 # Copyright (c) IBM Corp. 2024. All rights reserved.

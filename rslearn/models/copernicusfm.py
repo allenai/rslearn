@@ -3,11 +3,12 @@
 import logging
 import math
 from enum import Enum
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
 from einops import rearrange
-from upath import UPath
+from huggingface_hub import hf_hub_download
 
 from .copernicusfm_src.model_vit import vit_base_patch16
 
@@ -64,6 +65,10 @@ MODALITY_TO_WAVELENGTH_BANDWIDTHS: dict[str, dict[str, list]] = {
     },
 }
 
+HF_REPO_ID = "wangyi111/Copernicus-FM"
+HF_REPO_REVISION = "e1db406d517a122c8373802e1c130c5fc4789f84"
+HF_FILENAME = "CopernicusFM_ViT_base_varlang_e100.pth"
+
 
 class CopernicusFM(torch.nn.Module):
     """Wrapper for Copernicus FM to ingest Masked Helios Sample."""
@@ -80,44 +85,51 @@ class CopernicusFM(torch.nn.Module):
     def __init__(
         self,
         band_order: dict[str, list[str]],
-        load_directory: str | None,
+        cache_dir: str | Path | None = None,
     ) -> None:
         """Initialize the Copernicus FM wrapper.
 
         Args:
-            band_order: The band order for each modality
-            load_directory: The directory to load from, if None no weights are loaded
+            band_order: The band order for each modality that will be used. The bands
+                can be provided in any order, and any subset can be used.
+            cache_dir: The directory to cache the weights. If None, a default directory
+                managed by huggingface_hub is used. The weights are downloaded from
+                Hugging Face (https://huggingface.co/wangyi111/Copernicus-FM).
         """
         super().__init__()
 
-        # global_pool=True so that we initialize the fc_norm layer
-        self.band_order = band_order
-        self.model = vit_base_patch16(num_classes=10, global_pool=True)
-        if load_directory is not None:
-            check_point = torch.load(
-                UPath(load_directory) / "CopernicusFM_ViT_base_varlang_e100.pth",
-                weights_only=True,
+        # Make sure all keys in band_order are in supported_modalities.
+        for modality_name in band_order.keys():
+            if modality_name in self.supported_modalities:
+                continue
+            raise ValueError(
+                f"band_order contains unsupported modality {modality_name}"
             )
-            if "model" in check_point:
-                state_dict = check_point["model"]
-            else:
-                state_dict = check_point
-            self.model.load_state_dict(state_dict, strict=False)
 
-        # take MODALITY_TO_WAVELENGTH_BANDWIDTHS and rearrage it so that it has the same
-        # ordering as the Helios band orders, defined by Modality.band_order
+        # global_pool=True so that we initialize the fc_norm layer
+        self.model = vit_base_patch16(num_classes=10, global_pool=True)
+
+        # Load weights, downloading if needed.
+        local_fname = hf_hub_download(
+            repo_id=HF_REPO_ID,
+            revision=HF_REPO_REVISION,
+            filename=HF_FILENAME,
+            local_dir=cache_dir,
+        )  # nosec
+        state_dict = torch.load(local_fname, weights_only=True)
+        self.model.load_state_dict(state_dict, strict=False)
+
+        # take MODALITY_TO_WAVELENGTH_BANDWIDTHS and rearrange it so that it has the same
+        # ordering as the user-provided band order.
         self.modality_to_wavelength_bandwidths = {}
         for modality in self.supported_modalities:
+            if modality not in band_order:
+                continue
+
             wavelength_bandwidths = MODALITY_TO_WAVELENGTH_BANDWIDTHS[modality]
             wavelengths = []
             bandwidths = []
-            modality_band_order = self.band_order.get(modality, None)
-            if modality_band_order is None:
-                logger.warning(
-                    f"Band order for modality {modality} not found in band_order dictionary, unable to use this modality unless specified"
-                )
-                continue
-            for b in modality_band_order:
+            for b in band_order[modality]:
                 cfm_idx = wavelength_bandwidths["band_names"].index(b)
                 wavelengths.append(wavelength_bandwidths["band_wavelengths"][cfm_idx])
                 bandwidths.append(wavelength_bandwidths["band_bandwidths"][cfm_idx])
