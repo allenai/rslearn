@@ -12,7 +12,7 @@ def test_prithvi(tmp_path: pathlib.Path) -> None:
 
     inputs = [
         {
-            "sentinel2": torch.zeros(
+            "image": torch.zeros(
                 (len(prithvi.bands), input_hw, input_hw), dtype=torch.float32
             ),
         }
@@ -34,7 +34,7 @@ def test_prithvi_mt(tmp_path: pathlib.Path) -> None:
 
     inputs = [
         {
-            "sentinel2": torch.zeros(
+            "image": torch.zeros(
                 (len(prithvi.bands) * num_timesteps, input_hw, input_hw),
                 dtype=torch.float32,
             ),
