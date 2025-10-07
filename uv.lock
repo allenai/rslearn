@@ -1122,8 +1122,14 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+gcs = [
+    { name = "gcsfs" },
+]
 http = [
     { name = "aiohttp" },
+]
+s3 = [
+    { name = "s3fs" },
 ]
 
 [[package]]
@@ -4269,7 +4275,7 @@ extra = [
     { name = "earthdaily", extra = ["platform"] },
     { name = "earthengine-api" },
     { name = "einops" },
-    { name = "gcsfs" },
+    { name = "fsspec", extra = ["gcs", "s3"] },
     { name = "google-cloud-bigquery" },
     { name = "google-cloud-storage" },
     { name = "huggingface-hub" },
@@ -4280,7 +4286,6 @@ extra = [
     { name = "pycocotools" },
     { name = "pystac-client" },
     { name = "rtree" },
-    { name = "s3fs" },
     { name = "satlaspretrain-models" },
     { name = "scipy" },
     { name = "terratorch" },
@@ -4300,7 +4305,7 @@ requires-dist = [
     { name = "einops", marker = "extra == 'extra'", specifier = ">=0.8" },
     { name = "fiona", specifier = ">=1.10" },
     { name = "fsspec", specifier = ">=2025.9.0" },
-    { name = "gcsfs", marker = "extra == 'extra'", specifier = ">=2025.9.0" },
+    { name = "fsspec", extras = ["gcs", "s3"], marker = "extra == 'extra'" },
     { name = "google-cloud-bigquery", marker = "extra == 'extra'", specifier = ">=3.35" },
     { name = "google-cloud-storage", marker = "extra == 'extra'", specifier = ">=2.18" },
     { name = "huggingface-hub", marker = "extra == 'extra'", specifier = ">=0.34.4" },
@@ -4326,7 +4331,6 @@ requires-dist = [
     { name = "rasterio", specifier = ">=1.4" },
     { name = "rtree", marker = "extra == 'extra'", specifier = ">=1.4" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.9" },
-    { name = "s3fs", marker = "extra == 'extra'", specifier = ">=2025.9.0" },
     { name = "satlaspretrain-models", marker = "extra == 'extra'", specifier = ">=0.3" },
     { name = "scipy", marker = "extra == 'extra'", specifier = ">=1.16" },
     { name = "shapely", specifier = ">=2.1" },
