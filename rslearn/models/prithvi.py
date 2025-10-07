@@ -16,6 +16,7 @@ from timm.layers import to_2tuple
 from timm.models.vision_transformer import Block
 from torch.nn import functional as F
 
+from rslearn.train.transforms.normalize import Normalize
 from rslearn.train.transforms.transform import Transform
 
 logger = logging.getLogger(__name__)
@@ -149,7 +150,7 @@ class PrithviNormalize(Transform):
     "image".
     """
 
-    def __init__(self, cache_dir: str | Path | None) -> None:
+    def __init__(self, cache_dir: str | Path | None = None) -> None:
         """Initialize a new PrithviNormalize.
 
         Args:
@@ -161,8 +162,12 @@ class PrithviNormalize(Transform):
             cache_dir = DEFAULT_CACHE_DIR
         cache_dir = Path(cache_dir)
         config = get_config(cache_dir)
-        self.means = torch.tensor(config["mean"])
-        self.stds = torch.tensor(config["std"])
+        self.normalizer = Normalize(
+            mean=config["mean"],
+            std=config["std"],
+            num_bands=len(config["mean"]),
+            selectors=[PrithviV2.INPUT_KEY],
+        )
 
     def forward(
         self, input_dict: dict[str, Any], target_dict: dict[str, Any]
@@ -176,14 +181,7 @@ class PrithviNormalize(Transform):
         Returns:
             normalized (input_dicts, target_dicts) tuple
         """
-        image = input_dict[PrithviV2.INPUT_KEY]
-        if image.shape[0] != self.means.shape[0]:
-            raise ValueError(
-                f"image has shape {image.shape[0]} but expected {self.means.shape[0]} channels"
-            )
-        image = (image - self.means[:, None, None]) / self.stds[:, None, None]
-        input_dict[PrithviV2.INPUT_KEY] = image
-        return input_dict, target_dict
+        return self.normalizer(input_dict, target_dict)
 
 
 # Copyright (c) IBM Corp. 2024. All rights reserved.
