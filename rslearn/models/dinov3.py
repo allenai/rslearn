@@ -43,7 +43,9 @@ class DinoV3(torch.nn.Module):
 
     Only takes RGB as input. Expects normalized data (use the below normalizer).
 
-    Uses patch size 16.
+    Uses patch size 16. The input is resized to 256x256; when applying DinoV3 on
+    segmentation or detection tasks with inputs larger than 256x256, it may be best to
+    train and predict on 256x256 crops (using SplitConfig.patch_size argument).
     """
 
     image_size: int = 256
