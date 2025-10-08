@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+import torchvision
 from einops import rearrange
 from torchvision.transforms import v2
 
@@ -42,7 +43,9 @@ class DinoV3(torch.nn.Module):
 
     Only takes RGB as input. Expects normalized data (use the below normalizer).
 
-    Uses patch size 16.
+    Uses patch size 16. The input is resized to 256x256; when applying DinoV3 on
+    segmentation or detection tasks with inputs larger than 256x256, it may be best to
+    train and predict on 256x256 crops (using SplitConfig.patch_size argument).
     """
 
     image_size: int = 256
@@ -65,6 +68,7 @@ class DinoV3(torch.nn.Module):
         checkpoint_dir: str | None,
         size: str = DinoV3Models.LARGE_SATELLITE,
         use_cls_token: bool = False,
+        do_resizing: bool = True,
     ) -> None:
         """Instantiate a new DinoV3 instance.
 
@@ -73,11 +77,13 @@ class DinoV3(torch.nn.Module):
                 only (randomly initialized).
             size: the model size, see class for various models.
             use_cls_token: use pooled class token (for classification), otherwise returns spatial feature map.
+            do_resizing: whether to resize inputs to 256x256. Default true.
         """
         super().__init__()
         self.size = size
         self.checkpoint_dir = checkpoint_dir
         self.use_cls_token = use_cls_token
+        self.do_resizing = do_resizing
         self.model = self._load_model(size, checkpoint_dir)
 
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
@@ -90,6 +96,14 @@ class DinoV3(torch.nn.Module):
             List[torch.Tensor]: Single-scale feature tensors from the encoder.
         """
         cur = torch.stack([inp["image"] for inp in inputs], dim=0)  # (B, C, H, W)
+
+        if self.do_resizing and (
+            cur.shape[2] != self.image_size or cur.shape[3] != self.image_size
+        ):
+            cur = torchvision.transforms.functional.resize(
+                cur,
+                [self.image_size, self.image_size],
+            )
 
         if self.use_cls_token:
             features = self.model(cur)
