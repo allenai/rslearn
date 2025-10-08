@@ -7,8 +7,8 @@ from typing import Any
 import torch
 import torchvision
 from einops import rearrange
-from torchvision.transforms import v2
 
+from rslearn.train.transforms.normalize import Normalize
 from rslearn.train.transforms.transform import Transform
 
 
@@ -139,15 +139,17 @@ class DinoV3Normalize(Transform):
         super().__init__()
         self.satellite = satellite
         if satellite:
-            self.normalize = v2.Normalize(
-                mean=(0.430, 0.411, 0.296),
-                std=(0.213, 0.156, 0.143),
-            )
+            mean = [0.430, 0.411, 0.296]
+            std = [0.213, 0.156, 0.143]
         else:
-            self.normalize = v2.Normalize(
-                mean=(0.485, 0.456, 0.406),
-                std=(0.229, 0.224, 0.225),
-            )
+            mean = [0.485, 0.456, 0.406]
+            std = [0.229, 0.224, 0.225]
+
+        self.normalize = Normalize(
+            [value * 255 for value in mean],
+            [value * 255 for value in std],
+            num_bands=3,
+        )
 
     def forward(
         self, input_dict: dict[str, Any], target_dict: dict[str, Any]
@@ -161,5 +163,4 @@ class DinoV3Normalize(Transform):
         Returns:
             normalized (input_dicts, target_dicts) tuple
         """
-        input_dict["image"] = self.normalize(input_dict["image"] / 255.0)
-        return input_dict, target_dict
+        return self.normalize(input_dict, target_dict)

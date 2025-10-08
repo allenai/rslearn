@@ -128,6 +128,7 @@ class GalileoModel(nn.Module):
             idx for idx, key in enumerate(SPACE_TIME_BANDS_GROUPS_IDX) if "S1" in key
         ]
 
+        self.size = size
         self.patch_size = patch_size
 
     @staticmethod
@@ -515,3 +516,22 @@ class GalileoModel(nn.Module):
                     "b h w c_g d -> b c_g d h w",
                 ).mean(dim=1)
             ]
+
+    def get_backbone_channels(self) -> list:
+        """Returns the output channels of this model when used as a backbone.
+
+        The output channels is a list of (patch_size, depth) that corresponds
+        to the feature maps that the backbone returns.
+
+        Returns:
+            the output channels of the backbone as a list of (patch_size, depth) tuples.
+        """
+        if self.size == GalileoSize.BASE:
+            depth = 768
+        elif self.model_size == GalileoSize.TINY:
+            depth = 192
+        elif self.model_size == GalileoSize.NANO:
+            depth = 128
+        else:
+            raise ValueError(f"Invalid model size: {self.size}")
+        return [(self.patch_size, depth)]
