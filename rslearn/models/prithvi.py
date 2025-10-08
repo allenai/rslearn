@@ -4,6 +4,7 @@ import json
 import logging
 import tempfile
 import warnings
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -22,27 +23,47 @@ from rslearn.train.transforms.transform import Transform
 logger = logging.getLogger(__name__)
 
 
-HF_HUB_ID = "ibm-nasa-geospatial/Prithvi-EO-2.0-300M"
-HF_HUB_REVISION = "b2f2520ab889f42a25c5361ba18761fcb4ea44ad"
+class PrithviV2Models(StrEnum):
+    """Names for different Prithvi models on torch hub."""
+
+    VIT_300 = "Prithvi-EO-2.0-300M"
+    VIT_600 = "Prithvi-EO-2.0-600M"
+
+
+MODEL_TO_HF_INFO = {
+    PrithviV2Models.VIT_300: {
+        "hf_hub_id": f"ibm-nasa-geospatial/{PrithviV2Models.VIT_300.value}",
+        "weights": "Prithvi_EO_V2_300M.pt",
+        "revision": "b2f2520ab889f42a25c5361ba18761fcb4ea44ad",
+    },
+    PrithviV2Models.VIT_600: {
+        "hf_hub_id": f"ibm-nasa-geospatial/{PrithviV2Models.VIT_600.value}",
+        "weights": "Prithvi_EO_V2_600M.pt",
+        "revision": "87f15784813828dc37aa3197a143cd4689e4d080",
+    },
+}
+
+
 HF_HUB_CONFIG_FNAME = "config.json"
-HF_HUB_CHECKPOINT_FNAME = "Prithvi_EO_V2_300M.pt"
 DEFAULT_CACHE_DIR = Path(tempfile.gettempdir(), "rslearn_cache", "prithvi_v2")
 
 
-def get_config(cache_dir: Path) -> dict[str, Any]:
+def get_config(cache_dir: Path, hf_hub_id: str, hf_hub_revision: str) -> dict[str, Any]:
     """Get the JSON config dict.
 
     Args:
         cache_dir: the directory to cache the config.json file, which will be
             downloaded from HF Hub.
+        hf_hub_id: the HF Hub ID from which to download the config.
+        hf_hub_revision: The revision (commit) to download the config from.
     """
     cache_fname = cache_dir / HF_HUB_CONFIG_FNAME
     if not cache_fname.exists():
         _ = hf_hub_download(
             local_dir=cache_dir,
-            repo_id=HF_HUB_ID,
+            repo_id=hf_hub_id,
             filename=HF_HUB_CONFIG_FNAME,
-            revision=HF_HUB_REVISION,
+            revision=hf_hub_revision,
         )  # nosec
     with cache_fname.open() as f:
         return json.load(f)["pretrained_cfg"]
@@ -53,12 +74,18 @@ class PrithviV2(nn.Module):
 
     INPUT_KEY = "image"
 
-    def __init__(self, cache_dir: str | Path | None = None, num_frames: int = 1):
+    def __init__(
+        self,
+        cache_dir: str | Path | None = None,
+        size: PrithviV2Models = PrithviV2Models.VIT_300,
+        num_frames: int = 1,
+    ):
         """Create a new PrithviV2.
 
         Args:
             cache_dir: The local folder in which to download the prithvi config and
                 weights. If None, it downloads to a temporary folder.
+            size: the model size, see class for various models.
             num_frames: The number of input frames (timesteps). The model was trained on 3,
                 but if there is just one timestamp examples use 1 (e.g.
                 https://github.com/NASA-IMPACT/Prithvi-EO-2.0/blob/main/examples/
@@ -70,20 +97,24 @@ class PrithviV2(nn.Module):
             cache_dir = DEFAULT_CACHE_DIR
         cache_dir = Path(cache_dir)
 
-        config = get_config(cache_dir)
+        hub_id = MODEL_TO_HF_INFO[size]["hf_hub_id"]
+        revision = MODEL_TO_HF_INFO[size]["revision"]
+        checkpoint_fname = MODEL_TO_HF_INFO[size]["weights"]
+
+        config = get_config(cache_dir, hub_id, revision)
         config["num_frames"] = num_frames
         self.model = PrithviMAE(**config)
 
-        if not (cache_dir / HF_HUB_CHECKPOINT_FNAME).exists():
+        if not (cache_dir / checkpoint_fname).exists():
             _ = hf_hub_download(
                 local_dir=cache_dir,
-                repo_id=HF_HUB_ID,
-                filename=HF_HUB_CHECKPOINT_FNAME,
-                revision=HF_HUB_REVISION,
+                repo_id=hub_id,
+                filename=checkpoint_fname,
+                revision=revision,
             )  # nosec
 
         state_dict = torch.load(
-            cache_dir / HF_HUB_CHECKPOINT_FNAME,
+            cache_dir / checkpoint_fname,
             map_location="cpu",
             weights_only=True,
         )
@@ -150,18 +181,27 @@ class PrithviNormalize(Transform):
     "image".
     """
 
-    def __init__(self, cache_dir: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        cache_dir: str | Path | None = None,
+        size: PrithviV2Models = PrithviV2Models.VIT_300,
+    ) -> None:
         """Initialize a new PrithviNormalize.
 
         Args:
             cache_dir: the local directory to cache the config.json which contains the
                 means and standard deviations used in the normalization.
+            size: the model size, see class for various models. In this case (and
+                for the current hf revision), the config values (mean and std) are the
+                same for both the 300M and 600M model, so its safe to not set this.
         """
         super().__init__()
+        hub_id = MODEL_TO_HF_INFO[size]["hf_hub_id"]
+        revision = MODEL_TO_HF_INFO[size]["revision"]
         if cache_dir is None:
             cache_dir = DEFAULT_CACHE_DIR
         cache_dir = Path(cache_dir)
-        config = get_config(cache_dir)
+        config = get_config(cache_dir, hub_id, revision)
         self.normalizer = Normalize(
             mean=config["mean"],
             std=config["std"],
