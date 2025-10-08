@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+import torchvision
 from einops import rearrange
 from torchvision.transforms import v2
 
@@ -90,6 +91,12 @@ class DinoV3(torch.nn.Module):
             List[torch.Tensor]: Single-scale feature tensors from the encoder.
         """
         cur = torch.stack([inp["image"] for inp in inputs], dim=0)  # (B, C, H, W)
+
+        if cur.shape[2] != self.image_size or cur.shape[3] != self.image_size:
+            cur = torchvision.transforms.functional.resize(
+                cur,
+                [self.image_size, self.image_size],
+            )
 
         if self.use_cls_token:
             features = self.model(cur)
