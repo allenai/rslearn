@@ -2,7 +2,6 @@
 
 from typing import Any
 
-import numpy as np
 import torch
 
 from .transform import Transform
@@ -40,10 +39,10 @@ class Sentinel1ToDecibels(Transform):
         """
         if self.from_decibels:
             # Decibels to linear scale.
-            return np.power(10.0, image / 10.0)
+            return torch.pow(10.0, image / 10.0)
         else:
             # Linear scale to decibels.
-            return 10 * np.log10(np.clip(image, self.epsilon, None))
+            return 10 * torch.log10(torch.clamp(image, min=self.epsilon))
 
     def forward(
         self, input_dict: dict[str, Any], target_dict: dict[str, Any]
