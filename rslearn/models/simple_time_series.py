@@ -20,12 +20,13 @@ class SimpleTimeSeries(torch.nn.Module):
     def __init__(
         self,
         encoder: torch.nn.Module,
-        image_channels: int,
+        image_channels: int | None = None,
         op: str = "max",
         groups: list[list[int]] | None = None,
         num_layers: int | None = None,
         image_key: str = "image",
         backbone_channels: list[tuple[int, int]] | None = None,
+        image_keys: dict[str, int] | None = None,
     ) -> None:
         """Create a new SimpleTimeSeries.
 
@@ -48,13 +49,25 @@ class SimpleTimeSeries(torch.nn.Module):
             image_key: the key to access the images.
             backbone_channels: manually specify the backbone channels. Can be set if
                 the encoder does not provide get_backbone_channels function.
+            image_keys: as an alternative to setting image_channels, map from the key
+                in input dict to the number of channels per timestep for that modality.
+                This way SimpleTimeSeries can be used with multimodal inputs. One of
+                image_channels or image_keys must be specified.
         """
+        if (image_channels is None and image_keys is None) or (
+            image_channels is not None and image_keys is not None
+        ):
+            raise ValueError(
+                "exactly one of image_channels and image_keys must be specified"
+            )
+
         super().__init__()
         self.encoder = encoder
         self.image_channels = image_channels
         self.op = op
         self.groups = groups
         self.image_key = image_key
+        self.image_keys = image_keys
 
         if backbone_channels is not None:
             out_channels = backbone_channels
@@ -144,6 +157,26 @@ class SimpleTimeSeries(torch.nn.Module):
             out_channels.append((downsample_factor, depth * self.num_groups))
         return out_channels
 
+    def _get_batched_images(
+        self, input_dicts: list[dict[str, Any]], image_key: str, image_channels: int
+    ) -> torch.Tensor:
+        """Collect and reshape images across input dicts.
+
+        The BTCHW image time series are reshaped to (B*T)CHW so they can be passed to
+        the forward pass of a per-image (unitemporal) model.
+        """
+        images = torch.stack(
+            [input_dict[image_key] for input_dict in input_dicts], dim=0
+        )
+        n_batch = images.shape[0]
+        n_images = images.shape[1] // image_channels
+        n_height = images.shape[2]
+        n_width = images.shape[3]
+        batched_images = images.reshape(
+            n_batch * n_images, image_channels, n_height, n_width
+        )
+        return batched_images
+
     def forward(
         self,
         inputs: list[dict[str, Any]],
@@ -156,15 +189,37 @@ class SimpleTimeSeries(torch.nn.Module):
         """
         # First get features of each image.
         # To do so, we need to split up each grouped image into its component images (which have had their channels stacked).
-        images = torch.stack([inp[self.image_key] for inp in inputs], dim=0)
-        n_batch = images.shape[0]
-        n_images = images.shape[1] // self.image_channels
-        n_height = images.shape[2]
-        n_width = images.shape[3]
-        batched_images = images.reshape(
-            n_batch * n_images, self.image_channels, n_height, n_width
-        )
-        batched_inputs = [{self.image_key: image} for image in batched_images]
+        batched_inputs: list[dict[str, Any]] | None = None
+        n_batch = len(inputs)
+        n_images: int | None = None
+
+        if self.image_keys is not None:
+            for image_key, image_channels in self.image_keys.items():
+                batched_images = self._get_batched_images(
+                    inputs, image_key, image_channels
+                )
+
+                if batched_inputs is None:
+                    batched_inputs = [{} for _ in batched_images]
+                    n_images = batched_images.shape[0] // n_batch
+                elif n_images != batched_images.shape[0] // n_batch:
+                    raise ValueError(
+                        "expected all modalities to have the same number of timesteps"
+                    )
+
+                for i, image in enumerate(batched_images):
+                    batched_inputs[i][image_key] = image
+
+        else:
+            assert self.image_channels is not None
+            batched_images = self._get_batched_images(
+                inputs, self.image_key, self.image_channels
+            )
+            batched_inputs = [{self.image_key: image} for image in batched_images]
+            n_images = batched_images.shape[0] // n_batch
+
+        assert n_images is not None
+
         all_features = [
             feat_map.reshape(
                 n_batch,

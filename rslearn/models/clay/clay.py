@@ -15,6 +15,7 @@ from huggingface_hub import hf_hub_download
 # from claymodel.module import ClayMAEModule
 from terratorch.models.backbones.clay_v15.module import ClayMAEModule
 
+from rslearn.train.transforms.normalize import Normalize
 from rslearn.train.transforms.transform import Transform
 
 
@@ -163,13 +164,36 @@ class Clay(torch.nn.Module):
 
 
 class ClayNormalize(Transform):
-    """Normalize inputs using Clay metadata."""
+    """Normalize inputs using Clay metadata.
+
+    For Sentinel-1, the intensities should be converted to decibels.
+    """
 
     def __init__(self, metadata_path: str = CLAY_METADATA_PATH) -> None:
         """Initialize ClayNormalize."""
         super().__init__()
         with open(metadata_path) as f:
-            self.metadata = yaml.safe_load(f)
+            metadata = yaml.safe_load(f)
+        normalizers = {}
+        for modality in CLAY_MODALITIES:
+            if modality not in metadata:
+                continue
+            modality_metadata = metadata[modality]
+            means = [
+                modality_metadata["bands"]["mean"][b]
+                for b in modality_metadata["band_order"]
+            ]
+            stds = [
+                modality_metadata["bands"]["std"][b]
+                for b in modality_metadata["band_order"]
+            ]
+            normalizers[modality] = Normalize(
+                mean=means,
+                std=stds,
+                selectors=[modality],
+                num_bands=len(means),
+            )
+        self.normalizers = torch.nn.ModuleDict(normalizers)
 
     def apply_image(
         self, image: torch.Tensor, means: list[float], stds: list[float]
@@ -188,17 +212,8 @@ class ClayNormalize(Transform):
         self, input_dict: dict[str, Any], target_dict: dict[str, Any]
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Normalize the specified image with Clay normalization."""
-        for modality in CLAY_MODALITIES:
-            if modality not in input_dict or modality not in self.metadata:
+        for modality, normalizer in self.normalizers.items():
+            if modality not in input_dict:
                 continue
-            modality_metadata = self.metadata[modality]
-            means = [
-                modality_metadata["bands"]["mean"][b]
-                for b in modality_metadata["band_order"]
-            ]
-            stds = [
-                modality_metadata["bands"]["std"][b]
-                for b in modality_metadata["band_order"]
-            ]
-            input_dict[modality] = self.apply_image(input_dict[modality], means, stds)
+            input_dict, target_dict = normalizer(input_dict, target_dict)
         return input_dict, target_dict
