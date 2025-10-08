@@ -34,7 +34,8 @@ def test_prithvi_mt(tmp_path: pathlib.Path) -> None:
     """Verify that the forward pass for Prithvi works."""
 
     # the implementation is shared with the single timestep model,
-    # and the VIT_600 crashes the github runner
+    # and the VIT_600 crashes the github runner. Running
+    # for the VIT_600 passes locally.
     for model_size in [PrithviV2Models.VIT_300]:
         # make a unique cache dir per model
         model_tmp_path = tmp_path / model_size.value
