@@ -22,10 +22,12 @@ from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
 from rslearn.dataset.handler_summaries import (
     ErrorOutcome,
+    IngestCounts,
     IngestDatasetJobsSummary,
     LayerIngestSummary,
     MaterializeDatasetWindowsSummary,
     PrepareDatasetWindowsSummary,
+    UnknownIngestCounts,
 )
 from rslearn.dataset.index import DatasetIndex
 from rslearn.dataset.manage import (
@@ -549,6 +551,7 @@ class IngestHandler:
             data_source = data_source_from_config(layer_cfg, self.dataset.path)
 
             attempts_counter = AttemptsCounter()
+            ingest_counts: IngestCounts | UnknownIngestCounts
             try:
                 retry(
                     lambda: data_source.ingest(
@@ -562,10 +565,22 @@ class IngestHandler:
                     retry_backoff=self.retry_backoff,
                     attempts_counter=attempts_counter,
                 )
+                ingest_counts = IngestCounts(
+                    items_ingested=len(items_and_geometries),
+                    geometries_ingested=sum(
+                        len(geometries) for _, geometries in items_and_geometries
+                    ),
+                )
             except Exception as e:
                 if not self.ignore_errors:
                     raise
 
+                ingest_counts = UnknownIngestCounts(
+                    items_attempted=len(items_and_geometries),
+                    geometries_attempted=sum(
+                        len(geometries) for _, geometries in items_and_geometries
+                    ),
+                )
                 logger.error(
                     "warning: got error while ingesting "
                     + f"{len(items_and_geometries)} items: {e}"
@@ -576,10 +591,7 @@ class IngestHandler:
                     layer_name=layer_name,
                     data_source_name=getattr(layer_cfg.data_source, "name", "N/A"),
                     duration_seconds=time.monotonic() - start_time,
-                    items_ingested=len(items_and_geometries),
-                    geometries_ingested=sum(
-                        len(geometries) for _, geometries in items_and_geometries
-                    ),
+                    ingest_counts=ingest_counts,
                     ingest_attempts=attempts_counter.value,
                 )
             )

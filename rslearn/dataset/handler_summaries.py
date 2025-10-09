@@ -38,6 +38,22 @@ class PrepareDatasetWindowsSummary:
 
 
 @dataclass
+class IngestCounts:
+    """Known ingestion counts."""
+
+    items_ingested: int
+    geometries_ingested: int
+
+
+@dataclass
+class UnknownIngestCounts:
+    """Indicates ingestion counts are unknown due to partial failure."""
+
+    items_attempted: int
+    geometries_attempted: int
+
+
+@dataclass
 class LayerIngestSummary:
     """Results for ingesting a single layer."""
 
@@ -48,9 +64,8 @@ class LayerIngestSummary:
     # Timing
     duration_seconds: float
 
-    # Counts
-    items_ingested: int
-    geometries_ingested: int
+    # Counts - either known or unknown
+    ingest_counts: IngestCounts | UnknownIngestCounts
     ingest_attempts: int
 
 

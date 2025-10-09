@@ -110,32 +110,11 @@ def prepare_dataset_windows(
     for layer_name, layer_cfg in dataset.layers.items():
         layer_start_time = time.monotonic()
 
-        # Determine what work needs to be done
-        should_skip = False
-        needed_windows = []
-        data_source_name = "N/A"
-
         if not layer_cfg.data_source:
-            should_skip = True
-        else:
-            data_source_name = layer_cfg.data_source.name
-            data_source_cfg = layer_cfg.data_source
-            # Get windows that need to be prepared for this layer.
-            for window in windows:
-                layer_datas = window.load_layer_datas()
-                if layer_name in layer_datas and not force:
-                    continue
-                needed_windows.append(window)
-
-            if len(needed_windows) == 0:
-                should_skip = True
-
-        # Handle skipped layers
-        if should_skip:
             layer_summaries.append(
                 LayerPrepareSummary(
                     layer_name=layer_name,
-                    data_source_name=data_source_name,
+                    data_source_name="N/A",
                     duration_seconds=time.monotonic() - layer_start_time,
                     windows_prepared=0,
                     windows_skipped=len(windows),
@@ -143,8 +122,29 @@ def prepare_dataset_windows(
                 )
             )
             continue
+        data_source_cfg = layer_cfg.data_source
 
+        # Get windows that need to be prepared for this layer.
+        needed_windows = []
+        for window in windows:
+            layer_datas = window.load_layer_datas()
+            if layer_name in layer_datas and not force:
+                continue
+            needed_windows.append(window)
         logger.info(f"Preparing {len(needed_windows)} windows for layer {layer_name}")
+
+        if len(needed_windows) == 0:
+            layer_summaries.append(
+                LayerPrepareSummary(
+                    layer_name=layer_name,
+                    data_source_name=data_source_cfg.name,
+                    duration_seconds=time.monotonic() - layer_start_time,
+                    windows_prepared=0,
+                    windows_skipped=len(windows),
+                    get_items_attempts=0,
+                )
+            )
+            continue
 
         # Create data source after checking for at least one window so it can be fast
         # if there are no windows to prepare.
