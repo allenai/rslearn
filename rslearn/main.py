@@ -4,6 +4,7 @@ import argparse
 import multiprocessing
 import random
 import sys
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
@@ -19,8 +20,16 @@ from rslearn.const import WGS84_EPSG
 from rslearn.data_sources import Item, data_source_from_config
 from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
+from rslearn.dataset.handler_summaries import (
+    ErrorOutcome,
+    IngestDatasetJobsSummary,
+    LayerIngestSummary,
+    MaterializeDatasetWindowsSummary,
+    PrepareDatasetWindowsSummary,
+)
 from rslearn.dataset.index import DatasetIndex
 from rslearn.dataset.manage import (
+    AttemptsCounter,
     materialize_dataset_windows,
     prepare_dataset_windows,
     retry,
@@ -287,7 +296,7 @@ def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
 
 
 def apply_on_windows(
-    f: Callable[[list[Window]], None],
+    f: Callable[[list[Window]], Any],
     dataset: Dataset,
     group: str | list[str] | None = None,
     names: list[str] | None = None,
@@ -367,7 +376,7 @@ def apply_on_windows(
         p.close()
 
 
-def apply_on_windows_args(f: Callable[..., None], args: argparse.Namespace) -> None:
+def apply_on_windows_args(f: Callable[..., Any], args: argparse.Namespace) -> None:
     """Call apply_on_windows with arguments passed via command-line interface."""
     dataset = Dataset(UPath(args.root), args.disabled_layers)
     apply_on_windows(
@@ -413,12 +422,12 @@ class PrepareHandler:
         """
         self.dataset = dataset
 
-    def __call__(self, windows: list[Window]) -> None:
+    def __call__(self, windows: list[Window]) -> PrepareDatasetWindowsSummary:
         """Prepares the windows from apply_on_windows."""
         logger.info(f"Running prepare on {len(windows)} windows")
         if self.dataset is None:
             raise ValueError("dataset not set")
-        prepare_dataset_windows(
+        return prepare_dataset_windows(
             self.dataset,
             windows,
             self.force,
@@ -502,14 +511,20 @@ class IngestHandler:
 
     def __call__(
         self, jobs: list[tuple[str, LayerConfig, Item, list[STGeometry]]]
-    ) -> None:
+    ) -> IngestDatasetJobsSummary:
         """Ingest the specified items.
 
         The items are computed from list of windows via IngestHandler.get_jobs.
 
         Args:
-            jobs: list of (layer_name, item, geometries) tuples to ingest.
+            jobs: list of (layer_name, layer_cfg, item, geometries) tuples to ingest.
+
+        Returns:
+            summary of the ingest jobs operation fit for telemetry purposes.
         """
+        start_time = time.monotonic()
+        layer_summaries: list[LayerIngestSummary] = []
+
         logger.info(f"Running ingest for {len(jobs)} jobs")
         import gc
 
@@ -533,6 +548,7 @@ class IngestHandler:
             layer_cfg = self.dataset.layers[layer_name]
             data_source = data_source_from_config(layer_cfg, self.dataset.path)
 
+            attempts_counter = AttemptsCounter()
             try:
                 retry(
                     lambda: data_source.ingest(
@@ -544,6 +560,7 @@ class IngestHandler:
                     ),
                     retry_max_attempts=self.retry_max_attempts,
                     retry_backoff=self.retry_backoff,
+                    attempts_counter=attempts_counter,
                 )
             except Exception as e:
                 if not self.ignore_errors:
@@ -554,7 +571,26 @@ class IngestHandler:
                     + f"{len(items_and_geometries)} items: {e}"
                 )
 
+            layer_summaries.append(
+                LayerIngestSummary(
+                    layer_name=layer_name,
+                    data_source_name=getattr(layer_cfg.data_source, "name", "N/A"),
+                    duration_seconds=time.monotonic() - start_time,
+                    items_ingested=len(items_and_geometries),
+                    geometries_ingested=sum(
+                        len(geometries) for _, geometries in items_and_geometries
+                    ),
+                    ingest_attempts=attempts_counter.value,
+                )
+            )
+
         gc.collect()
+
+        return IngestDatasetJobsSummary(
+            duration_seconds=time.monotonic() - start_time,
+            num_jobs=len(jobs),
+            layer_summaries=layer_summaries,
+        )
 
     def _load_layer_data_for_windows(
         self, windows: list[Window], workers: int
@@ -686,13 +722,16 @@ class MaterializeHandler:
         """
         self.dataset = dataset
 
-    def __call__(self, windows: list[Window]) -> None:
+    def __call__(
+        self, windows: list[Window]
+    ) -> MaterializeDatasetWindowsSummary | ErrorOutcome:
         """Materializes the windows from apply_on_windows."""
         logger.info(f"Running Materialize with {len(windows)} windows")
+        start_time = time.monotonic()
         if self.dataset is None:
             raise ValueError("dataset not set")
         try:
-            materialize_dataset_windows(
+            return materialize_dataset_windows(
                 self.dataset,
                 windows,
                 retry_max_attempts=self.retry_max_attempts,
@@ -703,6 +742,7 @@ class MaterializeHandler:
                 logger.error(f"Error materializing windows: {e}")
                 raise
             logger.warning(f"Ignoring error while materializing windows: {e}")
+            return ErrorOutcome(duration_seconds=time.monotonic() - start_time)
 
 
 @register_handler("dataset", "materialize")
