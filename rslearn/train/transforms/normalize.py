@@ -27,14 +27,18 @@ class Normalize(Transform):
 
         Args:
             mean: a single value or one mean per channel
-            std: a single value or one std per channel
+            std: a single value or one std per channel (must match the shape of mean)
             valid_range: optionally clip to a minimum and maximum value
             selectors: image items to transform
-            bands: optionally restrict the normalization to these bands
+            bands: optionally restrict the normalization to these band indices. If set,
+                mean and std must either be one value, or have length equal to the
+                number of band indices passed here.
             num_bands: the number of bands per image, to distinguish different images
                 in a time series. If set, then the bands list is repeated for each
                 image, e.g. if bands=[2] then we apply normalization on images[2],
-                images[2+num_bands], images[2+num_bands*2], etc.
+                images[2+num_bands], images[2+num_bands*2], etc. Or if the bands list
+                is not set, then we apply the mean and std on each image in the time
+                series.
         """
         super().__init__()
         self.mean = torch.tensor(mean)
@@ -57,6 +61,23 @@ class Normalize(Transform):
         Args:
             image: the image to transform.
         """
+
+        def _repeat_mean_and_std(
+            image_channels: int, num_bands: int | None
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            """Get mean and std tensor that are suitable for applying on the image."""
+            # We only need to repeat the tensor if both of these are true:
+            # - The mean/std are not just one scalar.
+            # - self.num_bands is set, otherwise we treat the input as a single image.
+            if len(self.mean.shape) == 0:
+                return self.mean, self.std
+            if num_bands is None:
+                return self.mean, self.std
+            num_images = image_channels // num_bands
+            return self.mean.repeat(num_images)[:, None, None], self.std.repeat(
+                num_images
+            )[:, None, None]
+
         if self.bands is not None:
             # User has provided band indices to normalize.
             # If num_bands is set, then we repeat these for each image in the input
@@ -72,13 +93,21 @@ class Normalize(Transform):
                     dim=0,
                 )
 
-            image[band_indices] = (image[band_indices] - self.mean) / self.std
+            # We use len(self.bands) here because that is how many bands per timestep
+            # we are actually processing with the mean/std.
+            mean, std = _repeat_mean_and_std(
+                image_channels=len(band_indices), num_bands=len(self.bands)
+            )
+            image[band_indices] = (image[band_indices] - mean) / std
             if self.valid_min is not None:
                 image[band_indices] = torch.clamp(
                     image[band_indices], min=self.valid_min, max=self.valid_max
                 )
         else:
-            image = (image - self.mean) / self.std
+            mean, std = _repeat_mean_and_std(
+                image_channels=image.shape[0], num_bands=self.num_bands
+            )
+            image = (image - mean) / std
             if self.valid_min is not None:
                 image = torch.clamp(image, min=self.valid_min, max=self.valid_max)
         return image

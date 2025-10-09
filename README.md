@@ -175,10 +175,10 @@ that they align with the windows we have previously defined (and the Sentinel-2 
 we have already ingested). We can use the LocalFiles data source to have rslearn
 automate this process. Update the dataset `config.json` with a new layer:
 
-```json
+```jsonc
 "layers": {
     "sentinel2": {
-        ...
+        # ...
     },
     "worldcover": {
         "type": "raster",
@@ -193,7 +193,7 @@ automate this process. Update the dataset `config.json` with a new layer:
         }
     }
 },
-...
+# ...
 ```
 
 Repeat the materialize process so we populate the data for this new layer:
@@ -315,6 +315,7 @@ trainer:
         save_last: true
         monitor: val_accuracy
         mode: max
+        dirpath: ./land_cover_model_checkpoints/
 ```
 
 Now we can train the model:
@@ -359,13 +360,13 @@ windows in the "predict" group, which is where we added the Portland window.
 And it will be written in a new output_layer called "output". But we have to update the
 dataset configuration so it specifies the layer:
 
-```json
+```jsonc
 "layers": {
     "sentinel2": {
-        ...
+        # ...
     },
     "worldcover": {
-        ...
+        # ...
     },
     "output": {
         "type": "raster",
@@ -382,7 +383,7 @@ Now we can apply the model:
 ```
 # Find model checkpoint in lightning_logs dir.
 ls lightning_logs/*/checkpoints/last.ckpt
-rslearn model predict --config land_cover_model.yaml --ckpt_path lightning_logs/version_0/checkpoints/last.ckpt
+rslearn model predict --config land_cover_model.yaml --ckpt_path land_cover_model_checkpoints/last.ckpt
 ```
 
 And visualize the Sentinel-2 image and output in qgis:
@@ -489,17 +490,144 @@ got 585 examples in split val
 
 ### Visualizing with `model test`
 
-Coming soon
+We can visualize the ground truth labels and model predictions in the test set using
+the `model test` command:
 
+```
+mkdir ./vis
+rslearn model test --config land_cover_model.yaml --ckpt_path land_cover_model_checkpoints/last.ckpt --model.init_args.visualize_dir=./vis/
+```
 
-### Inputting Multiple Sentinel-2 Images
-
-Coming soon
+This will produce PNGs in the vis directory. The visualizations are produced by the
+`Task.visualize` function, so we could customize the visualization by subclassing
+SegmentationTask and overriding the visualize function.
 
 
 ### Logging to Weights & Biases
 
-Coming soon
+We can log to W&B by setting the logger under trainer in the model configuration file:
+
+```yaml
+trainer:
+  # ...
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: land_cover_model
+      name: version_00
+```
+
+Now, runs with this model configuration should show on W&B. For `model fit` runs,
+the training and validation loss and accuracy metric will be logged. The accuracy
+metric is provided by SegmentationTask, and additional metrics can be enabled by
+passing the relevant init_args to the task, e.g. mean IoU and F1:
+
+```yaml
+      class_path: rslearn.train.tasks.segmentation.SegmentationTask
+      init_args:
+        num_classes: 101
+        remap_values: [[0, 1], [0, 255]]
+        enable_miou_metric: true
+        enable_f1_metric: true
+```
+
+
+### Inputting Multiple Sentinel-2 Images
+
+Currently our model inputs a single Sentinel-2 image. However, for most tasks where
+labels are not expected to change from week to week, we find that accuracy can be
+significantly improved by inputting multiple images, regardless of the pre-trained
+model used. Multiple images makes the model more resilient to clouds and image
+artifacts, and allows the model to synthesize information across different views that
+may come from different seasons or weather conditions.
+
+We first update our dataset configuration to obtain three images, by customizing the
+query_config section. This can replace the sentinel2 layer:
+
+```jsonc
+"layers": {
+    "sentinel2_multi": {
+        "type": "raster",
+        "band_sets": [{
+            "dtype": "uint8",
+            "bands": ["R", "G", "B"]
+        }],
+        "data_source": {
+            "name": "rslearn.data_sources.gcp_public_data.Sentinel2",
+            "index_cache_dir": "cache/sentinel2/",
+            "sort_by": "cloud_cover",
+            "use_rtree_index": false,
+            "query_config": {
+                "max_matches": 3
+            }
+        }
+    },
+    "worldcover": {
+        # ...
+    },
+    "output": {
+        # ...
+    }
+}
+```
+
+Repeat the steps from earlier to prepare, ingest, and materialize the dataset.
+
+Now we update our model configuration file. First, we modify the model architecture to
+be able to input an image time series. We use the SimpleTimeSeries model, which takes
+an encoder that expects a single-image input, and applies that encoder on each image in
+the time series. It then applies max temporal pooling to combine the per-image feature
+maps extracted by the encoder.
+
+Image time series in rslearn are currently stored as [T*C, H, W] tensors. So we pass
+the `image_channels` to SimpleTimeSeries so it knows how to slice up the tensor to
+recover the per-timestep images.
+
+```yaml
+model:
+  class_path: rslearn.train.lightning_module.RslearnLightningModule
+  init_args:
+    model:
+      class_path: rslearn.models.singletask.SingleTaskModel
+      init_args:
+        encoder:
+          - class_path: rslearn.models.simple_time_series.SimpleTimeSeries
+            init_args:
+              encoder:
+                class_path: rslearn.models.satlaspretrain.SatlasPretrain
+                init_args:
+                  model_identifier: "Sentinel2_SwinB_SI_RGB"
+              image_channels: 3
+        decoder:
+          # ...
+```
+
+Next, we update the data module section so that the dataset loads the image time series
+rather than a single image. The `load_all_layers` option tells the dataset to stack the
+rasters from all of the layers specified, and also to ignore windows where any of those
+layers are missing.
+
+```yaml
+data:
+  class_path: rslearn.train.data_module.RslearnDataModule
+  init_args:
+    path: # ...
+    inputs:
+      image:
+        data_type: "raster"
+        layers: ["sentinel2_multi", "sentinel2_multi.1", "sentinel2_multi.2"]
+        bands: ["R", "G", "B"]
+        passthrough: true
+        load_all_layers: true
+      targets:
+        # ...
+```
+
+Now we can train an updated model:
+
+```
+rslearn model fit --config land_cover_model.yaml
+```
 
 
 Contact

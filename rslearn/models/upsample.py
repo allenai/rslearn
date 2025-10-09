@@ -23,13 +23,13 @@ class Upsample(torch.nn.Module):
     def forward(
         self, features: list[torch.Tensor], inputs: list[torch.Tensor]
     ) -> list[torch.Tensor]:
-        """Compute flat output vector from multi-scale feature map.
+        """Upsample each feature map.
 
         Args:
             features: list of feature maps at different resolutions.
             inputs: original inputs (ignored).
 
         Returns:
-            flat feature vector
+            upsampled feature maps
         """
         return [self.layer(feat_map) for feat_map in features]

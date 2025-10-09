@@ -8,6 +8,7 @@ from upath import UPath
 
 from rslearn.config import load_layer_config
 from rslearn.log_utils import get_logger
+from rslearn.template_params import substitute_env_vars_in_string
 from rslearn.tile_stores import TileStore, load_tile_store
 
 from .index import DatasetIndex
@@ -52,7 +53,9 @@ class Dataset:
 
         # Load dataset configuration.
         with (self.path / "config.json").open("r") as f:
-            config = json.load(f)
+            config_content = f.read()
+            config_content = substitute_env_vars_in_string(config_content)
+            config = json.loads(config_content)
             self.layers = {}
             for layer_name, d in config["layers"].items():
                 # Layer names must not contain period, since we use period to

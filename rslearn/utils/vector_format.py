@@ -15,7 +15,7 @@ from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import open_atomic
 
 from .feature import Feature
-from .geometry import PixelBounds, Projection, STGeometry
+from .geometry import PixelBounds, Projection, STGeometry, safely_reproject_and_clip
 
 logger = get_logger(__name__)
 VectorFormats = ClassRegistry()
@@ -368,17 +368,20 @@ class GeojsonVectorFormat(VectorFormat):
             the vector data
         """
         features = self.decode_from_file(path / self.fname)
-        # Re-project to the desired projection.
-        reprojected_features = [feat.to_projection(projection) for feat in features]
-        # Filter out features that do not intersect the given bounds.
-        filtered_features: list[Feature] = []
-        bounds_shp = shapely.box(*bounds)
-        for feat in reprojected_features:
-            if not feat.geometry.shp.intersects(bounds_shp):
-                continue
-            filtered_features.append(feat)
 
-        return filtered_features
+        # Re-project to the desired projection and clip to bounds.
+        dst_geom = STGeometry(projection, shapely.box(*bounds), None)
+        reprojected_geoms = safely_reproject_and_clip(
+            [feat.geometry for feat in features], dst_geom
+        )
+        reprojected_features = []
+        for feat, geom in zip(features, reprojected_geoms):
+            if geom is None:
+                # None value means that it did not intersect the provided bounds.
+                continue
+            reprojected_features.append(Feature(geom, feat.properties))
+
+        return reprojected_features
 
     @staticmethod
     def from_config(name: str, config: dict[str, Any]) -> "GeojsonVectorFormat":

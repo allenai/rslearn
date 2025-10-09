@@ -232,6 +232,17 @@ class RasterImporter(Importer):
                 projection = Projection(crs, x_resolution, y_resolution)
                 geometry = STGeometry(projection, shp, None)
 
+            if geometry.is_too_large():
+                geometry = get_global_geometry(time_range=None)
+                logger.warning(
+                    "Global geometry detected: this geometry will be matched against all "
+                    "windows in the rslearn dataset. When using settings like "
+                    "max_matches=1 and space_mode=MOSAIC, this may cause windows outside "
+                    "the geometry’s valid bounds to be materialized from the global raster "
+                    "instead of a more appropriate source. Consider using COMPOSITE mode, "
+                    "or increasing max_matches if this behavior is unintended."
+                )
+
             if spec.name:
                 item_name = spec.name
             else:

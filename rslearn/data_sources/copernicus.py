@@ -319,7 +319,6 @@ class Copernicus(DataSource):
                 then we attempt to read the username/password from COPERNICUS_USERNAME
                 and COPERNICUS_PASSWORD (this is useful since access tokens are only
                 valid for an hour).
-            password: set API username/password instead of access token.
             query_filter: filter string to include when searching for items. This will
                 be appended to other name, geographic, and sensing time filters where
                 applicable. For example, "Collection/Name eq 'SENTINEL-2'". See the API
@@ -368,6 +367,7 @@ class Copernicus(DataSource):
             "order_by",
             "sort_by",
             "sort_desc",
+            "timeout",
         ]
         for k in simple_optionals:
             if k in d:
@@ -709,6 +709,8 @@ class Sentinel2(Copernicus):
         "B12": ["B12"],
         "B8A": ["B8A"],
         "TCI": ["R", "G", "B"],
+        # L1C-only products.
+        "B10": ["B10"],
         # L2A-only products.
         "AOT": ["AOT"],
         "WVP": ["WVP"],
@@ -809,10 +811,8 @@ class Sentinel2(Copernicus):
 
         kwargs: dict[str, Any] = dict(
             assets=list(needed_assets),
+            product_type=Sentinel2ProductType[d["product_type"]],
         )
-
-        if "product_type" in d:
-            kwargs["product_type"] = Sentinel2ProductType(d["product_type"])
 
         simple_optionals = [
             "harmonize",
@@ -820,6 +820,7 @@ class Sentinel2(Copernicus):
             "order_by",
             "sort_by",
             "sort_desc",
+            "timeout",
         ]
         for k in simple_optionals:
             if k in d:
@@ -965,6 +966,7 @@ class Sentinel1(Copernicus):
             "order_by",
             "sort_by",
             "sort_desc",
+            "timeout",
         ]
         for k in simple_optionals:
             if k in d:
