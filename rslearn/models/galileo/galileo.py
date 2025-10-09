@@ -2,6 +2,7 @@
 
 import math
 import tempfile
+from contextlib import nullcontext
 from enum import StrEnum
 from typing import Any, cast
 
@@ -63,6 +64,11 @@ pretrained_weights: dict[GalileoSize, str] = {
 
 DEFAULT_NORMALIZER = Normalizer()
 
+AUTOCAST_DTYPE_MAP = {
+    "bfloat16": torch.bfloat16,
+    "float32": torch.float32,
+}
+
 
 class GalileoModel(nn.Module):
     """Galileo backbones."""
@@ -85,6 +91,7 @@ class GalileoModel(nn.Module):
         size: GalileoSize,
         patch_size: int = 4,
         pretrained_path: str | UPath | None = None,
+        autocast_dtype: str | None = "bfloat16",
     ) -> None:
         """Initialize the Galileo model.
 
@@ -93,6 +100,7 @@ class GalileoModel(nn.Module):
             patch_size: The patch size to use.
             pretrained_path: the local path to the pretrained weights. Otherwise it is
                 downloaded and cached in temp directory.
+            autocast_dtype: which dtype to use for autocasting, or set None to disable.
         """
         super().__init__()
         if pretrained_path is None:
@@ -130,6 +138,11 @@ class GalileoModel(nn.Module):
 
         self.size = size
         self.patch_size = patch_size
+
+        if autocast_dtype is not None:
+            self.autocast_dtype = AUTOCAST_DTYPE_MAP[autocast_dtype]
+        else:
+            self.autocast_dtype = None
 
     @staticmethod
     def to_cartesian(
@@ -485,18 +498,31 @@ class GalileoModel(nn.Module):
             patch_size = h
         else:
             patch_size = self.patch_size
-        outputs = self.model(
-            s_t_x=galileo_input.s_t_x,
-            s_t_m=galileo_input.s_t_m,
-            sp_x=galileo_input.sp_x,
-            sp_m=galileo_input.sp_m,
-            t_x=galileo_input.t_x,
-            t_m=galileo_input.t_m,
-            st_x=galileo_input.st_x,
-            st_m=galileo_input.st_m,
-            months=galileo_input.months,
-            patch_size=patch_size,
-        )
+
+        # Decide context based on self.autocast_dtype.
+        device = galileo_input.s_t_x.device
+        if self.autocast_dtype is None:
+            context = nullcontext()
+        else:
+            assert device is not None
+            context = torch.amp.autocast(
+                device_type=device.type, dtype=self.autocast_dtype
+            )
+
+        with context:
+            outputs = self.model(
+                s_t_x=galileo_input.s_t_x,
+                s_t_m=galileo_input.s_t_m,
+                sp_x=galileo_input.sp_x,
+                sp_m=galileo_input.sp_m,
+                t_x=galileo_input.t_x,
+                t_m=galileo_input.t_m,
+                st_x=galileo_input.st_x,
+                st_m=galileo_input.st_m,
+                months=galileo_input.months,
+                patch_size=patch_size,
+            )
+
         if h == patch_size:
             # only one spatial patch, so we can just take an average
             # of all the tokens to output b c_g 1 1
