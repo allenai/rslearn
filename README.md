@@ -21,6 +21,7 @@ Quick links:
 - [Examples](docs/Examples.md) contains more examples, including customizing different
   stages of rslearn with additional code.
 - [DatasetConfig](docs/DatasetConfig.md) documents the dataset configuration file.
+- [ModelConfig](docs/ModelConfig.md) documents the model configuration file.
 
 
 Setup
