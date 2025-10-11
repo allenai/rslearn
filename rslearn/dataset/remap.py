@@ -1,13 +1,25 @@
 """Classes to remap raster values."""
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 import numpy as np
 import numpy.typing as npt
-from class_registry import ClassRegistry
 
-Remappers = ClassRegistry()
+Remappers: dict[str, type["Remapper"]] = {}
 """Registry of Remapper implementations."""
+
+_RemapperT = TypeVar("_RemapperT", bound="Remapper")
+
+
+def register_remapper(name: str) -> Callable[[type[_RemapperT]], type[_RemapperT]]:
+    """Decorator to register a remapper class."""
+
+    def decorator(cls: type[_RemapperT]) -> type[_RemapperT]:
+        Remappers[name] = cls
+        return cls
+
+    return decorator
 
 
 class Remapper:
@@ -28,7 +40,7 @@ class Remapper:
         raise NotImplementedError
 
 
-@Remappers.register("linear")
+@register_remapper("linear")
 class LinearRemapper(Remapper):
     """A Remapper that performs a linear remapping."""
 
@@ -67,4 +79,5 @@ class LinearRemapper(Remapper):
 
 def load_remapper(config: dict[str, Any]) -> Remapper:
     """Load a remapper from a configuration dictionary."""
-    return Remappers.get(config["name"], config=config)
+    cls = Remappers[config["name"]]
+    return cls(config)

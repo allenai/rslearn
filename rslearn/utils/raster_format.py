@@ -2,13 +2,13 @@
 
 import hashlib
 import json
-from typing import Any, BinaryIO
+from collections.abc import Callable
+from typing import Any, BinaryIO, TypeVar
 
 import affine
 import numpy as np
 import numpy.typing as npt
 import rasterio
-from class_registry import ClassRegistry
 from PIL import Image
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
@@ -21,7 +21,23 @@ from rslearn.utils.fsspec import open_rasterio_upath_reader, open_rasterio_upath
 
 from .geometry import PixelBounds, Projection
 
-RasterFormats = ClassRegistry()
+RasterFormats: dict[str, type["RasterFormat"]] = {}
+
+_RasterFormatT = TypeVar("_RasterFormatT", bound="RasterFormat")
+
+
+def register_raster_format(
+    name: str,
+) -> Callable[[type[_RasterFormatT]], type[_RasterFormatT]]:
+    """Decorator to register a raster format class."""
+
+    def decorator(cls: type[_RasterFormatT]) -> type[_RasterFormatT]:
+        RasterFormats[name] = cls
+        return cls
+
+    return decorator
+
+
 logger = get_logger(__name__)
 
 
@@ -148,7 +164,7 @@ class RasterFormat:
         raise NotImplementedError
 
 
-@RasterFormats.register("image_tile")
+@register_raster_format("image_tile")
 class ImageTileRasterFormat(RasterFormat):
     """A RasterFormat that stores data in image tiles corresponding to grid cells.
 
@@ -397,7 +413,7 @@ class ImageTileRasterFormat(RasterFormat):
         )
 
 
-@RasterFormats.register("geotiff")
+@register_raster_format("geotiff")
 class GeotiffRasterFormat(RasterFormat):
     """A raster format that uses one big, tiled GeoTIFF with small block size."""
 
@@ -552,7 +568,7 @@ class GeotiffRasterFormat(RasterFormat):
         return GeotiffRasterFormat(**kwargs)
 
 
-@RasterFormats.register("single_image")
+@register_raster_format("single_image")
 class SingleImageRasterFormat(RasterFormat):
     """A raster format that produces a single image called image.png/jpg.
 
@@ -716,5 +732,5 @@ def load_raster_format(config: RasterFormatConfig) -> RasterFormat:
     Returns:
         the loaded RasterFormat implementation
     """
-    cls = RasterFormats.get_class(config.name)
+    cls = RasterFormats[config.name]
     return cls.from_config(config.name, config.config_dict)

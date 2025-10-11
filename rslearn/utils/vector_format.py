@@ -1,11 +1,11 @@
 """Classes for writing vector data to a UPath."""
 
 import json
+from collections.abc import Callable
 from enum import Enum
-from typing import Any
+from typing import Any, TypeVar
 
 import shapely
-from class_registry import ClassRegistry
 from rasterio.crs import CRS
 from upath import UPath
 
@@ -18,7 +18,21 @@ from .feature import Feature
 from .geometry import PixelBounds, Projection, STGeometry, safely_reproject_and_clip
 
 logger = get_logger(__name__)
-VectorFormats = ClassRegistry()
+VectorFormats: dict[str, type["VectorFormat"]] = {}
+
+_VectorFormatT = TypeVar("_VectorFormatT", bound="VectorFormat")
+
+
+def register_vector_format(
+    name: str,
+) -> Callable[[type[_VectorFormatT]], type[_VectorFormatT]]:
+    """Decorator to register a vector format class."""
+
+    def decorator(cls: type[_VectorFormatT]) -> type[_VectorFormatT]:
+        VectorFormats[name] = cls
+        return cls
+
+    return decorator
 
 
 class VectorFormat:
@@ -54,7 +68,7 @@ class VectorFormat:
         raise NotImplementedError
 
 
-@VectorFormats.register("tile")
+@register_vector_format("tile")
 class TileVectorFormat(VectorFormat):
     """TileVectorFormat stores data in GeoJSON files corresponding to grid cells.
 
@@ -244,7 +258,7 @@ class GeojsonCoordinateMode(Enum):
     WGS84 = "wgs84"
 
 
-@VectorFormats.register("geojson")
+@register_vector_format("geojson")
 class GeojsonVectorFormat(VectorFormat):
     """A vector format that uses one big GeoJSON."""
 
@@ -410,5 +424,5 @@ def load_vector_format(config: VectorFormatConfig) -> VectorFormat:
     Returns:
         the loaded VectorFormat implementation
     """
-    cls = VectorFormats.get_class(config.name)
+    cls = VectorFormats[config.name]
     return cls.from_config(config.name, config.config_dict)

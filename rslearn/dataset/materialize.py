@@ -1,10 +1,10 @@
 """Classes to implement dataset materialization."""
 
+from collections.abc import Callable
 from typing import Any, Generic, TypeVar
 
 import numpy as np
 import numpy.typing as npt
-from class_registry import ClassRegistry
 from rasterio.enums import Resampling
 
 from rslearn.config import (
@@ -25,7 +25,22 @@ from rslearn.utils.vector_format import load_vector_format
 from .remap import Remapper, load_remapper
 from .window import Window
 
-Materializers = ClassRegistry()
+Materializers: dict[str, type["Materializer"]] = {}
+
+_MaterializerT = TypeVar("_MaterializerT", bound="Materializer")
+
+
+def register_materializer(
+    name: str,
+) -> Callable[[type[_MaterializerT]], type[_MaterializerT]]:
+    """Decorator to register a materializer class."""
+
+    def decorator(cls: type[_MaterializerT]) -> type[_MaterializerT]:
+        Materializers[name] = cls
+        return cls
+
+    return decorator
+
 
 LayerConfigType = TypeVar("LayerConfigType", bound=LayerConfig)
 
@@ -489,7 +504,7 @@ def build_composite(
     )
 
 
-@Materializers.register("raster")
+@register_materializer("raster")
 class RasterMaterializer(Materializer[RasterLayerConfig]):
     """A Materializer for raster data."""
 
@@ -550,7 +565,7 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
             window.mark_layer_completed(layer_name, group_id)
 
 
-@Materializers.register("vector")
+@register_materializer("vector")
 class VectorMaterializer(Materializer):
     """A Materializer for vector data."""
 
