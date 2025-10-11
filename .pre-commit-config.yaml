@@ -82,3 +82,9 @@ repos:
         exclude: ^rslearn/models/copernicusfm_src/
       - id: ruff-format
         exclude: ^rslearn/models/copernicusfm_src/
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.8.22 # Specify the desired uv version
+    hooks:
+      - id: uv-lock
+        args: [--check]
