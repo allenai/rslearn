@@ -163,6 +163,19 @@ class RasterFormat:
         """
         raise NotImplementedError
 
+    @staticmethod
+    def from_config(name: str, config: dict[str, Any]) -> "RasterFormat":
+        """Create a RasterFormat from a config dict.
+
+        Args:
+            name: the name of this format
+            config: the config dict
+
+        Returns:
+            the RasterFormat instance
+        """
+        raise NotImplementedError
+
 
 @register_raster_format("image_tile")
 class ImageTileRasterFormat(RasterFormat):

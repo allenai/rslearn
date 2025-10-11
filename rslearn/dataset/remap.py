@@ -25,6 +25,14 @@ def register_remapper(name: str) -> Callable[[type[_RemapperT]], type[_RemapperT
 class Remapper:
     """An abstract class that remaps pixel values based on layer configuration."""
 
+    def __init__(self, config: dict[str, Any]) -> None:
+        """Initialize a Remapper.
+
+        Args:
+            config: the config dict for this remapper.
+        """
+        pass
+
     def __call__(
         self, array: npt.NDArray[Any], dtype: npt.DTypeLike
     ) -> npt.NDArray[Any]:

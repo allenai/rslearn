@@ -67,6 +67,19 @@ class VectorFormat:
         """
         raise NotImplementedError
 
+    @staticmethod
+    def from_config(name: str, config: dict[str, Any]) -> "VectorFormat":
+        """Create a VectorFormat from a config dict.
+
+        Args:
+            name: the name of this format
+            config: the config dict
+
+        Returns:
+            the VectorFormat instance
+        """
+        raise NotImplementedError
+
 
 @register_vector_format("tile")
 class TileVectorFormat(VectorFormat):
