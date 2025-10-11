@@ -54,7 +54,7 @@ def read_selector(
         the item specified by the selector
     """
     d, selector = get_dict_and_subselector(input_dict, target_dict, selector)
-    parts = selector.split("/")
+    parts = selector.split("/") if selector else []
     cur = d
     for part in parts:
         cur = cur[part]
@@ -76,11 +76,28 @@ def write_selector(
         v: the value to write
     """
     d, selector = get_dict_and_subselector(input_dict, target_dict, selector)
-    parts = selector.split("/")
-    cur = d
-    for part in parts[:-1]:
-        cur = cur[part]
-    cur[parts[-1]] = v
+    if selector:
+        parts = selector.split("/")
+        cur = d
+        for part in parts[:-1]:
+            cur = cur[part]
+        cur[parts[-1]] = v
+    else:
+        # If the selector references the input or target dictionary directly, then we
+        # have a special case where instead of overwriting with v, we replace the keys
+        # with those in v. v must be a dictionary here, not a tensor, since otherwise
+        # it wouldn't match the type of the input or target dictionary.
+        if not isinstance(v, dict):
+            raise ValueError(
+                "when directly specifying the input or target dict, expected the value to be a dict"
+            )
+        if d == v:
+            # This may happen if the writer did not make a copy of the dictionary. In
+            # this case the code below would not update d correctly since it would also
+            # clear v.
+            return
+        d.clear()
+        d.update(v)
 
 
 class Transform(torch.nn.Module):
