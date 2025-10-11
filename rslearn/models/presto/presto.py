@@ -248,3 +248,14 @@ class Presto(nn.Module):
             output_features[batch_idx : batch_idx + self.pixel_batch_size] = output_b
 
         return [rearrange(output_features, "(b h w) d -> b d h w", h=h, w=w, b=b)]
+
+    def get_backbone_channels(self) -> list:
+        """Returns the output channels of this model when used as a backbone.
+
+        The output channels is a list of (patch_size, depth) that corresponds
+        to the feature maps that the backbone returns.
+
+        Returns:
+            the output channels of the backbone as a list of (patch_size, depth) tuples.
+        """
+        return [(1, 128)]
