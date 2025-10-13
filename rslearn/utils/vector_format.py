@@ -18,21 +18,25 @@ from .feature import Feature
 from .geometry import PixelBounds, Projection, STGeometry, safely_reproject_and_clip
 
 logger = get_logger(__name__)
-VectorFormats: dict[str, type["VectorFormat"]] = {}
-
 _VectorFormatT = TypeVar("_VectorFormatT", bound="VectorFormat")
 
 
-def register_vector_format(
-    name: str,
-) -> Callable[[type[_VectorFormatT]], type[_VectorFormatT]]:
-    """Decorator to register a vector format class."""
+class _VectorFormatRegistry(dict[str, type["VectorFormat"]]):
+    """Registry for VectorFormat classes."""
 
-    def decorator(cls: type[_VectorFormatT]) -> type[_VectorFormatT]:
-        VectorFormats[name] = cls
-        return cls
+    def register(
+        self, name: str
+    ) -> Callable[[type[_VectorFormatT]], type[_VectorFormatT]]:
+        """Decorator to register a vector format class."""
 
-    return decorator
+        def decorator(cls: type[_VectorFormatT]) -> type[_VectorFormatT]:
+            self[name] = cls
+            return cls
+
+        return decorator
+
+
+VectorFormats = _VectorFormatRegistry()
 
 
 class VectorFormat:
@@ -81,7 +85,7 @@ class VectorFormat:
         raise NotImplementedError
 
 
-@register_vector_format("tile")
+@VectorFormats.register("tile")
 class TileVectorFormat(VectorFormat):
     """TileVectorFormat stores data in GeoJSON files corresponding to grid cells.
 
@@ -271,7 +275,7 @@ class GeojsonCoordinateMode(Enum):
     WGS84 = "wgs84"
 
 
-@register_vector_format("geojson")
+@VectorFormats.register("geojson")
 class GeojsonVectorFormat(VectorFormat):
     """A vector format that uses one big GeoJSON."""
 

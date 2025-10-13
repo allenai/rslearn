@@ -23,19 +23,23 @@ from rslearn.utils.geometry import Projection, STGeometry, get_global_geometry
 from .data_source import DataSource, Item, QueryConfig
 
 logger = get_logger("__name__")
-Importers: dict[str, type["Importer"]] = {}
-
 _ImporterT = TypeVar("_ImporterT", bound="Importer")
 
 
-def register_importer(name: str) -> Callable[[type[_ImporterT]], type[_ImporterT]]:
-    """Decorator to register an importer class."""
+class _ImporterRegistry(dict[str, type["Importer"]]):
+    """Registry for Importer classes."""
 
-    def decorator(cls: type[_ImporterT]) -> type[_ImporterT]:
-        Importers[name] = cls
-        return cls
+    def register(self, name: str) -> Callable[[type[_ImporterT]], type[_ImporterT]]:
+        """Decorator to register an importer class."""
 
-    return decorator
+        def decorator(cls: type[_ImporterT]) -> type[_ImporterT]:
+            self[name] = cls
+            return cls
+
+        return decorator
+
+
+Importers = _ImporterRegistry()
 
 
 ItemType = TypeVar("ItemType", bound=Item)
@@ -189,7 +193,7 @@ class VectorItem(Item):
         )
 
 
-@register_importer("raster")
+@Importers.register("raster")
 class RasterImporter(Importer):
     """An Importer for raster data."""
 
@@ -296,7 +300,7 @@ class RasterImporter(Importer):
             tile_store.write_raster_file(item.name, bands, fname)
 
 
-@register_importer("vector")
+@Importers.register("vector")
 class VectorImporter(Importer):
     """An Importer for vector data."""
 

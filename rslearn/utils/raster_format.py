@@ -21,21 +21,25 @@ from rslearn.utils.fsspec import open_rasterio_upath_reader, open_rasterio_upath
 
 from .geometry import PixelBounds, Projection
 
-RasterFormats: dict[str, type["RasterFormat"]] = {}
-
 _RasterFormatT = TypeVar("_RasterFormatT", bound="RasterFormat")
 
 
-def register_raster_format(
-    name: str,
-) -> Callable[[type[_RasterFormatT]], type[_RasterFormatT]]:
-    """Decorator to register a raster format class."""
+class _RasterFormatRegistry(dict[str, type["RasterFormat"]]):
+    """Registry for RasterFormat classes."""
 
-    def decorator(cls: type[_RasterFormatT]) -> type[_RasterFormatT]:
-        RasterFormats[name] = cls
-        return cls
+    def register(
+        self, name: str
+    ) -> Callable[[type[_RasterFormatT]], type[_RasterFormatT]]:
+        """Decorator to register a raster format class."""
 
-    return decorator
+        def decorator(cls: type[_RasterFormatT]) -> type[_RasterFormatT]:
+            self[name] = cls
+            return cls
+
+        return decorator
+
+
+RasterFormats = _RasterFormatRegistry()
 
 
 logger = get_logger(__name__)
@@ -177,7 +181,7 @@ class RasterFormat:
         raise NotImplementedError
 
 
-@register_raster_format("image_tile")
+@RasterFormats.register("image_tile")
 class ImageTileRasterFormat(RasterFormat):
     """A RasterFormat that stores data in image tiles corresponding to grid cells.
 
@@ -426,7 +430,7 @@ class ImageTileRasterFormat(RasterFormat):
         )
 
 
-@register_raster_format("geotiff")
+@RasterFormats.register("geotiff")
 class GeotiffRasterFormat(RasterFormat):
     """A raster format that uses one big, tiled GeoTIFF with small block size."""
 
@@ -581,7 +585,7 @@ class GeotiffRasterFormat(RasterFormat):
         return GeotiffRasterFormat(**kwargs)
 
 
-@register_raster_format("single_image")
+@RasterFormats.register("single_image")
 class SingleImageRasterFormat(RasterFormat):
     """A raster format that produces a single image called image.png/jpg.
 

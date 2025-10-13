@@ -6,20 +6,24 @@ from typing import Any, TypeVar
 import numpy as np
 import numpy.typing as npt
 
-Remappers: dict[str, type["Remapper"]] = {}
-"""Registry of Remapper implementations."""
-
 _RemapperT = TypeVar("_RemapperT", bound="Remapper")
 
 
-def register_remapper(name: str) -> Callable[[type[_RemapperT]], type[_RemapperT]]:
-    """Decorator to register a remapper class."""
+class _RemapperRegistry(dict[str, type["Remapper"]]):
+    """Registry for Remapper classes."""
 
-    def decorator(cls: type[_RemapperT]) -> type[_RemapperT]:
-        Remappers[name] = cls
-        return cls
+    def register(self, name: str) -> Callable[[type[_RemapperT]], type[_RemapperT]]:
+        """Decorator to register a remapper class."""
 
-    return decorator
+        def decorator(cls: type[_RemapperT]) -> type[_RemapperT]:
+            self[name] = cls
+            return cls
+
+        return decorator
+
+
+Remappers = _RemapperRegistry()
+"""Registry of Remapper implementations."""
 
 
 class Remapper:
@@ -48,7 +52,7 @@ class Remapper:
         raise NotImplementedError
 
 
-@register_remapper("linear")
+@Remappers.register("linear")
 class LinearRemapper(Remapper):
     """A Remapper that performs a linear remapping."""
 
