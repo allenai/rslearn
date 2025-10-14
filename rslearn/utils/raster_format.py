@@ -2,13 +2,13 @@
 
 import hashlib
 import json
-from typing import Any, BinaryIO
+from collections.abc import Callable
+from typing import Any, BinaryIO, TypeVar
 
 import affine
 import numpy as np
 import numpy.typing as npt
 import rasterio
-from class_registry import ClassRegistry
 from PIL import Image
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
@@ -21,18 +21,44 @@ from rslearn.utils.fsspec import open_rasterio_upath_reader, open_rasterio_upath
 
 from .geometry import PixelBounds, Projection
 
-RasterFormats = ClassRegistry()
+_RasterFormatT = TypeVar("_RasterFormatT", bound="RasterFormat")
+
+
+class _RasterFormatRegistry(dict[str, type["RasterFormat"]]):
+    """Registry for RasterFormat classes."""
+
+    def register(
+        self, name: str
+    ) -> Callable[[type[_RasterFormatT]], type[_RasterFormatT]]:
+        """Decorator to register a raster format class."""
+
+        def decorator(cls: type[_RasterFormatT]) -> type[_RasterFormatT]:
+            self[name] = cls
+            return cls
+
+        return decorator
+
+
+RasterFormats = _RasterFormatRegistry()
+
+
 logger = get_logger(__name__)
 
 
 def get_bandset_dirname(bands: list[str]) -> str:
     """Get the directory name that should be used to store the given group of bands."""
+    # We try to use a human-readable name with underscore as the delimiter, but if that
+    # isn't straightforward then we use hash instead.
     if any(["_" in band for band in bands]):
-        raise ValueError("band names must not contain '_'")
+        # In this case we hash the JSON representation of the bands.
+        return hashlib.sha256(json.dumps(bands).encode()).hexdigest()
     dirname = "_".join(bands)
     if len(dirname) > 64:
         # Previously we simply joined the bands, but this can result in directory name
         # that is too long. In this case, now we use hash instead.
+        # We use a different code path here where we hash the initial directory name
+        # instead of the JSON, for historical reasons (to maintain backwards
+        # compatibility).
         dirname = hashlib.sha256(dirname.encode()).hexdigest()
     return dirname
 
@@ -138,6 +164,19 @@ class RasterFormat:
 
         Returns:
             the raster data
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def from_config(name: str, config: dict[str, Any]) -> "RasterFormat":
+        """Create a RasterFormat from a config dict.
+
+        Args:
+            name: the name of this format
+            config: the config dict
+
+        Returns:
+            the RasterFormat instance
         """
         raise NotImplementedError
 
@@ -710,5 +749,5 @@ def load_raster_format(config: RasterFormatConfig) -> RasterFormat:
     Returns:
         the loaded RasterFormat implementation
     """
-    cls = RasterFormats.get_class(config.name)
+    cls = RasterFormats[config.name]
     return cls.from_config(config.name, config.config_dict)

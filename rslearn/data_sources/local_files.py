@@ -2,12 +2,12 @@
 
 import functools
 import json
+from collections.abc import Callable
 from typing import Any, Generic, TypeVar
 
 import fiona
 import shapely
 import shapely.geometry
-from class_registry import ClassRegistry
 from rasterio.crs import CRS
 from upath import UPath
 
@@ -23,7 +23,24 @@ from rslearn.utils.geometry import Projection, STGeometry, get_global_geometry
 from .data_source import DataSource, Item, QueryConfig
 
 logger = get_logger("__name__")
-Importers = ClassRegistry()
+_ImporterT = TypeVar("_ImporterT", bound="Importer")
+
+
+class _ImporterRegistry(dict[str, type["Importer"]]):
+    """Registry for Importer classes."""
+
+    def register(self, name: str) -> Callable[[type[_ImporterT]], type[_ImporterT]]:
+        """Decorator to register an importer class."""
+
+        def decorator(cls: type[_ImporterT]) -> type[_ImporterT]:
+            self[name] = cls
+            return cls
+
+        return decorator
+
+
+Importers = _ImporterRegistry()
+
 
 ItemType = TypeVar("ItemType", bound=Item)
 LayerConfigType = TypeVar("LayerConfigType", bound=LayerConfig)
@@ -425,7 +442,7 @@ class LocalFiles(DataSource):
         """
         self.config = config
 
-        self.importer = Importers[config.layer_type.value]
+        self.importer = Importers[config.layer_type.value]()
         self.src_dir = src_dir
 
     @staticmethod

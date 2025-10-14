@@ -510,18 +510,6 @@ wheels = [
 ]
 
 [[package]]
-name = "class-registry"
-version = "2.1.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "six" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/77/12/9588e71126438abdf10d3cec4ff4257eedaf6bc9b9637ab001d138d74085/class-registry-2.1.2.tar.gz", hash = "sha256:678bdb0322566c07a4d8905140d364bd34a73baf46bf7580fc2e06fa994d4e7e", size = 15277, upload-time = "2017-12-30T23:34:29.393Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/05/ca/3723cb3a74a23fe77c88f29fe06fed202acc398763d36b6721dc2883bbd4/class_registry-2.1.2-py2.py3-none-any.whl", hash = "sha256:cfb855514753e2edfe8d88b14a6e449820682fe0983efe61b83df28b688b3e5a", size = 12875, upload-time = "2017-12-30T23:34:28.504Z" },
-]
-
-[[package]]
 name = "click"
 version = "8.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4237,11 +4225,10 @@ wheels = [
 
 [[package]]
 name = "rslearn"
-version = "0.0.7"
+version = "0.0.8"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
-    { name = "class-registry" },
     { name = "fiona" },
     { name = "fsspec" },
     { name = "jsonargparse" },
@@ -4299,7 +4286,6 @@ requires-dist = [
     { name = "accelerate", marker = "extra == 'extra'", specifier = ">=1.10" },
     { name = "boto3", specifier = ">=1.39" },
     { name = "cdsapi", marker = "extra == 'extra'", specifier = ">=0.7.6" },
-    { name = "class-registry", specifier = ">=2.1" },
     { name = "earthdaily", extras = ["platform"], marker = "extra == 'extra'", specifier = ">=1.0.7" },
     { name = "earthengine-api", marker = "extra == 'extra'", specifier = ">=1.6.3" },
     { name = "einops", marker = "extra == 'extra'", specifier = ">=0.8" },

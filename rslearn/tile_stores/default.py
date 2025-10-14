@@ -1,5 +1,6 @@
 """Default TileStore implementation."""
 
+import json
 import math
 import shutil
 from typing import Any
@@ -34,6 +35,9 @@ from .tile_store import TileStore
 
 # Special filename to indicate writing is done.
 COMPLETED_FNAME = "completed"
+
+# Special filename to store the bands that are present in a raster.
+BANDS_FNAME = "bands.json"
 
 
 class DefaultTileStore(TileStore):
@@ -84,7 +88,7 @@ class DefaultTileStore(TileStore):
         self.path = join_upath(ds_path, self.path_suffix)
 
     def _get_raster_dir(
-        self, layer_name: str, item_name: str, bands: list[str]
+        self, layer_name: str, item_name: str, bands: list[str], write: bool = False
     ) -> UPath:
         """Get the directory where the specified raster is stored.
 
@@ -92,12 +96,21 @@ class DefaultTileStore(TileStore):
             layer_name: the name of the dataset layer.
             item_name: the name of the item from the data source.
             bands: list of band names that are expected to be stored together.
+            write: whether to create the directory and write the bands to a file inside
+                the directory.
 
         Returns:
             the UPath directory where the raster should be stored.
         """
         assert self.path is not None
-        return self.path / layer_name / item_name / get_bandset_dirname(bands)
+        dir_name = self.path / layer_name / item_name / get_bandset_dirname(bands)
+
+        if write:
+            dir_name.mkdir(parents=True, exist_ok=True)
+            with (dir_name / BANDS_FNAME).open("w") as f:
+                json.dump(bands, f)
+
+        return dir_name
 
     def _get_raster_fname(
         self, layer_name: str, item_name: str, bands: list[str]
@@ -117,9 +130,11 @@ class DefaultTileStore(TileStore):
         """
         raster_dir = self._get_raster_dir(layer_name, item_name, bands)
         for fname in raster_dir.iterdir():
-            # Ignore completed sentinel files as well as temporary files created by
+            # Ignore completed sentinel files, bands files, as well as temporary files created by
             # open_atomic (in case this tile store is on local filesystem).
             if fname.name == COMPLETED_FNAME:
+                continue
+            if fname.name == BANDS_FNAME:
                 continue
             if ".tmp." in fname.name:
                 continue
@@ -161,8 +176,20 @@ class DefaultTileStore(TileStore):
 
         bands: list[list[str]] = []
         for raster_dir in item_dir.iterdir():
-            parts = raster_dir.name.split("_")
-            bands.append(parts)
+            if not (raster_dir / BANDS_FNAME).exists():
+                # This is likely a legacy directory where the bands are only encoded in
+                # the directory name, so we have to rely on that.
+                parts = raster_dir.name.split("_")
+                bands.append(parts)
+                continue
+
+            # We use the BANDS_FNAME here -- although it is slower to read the file, it
+            # is more reliable since sometimes the directory name is a hash of the
+            # bands in case there are too many bands (filename too long) or some bands
+            # contain the underscore character.
+            with (raster_dir / BANDS_FNAME).open() as f:
+                bands.append(json.load(f))
+
         return bands
 
     def get_raster_bounds(
@@ -248,7 +275,7 @@ class DefaultTileStore(TileStore):
             bounds: the bounds of the array.
             array: the raster data.
         """
-        raster_dir = self._get_raster_dir(layer_name, item_name, bands)
+        raster_dir = self._get_raster_dir(layer_name, item_name, bands, write=True)
         raster_format = GeotiffRasterFormat(geotiff_options=self.geotiff_options)
         raster_format.encode_raster(raster_dir, projection, bounds, array)
         (raster_dir / COMPLETED_FNAME).touch()
@@ -264,7 +291,7 @@ class DefaultTileStore(TileStore):
             bands: the list of bands in the array.
             fname: the raster file, which must be readable by rasterio.
         """
-        raster_dir = self._get_raster_dir(layer_name, item_name, bands)
+        raster_dir = self._get_raster_dir(layer_name, item_name, bands, write=True)
         raster_dir.mkdir(parents=True, exist_ok=True)
 
         if self.convert_rasters_to_cogs:

@@ -6,6 +6,7 @@ import rasterio
 from rasterio.crs import CRS
 from upath import UPath
 
+from rslearn.const import WGS84_PROJECTION
 from rslearn.tile_stores.default import DefaultTileStore
 from rslearn.utils.fsspec import open_atomic
 from rslearn.utils.geometry import Projection
@@ -128,3 +129,63 @@ def test_leftover_tmp_file(tmp_path: pathlib.Path) -> None:
     # And make sure this time the read succeeds.
     array = tile_store.read_raster(LAYER_NAME, ITEM_NAME, BANDS, PROJECTION, bounds)
     assert array.min() == 1 and array.max() == 1
+
+
+class TestGetRasterBands:
+    """Tests for DefaultTileStore.get_raster_bands."""
+
+    def test_simple_bands(self, tmp_path: pathlib.Path) -> None:
+        """Test with two bands with standard names."""
+        tile_store = DefaultTileStore()
+        tile_store.set_dataset_path(UPath(tmp_path))
+        tile_store.write_raster(
+            "layer",
+            "item",
+            ["B01", "B02"],
+            WGS84_PROJECTION,
+            (0, 0, 4, 4),
+            np.ones((2, 4, 4), dtype=np.uint8),
+        )
+        assert tile_store.get_raster_bands("layer", "item") == [["B01", "B02"]]
+
+    def test_band_with_underscore(self, tmp_path: pathlib.Path) -> None:
+        """Verify that the tile store works when a band contains underscore.
+
+        The tile store needs to use bands.json to check the band names, since it would
+        not be encoded in the directory name.
+        """
+        tile_store = DefaultTileStore()
+        tile_store.set_dataset_path(UPath(tmp_path))
+        tile_store.write_raster(
+            "layer",
+            "item",
+            ["B01", "_"],
+            WGS84_PROJECTION,
+            (0, 0, 4, 4),
+            np.ones((2, 4, 4), dtype=np.uint8),
+        )
+        assert tile_store.get_raster_bands("layer", "item") == [["B01", "_"]]
+
+    def test_multiple_files(self, tmp_path: pathlib.Path) -> None:
+        """Test when there are multiple files with different subsets of bands."""
+        tile_store = DefaultTileStore()
+        tile_store.set_dataset_path(UPath(tmp_path))
+        tile_store.write_raster(
+            "layer",
+            "item",
+            ["B01", "B02"],
+            WGS84_PROJECTION,
+            (0, 0, 4, 4),
+            np.ones((2, 4, 4), dtype=np.uint8),
+        )
+        tile_store.write_raster(
+            "layer",
+            "item",
+            ["_"],
+            WGS84_PROJECTION,
+            (0, 0, 4, 4),
+            np.ones((2, 4, 4), dtype=np.uint8),
+        )
+        assert list(sorted(tile_store.get_raster_bands("layer", "item"))) == list(
+            sorted([["B01", "B02"], ["_"]])
+        )
