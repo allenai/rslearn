@@ -83,6 +83,10 @@ class PlanetaryComputer(DataSource, TileStore):
 
     STAC_ENDPOINT = "https://planetarycomputer.microsoft.com/api/stac/v1"
 
+    # Default threshold for recreating the STAC client to prevent memory leaks
+    # from the pystac Catalog's resolved objects cache growing unbounded
+    DEFAULT_CACHE_BUST_ITEM_THRESHOLD = 100
+
     def __init__(
         self,
         collection_name: str,
@@ -93,6 +97,7 @@ class PlanetaryComputer(DataSource, TileStore):
         timeout: timedelta = timedelta(seconds=10),
         skip_items_missing_assets: bool = False,
         cache_dir: UPath | None = None,
+        cache_bust_item_threshold: int | None = None,
     ):
         """Initialize a new PlanetaryComputer instance.
 
@@ -109,6 +114,9 @@ class PlanetaryComputer(DataSource, TileStore):
             cache_dir: optional directory to cache items by name, including asset URLs.
                 If not set, there will be no cache and instead STAC requests will be
                 needed each time.
+            cache_bust_item_threshold: number of STAC items to process before recreating
+                the client to prevent memory leaks from the resolved objects cache.
+                Defaults to DEFAULT_CACHE_BUST_ITEM_THRESHOLD.
         """
         self.collection_name = collection_name
         self.asset_bands = asset_bands
@@ -118,12 +126,16 @@ class PlanetaryComputer(DataSource, TileStore):
         self.timeout = timeout
         self.skip_items_missing_assets = skip_items_missing_assets
         self.cache_dir = cache_dir
+        self.cache_bust_item_threshold = (
+            cache_bust_item_threshold or self.DEFAULT_CACHE_BUST_ITEM_THRESHOLD
+        )
 
         if self.cache_dir is not None:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         self.client: pystac_client.Client | None = None
         self.collection: pystac_client.CollectionClient | None = None
+        self._client_item_count = 0
 
     @staticmethod
     def from_config(config: RasterLayerConfig, ds_path: UPath) -> "PlanetaryComputer":
@@ -142,7 +154,12 @@ class PlanetaryComputer(DataSource, TileStore):
         if "cache_dir" in d:
             kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
 
-        simple_optionals = ["query", "sort_by", "sort_ascending"]
+        simple_optionals = [
+            "query",
+            "sort_by",
+            "sort_ascending",
+            "cache_bust_item_threshold",
+        ]
         for k in simple_optionals:
             if k in d:
                 kwargs[k] = d[k]
@@ -158,10 +175,24 @@ class PlanetaryComputer(DataSource, TileStore):
         may not be calling get_items. Additionally, loading it during the get_items
         call enables leveraging the retry loop functionality in
         prepare_dataset_windows.
+
+        Note: We periodically recreate the client to prevent memory leaks from the
+        pystac Catalog's resolved objects cache, which grows unbounded as STAC items
+        are deserialized and cached. The cache cannot be cleared or disabled.
         """
-        if self.client is not None:
+        if (
+            self.client is not None
+            and self._client_item_count < self.cache_bust_item_threshold
+        ):
             return self.client, self.collection
 
+        # Recreate client to clear the resolved objects cache
+        logger.debug(
+            "Recreating STAC client after processing %d items (threshold: %d)",
+            self._client_item_count,
+            self.cache_bust_item_threshold,
+        )
+        self._client_item_count = 0
         self.client = pystac_client.Client.open(self.STAC_ENDPOINT)
         self.collection = self.client.get_collection(self.collection_name)
         return self.client, self.collection
@@ -214,6 +245,9 @@ class PlanetaryComputer(DataSource, TileStore):
         stac_item = collection.get_item(name)
         item = self._stac_item_to_item(stac_item)
 
+        # Track items processed for client recreation threshold (after deserialization)
+        self._client_item_count += 1
+
         # Finally we cache it if cache_dir is set.
         if cache_fname is not None:
             with cache_fname.open("w") as f:
@@ -248,6 +282,8 @@ class PlanetaryComputer(DataSource, TileStore):
                 query=self.query,
             )
             stac_items = [item for item in result.item_collection()]
+            # Track items processed for client recreation threshold (after deserialization)
+            self._client_item_count += len(stac_items)
             logger.debug("STAC search yielded %d items", len(stac_items))
 
             if self.skip_items_missing_assets:
