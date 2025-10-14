@@ -173,6 +173,17 @@ class PrithviV2(nn.Module):
             features, num_timesteps
         )
 
+    def get_backbone_channels(self) -> list:
+        """Returns the output channels of this model when used as a backbone.
+
+        The output channels is a list of (patch_size, depth) that corresponds
+        to the feature maps that the backbone returns.
+
+        Returns:
+            the output channels of the backbone as a list of (patch_size, depth) tuples.
+        """
+        return [(1, 1024)]
+
 
 class PrithviNormalize(Transform):
     """Normalize inputs using Prithvi normalization.
