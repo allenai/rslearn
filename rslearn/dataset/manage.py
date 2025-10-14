@@ -396,9 +396,9 @@ def materialize_window(
         )
 
         if dataset.materializer_name:
-            materializer = Materializers[dataset.materializer_name]
+            materializer = Materializers[dataset.materializer_name]()
         else:
-            materializer = Materializers[layer_cfg.layer_type.value]
+            materializer = Materializers[layer_cfg.layer_type.value]()
 
         retry(
             fn=lambda: materializer.materialize(
