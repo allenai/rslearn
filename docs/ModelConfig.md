@@ -487,6 +487,15 @@ Here is an example of its usage.
             init_args:
               num_classes: 2
               enable_miou_metric: true
+        input_mapping:
+          # This specifies a per-task remapping from the keys in inputs to keys
+          # expected by the task. Currently, all tasks expect the labels to be under
+          # the "targets" key. The tasks will process these into a form suitable for
+          # training.
+          regress:
+            # The key here must match the name of the input under the inpust section.
+            regress_input: "targets"
+            segment_input: "targets
 ```
 
 ### num_workers and init_workers
