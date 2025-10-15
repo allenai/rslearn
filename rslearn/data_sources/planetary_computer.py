@@ -299,7 +299,6 @@ class PlanetaryComputer(DataSource, TileStore):
                 datetime=wgs84_geometry.time_range,
                 query=self.query,
             )
-            # stac_items = [item for item in result.item_collection()]
             stac_items = [item for item in result.items()]
             # Track items processed for client recreation threshold (after deserialization)
             self._client_item_count += len(stac_items)
