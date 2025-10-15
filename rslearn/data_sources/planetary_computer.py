@@ -85,7 +85,7 @@ class PlanetaryComputer(DataSource, TileStore):
 
     # Default threshold for recreating the STAC client to prevent memory leaks
     # from the pystac Catalog's resolved objects cache growing unbounded
-    DEFAULT_CACHE_BUST_ITEM_THRESHOLD = 100
+    DEFAULT_MAX_ITEMS_PER_CLIENT = 1000
 
     def __init__(
         self,
@@ -97,7 +97,7 @@ class PlanetaryComputer(DataSource, TileStore):
         timeout: timedelta = timedelta(seconds=10),
         skip_items_missing_assets: bool = False,
         cache_dir: UPath | None = None,
-        cache_bust_item_threshold: int | None = None,
+        max_items_per_client: int | None = None,
     ):
         """Initialize a new PlanetaryComputer instance.
 
@@ -114,9 +114,9 @@ class PlanetaryComputer(DataSource, TileStore):
             cache_dir: optional directory to cache items by name, including asset URLs.
                 If not set, there will be no cache and instead STAC requests will be
                 needed each time.
-            cache_bust_item_threshold: number of STAC items to process before recreating
+            max_items_per_client: number of STAC items to process before recreating
                 the client to prevent memory leaks from the resolved objects cache.
-                Defaults to DEFAULT_CACHE_BUST_ITEM_THRESHOLD.
+                Defaults to DEFAULT_MAX_ITEMS_PER_CLIENT.
         """
         self.collection_name = collection_name
         self.asset_bands = asset_bands
@@ -126,15 +126,14 @@ class PlanetaryComputer(DataSource, TileStore):
         self.timeout = timeout
         self.skip_items_missing_assets = skip_items_missing_assets
         self.cache_dir = cache_dir
-        self.cache_bust_item_threshold = (
-            cache_bust_item_threshold or self.DEFAULT_CACHE_BUST_ITEM_THRESHOLD
+        self.max_items_per_client = (
+            max_items_per_client or self.DEFAULT_MAX_ITEMS_PER_CLIENT
         )
 
         if self.cache_dir is not None:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         self.client: pystac_client.Client | None = None
-        self.collection: pystac_client.CollectionClient | None = None
         self._client_item_count = 0
 
     @staticmethod
@@ -158,7 +157,7 @@ class PlanetaryComputer(DataSource, TileStore):
             "query",
             "sort_by",
             "sort_ascending",
-            "cache_bust_item_threshold",
+            "max_items_per_client",
         ]
         for k in simple_optionals:
             if k in d:
@@ -168,7 +167,7 @@ class PlanetaryComputer(DataSource, TileStore):
 
     def _load_client(
         self,
-    ) -> tuple[pystac_client.Client, pystac_client.CollectionClient]:
+    ) -> pystac_client.Client:
         """Lazily load pystac client.
 
         We don't load it when creating the data source because it takes time and caller
@@ -180,22 +179,28 @@ class PlanetaryComputer(DataSource, TileStore):
         pystac Catalog's resolved objects cache, which grows unbounded as STAC items
         are deserialized and cached. The cache cannot be cleared or disabled.
         """
-        if (
-            self.client is not None
-            and self._client_item_count < self.cache_bust_item_threshold
-        ):
-            return self.client, self.collection
+        if self.client is None:
+            logger.info("Creating initial STAC client")
+            self.client = pystac_client.Client.open(self.STAC_ENDPOINT)
+            return self.client
+
+        if self._client_item_count < self.max_items_per_client:
+            return self.client
 
         # Recreate client to clear the resolved objects cache
+        current_client = self.client
         logger.debug(
             "Recreating STAC client after processing %d items (threshold: %d)",
             self._client_item_count,
-            self.cache_bust_item_threshold,
+            self.max_items_per_client,
         )
+        client_root = current_client.get_root()
+        client_root.clear_links()
+        client_root.clear_items()
+        client_root.clear_children()
         self._client_item_count = 0
         self.client = pystac_client.Client.open(self.STAC_ENDPOINT)
-        self.collection = self.client.get_collection(self.collection_name)
-        return self.client, self.collection
+        return self.client
 
     def _stac_item_to_item(self, stac_item: pystac.Item) -> PlanetaryComputerItem:
         shp = shapely.geometry.shape(stac_item.geometry)
@@ -241,8 +246,21 @@ class PlanetaryComputer(DataSource, TileStore):
 
         # No cache or not in cache, so we need to make the STAC request.
         logger.debug("Getting STAC item {name}")
-        _, collection = self._load_client()
-        stac_item = collection.get_item(name)
+        client = self._load_client()
+
+        search_result = client.search(ids=[name], collections=[self.collection_name])
+        stac_items = list(search_result.items())
+
+        if not stac_items:
+            raise ValueError(
+                f"Item {name} not found in collection {self.collection_name}"
+            )
+        if len(stac_items) > 1:
+            raise ValueError(
+                f"Multiple items found for ID {name} in collection {self.collection_name}"
+            )
+
+        stac_item = stac_items[0]
         item = self._stac_item_to_item(stac_item)
 
         # Track items processed for client recreation threshold (after deserialization)
@@ -267,7 +285,7 @@ class PlanetaryComputer(DataSource, TileStore):
         Returns:
             List of groups of items that should be retrieved for each geometry.
         """
-        client, _ = self._load_client()
+        client = self._load_client()
 
         groups = []
         for geometry in geometries:
@@ -281,7 +299,8 @@ class PlanetaryComputer(DataSource, TileStore):
                 datetime=wgs84_geometry.time_range,
                 query=self.query,
             )
-            stac_items = [item for item in result.item_collection()]
+            # stac_items = [item for item in result.item_collection()]
+            stac_items = [item for item in result.items()]
             # Track items processed for client recreation threshold (after deserialization)
             self._client_item_count += len(stac_items)
             logger.debug("STAC search yielded %d items", len(stac_items))
@@ -616,7 +635,13 @@ class Sentinel2(PlanetaryComputer):
         if "cache_dir" in d:
             kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
 
-        simple_optionals = ["harmonize", "query", "sort_by", "sort_ascending"]
+        simple_optionals = [
+            "harmonize",
+            "query",
+            "sort_by",
+            "sort_ascending",
+            "max_items_per_client",
+        ]
         for k in simple_optionals:
             if k in d:
                 kwargs[k] = d[k]
@@ -792,7 +817,12 @@ class Sentinel1(PlanetaryComputer):
         if "cache_dir" in d:
             kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
 
-        simple_optionals = ["query", "sort_by", "sort_ascending"]
+        simple_optionals = [
+            "query",
+            "sort_by",
+            "sort_ascending",
+            "max_items_per_client",
+        ]
         for k in simple_optionals:
             if k in d:
                 kwargs[k] = d[k]
