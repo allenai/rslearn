@@ -2,13 +2,13 @@
 
 import hashlib
 import json
-from typing import Any, BinaryIO
+from collections.abc import Callable
+from typing import Any, BinaryIO, TypeVar
 
 import affine
 import numpy as np
 import numpy.typing as npt
 import rasterio
-from class_registry import ClassRegistry
 from PIL import Image
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
@@ -21,7 +21,27 @@ from rslearn.utils.fsspec import open_rasterio_upath_reader, open_rasterio_upath
 
 from .geometry import PixelBounds, Projection
 
-RasterFormats = ClassRegistry()
+_RasterFormatT = TypeVar("_RasterFormatT", bound="RasterFormat")
+
+
+class _RasterFormatRegistry(dict[str, type["RasterFormat"]]):
+    """Registry for RasterFormat classes."""
+
+    def register(
+        self, name: str
+    ) -> Callable[[type[_RasterFormatT]], type[_RasterFormatT]]:
+        """Decorator to register a raster format class."""
+
+        def decorator(cls: type[_RasterFormatT]) -> type[_RasterFormatT]:
+            self[name] = cls
+            return cls
+
+        return decorator
+
+
+RasterFormats = _RasterFormatRegistry()
+
+
 logger = get_logger(__name__)
 
 
@@ -144,6 +164,19 @@ class RasterFormat:
 
         Returns:
             the raster data
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def from_config(name: str, config: dict[str, Any]) -> "RasterFormat":
+        """Create a RasterFormat from a config dict.
+
+        Args:
+            name: the name of this format
+            config: the config dict
+
+        Returns:
+            the RasterFormat instance
         """
         raise NotImplementedError
 
@@ -716,5 +749,5 @@ def load_raster_format(config: RasterFormatConfig) -> RasterFormat:
     Returns:
         the loaded RasterFormat implementation
     """
-    cls = RasterFormats.get_class(config.name)
+    cls = RasterFormats[config.name]
     return cls.from_config(config.name, config.config_dict)

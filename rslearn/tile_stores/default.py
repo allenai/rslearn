@@ -130,9 +130,11 @@ class DefaultTileStore(TileStore):
         """
         raster_dir = self._get_raster_dir(layer_name, item_name, bands)
         for fname in raster_dir.iterdir():
-            # Ignore completed sentinel files as well as temporary files created by
+            # Ignore completed sentinel files, bands files, as well as temporary files created by
             # open_atomic (in case this tile store is on local filesystem).
             if fname.name == COMPLETED_FNAME:
+                continue
+            if fname.name == BANDS_FNAME:
                 continue
             if ".tmp." in fname.name:
                 continue
