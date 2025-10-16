@@ -234,6 +234,16 @@ data:
         box_size: 10
 ```
 
+The expected output from the model is a list of dicts (one dict per example in the
+batch) with the "boxes", "scores", and "labels" keys:
+
+- boxes: a (N, 4) float tensor, where N is the number of predicted boxes for this example,
+  containing the predicted bounding box coordinates. The coordinates are in
+  (x1, y1, x2, y2) order, and in relative pixel coordinates corresponding to the input
+  resolution.
+- scores: a (N,) float tensor containing the output probabilities.
+- labels: a (N,) integer tensor containing the predicted class ID for each box.
+
 ### PerPixelRegressionTask
 
 PerPixelRegressionTask trains a model to predict a real value at each input pixel. For
@@ -399,18 +409,18 @@ The configuration snippet below summarizes the most common options. See
     task:
       class_path: rslearn.train.tasks.segmentation.SegmentationTask
       init_args:
-        # Multiply ground truth values by this factor before using it for training.
-        scale_factor: 0.1
-        # What metric to use, either "mse" (default) or "l1".
-        metric_mode: "mse"
-        # Optional value to treat as invalid. The loss will be masked at pixels where
-        # the ground truth value is equal to nodata_value.
-        nodata_value: -1
+        # The number of classes to predict.
+        num_classes: 10
+        # The value to use for NODATA pixels, which will be excluded from the loss.
+        # If null (default), all pixels are considered valid.
+        nodata_value: 255
+        # Whether to compute mean IoU.
+        enable_miou_metric: true
 ```
 
-For each training example, PerPixelRegressionTask computes a target dict containing the
-"values" (scaled ground truth values) and "valid" (mask indicating which pixels are
-valid for training) keys.
+For each training example, SegmentationTask computes a target dict containing the
+"classes" (ground truth class IDs) and "valid" (mask indicating which pixels are valid
+for training) keys.
 
 Here is an example usage:
 
@@ -427,19 +437,15 @@ model:
               pretrained: true
               output_layers: [1, 3, 5, 7]
         decoder:
-          # We apply a UNet-style decoder on the feature maps from the Swin encoder to
-          # compute outputs at the input resolution.
+          # Similar to PerPixelRegression, we apply a UNet-style decoder.
           - class_path: rslearn.models.unet.UNetDecoder
             init_args:
-              # These indicate the resolution (1/X relative to the input resolution)
-              # and embedding sizes of the input feature maps.
               in_channels: [[4, 128], [8, 256], [16, 512], [32, 1024]]
-              # Number of output channels, should be 1 for regression.
-              out_channels: 1
-          - class_path: rslearn.train.tasks.per_pixel_regression.PerPixelRegressionHead
-            init_args:
-              # The loss function to use, either "mse" (default) or "l1".
-              loss_mode: "mse"
+              # Number of output channels, must match the number of classes.
+              out_channels: 10
+          # The SegmentationHead computes cross entropy loss on valid pixels between
+          # the model output and the ground truth class IDs.
+          - class_path: rslearn.train.tasks.segmentation.SegmentationHead
 data:
   class_path: rslearn.train.data_module.RslearnDataModule
   init_args:
@@ -452,9 +458,153 @@ data:
       targets:
         data_type: "raster"
         layers: ["label"]
-        bands: ["lfmc"]
-        dtype: FLOAT32
+        bands: ["classes"]
+        dtype: INT32
         is_target: true
     task:
       # see example above
 ```
+
+## Models
+
+rslearn includes a variety of model components that can be composed together, including
+remote sensing foundation models like OlmoEarth, decoders like Faster R-CNN, and
+intermediate components.
+
+### Framework: SingleTaskModel and MultiTaskModel
+
+`SingleTaskModel` and `MultiTaskModel` provide a framework for composing encoders and
+decoders. `SingleTaskModel` applies a single sequence of decoder components to make a
+prediction for one task, while `MultiTaskModel` can be used with `MultiTask` to have
+parallel decoders making multiple predictions for training no multiple tasks.
+
+Here is an example of using `SingleTaskModel`:
+
+```yaml
+model:
+  class_path: rslearn.train.lightning_module.RslearnLightningModule
+  init_args:
+    model:
+      class_path: rslearn.models.multitask.SingleTaskModel
+      init_args:
+        encoder:
+          # We compose two components in the encoder:
+          # (1) A Swin encoder, which processes input images and computes feature maps.
+          # (2) An Fpn, which inputs feature maps and outputs updated feature maps.
+          - class_path: rslearn.models.swin.Swin
+            init_args:
+              arch: "swin_v2_b"
+              pretrained: true
+              input_channels: 9
+              output_layers: [1, 3, 5, 7]
+          - class_path: rslearn.models.fpn.Fpn
+            init_args:
+              in_channels: [128, 256, 512, 1024]
+              out_channels: 128
+        decoder:
+          # We also compose two components in the decoder:
+          # (1) A Conv layer, which applies a Conv2D on each input feature map.
+          # (2) A FasterRCNN to predict bounding boxes.
+          - class_path: rslearn.models.conv.Conv
+            init_args:
+              in_channels: 128
+              out_channels: 128
+              kernel_size: 3
+          - class_path: rslearn.models.faster_rcnn.FasterRCNN
+            init_args:
+              downsample_factors: [4, 8, 16, 32]
+              num_channels: 128
+              num_classes: 2
+              anchor_sizes: [[32], [64], [128], [256]]
+```
+
+This framework is somewhat rigid. The first component in the encoder should input the
+input dict from the dataset, which is initialized with the passthrough DataInputs
+specified in the model config but then modified by the transforms. It should output a
+list of 2D feature maps. For example, Swin inputs an input dict like this:
+
+```
+{
+  "image": BxCxHxW tensor,
+}
+```
+
+It outputs a list of feature maps. With the selected Base architecture (swin_v2_b), and
+the configured `output_layers`, this list is like this:
+
+```
+[
+  B x 128 x (H/4) x (W/4) tensor,
+  B x 256 x (H/8) x (W/8) tensor,
+  B x 512 x (H/16) x (W/16) tensor,
+  B x 1024 x (H/32) x (W/32) tensor,
+]
+```
+
+In the Python code, the signature of the first encoder is:
+
+```python
+    def forward(
+        self,
+        inputs: list[dict[str, Any]],
+    ) -> list[torch.Tensor]:
+```
+
+Subsequent components in the encoder should input feature maps and output updated
+feature maps. For example, the Fpn (Feature Pyramid Network) inputs the feature map
+above and outputs feature maps that have a consistent number of channels
+(configured by `out_channels`, which we have set to 128). The `in_channels` specifies
+the embedding size of each input feature map, in order. Then, the output is like this:
+
+```
+[
+  B x 128 x (H/4) x (W/4) tensor,
+  B x 128 x (H/8) x (W/8) tensor,
+  B x 128 x (H/16) x (W/16) tensor,
+  B x 128 x (H/32) x (W/32) tensor,
+]
+```
+
+The signature of subsequent encoder components is:
+
+```python
+    def forward(self, x: list[torch.Tensor]) -> list[torch.Tensor]:
+```
+
+In the decoder, all components except the last should input feature maps, along with
+the original inputs to the model, and output updated feature maps. For example, the
+Conv component applies the same `nn.Conv2d` layer on each input feature map, producing
+an output with the same shapes. The signature of these decoder components is:
+
+```python
+    def forward(
+        self,
+        features: list[torch.Tensor],
+        inputs: list[dict[str, Any]],
+    ) -> list[torch.Tensor]:
+```
+
+Note that several components, including Conv, ignore the inputs.
+
+The final component should accept the targets, and compute outputs and the loss(es).
+For example, the output from Faster R-CNN is a list of dicts with the "boxes",
+"scores", and "labels" keys. It outputs a loss dict with the "rpn_box_reg",
+"objectness", "classifier", and "box_reg" keys. These will be logged separately, but
+are summed for computing gradients during training. The signature of the final decoder
+component is:
+
+```python
+    def forward(
+        self,
+        features: list[torch.Tensor],
+        inputs: list[dict[str, Any]],
+        targets: list[dict[str, Any]] | None = None,
+    ) -> tuple[list[Any], dict[str, torch.Tensor]]:
+```
+
+### Foundation Models
+
+Several remote sensing foundation models are included in rslearn, and can be used as
+the first component in the encoder list.
+
+- [SatlasPretrain](SatlasPretrain.md)
