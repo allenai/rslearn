@@ -12,13 +12,8 @@ jobs:
       contents: 'read'
     runs-on: 'ubuntu-latest'
     steps:
-      - uses: 'astral-sh/setup-uv@v6'
-        with:
-          enable-cache: true
-          cache-dependency-glob: |
-            pyproject.toml
-            uv.lock
       - uses: 'actions/checkout@v5'
+      - uses: 'astral-sh/setup-uv@v6'
       - name: 'validate release tag matches pyproject version'
         run: |
           RELEASE_VERSION=${GITHUB_REF#refs/tags/v}
