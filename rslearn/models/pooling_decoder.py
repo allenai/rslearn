@@ -76,3 +76,35 @@ class PoolingDecoder(torch.nn.Module):
         features = torch.amax(features, dim=(2, 3))
         features = self.fc_layers(features)
         return self.output_layer(features)
+
+
+class SegmentationPoolingDecoder(PoolingDecoder):
+    """Like PoolingDecoder, but copy output to all pixels.
+
+    This allows for the model to produce a global output while still being compatible
+    with SegmentationTask. This only makes sense for very small windows, since the
+    output probabilities will be the same at all pixels. The main use case is to train
+    for a classification-like task on small windows, but still produce a raster during
+    inference on large windows.
+    """
+
+    def __init__(self, image_key: str = "image"):
+        """Create a new SegmentationPoolingDecoder.
+
+        Args:
+            image_key: the key in inputs for the image from which the expected width
+                and height is derived.
+        """
+        self.image_key = image_key
+
+    def forward(
+        self, features: list[torch.Tensor], inputs: list[dict[str, Any]]
+    ) -> torch.Tensor:
+        """Extend PoolingDecoder forward to upsample the output to a segmentation mask.
+
+        This only works when all of the pixels have the same segmentation target.
+        """
+        output_probs = super().forward(features, inputs)
+        # BC -> BCHW
+        h, w = inputs[0][self.image_key].shape[1:3]
+        return output_probs[:, :, None, None].repeat([1, 1, h, w])
