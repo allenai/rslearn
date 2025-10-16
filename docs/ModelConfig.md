@@ -1,11 +1,10 @@
 ## Model Configuration File
 
-Typically, model training in rslearn involves fine-tuning remote sensing foundation
-models for prediction tasks encapsulated in an rslearn dataset. Typically, the dataset
-will contain one or more satellite image layers that contain the input that should be
-passed to the model; these could be individual images, or image time series. The
-dataset should also contain one or more raster or vector layers that act as labels, so
-that the model can be trained to make predictions corresponding to those layers.
+Model training in rslearn involves supervised fine-tuning of remote sensing foundation
+models for prediction tasks. The training dataset contains one or more satellite image
+layers as input, either individual images or time series, along with corresponding
+raster or vector layers that serve as labels. The model learns to generate predictions
+that match these label layers.
 
 The model configuration file is a PyTorch Lightning-style YAML file that defines a
 model architecture, the tasks that the model should be trained for, and how the
@@ -42,10 +41,10 @@ supplement the examples in [Examples](Examples.md).
 
 ## Model Section
 
-The model section configures the RslearnLightningModule, which is intended to be
+The model section configures the `RslearnLightningModule`, which is intended to be
 flexible enough for most supervised fine-tuning tasks.
 
-Here is a summary of all of the options available in RslearnLightningModule:
+Here is a summary of all of the options available in `RslearnLightningModule`:
 
 ```yaml
 model:
@@ -68,13 +67,13 @@ model:
 ### model
 
 The model argument is a `torch.nn.Module` that corresponds to the model architecture.
-Typically, models will either employ SingleTaskModel (when training a model for one
-task, like segmentation or detection) or MultiTaskModel (when training a model on
+Typically, models will either employ `SingleTaskModel` (when training a model for one
+task, like segmentation or detection) or `MultiTaskModel` (when training a model on
 multiple tasks, e.g. predicting LFMC at each pixel while also classifying land cover at
 each pixel). These classes provide scaffolding that makes foundation models like
 OlmoEarth and SatlasPretrain compatible with decoders like U-Net and Faster R-CNN.
 
-Here is an example with SingleTaskModel, for segmentation:
+Here is an example with `SingleTaskModel`, for segmentation:
 
 ```yaml
     model:
@@ -103,7 +102,7 @@ Here is an example with SingleTaskModel, for segmentation:
           - class_path: rslearn.train.tasks.segmentation.SegmentationHead
 ```
 
-Here is an example with MultiTaskModel, for per-pixel regression + segmentation:
+Here is an example with `MultiTaskModel`, for per-pixel regression + segmentation:
 
 ```yaml
     model:
@@ -142,7 +141,7 @@ available. These are documented in [TasksAndModels](TasksAndModels.md).
 
 This section defines the optimizer that should be used.
 
-Currently, the only optimizer included in rslearn is AdamW.
+Currently, the only optimizer included in rslearn is `AdamW`.
 
 ```yaml
     optimizer:
@@ -290,7 +289,7 @@ We detail each of the options below.
 
 ### inputs
 
-This is a list of DataInput objects that define how to read data from the underlying
+This is a list of `DataInput` objects that define how to read data from the underlying
 rslearn dataset.
 
 Here is an example for a simple single-task training setup that inputs one modality:
@@ -305,7 +304,8 @@ Here is an example for a simple single-task training setup that inputs one modal
         data_type: "raster"
         # The layer names in the rslearn dataset that should be read from.
         layers: ["sentinel2"]
-        # The bands to read.
+        # The bands to read. These should correspond to band names in the dataset
+        # config.json for each of the layers above.
         bands: ["B04", "B03", "B02", "B05", "B06", "B07", "B08", "B11", "B12"]
         # If true, examples not containing the layers needed to read this input are
         # skipped. This should generally be left enabled (default).
@@ -341,12 +341,13 @@ Here is an example for a simple single-task training setup that inputs one modal
         load_all_item_groups: false
 ```
 
-For raster data, the `bands` and `dtype` options are required, but they can be omitted
-for vector data.
+For raster data, the `bands` and `dtype` options are required, but they should be
+omitted for vector data.
 
-Time series in rslearn are represented as (T*C, H, W) tensors, where the timesteps are
-concatenated on the channel dimension. Often, you may have an rslearn dataset with each
-timestep in a different item group of the same layer, like "sentinel2", "sentinel2.1",
+Time series in rslearn are represented as (T*C, H, W) tensors, where the timesteps (T)
+are concatenated on the channel dimension (C), and the other two dimensions are
+height (H) and width (W). Often, you may have an rslearn dataset with each timestep in
+a different item group of the same layer, like "sentinel2", "sentinel2.1",
 "sentinel2.2".
 
 If `layers` is set to `["sentinel2"]`, and `load_all_layers` and `load_all_item_groups`
@@ -462,7 +463,7 @@ Then, we can achieve that in the task with these settings:
         remap_values: [[-1.33, 0.33], [0, 255]]
 ```
 
-The MultiTask task can be used along with MultiTaskModel to combine multiple tasks.
+The `MultiTask` task can be used along with `MultiTaskModel` to combine multiple tasks.
 Here is an example of its usage.
 
 ```yaml
@@ -504,7 +505,7 @@ Here is an example of its usage.
 
 Worker processes are also used to enumerate the windows in the rslearn dataset, and to
 determine which ones contain the layers that are needed. By default, the same number of
-workers used for data loader is used for this initialization. However, it can be
+workers used for the data loader is used for this initialization. However, it can be
 overridden by also setting `init_workers`.
 
 By default, `num_workers` is 0, which means the main process is used. Common values
@@ -575,7 +576,7 @@ Some transforms can be used to perform normalization or renaming of inputs so th
 match with the keys expected by foundation models or by decoders. Other transforms are
 used as augmentations.
 
-Here is an example where a Sentinel-2 image time series is intiially loaded under
+Here is an example where a Sentinel-2 image time series is initially loaded under
 sentinel2_l2a, which is the key expected by the OlmoEarth pre-trained model. But we
 also copy it to the "image" key so that it can be accessed when creating visualizations
 (by the Task object), and since the Faster R-CNN also expects an "image" key to know
