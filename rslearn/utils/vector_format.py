@@ -1,11 +1,11 @@
 """Classes for writing vector data to a UPath."""
 
 import json
+from collections.abc import Callable
 from enum import Enum
-from typing import Any
+from typing import Any, TypeVar
 
 import shapely
-from class_registry import ClassRegistry
 from rasterio.crs import CRS
 from upath import UPath
 
@@ -18,7 +18,25 @@ from .feature import Feature
 from .geometry import PixelBounds, Projection, STGeometry, safely_reproject_and_clip
 
 logger = get_logger(__name__)
-VectorFormats = ClassRegistry()
+_VectorFormatT = TypeVar("_VectorFormatT", bound="VectorFormat")
+
+
+class _VectorFormatRegistry(dict[str, type["VectorFormat"]]):
+    """Registry for VectorFormat classes."""
+
+    def register(
+        self, name: str
+    ) -> Callable[[type[_VectorFormatT]], type[_VectorFormatT]]:
+        """Decorator to register a vector format class."""
+
+        def decorator(cls: type[_VectorFormatT]) -> type[_VectorFormatT]:
+            self[name] = cls
+            return cls
+
+        return decorator
+
+
+VectorFormats = _VectorFormatRegistry()
 
 
 class VectorFormat:
@@ -50,6 +68,19 @@ class VectorFormat:
 
         Returns:
             the vector data
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def from_config(name: str, config: dict[str, Any]) -> "VectorFormat":
+        """Create a VectorFormat from a config dict.
+
+        Args:
+            name: the name of this format
+            config: the config dict
+
+        Returns:
+            the VectorFormat instance
         """
         raise NotImplementedError
 
@@ -410,5 +441,5 @@ def load_vector_format(config: VectorFormatConfig) -> VectorFormat:
     Returns:
         the loaded VectorFormat implementation
     """
-    cls = VectorFormats.get_class(config.name)
+    cls = VectorFormats[config.name]
     return cls.from_config(config.name, config.config_dict)
