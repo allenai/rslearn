@@ -11,9 +11,12 @@ def test_forward() -> None:
         checkpoint_path="tests/unit/models/olmoearth_pretrain/",
         # With random initialization we only need config.json, not the weights.
         random_initialization=True,
+        selector=["encoder"],
         forward_kwargs=dict(
             patch_size=4,
         ),
+        patch_size=4,
+        embedding_size=768,
     )
 
     T = 2

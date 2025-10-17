@@ -14,7 +14,7 @@ logging.basicConfig()
 
 @pytest.fixture(scope="session", autouse=True)
 def always_spawn() -> None:
-    multiprocessing.set_start_method("forkserver")
+    multiprocessing.set_start_method("forkserver", force=True)
 
 
 __all__ = [
