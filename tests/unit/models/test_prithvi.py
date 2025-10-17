@@ -37,7 +37,7 @@ def test_prithvi_mt(tmp_path: pathlib.Path) -> None:
         # make a unique cache dir per model
         model_tmp_path = tmp_path / model_size.value
         model_tmp_path.mkdir()
-        input_hw = 32
+        input_hw = 1
         num_timesteps = 2
         prithvi = PrithviV2(cache_dir=model_tmp_path, size=model_size)
 
