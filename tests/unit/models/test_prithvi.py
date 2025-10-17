@@ -54,5 +54,5 @@ def test_prithvi_mt(tmp_path: pathlib.Path) -> None:
         for features in feature_list:
             # features should be BxCxHxW.
             assert features.shape[0] == 1 and len(features.shape) == 4
-            feat_hw = prithvi.image_resolution // prithvi.patch_size
-            assert features.shape[2] == feat_hw and features.shape[3] == feat_hw
+            # Should be one feature since for 1x1 input we only resize to patch size.
+            assert features.shape[2] == 1 and features.shape[3] == 1
