@@ -72,11 +72,11 @@ class DetectionTask(BasicTask):
         f1_metric_kwargs: dict[str, Any] = {},
         **kwargs: Any,
     ) -> None:
-        """Initialize a new SegmentationTask.
+        """Initialize a new DetectionTask.
 
         Args:
-            property_name: the property from which to extract the class name. The class
-                is read from the first matching feature.
+            property_name: the property from which to extract the class name. Features
+                without this property name are ignored.
             classes: a list of class names.
             filters: optional list of (property_name, property_value) to only consider
                 features with matching properties.
@@ -86,8 +86,8 @@ class DetectionTask(BasicTask):
                 not passed via classes, instead of throwing error
             skip_empty_examples: whether to skip examples with zero labels.
             colors: optional colors for each class
-            box_size: force all boxes to be this size, centered at the centroid of the
-                geometry. Required for Point geometries.
+            box_size: force all boxes to be two times this size, centered at the
+                centroid of the geometry. Required for Point geometries.
             clip_boxes: whether to clip boxes to the image bounds.
             exclude_by_center: before optionally clipping boxes, exclude boxes if the
                 center is outside the image bounds.

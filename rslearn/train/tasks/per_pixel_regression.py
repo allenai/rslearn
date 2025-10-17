@@ -26,10 +26,11 @@ class PerPixelRegressionTask(BasicTask):
         """Initialize a new PerPixelRegressionTask.
 
         Args:
-            scale_factor: multiply the label value by this factor before using it for
+            scale_factor: multiply ground truth values by this factor before using it for
                 training.
-            metric_mode: what metric to use, either mse or l1
-            nodata_value: optional value to treat as invalid
+            metric_mode: what metric to use, either "mse" (default) or "l1"
+            nodata_value: optional value to treat as invalid. The loss will be masked
+                at pixels where the ground truth value is equal to nodata_value.
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -141,7 +142,7 @@ class PerPixelRegressionHead(torch.nn.Module):
         """Initialize a new RegressionHead.
 
         Args:
-            loss_mode: the loss function to use, either "mse" or "l1".
+            loss_mode: the loss function to use, either "mse" (default) or "l1".
             use_sigmoid: whether to apply a sigmoid activation on the output. This
                 requires targets to be between 0-1.
         """
