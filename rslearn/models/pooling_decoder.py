@@ -88,13 +88,24 @@ class SegmentationPoolingDecoder(PoolingDecoder):
     inference on large windows.
     """
 
-    def __init__(self, image_key: str = "image"):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        image_key: str = "image",
+        **kwargs: Any,
+    ):
         """Create a new SegmentationPoolingDecoder.
 
         Args:
+            in_channels: input channels (channels in the last feature map passed to
+                this module)
+            out_channels: channels for the output flat feature vector
             image_key: the key in inputs for the image from which the expected width
                 and height is derived.
+            kwargs: other arguments to pass to PoolingDecoder.
         """
+        super().__init__(in_channels=in_channels, out_channels=out_channels, **kwargs)
         self.image_key = image_key
 
     def forward(
