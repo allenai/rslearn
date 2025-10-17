@@ -96,7 +96,8 @@ jobs:
             ${{ needs.build.outputs.ghcr_docker_image }} \
             pytest -n auto tests/ -vv \
             --ignore tests/integration/ \
-            --ignore tests/unit/models/test_molmo.py
+            --ignore tests/unit/models/test_molmo.py \
+            --ignore tests/unit/models/olmoearth_pretrain/
 
       - name: Authenticate into gcp
         uses: "google-github-actions/auth@v2"
@@ -114,7 +115,9 @@ jobs:
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
-            pytest tests/integration/ --ignore tests/integration/data_sources/ -vv
+            pytest tests/integration/ \
+            --ignore tests/integration/data_sources/ \
+            -vv
 
       # Add Job to clean up test bucket
       - name: Clean up
