@@ -67,6 +67,7 @@ class RslearnDataModule(L.LightningDataModule):
         name: str | None = None,
         retries: int = 0,
         use_in_memory_all_patches_dataset: bool = False,
+        use_h5_dataset: bool = False,
     ) -> None:
         """Initialize a new RslearnDataModule.
 
@@ -107,7 +108,7 @@ class RslearnDataModule(L.LightningDataModule):
             "test": default_config.update(test_config),
             "predict": default_config.update(predict_config),
         }
-
+        self.use_h5_dataset = use_h5_dataset
     def setup(
         self, stage: str, use_in_memory_all_patches_dataset: bool | None = None
     ) -> None:
@@ -136,6 +137,7 @@ class RslearnDataModule(L.LightningDataModule):
                 workers=self.init_workers,
                 name=self.name,
                 fix_patch_pick=(split != "train"),
+                use_h5_dataset=self.use_h5_dataset,
             )
             logger.info(f"got {len(dataset)} examples in split {split}")
             if split_config.get_load_all_patches():
