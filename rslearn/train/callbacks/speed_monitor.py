@@ -112,35 +112,17 @@ class SpeedMonitor(Callback):
                 prog_bar=False,
             )
 
-            # Calculate and log percentages
-            if total_time > 0:
-                forward_percent = (forward_time / total_time) * 100
-                backward_optimizer_percent = (backward_optimizer_time / total_time) * 100
-
-                pl_module.log(
-                    f"{THROUGHPUT_PREFIX}/forward_pass_percent",
-                    forward_percent,
-                    on_step=True,
-                    on_epoch=False,
-                    prog_bar=False,
-                )
-                pl_module.log(
-                    f"{THROUGHPUT_PREFIX}/backward_optimizer_percent",
-                    backward_optimizer_percent,
-                    on_step=True,
-                    on_epoch=False,
-                    prog_bar=False,
-                )
 
             # Log data loading percentage if available
             if self.data_loading_time is not None:
                 total_time_with_loading = self.data_loading_time + total_time
                 if total_time_with_loading > 0:
+                    # Calculate all percentages using the same total
+                    forward_percent = (forward_time / total_time_with_loading) * 100
+                    backward_optimizer_percent = (backward_optimizer_time / total_time_with_loading) * 100
                     data_loading_percent = (self.data_loading_time / total_time_with_loading) * 100
-                    pl_module.log(
-                        "speed/data_loading_percent",
-                        data_loading_percent,
-                        on_step=True,
-                        on_epoch=False,
-                        prog_bar=False,
-                    )
+
+                    # Log all percentages
+                    pl_module.log(f"{THROUGHPUT_PREFIX}/forward_pass_percent", forward_percent, ...)
+                    pl_module.log(f"{THROUGHPUT_PREFIX}/backward_optimizer_percent", backward_optimizer_percent, ...)
+                    pl_module.log(f"{THROUGHPUT_PREFIX}/data_loading_percent", data_loading_percent, ...)
