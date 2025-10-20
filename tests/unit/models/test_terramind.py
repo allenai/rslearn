@@ -16,7 +16,7 @@ def test_terramind(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
 
     inputs = [
         {
-            "RGB": torch.zeros((3, 256, 256), dtype=torch.float32),
+            "RGB": torch.zeros((3, 32, 32), dtype=torch.float32),
         }
     ]
 
@@ -31,5 +31,5 @@ def test_terramind(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
     features = feature_list[0]
     # Features should be BxCxHxW
     assert features.shape[0] == 1
-    assert features.shape[2] == 16
-    assert features.shape[3] == 16
+    assert features.shape[2] == 2
+    assert features.shape[3] == 2

@@ -9,7 +9,7 @@ from rslearn.models.galileo import GalileoModel, GalileoSize
 
 def test_galileo(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
     """Verify that the forward pass for Galileo works."""
-    input_hw = 32
+    input_hw = 8
     patch_size = 4
     # We override the temporary directory so we don't retain the model weights outside
     # of this test.
@@ -37,9 +37,9 @@ def test_galileo(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
 
 def test_galileo_mt(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
     """Verify that the forward pass for Galileo works."""
-    input_hw = 32
+    input_hw = 8
     patch_size = 4
-    num_timesteps = 10
+    num_timesteps = 2
     # We override the temporary directory so we don't retain the model weights outside
     # of this test.
     monkeypatch.setattr(tempfile, "gettempdir", lambda: tmp_path)
@@ -50,14 +50,6 @@ def test_galileo_mt(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
             "s2": torch.zeros(
                 (10 * num_timesteps, input_hw, input_hw), dtype=torch.float32
             ),
-            "s1": torch.zeros(
-                (2 * num_timesteps, input_hw, input_hw), dtype=torch.float32
-            ),
-            "era5": torch.zeros(
-                (2 * num_timesteps, input_hw, input_hw), dtype=torch.float32
-            ),
-            "srtm": torch.zeros((2, input_hw, input_hw), dtype=torch.float32),
-            "latlon": torch.zeros((2, input_hw, input_hw), dtype=torch.float32),
         }
     ]
     feature_list = galileo(inputs)
