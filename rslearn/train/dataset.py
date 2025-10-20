@@ -33,7 +33,7 @@ from rslearn.utils.geometry import PixelBounds, STGeometry
 from rslearn.utils.mp import star_imap_unordered
 from rslearn.utils.raster_format import load_raster_format
 from rslearn.utils.vector_format import load_vector_format
-
+import h5py
 from .transforms import Sequential
 
 logger = get_logger(__name__)
@@ -610,6 +610,7 @@ class ModelDataset(torch.utils.data.Dataset):
         workers: int,
         name: str | None = None,
         fix_patch_pick: bool = False,
+        use_h5_dataset: bool = False,
     ) -> None:
         """Instantiate a new ModelDataset.
 
@@ -745,6 +746,8 @@ class ModelDataset(torch.utils.data.Dataset):
             f"Writing {len(windows)} dataset examples to {self.dataset_examples_fname}"
         )
         os.makedirs(os.path.dirname(self.dataset_examples_fname), exist_ok=True)
+        self.h5py_dir = os.path.join("/weka/dfive-default/henryh/lfmc_cache", "rslearn_h5py")
+        os.makedirs(self.h5py_dir, exist_ok=True)
         with open(self.dataset_examples_fname, "w") as f:
             json.dump([self._serialize_item(example) for example in windows], f)
 
@@ -832,15 +835,25 @@ class ModelDataset(torch.utils.data.Dataset):
             bounds = window.bounds
 
         assert isinstance(window, Window)
-
-        raw_inputs = {}
-        passthrough_inputs = {}
-        for name, data_input in self.inputs.items():
-            raw_inputs[name] = read_data_input(
-                self.dataset, window, bounds, data_input, rng
-            )
-            if data_input.passthrough:
-                passthrough_inputs[name] = raw_inputs[name]
+        h5py_file_path_raw = os.path.join(self.h5py_dir, f"raw_inputs_{idx}.h5")
+        h5py_file_path_passthrough = os.path.join(self.h5py_dir, f"passthrough_inputs_{idx}.h5")
+        if not os.path.exists(h5py_file_path_raw) or not self.use_h5_dataset:
+            raw_inputs = {}
+            passthrough_inputs = {}
+            for name, data_input in self.inputs.items():
+                raw_inputs[name] = read_data_input(
+                    self.dataset, window, bounds, data_input, rng
+                )
+                if data_input.passthrough:
+                    passthrough_inputs[name] = raw_inputs[name]
+        else:
+            start_time = time.perf_counter()
+            with h5py.File(h5py_file_path_raw, "r") as f:
+                raw_inputs = {k: torch.from_numpy(v[()]) for k, v in f.items()}
+            with h5py.File(h5py_file_path_passthrough, "r") as f:
+                passthrough_inputs = {k: torch.from_numpy(v[()]) for k, v in f.items()}
+            end_time = time.perf_counter()
+            logger.info(f"time to read raw inputs from h5py file: {end_time - start_time} seconds")
 
         metadata = {
             "group": window.group,
@@ -851,6 +864,19 @@ class ModelDataset(torch.utils.data.Dataset):
             "projection": window.projection,
             "dataset_source": self.name,
         }
+        # list the raw inouts keys and shapes
+        logger.info(f"raw inputs keys and shapes: {[(k, v.shape) for k, v in raw_inputs.items()]}")
+        # write the raw inputs to a h5py file
+
+        if not os.path.exists(h5py_file_path_raw) and self.use_h5_dataset:
+            logger.info(f"writing raw inputs to {h5py_file_path_raw}")
+            with h5py.File(h5py_file_path_raw, "w") as f:
+                for k, v in raw_inputs.items():
+                    f.create_dataset(k, data=v)
+            # also write the passthrough inputs to a h5py file
+            with h5py.File(h5py_file_path_passthrough, "w") as f:
+                for k, v in passthrough_inputs.items():
+                    f.create_dataset(k, data=v)
 
         return raw_inputs, passthrough_inputs, metadata
 
@@ -865,9 +891,12 @@ class ModelDataset(torch.utils.data.Dataset):
         Returns:
             a tuple (input_dict, target_dict, metadata)
         """
+        start_time = time.perf_counter()
         logger.debug("__getitem__ start pid=%d item_idx=%d", os.getpid(), idx)
 
         raw_inputs, passthrough_inputs, metadata = self.get_raw_inputs(idx)
+        end_time = time.perf_counter()
+        logger.info(f"time to get raw inputs: {end_time - start_time} seconds")
         metadata["patch_idx"] = 0
         metadata["num_patches"] = 1
 

@@ -12,6 +12,7 @@ from rslearn.log_utils import get_logger
 logger = get_logger(__name__)
 
 THROUGHPUT_PREFIX = "throughput"
+
 class SpeedMonitor(Callback):
     """Monitor time spent on data loading and forward pass.
 
