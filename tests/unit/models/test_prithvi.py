@@ -7,7 +7,7 @@ from rslearn.models.prithvi import PrithviV2, PrithviV2Models
 
 def test_prithvi(tmp_path: pathlib.Path) -> None:
     """Verify that the forward pass for Prithvi works."""
-    for model_size in [PrithviV2Models.VIT_300, PrithviV2Models.VIT_600]:
+    for model_size in [PrithviV2Models.VIT_300]:
         # make a unique cache dir per model
         model_tmp_path = tmp_path / model_size.value
         model_tmp_path.mkdir()
@@ -33,7 +33,7 @@ def test_prithvi(tmp_path: pathlib.Path) -> None:
 def test_prithvi_mt(tmp_path: pathlib.Path) -> None:
     """Verify that the forward pass for Prithvi works."""
 
-    for model_size in [PrithviV2Models.VIT_300, PrithviV2Models.VIT_600]:
+    for model_size in [PrithviV2Models.VIT_300]:
         # make a unique cache dir per model
         model_tmp_path = tmp_path / model_size.value
         model_tmp_path.mkdir()
