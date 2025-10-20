@@ -471,8 +471,6 @@ rslearn includes a variety of model components that can be composed together, in
 remote sensing foundation models like OlmoEarth, decoders like Faster R-CNN, and
 intermediate components.
 
-### Framework: SingleTaskModel and MultiTaskModel
-
 `SingleTaskModel` and `MultiTaskModel` provide a framework for composing encoders and
 decoders. `SingleTaskModel` applies a single sequence of decoder components to make a
 prediction for one task, while `MultiTaskModel` can be used with `MultiTask` to have
@@ -518,10 +516,11 @@ model:
               anchor_sizes: [[32], [64], [128], [256]]
 ```
 
-This framework is somewhat rigid. The first component in the encoder should input the
-input dict from the dataset, which is initialized with the passthrough DataInputs
-specified in the model config but then modified by the transforms. It should output a
-list of 2D feature maps. For example, Swin inputs an input dict like this:
+This framework is somewhat rigid. The first component in the encoder is the feature
+extractor, and should input the input dict from the dataset, which is initialized with
+the passthrough DataInputs specified in the model config but then modified by the
+transforms. It should output a list of 2D feature maps. For example, Swin inputs an
+input dict like this:
 
 ```
 {
@@ -586,9 +585,9 @@ an output with the same shapes. The signature of these decoder components is:
 
 Note that several components, including Conv, ignore the inputs.
 
-The final component should accept the targets, and compute outputs and the loss(es).
-For example, the output from Faster R-CNN is a list of dicts with the "boxes",
-"scores", and "labels" keys. It outputs a loss dict with the "rpn_box_reg",
+The final component is a predictor that should accept the targets, and compute outputs
+and the loss(es). For example, the output from Faster R-CNN is a list of dicts with the
+"boxes", "scores", and "labels" keys. It outputs a loss dict with the "rpn_box_reg",
 "objectness", "classifier", and "box_reg" keys. These will be logged separately, but
 are summed for computing gradients during training. The signature of the final decoder
 component is:
@@ -602,9 +601,205 @@ component is:
     ) -> tuple[list[Any], dict[str, torch.Tensor]]:
 ```
 
+## Feature Extractors
+
 ### Foundation Models
 
 Several remote sensing foundation models are included in rslearn, and can be used as
-the first component in the encoder list.
+the first component in the encoder list (the feature extractor).
 
 - [SatlasPretrain](SatlasPretrain.md)
+- TODO
+
+### SimpleTimeSeries
+
+SimpleTimeSeries wraps a unitemporal feature extractor and applies it on a time series.
+It encodes each image in the time series individually using the unitemporal feature
+extractor, and then pools the features temporally via max pooling, mean pooling, a
+ConvRNN, 3D convolutions, or 1D convolutions.
+
+Here is a summary, see `rslearn.models.simple_time_series` for all of the available
+options.
+
+```yaml
+model:
+  class_path: rslearn.train.lightning_module.RslearnLightningModule
+  init_args:
+    model:
+      class_path: rslearn.models.multitask.MultiTaskModel
+      init_args:
+        encoder:
+          - class_path: rslearn.models.simple_time_series.SimpleTimeSeries
+            init_args:
+              encoder:
+                class_path: # ...
+                init_args:
+                  # ...
+              # One of "max" (default), "mean", "convrnn", "conv3d", or "conv1d".
+              op: "max"
+              # Number of layers for convrnn, conv3d, and conv1d ops.
+              num_layers: null
+              # A map from input dict keys to the number of bands per image. This is
+              # used to split up the time series back into the individual images.
+              image_keys:
+                sentinel2: 12
+                sentinel1: 2
+          - ...
+```
+
+The [main README](../README.md) has an example of using SimpleTimeSeries with
+SatlasPretrain.
+
+## Encoder Components
+
+This section documents model components that can be used in the encoder, after the
+initial feature extractor.
+
+### Feature Pyramid Network
+
+Fpn implements a Feature Pyramid Network (FPN). The FPN inputs a multi-scale feature
+map. At each scale, it computes new features of a configurable depth based on all input
+features. So it is best used for maps that were computed sequentially, where earlier
+features don't have the context from later features, but comprehensive features at each
+resolution are desired.
+
+Here is a summary, see `rslearn.models.fpn` for all of the available
+options.
+
+```yaml
+        encoder:
+          - # ...
+          - class_path: rslearn.models.fpn.Fpn
+            init_args:
+              # in_channels lists the number of channels in each feature map from the
+              # previous component. In this example, there are two feature maps, the
+              # first with 128 channels and the second with 256 channels.
+              in_channels: [128, 256]
+              # The number of output channels. Since there are two feature maps in the
+              # input, the output will have two feature maps at the same resolutions,
+              # but with 128 channels.
+              out_channels: 128
+```
+
+It is most often used for object detection tasks in conjunction with Faster R-CNN or
+similar bounding box predictors. Here is an example:
+
+```yaml
+model:
+  class_path: rslearn.train.lightning_module.RslearnLightningModule
+  init_args:
+    model:
+      class_path: rslearn.models.multitask.SingleTaskModel
+      init_args:
+        encoder:
+          - class_path: rslearn.models.swin.Swin
+            init_args:
+              pretrained: true
+              input_channels: 3
+              # These are the typical feature maps used from Swin. They are at 1/4, 1/8,
+              # 1/16, and 1/32 of the input resolution.
+              output_layers: [1, 3, 5, 7]
+          - class_path: rslearn.models.fpn.Fpn
+            init_args:
+              in_channels: [128, 256, 512, 1024]
+              out_channels: 128
+        decoder:
+          # Since we have applied the FPN, the input to the Faster R-CNN has 128
+          # channels at each resolution.
+          - class_path: rslearn.models.faster_rcnn.FasterRCNN
+            init_args:
+              downsample_factors: [4, 8, 16, 32]
+              num_channels: 128
+              num_classes: 10
+              anchor_sizes: [[32], [64], [128], [256]]
+```
+
+## Decoder Components
+
+The predictors (final decoder components) are documented with the tasks. Here, we
+document the available decoder components before the predictor.
+
+### PickFeatures
+
+`PickFeatures` picks a subset of feature maps from a multi-scale feature map list to pass
+to the next component.
+
+Here is a summary, see `rslearn.models.pick_features` for all of the available
+options.
+
+```yaml
+        decoder:
+          - class_path: rslearn.models.pick_features.PickFeatures
+            init_args:
+              # The indexes of the input feature map list to select.
+              # In this example, we select only the first feature map.
+              indexes: [0]
+```
+
+### PoolingDecoder
+
+`PoolingDecoder` computes a flat vector from a 2D feature map.
+
+It inputs multi-scale features, but only uses the last feature map. Then it applies a
+configurable number of convolutional layers before pooling, and a configurable number
+of fully connected layers after pooling.
+
+The output is a vector and not a list of feature maps, so the next component is
+typically a predictor (either `ClassificationHead` or `RegressionHead`).
+
+Here is a summary, see `rslearn.models.pick_features` for all of the available
+options.
+
+```yaml
+        decoder:
+          - class_path: rslearn.models.pooling_decoder.PoolingDecoder
+            init_args:
+              # The number of channels in the input (specifically, the last feature map
+              # in the list).
+              in_channels: 1024
+              # The number of output channels. This is typically tied to the task, e.g.
+              # if there will be 8 classes then this should be 8.
+              out_channels: 8
+              # The number of extra convolutional layers to apply before pooling. The
+              # default is 0.
+              num_conv_layers: 0
+              # The number of fully connected layers to apply after pooling. The
+              # default is 0.
+              num_fc_layers: 0
+              # Number of hidden channels when using num_conv_layers / num_fc_layers.
+              conv_channels: 128
+              fc_channels: 512
+          # This is an example for using PoolingDecoder with a classification task.
+          - class_path: rslearn.train.tasks.classification.ClassificationHead
+```
+
+### Conv
+
+`Conv` implements a standard 2D convolutional layer.
+
+If there are multiple input feature maps, the same weights are convolved with each
+feature map.
+
+```yaml
+        decoder:
+          - class_path: rslearn.models.conv.Conv
+            init_args:
+              # The number of input channels. If there are multiple feature maps, they
+              # can have different resolutions, but must all have the same number of
+              # channels.
+              in_channels: 128
+              # The number of output channels.
+              out_channels: 64
+              # The kernel size, stride, and padding. See torch.nn.Conv2D.
+              # The stride defaults to 1 and the padding defaults to "same", while
+              # kernel_size must be configured. "same" padding keeps the same
+              # resolution as the input. If stride is not 1, then padding must be set
+              # since "same" is only accepted when the stride is 1.
+              kernel_size: 3
+              stride: 1
+              padding: "same"
+              # The activation to use. It defaults to ReLU.
+              activation:
+                class_path: torch.nn.ReLU
+          # ...
+```

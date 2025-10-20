@@ -216,11 +216,11 @@ model:
       class_path: rslearn.models.multitask.MultiTaskModel
       init_args:
         encoder:
-          class_path: rslearn.models.swin.Swin
-          init_args:
-            pretrained: true
-            input_channels: 3
-            output_layers: [1, 3, 5, 7]
+          - class_path: rslearn.models.swin.Swin
+            init_args:
+              pretrained: true
+              input_channels: 3
+              output_layers: [1, 3, 5, 7]
     restore_config:
       restore_path: https://ai2-public-datasets.s3.amazonaws.com/satlas/satlas-model-v1-lowres-multi.pth
       remap_prefixes:
