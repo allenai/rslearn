@@ -630,6 +630,7 @@ class ModelDataset(torch.utils.data.Dataset):
         self.task = task
         self.name = name
         self.fix_patch_pick = fix_patch_pick
+        self.use_h5_dataset = use_h5_dataset
         if split_config.transforms:
             self.transforms = Sequential(*split_config.transforms)
         else:
