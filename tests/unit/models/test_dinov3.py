@@ -28,7 +28,7 @@ def test_dinov3() -> None:
             ),
         }
     ]
-    dinov3 = DinoV3(checkpoint_dir=None).to(DEVICE)
+    dinov3 = DinoV3(checkpoint_dir=None, do_resizing=False).to(DEVICE)
     with torch.no_grad():
         feature_list = dinov3(inputs)
     assert (
