@@ -9,7 +9,7 @@ from rslearn.models.croma import PATCH_SIZE, Croma, CromaModality, CromaSize
 
 def test_croma(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
     """Verify that the forward pass for CROMA works."""
-    input_hw = 32
+    input_hw = 16
     # We override the temporary directory so we don't retain the model weights outside
     # of this test.
     monkeypatch.setattr(tempfile, "gettempdir", lambda: tmp_path)

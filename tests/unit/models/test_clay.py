@@ -16,10 +16,10 @@ def test_clay(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
     # Build Clay model
     clay = Clay(model_size=ClaySize.LARGE, modality="sentinel-2-l2a")
 
-    # One input sample, Sentinel-2 L2A modality, 10 bands × 256 × 256
+    # One input sample, Sentinel-2 L2A modality, 10 bands x 32 x 32
     inputs = [
         {
-            "sentinel-2-l2a": torch.zeros((10, 256, 256), dtype=torch.float32),
+            "sentinel-2-l2a": torch.zeros((10, 32, 32), dtype=torch.float32),
         }
     ]
 
@@ -35,11 +35,11 @@ def test_clay(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
     assert len(feature_list) == 1
     features = feature_list[0]
 
-    # Check feature shape: (B, D, H', W') with B=1, D=1024, H'=W'=32 (256/8)
+    # Check feature shape: (B, D, H', W') with B=1, D=1024, H'=W'=4 (32/8)
     assert features.shape[0] == 1
     assert features.shape[1] == 1024
-    assert features.shape[2] == 32
-    assert features.shape[3] == 32
+    assert features.shape[2] == 4
+    assert features.shape[3] == 4
 
     # Backbone channels should match patch size and depth
     assert clay.get_backbone_channels() == [(8, 1024)]
