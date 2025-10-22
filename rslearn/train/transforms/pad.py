@@ -25,8 +25,8 @@ class Pad(Transform):
         Args:
             size: the size to pad to, or a min/max range of pad sizes. If the image is
                 larger than this size, then it is cropped instead.
-            mode: "center" (default) to apply padding equally on all sides, or
-                "topleft" to only apply it on the bottom and right.
+            mode: "topleft" (default) to only apply padding on the bottom and right
+                sides, or "center" to apply padding equally on all sides.
             image_selectors: image items to transform.
             box_selectors: boxes items to transform.
         """
