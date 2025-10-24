@@ -17,3 +17,5 @@ Examples
   how to specify more complex model architectures (it applies SatlasPretrain
   independently on the two images and then concatenates the feature maps), and also how
   to add custom augmentations (to randomize the order of the images).
+- [OlmoEarthEmbeddings](examples/OlmoEarthEmbeddings.md): compute OlmoEarth embeddings
+  on a location and time range of interest.

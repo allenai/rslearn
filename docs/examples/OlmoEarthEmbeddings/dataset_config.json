@@ -1,0 +1,107 @@
+{
+  "layers": {
+    "landsat": {
+      "band_sets": [
+        {
+          "bands": [
+            "B1",
+            "B2",
+            "B3",
+            "B4",
+            "B5",
+            "B6",
+            "B7",
+            "B8",
+            "B9",
+            "B10",
+            "B11"
+          ],
+          "dtype": "uint16"
+        }
+      ],
+      "data_source": {
+        "ingest": false,
+        "metadata_cache_dir": "cache/landsat",
+        "name": "rslearn.data_sources.aws_landsat.LandsatOliTirs",
+        "query_config": {
+          "max_matches": 12,
+          "period_duration": "30d",
+          "space_mode": "PER_PERIOD_MOSAIC"
+        },
+        "sort_by": "cloud_cover"
+      },
+      "type": "raster"
+    },
+    "sentinel1": {
+      "band_sets": [
+        {
+          "bands": [
+            "vv",
+            "vh"
+          ],
+          "dtype": "float32",
+          "nodata_vals": [
+            -32768,
+            -32768
+          ]
+        }
+      ],
+      "data_source": {
+        "cache_dir": "cache/planetary_computer",
+        "ingest": false,
+        "name": "rslearn.data_sources.planetary_computer.Sentinel1",
+        "query": {
+          "sar:instrument_mode": {
+            "eq": "IW"
+          },
+          "sar:polarizations": {
+            "eq": [
+              "VV",
+              "VH"
+            ]
+          }
+        },
+        "query_config": {
+          "max_matches": 12,
+          "period_duration": "30d",
+          "space_mode": "PER_PERIOD_MOSAIC"
+        }
+      },
+      "type": "raster"
+    },
+    "sentinel2_l2a": {
+      "band_sets": [
+        {
+          "bands": [
+            "B01",
+            "B02",
+            "B03",
+            "B04",
+            "B05",
+            "B06",
+            "B07",
+            "B08",
+            "B8A",
+            "B09",
+            "B11",
+            "B12"
+          ],
+          "dtype": "uint16"
+        }
+      ],
+      "data_source": {
+        "cache_dir": "cache/planetary_computer",
+        "harmonize": true,
+        "ingest": false,
+        "name": "rslearn.data_sources.planetary_computer.Sentinel2",
+        "query_config": {
+          "max_matches": 12,
+          "period_duration": "30d",
+          "space_mode": "PER_PERIOD_MOSAIC"
+        },
+        "sort_by": "eo:cloud_cover"
+      },
+      "type": "raster"
+    }
+  }
+}
