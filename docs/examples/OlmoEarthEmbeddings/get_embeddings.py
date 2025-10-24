@@ -44,14 +44,13 @@ def initialize_dataset_for_olmoearth(
 
     # Setup the OlmoEarthNormalize normalizer. It needs to know which modalities are
     # present.
-    norm_band_names = {}
-    if "sentinel2_l2a" in modalities:
-        norm_band_names["sentinel2_l2a"] = Modality.SENTINEL2_L2A.band_order
-    if "sentinel1" in modalities:
-        norm_band_names["sentinel1"] = Modality.SENTINEL1.band_order
-    if "landsat" in modalities:
-        norm_band_names["landsat"] = Modality.LANDSAT.band_order
-    transforms.append(OlmoEarthNormalize(band_names=norm_band_names))
+    transforms.append(
+        OlmoEarthNormalize(
+            band_names={
+                modality: Modality.get(modality).band_order for modality in modalities
+            }
+        )
+    )
 
     # Setup the data inputs to read. We read all timesteps for each enabled modality.
     # We will use batch size 1 for data loading so that it works even when there are
@@ -63,29 +62,11 @@ def initialize_dataset_for_olmoearth(
             is_target=True,
         ),
     )
-    if "sentinel2_l2a" in modalities:
-        data_inputs["sentinel2_l2a"] = DataInput(
+    for modality in modalities:
+        data_inputs[modality] = DataInput(
             data_type="raster",
-            layers=["sentinel2_l2a"],
-            bands=Modality.SENTINEL2_L2A.band_order,
-            passthrough=True,
-            load_all_layers=True,
-            load_all_item_groups=True,
-        )
-    if "sentinel1" in modalities:
-        data_inputs["sentinel1"] = DataInput(
-            data_type="raster",
-            layers=["sentinel1"],
-            bands=Modality.SENTINEL1.band_order,
-            passthrough=True,
-            load_all_layers=True,
-            load_all_item_groups=True,
-        )
-    if "landsat" in modalities:
-        data_inputs["landsat"] = DataInput(
-            data_type="raster",
-            layers=["landsat"],
-            bands=Modality.LANDSAT.band_order,
+            layers=[modality],
+            bands=Modality.get(modality).band_order,
             passthrough=True,
             load_all_layers=True,
             load_all_item_groups=True,
@@ -148,9 +129,32 @@ def get_embeddings(
                     for k, v in inputs[0].items()
                 }
             ]
-            features = None
-            # Use Sentinel-2 to get the shape.
-            image = gpu_inputs[0]["sentinel2_l2a"]
+
+            # Align the number of timesteps across modalities, by cutting to the
+            # smallest number of timesteps.
+            min_timesteps = None
+            for modality in modalities:
+                cur_timesteps = gpu_inputs[0][modality].shape[0] // len(
+                    Modality.get(modality).band_order
+                )
+                if min_timesteps is None:
+                    min_timesteps = cur_timesteps
+                min_timesteps = min(min_timesteps, cur_timesteps)
+            assert min_timesteps is not None
+            for modality in modalities:
+                num_bands = len(Modality.get(modality).band_order)
+                cur_timesteps = gpu_inputs[0][modality].shape[0] // num_bands
+                if cur_timesteps == min_timesteps:
+                    continue
+                print(
+                    f"for window {metadata['window_name']}, limiting modality {modality} from {cur_timesteps} timesteps to {min_timesteps}"
+                )
+                gpu_inputs[0][modality] = gpu_inputs[0][modality][
+                    0 : min_timesteps * num_bands
+                ]
+
+            # Use first modality to get the width/height.
+            image = gpu_inputs[0][modalities[0]]
             height = image.shape[1]
             width = image.shape[2]
 
@@ -158,13 +162,15 @@ def get_embeddings(
                 f"processing window {metadata['window_name']} with height={height}, width={width}"
             )
             for modality in modalities:
-                print(modality, "shape", gpu_inputs[0][modality].shape)
+                print(modality, "final shape:", gpu_inputs[0][modality].shape)
 
             rows = list(range(0, height - input_size, input_size)) + [
                 height - input_size
             ]
             cols = list(range(0, width - input_size, input_size)) + [width - input_size]
             all_positions = [(row, col) for row in rows for col in cols]
+
+            features = None
 
             for batch_idx in range(0, len(all_positions), batch_size):
                 batch = all_positions[batch_idx : batch_idx + batch_size]
