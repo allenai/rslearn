@@ -1,4 +1,9 @@
-"""DinoV3 model."""
+"""DinoV3 model.
+
+This code loads the DINOv3 model. You must obtain the model separately from Meta to use
+it. See https://github.com/facebookresearch/dinov3 for applicable license and copyright
+information.
+"""
 
 from enum import StrEnum
 from pathlib import Path
