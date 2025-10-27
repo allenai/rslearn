@@ -1,4 +1,8 @@
-"""AnySat model."""
+"""AnySat model.
+
+This code loads the AnySat model from torch hub. See
+https://github.com/gastruc/AnySat for applicable license and copyright information.
+"""
 
 from typing import Any
 
