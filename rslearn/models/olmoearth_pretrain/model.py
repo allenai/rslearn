@@ -98,27 +98,9 @@ class OlmoEarth(torch.nn.Module):
 
         else:
             # Load the model by checkpoint path.
-            checkpoint_upath = UPath(checkpoint_path)
-
-            # Load the model config and initialize it.
-            # We avoid loading the train module here because it depends on running within
-            # olmo_core.
-            with (checkpoint_upath / "config.json").open() as f:
-                config_dict = json.load(f)
-                model_config = Config.from_dict(config_dict["model"])
-
-            model = model_config.build()
-
-            # Load the checkpoint.
-            if not random_initialization:
-                train_module_dir = checkpoint_upath / "model_and_optim"
-                if train_module_dir.exists():
-                    load_model_and_optim_state(str(train_module_dir), model)
-                    logger.info(f"loaded OlmoEarth encoder from {train_module_dir}")
-                else:
-                    logger.info(
-                        f"could not find OlmoEarth encoder at {train_module_dir}"
-                    )
+            model = self._load_model_from_checkpoint(
+                UPath(checkpoint_path), random_initialization
+            )
 
         # Select just the portion of the model that we actually want to use.
         for part in selector:
@@ -127,6 +109,35 @@ class OlmoEarth(torch.nn.Module):
             else:
                 model = model[part]
         self.model = model
+
+    def _load_model_from_checkpoint(
+        self, checkpoint_upath: UPath, random_initialization: bool
+    ) -> torch.nn.Module:
+        """Load the OlmoEarth pre-trained model from a distributed checkpoint folder.
+
+        The folder should contain config.json as well as the model_and_optim folder
+        that contains the distributed checkpoint. This is the format produced by
+        pre-training runs in olmoearth_pretrain.
+        """
+        # Load the model config and initialize it.
+        # We avoid loading the train module here because it depends on running within
+        # olmo_core.
+        with (checkpoint_upath / "config.json").open() as f:
+            config_dict = json.load(f)
+            model_config = Config.from_dict(config_dict["model"])
+
+        model = model_config.build()
+
+        # Load the checkpoint.
+        if not random_initialization:
+            train_module_dir = checkpoint_upath / "model_and_optim"
+            if train_module_dir.exists():
+                load_model_and_optim_state(str(train_module_dir), model)
+                logger.info(f"loaded OlmoEarth encoder from {train_module_dir}")
+            else:
+                logger.info(f"could not find OlmoEarth encoder at {train_module_dir}")
+
+        return model
 
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Compute feature maps from the OlmoEarth backbone.
