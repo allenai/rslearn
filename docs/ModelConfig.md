@@ -588,7 +588,7 @@ model:
   class_path: rslearn.train.lightning_module.RslearnLightningModule
   init_args:
     model:
-      class_path: rslearn.models.multitask.SingleTaskModel
+      class_path: rslearn.models.singletask.SingleTaskModel
       init_args:
         encoder:
           - class_path: rslp.olmoearth_pretrain.model.OlmoEarth
