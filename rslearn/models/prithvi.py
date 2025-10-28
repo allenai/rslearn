@@ -1,4 +1,12 @@
-"""Prithvi V2."""
+"""Prithvi V2.
+
+This code is adapted from https://github.com/NASA-IMPACT/Prithvi-WxC
+
+The code is released under:
+
+MIT License
+Copyright (c) 2024 Inter Agency Implementation and Advanced Concepts
+"""
 
 import json
 import logging

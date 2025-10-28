@@ -64,7 +64,7 @@ class Pad(Transform):
         ) -> torch.Tensor:
             # Before/after must either be both non-negative or both negative.
             # >=0 indicates padding while <0 indicates cropping.
-            assert (before < 0 and after < 0) or (before >= 0 and after >= 0)
+            assert (before < 0 and after <= 0) or (before >= 0 and after >= 0)
             if before > 0:
                 # Padding.
                 if horizontal:
