@@ -123,6 +123,44 @@ def get_transform_from_projection_and_bounds(
     )
 
 
+def adjust_projection_and_bounds_for_array(
+    projection: Projection, bounds: PixelBounds, array: npt.NDArray
+) -> tuple[Projection, PixelBounds]:
+    """Adjust the projection and bounds to correspond to the resolution of the array.
+
+    The returned projection and bounds cover the same spatial extent as the inputs, but
+    are updated so that the width and height match that of the array.
+
+    Args:
+        projection: the original projection.
+        bounds: the original bounds.
+        array: the CHW array for which to compute an updated projection and bounds. The
+            returned bounds will have the same width and height as this array.
+
+    Returns:
+        a tuple of adjusted (projection, bounds)
+    """
+    if array.shape[2] == (bounds[2] - bounds[0]) and array.shape[1] == (
+        bounds[3] - bounds[1]
+    ):
+        return (projection, bounds)
+
+    x_factor = array.shape[2] / (bounds[2] - bounds[0])
+    y_factor = array.shape[1] / (bounds[3] - bounds[1])
+    adjusted_projection = Projection(
+        projection.crs,
+        projection.x_resolution / x_factor,
+        projection.y_resolution / y_factor,
+    )
+    adjusted_bounds = (
+        round(bounds[0] * x_factor),
+        round(bounds[1] * y_factor),
+        round(bounds[0] * x_factor) + array.shape[2],
+        round(bounds[1] * y_factor) + array.shape[1],
+    )
+    return (adjusted_projection, adjusted_bounds)
+
+
 class RasterFormat:
     """An abstract class for writing raster data.
 

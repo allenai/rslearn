@@ -22,7 +22,11 @@ from rslearn.log_utils import get_logger
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds
-from rslearn.utils.raster_format import RasterFormat, load_raster_format
+from rslearn.utils.raster_format import (
+    RasterFormat,
+    adjust_projection_and_bounds_for_array,
+    load_raster_format,
+)
 from rslearn.utils.vector_format import VectorFormat, load_vector_format
 
 from .lightning_module import RslearnLightningModule
@@ -68,15 +72,18 @@ class VectorMerger(PatchPredictionMerger):
 class RasterMerger(PatchPredictionMerger):
     """Merger for raster data that copies the rasters to the output."""
 
-    def __init__(self, padding: int | None = None):
+    def __init__(self, padding: int | None = None, downsample_factor: int = 1):
         """Create a new RasterMerger.
 
         Args:
             padding: the padding around the individual patch outputs to remove. This is
                 typically used when leveraging overlapping patches. Portions of outputs
                 at the border of the window will still be retained.
+            downsample_factor: the factor by which the rasters output by the task are
+                lower in resolution relative to the window resolution.
         """
         self.padding = padding
+        self.downsample_factor = downsample_factor
 
     def merge(
         self, window: Window, outputs: Sequence[PendingPatchOutput]
@@ -87,8 +94,8 @@ class RasterMerger(PatchPredictionMerger):
         merged_image = np.zeros(
             (
                 num_channels,
-                window.bounds[3] - window.bounds[1],
-                window.bounds[2] - window.bounds[0],
+                (window.bounds[3] - window.bounds[1]) // self.downsample_factor,
+                (window.bounds[2] - window.bounds[0]) // self.downsample_factor,
             ),
             dtype=dtype,
         )
@@ -104,7 +111,10 @@ class RasterMerger(PatchPredictionMerger):
             # If the output is not on the left or top boundary, then we should apply
             # the padding (if set).
             src = output.output
-            src_offset = (output.bounds[0], output.bounds[1])
+            src_offset = (
+                output.bounds[0] // self.downsample_factor,
+                output.bounds[1] // self.downsample_factor,
+            )
             if self.padding is not None and output.bounds[0] != window.bounds[0]:
                 src = src[:, :, self.padding :]
                 src_offset = (src_offset[0] + self.padding, src_offset[1])
@@ -116,7 +126,10 @@ class RasterMerger(PatchPredictionMerger):
                 src=src,
                 dst=merged_image,
                 src_offset=src_offset,
-                dst_offset=(window.bounds[0], window.bounds[1]),
+                dst_offset=(
+                    window.bounds[0] // self.downsample_factor,
+                    window.bounds[1] // self.downsample_factor,
+                ),
             )
 
         return merged_image
@@ -330,9 +343,13 @@ class RslearnWriter(BasePredictionWriter):
                 self.output_layer, self.layer_config.band_sets[0].bands
             )
             assert isinstance(self.format, RasterFormat)
-            self.format.encode_raster(
-                raster_dir, window.projection, window.bounds, merged_output
+
+            # In case the merged_output is at a different resolution than the window,
+            # get adjusted projection and bounds for writing it.
+            projection, bounds = adjust_projection_and_bounds_for_array(
+                window.projection, window.bounds, merged_output
             )
+            self.format.encode_raster(raster_dir, projection, bounds, merged_output)
 
         elif self.layer_config.layer_type == LayerType.VECTOR:
             layer_dir = window.get_layer_dir(self.output_layer)
