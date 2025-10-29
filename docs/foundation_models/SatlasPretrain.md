@@ -7,7 +7,7 @@ The input should include a key "image" containing a single image. The number of
 channels and expected bands and normalization depends on the model ID being used.
 
 The Sentinel2_X_RGB models expect the R, G, and B bands (from the 8-bit true-color image
-product) normalized to 0-1 by dividing by 255. Here is an example:
+product) normalized to 0-1 by dividing by 255 and clipping. Here is an example:
 
 ```yaml
 model:
@@ -38,6 +38,7 @@ data:
           init_args:
             mean: 0
             std: 255
+            # This ensures the value after dividing by 255 is clipped to 0-1.
             valid_range: [0, 1]
 ```
 

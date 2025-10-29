@@ -410,9 +410,13 @@ The configuration snippet below summarizes the most common options. See
       class_path: rslearn.train.tasks.segmentation.SegmentationTask
       init_args:
         # The number of classes to predict.
+        # The raster label should contain values between 0 and (num_classes-1).
         num_classes: 10
         # The value to use for NODATA pixels, which will be excluded from the loss.
         # If null (default), all pixels are considered valid.
+        # If the NODATA value falls within 0 to (num_classes-1), then it must be
+        # counted in num_classes (higher class IDs won't automatically be remapped to
+        # lower values).
         nodata_value: 255
         # Whether to compute mean IoU.
         enable_miou_metric: true
@@ -747,7 +751,7 @@ of fully connected layers after pooling.
 The output is a vector and not a list of feature maps, so the next component is
 typically a predictor (either `ClassificationHead` or `RegressionHead`).
 
-Here is a summary, see `rslearn.models.pick_features` for all of the available
+Here is a summary, see `rslearn.models.pooling_decoder` for all of the available
 options.
 
 ```yaml
