@@ -1,6 +1,6 @@
 ## Transforms
 
-Transforms in rslearn can be used to implement augmentations, to normalize dat, to
+Transforms in rslearn can be used to implement augmentations, to normalize data, to
 perform specialized data pre-processing, etc.
 
 Transforms are specified via the `SplitConfig` object. The `RslearnDataModule` accepts
