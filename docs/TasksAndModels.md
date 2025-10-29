@@ -751,7 +751,7 @@ of fully connected layers after pooling.
 The output is a vector and not a list of feature maps, so the next component is
 typically a predictor (either `ClassificationHead` or `RegressionHead`).
 
-Here is a summary, see `rslearn.models.pick_features` for all of the available
+Here is a summary, see `rslearn.models.pooling_decoder` for all of the available
 options.
 
 ```yaml
