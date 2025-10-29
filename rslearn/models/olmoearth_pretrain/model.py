@@ -9,7 +9,11 @@ from einops import rearrange
 from olmo_core.config import Config
 from olmo_core.distributed.checkpoint import load_model_and_optim_state
 from olmoearth_pretrain.data.constants import Modality
-from olmoearth_pretrain.model_loader import ModelID, load_model
+from olmoearth_pretrain.model_loader import (
+    ModelID,
+    load_model_from_id,
+    load_model_from_path,
+)
 from olmoearth_pretrain.nn.flexihelios import Encoder, TokensAndMasks
 from olmoearth_pretrain.train.masking import MaskedOlmoEarthSample, MaskValue
 from upath import UPath
@@ -46,6 +50,7 @@ class OlmoEarth(torch.nn.Module):
         self,
         patch_size: int,
         model_id: ModelID | None = None,
+        model_path: str | None = None,
         checkpoint_path: str | None = None,
         selector: list[str | int] = ["encoder"],
         forward_kwargs: dict[str, Any] = {},
@@ -57,10 +62,12 @@ class OlmoEarth(torch.nn.Module):
 
         Args:
             patch_size: token spatial patch size to use.
-            model_id: the model ID to load. One of model_id or checkpoint_path must be
+            model_id: the model ID to load. One of model_id or model_path or checkpoint_path must be
                 set.
-            checkpoint_path: the checkpoint directory to load from, if model_id is not
-                set. It should contain config.json file as well as model_and_optim
+            model_path: the path to load the model from. One of model_id or model_path or checkpoint_path must be
+                set. Same structure as the HF-hosted `model_id` models: bundle with a config.json and weights.pth.
+            checkpoint_path: the checkpoint directory to load from, if model_id or model_path is not
+                set. It should contain a distributed checkpoint with a config.json file as well as model_and_optim
                 folder.
             selector: an optional sequence of attribute names or list indices to select
                 the sub-module that should be applied on the input images. Defaults to
@@ -74,10 +81,19 @@ class OlmoEarth(torch.nn.Module):
                 get_backbone_channels (if model_id is not set).
             autocast_dtype: which dtype to use for autocasting, or set None to disable.
         """
-        if (checkpoint_path is not None and model_id is not None) or (
-            checkpoint_path is None and model_id is None
+        if (
+            sum(
+                [
+                    model_id is not None,
+                    model_path is not None,
+                    checkpoint_path is not None,
+                ]
+            )
+            != 1
         ):
-            raise ValueError("exactly one of checkpoint_path and model_id must be set")
+            raise ValueError(
+                "exactly one of model_id, model_path, or checkpoint_path must be set"
+            )
 
         super().__init__()
         self.patch_size = patch_size
@@ -90,14 +106,19 @@ class OlmoEarth(torch.nn.Module):
             self.autocast_dtype = None
 
         if model_id is not None:
-            # Load the model by ID from Hugging Face.
-            model = load_model(model_id, load_weights=not random_initialization)
-
+            # Load from Hugging Face.
+            model = load_model_from_id(model_id, load_weights=not random_initialization)
             if self.embedding_size is None and model_id in EMBEDDING_SIZES:
                 self.embedding_size = EMBEDDING_SIZES[model_id]
 
+        elif model_path is not None:
+            # Load from path.
+            model = load_model_from_path(
+                UPath(model_path), load_weights=not random_initialization
+            )
+
         else:
-            # Load the model by checkpoint path.
+            # Load the distributed model checkpoint by path through Olmo Core
             model = self._load_model_from_checkpoint(
                 UPath(checkpoint_path), random_initialization
             )
