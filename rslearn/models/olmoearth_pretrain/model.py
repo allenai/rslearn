@@ -65,9 +65,9 @@ class OlmoEarth(torch.nn.Module):
             model_id: the model ID to load. One of model_id or model_path or checkpoint_path must be
                 set.
             model_path: the path to load the model from. One of model_id or model_path or checkpoint_path must be
-                set.
+                set. Same structure as the HF-hosted `model_id` models: bundle with a config.json and weights.pth.
             checkpoint_path: the checkpoint directory to load from, if model_id or model_path is not
-                set. It should contain config.json file as well as model_and_optim
+                set. It should contain a distributed checkpoint with a config.json file as well as model_and_optim
                 folder.
             selector: an optional sequence of attribute names or list indices to select
                 the sub-module that should be applied on the input images. Defaults to
