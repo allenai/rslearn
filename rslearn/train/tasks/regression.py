@@ -33,14 +33,14 @@ class RegressionTask(BasicTask):
         """Initialize a new RegressionTask.
 
         Args:
-            property_name: the property from which to extract the regression value. The
-                value is read from the first matching feature.
+            property_name: the property from which to extract the ground truth
+                regression value. The value is read from the first matching feature.
             filters: optional list of (property_name, property_value) to only consider
                 features with matching properties.
             allow_invalid: instead of throwing error when no regression label is found
                 at a window, simply mark the example invalid for this task
-            scale_factor: multiply the label value by this factor
-            metric_mode: what metric to use, either mse or l1
+            scale_factor: multiply the label value by this factor for training
+            metric_mode: what metric to use, either "mse" (default) or "l1"
             use_accuracy_metric: include metric that reports percentage of
                 examples where output is within a factor of the ground truth.
             within_factor: the factor for accuracy metric. If it's 0.2, and ground
@@ -189,7 +189,7 @@ class RegressionHead(torch.nn.Module):
         """Initialize a new RegressionHead.
 
         Args:
-            loss_mode: the loss function to use, either "mse" or "l1".
+            loss_mode: the loss function to use, either "mse" (default) or "l1".
             use_sigmoid: whether to apply a sigmoid activation on the output. This
                 requires targets to be between 0-1.
         """
