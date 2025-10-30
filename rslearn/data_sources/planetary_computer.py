@@ -827,3 +827,55 @@ class Sentinel1(PlanetaryComputer):
                 kwargs[k] = d[k]
 
         return Sentinel1(**kwargs)
+
+
+class Naip(PlanetaryComputer):
+    """A data source for NAIP data on Microsoft Planetary Computer.
+
+    See https://planetarycomputer.microsoft.com/dataset/naip.
+    """
+
+    COLLECTION_NAME = "naip"
+    ASSET_BANDS = {"image": ["R", "G", "B", "NIR"]}
+
+    def __init__(
+        self,
+        **kwargs: Any,
+    ):
+        """Initialize a new Naip instance.
+
+        Args:
+            band_names: list of bands to try to ingest.
+            kwargs: additional arguments to pass to PlanetaryComputer.
+        """
+        super().__init__(
+            collection_name=self.COLLECTION_NAME,
+            asset_bands=self.ASSET_BANDS,
+            **kwargs,
+        )
+
+    @staticmethod
+    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Naip":
+        """Creates a new Naip instance from a configuration dictionary."""
+        if config.data_source is None:
+            raise ValueError("config.data_source is required")
+        d = config.data_source.config_dict
+        kwargs = {}
+
+        if "timeout_seconds" in d:
+            kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
+
+        if "cache_dir" in d:
+            kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
+
+        simple_optionals = [
+            "query",
+            "sort_by",
+            "sort_ascending",
+            "max_items_per_client",
+        ]
+        for k in simple_optionals:
+            if k in d:
+                kwargs[k] = d[k]
+
+        return Naip(**kwargs)
