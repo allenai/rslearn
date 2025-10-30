@@ -20,3 +20,5 @@ Examples
 - [FinetuneOlmoEarth](examples/FinetuneOlmoEarth.md): fine-tune OlmoEarth to segment
   Sentinel-2 images for land cover and crop type mapping. In this example, the labels
   are taken from the USDA Cropland Data Layer.
+- [OlmoEarthEmbeddings](examples/OlmoEarthEmbeddings.md): compute OlmoEarth embeddings
+  on a location and time range of interest.
