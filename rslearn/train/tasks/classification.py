@@ -49,8 +49,8 @@ class ClassificationTask(BasicTask):
                 features with matching properties.
             read_class_id: whether to read an integer class ID instead of the class
                 name.
-            allow_invalid: instead of throwing error when no regression label is found
-                at a window, simply mark the example invalid for this task
+            allow_invalid: instead of throwing error when no classification label is
+                found at a window, simply mark the example invalid for this task
             skip_unknown_categories: whether to skip examples with categories that are
                 not passed via classes, instead of throwing error
             prob_property: when predicting, write probabilities in addition to class ID
