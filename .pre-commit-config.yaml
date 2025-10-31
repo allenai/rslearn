@@ -58,13 +58,10 @@ repos:
           # Skip B113 request_without_timeout because it has false positives e.g. when
           # timeout is computed by a function.
           - B101,B311,B324,B108,B104,B310,B405,B314,B608,B113
-  - repo: local
+  - repo: https://github.com/econchick/interrogate
+    rev: 1.7.0
     hooks:
       - id: interrogate
-        name: interrogate
-        language: system
-        entry: interrogate
-        types: [python]
         args:
           - --ignore-init-method
           - --ignore-init-module
