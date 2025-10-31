@@ -118,7 +118,10 @@ class TestPrepareDatasetWindows:
         layer_summary = summary.layer_summaries[0]
         assert layer_summary.layer_name == "local_file"
         assert layer_summary.windows_prepared == 1  # Only window2
-        assert layer_summary.windows_skipped == 1  # window1 skipped due to min_matches
+        assert layer_summary.windows_skipped == 0  # All windows were needed
+        assert (
+            layer_summary.windows_rejected == 1
+        )  # window1 rejected due to min_matches
         assert summary.total_windows_requested == 2
 
         # Verify window1 has empty item groups (was skipped)
@@ -203,7 +206,8 @@ class TestPrepareDatasetWindows:
         assert len(summary.layer_summaries) == 1
         layer_summary = summary.layer_summaries[0]
         assert layer_summary.windows_prepared == 1
-        assert layer_summary.windows_skipped == 0  # No skipping when min_matches=0
+        assert layer_summary.windows_skipped == 0
+        assert layer_summary.windows_rejected == 0
         assert summary.total_windows_requested == 1
 
     def test_min_matches_with_mixed_prepared_and_skipped_windows(
@@ -329,6 +333,8 @@ class TestPrepareDatasetWindows:
         assert len(summary.layer_summaries) == 1
         layer_summary = summary.layer_summaries[0]
         assert layer_summary.windows_prepared == 1  # Only window3
-        # window1 skipped (already prepared) + window2 skipped (min_matches)
-        assert layer_summary.windows_skipped == 2
+        assert layer_summary.windows_skipped == 1  # window1 not needed (already prepared)
+        assert (
+            layer_summary.windows_rejected == 1
+        )  # window2 rejected due to min_matches
         assert summary.total_windows_requested == 3

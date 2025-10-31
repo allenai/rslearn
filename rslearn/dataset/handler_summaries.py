@@ -20,6 +20,7 @@ class LayerPrepareSummary:
     # Counts
     windows_prepared: int
     windows_skipped: int
+    windows_rejected: int
     get_items_attempts: int
 
 
