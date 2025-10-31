@@ -125,7 +125,8 @@ class BandSetConfig:
         self,
         config_dict: dict[str, Any],
         dtype: DType,
-        bands: list[str],
+        bands: list[str] | None = None,
+        num_bands: int | None = None,
         format: dict[str, Any] | None = None,
         zoom_offset: int = 0,
         remap: dict[str, Any] | None = None,
@@ -137,7 +138,10 @@ class BandSetConfig:
         Args:
             config_dict: the config dict used to configure this BandSetConfig
             dtype: the pixel value type to store tiles in
-            bands: list of band names in this BandSetConfig
+            bands: list of band names in this BandSetConfig. One of bands or num_bands
+                must be set.
+            num_bands: the number of bands in this band set. The bands will be named
+                B00, B01, B02, etc.
             format: the format to store tiles in, defaults to geotiff
             zoom_offset: store images at a resolution higher or lower than the window
                 resolution. This enables keeping source data at its native resolution,
@@ -155,6 +159,14 @@ class BandSetConfig:
                 materialization when creating mosaics, to determine which parts of the
                 source images should be copied.
         """
+        if (bands is None and num_bands is None) or (
+            bands is not None and num_bands is not None
+        ):
+            raise ValueError("exactly one of bands and num_bands must be set")
+        if bands is None:
+            assert num_bands is not None
+            bands = [f"B{idx}" for idx in range(num_bands)]
+
         if class_names is not None and len(bands) != len(class_names):
             raise ValueError(
                 f"the number of class lists ({len(class_names)}) does not match the number of bands ({len(bands)})"
@@ -187,9 +199,16 @@ class BandSetConfig:
         kwargs = dict(
             config_dict=config,
             dtype=DType(config["dtype"]),
-            bands=config["bands"],
         )
-        for k in ["format", "zoom_offset", "remap", "class_names", "nodata_vals"]:
+        for k in [
+            "bands",
+            "num_bands",
+            "format",
+            "zoom_offset",
+            "remap",
+            "class_names",
+            "nodata_vals",
+        ]:
             if k in config:
                 kwargs[k] = config[k]
         return BandSetConfig(**kwargs)  # type: ignore
