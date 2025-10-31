@@ -118,6 +118,7 @@ def prepare_dataset_windows(
                     duration_seconds=time.monotonic() - layer_start_time,
                     windows_prepared=0,
                     windows_skipped=len(windows),
+                    windows_rejected=0,
                     get_items_attempts=0,
                 )
             )
@@ -141,6 +142,7 @@ def prepare_dataset_windows(
                     duration_seconds=time.monotonic() - layer_start_time,
                     windows_prepared=0,
                     windows_skipped=len(windows),
+                    windows_rejected=0,
                     get_items_attempts=0,
                 )
             )
@@ -181,6 +183,9 @@ def prepare_dataset_windows(
             attempts_counter=attempts_counter,
         )
 
+        windows_prepared = 0
+        windows_rejected = 0
+        min_matches = data_source_cfg.query_config.min_matches
         for window, result in zip(needed_windows, results):
             layer_datas = window.load_layer_datas()
             layer_datas[layer_name] = WindowLayerData(
@@ -191,13 +196,22 @@ def prepare_dataset_windows(
             )
             window.save_layer_datas(layer_datas)
 
+            # If result is empty and min_matches > 0, window was rejected due to min_matches
+            if len(result) == 0 and min_matches > 0:
+                windows_rejected += 1
+            else:
+                windows_prepared += 1
+
+        windows_skipped = len(windows) - len(needed_windows)
+
         layer_summaries.append(
             LayerPrepareSummary(
                 layer_name=layer_name,
                 data_source_name=data_source_cfg.name,
                 duration_seconds=time.monotonic() - layer_start_time,
-                windows_prepared=len(needed_windows),  # we assume all have succeeded
-                windows_skipped=len(windows) - len(needed_windows),
+                windows_prepared=windows_prepared,
+                windows_skipped=windows_skipped,
+                windows_rejected=windows_rejected,
                 get_items_attempts=attempts_counter.value,
             )
         )
