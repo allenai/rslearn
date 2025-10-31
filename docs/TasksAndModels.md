@@ -612,8 +612,8 @@ component is:
 Several remote sensing foundation models are included in rslearn, and can be used as
 the first component in the encoder list (the feature extractor).
 
+- [OlmoEarth](OlmoEarth.md)
 - [SatlasPretrain](SatlasPretrain.md)
-- TODO
 
 ### SimpleTimeSeries
 

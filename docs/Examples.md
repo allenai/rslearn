@@ -14,8 +14,11 @@ Examples
   used e.g. for super-resolution training.
 - [BitemporalSentinel2](examples/BitemporalSentinel2.md): acquire Sentinel-2 images
   from 2016 and 2024, and train a model to predict which is earlier. This example shows
-  how to specify more complex model architectures (it applies SatlasPretrain
-  independently on the two images and then concatenates the feature maps), and also how
-  to add custom augmentations (to randomize the order of the images).
+  how to specify more complex model architectures (it applies OlmoEarth independently
+  on the two images and then concatenates the feature maps), and also how to add custom
+  augmentations (to randomize the order of the images).
+- [FinetuneOlmoEarth](examples/FinetuneOlmoEarth.md): fine-tune OlmoEarth to segment
+  Sentinel-2 images for land cover and crop type mapping. In this example, the labels
+  are taken from the USDA Cropland Data Layer.
 - [OlmoEarthEmbeddings](examples/OlmoEarthEmbeddings.md): compute OlmoEarth embeddings
   on a location and time range of interest.
