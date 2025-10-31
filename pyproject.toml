@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
     "boto3>=1.39",
     "fiona>=1.10",
-    "fsspec>=2025.9.0", # this is used both directly and indirectly (via universal_pathlib) in our code
+    "fsspec>=2025.10.0", # this is used both directly and indirectly (via universal_pathlib) in our code
     "jsonargparse>=4.35.0",
     "lightning>=2.5.1.post0",
     "Pillow>=11.3",
