@@ -204,7 +204,9 @@ def prepare_dataset_windows(
             else:
                 windows_prepared += 1
 
-        windows_skipped = len(windows) - len(needed_windows) + windows_skipped_min_matches
+        windows_skipped = (
+            len(windows) - len(needed_windows) + windows_skipped_min_matches
+        )
 
         layer_summaries.append(
             LayerPrepareSummary(
