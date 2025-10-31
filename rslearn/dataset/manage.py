@@ -183,11 +183,7 @@ def prepare_dataset_windows(
 
         windows_prepared = 0
         windows_skipped_min_matches = 0
-        min_matches = (
-            data_source_cfg.query_config.min_matches
-            if data_source_cfg.query_config
-            else 0
-        )
+        min_matches = data_source_cfg.query_config.min_matches
         for window, result in zip(needed_windows, results):
             layer_datas = window.load_layer_datas()
             layer_datas[layer_name] = WindowLayerData(
