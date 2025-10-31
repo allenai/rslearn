@@ -118,7 +118,15 @@ model:
           # This applies the OlmoEarth encoder on the inputs.
           - class_path: rslearn.models.olmoearth_pretrain.model.OlmoEarth
             init_args:
+              # This can be one of:
+              # - OLMOEARTH_V1_NANO
+              # - OLMOEARTH_V1_TINY
+              # - OLMOEARTH_V1_BASE
+              # - OLMOEARTH_V1_LARGE
               model_id: OLMOEARTH_V1_BASE
+              # The patch size should be set between 1 and 8, depending on the size of
+              # the features being predicted, and the available compute (lower patch
+              # sizes are slower).
               patch_size: 8
         decoder:
           # For the decoder, we apply UNetDecoder to upsample features to the input
