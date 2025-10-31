@@ -333,7 +333,9 @@ class TestPrepareDatasetWindows:
         assert len(summary.layer_summaries) == 1
         layer_summary = summary.layer_summaries[0]
         assert layer_summary.windows_prepared == 1  # Only window3
-        assert layer_summary.windows_skipped == 1  # window1 not needed (already prepared)
+        assert (
+            layer_summary.windows_skipped == 1
+        )  # window1 not needed (already prepared)
         assert (
             layer_summary.windows_rejected == 1
         )  # window2 rejected due to min_matches
