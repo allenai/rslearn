@@ -340,8 +340,12 @@ images. EuroSAT only provides one image, so we need to materialize the image tim
 series using rslearn.
 
 Update the dataset configuration file with a new layer. We will call it "sentinel2_ts",
-and it downloads up to four Sentinel-2 L2A mosaics from Microsoft Planetary Computer,
-creating the mosaics starting with the least cloudy Sentinel-2 scenes.
+and it downloads up to four Sentinel-2 L2A mosaics from Microsoft Planetary Computer.
+rslearn will create the mosaics by stitching together individual Sentinel-2 scenes
+until together they cover the window bounds, and the `sort_by` option ensures that
+rslearn will add scenes starting with the least cloudy ones. Only scenes captured
+within the time range of our windows (which we specified as January to December 2018
+when converting the dataset) will be used.
 
 ```json
 {
