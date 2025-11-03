@@ -1,8 +1,11 @@
 ## Fine-tune OlmoEarth
 
-In this example, we fine-tune [OlmoEarth](https://github.com/allenai/olmoearth_pretrain)
+In this example, we use rslearn to fine-tune [OlmoEarth](https://github.com/allenai/olmoearth_pretrain)
 for segmenting land cover and crop type categories. We use labels from the USDA
 Cropland Data Layer. For the inputs, we use four Sentinel-2 images (one per month).
+
+If you are new to rslearn, you may want to read [the main README](../../README.md) or
+[CoreConcepts](../CoreConcepts.md) first.
 
 ## Create the Dataset
 
