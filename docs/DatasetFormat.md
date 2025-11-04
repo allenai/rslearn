@@ -91,7 +91,7 @@ The `options` key stores arbitrary user-specified key-value pairs. Oftentimes, w
 are assigned to training and validation splits via an option here, although this can
 also be achieved by using different window groups for train/val.
 
-### `item.json`
+### `items.json`
 
 In the per-window folders, `items.json` is populated when the dataset is prepared, and
 specifies which items in the data source matched with the window. Here is an example:
@@ -124,7 +124,7 @@ specifies which items in the data source matched with the window. Here is an exa
 ```
 
 The file contains a JSON list with one dict for each layer that has been prepared (this
-only includes layers that are popluated from data sources). The dict specifies the
+only includes layers that are populated from data sources). The dict specifies the
 layer name, along with the item groups that matched. `item_groups` is a serialized
 `list[list[Item]]`, where each sub-list is one group of data source items that should
 be merged/mosaicked together to form one raster or vector file for the window. If there
