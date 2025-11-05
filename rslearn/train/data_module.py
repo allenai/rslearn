@@ -15,10 +15,12 @@ from rslearn.dataset import Dataset
 from rslearn.log_utils import get_logger
 from rslearn.train.tasks import Task
 
-from .dataset import (
-    DataInput,
+from .all_patches_dataset import (
     InMemoryAllPatchesDataset,
     IterableAllPatchesDataset,
+)
+from .dataset import (
+    DataInput,
     ModelDataset,
     MultiDataset,
     RetryDataset,
