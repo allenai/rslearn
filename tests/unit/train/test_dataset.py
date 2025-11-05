@@ -12,10 +12,12 @@ from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
-from rslearn.train.dataset import (
-    DataInput,
+from rslearn.train.all_patches_dataset import (
     InMemoryAllPatchesDataset,
     IterableAllPatchesDataset,
+)
+from rslearn.train.dataset import (
+    DataInput,
     ModelDataset,
     RetryDataset,
     SplitConfig,

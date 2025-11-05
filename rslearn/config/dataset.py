@@ -8,7 +8,6 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 import pytimeparse
-import torch
 from rasterio.enums import Resampling
 
 from rslearn.utils import PixelBounds, Projection
@@ -48,15 +47,6 @@ class DType(Enum):
         elif self == DType.FLOAT32:
             return np.float32
         raise ValueError(f"unable to handle numpy dtype {self}")
-
-    def get_torch_dtype(self) -> torch.dtype:
-        """Returns pytorch dtype object corresponding to this DType."""
-        if self == DType.INT32:
-            return torch.int32
-        elif self == DType.FLOAT32:
-            return torch.float32
-        else:
-            raise ValueError(f"unable to handle torch dtype {self}")
 
 
 RESAMPLING_METHODS = {
