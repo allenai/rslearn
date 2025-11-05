@@ -9,8 +9,8 @@ if TYPE_CHECKING:
 
 
 def copy_spatial_array(
-    src: "torch.Tensor" | npt.NDArray[Any],
-    dst: "torch.Tensor" | npt.NDArray[Any],
+    src: "torch.Tensor | npt.NDArray[Any]",
+    dst: "torch.Tensor | npt.NDArray[Any]",
     src_offset: tuple[int, int],
     dst_offset: tuple[int, int],
 ) -> None:
