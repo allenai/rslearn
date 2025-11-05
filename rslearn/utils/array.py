@@ -1,14 +1,16 @@
 """Array util functions."""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy.typing as npt
-import torch
+
+if TYPE_CHECKING:
+    import torch
 
 
 def copy_spatial_array(
-    src: torch.Tensor | npt.NDArray[Any],
-    dst: torch.Tensor | npt.NDArray[Any],
+    src: "torch.Tensor" | npt.NDArray[Any],
+    dst: "torch.Tensor" | npt.NDArray[Any],
     src_offset: tuple[int, int],
     dst_offset: tuple[int, int],
 ) -> None:

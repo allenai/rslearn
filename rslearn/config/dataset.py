@@ -3,15 +3,17 @@
 import json
 from datetime import timedelta
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import numpy.typing as npt
 import pytimeparse
-import torch
 from rasterio.enums import Resampling
 
 from rslearn.utils import PixelBounds, Projection
+
+if TYPE_CHECKING:
+    import torch
 
 
 class DType(Enum):
@@ -49,8 +51,10 @@ class DType(Enum):
             return np.float32
         raise ValueError(f"unable to handle numpy dtype {self}")
 
-    def get_torch_dtype(self) -> torch.dtype:
+    def get_torch_dtype(self) -> "torch.dtype":
         """Returns pytorch dtype object corresponding to this DType."""
+        import torch
+
         if self == DType.INT32:
             return torch.int32
         elif self == DType.FLOAT32:
