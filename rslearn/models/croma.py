@@ -115,8 +115,15 @@ class Croma(torch.nn.Module):
         super().__init__()
         self.size = size
         self.modality = modality
-        self.image_resolution = image_resolution
         self.do_resizing = do_resizing
+        if not do_resizing:
+            self.image_resolution = image_resolution
+        else:
+            # With single pixel input, we always resample to the patch size.
+            if image_resolution == 1:
+                self.image_resolution = PATCH_SIZE
+            else:
+                self.image_resolution = DEFAULT_IMAGE_RESOLUTION
 
         # Cache the CROMA weights to a deterministic path in temporary directory if the
         # path is not provided by the user.
@@ -141,7 +148,7 @@ class Croma(torch.nn.Module):
             pretrained_path=pretrained_path,
             size=size.value,
             modality=modality.value,
-            image_resolution=image_resolution,
+            image_resolution=self.image_resolution,
         )
 
     def _resize_image(self, image: torch.Tensor, original_hw: int) -> torch.Tensor:
