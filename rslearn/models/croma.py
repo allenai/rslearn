@@ -100,6 +100,7 @@ class Croma(torch.nn.Module):
         modality: CromaModality,
         pretrained_path: str | None = None,
         image_resolution: int = DEFAULT_IMAGE_RESOLUTION,
+        do_resizing: bool = True,
     ) -> None:
         """Instantiate a new Croma instance.
 
@@ -108,14 +109,14 @@ class Croma(torch.nn.Module):
             modality: the modalities to configure the model to accept.
             pretrained_path: the local path to the pretrained weights. Otherwise it is
                 downloaded and cached in temp directory.
-            image_resolution: the width and height of the input images, the image will be resized to this resolution
-                if it is not already except if it is single pixel
-                then it is resized to a single patch size by patch size image.
+            image_resolution: the width and height of the input images passed to the model. if do_resizing is True, the image will be resized to this resolution.
+            do_resizing: Whether to resize the image to the input resolution.
         """
         super().__init__()
         self.size = size
         self.modality = modality
         self.image_resolution = image_resolution
+        self.do_resizing = do_resizing
 
         # Cache the CROMA weights to a deterministic path in temporary directory if the
         # path is not provided by the user.
@@ -145,7 +146,7 @@ class Croma(torch.nn.Module):
 
     def _resize_image(self, image: torch.Tensor, original_hw: int) -> torch.Tensor:
         """Resize the image to the input resolution."""
-        new_hw = self.patch_size if original_hw == 1 else self.image_resolution
+        new_hw = self.patch_size if original_hw == 1 else DEFAULT_IMAGE_RESOLUTION
         return F.interpolate(
             image, size=(new_hw, new_hw), mode="bilinear", align_corners=False
         )
@@ -162,11 +163,19 @@ class Croma(torch.nn.Module):
         if self.modality in [CromaModality.BOTH, CromaModality.SENTINEL1]:
             sentinel1 = torch.stack([inp["sentinel1"] for inp in inputs], dim=0)
             original_hw = sentinel1.shape[2]
-            sentinel1 = self._resize_image(sentinel1, original_hw)
+            sentinel1 = (
+                self._resize_image(sentinel1, original_hw)
+                if self.do_resizing
+                else sentinel1
+            )
         if self.modality in [CromaModality.BOTH, CromaModality.SENTINEL2]:
             sentinel2 = torch.stack([inp["sentinel2"] for inp in inputs], dim=0)
             original_hw = sentinel2.shape[2]
-            sentinel2 = self._resize_image(sentinel2, original_hw)
+            sentinel2 = (
+                self._resize_image(sentinel2, original_hw)
+                if self.do_resizing
+                else sentinel2
+            )
 
         outputs = self.model(
             SAR_images=sentinel1,

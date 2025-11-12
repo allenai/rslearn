@@ -20,7 +20,10 @@ def test_croma(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
     # of this test.
     monkeypatch.setattr(tempfile, "gettempdir", lambda: tmp_path)
     croma = Croma(
-        size=CromaSize.BASE, modality=CromaModality.SENTINEL2, image_resolution=input_hw
+        size=CromaSize.BASE,
+        modality=CromaModality.SENTINEL2,
+        image_resolution=input_hw,
+        do_resizing=False,
     )
 
     inputs = [
