@@ -92,7 +92,7 @@ class Terramind(torch.nn.Module):
         self,
         model_size: TerramindSize,
         modalities: list[str] = ["S2L2A"],
-        do_resizing: bool = True,
+        do_resizing: bool = False,
     ) -> None:
         """Initialize the Terramind model.
 
