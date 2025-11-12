@@ -4,6 +4,7 @@ from enum import Enum
 from typing import Any
 
 import torch
+import torchvision
 from einops import rearrange
 from terratorch.registry import BACKBONE_REGISTRY
 
@@ -18,6 +19,8 @@ class TerramindSize(str, Enum):
     LARGE = "large"
 
 
+# Default image size for Terramind
+IMAGE_SIZE = 224
 # Default patch size for Terramind
 PATCH_SIZE = 16
 
@@ -89,12 +92,14 @@ class Terramind(torch.nn.Module):
         self,
         model_size: TerramindSize,
         modalities: list[str] = ["S2L2A"],
+        do_resizing: bool = True,
     ) -> None:
         """Initialize the Terramind model.
 
         Args:
             model_size: The size of the Terramind model.
             modalities: The modalities to use.
+            do_resizing: Whether to resize the input images to the pretraining resolution.
         """
         super().__init__()
 
@@ -116,6 +121,7 @@ class Terramind(torch.nn.Module):
 
         self.model_size = model_size
         self.modalities = modalities
+        self.do_resizing = do_resizing
 
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Forward pass for the Terramind model.
@@ -132,6 +138,13 @@ class Terramind(torch.nn.Module):
             if modality not in inputs[0]:
                 continue
             cur = torch.stack([inp[modality] for inp in inputs], dim=0)  # (B, C, H, W)
+            if self.do_resizing and (
+                cur.shape[2] != IMAGE_SIZE or cur.shape[3] != IMAGE_SIZE
+            ):
+                cur = torchvision.transforms.functional.resize(
+                    cur,
+                    [IMAGE_SIZE, IMAGE_SIZE],
+                )
             model_inputs[modality] = cur
 
         # By default, the patch embeddings are averaged over all modalities to reduce output tokens
