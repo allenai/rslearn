@@ -19,7 +19,7 @@ class TerramindSize(str, Enum):
     LARGE = "large"
 
 
-# Default image size for Terramind
+# Pretraining image size for Terramind
 IMAGE_SIZE = 224
 # Default patch size for Terramind
 PATCH_SIZE = 16
