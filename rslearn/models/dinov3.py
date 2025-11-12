@@ -73,7 +73,7 @@ class DinoV3(torch.nn.Module):
         checkpoint_dir: str | None,
         size: str = DinoV3Models.LARGE_SATELLITE,
         use_cls_token: bool = False,
-        do_resizing: bool = True,
+        do_resizing: bool = False,
     ) -> None:
         """Instantiate a new DinoV3 instance.
 
@@ -82,7 +82,7 @@ class DinoV3(torch.nn.Module):
                 only (randomly initialized).
             size: the model size, see class for various models.
             use_cls_token: use pooled class token (for classification), otherwise returns spatial feature map.
-            do_resizing: whether to resize inputs to 256x256. Default true.
+            do_resizing: whether to resize inputs to 256x256. Default false.
         """
         super().__init__()
         self.size = size
