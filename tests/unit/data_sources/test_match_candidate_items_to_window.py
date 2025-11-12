@@ -364,20 +364,108 @@ class TestPerPeriodMosaic:
         ]
 
 
-def test_min_matches() -> None:
-    """Ensure that no groups are returned if minimum matches is set."""
-    bbox = shapely.box(0, 0, 1, 1)
-    time_range = (
-        datetime(2024, 1, 1, tzinfo=UTC),
-        datetime(2024, 2, 1, tzinfo=UTC),
-    )
-    geom = STGeometry(WGS84_PROJECTION, bbox, time_range)
-    item_list = [
-        Item("item0", geom),
-        Item("item1", geom),
-    ]
-    query_config = QueryConfig(
-        space_mode=SpaceMode.CONTAINS, max_matches=3, min_matches=3
-    )
-    item_groups = match_candidate_items_to_window(geom, item_list, query_config)
-    assert item_groups == []
+class TestMinMatches:
+    """Test that min_matches is respected for all space modes."""
+
+    def test_min_matches_contains(self) -> None:
+        """Test min_matches with CONTAINS mode."""
+        bbox = shapely.box(0, 0, 1, 1)
+        time_range = (
+            datetime(2024, 1, 1, tzinfo=UTC),
+            datetime(2024, 2, 1, tzinfo=UTC),
+        )
+        geom = STGeometry(WGS84_PROJECTION, bbox, time_range)
+        item_list = [
+            Item("item0", STGeometry(WGS84_PROJECTION, bbox, time_range)),
+            Item("item1", STGeometry(WGS84_PROJECTION, bbox, time_range)),
+        ]
+        # Only 2 items, but min_matches=3, so should return empty
+        query_config = QueryConfig(
+            space_mode=SpaceMode.CONTAINS, max_matches=10, min_matches=3
+        )
+        item_groups = match_candidate_items_to_window(geom, item_list, query_config)
+        assert item_groups == []
+
+    def test_min_matches_intersects(self) -> None:
+        """Test min_matches with INTERSECTS mode."""
+        bbox = shapely.box(0, 0, 1, 1)
+        time_range = (
+            datetime(2024, 1, 1, tzinfo=UTC),
+            datetime(2024, 2, 1, tzinfo=UTC),
+        )
+        geom = STGeometry(WGS84_PROJECTION, bbox, time_range)
+        item_list = [
+            Item("item0", STGeometry(WGS84_PROJECTION, bbox, time_range)),
+            Item("item1", STGeometry(WGS84_PROJECTION, bbox, time_range)),
+        ]
+        # Only 2 items, but min_matches=3, so should return empty
+        query_config = QueryConfig(
+            space_mode=SpaceMode.INTERSECTS, max_matches=10, min_matches=3
+        )
+        item_groups = match_candidate_items_to_window(geom, item_list, query_config)
+        assert item_groups == []
+
+    def test_min_matches_mosaic(self) -> None:
+        """Test min_matches with MOSAIC mode."""
+        part1 = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 0.5, 1), None)
+        part2 = STGeometry(WGS84_PROJECTION, shapely.box(0.5, 0, 1, 1), None)
+        items = [
+            Item("part1_item1", part1),
+            Item("part2_item1", part2),
+        ]
+        window_geom = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), None)
+        # Only 1 mosaic can be created, but min_matches=2, so should return empty
+        query_config = QueryConfig(
+            space_mode=SpaceMode.MOSAIC, max_matches=10, min_matches=2
+        )
+        item_groups = match_candidate_items_to_window(window_geom, items, query_config)
+        assert item_groups == []
+
+    def test_min_matches_composite(self) -> None:
+        """Test min_matches with COMPOSITE mode."""
+        bbox = shapely.box(0, 0, 1, 1)
+        time_range = (
+            datetime(2024, 1, 1, tzinfo=UTC),
+            datetime(2024, 2, 1, tzinfo=UTC),
+        )
+        geom = STGeometry(WGS84_PROJECTION, bbox, time_range)
+        item_list = [
+            Item("item0", STGeometry(WGS84_PROJECTION, bbox, time_range)),
+            Item("item1", STGeometry(WGS84_PROJECTION, bbox, time_range)),
+        ]
+        # COMPOSITE always returns 1 group, but min_matches=2, so should return empty
+        query_config = QueryConfig(
+            space_mode=SpaceMode.COMPOSITE, max_matches=10, min_matches=2
+        )
+        item_groups = match_candidate_items_to_window(geom, item_list, query_config)
+        assert item_groups == []
+
+    def test_min_matches_per_period_mosaic(self) -> None:
+        """Test min_matches with PER_PERIOD_MOSAIC mode."""
+        base_ts = datetime(2024, 1, 1, tzinfo=UTC)
+        period_duration = timedelta(days=30)
+        bbox = shapely.box(0, 0, 1, 1)
+        window_geometry = STGeometry(
+            WGS84_PROJECTION, bbox, (base_ts, base_ts + period_duration * 4)
+        )
+        # Only 1 period has items, but min_matches=2, so should return empty
+        item_list = [
+            Item(
+                "item0",
+                STGeometry(
+                    WGS84_PROJECTION,
+                    bbox,
+                    (base_ts, base_ts + period_duration),
+                ),
+            ),
+        ]
+        query_config = QueryConfig(
+            space_mode=SpaceMode.PER_PERIOD_MOSAIC,
+            max_matches=10,
+            min_matches=2,
+            period_duration=period_duration,
+        )
+        item_groups = match_candidate_items_to_window(
+            window_geometry, item_list, query_config
+        )
+        assert item_groups == []
