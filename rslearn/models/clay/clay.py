@@ -8,6 +8,7 @@ from importlib.resources import files
 from typing import Any
 
 import torch
+import torch.nn.functional as F
 import yaml
 from einops import rearrange
 from huggingface_hub import hf_hub_download
@@ -30,6 +31,7 @@ PATCH_SIZE = 8
 CLAY_MODALITIES = ["sentinel-2-l2a", "sentinel-1-rtc", "landsat-c2l1", "naip"]
 CONFIG_DIR = files("rslearn.models.clay.configs")
 CLAY_METADATA_PATH = str(CONFIG_DIR / "metadata.yaml")
+DEFAULT_IMAGE_RESOLUTION = 128  # image resolution during pretraining
 
 
 def get_clay_checkpoint_path(
@@ -49,6 +51,7 @@ class Clay(torch.nn.Module):
         modality: str = "sentinel-2-l2a",
         checkpoint_path: str | None = None,
         metadata_path: str = CLAY_METADATA_PATH,
+        do_resizing: bool = True,
     ) -> None:
         """Initialize the Clay model.
 
@@ -57,6 +60,7 @@ class Clay(torch.nn.Module):
             modality: The modality to use (subset of CLAY_MODALITIES).
             checkpoint_path: Path to clay-v1.5.ckpt, if None, fetch from HF Hub.
             metadata_path: Path to metadata.yaml.
+            do_resizing: Whether to resize the image to the input resolution.
         """
         super().__init__()
 
@@ -95,6 +99,14 @@ class Clay(torch.nn.Module):
 
         self.model_size = model_size
         self.modality = modality
+        self.do_resizing = do_resizing
+
+    def _resize_image(self, image: torch.Tensor, original_hw: int) -> torch.Tensor:
+        """Resize the image to the input resolution."""
+        new_hw = self.patch_size if original_hw == 1 else DEFAULT_IMAGE_RESOLUTION
+        return F.interpolate(
+            image, size=(new_hw, new_hw), mode="bilinear", align_corners=False
+        )
 
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Forward pass for the Clay model.
@@ -114,7 +126,8 @@ class Clay(torch.nn.Module):
         chips = torch.stack(
             [inp[self.modality] for inp in inputs], dim=0
         )  # (B, C, H, W)
-
+        if self.do_resizing:
+            chips = self._resize_image(chips, chips.shape[2])
         order = self.metadata[self.modality]["band_order"]
         wavelengths = []
         for band in self.metadata[self.modality]["band_order"]:

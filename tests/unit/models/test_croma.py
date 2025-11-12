@@ -41,7 +41,7 @@ def test_croma(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
 def test_croma_default_image_resolution(
     tmp_path: pathlib.Path, monkeypatch: Any
 ) -> None:
-    """Verify that the forward pass for CROMA works."""
+    """Verify that the forward pass for CROMA works when we resize the image to the default image resolution."""
     input_hw = 16
     # We override the temporary directory so we don't retain the model weights outside
     # of this test.
