@@ -36,10 +36,7 @@ def test_clay(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
     features = feature_list[0]
 
     # Check feature shape: (B, D, H', W') with B=1, D=1024, H'=W'=4 (32/8)
-    assert features.shape[0] == 1
-    assert features.shape[1] == 1024
-    assert features.shape[2] == 4
-    assert features.shape[3] == 4
+    assert features.shape == (1, 1024, 16, 16)
 
     # Backbone channels should match patch size and depth
     assert clay.get_backbone_channels() == [(8, 1024)]
