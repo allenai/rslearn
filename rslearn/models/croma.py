@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any
 
 import torch
+import torch.nn.functional as F
 from einops import rearrange
 from upath import UPath
 
@@ -107,7 +108,9 @@ class Croma(torch.nn.Module):
             modality: the modalities to configure the model to accept.
             pretrained_path: the local path to the pretrained weights. Otherwise it is
                 downloaded and cached in temp directory.
-            image_resolution: the width and height of the input images.
+            image_resolution: the width and height of the input images, the image will be resized to this resolution
+                if it is not already except if it is single pixel
+                then it is resized to a single patch size by patch size image.
         """
         super().__init__()
         self.size = size
@@ -140,6 +143,13 @@ class Croma(torch.nn.Module):
             image_resolution=image_resolution,
         )
 
+    def _resize_image(self, image: torch.Tensor, original_hw: int) -> torch.Tensor:
+        """Resize the image to the input resolution."""
+        new_hw = self.patch_size if original_hw == 1 else self.image_resolution
+        return F.interpolate(
+            image, size=(new_hw, new_hw), mode="bilinear", align_corners=False
+        )
+
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Compute feature maps from the Croma backbone.
 
@@ -151,8 +161,13 @@ class Croma(torch.nn.Module):
         sentinel2: torch.Tensor | None = None
         if self.modality in [CromaModality.BOTH, CromaModality.SENTINEL1]:
             sentinel1 = torch.stack([inp["sentinel1"] for inp in inputs], dim=0)
+            original_hw = sentinel1.shape[2]
+            sentinel1 = self._resize_image(sentinel1, original_hw)
         if self.modality in [CromaModality.BOTH, CromaModality.SENTINEL2]:
             sentinel2 = torch.stack([inp["sentinel2"] for inp in inputs], dim=0)
+            original_hw = sentinel2.shape[2]
+            sentinel2 = self._resize_image(sentinel2, original_hw)
+
         outputs = self.model(
             SAR_images=sentinel1,
             optical_images=sentinel2,
