@@ -141,9 +141,13 @@ class Terramind(torch.nn.Module):
             if self.do_resizing and (
                 cur.shape[2] != IMAGE_SIZE or cur.shape[3] != IMAGE_SIZE
             ):
+                if cur.shape[2] == 1 and cur.shape[3] == 1:
+                    new_width, new_height = PATCH_SIZE, PATCH_SIZE
+                else:
+                    new_width, new_height = IMAGE_SIZE, IMAGE_SIZE
                 cur = F.interpolate(
                     cur,
-                    size=(IMAGE_SIZE, IMAGE_SIZE),
+                    size=(new_width, new_height),
                     mode="bilinear",
                     align_corners=False,
                 )
