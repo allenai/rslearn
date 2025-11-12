@@ -52,6 +52,8 @@ def test_croma_default_image_resolution(
     croma = Croma(
         size=CromaSize.BASE,
         modality=CromaModality.SENTINEL2,
+        image_resolution=input_hw,
+        do_resizing=True,
     )
 
     inputs = [
