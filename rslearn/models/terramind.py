@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Any
 
 import torch
-import torchvision
+import torch.nn.functional as F
 from einops import rearrange
 from terratorch.registry import BACKBONE_REGISTRY
 
@@ -141,9 +141,11 @@ class Terramind(torch.nn.Module):
             if self.do_resizing and (
                 cur.shape[2] != IMAGE_SIZE or cur.shape[3] != IMAGE_SIZE
             ):
-                cur = torchvision.transforms.functional.resize(
+                cur = F.interpolate(
                     cur,
-                    [IMAGE_SIZE, IMAGE_SIZE],
+                    size=(IMAGE_SIZE, IMAGE_SIZE),
+                    mode="bilinear",
+                    align_corners=False,
                 )
             model_inputs[modality] = cur
 
