@@ -51,7 +51,7 @@ class Clay(torch.nn.Module):
         modality: str = "sentinel-2-l2a",
         checkpoint_path: str | None = None,
         metadata_path: str = CLAY_METADATA_PATH,
-        do_resizing: bool = True,
+        do_resizing: bool = False,
     ) -> None:
         """Initialize the Clay model.
 

@@ -100,7 +100,7 @@ class Croma(torch.nn.Module):
         modality: CromaModality,
         pretrained_path: str | None = None,
         image_resolution: int = DEFAULT_IMAGE_RESOLUTION,
-        do_resizing: bool = True,
+        do_resizing: bool = False,
     ) -> None:
         """Instantiate a new Croma instance.
 
