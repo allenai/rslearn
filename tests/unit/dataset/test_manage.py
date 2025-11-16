@@ -340,3 +340,88 @@ class TestPrepareDatasetWindows:
             layer_summary.windows_rejected == 1
         )  # window2 rejected due to min_matches
         assert summary.total_windows_requested == 3
+
+    def test_previously_rejected_windows_counted_as_rejected_not_skipped(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Test that windows previously rejected due to min_matches are counted as rejected on second run."""
+        ds_path = UPath(tmp_path)
+
+        # Create GeoJSON file - LocalFiles creates one item per file
+        # Window will intersect 1 file, but min_matches=2, so will be rejected
+        src_data_dir = tmp_path / "src_data"
+        src_data_dir.mkdir()
+
+        features = [
+            {
+                "type": "Feature",
+                "properties": {},
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [5, 5],
+                },
+            },
+        ]
+        with (src_data_dir / "data.geojson").open("w") as f:
+            json.dump(
+                {
+                    "type": "FeatureCollection",
+                    "features": features,
+                },
+                f,
+            )
+
+        # Create dataset config with min_matches=2
+        dataset_config = {
+            "layers": {
+                "local_file": {
+                    "type": "vector",
+                    "data_source": {
+                        "name": "rslearn.data_sources.local_files.LocalFiles",
+                        "src_dir": str(src_data_dir),
+                        "query_config": {
+                            "space_mode": "INTERSECTS",
+                            "min_matches": 2,
+                            "max_matches": 10,
+                        },
+                    },
+                },
+            },
+        }
+        with (ds_path / "config.json").open("w") as f:
+            json.dump(dataset_config, f)
+
+        # Create a window that intersects 1 file (will not meet min_matches=2)
+        Window(
+            path=Window.get_window_root(ds_path, "default", "window1"),
+            group="default",
+            name="window1",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 10, 10),  # Intersects data.geojson (1 file)
+            time_range=None,
+        ).save()
+
+        dataset = Dataset(ds_path)
+        windows = dataset.load_windows()
+
+        # First run: window should be rejected
+        summary1 = prepare_dataset_windows(dataset, windows)
+        assert len(summary1.layer_summaries) == 1
+        layer_summary1 = summary1.layer_summaries[0]
+        assert layer_summary1.windows_prepared == 0
+        assert layer_summary1.windows_skipped == 0
+        assert layer_summary1.windows_rejected == 1  # Rejected due to min_matches
+
+        # Verify window1 has empty item groups (was rejected)
+        window1 = next(w for w in windows if w.name == "window1")
+        layer_datas = window1.load_layer_datas()
+        assert "local_file" in layer_datas
+        assert len(layer_datas["local_file"].serialized_item_groups) == 0
+
+        # Second run: window should still be counted as rejected, not skipped
+        summary2 = prepare_dataset_windows(dataset, windows)
+        assert len(summary2.layer_summaries) == 1
+        layer_summary2 = summary2.layer_summaries[0]
+        assert layer_summary2.windows_prepared == 0
+        assert layer_summary2.windows_skipped == 0
+        assert layer_summary2.windows_rejected == 1  # Still rejected, not skipped

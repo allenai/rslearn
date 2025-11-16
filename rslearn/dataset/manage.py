@@ -124,12 +124,24 @@ def prepare_dataset_windows(
             )
             continue
         data_source_cfg = layer_cfg.data_source
+        min_matches = data_source_cfg.query_config.min_matches
 
         # Get windows that need to be prepared for this layer.
+        # Also track which windows are skipped vs previously rejected.
         needed_windows = []
+        windows_skipped = 0
+        windows_rejected = 0
         for window in windows:
             layer_datas = window.load_layer_datas()
             if layer_name in layer_datas and not force:
+                # Window already has layer data - check if it was previously rejected
+                layer_data = layer_datas[layer_name]
+                if len(layer_data.serialized_item_groups) == 0 and min_matches > 0:
+                    # Previously rejected due to min_matches
+                    windows_rejected += 1
+                else:
+                    # Successfully prepared previously
+                    windows_skipped += 1
                 continue
             needed_windows.append(window)
         logger.info(f"Preparing {len(needed_windows)} windows for layer {layer_name}")
@@ -141,8 +153,8 @@ def prepare_dataset_windows(
                     data_source_name=data_source_cfg.name,
                     duration_seconds=time.monotonic() - layer_start_time,
                     windows_prepared=0,
-                    windows_skipped=len(windows),
-                    windows_rejected=0,
+                    windows_skipped=windows_skipped,
+                    windows_rejected=windows_rejected,
                     get_items_attempts=0,
                 )
             )
@@ -184,8 +196,6 @@ def prepare_dataset_windows(
         )
 
         windows_prepared = 0
-        windows_rejected = 0
-        min_matches = data_source_cfg.query_config.min_matches
         for window, result in zip(needed_windows, results):
             layer_datas = window.load_layer_datas()
             layer_datas[layer_name] = WindowLayerData(
@@ -201,8 +211,6 @@ def prepare_dataset_windows(
                 windows_rejected += 1
             else:
                 windows_prepared += 1
-
-        windows_skipped = len(windows) - len(needed_windows)
 
         layer_summaries.append(
             LayerPrepareSummary(
