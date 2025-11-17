@@ -58,6 +58,7 @@ class OlmoEarth(torch.nn.Module):
         random_initialization: bool = False,
         embedding_size: int | None = None,
         autocast_dtype: str | None = "bfloat16",
+        encoder_state_dict_path: str | None = None,
     ):
         """Create a new OlmoEarth model.
 
@@ -81,6 +82,8 @@ class OlmoEarth(torch.nn.Module):
             embedding_size: optional embedding size to report via
                 get_backbone_channels (if model_id is not set).
             autocast_dtype: which dtype to use for autocasting, or set None to disable.
+            encoder_state_dict_path: If not None, we will overwrite the encoder weights with these weights.
+                This can be useful if you want to do multiple rounds of finetuning for a model.
         """
         if (
             sum(
@@ -131,6 +134,10 @@ class OlmoEarth(torch.nn.Module):
             else:
                 model = model[part]
         self.model = model
+
+        if encoder_state_dict_path is not None:
+            encoder_state_dict = torch.load(encoder_state_dict_path, weights_only=True)
+            self.model.encoder.load_state_dict(encoder_state_dict)
 
     def _load_model_from_checkpoint(
         self, checkpoint_upath: UPath, random_initialization: bool
