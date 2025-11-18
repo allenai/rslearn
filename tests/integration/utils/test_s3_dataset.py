@@ -6,7 +6,6 @@ from pathlib import Path
 import shapely
 from upath import UPath
 
-from rslearn.config import VectorLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
 from rslearn.dataset.manage import (
@@ -89,8 +88,7 @@ class TestLocalFiles:
 
         window = windows[0]
         layer_config = dataset.layers["local_file"]
-        assert isinstance(layer_config, VectorLayerConfig)
-        vector_format = load_vector_format(layer_config.format)
+        vector_format = load_vector_format(layer_config.vector_format)
         features = vector_format.decode_vector(
             window.get_layer_dir("local_file"), window.projection, window.bounds
         )
