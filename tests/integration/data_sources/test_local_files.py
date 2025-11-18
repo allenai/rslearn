@@ -83,7 +83,7 @@ class TestLocalFiles:
         dataset_config = {
             "layers": {
                 "local_file": {
-                    "layer_type": "vector",
+                    "type": "vector",
                     "data_source": {
                         "class_path": "rslearn.data_sources.local_files.LocalFiles",
                         "init_args": {
@@ -157,7 +157,7 @@ class TestLocalFiles:
         dataset_config = {
             "layers": {
                 layer_name: {
-                    "layer_type": "raster",
+                    "type": "raster",
                     "band_sets": [
                         {
                             "bands": ["b1", "b2"],
@@ -250,7 +250,7 @@ class TestCoordinateModes:
         dataset_config = {
             "layers": {
                 "local_file": {
-                    "layer_type": "vector",
+                    "type": "vector",
                     "data_source": {
                         "class_path": "rslearn.data_sources.local_files.LocalFiles",
                         "init_args": {

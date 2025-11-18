@@ -31,7 +31,7 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
     dataset_config = {
         "layers": {
             "image": {
-                "layer_type": "raster",
+                "type": "raster",
                 "band_sets": [
                     {
                         "dtype": "uint8",
@@ -43,8 +43,8 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
                     }
                 ],
             },
-            "label": {"layer_type": "vector"},
-            "output": {"layer_type": "vector"},
+            "label": {"type": "vector"},
+            "output": {"type": "vector"},
         },
     }
     ds_path.mkdir(parents=True, exist_ok=True)

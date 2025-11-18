@@ -32,7 +32,7 @@ def test_materialize_capitol_hill(tmp_path: pathlib.Path) -> None:
     dataset_config = {
         "layers": {
             layer_name: {
-                "layer_type": "raster",
+                "type": "raster",
                 "band_sets": [
                     {
                         "dtype": "int32",

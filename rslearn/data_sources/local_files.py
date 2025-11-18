@@ -94,7 +94,7 @@ class RasterItemSpec:
     def deserialize(d: dict[str, Any]) -> "RasterItemSpec":
         """Deserializes a RasterItemSpec from a JSON-decoded dictionary."""
         return RasterItemSpec(
-            fnames=[UPath(s) for s in d["fnames"]],
+            fnames=[s for s in d["fnames"]],
             bands=d["bands"],
             name=d["name"],
         )
@@ -129,7 +129,7 @@ class RasterItem(Item):
     def deserialize(d: dict) -> "RasterItem":
         """Deserializes an item from a JSON-decoded dictionary."""
         item = super(RasterItem, RasterItem).deserialize(d)
-        src_dir = UPath(d["src_dir"])
+        src_dir = d["src_dir"]
         spec = RasterItemSpec.deserialize(d["spec"])
         return RasterItem(
             name=item.name, geometry=item.geometry, src_dir=src_dir, spec=spec
@@ -248,7 +248,7 @@ class RasterImporter(Importer):
             logger.debug(
                 "RasterImporter.list_items: got bounds of %s: %s", item_name, geometry
             )
-            items.append(RasterItem(item_name, geometry, src_dir, spec))
+            items.append(RasterItem(item_name, geometry, str(src_dir), spec))
 
         logger.debug("RasterImporter.list_items: discovered %d items", len(items))
         return items
@@ -268,7 +268,7 @@ class RasterImporter(Importer):
         """
         assert isinstance(item, RasterItem)
         for file_idx, fname in enumerate(item.spec.fnames):
-            fname_upath = join_upath(item.src_dir, fname)
+            fname_upath = join_upath(UPath(item.src_dir), fname)
             with open_rasterio_upath_reader(fname_upath) as src:
                 if item.spec.bands:
                     bands = item.spec.bands[file_idx]
@@ -428,7 +428,7 @@ class LocalFiles(DataSource):
 
         # Determine layer type.
         if context.layer_config is not None:
-            self.layer_type = context.layer_config.layer_type
+            self.layer_type = context.layer_config.type
         elif layer_type is not None:
             self.layer_type = layer_type
         else:

@@ -71,14 +71,14 @@ class TestPrepareDatasetWindows:
         dataset_config = {
             "layers": {
                 "local_file": {
-                    "layer_type": "vector",
+                    "type": "vector",
                     "data_source": {
                         "class_path": "rslearn.data_sources.local_files.LocalFiles",
                         "init_args": {
                             "src_dir": str(src_data_dir),
                         },
                         "query_config": {
-                            "space_mode": "intersects",
+                            "space_mode": "INTERSECTS",
                             "min_matches": 3,
                             "max_matches": 10,
                         },
@@ -173,14 +173,14 @@ class TestPrepareDatasetWindows:
         dataset_config = {
             "layers": {
                 "local_file": {
-                    "layer_type": "vector",
+                    "type": "vector",
                     "data_source": {
                         "class_path": "rslearn.data_sources.local_files.LocalFiles",
                         "init_args": {
                             "src_dir": str(src_data_dir),
                         },
                         "query_config": {
-                            "space_mode": "intersects",
+                            "space_mode": "INTERSECTS",
                             "min_matches": 0,
                             "max_matches": 10,
                         },
@@ -271,14 +271,14 @@ class TestPrepareDatasetWindows:
         dataset_config = {
             "layers": {
                 "local_file": {
-                    "layer_type": "vector",
+                    "type": "vector",
                     "data_source": {
                         "class_path": "rslearn.data_sources.local_files.LocalFiles",
                         "init_args": {
                             "src_dir": str(src_data_dir),
                         },
                         "query_config": {
-                            "space_mode": "intersects",
+                            "space_mode": "INTERSECTS",
                             "min_matches": 2,
                             "max_matches": 10,
                         },

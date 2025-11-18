@@ -217,26 +217,26 @@ class BandSetConfig(BaseModel):
 class SpaceMode(StrEnum):
     """Spatial matching mode when looking up items corresponding to a window."""
 
-    CONTAINS = "contains"
+    CONTAINS = "CONTAINS"
     """Items must contain the entire window."""
 
-    INTERSECTS = "intersects"
+    INTERSECTS = "INTERSECTS"
     """Items must overlap any portion of the window."""
 
-    MOSAIC = "mosaic"
+    MOSAIC = "MOSAIC"
     """Groups of items should be computed that cover the entire window.
 
     During materialization, items in each group are merged to form a mosaic in the
     dataset.
     """
 
-    PER_PERIOD_MOSAIC = "per_period_mosaic"
+    PER_PERIOD_MOSAIC = "PER_PERIOD_MOSAIC"
     """Create one mosaic per sub-period of the time range.
 
     The duration of the sub-periods is controlled by another option in QueryConfig.
     """
 
-    COMPOSITE = "composite"
+    COMPOSITE = "COMPOSITE"
     """Creates one composite covering the entire window.
 
     During querying all items intersecting the window are placed in one group.
@@ -250,16 +250,16 @@ class SpaceMode(StrEnum):
 class TimeMode(StrEnum):
     """Temporal  matching mode when looking up items corresponding to a window."""
 
-    WITHIN = "within"
+    WITHIN = "WITHIN"
     """Items must be within the window time range."""
 
-    NEAREST = "nearest"
+    NEAREST = "NEAREST"
     """Select items closest to the window time range, up to max_matches."""
 
-    BEFORE = "before"
+    BEFORE = "BEFORE"
     """Select items before the end of the window time range, up to max_matches."""
 
-    AFTER = "after"
+    AFTER = "AFTER"
     """Select items after the start of the window time range, up to max_matches."""
 
 
@@ -343,13 +343,13 @@ class LayerType(StrEnum):
 class CompositingMethod(StrEnum):
     """Method how to select pixels for the composite from corresponding items of a window."""
 
-    FIRST_VALID = "first_valid"
+    FIRST_VALID = "FIRST_VALID"
     """Select first valid pixel in order of corresponding items (might be sorted)"""
 
-    MEAN = "mean"
+    MEAN = "MEAN"
     """Select per-pixel mean value of corresponding items of a window"""
 
-    MEDIAN = "median"
+    MEDIAN = "MEDIAN"
     """Select per-pixel median value of corresponding items of a window"""
 
 
@@ -358,7 +358,7 @@ class LayerConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    layer_type: LayerType = Field(description="The LayerType (raster or vector).")
+    type: LayerType = Field(description="The LayerType (raster or vector).")
     data_source: DataSourceConfig | None = Field(
         default=None,
         description="Optional DataSourceConfig if this layer is retrievable.",
@@ -400,7 +400,7 @@ class LayerConfig(BaseModel):
     @model_validator(mode="after")
     def after_validator(self) -> "LayerConfig":
         """Ensure the LayerConfig is valid."""
-        if self.layer_type == LayerType.RASTER and len(self.band_sets) == 0:
+        if self.type == LayerType.RASTER and len(self.band_sets) == 0:
             raise ValueError(
                 "band sets must be specified and non-empty for raster layers"
             )

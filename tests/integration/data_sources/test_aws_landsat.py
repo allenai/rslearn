@@ -26,7 +26,7 @@ class TestLandsatOliTirs:
     @pytest.fixture
     def landsat_layer_config(self) -> LayerConfig:
         return LayerConfig(
-            layer_type=LayerType.RASTER,
+            type=LayerType.RASTER,
             band_sets=[BandSetConfig(dtype=DType.UINT8, bands=[TEST_BAND])],
         )
 

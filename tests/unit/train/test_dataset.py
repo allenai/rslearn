@@ -41,7 +41,7 @@ def basic_classification_dataset(tmp_path: pathlib.Path) -> Dataset:
     dataset_config = {
         "layers": {
             "image_layer1": {
-                "layer_type": "raster",
+                "type": "raster",
                 "band_sets": [
                     {
                         "dtype": "uint8",
@@ -50,7 +50,7 @@ def basic_classification_dataset(tmp_path: pathlib.Path) -> Dataset:
                 ],
             },
             "image_layer2": {
-                "layer_type": "raster",
+                "type": "raster",
                 "band_sets": [
                     {
                         "dtype": "uint8",
@@ -58,7 +58,7 @@ def basic_classification_dataset(tmp_path: pathlib.Path) -> Dataset:
                     }
                 ],
             },
-            "vector_layer": {"layer_type": "vector"},
+            "vector_layer": {"type": "vector"},
         },
     }
     ds_path.mkdir(parents=True, exist_ok=True)

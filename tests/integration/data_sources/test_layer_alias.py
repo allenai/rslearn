@@ -23,7 +23,7 @@ def test_layer_alias(local_files_dataset: Dataset) -> None:
     dataset_config = {
         "layers": {
             "layer1": {
-                "layer_type": "vector",
+                "type": "vector",
                 "alias": "common",
                 "data_source": {
                     "class_path": "rslearn.data_sources.local_files.LocalFiles",
@@ -52,7 +52,7 @@ def test_layer_alias(local_files_dataset: Dataset) -> None:
     dataset_config = {
         "layers": {
             "layer2": {
-                "layer_type": "vector",
+                "type": "vector",
                 "alias": "common",
                 "data_source": {
                     "class_path": "rslearn.data_sources.local_files.LocalFiles",
@@ -78,7 +78,7 @@ def test_layer_alias(local_files_dataset: Dataset) -> None:
     dataset_config = {
         "layers": {
             "layer3": {
-                "layer_type": "vector",
+                "type": "vector",
                 "data_source": {
                     "class_path": "rslearn.data_sources.local_files.LocalFiles",
                     "init_args": {

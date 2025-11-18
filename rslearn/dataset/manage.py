@@ -313,7 +313,7 @@ def is_window_ingested(
             for serialized_item in group:
                 item = Item.deserialize(serialized_item)
 
-                if layer_cfg.layer_type == LayerType.RASTER:
+                if layer_cfg.type == LayerType.RASTER:
                     for band_set in layer_cfg.band_sets:
                         # Make sure that layers exist containing each configured band.
                         # And that those layers are marked completed.
@@ -408,10 +408,12 @@ def materialize_window(
         )
 
         materializer: Materializer
-        if layer_cfg.layer_type == LayerType.RASTER:
+        if layer_cfg.type == LayerType.RASTER:
             materializer = RasterMaterializer()
-        else:
+        elif layer_cfg.type == LayerType.VECTOR:
             materializer = VectorMaterializer()
+        else:
+            raise ValueError(f"unknown layer type {layer_cfg.type}")
 
         retry(
             fn=lambda: materializer.materialize(

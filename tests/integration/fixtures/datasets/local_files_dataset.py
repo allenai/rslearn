@@ -49,7 +49,7 @@ def local_files_dataset(tmp_path: pathlib.Path) -> Dataset:
     dataset_config = {
         "layers": {
             "local_file": {
-                "layer_type": "vector",
+                "type": "vector",
                 "data_source": {
                     "class_path": "rslearn.data_sources.local_files.LocalFiles",
                     "init_args": {

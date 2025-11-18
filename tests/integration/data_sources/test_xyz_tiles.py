@@ -24,7 +24,7 @@ class TestXyzTiles:
     def run_simple_test(self, dst_dir: UPath, seattle2020: STGeometry) -> None:
         """Apply test where we ingest an item corresponding to seattle2020."""
         layer_config = LayerConfig(
-            layer_type=LayerType.RASTER,
+            type=LayerType.RASTER,
             band_sets=[BandSetConfig(dtype=DType.UINT8, bands=self.TEST_BANDS)],
         )
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)

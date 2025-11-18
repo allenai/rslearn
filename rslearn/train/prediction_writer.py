@@ -188,19 +188,19 @@ class RslearnWriter(BasePredictionWriter):
             self.layer_config = dataset.layers[self.output_layer]
 
         self.format: RasterFormat | VectorFormat
-        if self.layer_config.layer_type == LayerType.RASTER:
+        if self.layer_config.type == LayerType.RASTER:
             band_cfg = self.layer_config.band_sets[0]
             self.format = load_raster_format(band_cfg.format)
-        elif self.layer_config.layer_type == LayerType.VECTOR:
+        elif self.layer_config.type == LayerType.VECTOR:
             self.format = load_vector_format(self.layer_config.vector_format)
         else:
-            raise ValueError(f"invalid layer type {self.layer_config.layer_type}")
+            raise ValueError(f"invalid layer type {self.layer_config.type}")
 
         if merger is not None:
             self.merger = merger
-        elif self.layer_config.layer_type == LayerType.RASTER:
+        elif self.layer_config.type == LayerType.RASTER:
             self.merger = RasterMerger()
-        elif self.layer_config.layer_type == LayerType.VECTOR:
+        elif self.layer_config.type == LayerType.VECTOR:
             self.merger = VectorMerger()
 
         # Map from window name to pending data to write.
@@ -323,7 +323,7 @@ class RslearnWriter(BasePredictionWriter):
         logger.debug(f"Merging and writing for window {window.name}")
         merged_output = self.merger.merge(window, pending_output)
 
-        if self.layer_config.layer_type == LayerType.RASTER:
+        if self.layer_config.type == LayerType.RASTER:
             raster_dir = window.get_raster_dir(
                 self.output_layer, self.layer_config.band_sets[0].bands
             )
@@ -336,7 +336,7 @@ class RslearnWriter(BasePredictionWriter):
             )
             self.format.encode_raster(raster_dir, projection, bounds, merged_output)
 
-        elif self.layer_config.layer_type == LayerType.VECTOR:
+        elif self.layer_config.type == LayerType.VECTOR:
             layer_dir = window.get_layer_dir(self.output_layer)
             assert isinstance(self.format, VectorFormat)
             self.format.encode_vector(layer_dir, merged_output)

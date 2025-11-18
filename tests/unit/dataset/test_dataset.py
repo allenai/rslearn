@@ -29,9 +29,9 @@ class TestDataset:
             # Create config.json with template variables - use a simple config that works
             config_content = {
                 "layers": {
-                    "test_layer": {"layer_type": "vector"},
-                    "${LABEL_LAYER}": {"layer_type": "vector"},
-                    "${PREDICTION_OUTPUT_LAYER}": {"layer_type": "vector"},
+                    "test_layer": {"type": "vector"},
+                    "${LABEL_LAYER}": {"type": "vector"},
+                    "${PREDICTION_OUTPUT_LAYER}": {"type": "vector"},
                 },
                 "tile_store": {
                     "class_path": "rslearn.tile_stores.default.DefaultTileStore",
@@ -64,7 +64,7 @@ class TestDataset:
 
             # Create config.json with a missing environment variable
             config_content = {
-                "layers": {"test_layer": {"layer_type": "vector"}},
+                "layers": {"test_layer": {"type": "vector"}},
                 "tile_store": {
                     "class_path": "rslearn.tile_stores.default.DefaultTileStore",
                     "init_args": {"path_suffix": "/base/path/${MISSING_VAR}/tiles"},
@@ -91,7 +91,7 @@ class TestDataset:
 
             # Create config.json without any template variables
             config_content = {
-                "layers": {"test_layer": {"layer_type": "vector"}},
+                "layers": {"test_layer": {"type": "vector"}},
                 "tile_store": {
                     "class_path": "rslearn.tile_stores.default.DefaultTileStore",
                     "init_args": {"path_suffix": "/static/path/to/tiles"},

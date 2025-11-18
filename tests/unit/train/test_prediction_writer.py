@@ -186,7 +186,7 @@ def test_write_raster(tmp_path: pathlib.Path) -> None:
     ds_config = {
         "layers": {
             output_layer_name: {
-                "layer_type": "raster",
+                "type": "raster",
                 "band_sets": [
                     {
                         "dtype": "uint8",
@@ -273,7 +273,7 @@ def test_write_raster_with_custom_output_path(tmp_path: pathlib.Path) -> None:
     ds_config = {
         "layers": {
             output_layer_name: {
-                "layer_type": "raster",
+                "type": "raster",
                 "band_sets": [
                     {
                         "dtype": "uint8",
@@ -377,7 +377,7 @@ def test_write_raster_with_layer_config(tmp_path: pathlib.Path) -> None:
 
     # Create custom layer config without needing dataset config.
     layer_config = LayerConfig(
-        layer_type=LayerType.RASTER,
+        type=LayerType.RASTER,
         band_sets=[
             BandSetConfig(
                 dtype=DType.UINT8,
@@ -466,7 +466,7 @@ def test_selector_with_dictionary_output(tmp_path: pathlib.Path) -> None:
 
     # Create layer config for raster output
     layer_config = LayerConfig(
-        layer_type=LayerType.RASTER,
+        type=LayerType.RASTER,
         band_sets=[
             BandSetConfig(
                 dtype=DType.UINT8,
@@ -595,7 +595,7 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
     output_bands = ["value"]
 
     layer_config = LayerConfig(
-        layer_type=LayerType.RASTER,
+        type=LayerType.RASTER,
         band_sets=[
             BandSetConfig(
                 dtype=DType.UINT8,
