@@ -15,7 +15,7 @@ def dummy_dataset(tmp_path: pathlib.Path) -> Dataset:
     """An empty dataset with one layer called layer."""
     ds_path = UPath(tmp_path)
     with (ds_path / "config.json").open("w") as f:
-        json.dump({"layers": {"layer": {"type": "vector"}}}, f)
+        json.dump({"layers": {"layer": {"layer_type": "vector"}}}, f)
     return Dataset(ds_path)
 
 

@@ -2,18 +2,58 @@
 
 import json
 from datetime import timedelta
-from enum import Enum
-from typing import Any
+from enum import StrEnum
+from typing import Annotated, Any
 
 import numpy as np
 import numpy.typing as npt
 import pytimeparse
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    model_validator,
+)
 from rasterio.enums import Resampling
 
 from rslearn.utils import PixelBounds, Projection
 
 
-class DType(Enum):
+def ensure_timedelta(v: Any) -> Any:
+    """Ensure the value is a timedelta.
+
+    If the value is a string, we try to parse it with pytimeparse.
+
+    This function is meant to be used like Annotated[timedelta, BeforeValidator(ensure_timedelta)].
+    """
+    if isinstance(v, timedelta):
+        return v
+    if isinstance(v, str):
+        return pytimeparse.parse(v)
+    raise TypeError(f"Invalid type for timedelta: {type(v).__name__}")
+
+
+def ensure_optional_timedelta(v: Any) -> Any:
+    """Like ensure_timedelta, but allows None as a value."""
+    if v is None:
+        return None
+    if isinstance(v, timedelta):
+        return v
+    if isinstance(v, str):
+        return pytimeparse.parse(v)
+    raise TypeError(f"Invalid type for timedelta: {type(v).__name__}")
+
+
+def serialize_optional_timedelta(v: timedelta | None) -> str | None:
+    """Serialize an optional timedelta for compatibility with pytimeparse."""
+    if v is None:
+        return None
+    return str(v.total_seconds()) + "s"
+
+
+class DType(StrEnum):
     """Data type of a raster."""
 
     UINT8 = "uint8"
@@ -49,61 +89,28 @@ class DType(Enum):
         raise ValueError(f"unable to handle numpy dtype {self}")
 
 
+class ResamplingMethod(StrEnum):
+    """An enum representing the rasterio Resampling."""
+
+    NEAREST = "nearest"
+    BILINEAR = "bilinear"
+    CUBIC = "cubic"
+    CUBIC_SPLINE = "cubic_spline"
+
+    def get_rasterio_resampling(self) -> Resampling:
+        """Get the rasterio Resampling corresponding to this ResamplingMethod."""
+        return RESAMPLING_METHODS[self]
+
+
 RESAMPLING_METHODS = {
-    "nearest": Resampling.nearest,
-    "bilinear": Resampling.bilinear,
-    "cubic": Resampling.cubic,
-    "cubic_spline": Resampling.cubic_spline,
+    ResamplingMethod.NEAREST: Resampling.nearest,
+    ResamplingMethod.BILINEAR: Resampling.bilinear,
+    ResamplingMethod.CUBIC: Resampling.cubic,
+    ResamplingMethod.CUBIC_SPLINE: Resampling.cubic_spline,
 }
 
 
-class RasterFormatConfig:
-    """A configuration specifying a RasterFormat."""
-
-    def __init__(self, name: str, config_dict: dict[str, Any]) -> None:
-        """Initialize a new RasterFormatConfig.
-
-        Args:
-            name: the name of the RasterFormat to use.
-            config_dict: configuration to pass to the RasterFormat.
-        """
-        self.name = name
-        self.config_dict = config_dict
-
-    @staticmethod
-    def from_config(config: dict[str, Any]) -> "RasterFormatConfig":
-        """Create a RasterFormatConfig from config dict.
-
-        Args:
-            config: the config dict for this RasterFormatConfig
-        """
-        return RasterFormatConfig(name=config["name"], config_dict=config)
-
-
-class VectorFormatConfig:
-    """A configuration specifying a VectorFormat."""
-
-    def __init__(self, name: str, config_dict: dict[str, Any] = {}) -> None:
-        """Initialize a new VectorFormatConfig.
-
-        Args:
-            name: the name of the VectorFormat to use.
-            config_dict: configuration to pass to the VectorFormat.
-        """
-        self.name = name
-        self.config_dict = config_dict
-
-    @staticmethod
-    def from_config(config: dict[str, Any]) -> "VectorFormatConfig":
-        """Create a VectorFormatConfig from config dict.
-
-        Args:
-            config: the config dict for this VectorFormatConfig
-        """
-        return VectorFormatConfig(name=config["name"], config_dict=config)
-
-
-class BandSetConfig:
+class BandSetConfig(BaseModel):
     """A configuration for a band set in a raster layer.
 
     Each band set specifies one or more bands that should be stored together.
@@ -111,97 +118,67 @@ class BandSetConfig:
     bands.
     """
 
-    def __init__(
-        self,
-        config_dict: dict[str, Any],
-        dtype: DType,
-        bands: list[str] | None = None,
-        num_bands: int | None = None,
-        format: dict[str, Any] | None = None,
-        zoom_offset: int = 0,
-        remap: dict[str, Any] | None = None,
-        class_names: list[list[str]] | None = None,
-        nodata_vals: list[float] | None = None,
-    ) -> None:
-        """Creates a new BandSetConfig instance.
+    dtype: DType = Field(description="Pixel value type to store the data under")
+    bands: list[str] = Field(
+        default_factory=lambda: [],
+        description="List of band names in this BandSetConfig. One of bands or num_bands must be set.",
+    )
+    num_bands: int | None = Field(
+        default=None,
+        description="The number of bands in this band set. The bands will be named B0, B1, B2, etc.",
+    )
+    format: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "class_path": "rslearn.utils.raster_format.GeotiffRasterFormat"
+        },
+        description="jsonargparse configuration for the RasterFormat to store the tiles in.",
+    )
 
-        Args:
-            config_dict: the config dict used to configure this BandSetConfig
-            dtype: the pixel value type to store tiles in
-            bands: list of band names in this BandSetConfig. One of bands or num_bands
-                must be set.
-            num_bands: the number of bands in this band set. The bands will be named
-                B00, B01, B02, etc.
-            format: the format to store tiles in, defaults to geotiff
-            zoom_offset: store images at a resolution higher or lower than the window
-                resolution. This enables keeping source data at its native resolution,
-                either to save storage space (for lower resolution data) or to retain
-                details (for higher resolution data). If positive, store data at the
-                window resolution divided by 2^(zoom_offset) (higher resolution). If
-                negative, store data at the window resolution multiplied by
-                2^(-zoom_offset) (lower resolution).
-            remap: config dict for Remapper to remap pixel values
-            class_names: optional list of names for the different possible values of
-                each band. The length of this list must equal the number of bands. For
-                example, [["forest", "desert"]] means that it is a single-band raster
-                where values can be 0 (forest) or 1 (desert).
-            nodata_vals: the nodata values for this band set. This is used during
-                materialization when creating mosaics, to determine which parts of the
-                source images should be copied.
-        """
-        if (bands is None and num_bands is None) or (
-            bands is not None and num_bands is not None
+    # Store images at a resolution higher or lower than the window resolution. This
+    # enables keeping source data at its native resolution, either to save storage
+    # space (for lower resolution data) or to retain details (for higher resolution
+    # data). If positive, store data at the window resolution divided by
+    # 2^(zoom_offset) (higher resolution). If negative, store data at the window
+    # resolution multiplied by 2^(-zoom_offset) (lower resolution).
+    zoom_offset: int = Field(
+        default=0,
+        description="Store data at the window resolution multiplied by 2^(-zoom_offset).",
+    )
+
+    remap: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional jsonargparse configuration for a Remapper to remap pixel values.",
+    )
+
+    # Optional list of names for the different possible values of each band. The length
+    # of this list must equal the number of bands. For example, [["forest", "desert"]]
+    # means that it is a single-band raster where values can be 0 (forest) or 1
+    # (desert).
+    class_names: list[list[str]] | None = Field(
+        default=None,
+        description="Optional list of names for the different possible values of each band.",
+    )
+
+    # Optional list of nodata values for this band set. This is used during
+    # materialization when creating mosaics, to determine which parts of the source
+    # images should be copied.
+    nodata_vals: list[float] | None = Field(
+        default=None, description="Optional nodata value for each band."
+    )
+
+    @model_validator(mode="after")
+    def after_validator(self) -> "BandSetConfig":
+        """Ensure the BandSetConfig is valid, and handle the num_bands field."""
+        if (len(self.bands) == 0 and self.num_bands is None) or (
+            len(self.bands) != 0 and self.num_bands is not None
         ):
-            raise ValueError("exactly one of bands and num_bands must be set")
-        if bands is None:
-            assert num_bands is not None
-            bands = [f"B{idx}" for idx in range(num_bands)]
+            raise ValueError("exactly one of bands and num_bands must be specified")
 
-        if class_names is not None and len(bands) != len(class_names):
-            raise ValueError(
-                f"the number of class lists ({len(class_names)}) does not match the number of bands ({len(bands)})"
-            )
+        if self.num_bands is not None:
+            self.bands = [f"B{band_idx}" for band_idx in range(self.num_bands)]
+            self.num_bands = None
 
-        self.config_dict = config_dict
-        self.bands = bands
-        self.dtype = dtype
-        self.zoom_offset = zoom_offset
-        self.remap = remap
-        self.class_names = class_names
-        self.nodata_vals = nodata_vals
-
-        if format is None:
-            self.format = {"name": "geotiff"}
-        else:
-            self.format = format
-
-    def serialize(self) -> dict[str, Any]:
-        """Serialize this BandSetConfig to a config dict."""
-        return self.config_dict
-
-    @staticmethod
-    def from_config(config: dict[str, Any]) -> "BandSetConfig":
-        """Create a BandSetConfig from config dict.
-
-        Args:
-            config: the config dict for this BandSetConfig
-        """
-        kwargs = dict(
-            config_dict=config,
-            dtype=DType(config["dtype"]),
-        )
-        for k in [
-            "bands",
-            "num_bands",
-            "format",
-            "zoom_offset",
-            "remap",
-            "class_names",
-            "nodata_vals",
-        ]:
-            if k in config:
-                kwargs[k] = config[k]
-        return BandSetConfig(**kwargs)  # type: ignore
+        return self
 
     def get_final_projection_and_bounds(
         self, projection: Projection, bounds: PixelBounds
@@ -237,29 +214,29 @@ class BandSetConfig:
         return projection, bounds
 
 
-class SpaceMode(Enum):
+class SpaceMode(StrEnum):
     """Spatial matching mode when looking up items corresponding to a window."""
 
-    CONTAINS = 1
+    CONTAINS = "contains"
     """Items must contain the entire window."""
 
-    INTERSECTS = 2
+    INTERSECTS = "intersects"
     """Items must overlap any portion of the window."""
 
-    MOSAIC = 3
+    MOSAIC = "mosaic"
     """Groups of items should be computed that cover the entire window.
 
     During materialization, items in each group are merged to form a mosaic in the
     dataset.
     """
 
-    PER_PERIOD_MOSAIC = 4
+    PER_PERIOD_MOSAIC = "per_period_mosaic"
     """Create one mosaic per sub-period of the time range.
 
     The duration of the sub-periods is controlled by another option in QueryConfig.
     """
 
-    COMPOSITE = 5
+    COMPOSITE = "composite"
     """Creates one composite covering the entire window.
 
     During querying all items intersecting the window are placed in one group.
@@ -270,188 +247,169 @@ class SpaceMode(Enum):
     # TODO add PER_PERIOD_COMPOSITE
 
 
-class TimeMode(Enum):
+class TimeMode(StrEnum):
     """Temporal  matching mode when looking up items corresponding to a window."""
 
-    WITHIN = 1
+    WITHIN = "within"
     """Items must be within the window time range."""
 
-    NEAREST = 2
+    NEAREST = "nearest"
     """Select items closest to the window time range, up to max_matches."""
 
-    BEFORE = 3
+    BEFORE = "before"
     """Select items before the end of the window time range, up to max_matches."""
 
-    AFTER = 4
+    AFTER = "after"
     """Select items after the start of the window time range, up to max_matches."""
 
 
-class QueryConfig:
+class QueryConfig(BaseModel):
     """A configuration for querying items in a data source."""
 
-    def __init__(
-        self,
-        space_mode: SpaceMode = SpaceMode.MOSAIC,
-        time_mode: TimeMode = TimeMode.WITHIN,
-        min_matches: int = 0,
-        max_matches: int = 1,
-        period_duration: timedelta = timedelta(days=30),
-    ):
-        """Creates a new query configuration.
+    model_config = ConfigDict(frozen=True)
 
-        The provided options determine how a DataSource should lookup items that match a
-        spatiotemporal window.
+    space_mode: SpaceMode = Field(
+        default=SpaceMode.MOSAIC,
+        description="Specifies how items should be matched with windows spatially.",
+    )
+    time_mode: TimeMode = Field(
+        default=TimeMode.WITHIN,
+        description="Specifies how items should be matched with windows temporally.",
+    )
 
-        Args:
-            space_mode: specifies how items should be matched with windows spatially
-            time_mode: specifies how items should be matched with windows temporally
-            min_matches: the minimum number of item groups. If there are fewer than
-                this many matches, then no matches will be returned. This can be used
-                to prevent unnecessary data ingestion if the user plans to discard
-                windows that do not have a sufficient amount of data.
-            max_matches: the maximum number of items (or groups of items, if space_mode
-                is MOSAIC) to match
-            period_duration: the duration of the periods, if the space mode is
-                PER_PERIOD_MOSAIC.
-        """
-        self.space_mode = space_mode
-        self.time_mode = time_mode
-        self.min_matches = min_matches
-        self.max_matches = max_matches
-        self.period_duration = period_duration
+    # Minimum number of item groups. If there are fewer than this many matches, then no
+    # matches will be returned. This can be used to prevent unnecessary data ingestion
+    # if the user plans to discard windows that do not have a sufficient amount of data.
+    min_matches: int = Field(
+        default=0, description="The minimum number of item groups."
+    )
 
-    def serialize(self) -> dict[str, Any]:
-        """Serialize this QueryConfig to a config dict."""
-        return {
-            "space_mode": str(self.space_mode),
-            "time_mode": str(self.time_mode),
-            "min_matches": self.min_matches,
-            "max_matches": self.max_matches,
-            "period_duration": f"{self.period_duration.total_seconds()}s",
-        }
-
-    @staticmethod
-    def from_config(config: dict[str, Any]) -> "QueryConfig":
-        """Create a QueryConfig from config dict.
-
-        Args:
-            config: the config dict for this QueryConfig
-        """
-        kwargs: dict[str, Any] = dict()
-        if "space_mode" in config:
-            kwargs["space_mode"] = SpaceMode[config["space_mode"]]
-        if "time_mode" in config:
-            kwargs["time_mode"] = TimeMode[config["time_mode"]]
-        if "period_duration" in config:
-            kwargs["period_duration"] = timedelta(
-                seconds=pytimeparse.parse(config["period_duration"])
-            )
-        for k in ["min_matches", "max_matches"]:
-            if k not in config:
-                continue
-            kwargs[k] = config[k]
-        return QueryConfig(**kwargs)
+    max_matches: int = Field(
+        default=1, description="The maximum number of item groups."
+    )
+    period_duration: Annotated[
+        timedelta,
+        BeforeValidator(ensure_timedelta),
+        PlainSerializer(serialize_optional_timedelta),
+    ] = Field(
+        default=timedelta(days=30),
+        description="The duration of the periods, if the space mode is PER_PERIOD_MOSAIC.",
+    )
 
 
-class DataSourceConfig:
+class DataSourceConfig(BaseModel):
     """Configuration for a DataSource in a dataset layer."""
 
-    def __init__(
-        self,
-        name: str,
-        query_config: QueryConfig,
-        config_dict: dict[str, Any],
-        time_offset: timedelta | None = None,
-        duration: timedelta | None = None,
-        ingest: bool = True,
-    ) -> None:
-        """Initializes a new DataSourceConfig.
+    model_config = ConfigDict(frozen=True)
 
-        Args:
-            name: the data source class name
-            query_config: the QueryConfig specifying how to match items with windows
-            config_dict: additional config passed to initialize the DataSource
-            time_offset: optional, add this timedelta to the window's time range before
-                matching
-            duration: optional, if window's time range is (t0, t1), then update to
-                (t0, t0 + duration)
-            ingest: whether to ingest this layer or directly materialize it
-                (default true)
-        """
-        self.name = name
-        self.query_config = query_config
-        self.config_dict = config_dict
-        self.time_offset = time_offset
-        self.duration = duration
-        self.ingest = ingest
-
-    def serialize(self) -> dict[str, Any]:
-        """Serialize this DataSourceConfig to a config dict."""
-        return self.config_dict
-
-    @staticmethod
-    def from_config(config: dict[str, Any]) -> "DataSourceConfig":
-        """Create a DataSourceConfig from config dict.
-
-        Args:
-            config: the config dict for this DataSourceConfig
-        """
-        kwargs = dict(
-            name=config["name"],
-            query_config=QueryConfig.from_config(config.get("query_config", {})),
-            config_dict=config,
-        )
-        if "time_offset" in config:
-            kwargs["time_offset"] = timedelta(
-                seconds=pytimeparse.parse(config["time_offset"])
-            )
-        if "duration" in config:
-            kwargs["duration"] = timedelta(
-                seconds=pytimeparse.parse(config["duration"])
-            )
-        if "ingest" in config:
-            kwargs["ingest"] = config["ingest"]
-        return DataSourceConfig(**kwargs)
+    class_path: str = Field(description="Class path for the data source.")
+    init_args: dict[str, Any] = Field(
+        default_factory=lambda: {},
+        description="jsonargparse init args for the data source.",
+    )
+    query_config: QueryConfig = Field(
+        default_factory=lambda: QueryConfig(),
+        description="QueryConfig specifying how to match items with windows.",
+    )
+    time_offset: Annotated[
+        timedelta | None,
+        BeforeValidator(ensure_optional_timedelta),
+        PlainSerializer(serialize_optional_timedelta),
+    ] = Field(
+        default=None,
+        description="Optional timedelta to add to the window's time range before matching.",
+    )
+    duration: Annotated[
+        timedelta | None,
+        BeforeValidator(ensure_optional_timedelta),
+        PlainSerializer(serialize_optional_timedelta),
+    ] = Field(
+        default=None,
+        description="Optional, if the window's time range is (t0, t1), then update to (t0, t0 + duration).",
+    )
+    ingest: bool = Field(
+        default=True,
+        description="Whether to ingest this layer (default True). If False, it will be directly materialized without ingestion.",
+    )
 
 
-class LayerType(Enum):
+class LayerType(StrEnum):
     """The layer type (raster or vector)."""
 
     RASTER = "raster"
     VECTOR = "vector"
 
 
-class LayerConfig:
+class CompositingMethod(StrEnum):
+    """Method how to select pixels for the composite from corresponding items of a window."""
+
+    FIRST_VALID = "first_valid"
+    """Select first valid pixel in order of corresponding items (might be sorted)"""
+
+    MEAN = "mean"
+    """Select per-pixel mean value of corresponding items of a window"""
+
+    MEDIAN = "median"
+    """Select per-pixel median value of corresponding items of a window"""
+
+
+class LayerConfig(BaseModel):
     """Configuration of a layer in a dataset."""
 
-    def __init__(
-        self,
-        layer_type: LayerType,
-        data_source: DataSourceConfig | None = None,
-        alias: str | None = None,
-    ):
-        """Initialize a new LayerConfig.
+    model_config = ConfigDict(frozen=True)
 
-        Args:
-            layer_type: the LayerType (raster or vector)
-            data_source: optional DataSourceConfig if this layer is retrievable
-            alias: alias for this layer to use in the tile store
-        """
-        self.layer_type = layer_type
-        self.data_source = data_source
-        self.alias = alias
+    layer_type: LayerType = Field(description="The LayerType (raster or vector).")
+    data_source: DataSourceConfig | None = Field(
+        default=None,
+        description="Optional DataSourceConfig if this layer is retrievable.",
+    )
+    alias: str | None = Field(
+        default=None, description="Alias for this layer to use in the tile store."
+    )
 
-    def serialize(self) -> dict[str, Any]:
-        """Serialize this LayerConfig to a config dict."""
-        return {
-            "layer_type": str(self.layer_type),
-            "data_source": self.data_source.serialize() if self.data_source else None,
-            "alias": self.alias,
-        }
+    # Raster layer options.
+    band_sets: list[BandSetConfig] = Field(
+        default_factory=lambda: [],
+        description="For raster layers, the bands to store in this layer.",
+    )
+    resampling_method: ResamplingMethod = Field(
+        default=ResamplingMethod.BILINEAR,
+        description="For raster layers, how to resample rasters (if neeed), default bilinear resampling.",
+    )
+    compositing_method: CompositingMethod = Field(
+        default=CompositingMethod.FIRST_VALID,
+        description="For raster layers, how to compute pixel values in the composite of each window's items.",
+    )
+
+    # Vector layer options.
+    vector_format: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "class_path": "rslearn.utils.vector_format.GeojsonVectorFormat"
+        },
+        description="For vector layers, the jsonargparse configuration for the VectorFormat.",
+    )
+    class_property_name: str | None = Field(
+        default=None,
+        description="Optional metadata field indicating that the GeoJSON features contain a property that corresponds to a class label, and this is the name of that property.",
+    )
+    class_names: list[str] | None = Field(
+        default=None,
+        description="The list of classes that the class_property_name property could be set to.",
+    )
+
+    @model_validator(mode="after")
+    def after_validator(self) -> "LayerConfig":
+        """Ensure the LayerConfig is valid."""
+        if self.layer_type == LayerType.RASTER and len(self.band_sets) == 0:
+            raise ValueError(
+                "band sets must be specified and non-empty for raster layers"
+            )
+
+        return self
 
     def __hash__(self) -> int:
         """Return a hash of this LayerConfig."""
-        return hash(json.dumps(self.serialize(), sort_keys=True))
+        return hash(json.dumps(self.model_dump(mode="json"), sort_keys=True))
 
     def __eq__(self, other: Any) -> bool:
         """Returns whether other is the same as this LayerConfig.
@@ -461,142 +419,14 @@ class LayerConfig:
         """
         if not isinstance(other, LayerConfig):
             return False
-        return self.serialize() == other.serialize()
+        return self.model_dump() == other.model_dump()
 
 
-class CompositingMethod(Enum):
-    """Method how to select pixels for the composite from corresponding items of a window."""
+class DatasetConfig(BaseModel):
+    """Overall dataset configuration."""
 
-    FIRST_VALID = 1
-    """Select first valid pixel in order of corresponding items (might be sorted)"""
-
-    MEAN = 2
-    """Select per-pixel mean value of corresponding items of a window"""
-
-    MEDIAN = 3
-    """Select per-pixel median value of corresponding items of a window"""
-
-
-class RasterLayerConfig(LayerConfig):
-    """Configuration of a raster layer."""
-
-    def __init__(
-        self,
-        layer_type: LayerType,
-        band_sets: list[BandSetConfig],
-        data_source: DataSourceConfig | None = None,
-        resampling_method: Resampling = Resampling.bilinear,
-        alias: str | None = None,
-        compositing_method: CompositingMethod = CompositingMethod.FIRST_VALID,
-    ):
-        """Initialize a new RasterLayerConfig.
-
-        Args:
-            layer_type: the LayerType (must be raster)
-            band_sets: the bands to store in this layer
-            data_source: optional DataSourceConfig if this layer is retrievable
-            resampling_method: how to resample rasters (if needed), default bilinear resampling
-            alias: alias for this layer to use in the tile store
-            compositing_method: how to compute pixel values in the composite of each windows items
-        """
-        super().__init__(layer_type, data_source, alias)
-        self.band_sets = band_sets
-        self.resampling_method = resampling_method
-        self.compositing_method = compositing_method
-
-    @staticmethod
-    def from_config(config: dict[str, Any]) -> "RasterLayerConfig":
-        """Create a RasterLayerConfig from config dict.
-
-        Args:
-            config: the config dict for this RasterLayerConfig
-        """
-        kwargs = {
-            "layer_type": LayerType(config["type"]),
-            "band_sets": [BandSetConfig.from_config(el) for el in config["band_sets"]],
-        }
-        if "data_source" in config:
-            kwargs["data_source"] = DataSourceConfig.from_config(config["data_source"])
-        if "resampling_method" in config:
-            kwargs["resampling_method"] = RESAMPLING_METHODS[
-                config["resampling_method"]
-            ]
-        if "alias" in config:
-            kwargs["alias"] = config["alias"]
-        if "compositing_method" in config:
-            kwargs["compositing_method"] = CompositingMethod[
-                config["compositing_method"]
-            ]
-        return RasterLayerConfig(**kwargs)  # type: ignore
-
-
-class VectorLayerConfig(LayerConfig):
-    """Configuration of a vector layer."""
-
-    def __init__(
-        self,
-        layer_type: LayerType,
-        data_source: DataSourceConfig | None = None,
-        format: VectorFormatConfig = VectorFormatConfig("geojson"),
-        alias: str | None = None,
-        class_property_name: str | None = None,
-        class_names: list[str] | None = None,
-    ):
-        """Initialize a new VectorLayerConfig.
-
-        Args:
-            layer_type: the LayerType (must be vector)
-            data_source: optional DataSourceConfig if this layer is retrievable
-            format: the VectorFormatConfig, default storing as GeoJSON
-            alias: alias for this layer to use in the tile store
-            class_property_name: optional metadata field indicating that the GeoJSON
-                features contain a property that corresponds to a class label, and this
-                is the name of that property.
-            class_names: the list of classes that the class_property_name property
-                could be set to.
-        """
-        super().__init__(layer_type, data_source, alias)
-        self.format = format
-        self.class_property_name = class_property_name
-        self.class_names = class_names
-
-    @staticmethod
-    def from_config(config: dict[str, Any]) -> "VectorLayerConfig":
-        """Create a VectorLayerConfig from config dict.
-
-        Args:
-            config: the config dict for this VectorLayerConfig
-        """
-        kwargs: dict[str, Any] = {"layer_type": LayerType(config["type"])}
-        if "data_source" in config:
-            kwargs["data_source"] = DataSourceConfig.from_config(config["data_source"])
-        if "format" in config:
-            kwargs["format"] = VectorFormatConfig.from_config(config["format"])
-
-        simple_optionals = [
-            "alias",
-            "class_property_name",
-            "class_names",
-        ]
-        for k in simple_optionals:
-            if k in config:
-                kwargs[k] = config[k]
-
-        # The "zoom_offset" option was removed.
-        # We should change how we create configuration so we can error on all
-        # non-existing config options, but for now we make sure to raise error if
-        # zoom_offset is set since it is no longer supported.
-        if "zoom_offset" in config:
-            raise ValueError("unsupported zoom_offset option in vector layer config")
-
-        return VectorLayerConfig(**kwargs)  # type: ignore
-
-
-def load_layer_config(config: dict[str, Any]) -> LayerConfig:
-    """Load a LayerConfig from a config dict."""
-    layer_type = LayerType(config.get("type"))
-    if layer_type == LayerType.RASTER:
-        return RasterLayerConfig.from_config(config)
-    elif layer_type == LayerType.VECTOR:
-        return VectorLayerConfig.from_config(config)
-    raise ValueError(f"Unknown layer type {layer_type}")
+    layers: dict[str, LayerConfig] = Field(description="Layers in the dataset.")
+    tile_store: dict[str, Any] = Field(
+        default={"class_path": "rslearn.tile_stores.default.DefaultTileStore"},
+        description="jsonargparse configuration for the TileStore.",
+    )

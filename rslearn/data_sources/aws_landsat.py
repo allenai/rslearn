@@ -25,7 +25,7 @@ from rasterio.enums import Resampling
 from upath import UPath
 
 import rslearn.data_sources.utils
-from rslearn.config import LayerConfig, RasterLayerConfig
+from rslearn.config import LayerConfig
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_PROJECTION
 from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
@@ -34,7 +34,7 @@ from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.grid_index import GridIndex
 
-from .data_source import DataSource, Item, QueryConfig
+from .data_source import DataSource, DataSourceContext, Item, QueryConfig
 
 WRS2_GRID_SIZE = 1.0
 
@@ -98,20 +98,27 @@ class LandsatOliTirs(DataSource, TileStore):
 
     def __init__(
         self,
-        config: RasterLayerConfig,
-        metadata_cache_dir: UPath,
+        metadata_cache_dir: str,
         sort_by: str | None = None,
+        context: DataSourceContext = DataSourceContext(),
     ) -> None:
         """Initialize a new LandsatOliTirs instance.
 
         Args:
-            config: configuration of this layer
-            metadata_cache_dir: directory to cache product metadata files.
+            metadata_cache_dir: directory to cache produtc metadata files.
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
+            context: the data source context.
         """
-        self.config = config
-        self.metadata_cache_dir = metadata_cache_dir
+        # If context is provided, we join the directory with the dataset path,
+        # otherwise we treat it directly as UPath.
+        if context.dataset is not None:
+            self.metadata_cache_dir = join_upath(
+                context.dataset.path, metadata_cache_dir
+            )
+        else:
+            self.metadata_cache_dir = UPath(metadata_cache_dir)
+
         self.sort_by = sort_by
 
         self.client = boto3.client("s3")
@@ -119,21 +126,6 @@ class LandsatOliTirs(DataSource, TileStore):
         self.metadata_cache_dir.mkdir(parents=True, exist_ok=True)
 
         self.wrs2_index: GridIndex | None = None
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "LandsatOliTirs":
-        """Creates a new LandsatOliTirs instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError(f"data_source is required for config dict {config}")
-        d = config.data_source.config_dict
-        kwargs = dict(
-            config=config,
-            metadata_cache_dir=join_upath(ds_path, d["metadata_cache_dir"]),
-        )
-        if "sort_by" in d:
-            kwargs["sort_by"] = d["sort_by"]
-
-        return LandsatOliTirs(**kwargs)
 
     def _read_products(
         self, needed_year_pathrows: set[tuple[int, str, str]]
@@ -536,7 +528,6 @@ class LandsatOliTirs(DataSource, TileStore):
             layer_name: the name of this layer
             layer_cfg: the config of this layer
         """
-        assert isinstance(layer_cfg, RasterLayerConfig)
         RasterMaterializer().materialize(
             TileStoreWithLayer(self, layer_name),
             window,

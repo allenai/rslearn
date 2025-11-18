@@ -1,42 +1,23 @@
 """Classes for writing vector data to a UPath."""
 
 import json
-from collections.abc import Callable
 from enum import Enum
-from typing import Any, TypeVar
+from typing import Any
 
+import jsonargparse
 import shapely
 from rasterio.crs import CRS
 from upath import UPath
 
-from rslearn.config import VectorFormatConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import open_atomic
+from rslearn.utils.jsonargparse import init_jsonargparse
 
 from .feature import Feature
 from .geometry import PixelBounds, Projection, STGeometry, safely_reproject_and_clip
 
 logger = get_logger(__name__)
-_VectorFormatT = TypeVar("_VectorFormatT", bound="VectorFormat")
-
-
-class _VectorFormatRegistry(dict[str, type["VectorFormat"]]):
-    """Registry for VectorFormat classes."""
-
-    def register(
-        self, name: str
-    ) -> Callable[[type[_VectorFormatT]], type[_VectorFormatT]]:
-        """Decorator to register a vector format class."""
-
-        def decorator(cls: type[_VectorFormatT]) -> type[_VectorFormatT]:
-            self[name] = cls
-            return cls
-
-        return decorator
-
-
-VectorFormats = _VectorFormatRegistry()
 
 
 class VectorFormat:
@@ -85,7 +66,6 @@ class VectorFormat:
         raise NotImplementedError
 
 
-@VectorFormats.register("tile")
 class TileVectorFormat(VectorFormat):
     """TileVectorFormat stores data in GeoJSON files corresponding to grid cells.
 
@@ -275,7 +255,6 @@ class GeojsonCoordinateMode(Enum):
     WGS84 = "wgs84"
 
 
-@VectorFormats.register("geojson")
 class GeojsonVectorFormat(VectorFormat):
     """A vector format that uses one big GeoJSON."""
 
@@ -431,15 +410,11 @@ class GeojsonVectorFormat(VectorFormat):
         return GeojsonVectorFormat(**kwargs)
 
 
-def load_vector_format(config: VectorFormatConfig) -> VectorFormat:
-    """Loads a VectorFormat from a VectorFormatConfig.
-
-    Args:
-        config: the VectorFormatConfig configuration object specifying the
-            VectorFormat.
-
-    Returns:
-        the loaded VectorFormat implementation
-    """
-    cls = VectorFormats[config.name]
-    return cls.from_config(config.name, config.config_dict)
+def load_vector_format(config: dict[str, Any]) -> VectorFormat:
+    """Loads a RasterFormat from the jsonargparse config dict."""
+    init_jsonargparse()
+    parser = jsonargparse.ArgumentParser()
+    parser.add_argument("--vector_format", type=VectorFormat)
+    cfg = parser.parse_object({"vector_format": config})
+    vector_format = parser.instantiate_classes(cfg).vector_format
+    return vector_format

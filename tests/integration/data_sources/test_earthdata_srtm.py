@@ -32,7 +32,7 @@ def test_materialize_capitol_hill(tmp_path: pathlib.Path) -> None:
     dataset_config = {
         "layers": {
             layer_name: {
-                "type": "raster",
+                "layer_type": "raster",
                 "band_sets": [
                     {
                         "dtype": "int32",
@@ -40,7 +40,7 @@ def test_materialize_capitol_hill(tmp_path: pathlib.Path) -> None:
                     }
                 ],
                 "data_source": {
-                    "name": "rslearn.data_sources.earthdata_srtm.SRTM",
+                    "class_path": "rslearn.data_sources.earthdata_srtm.SRTM",
                 },
             },
         },

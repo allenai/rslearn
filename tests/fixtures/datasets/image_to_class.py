@@ -31,21 +31,20 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
     dataset_config = {
         "layers": {
             "image": {
-                "type": "raster",
+                "layer_type": "raster",
                 "band_sets": [
                     {
                         "dtype": "uint8",
                         "bands": ["band"],
-                        "format": {"name": "single_image", "format": "png"},
+                        "format": {
+                            "class_path": "rslearn.utils.raster_format.SingleImageRasterFormat",
+                            "init_args": {"format": "png"},
+                        },
                     }
                 ],
             },
-            "label": {"type": "vector", "format": {"name": "geojson"}},
-            "output": {"type": "vector", "format": {"name": "geojson"}},
-        },
-        "tile_store": {
-            "name": "file",
-            "root_dir": "tiles",
+            "label": {"layer_type": "vector"},
+            "output": {"layer_type": "vector"},
         },
     }
     ds_path.mkdir(parents=True, exist_ok=True)

@@ -9,7 +9,8 @@ import requests
 from fsspec.implementations.local import LocalFileSystem
 from upath import UPath
 
-from rslearn.config import LayerConfig
+from rslearn.config import LayerType
+from rslearn.data_sources import DataSourceContext
 from rslearn.data_sources.local_files import LocalFiles
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
@@ -52,8 +53,8 @@ class WorldCover(LocalFiles):
 
     def __init__(
         self,
-        config: LayerConfig,
-        worldcover_dir: UPath,
+        worldcover_dir: str,
+        context: DataSourceContext = DataSourceContext(),
     ) -> None:
         """Create a new WorldCover.
 
@@ -64,18 +65,19 @@ class WorldCover(LocalFiles):
                 high performance, this should be a local directory; if the dataset is
                 remote, prefix with a protocol ("file://") to use a local directory
                 instead of a path relative to the dataset path.
+            context: the data source context.
         """
-        tif_dir = self.download_worldcover_data(worldcover_dir)
-        super().__init__(config, tif_dir)
+        if context.dataset is not None:
+            worldcover_upath = join_upath(context.dataset.path, worldcover_dir)
+        else:
+            worldcover_upath = UPath(worldcover_dir)
 
-    @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "LocalFiles":
-        """Creates a new LocalFiles instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("LocalFiles data source requires a data source config")
-        d = config.data_source.config_dict
-        return WorldCover(
-            config=config, worldcover_dir=join_upath(ds_path, d["worldcover_dir"])
+        tif_dir = self.download_worldcover_data(worldcover_upath)
+
+        super().__init__(
+            src_dir=tif_dir,
+            layer_type=LayerType.RASTER,
+            context=context,
         )
 
     def download_worldcover_data(self, worldcover_dir: UPath) -> UPath:

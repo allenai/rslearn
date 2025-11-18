@@ -2,7 +2,6 @@
 
 import functools
 import json
-from collections.abc import Callable
 from typing import Any, Generic, TypeVar
 
 import fiona
@@ -12,58 +11,43 @@ from rasterio.crs import CRS
 from upath import UPath
 
 import rslearn.data_sources.utils
-from rslearn.config import LayerConfig, LayerType, RasterLayerConfig, VectorLayerConfig
+from rslearn.config import LayerType
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.feature import Feature
-from rslearn.utils.fsspec import get_upath_local, join_upath, open_rasterio_upath_reader
+from rslearn.utils.fsspec import (
+    get_relative_suffix,
+    get_upath_local,
+    join_upath,
+    open_rasterio_upath_reader,
+)
 from rslearn.utils.geometry import Projection, STGeometry, get_global_geometry
 
-from .data_source import DataSource, Item, QueryConfig
+from .data_source import DataSource, DataSourceContext, Item, QueryConfig
 
 logger = get_logger("__name__")
-_ImporterT = TypeVar("_ImporterT", bound="Importer")
-
-
-class _ImporterRegistry(dict[str, type["Importer"]]):
-    """Registry for Importer classes."""
-
-    def register(self, name: str) -> Callable[[type[_ImporterT]], type[_ImporterT]]:
-        """Decorator to register an importer class."""
-
-        def decorator(cls: type[_ImporterT]) -> type[_ImporterT]:
-            self[name] = cls
-            return cls
-
-        return decorator
-
-
-Importers = _ImporterRegistry()
 
 
 ItemType = TypeVar("ItemType", bound=Item)
-LayerConfigType = TypeVar("LayerConfigType", bound=LayerConfig)
 ImporterType = TypeVar("ImporterType", bound="Importer")
 
 SOURCE_NAME = "rslearn.data_sources.local_files.LocalFiles"
 
 
-class Importer(Generic[ItemType, LayerConfigType]):
+class Importer(Generic[ItemType]):
     """An abstract base class for importing data from local files."""
 
-    def list_items(self, config: LayerConfigType, src_dir: UPath) -> list[ItemType]:
+    def list_items(self, src_dir: UPath) -> list[ItemType]:
         """Extract a list of Items from the source directory.
 
         Args:
-            config: the configuration of the layer.
             src_dir: the source directory.
         """
         raise NotImplementedError
 
     def ingest_item(
         self,
-        config: LayerConfigType,
         tile_store: TileStoreWithLayer,
         item: ItemType,
         cur_geometries: list[STGeometry],
@@ -71,7 +55,6 @@ class Importer(Generic[ItemType, LayerConfigType]):
         """Ingest the specified local file item.
 
         Args:
-            config: the configuration of the layer.
             tile_store: the tile store to ingest the data into.
             item: the Item to ingest
             cur_geometries: the geometries where the item is needed.
@@ -84,7 +67,7 @@ class RasterItemSpec:
 
     def __init__(
         self,
-        fnames: list[UPath],
+        fnames: list[str],
         bands: list[list[str]] | None = None,
         name: str | None = None,
     ):
@@ -98,25 +81,6 @@ class RasterItemSpec:
         self.fnames = fnames
         self.bands = bands
         self.name = name
-
-    @staticmethod
-    def from_config(src_dir: UPath, d: dict[str, Any]) -> "RasterItemSpec":
-        """Decode a dict into a RasterItemSpec.
-
-        Args:
-            src_dir: the source directory.
-            d: the configuration dict.
-
-        Returns:
-            the RasterItemSpec.
-        """
-        kwargs = dict(
-            fnames=[join_upath(src_dir, suffix) for suffix in d["fnames"]],
-            bands=d["bands"],
-        )
-        if "name" in d:
-            kwargs["name"] = d["name"]
-        return RasterItemSpec(**kwargs)
 
     def serialize(self) -> dict[str, Any]:
         """Serializes the RasterItemSpec to a JSON-encodable dictionary."""
@@ -139,20 +103,25 @@ class RasterItemSpec:
 class RasterItem(Item):
     """An item corresponding to a local file."""
 
-    def __init__(self, name: str, geometry: STGeometry, spec: RasterItemSpec):
-        """Creates a new LocalFileItem.
+    def __init__(
+        self, name: str, geometry: STGeometry, src_dir: str, spec: RasterItemSpec
+    ):
+        """Creates a new RasterItem.
 
         Args:
             name: unique name of the item
             geometry: the spatial and temporal extent of the item
+            src_dir: the source directory.
             spec: the RasterItemSpec that specifies the filename(s) and bands.
         """
         super().__init__(name, geometry)
+        self.src_dir = src_dir
         self.spec = spec
 
     def serialize(self) -> dict:
         """Serializes the item to a JSON-encodable dictionary."""
         d = super().serialize()
+        d["src_dir"] = str(self.src_dir)
         d["spec"] = self.spec.serialize()
         return d
 
@@ -160,8 +129,11 @@ class RasterItem(Item):
     def deserialize(d: dict) -> "RasterItem":
         """Deserializes an item from a JSON-decoded dictionary."""
         item = super(RasterItem, RasterItem).deserialize(d)
+        src_dir = UPath(d["src_dir"])
         spec = RasterItemSpec.deserialize(d["spec"])
-        return RasterItem(name=item.name, geometry=item.geometry, spec=spec)
+        return RasterItem(
+            name=item.name, geometry=item.geometry, src_dir=src_dir, spec=spec
+        )
 
 
 class VectorItem(Item):
@@ -193,29 +165,34 @@ class VectorItem(Item):
         )
 
 
-@Importers.register("raster")
 class RasterImporter(Importer):
     """An Importer for raster data."""
 
-    def list_items(self, config: LayerConfig, src_dir: UPath) -> list[RasterItem]:
+    def __init__(self, item_specs: list[RasterItemSpec] | None = None):
+        """Create a new RasterImporter.
+
+        Args:
+            item_specs: the specs to specify the raster items directly. If None, the
+                raster items are automatically detected from the files in the source
+                directory.
+        """
+        self.item_specs = item_specs
+
+    def list_items(self, src_dir: UPath) -> list[Item]:
         """Extract a list of Items from the source directory.
 
         Args:
-            config: the configuration of the layer.
             src_dir: the source directory.
         """
-        item_specs: list[RasterItemSpec] = []
+        item_specs: list[RasterItemSpec]
+
         # See if user has provided the item specs directly.
-        if (
-            config.data_source is not None
-            and "item_specs" in config.data_source.config_dict
-        ):
-            for spec_dict in config.data_source.config_dict["item_specs"]:
-                spec = RasterItemSpec.from_config(src_dir, spec_dict)
-                item_specs.append(spec)
+        if self.item_specs is not None:
+            item_specs = self.item_specs
         else:
             # Otherwise we need to list files and assume each one is separate.
             # And we'll need to autodetect the bands later.
+            item_specs = []
             file_paths = src_dir.glob("**/*.*")
             for path in file_paths:
                 # Ignore JSON files.
@@ -228,14 +205,17 @@ class RasterImporter(Importer):
                 if len(parts) >= 4 and parts[-2] == "tmp" and parts[-1].isdigit():
                     continue
 
-                spec = RasterItemSpec(fnames=[path], bands=None)
+                spec = RasterItemSpec(
+                    fnames=[get_relative_suffix(src_dir, path)], bands=None
+                )
                 item_specs.append(spec)
 
-        items = []
+        items: list[Item] = []
         for spec in item_specs:
             # Get geometry from the first raster file.
             # We assume files are readable with rasterio.
-            with open_rasterio_upath_reader(spec.fnames[0]) as src:
+            fname = join_upath(src_dir, spec.fnames[0])
+            with open_rasterio_upath_reader(fname) as src:
                 crs = src.crs
                 left = src.transform.c
                 top = src.transform.f
@@ -263,33 +243,33 @@ class RasterImporter(Importer):
             if spec.name:
                 item_name = spec.name
             else:
-                item_name = spec.fnames[0].name.split(".")[0]
+                item_name = fname.name.split(".")[0]
 
             logger.debug(
                 "RasterImporter.list_items: got bounds of %s: %s", item_name, geometry
             )
-            items.append(RasterItem(item_name, geometry, spec))
+            items.append(RasterItem(item_name, geometry, src_dir, spec))
 
         logger.debug("RasterImporter.list_items: discovered %d items", len(items))
         return items
 
     def ingest_item(
         self,
-        config: RasterLayerConfig,
         tile_store: TileStoreWithLayer,
-        item: RasterItem,
+        item: Item,
         cur_geometries: list[STGeometry],
     ) -> None:
         """Ingest the specified local file item.
 
         Args:
-            config: the configuration of the layer.
             tile_store: the tile store to ingest the data into.
             item: the RasterItem to ingest
             cur_geometries: the geometries where the item is needed.
         """
+        assert isinstance(item, RasterItem)
         for file_idx, fname in enumerate(item.spec.fnames):
-            with open_rasterio_upath_reader(fname) as src:
+            fname_upath = join_upath(item.src_dir, fname)
+            with open_rasterio_upath_reader(fname_upath) as src:
                 if item.spec.bands:
                     bands = item.spec.bands[file_idx]
                 else:
@@ -297,25 +277,23 @@ class RasterImporter(Importer):
 
             if tile_store.is_raster_ready(item.name, bands):
                 continue
-            tile_store.write_raster_file(item.name, bands, fname)
+            tile_store.write_raster_file(item.name, bands, fname_upath)
 
 
-@Importers.register("vector")
 class VectorImporter(Importer):
     """An Importer for vector data."""
 
     # We need some buffer around GeoJSON bounds in case it just contains one point.
     item_buffer_epsilon = 1e-4
 
-    def list_items(self, config: LayerConfig, src_dir: UPath) -> list[VectorItem]:
+    def list_items(self, src_dir: UPath) -> list[Item]:
         """Extract a list of Items from the source directory.
 
         Args:
-            config: the configuration of the layer.
             src_dir: the source directory.
         """
         file_paths = src_dir.glob("**/*.*")
-        items: list[VectorItem] = []
+        items: list[Item] = []
 
         for path in file_paths:
             # Ignore JSON files.
@@ -375,25 +353,21 @@ class VectorImporter(Importer):
 
     def ingest_item(
         self,
-        config: VectorLayerConfig,
         tile_store: TileStoreWithLayer,
-        item: VectorItem,
+        item: Item,
         cur_geometries: list[STGeometry],
     ) -> None:
         """Ingest the specified local file item.
 
         Args:
-            config: the configuration of the layer.
             tile_store: the TileStore to ingest the data into.
             item: the Item to ingest
             cur_geometries: the geometries where the item is needed.
         """
-        if not isinstance(config, VectorLayerConfig):
-            raise ValueError("VectorImporter requires a VectorLayerConfig")
-
         if tile_store.is_vector_ready(item.name):
             return
 
+        assert isinstance(item, VectorItem)
         path = UPath(item.path_uri)
 
         aux_files: list[UPath] = []
@@ -431,27 +405,44 @@ class LocalFiles(DataSource):
 
     def __init__(
         self,
-        config: LayerConfig,
-        src_dir: UPath,
+        src_dir: str,
+        raster_item_specs: list[RasterItemSpec] | None = None,
+        layer_type: LayerType | None = None,
+        context: DataSourceContext = DataSourceContext(),
     ) -> None:
         """Initialize a new LocalFiles instance.
 
         Args:
-            config: configuration for this layer.
             src_dir: source directory to ingest
+            raster_item_specs: the specs to specify the raster items directly. If None,
+                the raster items are automatically detected from the files in the
+                source directory.
+            layer_type: the layer type. It only needs to be set if the layer_config is
+                missing from the context.
+            context: the data source context. The layer config must be in the context.
         """
-        self.config = config
+        if context.dataset is not None:
+            self.src_dir = join_upath(context.dataset.path, src_dir)
+        else:
+            self.src_dir = UPath(src_dir)
 
-        self.importer = Importers[config.layer_type.value]()
-        self.src_dir = src_dir
+        # Determine layer type.
+        if context.layer_config is not None:
+            self.layer_type = context.layer_config.layer_type
+        elif layer_type is not None:
+            self.layer_type = layer_type
+        else:
+            raise ValueError(
+                "layer type must be specified if the layer config is not in the context"
+            )
 
-    @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "LocalFiles":
-        """Creates a new LocalFiles instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("LocalFiles data source requires a data source config")
-        d = config.data_source.config_dict
-        return LocalFiles(config=config, src_dir=join_upath(ds_path, d["src_dir"]))
+        self.importer: Importer
+        if self.layer_type == LayerType.RASTER:
+            self.importer = RasterImporter(item_specs=raster_item_specs)
+        elif self.layer_type == LayerType.VECTOR:
+            self.importer = VectorImporter()
+        else:
+            raise ValueError(f"unknown layer type {self.layer_type}")
 
     @functools.cache
     def list_items(self) -> list[Item]:
@@ -459,7 +450,7 @@ class LocalFiles(DataSource):
         cache_fname = self.src_dir / "summary.json"
         if not cache_fname.exists():
             logger.debug("cache at %s does not exist, listing items", cache_fname)
-            items = self.importer.list_items(self.config, self.src_dir)
+            items = self.importer.list_items(self.src_dir)
             serialized_items = [item.serialize() for item in items]
             with cache_fname.open("w") as f:
                 json.dump(serialized_items, f)
@@ -501,12 +492,12 @@ class LocalFiles(DataSource):
 
     def deserialize_item(self, serialized_item: Any) -> RasterItem | VectorItem:
         """Deserializes an item from JSON-decoded data."""
-        if self.config.layer_type == LayerType.RASTER:
+        if self.layer_type == LayerType.RASTER:
             return RasterItem.deserialize(serialized_item)
-        elif self.config.layer_type == LayerType.VECTOR:
+        elif self.layer_type == LayerType.VECTOR:
             return VectorItem.deserialize(serialized_item)
         else:
-            raise ValueError(f"Unknown layer type: {self.config.layer_type}")
+            raise ValueError(f"Unknown layer type: {self.layer_type}")
 
     def ingest(
         self,
@@ -522,4 +513,4 @@ class LocalFiles(DataSource):
             geometries: a list of geometries needed for each item
         """
         for item, cur_geometries in zip(items, geometries):
-            self.importer.ingest_item(self.config, tile_store, item, cur_geometries)
+            self.importer.ingest_item(tile_store, item, cur_geometries)

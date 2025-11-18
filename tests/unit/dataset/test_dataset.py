@@ -29,11 +29,14 @@ class TestDataset:
             # Create config.json with template variables - use a simple config that works
             config_content = {
                 "layers": {
-                    "test_layer": {"type": "vector"},
-                    "${LABEL_LAYER}": {"type": "vector"},
-                    "${PREDICTION_OUTPUT_LAYER}": {"type": "vector"},
+                    "test_layer": {"layer_type": "vector"},
+                    "${LABEL_LAYER}": {"layer_type": "vector"},
+                    "${PREDICTION_OUTPUT_LAYER}": {"layer_type": "vector"},
                 },
-                "tile_store": {"name": "foobar", "root_dir": "${TILE_STORE_ROOT}"},
+                "tile_store": {
+                    "class_path": "rslearn.tile_stores.default.DefaultTileStore",
+                    "init_args": {"path_suffix": "${TILE_STORE_ROOT}"},
+                },
             }
 
             with (dataset_path / "config.json").open("w") as f:
@@ -45,7 +48,10 @@ class TestDataset:
             # Verify that environment variables were substituted in tile_store config
             assert dataset.tile_store_config is not None
             assert dataset.layers.keys() == {"test_layer", "labels", "output"}
-            assert dataset.tile_store_config["root_dir"] == "/path/to/tiles"
+            assert (
+                dataset.tile_store_config["init_args"]["path_suffix"]
+                == "/path/to/tiles"
+            )
 
     def test_template_substitution_missing_env_var(
         self, monkeypatch: pytest.MonkeyPatch
@@ -58,10 +64,10 @@ class TestDataset:
 
             # Create config.json with a missing environment variable
             config_content = {
-                "layers": {"test_layer": {"type": "vector"}},
+                "layers": {"test_layer": {"layer_type": "vector"}},
                 "tile_store": {
-                    "name": "file",
-                    "root_dir": "/base/path/${MISSING_VAR}/tiles",
+                    "class_path": "rslearn.tile_stores.default.DefaultTileStore",
+                    "init_args": {"path_suffix": "/base/path/${MISSING_VAR}/tiles"},
                 },
             }
 
@@ -74,7 +80,8 @@ class TestDataset:
             # Verify that missing variable was replaced with empty string
             assert dataset.tile_store_config is not None
             assert (
-                dataset.tile_store_config["root_dir"] == "/base/path//tiles"
+                dataset.tile_store_config["init_args"]["path_suffix"]
+                == "/base/path//tiles"
             )  # Empty string substitution
 
     def test_no_template_variables(self) -> None:
@@ -84,8 +91,11 @@ class TestDataset:
 
             # Create config.json without any template variables
             config_content = {
-                "layers": {"test_layer": {"type": "vector"}},
-                "tile_store": {"name": "file", "root_dir": "/static/path/to/tiles"},
+                "layers": {"test_layer": {"layer_type": "vector"}},
+                "tile_store": {
+                    "class_path": "rslearn.tile_stores.default.DefaultTileStore",
+                    "init_args": {"path_suffix": "/static/path/to/tiles"},
+                },
             }
 
             with (dataset_path / "config.json").open("w") as f:
@@ -96,4 +106,7 @@ class TestDataset:
 
             # Verify that static values remain unchanged
             assert dataset.tile_store_config is not None
-            assert dataset.tile_store_config["root_dir"] == "/static/path/to/tiles"
+            assert (
+                dataset.tile_store_config["init_args"]["path_suffix"]
+                == "/static/path/to/tiles"
+            )

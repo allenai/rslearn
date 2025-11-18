@@ -2,10 +2,10 @@
 
 import hashlib
 import json
-from collections.abc import Callable
-from typing import Any, BinaryIO, TypeVar
+from typing import Any, BinaryIO
 
 import affine
+import jsonargparse
 import numpy as np
 import numpy.typing as npt
 import rasterio
@@ -14,33 +14,12 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from upath import UPath
 
-from rslearn.config import RasterFormatConfig
 from rslearn.const import TILE_SIZE
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import open_rasterio_upath_reader, open_rasterio_upath_writer
+from rslearn.utils.jsonargparse import init_jsonargparse
 
 from .geometry import PixelBounds, Projection
-
-_RasterFormatT = TypeVar("_RasterFormatT", bound="RasterFormat")
-
-
-class _RasterFormatRegistry(dict[str, type["RasterFormat"]]):
-    """Registry for RasterFormat classes."""
-
-    def register(
-        self, name: str
-    ) -> Callable[[type[_RasterFormatT]], type[_RasterFormatT]]:
-        """Decorator to register a raster format class."""
-
-        def decorator(cls: type[_RasterFormatT]) -> type[_RasterFormatT]:
-            self[name] = cls
-            return cls
-
-        return decorator
-
-
-RasterFormats = _RasterFormatRegistry()
-
 
 logger = get_logger(__name__)
 
@@ -219,7 +198,6 @@ class RasterFormat:
         raise NotImplementedError
 
 
-@RasterFormats.register("image_tile")
 class ImageTileRasterFormat(RasterFormat):
     """A RasterFormat that stores data in image tiles corresponding to grid cells.
 
@@ -468,7 +446,6 @@ class ImageTileRasterFormat(RasterFormat):
         )
 
 
-@RasterFormats.register("geotiff")
 class GeotiffRasterFormat(RasterFormat):
     """A raster format that uses one big, tiled GeoTIFF with small block size."""
 
@@ -623,7 +600,6 @@ class GeotiffRasterFormat(RasterFormat):
         return GeotiffRasterFormat(**kwargs)
 
 
-@RasterFormats.register("single_image")
 class SingleImageRasterFormat(RasterFormat):
     """A raster format that produces a single image called image.png/jpg.
 
@@ -777,15 +753,11 @@ class SingleImageRasterFormat(RasterFormat):
         return SingleImageRasterFormat(**kwargs)
 
 
-def load_raster_format(config: RasterFormatConfig) -> RasterFormat:
-    """Loads a RasterFormat from a RasterFormatConfig.
-
-    Args:
-        config: the RasterFormatConfig configuration object specifying the
-            RasterFormat.
-
-    Returns:
-        the loaded RasterFormat implementation
-    """
-    cls = RasterFormats[config.name]
-    return cls.from_config(config.name, config.config_dict)
+def load_raster_format(config: dict[str, Any]) -> RasterFormat:
+    """Loads a RasterFormat from the jsonargparse config dict."""
+    init_jsonargparse()
+    parser = jsonargparse.ArgumentParser()
+    parser.add_argument("--raster_format", type=RasterFormat)
+    cfg = parser.parse_object({"raster_format": config})
+    raster_format = parser.instantiate_classes(cfg).raster_format
+    return raster_format

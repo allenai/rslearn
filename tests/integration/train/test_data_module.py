@@ -44,7 +44,7 @@ class TestPredictLoader:
         dataset_config = {
             "layers": {
                 self.LAYER_NAME: {
-                    "type": "raster",
+                    "layer_type": "raster",
                     "band_sets": [
                         {
                             "dtype": "uint8",

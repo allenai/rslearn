@@ -6,18 +6,17 @@ import os
 import shutil
 import tempfile
 import zipfile
-from typing import Any
 
 import requests
 from fsspec.implementations.local import LocalFileSystem
 from upath import UPath
 
-from rslearn.config import DataSourceConfig, LayerConfig, QueryConfig, RasterLayerConfig
-from rslearn.data_sources.local_files import LocalFiles
+from rslearn.config import LayerType
+from rslearn.data_sources.local_files import LocalFiles, RasterItemSpec
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 
-from .data_source import Item
+from .data_source import DataSourceContext, Item
 
 logger = get_logger(__name__)
 
@@ -237,71 +236,65 @@ class WorldCereal(LocalFiles):
 
     def __init__(
         self,
-        config: LayerConfig,
-        band: str,
-        worldcereal_dir: UPath,
+        worldcereal_dir: str,
+        band: str | None = None,
+        context: DataSourceContext = DataSourceContext(),
     ) -> None:
         """Create a new WorldCereal.
 
         Args:
-            config: configuration for this layer.
-            band: the worldcereal band being processed.
             worldcereal_dir: the directory to extract the WorldCereal GeoTIFF files. For
                 high performance, this should be a local directory; if the dataset is
                 remote, prefix with a protocol ("file://") to use a local directory
                 instead of a path relative to the dataset path.
+            band: the worldcereal band to process. This will only be used if the layer
+                config is missing from the context.
+            context: the data source context.
         """
-        self.band = band
-        tif_dir, tif_filepath = self.download_worldcereal_data(band, worldcereal_dir)
+        if context.dataset is not None:
+            worldcereal_upath = join_upath(context.dataset.path, worldcereal_dir)
+        else:
+            worldcereal_upath = UPath(worldcereal_dir)
+
+        if context.layer_config is not None:
+            if len(context.layer_config.band_sets) != 1:
+                raise ValueError("expected a single band set")
+            if len(context.layer_config.band_sets[0].bands) != 1:
+                raise ValueError("expected band set to have a single band")
+            self.band = context.layer_config.band_sets[0].bands[0]
+        elif band is not None:
+            self.band = band
+        else:
+            raise ValueError("band must be set if layer config is not in the context")
+
+        tif_dir, tif_filepath = self.download_worldcereal_data(
+            self.band, worldcereal_upath
+        )
         all_aezs: set[int] = self.all_aezs_from_tifs(tif_filepath)
 
         # now that we have all our aezs, lets match them to the bands
-        spec_dicts: list[dict] = []
+        item_specs: list[RasterItemSpec] = []
         for aez in all_aezs:
-            spec_dict: dict[str, Any] = {
+            item_spec = RasterItemSpec(
+                fnames=[],
+                bands=[],
                 # must be a str since we / with a posix path later
-                "name": str(aez),
-                "fnames": [],
-                "bands": [],
-            }
+                name=str(aez),
+            )
             aez_band_filepath = self.filepath_for_product_aez(tif_filepath, aez)
             if aez_band_filepath is not None:
-                spec_dict["fnames"].append(aez_band_filepath.absolute().as_uri())
-                spec_dict["bands"].append([band])
-            spec_dicts.append(spec_dict)
-        if len(spec_dicts) == 0:
-            raise ValueError(f"No AEZ files found for {band}")
-        # add this to the config
-        if config.data_source is not None:
-            if "item_specs" in config.data_source.config_dict:
-                logger.warning(
-                    "Overwriting item_specs in WorldCereal config.data_source"
-                )
-            config.data_source.config_dict["item_specs"] = spec_dicts
-        else:
-            config.data_source = DataSourceConfig(
-                name="rslearn.data_sources.WorldCereal",
-                query_config=QueryConfig.from_config({}),
-                config_dict={"item_specs": spec_dicts},
-            )
+                item_spec.fnames.append(aez_band_filepath.absolute().as_uri())
+                assert item_spec.bands is not None
+                item_spec.bands.append([self.band])
+            item_specs.append(item_spec)
+        if len(item_specs) == 0:
+            raise ValueError(f"No AEZ files found for {self.band}")
 
-        super().__init__(config, tif_dir)
-
-    @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "LocalFiles":
-        """Creates a new LocalFiles instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("LocalFiles data source requires a data source config")
-        d = config.data_source.config_dict
-        assert isinstance(config, RasterLayerConfig)
-        bandsets = config.band_sets
-        assert len(bandsets) == 1
-        assert len(bandsets[0].bands) == 1
-        band = bandsets[0].bands[0]
-        return WorldCereal(
-            config=config,
-            band=band,
-            worldcereal_dir=join_upath(ds_path, d["worldcereal_dir"]),
+        super().__init__(
+            src_dir=tif_dir,
+            raster_item_specs=item_specs,
+            layer_type=LayerType.RASTER,
+            context=context,
         )
 
     @staticmethod
@@ -441,7 +434,7 @@ class WorldCereal(LocalFiles):
         cache_fname = self.src_dir / f"{self.band}_summary.json"
         if not cache_fname.exists():
             logger.debug("cache at %s does not exist, listing items", cache_fname)
-            items = self.importer.list_items(self.config, self.src_dir)
+            items = self.importer.list_items(self.src_dir)
             serialized_items = [item.serialize() for item in items]
             with cache_fname.open("w") as f:
                 json.dump(serialized_items, f)

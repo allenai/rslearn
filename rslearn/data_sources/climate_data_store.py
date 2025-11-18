@@ -14,9 +14,9 @@ from dateutil.relativedelta import relativedelta
 from rasterio.transform import from_origin
 from upath import UPath
 
-from rslearn.config import QueryConfig, RasterLayerConfig, SpaceMode
+from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_EPSG, WGS84_PROJECTION
-from rslearn.data_sources import DataSource, Item
+from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
@@ -55,58 +55,39 @@ class ERA5LandMonthlyMeans(DataSource):
 
     def __init__(
         self,
-        band_names: list[str],
+        band_names: list[str] | None = None,
         api_key: str | None = None,
+        context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new ERA5LandMonthlyMeans instance.
 
         Args:
             band_names: list of band names to acquire. These should correspond to CDS
-                variable names but with "_" replaced with "-".
+                variable names but with "_" replaced with "-". If not set, they will be
+                determined from the LayerConfig in the context.
             api_key: the API key. If not set, it should be set via the CDSAPI_KEY
                 environment variable.
+            context: the data source context.
         """
-        self.band_names = band_names
+        self.band_names: list[str]
+        if band_names is not None:
+            self.band_names = band_names
+        elif context.layer_config is not None:
+            self.band_names = []
+            for band_set in context.layer_config.band_sets:
+                for band in band_set.bands:
+                    if band in self.band_names:
+                        continue
+                    self.band_names.append(band)
+        else:
+            raise ValueError(
+                "band_names must be set if layer_config is not in the context"
+            )
 
         self.client = cdsapi.Client(
             url=self.api_url,
             key=api_key,
         )
-
-    @staticmethod
-    def from_config(
-        config: RasterLayerConfig, ds_path: UPath
-    ) -> "ERA5LandMonthlyMeans":
-        """Creates a new ERA5LandMonthlyMeans instance from a configuration dictionary.
-
-        Args:
-            config: the LayerConfig of the layer containing this data source
-            ds_path: the path to the data source
-
-        Returns:
-            A new ERA5LandMonthlyMeans instance
-        """
-        if config.data_source is None:
-            raise ValueError("data_source is required")
-        d = config.data_source.config_dict
-
-        # Determine band names based on the configured band sets.
-        band_names = []
-        for band_set in config.band_sets:
-            for band in band_set.bands:
-                if band in band_names:
-                    continue
-                band_names.append(band)
-        kwargs: dict[str, Any] = dict(
-            band_names=band_names,
-        )
-
-        simple_optionals = ["api_key"]
-        for k in simple_optionals:
-            if k in d:
-                kwargs[k] = d[k]
-
-        return ERA5LandMonthlyMeans(**kwargs)
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig

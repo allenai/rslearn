@@ -156,3 +156,23 @@ def open_rasterio_upath_writer(
         with path.open("wb") as f:
             with rasterio.open(f, "w", **kwargs) as raster:
                 yield raster
+
+
+def get_relative_suffix(base_dir: UPath, fname: UPath) -> str:
+    """Get the suffix of fname relative to base_dir.
+
+    Args:
+        base_dir: the base directory.
+        fname: a filename within the base directory.
+
+    Returns:
+        the suffix on base_dir that would yield the given filename.
+    """
+    if not fname.path.startswith(base_dir.path):
+        raise ValueError(
+            f"filename {fname.path} must start with base directory {base_dir.path}"
+        )
+    suffix = fname.path[len(base_dir.path) :]
+    if suffix.startswith("/"):
+        suffix = suffix[1:]
+    return suffix

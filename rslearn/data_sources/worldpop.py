@@ -6,10 +6,10 @@ from html.parser import HTMLParser
 from urllib.parse import urljoin
 
 import requests
-import requests.auth
 from upath import UPath
 
-from rslearn.config import LayerConfig
+from rslearn.config import LayerType
+from rslearn.data_sources import DataSourceContext
 from rslearn.data_sources.local_files import LocalFiles
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import join_upath, open_atomic
@@ -59,33 +59,30 @@ class WorldPop(LocalFiles):
 
     def __init__(
         self,
-        config: LayerConfig,
-        worldpop_dir: UPath,
+        worldpop_dir: str,
         timeout: timedelta = timedelta(seconds=30),
+        context: DataSourceContext = DataSourceContext(),
     ):
         """Create a new WorldPop.
 
         Args:
-            config: configuration for this layer. It should specify a single band
-                called B1 which will contain the population counts.
             worldpop_dir: the directory to extract the WorldPop GeoTIFF files. For
                 high performance, this should be a local directory; if the dataset is
                 remote, prefix with a protocol ("file://") to use a local directory
                 instead of a path relative to the dataset path.
             timeout: timeout for HTTP requests.
+            context: the data source context.
         """
-        worldpop_dir.mkdir(parents=True, exist_ok=True)
-        self.download_worldpop_data(worldpop_dir, timeout)
-        super().__init__(config, worldpop_dir)
-
-    @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "LocalFiles":
-        """Creates a new LocalFiles instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("LocalFiles data source requires a data source config")
-        d = config.data_source.config_dict
-        return WorldPop(
-            config=config, worldpop_dir=join_upath(ds_path, d["worldpop_dir"])
+        if context.dataset is not None:
+            worldpop_upath = join_upath(context.dataset.path, worldpop_dir)
+        else:
+            worldpop_upath = UPath(worldpop_dir)
+        worldpop_upath.mkdir(parents=True, exist_ok=True)
+        self.download_worldpop_data(worldpop_upath, timeout)
+        super().__init__(
+            src_dir=worldpop_upath,
+            layer_type=LayerType.RASTER,
+            context=context,
         )
 
     def download_worldpop_data(self, worldpop_dir: UPath, timeout: timedelta) -> None:

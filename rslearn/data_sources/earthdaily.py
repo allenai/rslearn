@@ -17,9 +17,9 @@ from earthdaily import EDSClient, EDSConfig
 from rasterio.enums import Resampling
 from upath import UPath
 
-from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
+from rslearn.config import LayerConfig, QueryConfig
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources import DataSource, Item
+from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
@@ -81,10 +81,11 @@ class EarthDaily(DataSource, TileStore):
         sort_ascending: bool = True,
         timeout: timedelta = timedelta(seconds=10),
         skip_items_missing_assets: bool = False,
-        cache_dir: UPath | None = None,
+        cache_dir: str | None = None,
         max_retries: int = 3,
         retry_backoff_factor: float = 5.0,
         service_name: Literal["platform"] = "platform",
+        context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new EarthDaily instance.
 
@@ -108,6 +109,7 @@ class EarthDaily(DataSource, TileStore):
                 `(retry_backoff_factor * (2 ** (retry_count - 1)))` seconds.
             service_name: the service name, only "platform" is supported, the other
                 services "legacy" and "internal" are not supported.
+            context: the data source context.
         """
         self.collection_name = collection_name
         self.asset_bands = asset_bands
@@ -116,50 +118,24 @@ class EarthDaily(DataSource, TileStore):
         self.sort_ascending = sort_ascending
         self.timeout = timeout
         self.skip_items_missing_assets = skip_items_missing_assets
-        self.cache_dir = cache_dir
         self.max_retries = max_retries
         self.retry_backoff_factor = retry_backoff_factor
         self.service_name = service_name
 
         if cache_dir is not None:
-            self.cache_dir = cache_dir
+            # Use dataset path as root if provided.
+            if context.dataset is not None:
+                self.cache_dir = join_upath(context.dataset.path, cache_dir)
+            else:
+                self.cache_dir = UPath(cache_dir)
+
             self.cache_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            self.cache_dir = None
 
         self.eds_client: EDSClient | None = None
         self.client: pystac_client.Client | None = None
         self.collection: pystac_client.CollectionClient | None = None
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "EarthDaily":
-        """Creates a new EarthDaily instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("config.data_source is required")
-        d = config.data_source.config_dict
-
-        kwargs: dict[str, Any] = dict(
-            collection_name=d["collection_name"],
-            service_name=d["service_name"],
-            asset_bands=d["asset_bands"],
-        )
-
-        if "timeout_seconds" in d:
-            kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
-
-        if "cache_dir" in d:
-            kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
-
-        if "max_retries" in d:
-            kwargs["max_retries"] = d["max_retries"]
-
-        if "retry_backoff_factor" in d:
-            kwargs["retry_backoff_factor"] = d["retry_backoff_factor"]
-
-        simple_optionals = ["query", "sort_by", "sort_ascending"]
-        for k in simple_optionals:
-            if k in d:
-                kwargs[k] = d[k]
-
-        return EarthDaily(**kwargs)
 
     def _load_client(
         self,
@@ -499,7 +475,6 @@ class EarthDaily(DataSource, TileStore):
             layer_name: the name of this layer
             layer_cfg: the config of this layer
         """
-        assert isinstance(layer_cfg, RasterLayerConfig)
         RasterMaterializer().materialize(
             TileStoreWithLayer(self, layer_name),
             window,

@@ -12,10 +12,8 @@ from lightning.pytorch.callbacks import BasePredictionWriter
 from upath import UPath
 
 from rslearn.config import (
+    LayerConfig,
     LayerType,
-    RasterFormatConfig,
-    RasterLayerConfig,
-    VectorLayerConfig,
 )
 from rslearn.dataset import Dataset, Window
 from rslearn.log_utils import get_logger
@@ -150,7 +148,7 @@ class RslearnWriter(BasePredictionWriter):
         selector: list[str] | None = None,
         merger: PatchPredictionMerger | None = None,
         output_path: str | Path | None = None,
-        layer_config: RasterLayerConfig | VectorLayerConfig | None = None,
+        layer_config: LayerConfig | None = None,
     ):
         """Create a new RslearnWriter.
 
@@ -178,35 +176,23 @@ class RslearnWriter(BasePredictionWriter):
         )
 
         # Handle dataset and layer config
-        self.layer_config: RasterLayerConfig | VectorLayerConfig
+        self.layer_config: LayerConfig
         if layer_config:
             self.layer_config = layer_config
-            self.dataset = None if self.output_path else Dataset(self.path)
         else:
-            self.dataset = Dataset(self.path)
-            if self.output_layer not in self.dataset.layers:
+            dataset = Dataset(self.path)
+            if self.output_layer not in dataset.layers:
                 raise KeyError(
                     f"Output layer '{self.output_layer}' not found in dataset layers."
                 )
-            raw_layer_config = self.dataset.layers[self.output_layer]
-            # Type narrowing to ensure compatibility
-            if isinstance(raw_layer_config, (RasterLayerConfig | VectorLayerConfig)):
-                self.layer_config = raw_layer_config
-            else:
-                raise ValueError(
-                    f"Layer config must be RasterLayerConfig or VectorLayerConfig, got {type(raw_layer_config)}"
-                )
+            self.layer_config = dataset.layers[self.output_layer]
 
         self.format: RasterFormat | VectorFormat
         if self.layer_config.layer_type == LayerType.RASTER:
-            assert isinstance(self.layer_config, RasterLayerConfig)
             band_cfg = self.layer_config.band_sets[0]
-            self.format = load_raster_format(
-                RasterFormatConfig(band_cfg.format["name"], band_cfg.format)
-            )
+            self.format = load_raster_format(band_cfg.format)
         elif self.layer_config.layer_type == LayerType.VECTOR:
-            assert isinstance(self.layer_config, VectorLayerConfig)
-            self.format = load_vector_format(self.layer_config.format)
+            self.format = load_vector_format(self.layer_config.vector_format)
         else:
             raise ValueError(f"invalid layer type {self.layer_config.layer_type}")
 
@@ -338,7 +324,6 @@ class RslearnWriter(BasePredictionWriter):
         merged_output = self.merger.merge(window, pending_output)
 
         if self.layer_config.layer_type == LayerType.RASTER:
-            assert isinstance(self.layer_config, RasterLayerConfig)
             raster_dir = window.get_raster_dir(
                 self.output_layer, self.layer_config.band_sets[0].bands
             )

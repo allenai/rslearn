@@ -11,13 +11,16 @@ import osmium.osm.types
 import shapely
 from upath import UPath
 
-from rslearn.config import QueryConfig, VectorLayerConfig
+from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources import DataSource, Item
+from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
+from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import Feature, GridIndex, STGeometry
 from rslearn.utils.fsspec import get_upath_local, join_upath
+
+logger = get_logger(__name__)
 
 
 class FeatureType(Enum):
@@ -54,27 +57,6 @@ class Filter:
         self.tag_conditions = tag_conditions
         self.tag_properties = tag_properties
         self.to_geometry = to_geometry
-
-    @staticmethod
-    def from_config(d: dict[str, Any]) -> "Filter":
-        """Creates a Filter from a config dict.
-
-        Args:
-            d: the config dict
-
-        Returns:
-            the Filter object
-        """
-        kwargs: dict[str, Any] = {}
-        if "feature_types" in d:
-            kwargs["feature_types"] = [FeatureType(el) for el in d["feature_types"]]
-        if "tag_conditions" in d:
-            kwargs["tag_conditions"] = d["tag_conditions"]
-        if "tag_properties" in d:
-            kwargs["tag_properties"] = d["tag_properties"]
-        if "to_geometry" in d:
-            kwargs["to_geometry"] = d["to_geometry"]
-        return Filter(**kwargs)
 
     def match_tags(self, tags: dict[str, str]) -> bool:
         """Returns whether this filter matches based on the tags."""
@@ -387,10 +369,10 @@ class OpenStreetMap(DataSource[OsmItem]):
 
     def __init__(
         self,
-        config: VectorLayerConfig,
-        pbf_fnames: list[UPath],
-        bounds_fname: UPath,
+        pbf_fnames: list[str],
+        bounds_fname: str,
         categories: dict[str, Filter],
+        context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new OpenStreetMap instance.
 
@@ -402,14 +384,21 @@ class OpenStreetMap(DataSource[OsmItem]):
             bounds_fname: filename where the bounds of the PBF are cached.
             categories: dictionary of (category name, filter). Features that match the
                 filter will be emitted under the corresponding category.
+            context: the data source context.
         """
-        self.config = config
-        self.pbf_fnames = pbf_fnames
-        self.bounds_fname = bounds_fname
         self.categories = categories
 
+        if context.dataset is not None:
+            self.pbf_fnames = [
+                join_upath(context.dataset.path, pbf_fname) for pbf_fname in pbf_fnames
+            ]
+            self.bounds_fname = join_upath(context.dataset.path, bounds_fname)
+        else:
+            self.pbf_fnames = [UPath(pbf_fname) for pbf_fname in pbf_fnames]
+            self.bounds_fname = UPath(bounds_fname)
+
         if len(self.pbf_fnames) == 1 and not self.pbf_fnames[0].exists():
-            print(
+            logger.info(
                 "Downloading planet.osm.pbf from "
                 + f"{self.planet_pbf_url} to {self.pbf_fnames[0]}"
             )
@@ -420,32 +409,13 @@ class OpenStreetMap(DataSource[OsmItem]):
         # Detect bounds of each pbf file if needed.
         self.pbf_bounds = self._get_pbf_bounds()
 
-    @staticmethod
-    def from_config(config: VectorLayerConfig, ds_path: UPath) -> "OpenStreetMap":
-        """Creates a new OpenStreetMap instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("data_source is required")
-        d = config.data_source.config_dict
-        categories = {
-            category_name: Filter.from_config(filter_config_dict)
-            for category_name, filter_config_dict in d["categories"].items()
-        }
-        pbf_fnames = [join_upath(ds_path, pbf_fname) for pbf_fname in d["pbf_fnames"]]
-        bounds_fname = join_upath(ds_path, d["bounds_fname"])
-        return OpenStreetMap(
-            config=config,
-            pbf_fnames=pbf_fnames,
-            bounds_fname=bounds_fname,
-            categories=categories,
-        )
-
     def _get_pbf_bounds(self) -> list[tuple[float, float, float, float]]:
         # Determine WGS84 bounds of each PBF file by processing them through
         # BoundsHandler.
         if not self.bounds_fname.exists():
             pbf_bounds = []
             for pbf_fname in self.pbf_fnames:
-                print(f"detecting bounds of {pbf_fname}")
+                logger.info(f"detecting bounds of {pbf_fname}")
                 handler = BoundsHandler()
                 with get_upath_local(pbf_fname) as local_fname:
                     handler.apply_file(local_fname)
@@ -512,7 +482,7 @@ class OpenStreetMap(DataSource[OsmItem]):
             if tile_store.is_vector_ready(cur_item.name):
                 continue
 
-            print(
+            logger.info(
                 f"ingesting osm item {cur_item.name} "
                 + f"with {len(cur_geometries)} geometries"
             )

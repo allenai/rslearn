@@ -10,40 +10,63 @@ Each source supports operations to lookup items that match with spatiotemporal
 geometries, and ingest those items.
 """
 
+import copy
 import functools
-import importlib
+from typing import Any
 
-from upath import UPath
+import jsonargparse
 
 from rslearn.config import LayerConfig
+from rslearn.dataset import Dataset
 from rslearn.log_utils import get_logger
+from rslearn.utils.jsonargparse import data_source_context_serializer, init_jsonargparse
 
-from .data_source import DataSource, Item, ItemLookupDataSource, RetrieveItemDataSource
+from .data_source import (
+    DataSource,
+    DataSourceContext,
+    Item,
+    ItemLookupDataSource,
+    RetrieveItemDataSource,
+)
 
 logger = get_logger(__name__)
 
 
 @functools.cache
-def data_source_from_config(config: LayerConfig, ds_path: UPath) -> DataSource:
+def data_source_from_config(config: LayerConfig, dataset: Dataset) -> DataSource:
     """Loads a data source from config dict.
 
     Args:
         config: the LayerConfig containing this data source.
-        ds_path: the dataset root directory.
+        dataset: the underlying dataset.
     """
-    logger.debug("getting a data source for dataset at %s", ds_path)
+    logger.debug("getting a data source for dataset at %s", dataset.path)
     if config.data_source is None:
-        raise ValueError("No data source specified")
-    name = config.data_source.name
-    module_name = ".".join(name.split(".")[:-1])
-    class_name = name.split(".")[-1]
-    module = importlib.import_module(module_name)
-    class_ = getattr(module, class_name)
-    return class_.from_config(config, ds_path)
+        raise ValueError("The layer does not specify a data source")
+
+    # Inject the DataSourceContext into the args.
+    context = DataSourceContext(
+        dataset=dataset,
+        layer_config=config,
+    )
+    ds_config: dict[str, Any] = {
+        "class_path": config.data_source.class_path,
+        "init_args": copy.deepcopy(config.data_source.init_args),
+    }
+    ds_config["init_args"]["context"] = data_source_context_serializer(context)
+
+    # Now we can parse with jsonargparse.
+    init_jsonargparse()
+    parser = jsonargparse.ArgumentParser()
+    parser.add_argument("--data_source", type=DataSource)
+    cfg = parser.parse_object({"data_source": ds_config})
+    data_source = parser.instantiate_classes(cfg).data_source
+    return data_source
 
 
 __all__ = (
     "DataSource",
+    "DataSourceContext",
     "Item",
     "ItemLookupDataSource",
     "RetrieveItemDataSource",

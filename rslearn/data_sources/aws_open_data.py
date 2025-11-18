@@ -22,7 +22,6 @@ from rasterio.crs import CRS
 from upath import UPath
 
 import rslearn.data_sources.utils
-from rslearn.config import RasterLayerConfig
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_EPSG, WGS84_PROJECTION
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import GridIndex, Projection, STGeometry, daterange
@@ -32,6 +31,7 @@ from rslearn.utils.raster_format import get_raster_projection_and_bounds
 from .copernicus import get_harmonize_callback, get_sentinel2_tiles
 from .data_source import (
     DataSource,
+    DataSourceContext,
     Item,
     ItemLookupDataSource,
     QueryConfig,
@@ -83,16 +83,15 @@ class Naip(DataSource):
 
     def __init__(
         self,
-        config: RasterLayerConfig,
-        index_cache_dir: UPath,
+        index_cache_dir: str,
         use_rtree_index: bool = False,
         states: list[str] | None = None,
         years: list[int] | None = None,
+        context: DataSourceContext = DataSourceContext(),
     ) -> None:
         """Initialize a new Naip instance.
 
         Args:
-            config: the LayerConfig of the layer containing this data source.
             index_cache_dir: directory to cache index shapefiles.
             use_rtree_index: whether to create an rtree index to enable faster lookups
                 (default false)
@@ -100,9 +99,15 @@ class Naip(DataSource):
                 the search. If use_rtree_index is enabled, the rtree will only be
                 populated with data from these states.
             years: optional list of years to restrict the search
+            context: the data source context.
         """
-        self.config = config
-        self.index_cache_dir = index_cache_dir
+        # If context is provided, we join the directory with the dataset path,
+        # otherwise we treat it directly as UPath.
+        if context.dataset is not None:
+            self.index_cache_dir = join_upath(context.dataset.path, index_cache_dir)
+        else:
+            self.index_cache_dir = UPath(index_cache_dir)
+
         self.states = states
         self.years = years
 
@@ -118,22 +123,6 @@ class Naip(DataSource):
                     index.insert(item.geometry.shp.bounds, json.dumps(item.serialize()))
 
             self.rtree_index = get_cached_rtree(self.index_cache_dir, build_fn)
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Naip":
-        """Creates a new Naip instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError(f"data_source is required for config dict {config}")
-        d = config.data_source.config_dict
-        kwargs = dict(
-            config=config,
-            index_cache_dir=join_upath(ds_path, d["index_cache_dir"]),
-        )
-        simple_optionals = ["use_rtree_index", "states", "years"]
-        for k in simple_optionals:
-            if k in d:
-                kwargs[k] = d[k]
-        return Naip(**kwargs)
 
     def _download_manifest(self) -> UPath:
         """Download the manifest that enumerates files in the bucket.
@@ -460,50 +449,38 @@ class Sentinel2(
 
     def __init__(
         self,
-        config: RasterLayerConfig,
         modality: Sentinel2Modality,
-        metadata_cache_dir: UPath,
+        metadata_cache_dir: str,
         sort_by: str | None = None,
         harmonize: bool = False,
+        context: DataSourceContext = DataSourceContext(),
     ) -> None:
         """Initialize a new Sentinel2 instance.
 
         Args:
-            config: the LayerConfig of the layer containing this data source.
             modality: L1C or L2A.
             metadata_cache_dir: directory to cache product metadata files.
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
             harmonize: harmonize pixel values across different processing baselines,
                 see https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
+            context: the data source context.
         """  # noqa: E501
-        self.config = config
+        # If context is provided, we join the directory with the dataset path,
+        # otherwise we treat it directly as UPath.
+        if context.dataset is not None:
+            self.metadata_cache_dir = join_upath(
+                context.dataset.path, metadata_cache_dir
+            )
+        else:
+            self.metadata_cache_dir = UPath(metadata_cache_dir)
+
         self.modality = modality
-        self.metadata_cache_dir = metadata_cache_dir
         self.sort_by = sort_by
         self.harmonize = harmonize
 
         bucket_name = self.bucket_names[modality]
         self.bucket = boto3.resource("s3").Bucket(bucket_name)
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Sentinel2":
-        """Creates a new Sentinel2 instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("Sentinel2 data source requires a data source config")
-        d = config.data_source.config_dict
-        kwargs = dict(
-            config=config,
-            modality=Sentinel2Modality(d["modality"]),
-            metadata_cache_dir=join_upath(ds_path, d["metadata_cache_dir"]),
-        )
-
-        simple_optionals = ["sort_by", "harmonize"]
-        for k in simple_optionals:
-            if k in d:
-                kwargs[k] = d[k]
-
-        return Sentinel2(**kwargs)
 
     def _read_products(
         self, needed_cell_months: set[tuple[str, int, int]]

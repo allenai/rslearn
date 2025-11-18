@@ -71,12 +71,14 @@ class TestPrepareDatasetWindows:
         dataset_config = {
             "layers": {
                 "local_file": {
-                    "type": "vector",
+                    "layer_type": "vector",
                     "data_source": {
-                        "name": "rslearn.data_sources.local_files.LocalFiles",
-                        "src_dir": str(src_data_dir),
+                        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                        "init_args": {
+                            "src_dir": str(src_data_dir),
+                        },
                         "query_config": {
-                            "space_mode": "INTERSECTS",
+                            "space_mode": "intersects",
                             "min_matches": 3,
                             "max_matches": 10,
                         },
@@ -171,12 +173,14 @@ class TestPrepareDatasetWindows:
         dataset_config = {
             "layers": {
                 "local_file": {
-                    "type": "vector",
+                    "layer_type": "vector",
                     "data_source": {
-                        "name": "rslearn.data_sources.local_files.LocalFiles",
-                        "src_dir": str(src_data_dir),
+                        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                        "init_args": {
+                            "src_dir": str(src_data_dir),
+                        },
                         "query_config": {
-                            "space_mode": "INTERSECTS",
+                            "space_mode": "intersects",
                             "min_matches": 0,
                             "max_matches": 10,
                         },
@@ -267,12 +271,14 @@ class TestPrepareDatasetWindows:
         dataset_config = {
             "layers": {
                 "local_file": {
-                    "type": "vector",
+                    "layer_type": "vector",
                     "data_source": {
-                        "name": "rslearn.data_sources.local_files.LocalFiles",
-                        "src_dir": str(src_data_dir),
+                        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                        "init_args": {
+                            "src_dir": str(src_data_dir),
+                        },
                         "query_config": {
-                            "space_mode": "INTERSECTS",
+                            "space_mode": "intersects",
                             "min_matches": 2,
                             "max_matches": 10,
                         },

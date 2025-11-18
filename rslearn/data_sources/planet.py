@@ -14,9 +14,9 @@ import shapely
 from fsspec.implementations.local import LocalFileSystem
 from upath import UPath
 
-from rslearn.config import QueryConfig, RasterLayerConfig
+from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources import DataSource, Item
+from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
@@ -31,14 +31,14 @@ class Planet(DataSource):
 
     def __init__(
         self,
-        config: RasterLayerConfig,
         item_type_id: str,
-        cache_dir: UPath | None = None,
+        cache_dir: str | None = None,
         asset_type_id: str = "ortho_analytic_sr",
         range_filters: dict[str, dict[str, Any]] = {},
         use_permission_filter: bool = True,
         sort_by: str | None = None,
         bands: list[str] = ["b01", "b02", "b03", "b04"],
+        context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new Planet instance.
 
@@ -60,39 +60,22 @@ class Planet(DataSource):
                 "-clear_percent" or "cloud_cover" (if it starts with minus sign then we
                 sort descending.)
             bands: what to call the bands in the asset.
+            context: the data source context.
         """
-        self.config = config
         self.item_type_id = item_type_id
-        self.cache_dir = cache_dir
         self.asset_type_id = asset_type_id
         self.range_filters = range_filters
         self.use_permission_filter = use_permission_filter
         self.sort_by = sort_by
         self.bands = bands
 
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Planet":
-        """Creates a new Planet instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("data_source is required")
-        d = config.data_source.config_dict
-        kwargs = dict(
-            config=config,
-            item_type_id=d["item_type_id"],
-        )
-        optional_keys = [
-            "asset_type_id",
-            "range_filters",
-            "use_permission_filter",
-            "sort_by",
-            "bands",
-        ]
-        for optional_key in optional_keys:
-            if optional_key in d:
-                kwargs[optional_key] = d[optional_key]
-        if "cache_dir" in d:
-            kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
-        return Planet(**kwargs)
+        if cache_dir is None:
+            self.cache_dir = None
+        else:
+            if context.dataset is not None:
+                self.cache_dir = join_upath(context.dataset.path, cache_dir)
+            else:
+                self.cache_dir = UPath(cache_dir)
 
     async def _search_items(self, geometry: STGeometry) -> list[dict[str, Any]]:
         wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)

@@ -11,7 +11,7 @@ from lightning.pytorch import Trainer
 from torchmetrics import MetricCollection
 from upath import UPath
 
-from rslearn.config import BandSetConfig, DType, LayerType, RasterLayerConfig
+from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Window
 from rslearn.train.lightning_module import RslearnLightningModule
@@ -186,7 +186,7 @@ def test_write_raster(tmp_path: pathlib.Path) -> None:
     ds_config = {
         "layers": {
             output_layer_name: {
-                "type": "raster",
+                "layer_type": "raster",
                 "band_sets": [
                     {
                         "dtype": "uint8",
@@ -273,7 +273,7 @@ def test_write_raster_with_custom_output_path(tmp_path: pathlib.Path) -> None:
     ds_config = {
         "layers": {
             output_layer_name: {
-                "type": "raster",
+                "layer_type": "raster",
                 "band_sets": [
                     {
                         "dtype": "uint8",
@@ -376,14 +376,15 @@ def test_write_raster_with_layer_config(tmp_path: pathlib.Path) -> None:
     output_bands = ["value"]
 
     # Create custom layer config without needing dataset config.
-    layer_config = RasterLayerConfig(
+    layer_config = LayerConfig(
         layer_type=LayerType.RASTER,
         band_sets=[
             BandSetConfig(
-                config_dict={},
                 dtype=DType.UINT8,
                 bands=output_bands,
-                format={"name": "geotiff"},
+                format={
+                    "class_path": "rslearn.utils.raster_format.GeotiffRasterFormat"
+                },
             )
         ],
     )
@@ -464,14 +465,15 @@ def test_selector_with_dictionary_output(tmp_path: pathlib.Path) -> None:
     output_bands = ["value"]
 
     # Create layer config for raster output
-    layer_config = RasterLayerConfig(
+    layer_config = LayerConfig(
         layer_type=LayerType.RASTER,
         band_sets=[
             BandSetConfig(
-                config_dict={},
                 dtype=DType.UINT8,
                 bands=output_bands,
-                format={"name": "geotiff"},
+                format={
+                    "class_path": "rslearn.utils.raster_format.GeotiffRasterFormat"
+                },
             )
         ],
     )
@@ -592,14 +594,15 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
     output_layer_name = "nested_output"
     output_bands = ["value"]
 
-    layer_config = RasterLayerConfig(
+    layer_config = LayerConfig(
         layer_type=LayerType.RASTER,
         band_sets=[
             BandSetConfig(
-                config_dict={},
                 dtype=DType.UINT8,
                 bands=output_bands,
-                format={"name": "geotiff"},
+                format={
+                    "class_path": "rslearn.utils.raster_format.GeotiffRasterFormat"
+                },
             )
         ],
     )

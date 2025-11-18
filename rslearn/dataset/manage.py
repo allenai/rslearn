@@ -10,7 +10,6 @@ import rslearn.data_sources
 from rslearn.config import (
     LayerConfig,
     LayerType,
-    RasterLayerConfig,
 )
 from rslearn.data_sources import DataSource, Item
 from rslearn.dataset.handler_summaries import (
@@ -24,7 +23,7 @@ from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, get_tile_store_with_layer
 
 from .dataset import Dataset
-from .materialize import Materializers
+from .materialize import Materializer, RasterMaterializer, VectorMaterializer
 from .window import Window, WindowLayerData
 
 logger = get_logger(__name__)
@@ -138,7 +137,7 @@ def prepare_dataset_windows(
             layer_summaries.append(
                 LayerPrepareSummary(
                     layer_name=layer_name,
-                    data_source_name=data_source_cfg.name,
+                    data_source_name=data_source_cfg.class_path,
                     duration_seconds=time.monotonic() - layer_start_time,
                     windows_prepared=0,
                     windows_skipped=len(windows),
@@ -207,7 +206,7 @@ def prepare_dataset_windows(
         layer_summaries.append(
             LayerPrepareSummary(
                 layer_name=layer_name,
-                data_source_name=data_source_cfg.name,
+                data_source_name=data_source_cfg.class_path,
                 duration_seconds=time.monotonic() - layer_start_time,
                 windows_prepared=windows_prepared,
                 windows_skipped=windows_skipped,
@@ -315,7 +314,6 @@ def is_window_ingested(
                 item = Item.deserialize(serialized_item)
 
                 if layer_cfg.layer_type == LayerType.RASTER:
-                    assert isinstance(layer_cfg, RasterLayerConfig)
                     for band_set in layer_cfg.band_sets:
                         # Make sure that layers exist containing each configured band.
                         # And that those layers are marked completed.
@@ -409,10 +407,11 @@ def materialize_window(
             f"Materializing {len(item_groups)} item groups in layer {layer_name} from tile store"
         )
 
-        if dataset.materializer_name:
-            materializer = Materializers[dataset.materializer_name]()
+        materializer: Materializer
+        if layer_cfg.layer_type == LayerType.RASTER:
+            materializer = RasterMaterializer()
         else:
-            materializer = Materializers[layer_cfg.layer_type.value]()
+            materializer = VectorMaterializer()
 
         retry(
             fn=lambda: materializer.materialize(
@@ -483,7 +482,7 @@ def materialize_dataset_windows(
         if not layer_cfg.data_source:
             total_skipped = len(windows)
         else:
-            data_source_name = layer_cfg.data_source.name
+            data_source_name = layer_cfg.data_source.class_path
             data_source = rslearn.data_sources.data_source_from_config(
                 layer_cfg, dataset.path
             )
