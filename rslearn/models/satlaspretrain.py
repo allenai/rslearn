@@ -4,15 +4,14 @@ from typing import Any
 
 import satlaspretrain_models
 import torch
+import torch.nn.functional as F
 
 
 class SatlasPretrain(torch.nn.Module):
     """SatlasPretrain backbones."""
 
     def __init__(
-        self,
-        model_identifier: str,
-        fpn: bool = False,
+        self, model_identifier: str, fpn: bool = False, resize_to_pretrain: bool = False
     ) -> None:
         """Instantiate a new SatlasPretrain instance.
 
@@ -21,6 +20,8 @@ class SatlasPretrain(torch.nn.Module):
                 https://github.com/allenai/satlaspretrain_models
             fpn: whether to include the feature pyramid network, otherwise only the
                 Swin-v2-Transformer is used.
+            resize_to_pretrain: whether to resize inputs to the pretraining input
+                size (512 x 512)
         """
         super().__init__()
         weights_manager = satlaspretrain_models.Weights()
@@ -49,6 +50,19 @@ class SatlasPretrain(torch.nn.Module):
                 [16, 1024],
                 [32, 2048],
             ]
+        self.resize_to_pretrain = resize_to_pretrain
+
+    def maybe_resize(self, data: torch.Tensor) -> list[torch.Tensor]:
+        """Resize to pretraining sizes if resize_to_pretrain == True."""
+        if self.resize_to_pretrain:
+            return F.interpolate(
+                data,
+                size=(512, 512),
+                mode="bilinear",
+                align_corners=False,
+            )
+        else:
+            return data
 
     def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
         """Compute feature maps from the SatlasPretrain backbone.
@@ -58,7 +72,7 @@ class SatlasPretrain(torch.nn.Module):
                 process.
         """
         images = torch.stack([inp["image"] for inp in inputs], dim=0)
-        return self.model(images)
+        return self.model(self.maybe_resize(images))
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.
