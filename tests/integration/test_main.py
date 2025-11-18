@@ -63,8 +63,10 @@ class TestIngestion:
                 "local_files": {
                     "type": "vector",
                     "data_source": {
-                        "name": "rslearn.data_sources.local_files.LocalFiles",
-                        "src_dir": str(src_fname.parent),
+                        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                        "init_args": {
+                            "src_dir": str(src_fname.parent),
+                        },
                     },
                 },
                 "sentinel2": {
@@ -76,16 +78,13 @@ class TestIngestion:
                         }
                     ],
                     "data_source": {
-                        "name": "rslearn.data_sources.gcp_public_data.Sentinel2",
-                        "modality": "L1C",
-                        "index_cache_dir": "cache",
-                        "use_rtree_index": False,
+                        "class_path": "rslearn.data_sources.gcp_public_data.Sentinel2",
+                        "init_args": {
+                            "index_cache_dir": "cache",
+                            "use_rtree_index": False,
+                        },
                     },
                 },
-            },
-            "tile_store": {
-                "name": "file",
-                "root_dir": "tiles",
             },
         }
         with (ds_path / "config.json").open("w") as f:
@@ -254,8 +253,10 @@ class TestMaterialization:
                 "local_files": {
                     "type": "vector",
                     "data_source": {
-                        "name": "rslearn.data_sources.local_files.LocalFiles",
-                        "src_dir": str(src_fname.parent),
+                        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                        "init_args": {
+                            "src_dir": str(src_fname.parent),
+                        },
                     },
                 },
                 "sentinel2": {
@@ -267,16 +268,13 @@ class TestMaterialization:
                         }
                     ],
                     "data_source": {
-                        "name": "rslearn.data_sources.gcp_public_data.Sentinel2",
-                        "modality": "L1C",
-                        "index_cache_dir": "cache",
-                        "use_rtree_index": False,
+                        "class_path": "rslearn.data_sources.gcp_public_data.Sentinel2",
+                        "init_args": {
+                            "index_cache_dir": "cache",
+                            "use_rtree_index": False,
+                        },
                     },
                 },
-            },
-            "tile_store": {
-                "name": "file",
-                "root_dir": "tiles",
             },
         }
         with (ds_path / "config.json").open("w") as f:
