@@ -251,8 +251,8 @@ class WorldCereal(LocalFiles):
                 config is missing from the context.
             context: the data source context.
         """
-        if context.dataset is not None:
-            worldcereal_upath = join_upath(context.dataset.path, worldcereal_dir)
+        if context.ds_path is not None:
+            worldcereal_upath = join_upath(context.ds_path, worldcereal_dir)
         else:
             worldcereal_upath = UPath(worldcereal_dir)
 

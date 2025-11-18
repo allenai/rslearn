@@ -73,8 +73,8 @@ class WorldPop(LocalFiles):
             timeout: timeout for HTTP requests.
             context: the data source context.
         """
-        if context.dataset is not None:
-            worldpop_upath = join_upath(context.dataset.path, worldpop_dir)
+        if context.ds_path is not None:
+            worldpop_upath = join_upath(context.ds_path, worldpop_dir)
         else:
             worldpop_upath = UPath(worldpop_dir)
         worldpop_upath.mkdir(parents=True, exist_ok=True)

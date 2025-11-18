@@ -388,11 +388,11 @@ class OpenStreetMap(DataSource[OsmItem]):
         """
         self.categories = categories
 
-        if context.dataset is not None:
+        if context.ds_path is not None:
             self.pbf_fnames = [
-                join_upath(context.dataset.path, pbf_fname) for pbf_fname in pbf_fnames
+                join_upath(context.ds_path, pbf_fname) for pbf_fname in pbf_fnames
             ]
-            self.bounds_fname = join_upath(context.dataset.path, bounds_fname)
+            self.bounds_fname = join_upath(context.ds_path, bounds_fname)
         else:
             self.pbf_fnames = [UPath(pbf_fname) for pbf_fname in pbf_fnames]
             self.bounds_fname = UPath(bounds_fname)

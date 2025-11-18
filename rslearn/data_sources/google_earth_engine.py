@@ -91,8 +91,8 @@ class GEE(DataSource, TileStore):
         self.dtype = dtype
 
         # Get index cache dir depending on dataset path.
-        if context.dataset is not None:
-            self.index_cache_dir = join_upath(context.dataset.path, index_cache_dir)
+        if context.ds_path is not None:
+            self.index_cache_dir = join_upath(context.ds_path, index_cache_dir)
         else:
             self.index_cache_dir = UPath(index_cache_dir)
 

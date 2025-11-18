@@ -65,27 +65,29 @@ def datetime_deserializer(v: str) -> datetime:
 
 def data_source_context_serializer(v: "DataSourceContext") -> dict[str, Any]:
     """Serialize DataSourceContext for jsonargparse."""
-    return {
-        "dataset_path": str(v.dataset.path) if v.dataset is not None else None,
-        "layer_config": v.layer_config.model_dump(mode="json")
-        if v.layer_config is not None
-        else None,
+    x = {
+        "ds_path": (str(v.ds_path) if v.ds_path is not None else None),
+        "layer_config": (
+            v.layer_config.model_dump(mode="json")
+            if v.layer_config is not None
+            else None
+        ),
     }
+    return x
 
 
 def data_source_context_deserializer(v: dict[str, Any]) -> "DataSourceContext":
     """Deserialize DataSourceContext for jsonargparse."""
     # We lazily import these to avoid cyclic dependency.
     from rslearn.data_sources.data_source import DataSourceContext
-    from rslearn.dataset.dataset import Dataset
 
     return DataSourceContext(
-        dataset=Dataset(UPath(v["dataset_path"]))
-        if v["dataset_path"] is not None
-        else None,
-        layer_config=LayerConfig.model_validate(v["layer_config"])
-        if v["layer_config"] is not None
-        else None,
+        ds_path=(UPath(v["ds_path"]) if v["ds_path"] is not None else None),
+        layer_config=(
+            LayerConfig.model_validate(v["layer_config"])
+            if v["layer_config"] is not None
+            else None
+        ),
     )
 
 

@@ -103,8 +103,8 @@ class Naip(DataSource):
         """
         # If context is provided, we join the directory with the dataset path,
         # otherwise we treat it directly as UPath.
-        if context.dataset is not None:
-            self.index_cache_dir = join_upath(context.dataset.path, index_cache_dir)
+        if context.ds_path is not None:
+            self.index_cache_dir = join_upath(context.ds_path, index_cache_dir)
         else:
             self.index_cache_dir = UPath(index_cache_dir)
 
@@ -468,10 +468,8 @@ class Sentinel2(
         """  # noqa: E501
         # If context is provided, we join the directory with the dataset path,
         # otherwise we treat it directly as UPath.
-        if context.dataset is not None:
-            self.metadata_cache_dir = join_upath(
-                context.dataset.path, metadata_cache_dir
-            )
+        if context.ds_path is not None:
+            self.metadata_cache_dir = join_upath(context.ds_path, metadata_cache_dir)
         else:
             self.metadata_cache_dir = UPath(metadata_cache_dir)
 

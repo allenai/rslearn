@@ -67,8 +67,8 @@ class WorldCover(LocalFiles):
                 instead of a path relative to the dataset path.
             context: the data source context.
         """
-        if context.dataset is not None:
-            worldcover_upath = join_upath(context.dataset.path, worldcover_dir)
+        if context.ds_path is not None:
+            worldcover_upath = join_upath(context.ds_path, worldcover_dir)
         else:
             worldcover_upath = UPath(worldcover_dir)
 

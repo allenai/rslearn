@@ -204,15 +204,15 @@ class Sentinel2(DataSource):
             )
 
         # Resolve index_cache_dir and rtree_cache_dir depending on dataset context.
-        if context.dataset is not None:
-            self.index_cache_dir = join_upath(context.dataset.path, index_cache_dir)
+        if context.ds_path is not None:
+            self.index_cache_dir = join_upath(context.ds_path, index_cache_dir)
         else:
             self.index_cache_dir = UPath(index_cache_dir)
 
         if rtree_cache_dir is None:
             self.rtree_cache_dir = self.index_cache_dir
-        elif context.dataset is not None:
-            self.rtree_cache_dir = join_upath(context.dataset.path, rtree_cache_dir)
+        elif context.ds_path is not None:
+            self.rtree_cache_dir = join_upath(context.ds_path, rtree_cache_dir)
         else:
             self.rtree_cache_dir = UPath(rtree_cache_dir)
 

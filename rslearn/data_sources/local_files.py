@@ -421,8 +421,8 @@ class LocalFiles(DataSource):
                 missing from the context.
             context: the data source context. The layer config must be in the context.
         """
-        if context.dataset is not None:
-            self.src_dir = join_upath(context.dataset.path, src_dir)
+        if context.ds_path is not None:
+            self.src_dir = join_upath(context.ds_path, src_dir)
         else:
             self.src_dir = UPath(src_dir)
 

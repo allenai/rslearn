@@ -72,8 +72,8 @@ class Planet(DataSource):
         if cache_dir is None:
             self.cache_dir = None
         else:
-            if context.dataset is not None:
-                self.cache_dir = join_upath(context.dataset.path, cache_dir)
+            if context.ds_path is not None:
+                self.cache_dir = join_upath(context.ds_path, cache_dir)
             else:
                 self.cache_dir = UPath(cache_dir)
 

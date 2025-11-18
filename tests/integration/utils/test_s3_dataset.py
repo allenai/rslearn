@@ -55,14 +55,12 @@ class TestLocalFiles:
                 "local_file": {
                     "type": "vector",
                     "data_source": {
-                        "name": "rslearn.data_sources.local_files.LocalFiles",
-                        "src_dir": "file://" + src_data_dir,
+                        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                        "init_args": {
+                            "src_dir": "file://" + src_data_dir,
+                        },
                     },
                 },
-            },
-            "tile_store": {
-                "name": "file",
-                "root_dir": "tiles",
             },
         }
         ds_path.mkdir(parents=True, exist_ok=True)
@@ -79,6 +77,7 @@ class TestLocalFiles:
         ).save()
 
         dataset = Dataset(ds_path)
+
         windows = dataset.load_windows()
         prepare_dataset_windows(dataset, windows)
         ingest_dataset_windows(dataset, windows)

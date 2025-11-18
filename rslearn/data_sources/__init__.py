@@ -15,9 +15,9 @@ import functools
 from typing import Any
 
 import jsonargparse
+from upath import UPath
 
 from rslearn.config import LayerConfig
-from rslearn.dataset import Dataset
 from rslearn.log_utils import get_logger
 from rslearn.utils.jsonargparse import data_source_context_serializer, init_jsonargparse
 
@@ -33,20 +33,20 @@ logger = get_logger(__name__)
 
 
 @functools.cache
-def data_source_from_config(config: LayerConfig, dataset: Dataset) -> DataSource:
+def data_source_from_config(config: LayerConfig, ds_path: UPath) -> DataSource:
     """Loads a data source from config dict.
 
     Args:
         config: the LayerConfig containing this data source.
-        dataset: the underlying dataset.
+        ds_path: the path of the underlying dataset.
     """
-    logger.debug("getting a data source for dataset at %s", dataset.path)
+    logger.debug("getting a data source for dataset at %s", ds_path)
     if config.data_source is None:
         raise ValueError("The layer does not specify a data source")
 
     # Inject the DataSourceContext into the args.
     context = DataSourceContext(
-        dataset=dataset,
+        ds_path=ds_path,
         layer_config=config,
     )
     ds_config: dict[str, Any] = {
