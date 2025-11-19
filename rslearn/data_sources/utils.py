@@ -8,7 +8,10 @@ import shapely
 
 from rslearn.config import QueryConfig, SpaceMode, TimeMode
 from rslearn.data_sources import Item
+from rslearn.log_utils import get_logger
 from rslearn.utils import STGeometry, shp_intersects
+
+logger = get_logger(__name__)
 
 MOSAIC_MIN_ITEM_COVERAGE = 0.1
 """Minimum fraction of area that item should cover when adding it to a mosaic group."""
@@ -298,6 +301,12 @@ def match_candidate_items_to_window(
 
     # Enforce minimum matches if set.
     if len(groups) < query_config.min_matches:
+        logger.warning(
+            "Window rejected: found %d matches (required: %d) for time range %s",
+            len(groups),
+            query_config.min_matches,
+            geometry.time_range if geometry.time_range else "unlimited",
+        )
         return []
 
     return groups
