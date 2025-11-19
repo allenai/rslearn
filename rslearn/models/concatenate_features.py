@@ -39,22 +39,17 @@ class ConcatenateFeatures(torch.nn.Module):
         base_features = features[0]
         feat_h, feat_w = base_features.shape[2], base_features.shape[3]
 
-        concatenated_features = []
-        for idx, input_data in enumerate(inputs):
-            # Shape of additional features: CHW
-            additional_features = input_data[self.key]
-            if (
-                additional_features.shape[1] != feat_w
-                or additional_features.shape[2] != feat_h
-            ):
-                raise ValueError(
-                    "Feature map and additional features have different shapes and cannot be concatenated"
-                )
-            concatenated_sample_features = torch.cat(
-                [base_features[idx], additional_features], dim=0
+        stacked_additional_features = torch.stack(
+            [input_data[self.key] for input_data in inputs], dim=0
+        )
+        if (
+            stacked_additional_features.shape[2] != feat_h
+            or stacked_additional_features.shape[3] != feat_w
+        ):
+            raise ValueError(
+                "Feature map and additional features have different shapes and cannot be concatenated"
             )
-            concatenated_features.append(concatenated_sample_features)
 
-        new_features = torch.stack(concatenated_features, dim=0)
+        new_features = torch.cat([base_features, stacked_additional_features], dim=1)
 
         return [new_features]
