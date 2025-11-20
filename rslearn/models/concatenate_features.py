@@ -42,12 +42,17 @@ class ConcatenateFeatures(torch.nn.Module):
         additional_features = torch.stack(
             [input_data[self.key] for input_data in inputs], dim=0
         )
+
+        # Resize additional features to match the feature map size
         if (
             additional_features.shape[2] != feat_h
             or additional_features.shape[3] != feat_w
         ):
-            raise ValueError(
-                "Feature map and additional features have different shapes and cannot be concatenated"
+            additional_features = torch.nn.functional.interpolate(
+                additional_features,
+                size=(feat_h, feat_w),
+                mode="bilinear",
+                align_corners=False,
             )
 
         new_features = torch.cat([base_features, additional_features], dim=1)
