@@ -43,7 +43,6 @@ class Planet(DataSource):
         """Initialize a new Planet instance.
 
         Args:
-            config: the LayerConfig of the layer containing this data source
             item_type_id: the item type ID, like "PSScene" or "SkySatCollect".
             cache_dir: where to store downloaded assets, or None to just store it in
                 temporary directory before putting into tile store.
