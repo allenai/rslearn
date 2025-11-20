@@ -16,6 +16,7 @@ class ConcatenateFeatures(torch.nn.Module):
         out_channels: int | None = None,
         num_conv_layers: int = 1,
         kernel_size: int = 3,
+        final_relu: bool = False,
     ):
         """Create a new ConcatenateFeatures.
 
@@ -26,6 +27,7 @@ class ConcatenateFeatures(torch.nn.Module):
             out_channels: number of output channels of the additional features.
             num_conv_layers: number of convolutional layers to apply to the additional features.
             kernel_size: kernel size of the convolutional layers.
+            final_relu: whether to apply a ReLU activation to the final output, default False.
         """
         super().__init__()
         self.key = key
@@ -48,7 +50,7 @@ class ConcatenateFeatures(torch.nn.Module):
                     padding="same",
                 )
             )
-            if i < num_conv_layers - 1:
+            if i < num_conv_layers - 1 or final_relu:
                 conv_layers.append(torch.nn.ReLU(inplace=True))
 
         self.conv_layers = torch.nn.Sequential(*conv_layers)
