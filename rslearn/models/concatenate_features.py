@@ -12,6 +12,7 @@ class ConcatenateFeatures(torch.nn.Module):
         self,
         key: str,
         in_channels: int | None = None,
+        conv_channels: int = 64,
         out_channels: int | None = None,
         num_conv_layers: int = 1,
         kernel_size: int = 3,
@@ -21,6 +22,7 @@ class ConcatenateFeatures(torch.nn.Module):
         Args:
             key: the key of the input_dict to concatenate.
             in_channels: number of input channels of the additional features.
+            conv_channels: number of channels of the convolutional layers.
             out_channels: number of output channels of the additional features.
             num_conv_layers: number of convolutional layers to apply to the additional features.
             kernel_size: kernel size of the convolutional layers.
@@ -36,12 +38,12 @@ class ConcatenateFeatures(torch.nn.Module):
 
         conv_layers = []
         for i in range(num_conv_layers):
+            conv_in = in_channels if i == 0 else conv_channels
+            conv_out = out_channels if i == num_conv_layers - 1 else conv_channels
             conv_layers.append(
                 torch.nn.Conv2d(
-                    in_channels=in_channels,
-                    out_channels=out_channels
-                    if i == num_conv_layers - 1
-                    else in_channels,
+                    in_channels=conv_in,
+                    out_channels=conv_out,
                     kernel_size=kernel_size,
                     padding="same",
                 )

@@ -20,6 +20,7 @@ def test_concatenate_features_with_conv_layer() -> None:
     concatenate_features = ConcatenateFeatures(
         key="input_key",
         in_channels=2,
+        conv_channels=8,
         out_channels=4,
         num_conv_layers=2,
         kernel_size=3,
