@@ -29,12 +29,14 @@ class ConcatenateFeatures(torch.nn.Module):
         self.key = key
 
         conv_layers = []
-        for _ in range(num_conv_layers):
+        for i in range(num_conv_layers):
             conv_layers.extend(
                 [
                     torch.nn.Conv2d(
                         in_channels=in_channels,
-                        out_channels=out_channels,
+                        out_channels=out_channels
+                        if i == num_conv_layers - 1
+                        else in_channels,
                         kernel_size=kernel_size,
                         padding="same",
                     ),
