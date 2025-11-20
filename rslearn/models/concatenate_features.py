@@ -36,19 +36,19 @@ class ConcatenateFeatures(torch.nn.Module):
 
         conv_layers = []
         for i in range(num_conv_layers):
-            conv_layers.extend(
-                [
-                    torch.nn.Conv2d(
-                        in_channels=in_channels,
-                        out_channels=out_channels
-                        if i == num_conv_layers - 1
-                        else in_channels,
-                        kernel_size=kernel_size,
-                        padding="same",
-                    ),
-                    torch.nn.ReLU(inplace=True),
-                ]
+            conv_layers.append(
+                torch.nn.Conv2d(
+                    in_channels=in_channels,
+                    out_channels=out_channels
+                    if i == num_conv_layers - 1
+                    else in_channels,
+                    kernel_size=kernel_size,
+                    padding="same",
+                )
             )
+            if i < num_conv_layers - 1:
+                conv_layers.append(torch.nn.ReLU(inplace=True))
+
         self.conv_layers = torch.nn.Sequential(*conv_layers)
 
     def forward(
