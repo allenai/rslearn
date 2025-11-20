@@ -11,8 +11,8 @@ class ConcatenateFeatures(torch.nn.Module):
     def __init__(
         self,
         key: str,
-        in_channels: int,
-        out_channels: int,
+        in_channels: int | None = None,
+        out_channels: int | None = None,
         num_conv_layers: int = 1,
         kernel_size: int = 3,
     ):
@@ -27,6 +27,12 @@ class ConcatenateFeatures(torch.nn.Module):
         """
         super().__init__()
         self.key = key
+
+        if num_conv_layers > 0:
+            if in_channels is None or out_channels is None:
+                raise ValueError(
+                    "in_channels and out_channels must be specified if num_conv_layers > 0"
+                )
 
         conv_layers = []
         for i in range(num_conv_layers):
