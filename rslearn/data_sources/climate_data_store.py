@@ -63,22 +63,22 @@ class ERA5LandMonthlyMeans(DataSource):
 
         Args:
             band_names: list of band names to acquire. These should correspond to CDS
-                variable names but with "_" replaced with "-". If not set, they will be
-                determined from the LayerConfig in the context.
+                variable names but with "_" replaced with "-". This will only be used
+                if the layer config is missing from the context.
             api_key: the API key. If not set, it should be set via the CDSAPI_KEY
                 environment variable.
             context: the data source context.
         """
         self.band_names: list[str]
-        if band_names is not None:
-            self.band_names = band_names
-        elif context.layer_config is not None:
+        if context.layer_config is not None:
             self.band_names = []
             for band_set in context.layer_config.band_sets:
                 for band in band_set.bands:
                     if band in self.band_names:
                         continue
                     self.band_names.append(band)
+        elif band_names is not None:
+            self.band_names = band_names
         else:
             raise ValueError(
                 "band_names must be set if layer_config is not in the context"

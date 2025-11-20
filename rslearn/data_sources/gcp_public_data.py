@@ -227,10 +227,13 @@ class Sentinel2(DataSource):
         if context.layer_config is not None:
             self.needed_bands = []
             for fname, cur_bands in self.BANDS:
+                # See if the bands provided by this file intersect with the bands in at
+                # least one configured band set.
                 for band_set in context.layer_config.band_sets:
                     if not set(band_set.bands).intersection(cur_bands):
                         continue
                     self.needed_bands.append((fname, cur_bands))
+                    break
         elif bands is not None:
             self.needed_bands = []
             for fname, cur_bands in self.BANDS:

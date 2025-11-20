@@ -324,7 +324,6 @@ class LandsatOliTirs(DataSource):
         """Initialize a new LandsatOliTirs instance.
 
         Args:
-            config: the LayerConfig of the layer containing this data source
             username: EROS username
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.

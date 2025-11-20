@@ -580,11 +580,14 @@ class Sentinel2(PlanetaryComputer):
         if context.layer_config is not None:
             asset_bands: dict[str, list[str]] = {}
             for asset_key, band_names in self.BANDS.items():
+                # See if the bands provided by this asset intersect with the bands in
+                # at least one configured band set.
                 for band_set in context.layer_config.band_sets:
                     if not set(band_set.bands).intersection(set(band_names)):
                         continue
                     asset_bands[asset_key] = band_names
-        if assets is not None:
+                    break
+        elif assets is not None:
             asset_bands = {asset_key: self.BANDS[asset_key] for asset_key in assets}
         else:
             asset_bands = self.BANDS

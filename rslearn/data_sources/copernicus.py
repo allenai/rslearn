@@ -764,10 +764,13 @@ class Sentinel2(Copernicus):
         if context.layer_config is not None:
             needed_assets = []
             for asset_key, asset_bands in Sentinel2.BANDS.items():
+                # See if the bands provided by this asset intersect with the bands in
+                # at least one configured band set.
                 for band_set in context.layer_config.band_sets:
                     if not set(band_set.bands).intersection(set(asset_bands)):
                         continue
                     needed_assets.append(asset_key)
+                    break
         elif assets is not None:
             needed_assets = assets
         else:
