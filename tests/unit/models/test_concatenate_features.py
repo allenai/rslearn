@@ -5,8 +5,8 @@ import torch
 from rslearn.models.concatenate_features import ConcatenateFeatures
 
 
-def test_concatenate_features_single_conv_layer() -> None:
-    """Test concatenating a feature map with additional features."""
+def test_concatenate_features_with_conv_layer() -> None:
+    """Test concatenating a feature map with additional features (with conv layer)."""
     features = [
         torch.randn(2, 256, 32, 32),
         torch.randn(2, 512, 16, 16),
@@ -21,7 +21,7 @@ def test_concatenate_features_single_conv_layer() -> None:
         key="input_key",
         in_channels=2,
         out_channels=4,
-        num_conv_layers=1,
+        num_conv_layers=2,
         kernel_size=3,
     )
     result = concatenate_features(features, inputs)
@@ -32,8 +32,8 @@ def test_concatenate_features_single_conv_layer() -> None:
     assert result[3].shape == (2, 1024 + 4, 4, 4)
 
 
-def test_concatenate_features_no_conv_layer() -> None:
-    """Test concatenating a feature map with additional features."""
+def test_concatenate_features_without_conv_layer() -> None:
+    """Test concatenating a feature map with additional features (without conv layer)."""
     features = [
         torch.randn(2, 256, 32, 32),
         torch.randn(2, 512, 16, 16),
