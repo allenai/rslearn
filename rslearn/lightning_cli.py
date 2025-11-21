@@ -24,7 +24,7 @@ from rslearn.utils.fsspec import open_atomic
 
 WANDB_ID_FNAME = "wandb_id"
 
-logger = get_logger("__name__")
+logger = get_logger(__name__)
 
 
 def get_cached_checkpoint(checkpoint_fname: UPath) -> str:
