@@ -26,7 +26,7 @@ class ClassificationTask(BasicTask):
     def __init__(
         self,
         property_name: str,
-        classes: list,  # TODO: Should this be a list of str or int or can it be both?
+        classes: list[str],
         filters: list[tuple[str, str]] = [],
         read_class_id: bool = False,
         allow_invalid: bool = False,
@@ -176,6 +176,7 @@ class ClassificationTask(BasicTask):
             # For multiclass classification or when using the default threshold
             class_idx = probs.argmax().item()
 
+        value: str | int
         if not self.read_class_id:
             value = self.classes[class_idx]  # type: ignore
         else:
