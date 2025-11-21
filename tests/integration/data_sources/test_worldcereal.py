@@ -7,11 +7,7 @@ from pytest_httpserver import HTTPServer
 from upath import UPath
 
 from rslearn.config import (
-    BandSetConfig,
-    DType,
-    LayerType,
     QueryConfig,
-    RasterLayerConfig,
     SpaceMode,
 )
 from rslearn.const import WGS84_PROJECTION
@@ -116,13 +112,8 @@ def test_with_worldcereal_dir(
     for band in bands:
         print(f"Testing {band}")
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
-        layer_config = RasterLayerConfig(
-            LayerType.RASTER,
-            [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[band])],
-        )
         data_source = WorldCereal(
             band=band,
-            config=layer_config,
             worldcereal_dir=worldcereal_dir,
         )
 

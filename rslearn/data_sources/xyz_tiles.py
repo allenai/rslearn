@@ -14,9 +14,8 @@ import shapely
 from PIL import Image
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
-from upath import UPath
 
-from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
+from rslearn.config import LayerConfig, QueryConfig
 from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
@@ -24,7 +23,7 @@ from rslearn.utils import PixelBounds, Projection, STGeometry
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.raster_format import get_transform_from_projection_and_bounds
 
-from .data_source import DataSource, Item
+from .data_source import DataSource, DataSourceContext, Item
 from .utils import match_candidate_items_to_window
 
 WEB_MERCATOR_EPSG = 3857
@@ -96,11 +95,12 @@ class XyzTiles(DataSource, TileStore):
         url_templates: list[str],
         time_ranges: list[tuple[datetime, datetime]],
         zoom: int,
-        crs: CRS = CRS.from_epsg(WEB_MERCATOR_EPSG),
+        crs: str | CRS = CRS.from_epsg(WEB_MERCATOR_EPSG),
         total_units: float = WEB_MERCATOR_UNITS,
         offset: float = WEB_MERCATOR_UNITS / 2,
         tile_size: int = 256,
         band_names: list[str] = ["R", "G", "B"],
+        context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize an XyzTiles instance.
 
@@ -121,15 +121,21 @@ class XyzTiles(DataSource, TileStore):
             offset: offset added to projection units when converting to tile positions.
             tile_size: size in pixels of each tile. Tiles must be square.
             band_names: what to name the bands that we read.
+            context: the data source context.
         """
         self.url_templates = url_templates
         self.time_ranges = time_ranges
         self.zoom = zoom
-        self.crs = crs
         self.total_units = total_units
         self.offset = offset
         self.tile_size = tile_size
         self.band_names = band_names
+
+        # Convert to CRS if needed.
+        if isinstance(crs, str):
+            self.crs = CRS.from_string(crs)
+        else:
+            self.crs = crs
 
         # Compute total number of pixels (a function of the zoom level and tile size).
         self.total_pixels = tile_size * (2**zoom)
@@ -152,30 +158,6 @@ class XyzTiles(DataSource, TileStore):
             geometry = STGeometry(self.projection, self.shp, time_range)
             item = Item(url_template, geometry)
             self.items.append(item)
-
-    @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "XyzTiles":
-        """Creates a new XyzTiles instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("data_source is required")
-        d = config.data_source.config_dict
-        time_ranges = []
-        for str1, str2 in d["time_ranges"]:
-            time1 = datetime.fromisoformat(str1)
-            time2 = datetime.fromisoformat(str2)
-            time_ranges.append((time1, time2))
-        kwargs = dict(
-            url_templates=d["url_templates"], zoom=d["zoom"], time_ranges=time_ranges
-        )
-        if "crs" in d:
-            kwargs["crs"] = CRS.from_string(d["crs"])
-        if "total_units" in d:
-            kwargs["total_units"] = d["total_units"]
-        if "offset" in d:
-            kwargs["offset"] = d["offset"]
-        if "tile_size" in d:
-            kwargs["tile_size"] = d["tile_size"]
-        return XyzTiles(**kwargs)
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
@@ -381,7 +363,6 @@ class XyzTiles(DataSource, TileStore):
             layer_name: the name of this layer
             layer_cfg: the config of this layer
         """
-        assert isinstance(layer_cfg, RasterLayerConfig)
         RasterMaterializer().materialize(
             TileStoreWithLayer(self, layer_name),
             window,

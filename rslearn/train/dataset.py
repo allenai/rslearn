@@ -17,9 +17,7 @@ from rasterio.warp import Resampling
 import rslearn.train.transforms.transform
 from rslearn.config import (
     DType,
-    RasterFormatConfig,
-    RasterLayerConfig,
-    VectorLayerConfig,
+    LayerConfig,
 )
 from rslearn.dataset.dataset import Dataset
 from rslearn.dataset.window import Window, get_layer_and_group_from_dir_name
@@ -28,8 +26,6 @@ from rslearn.train.tasks import Task
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds
 from rslearn.utils.mp import star_imap_unordered
-from rslearn.utils.raster_format import load_raster_format
-from rslearn.utils.vector_format import load_vector_format
 
 from .transforms import Sequential
 
@@ -185,7 +181,7 @@ def read_raster_layer_for_data_input(
     bounds: PixelBounds,
     layer_name: str,
     group_idx: int,
-    layer_config: RasterLayerConfig,
+    layer_config: LayerConfig,
     data_input: DataInput,
 ) -> torch.Tensor:
     """Read a raster layer for a DataInput.
@@ -246,9 +242,7 @@ def read_raster_layer_for_data_input(
         )
         if band_set.format is None:
             raise ValueError(f"No format specified for {layer_name}")
-        raster_format = load_raster_format(
-            RasterFormatConfig(band_set.format["name"], band_set.format)
-        )
+        raster_format = band_set.instantiate_raster_format()
         raster_dir = window.get_raster_dir(
             layer_name, band_set.bands, group_idx=group_idx
         )
@@ -349,7 +343,6 @@ def read_data_input(
         images: list[torch.Tensor] = []
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
-            assert isinstance(layer_config, RasterLayerConfig)
             images.append(
                 read_raster_layer_for_data_input(
                     window, bounds, layer_name, group_idx, layer_config, data_input
@@ -363,8 +356,7 @@ def read_data_input(
         features: list[Feature] = []
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
-            assert isinstance(layer_config, VectorLayerConfig)
-            vector_format = load_vector_format(layer_config.format)
+            vector_format = layer_config.instantiate_vector_format()
             layer_dir = window.get_layer_dir(layer_name, group_idx=group_idx)
             cur_features = vector_format.decode_vector(
                 layer_dir, window.projection, window.bounds

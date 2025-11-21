@@ -18,9 +18,9 @@ import requests
 import shapely
 from upath import UPath
 
-from rslearn.config import QueryConfig, RasterLayerConfig
+from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources import DataSource, Item
+from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
@@ -314,55 +314,30 @@ class LandsatOliTirs(DataSource):
 
     def __init__(
         self,
-        config: RasterLayerConfig,
         username: str,
         sort_by: str | None = None,
         password: str | None = None,
         token: str | None = None,
         timeout: timedelta = timedelta(seconds=10),
+        context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new LandsatOliTirs instance.
 
         Args:
-            config: the LayerConfig of the layer containing this data source
             username: EROS username
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
             password: EROS password (see M2MAPIClient).
             token: EROS application token (see M2MAPIClient).
             timeout: timeout for requests.
+            context: the data source context.
         """
-        self.config = config
         self.sort_by = sort_by
         self.timeout = timeout
 
         self.client = M2MAPIClient(
             username, password=password, token=token, timeout=timeout
         )
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "LandsatOliTirs":
-        """Creates a new LandsatOliTirs instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("data_source is required")
-        d = config.data_source.config_dict
-
-        kwargs = dict(
-            config=config,
-            username=d["username"],
-            sort_by=d.get("sort_by"),
-        )
-
-        if "timeout_seconds" in d:
-            kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
-
-        # Optional config.
-        for k in ["password", "token"]:
-            if k not in d:
-                continue
-            kwargs[k] = d[k]
-
-        return LandsatOliTirs(**kwargs)
 
     def _scene_metadata_to_item(self, result: dict[str, Any]) -> LandsatOliTirsItem:
         """Convert scene metadata from the API to a LandsatOliTirsItem."""

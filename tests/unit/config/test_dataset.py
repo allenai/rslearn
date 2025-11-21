@@ -1,47 +1,63 @@
-"""Test the dataset configuration file.
+"""Tests for the rslearn.config.dataset module."""
 
-Mostly just makes sure there aren't runtime errors with the parsing.
-"""
-
-from rslearn.config import RasterLayerConfig, VectorLayerConfig
-
-
-class TestBandSetConfig:
-    """Test BandSetConfig."""
-
-    def test_class_names_option(self) -> None:
-        """Verify that config parsing works when class_names option is set."""
-        class_names = ["class0", "class1", "class2"]
-        layer_cfg_dict = {
-            "type": "raster",
-            "band_sets": [
-                {
-                    "dtype": "uint8",
-                    "bands": ["class"],
-                    "class_names": [class_names],
-                }
-            ],
-        }
-        layer_cfg = RasterLayerConfig.from_config(layer_cfg_dict)
-        assert len(layer_cfg.band_sets) == 1
-        band_set = layer_cfg.band_sets[0]
-        assert len(band_set.bands) == 1
-        assert band_set.class_names is not None
-        assert band_set.class_names[0] == class_names
+from rslearn.config.dataset import DType, LayerConfig
+from rslearn.data_sources.planetary_computer import Sentinel2
+from rslearn.utils.raster_format import SingleImageRasterFormat
+from rslearn.utils.vector_format import TileVectorFormat
 
 
-class TestVectorLayerConfig:
-    """Test VectorLayerConfig."""
+class TestLayerConfig:
+    """Tests for LayerConfig."""
 
-    def test_class_names_option(self) -> None:
-        """Verify that config parsing works when property_name/class_names are set."""
-        property_name = "my_class_prop"
-        class_names = ["class0", "class1", "class2"]
-        layer_cfg_dict = {
-            "type": "vector",
-            "class_property_name": property_name,
-            "class_names": class_names,
-        }
-        layer_cfg = VectorLayerConfig.from_config(layer_cfg_dict)
-        assert layer_cfg.class_property_name == property_name
-        assert layer_cfg.class_names == class_names
+    def test_custom_vector_format(self) -> None:
+        """Test layer configuration that specifies a custom vector format."""
+        layer_config = LayerConfig.model_validate(
+            {
+                "type": "vector",
+                "vector_format": {
+                    "class_path": "rslearn.utils.vector_format.TileVectorFormat",
+                    "init_args": {
+                        "tile_size": 256,
+                    },
+                },
+            }
+        )
+        vector_format = layer_config.instantiate_vector_format()
+        assert isinstance(vector_format, TileVectorFormat)
+        assert vector_format.tile_size == 256
+
+    def test_data_source(self) -> None:
+        """Test layer configuration that specifies a data source."""
+        layer_config = LayerConfig.model_validate(
+            {
+                "type": "raster",
+                "band_sets": [
+                    {
+                        "dtype": "uint8",
+                        "bands": ["R", "G", "B"],
+                        "format": {
+                            "class_path": "rslearn.utils.raster_format.SingleImageRasterFormat",
+                            "init_args": {
+                                "format": "png",
+                            },
+                        },
+                    },
+                ],
+                "data_source": {
+                    "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+                    "init_args": {
+                        "harmonize": True,
+                    },
+                },
+            }
+        )
+
+        band_set = layer_config.band_sets[0]
+        assert band_set.dtype == DType.UINT8
+        raster_format = band_set.instantiate_raster_format()
+        assert isinstance(raster_format, SingleImageRasterFormat)
+        assert raster_format.format == "png"
+
+        data_source = layer_config.instantiate_data_source()
+        assert isinstance(data_source, Sentinel2)
+        assert data_source.harmonize

@@ -6,11 +6,9 @@ from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
 
-import rslearn.data_sources
 from rslearn.config import (
     LayerConfig,
     LayerType,
-    RasterLayerConfig,
 )
 from rslearn.data_sources import DataSource, Item
 from rslearn.dataset.handler_summaries import (
@@ -24,7 +22,7 @@ from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, get_tile_store_with_layer
 
 from .dataset import Dataset
-from .materialize import Materializers
+from .materialize import Materializer, RasterMaterializer, VectorMaterializer
 from .window import Window, WindowLayerData
 
 logger = get_logger(__name__)
@@ -150,7 +148,7 @@ def prepare_dataset_windows(
             layer_summaries.append(
                 LayerPrepareSummary(
                     layer_name=layer_name,
-                    data_source_name=data_source_cfg.name,
+                    data_source_name=data_source_cfg.class_path,
                     duration_seconds=time.monotonic() - layer_start_time,
                     windows_prepared=0,
                     windows_skipped=windows_skipped,
@@ -162,9 +160,7 @@ def prepare_dataset_windows(
 
         # Create data source after checking for at least one window so it can be fast
         # if there are no windows to prepare.
-        data_source = rslearn.data_sources.data_source_from_config(
-            layer_cfg, dataset.path
-        )
+        data_source = layer_cfg.instantiate_data_source(dataset.path)
 
         # Get STGeometry for each window.
         geometries = []
@@ -215,7 +211,7 @@ def prepare_dataset_windows(
         layer_summaries.append(
             LayerPrepareSummary(
                 layer_name=layer_name,
-                data_source_name=data_source_cfg.name,
+                data_source_name=data_source_cfg.class_path,
                 duration_seconds=time.monotonic() - layer_start_time,
                 windows_prepared=windows_prepared,
                 windows_skipped=windows_skipped,
@@ -258,9 +254,7 @@ def ingest_dataset_windows(
         if not layer_cfg.data_source.ingest:
             continue
 
-        data_source = rslearn.data_sources.data_source_from_config(
-            layer_cfg, dataset.path
-        )
+        data_source = layer_cfg.instantiate_data_source(dataset.path)
 
         geometries_by_item: dict = {}
         for window in windows:
@@ -322,8 +316,7 @@ def is_window_ingested(
             for serialized_item in group:
                 item = Item.deserialize(serialized_item)
 
-                if layer_cfg.layer_type == LayerType.RASTER:
-                    assert isinstance(layer_cfg, RasterLayerConfig)
+                if layer_cfg.type == LayerType.RASTER:
                     for band_set in layer_cfg.band_sets:
                         # Make sure that layers exist containing each configured band.
                         # And that those layers are marked completed.
@@ -417,10 +410,13 @@ def materialize_window(
             f"Materializing {len(item_groups)} item groups in layer {layer_name} from tile store"
         )
 
-        if dataset.materializer_name:
-            materializer = Materializers[dataset.materializer_name]()
+        materializer: Materializer
+        if layer_cfg.type == LayerType.RASTER:
+            materializer = RasterMaterializer()
+        elif layer_cfg.type == LayerType.VECTOR:
+            materializer = VectorMaterializer()
         else:
-            materializer = Materializers[layer_cfg.layer_type.value]()
+            raise ValueError(f"unknown layer type {layer_cfg.type}")
 
         retry(
             fn=lambda: materializer.materialize(
@@ -491,10 +487,8 @@ def materialize_dataset_windows(
         if not layer_cfg.data_source:
             total_skipped = len(windows)
         else:
-            data_source_name = layer_cfg.data_source.name
-            data_source = rslearn.data_sources.data_source_from_config(
-                layer_cfg, dataset.path
-            )
+            data_source_name = layer_cfg.data_source.class_path
+            data_source = layer_cfg.instantiate_data_source(dataset.path)
 
             for window in windows:
                 window_summary = materialize_window(

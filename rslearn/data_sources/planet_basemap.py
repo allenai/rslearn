@@ -9,9 +9,9 @@ import requests
 import shapely
 from upath import UPath
 
-from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
+from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources import DataSource, Item
+from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
@@ -68,21 +68,20 @@ class PlanetBasemap(DataSource):
 
     def __init__(
         self,
-        config: RasterLayerConfig,
         series_id: str,
         bands: list[str],
         api_key: str | None = None,
+        context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new Planet instance.
 
         Args:
-            config: the LayerConfig of the layer containing this data source
             series_id: the series of mosaics to use.
             bands: list of band names to use.
             api_key: optional Planet API key (it can also be provided via PL_API_KEY
                 environmnet variable).
+            context: the data source context
         """
-        self.config = config
         self.series_id = series_id
         self.bands = bands
 
@@ -93,26 +92,6 @@ class PlanetBasemap(DataSource):
 
         # Lazily load mosaics.
         self.mosaics: dict | None = None
-
-    @staticmethod
-    def from_config(config: LayerConfig, ds_path: UPath) -> "PlanetBasemap":
-        """Creates a new PlanetBasemap instance from a configuration dictionary."""
-        assert isinstance(config, RasterLayerConfig)
-        if config.data_source is None:
-            raise ValueError("data_source is required")
-        d = config.data_source.config_dict
-        kwargs = dict(
-            config=config,
-            series_id=d["series_id"],
-            bands=d["bands"],
-        )
-        optional_keys = [
-            "api_key",
-        ]
-        for optional_key in optional_keys:
-            if optional_key in d:
-                kwargs[optional_key] = d[optional_key]
-        return PlanetBasemap(**kwargs)
 
     def _load_mosaics(self) -> dict[str, STGeometry]:
         """Lazily load mosaics in the configured series_id from Planet API.

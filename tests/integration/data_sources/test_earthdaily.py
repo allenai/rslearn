@@ -60,7 +60,7 @@ def test_cache_dir(tmp_path: pathlib.Path, edc_preview_geometry: STGeometry) -> 
     data_source = EarthDaily(
         collection_name="edc-preview",
         asset_bands={"image_file_NIR": [band_name]},
-        cache_dir=cache_dir,
+        cache_dir=str(cache_dir),
     )
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     data_source.get_items([edc_preview_geometry], query_config)[0]

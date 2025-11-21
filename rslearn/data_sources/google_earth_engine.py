@@ -20,7 +20,7 @@ from google.cloud import storage
 from upath import UPath
 
 import rslearn.data_sources.utils
-from rslearn.config import DType, LayerConfig, RasterLayerConfig
+from rslearn.config import DType, LayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.dataset.window import Window
@@ -36,7 +36,7 @@ from rslearn.utils.raster_format import (
 )
 from rslearn.utils.rtree_index import RtreeIndex, get_cached_rtree
 
-from .data_source import DataSource, Item, QueryConfig
+from .data_source import DataSource, DataSourceContext, Item, QueryConfig
 
 logger = get_logger(__name__)
 
@@ -61,33 +61,54 @@ class GEE(DataSource, TileStore):
         self,
         collection_name: str,
         gcs_bucket_name: str,
-        bands: list[str],
-        index_cache_dir: UPath,
+        index_cache_dir: str,
         service_account_name: str,
         service_account_credentials: str,
+        bands: list[str] | None = None,
         filters: list[tuple[str, Any]] | None = None,
         dtype: DType | None = None,
+        context: DataSourceContext = DataSourceContext(),
     ) -> None:
         """Initialize a new GEE instance.
 
         Args:
             collection_name: the Earth Engine ImageCollection to ingest images from
             gcs_bucket_name: the Cloud Storage bucket to export GEE images to
-            bands: the list of bands to ingest
             index_cache_dir: cache directory to store rtree index
             service_account_name: name of the service account to use for authentication
             service_account_credentials: service account credentials filename
+            bands: the list of bands to ingest, in case the layer config is not present
+                in the context.
             filters: optional list of tuples (property_name, property_value) to filter
                 images (using ee.Filter.eq)
             dtype: optional desired array data type. If the data obtained from GEE does
                 not match this type, then it is converted.
+            context: the data source context.
         """
         self.collection_name = collection_name
         self.gcs_bucket_name = gcs_bucket_name
-        self.bands = bands
-        self.index_cache_dir = index_cache_dir
         self.filters = filters
         self.dtype = dtype
+
+        # Get index cache dir depending on dataset path.
+        if context.ds_path is not None:
+            self.index_cache_dir = join_upath(context.ds_path, index_cache_dir)
+        else:
+            self.index_cache_dir = UPath(index_cache_dir)
+
+        # Get bands we need to export.
+        if context.layer_config is not None:
+            self.bands = [
+                band
+                for band_set in context.layer_config.band_sets
+                for band in band_set.bands
+            ]
+        elif bands is not None:
+            self.bands = bands
+        else:
+            raise ValueError(
+                "bands must be specified if layer_config is not present in the context"
+            )
 
         self.bucket = storage.Client().bucket(self.gcs_bucket_name)
 
@@ -98,27 +119,6 @@ class GEE(DataSource, TileStore):
 
         self.index_cache_dir.mkdir(parents=True, exist_ok=True)
         self.rtree_index = get_cached_rtree(self.index_cache_dir, self._build_index)
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "GEE":
-        """Creates a new GEE instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("data_source is required in config")
-        d = config.data_source.config_dict
-        bands = [band for band_set in config.band_sets for band in band_set.bands]
-        kwargs = {
-            "collection_name": d["collection_name"],
-            "gcs_bucket_name": d["gcs_bucket_name"],
-            "bands": bands,
-            "service_account_name": d["service_account_name"],
-            "service_account_credentials": d["service_account_credentials"],
-            "filters": d.get("filters"),
-            "index_cache_dir": join_upath(ds_path, d["index_cache_dir"]),
-        }
-        if "dtype" in d:
-            kwargs["dtype"] = DType(d["dtype"])
-
-        return GEE(**kwargs)
 
     def get_collection(self) -> ee.ImageCollection:
         """Returns the Earth Engine image collection for this data source."""
@@ -578,7 +578,6 @@ class GEE(DataSource, TileStore):
             layer_name: the name of this layer
             layer_cfg: the config of this layer
         """
-        assert isinstance(layer_cfg, RasterLayerConfig)
         RasterMaterializer().materialize(
             TileStoreWithLayer(self, layer_name),
             window,
@@ -600,9 +599,10 @@ class GoogleSatelliteEmbeddings(GEE):
     def __init__(
         self,
         gcs_bucket_name: str,
-        index_cache_dir: UPath,
+        index_cache_dir: str,
         service_account_name: str,
         service_account_credentials: str,
+        context: DataSourceContext = DataSourceContext(),
     ):
         """Create a new GoogleSatelliteEmbeddings. See GEE for the arguments."""
         super().__init__(
@@ -612,21 +612,8 @@ class GoogleSatelliteEmbeddings(GEE):
             index_cache_dir=index_cache_dir,
             service_account_name=service_account_name,
             service_account_credentials=service_account_credentials,
+            context=context,
         )
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "GEE":
-        """Creates a new GEE instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("data_source is required in config")
-        d = config.data_source.config_dict
-        kwargs = {
-            "gcs_bucket_name": d["gcs_bucket_name"],
-            "index_cache_dir": join_upath(ds_path, d["index_cache_dir"]),
-            "service_account_name": d["service_account_name"],
-            "service_account_credentials": d["service_account_credentials"],
-        }
-        return GoogleSatelliteEmbeddings(**kwargs)
 
     # Override to add conversion to uint16.
     def item_to_image(self, item: Item) -> ee.image.Image:

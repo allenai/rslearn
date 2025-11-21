@@ -51,8 +51,10 @@ def local_files_dataset(tmp_path: pathlib.Path) -> Dataset:
             "local_file": {
                 "type": "vector",
                 "data_source": {
-                    "name": "rslearn.data_sources.local_files.LocalFiles",
-                    "src_dir": src_data_dir,
+                    "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                    "init_args": {
+                        "src_dir": src_data_dir,
+                    },
                 },
             },
         }

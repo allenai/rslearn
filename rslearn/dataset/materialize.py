@@ -1,7 +1,6 @@
 """Classes to implement dataset materialization."""
 
-from collections.abc import Callable
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -11,45 +10,17 @@ from rslearn.config import (
     BandSetConfig,
     CompositingMethod,
     LayerConfig,
-    RasterFormatConfig,
-    RasterLayerConfig,
-    VectorLayerConfig,
 )
 from rslearn.data_sources.data_source import ItemType
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, Projection
-from rslearn.utils.raster_format import load_raster_format
-from rslearn.utils.vector_format import load_vector_format
 
 from .remap import Remapper, load_remapper
 from .window import Window
 
-_MaterializerT = TypeVar("_MaterializerT", bound="Materializer")
 
-
-class _MaterializerRegistry(dict[str, type["Materializer"]]):
-    """Registry for Materializer classes."""
-
-    def register(
-        self, name: str
-    ) -> Callable[[type[_MaterializerT]], type[_MaterializerT]]:
-        """Decorator to register a materializer class."""
-
-        def decorator(cls: type[_MaterializerT]) -> type[_MaterializerT]:
-            self[name] = cls
-            return cls
-
-        return decorator
-
-
-Materializers = _MaterializerRegistry()
-
-
-LayerConfigType = TypeVar("LayerConfigType", bound=LayerConfig)
-
-
-class Materializer(Generic[LayerConfigType]):
+class Materializer:
     """An abstract class that materializes data from a tile store."""
 
     def materialize(
@@ -57,7 +28,7 @@ class Materializer(Generic[LayerConfigType]):
         tile_store: TileStoreWithLayer,
         window: Window,
         layer_name: str,
-        layer_cfg: LayerConfigType,
+        layer_cfg: LayerConfig,
         item_groups: list[list[ItemType]],
     ) -> None:
         """Materialize portions of items corresponding to this window into the dataset.
@@ -473,7 +444,7 @@ def build_composite(
     group: list[ItemType],
     compositing_method: CompositingMethod,
     tile_store: TileStoreWithLayer,
-    layer_cfg: RasterLayerConfig,
+    layer_cfg: LayerConfig,
     band_cfg: BandSetConfig,
     projection: Projection,
     bounds: PixelBounds,
@@ -503,13 +474,12 @@ def build_composite(
         band_dtype=band_cfg.dtype.value,
         tile_store=tile_store,
         projection=projection,
-        resampling_method=layer_cfg.resampling_method,
+        resampling_method=layer_cfg.resampling_method.get_rasterio_resampling(),
         remapper=remapper,
     )
 
 
-@Materializers.register("raster")
-class RasterMaterializer(Materializer[RasterLayerConfig]):
+class RasterMaterializer(Materializer):
     """A Materializer for raster data."""
 
     def materialize(
@@ -517,7 +487,7 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
         tile_store: TileStoreWithLayer,
         window: Window,
         layer_name: str,
-        layer_cfg: RasterLayerConfig,
+        layer_cfg: LayerConfig,
         item_groups: list[list[ItemType]],
     ) -> None:
         """Materialize portions of items corresponding to this window into the dataset.
@@ -529,8 +499,6 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
             layer_cfg: the configuration of the layer to materialize
             item_groups: the items associated with this window and layer
         """
-        assert isinstance(layer_cfg, RasterLayerConfig)
-
         for band_cfg in layer_cfg.band_sets:
             # band_cfg could specify zoom_offset and maybe other parameters that affect
             # projection/bounds, so use the corrected projection/bounds.
@@ -543,9 +511,7 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
             if band_cfg.remap:
                 remapper = load_remapper(band_cfg.remap)
 
-            raster_format = load_raster_format(
-                RasterFormatConfig(band_cfg.format["name"], band_cfg.format)
-            )
+            raster_format = band_cfg.instantiate_raster_format()
 
             for group_id, group in enumerate(item_groups):
                 composite = build_composite(
@@ -569,7 +535,6 @@ class RasterMaterializer(Materializer[RasterLayerConfig]):
             window.mark_layer_completed(layer_name, group_id)
 
 
-@Materializers.register("vector")
 class VectorMaterializer(Materializer):
     """A Materializer for vector data."""
 
@@ -590,8 +555,7 @@ class VectorMaterializer(Materializer):
             layer_cfg: the configuration of the layer to materialize
             item_groups: the items associated with this window and layer
         """
-        assert isinstance(layer_cfg, VectorLayerConfig)
-        vector_format = load_vector_format(layer_cfg.format)
+        vector_format = layer_cfg.instantiate_vector_format()
 
         for group_id, group in enumerate(item_groups):
             features: list[Feature] = []

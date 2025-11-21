@@ -73,8 +73,10 @@ class TestPrepareDatasetWindows:
                 "local_file": {
                     "type": "vector",
                     "data_source": {
-                        "name": "rslearn.data_sources.local_files.LocalFiles",
-                        "src_dir": str(src_data_dir),
+                        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                        "init_args": {
+                            "src_dir": str(src_data_dir),
+                        },
                         "query_config": {
                             "space_mode": "INTERSECTS",
                             "min_matches": 3,
@@ -173,8 +175,10 @@ class TestPrepareDatasetWindows:
                 "local_file": {
                     "type": "vector",
                     "data_source": {
-                        "name": "rslearn.data_sources.local_files.LocalFiles",
-                        "src_dir": str(src_data_dir),
+                        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                        "init_args": {
+                            "src_dir": str(src_data_dir),
+                        },
                         "query_config": {
                             "space_mode": "INTERSECTS",
                             "min_matches": 0,
@@ -269,8 +273,10 @@ class TestPrepareDatasetWindows:
                 "local_file": {
                     "type": "vector",
                     "data_source": {
-                        "name": "rslearn.data_sources.local_files.LocalFiles",
-                        "src_dir": str(src_data_dir),
+                        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                        "init_args": {
+                            "src_dir": str(src_data_dir),
+                        },
                         "query_config": {
                             "space_mode": "INTERSECTS",
                             "min_matches": 2,
@@ -377,8 +383,10 @@ class TestPrepareDatasetWindows:
                 "local_file": {
                     "type": "vector",
                     "data_source": {
-                        "name": "rslearn.data_sources.local_files.LocalFiles",
-                        "src_dir": str(src_data_dir),
+                        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                        "init_args": {
+                            "src_dir": str(src_data_dir),
+                        },
                         "query_config": {
                             "space_mode": "INTERSECTS",
                             "min_matches": 2,

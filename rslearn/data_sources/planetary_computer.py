@@ -18,9 +18,9 @@ import shapely
 from rasterio.enums import Resampling
 from upath import UPath
 
-from rslearn.config import LayerConfig, QueryConfig, RasterLayerConfig
+from rslearn.config import LayerConfig, QueryConfig
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources import DataSource, Item
+from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
@@ -96,8 +96,9 @@ class PlanetaryComputer(DataSource, TileStore):
         sort_ascending: bool = True,
         timeout: timedelta = timedelta(seconds=10),
         skip_items_missing_assets: bool = False,
-        cache_dir: UPath | None = None,
+        cache_dir: str | None = None,
         max_items_per_client: int | None = None,
+        context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new PlanetaryComputer instance.
 
@@ -117,6 +118,7 @@ class PlanetaryComputer(DataSource, TileStore):
             max_items_per_client: number of STAC items to process before recreating
                 the client to prevent memory leaks from the resolved objects cache.
                 Defaults to DEFAULT_MAX_ITEMS_PER_CLIENT.
+            context: the data source context.
         """
         self.collection_name = collection_name
         self.asset_bands = asset_bands
@@ -125,45 +127,22 @@ class PlanetaryComputer(DataSource, TileStore):
         self.sort_ascending = sort_ascending
         self.timeout = timeout
         self.skip_items_missing_assets = skip_items_missing_assets
-        self.cache_dir = cache_dir
         self.max_items_per_client = (
             max_items_per_client or self.DEFAULT_MAX_ITEMS_PER_CLIENT
         )
 
-        if self.cache_dir is not None:
+        if cache_dir is not None:
+            if context.ds_path is not None:
+                self.cache_dir = join_upath(context.ds_path, cache_dir)
+            else:
+                self.cache_dir = UPath(cache_dir)
+
             self.cache_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            self.cache_dir = None
 
         self.client: pystac_client.Client | None = None
         self._client_item_count = 0
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "PlanetaryComputer":
-        """Creates a new PlanetaryComputer instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("config.data_source is required")
-        d = config.data_source.config_dict
-        kwargs: dict[str, Any] = dict(
-            collection_name=d["collection_name"],
-            asset_bands=d["asset_bands"],
-        )
-
-        if "timeout_seconds" in d:
-            kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
-
-        if "cache_dir" in d:
-            kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
-
-        simple_optionals = [
-            "query",
-            "sort_by",
-            "sort_ascending",
-            "max_items_per_client",
-        ]
-        for k in simple_optionals:
-            if k in d:
-                kwargs[k] = d[k]
-
-        return PlanetaryComputer(**kwargs)
 
     def _load_client(
         self,
@@ -545,7 +524,6 @@ class PlanetaryComputer(DataSource, TileStore):
             layer_name: the name of this layer
             layer_cfg: the config of this layer
         """
-        assert isinstance(layer_cfg, RasterLayerConfig)
         RasterMaterializer().materialize(
             TileStoreWithLayer(self, layer_name),
             window,
@@ -581,71 +559,47 @@ class Sentinel2(PlanetaryComputer):
 
     def __init__(
         self,
-        assets: list[str] | None = None,
         harmonize: bool = False,
+        assets: list[str] | None = None,
+        context: DataSourceContext = DataSourceContext(),
         **kwargs: Any,
     ):
         """Initialize a new Sentinel2 instance.
 
         Args:
-            assets: which assets in BANDS to ingest/materialize. None to ingest all
-                assets.
             harmonize: harmonize pixel values across different processing baselines,
                 see https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
+            assets: list of asset names to ingest, or None to ingest all assets. This
+                is only used if the layer config is missing from the context.
+            context: the data source context.
             kwargs: other arguments to pass to PlanetaryComputer.
         """
         self.harmonize = harmonize
 
-        if assets is None:
-            asset_bands = self.BANDS
-        else:
+        # Determine which assets we need based on the bands in the layer config.
+        if context.layer_config is not None:
+            asset_bands: dict[str, list[str]] = {}
+            for asset_key, band_names in self.BANDS.items():
+                # See if the bands provided by this asset intersect with the bands in
+                # at least one configured band set.
+                for band_set in context.layer_config.band_sets:
+                    if not set(band_set.bands).intersection(set(band_names)):
+                        continue
+                    asset_bands[asset_key] = band_names
+                    break
+        elif assets is not None:
             asset_bands = {asset_key: self.BANDS[asset_key] for asset_key in assets}
+        else:
+            asset_bands = self.BANDS
 
         super().__init__(
             collection_name=self.COLLECTION_NAME,
             asset_bands=asset_bands,
             # Skip since all of the items should have the same assets.
             skip_items_missing_assets=True,
+            context=context,
             **kwargs,
         )
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Sentinel2":
-        """Creates a new Sentinel2 instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("config.data_source is required")
-        d = config.data_source.config_dict
-
-        # Determine the needed assets based on the band sets.
-        needed_assets: set[str] = set()
-        for asset_key, asset_bands in Sentinel2.BANDS.items():
-            for band_set in config.band_sets:
-                if not set(band_set.bands).intersection(set(asset_bands)):
-                    continue
-                needed_assets.add(asset_key)
-
-        kwargs: dict[str, Any] = dict(
-            assets=list(needed_assets),
-        )
-
-        if "timeout_seconds" in d:
-            kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
-
-        if "cache_dir" in d:
-            kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
-
-        simple_optionals = [
-            "harmonize",
-            "query",
-            "sort_by",
-            "sort_ascending",
-            "max_items_per_client",
-        ]
-        for k in simple_optionals:
-            if k in d:
-                kwargs[k] = d[k]
-
-        return Sentinel2(**kwargs)
 
     def _get_product_xml(self, item: PlanetaryComputerItem) -> ET.Element:
         asset_url = planetary_computer.sign(item.asset_urls["product-metadata"])
@@ -779,54 +733,41 @@ class Sentinel1(PlanetaryComputer):
 
     def __init__(
         self,
-        band_names: list[str],
+        band_names: list[str] | None = None,
+        context: DataSourceContext = DataSourceContext(),
         **kwargs: Any,
     ):
         """Initialize a new Sentinel1 instance.
 
         Args:
-            band_names: list of bands to try to ingest.
+            band_names: list of bands to try to ingest, if the layer config is missing
+                from the context.
+            context: the data source context.
             kwargs: additional arguments to pass to PlanetaryComputer.
         """
+        # Get band names from the config if possible. If it isn't in the context, then
+        # we have to use the provided band names.
+        if context.layer_config is not None:
+            band_names = list(
+                {
+                    band
+                    for band_set in context.layer_config.band_sets
+                    for band in band_set.bands
+                }
+            )
+        if band_names is None:
+            raise ValueError(
+                "band_names must be set if layer config is not in the context"
+            )
+        # For Sentinel-1, the asset key should be the same as the band name (and all
+        # assets have one band).
         asset_bands = {band: [band] for band in band_names}
         super().__init__(
             collection_name=self.COLLECTION_NAME,
             asset_bands=asset_bands,
+            context=context,
             **kwargs,
         )
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Sentinel1":
-        """Creates a new  Sentinel1 instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("config.data_source is required")
-        d = config.data_source.config_dict
-        band_names: set[str] = set()
-        for band_set in config.band_sets:
-            for band in band_set.bands:
-                band_names.add(band)
-
-        kwargs: dict[str, Any] = dict(
-            band_names=list(band_names),
-        )
-
-        if "timeout_seconds" in d:
-            kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
-
-        if "cache_dir" in d:
-            kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
-
-        simple_optionals = [
-            "query",
-            "sort_by",
-            "sort_ascending",
-            "max_items_per_client",
-        ]
-        for k in simple_optionals:
-            if k in d:
-                kwargs[k] = d[k]
-
-        return Sentinel1(**kwargs)
 
 
 class Naip(PlanetaryComputer):
@@ -840,42 +781,18 @@ class Naip(PlanetaryComputer):
 
     def __init__(
         self,
+        context: DataSourceContext = DataSourceContext(),
         **kwargs: Any,
     ):
         """Initialize a new Naip instance.
 
         Args:
-            band_names: list of bands to try to ingest.
+            context: the data source context.
             kwargs: additional arguments to pass to PlanetaryComputer.
         """
         super().__init__(
             collection_name=self.COLLECTION_NAME,
             asset_bands=self.ASSET_BANDS,
+            context=context,
             **kwargs,
         )
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Naip":
-        """Creates a new Naip instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("config.data_source is required")
-        d = config.data_source.config_dict
-        kwargs = {}
-
-        if "timeout_seconds" in d:
-            kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
-
-        if "cache_dir" in d:
-            kwargs["cache_dir"] = join_upath(ds_path, d["cache_dir"])
-
-        simple_optionals = [
-            "query",
-            "sort_by",
-            "sort_ascending",
-            "max_items_per_client",
-        ]
-        for k in simple_optionals:
-            if k in d:
-                kwargs[k] = d[k]
-
-        return Naip(**kwargs)

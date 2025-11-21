@@ -7,11 +7,7 @@ from pytest_httpserver import HTTPServer
 from upath import UPath
 
 from rslearn.config import (
-    BandSetConfig,
-    DType,
-    LayerType,
     QueryConfig,
-    RasterLayerConfig,
     SpaceMode,
 )
 from rslearn.const import WGS84_PROJECTION
@@ -115,12 +111,7 @@ def test_worldpop(
     # But we need to customize the URL that it retrieves from.
     monkeypatch.setattr(WorldPop, "INDEX_URLS", [httpserver.url_for("/")])
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
-    layer_config = RasterLayerConfig(
-        LayerType.RASTER,
-        [BandSetConfig(config_dict={}, dtype=DType.FLOAT32, bands=[TEST_BAND])],
-    )
     data_source = WorldPop(
-        config=layer_config,
         worldpop_dir=UPath(tmp_path) / "worldpop",
     )
 

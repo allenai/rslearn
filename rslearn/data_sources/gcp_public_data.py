@@ -18,10 +18,9 @@ import tqdm
 from google.cloud import bigquery, storage
 from upath import UPath
 
-from rslearn.config import QueryConfig, RasterLayerConfig
+from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources import DataSource, Item
-from rslearn.data_sources.raster_source import is_raster_needed
+from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
@@ -157,19 +156,19 @@ class Sentinel2(DataSource):
 
     def __init__(
         self,
-        config: RasterLayerConfig,
-        index_cache_dir: UPath,
+        index_cache_dir: str,
         sort_by: str | None = None,
         use_rtree_index: bool = True,
         harmonize: bool = False,
         rtree_time_range: tuple[datetime, datetime] | None = None,
-        rtree_cache_dir: UPath | None = None,
+        rtree_cache_dir: str | None = None,
         use_bigquery: bool | None = None,
+        bands: list[str] | None = None,
+        context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new Sentinel2 instance.
 
         Args:
-            config: the LayerConfig of the layer containing this data source.
             index_cache_dir: local directory to cache the index contents, as well as
                 individual product metadata files.
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
@@ -193,6 +192,9 @@ class Sentinel2(DataSource):
                 credentials, set use_bigquery=False and use_rtree_index=False. The
                 default value is None which enables BigQuery when use_rtree_index=True
                 and disables when use_rtree_index=False.
+            bands: the bands to download, or None to download all bands. This is only
+                used if the layer config is not in the context.
+            context: the data source context.
         """
         if use_bigquery is None:
             use_bigquery = use_rtree_index
@@ -201,22 +203,52 @@ class Sentinel2(DataSource):
                 "use_bigquery must be enabled if use_rtree_index is enabled"
             )
 
-        self.config = config
-        self.index_cache_dir = index_cache_dir
+        # Resolve index_cache_dir and rtree_cache_dir depending on dataset context.
+        if context.ds_path is not None:
+            self.index_cache_dir = join_upath(context.ds_path, index_cache_dir)
+        else:
+            self.index_cache_dir = UPath(index_cache_dir)
+
+        if rtree_cache_dir is None:
+            self.rtree_cache_dir = self.index_cache_dir
+        elif context.ds_path is not None:
+            self.rtree_cache_dir = join_upath(context.ds_path, rtree_cache_dir)
+        else:
+            self.rtree_cache_dir = UPath(rtree_cache_dir)
+
         self.sort_by = sort_by
         self.harmonize = harmonize
         self.use_bigquery = use_bigquery
 
         self.index_cache_dir.mkdir(parents=True, exist_ok=True)
 
+        # Determine the subset of bands that are needed based on the layer config.
+        self.needed_bands: list[tuple[str, list[str]]]
+        if context.layer_config is not None:
+            self.needed_bands = []
+            for fname, cur_bands in self.BANDS:
+                # See if the bands provided by this file intersect with the bands in at
+                # least one configured band set.
+                for band_set in context.layer_config.band_sets:
+                    if not set(band_set.bands).intersection(cur_bands):
+                        continue
+                    self.needed_bands.append((fname, cur_bands))
+                    break
+        elif bands is not None:
+            self.needed_bands = []
+            for fname, cur_bands in self.BANDS:
+                if not set(bands).intersection(cur_bands):
+                    continue
+                self.needed_bands.append((fname, cur_bands))
+        else:
+            self.needed_bands = list(self.BANDS)
+
         self.bucket = storage.Client.create_anonymous_client().bucket(self.BUCKET_NAME)
         self.rtree_index: Any | None = None
         if use_rtree_index:
             from rslearn.utils.rtree_index import RtreeIndex, get_cached_rtree
 
-            if rtree_cache_dir is None:
-                rtree_cache_dir = self.index_cache_dir
-            rtree_cache_dir.mkdir(parents=True, exist_ok=True)
+            self.rtree_cache_dir.mkdir(parents=True, exist_ok=True)
 
             def build_fn(index: RtreeIndex) -> None:
                 """Build the RtreeIndex from items in the data source."""
@@ -226,34 +258,7 @@ class Sentinel2(DataSource):
                     for shp in flatten_shape(item.geometry.shp):
                         index.insert(shp.bounds, json.dumps(item.serialize()))
 
-            self.rtree_index = get_cached_rtree(rtree_cache_dir, build_fn)
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Sentinel2":
-        """Creates a new Sentinel2 instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("config.data_source is required")
-        d = config.data_source.config_dict
-        kwargs = dict(
-            config=config,
-            index_cache_dir=join_upath(ds_path, d["index_cache_dir"]),
-        )
-
-        if "rtree_time_range" in d:
-            kwargs["rtree_time_range"] = (
-                datetime.fromisoformat(d["rtree_time_range"][0]),
-                datetime.fromisoformat(d["rtree_time_range"][1]),
-            )
-
-        if "rtree_cache_dir" in d:
-            kwargs["rtree_cache_dir"] = join_upath(ds_path, d["rtree_cache_dir"])
-
-        simple_optionals = ["sort_by", "use_rtree_index", "harmonize", "use_bigquery"]
-        for k in simple_optionals:
-            if k in d:
-                kwargs[k] = d[k]
-
-        return Sentinel2(**kwargs)
+            self.rtree_index = get_cached_rtree(self.rtree_cache_dir, build_fn)
 
     def _read_bigquery(
         self,
@@ -833,9 +838,7 @@ class Sentinel2(DataSource):
             geometries: a list of geometries needed for each item
         """
         for item in items:
-            for suffix, band_names in self.BANDS:
-                if not is_raster_needed(band_names, self.config.band_sets):
-                    continue
+            for suffix, band_names in self.needed_bands:
                 if tile_store.is_raster_ready(item.name, band_names):
                     continue
 

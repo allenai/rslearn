@@ -6,7 +6,7 @@ import multiprocessing
 import tqdm
 from upath import UPath
 
-from rslearn.config import load_layer_config
+from rslearn.config import DatasetConfig
 from rslearn.log_utils import get_logger
 from rslearn.template_params import substitute_env_vars_in_string
 from rslearn.tile_stores import TileStore, load_tile_store
@@ -55,19 +55,19 @@ class Dataset:
         with (self.path / "config.json").open("r") as f:
             config_content = f.read()
             config_content = substitute_env_vars_in_string(config_content)
-            config = json.loads(config_content)
+            config = DatasetConfig.model_validate(json.loads(config_content))
+
             self.layers = {}
-            for layer_name, d in config["layers"].items():
+            for layer_name, layer_config in config.layers.items():
                 # Layer names must not contain period, since we use period to
                 # distinguish different materialized groups within a layer.
                 assert "." not in layer_name, "layer names must not contain periods"
                 if layer_name in disabled_layers:
                     logger.warning(f"Layer {layer_name} is disabled")
                     continue
-                self.layers[layer_name] = load_layer_config(d)
+                self.layers[layer_name] = layer_config
 
-            self.tile_store_config = config.get("tile_store", None)
-            self.materializer_name = config.get("materialize")
+            self.tile_store_config = config.tile_store
 
     def _get_index(self) -> DatasetIndex | None:
         index_fname = self.path / DatasetIndex.FNAME

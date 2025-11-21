@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import shapely
 from upath import UPath
 
-from rslearn.config import LayerType, QueryConfig, SpaceMode, VectorLayerConfig
+from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.openstreetmap import FeatureType, Filter, OpenStreetMap
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
@@ -29,13 +29,8 @@ class TestOpenStreetMap:
             ),
         )
 
-        layer_config = VectorLayerConfig(
-            LayerType.VECTOR,
-        )
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
-        # Is there a smaller area we can use?
         data_source = OpenStreetMap(
-            config=layer_config,
             pbf_fnames=[
                 UPath(
                     "https://download.geofabrik.de/north-america/us/delaware-latest.osm.pbf"
