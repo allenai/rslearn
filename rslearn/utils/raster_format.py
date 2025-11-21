@@ -5,7 +5,6 @@ import json
 from typing import Any, BinaryIO
 
 import affine
-import jsonargparse
 import numpy as np
 import numpy.typing as npt
 import rasterio
@@ -17,7 +16,6 @@ from upath import UPath
 from rslearn.const import TILE_SIZE
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import open_rasterio_upath_reader, open_rasterio_upath_writer
-from rslearn.utils.jsonargparse import init_jsonargparse
 
 from .geometry import PixelBounds, Projection
 
@@ -751,13 +749,3 @@ class SingleImageRasterFormat(RasterFormat):
         if "format" in config:
             kwargs["format"] = config["format"]
         return SingleImageRasterFormat(**kwargs)
-
-
-def load_raster_format(config: dict[str, Any]) -> RasterFormat:
-    """Loads a RasterFormat from the jsonargparse config dict."""
-    init_jsonargparse()
-    parser = jsonargparse.ArgumentParser()
-    parser.add_argument("--raster_format", type=RasterFormat)
-    cfg = parser.parse_object({"raster_format": config})
-    raster_format = parser.instantiate_classes(cfg).raster_format
-    return raster_format

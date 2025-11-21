@@ -4,7 +4,6 @@ import json
 from enum import Enum
 from typing import Any
 
-import jsonargparse
 import shapely
 from rasterio.crs import CRS
 from upath import UPath
@@ -12,7 +11,6 @@ from upath import UPath
 from rslearn.const import WGS84_PROJECTION
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import open_atomic
-from rslearn.utils.jsonargparse import init_jsonargparse
 
 from .feature import Feature
 from .geometry import PixelBounds, Projection, STGeometry, safely_reproject_and_clip
@@ -408,13 +406,3 @@ class GeojsonVectorFormat(VectorFormat):
         if "coordinate_mode" in config:
             kwargs["coordinate_mode"] = GeojsonCoordinateMode(config["coordinate_mode"])
         return GeojsonVectorFormat(**kwargs)
-
-
-def load_vector_format(config: dict[str, Any]) -> VectorFormat:
-    """Loads a RasterFormat from the jsonargparse config dict."""
-    init_jsonargparse()
-    parser = jsonargparse.ArgumentParser()
-    parser.add_argument("--vector_format", type=VectorFormat)
-    cfg = parser.parse_object({"vector_format": config})
-    vector_format = parser.instantiate_classes(cfg).vector_format
-    return vector_format

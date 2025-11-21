@@ -15,8 +15,6 @@ from rslearn.data_sources.data_source import ItemType
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, Projection
-from rslearn.utils.raster_format import load_raster_format
-from rslearn.utils.vector_format import load_vector_format
 
 from .remap import Remapper, load_remapper
 from .window import Window
@@ -513,7 +511,7 @@ class RasterMaterializer(Materializer):
             if band_cfg.remap:
                 remapper = load_remapper(band_cfg.remap)
 
-            raster_format = load_raster_format(band_cfg.format)
+            raster_format = band_cfg.instantiate_raster_format()
 
             for group_id, group in enumerate(item_groups):
                 composite = build_composite(
@@ -557,7 +555,7 @@ class VectorMaterializer(Materializer):
             layer_cfg: the configuration of the layer to materialize
             item_groups: the items associated with this window and layer
         """
-        vector_format = load_vector_format(layer_cfg.vector_format)
+        vector_format = layer_cfg.instantiate_vector_format()
 
         for group_id, group in enumerate(item_groups):
             features: list[Feature] = []

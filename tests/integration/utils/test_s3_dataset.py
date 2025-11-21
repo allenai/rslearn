@@ -14,7 +14,6 @@ from rslearn.dataset.manage import (
     prepare_dataset_windows,
 )
 from rslearn.utils import Feature, STGeometry
-from rslearn.utils.vector_format import load_vector_format
 
 
 class TestLocalFiles:
@@ -87,7 +86,7 @@ class TestLocalFiles:
 
         window = windows[0]
         layer_config = dataset.layers["local_file"]
-        vector_format = load_vector_format(layer_config.vector_format)
+        vector_format = layer_config.instantiate_vector_format()
         features = vector_format.decode_vector(
             window.get_layer_dir("local_file"), window.projection, window.bounds
         )

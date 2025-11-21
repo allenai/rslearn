@@ -1,10 +1,14 @@
 """Classes for storing configuration of a dataset."""
 
+import copy
+import functools
 import json
+import warnings
 from datetime import timedelta
 from enum import StrEnum
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
+import jsonargparse
 import numpy as np
 import numpy.typing as npt
 import pytimeparse
@@ -14,11 +18,21 @@ from pydantic import (
     ConfigDict,
     Field,
     PlainSerializer,
+    field_validator,
     model_validator,
 )
 from rasterio.enums import Resampling
+from upath import UPath
 
+from rslearn.log_utils import get_logger
 from rslearn.utils import PixelBounds, Projection
+from rslearn.utils.raster_format import RasterFormat
+from rslearn.utils.vector_format import VectorFormat
+
+if TYPE_CHECKING:
+    from rslearn.data_sources.data_source import DataSource
+
+logger = get_logger("__name__")
 
 
 def ensure_timedelta(v: Any) -> Any:
@@ -213,6 +227,52 @@ class BandSetConfig(BaseModel):
             )
         return projection, bounds
 
+    @field_validator("format", mode="before")
+    @classmethod
+    def convert_format_from_legacy(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Support legacy format of the RasterFormat.
+
+        The legacy format sets 'name' instead of 'class_path', and uses custom parsing
+        for the init_args.
+        """
+        if "name" not in v:
+            # New version, it is all good.
+            return v
+
+        warnings.warn(
+            "`format = {'name': ...}` is deprecated; "
+            "use `{'class_path': '...', 'init_args': {...}}` instead.",
+            DeprecationWarning,
+        )
+
+        legacy_name_to_class_path = {
+            "image_tile": "rslearn.utils.raster_format.ImageTileRasterFormat",
+            "geotiff": "rslearn.utils.raster_format.GeotiffRasterFormat",
+            "single_image": "rslearn.utils.raster_format.SingleImageRasterFormat",
+        }
+        if v["name"] not in legacy_name_to_class_path:
+            raise ValueError(
+                f"could not parse legacy format with unknown raster format {v['name']}"
+            )
+        init_args = dict(v)
+        class_path = legacy_name_to_class_path[init_args.pop("name")]
+
+        return dict(
+            class_path=class_path,
+            init_args=init_args,
+        )
+
+    def instantiate_raster_format(self) -> RasterFormat:
+        """Instantiate the RasterFormat specified by this BandSetConfig."""
+        from rslearn.utils.jsonargparse import init_jsonargparse
+
+        init_jsonargparse()
+        parser = jsonargparse.ArgumentParser()
+        parser.add_argument("--raster_format", type=RasterFormat)
+        cfg = parser.parse_object({"raster_format": self.format})
+        raster_format = parser.instantiate_classes(cfg).raster_format
+        return raster_format
+
 
 class SpaceMode(StrEnum):
     """Spatial matching mode when looking up items corresponding to a window."""
@@ -332,6 +392,50 @@ class DataSourceConfig(BaseModel):
         description="Whether to ingest this layer (default True). If False, it will be directly materialized without ingestion.",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def convert_from_legacy(cls, d: dict[str, Any]) -> dict[str, Any]:
+        """Support legacy format of the DataSourceConfig.
+
+        The legacy format sets 'name' instead of 'class_path', and mixes the arguments
+        for the DataSource in with the DataSourceConfig keys.
+        """
+        if "name" not in d:
+            # New version, it is all good.
+            return d
+
+        warnings.warn(
+            "`Data source configuration {'name': ...}` is deprecated; "
+            "use `{'class_path': '...', 'init_args': {...}, ...}` instead.",
+            DeprecationWarning,
+        )
+
+        class_path = d["name"]
+        ds_init_args: dict[str, Any] = {}
+        for k, v in d.items():
+            if k == "name":
+                continue
+            if k in cls.model_fields:
+                continue
+            ds_init_args[k] = v
+
+        # Some legacy configs erroneously specify these keys, which are now caught by
+        # validation. But we still want those specific legacy configs to work.
+        if (
+            class_path == "rslearn.data_sources.planetary_computer.Sentinel2"
+            and "max_cloud_cover" in ds_init_args
+        ):
+            warnings.warn(
+                "Data source configuration specifies invalid 'max_cloud_cover' option.",
+                DeprecationWarning,
+            )
+            del ds_init_args["max_cloud_cover"]
+
+        return dict(
+            class_path=class_path,
+            init_args=ds_init_args,
+        )
+
 
 class LayerType(StrEnum):
     """The layer type (raster or vector)."""
@@ -420,6 +524,63 @@ class LayerConfig(BaseModel):
         if not isinstance(other, LayerConfig):
             return False
         return self.model_dump() == other.model_dump()
+
+    @functools.cache
+    def instantiate_data_source(self, ds_path: UPath | None = None) -> "DataSource":
+        """Instantiate the data source specified by this config.
+
+        Args:
+            ds_path: optional dataset path to include in the DataSourceContext.
+
+        Returns:
+            the DataSource object.
+        """
+        from rslearn.data_sources.data_source import DataSource, DataSourceContext
+        from rslearn.utils.jsonargparse import data_source_context_serializer
+
+        logger.debug("getting a data source for dataset at %s", ds_path)
+        if self.data_source is None:
+            raise ValueError("This layer does not specify a data source")
+
+        # Inject the DataSourceContext into the args.
+        context = DataSourceContext(
+            ds_path=ds_path,
+            layer_config=self,
+        )
+        ds_config: dict[str, Any] = {
+            "class_path": self.data_source.class_path,
+            "init_args": copy.deepcopy(self.data_source.init_args),
+        }
+        ds_config["init_args"]["context"] = data_source_context_serializer(context)
+
+        # Now we can parse with jsonargparse.
+        from rslearn.utils.jsonargparse import (
+            data_source_context_serializer,
+            init_jsonargparse,
+        )
+
+        init_jsonargparse()
+        parser = jsonargparse.ArgumentParser()
+        parser.add_argument("--data_source", type=DataSource)
+        cfg = parser.parse_object({"data_source": ds_config})
+        data_source = parser.instantiate_classes(cfg).data_source
+        return data_source
+
+    def instantiate_vector_format(self) -> VectorFormat:
+        """Instantiate the vector format specified by this config."""
+        if self.type != LayerType.VECTOR:
+            raise ValueError(
+                f"cannot instantiate vector format for layer with type {self.type}"
+            )
+
+        from rslearn.utils.jsonargparse import init_jsonargparse
+
+        init_jsonargparse()
+        parser = jsonargparse.ArgumentParser()
+        parser.add_argument("--vector_format", type=VectorFormat)
+        cfg = parser.parse_object({"vector_format": self.vector_format})
+        vector_format = parser.instantiate_classes(cfg).vector_format
+        return vector_format
 
 
 class DatasetConfig(BaseModel):

@@ -23,9 +23,8 @@ from rslearn.utils.geometry import PixelBounds
 from rslearn.utils.raster_format import (
     RasterFormat,
     adjust_projection_and_bounds_for_array,
-    load_raster_format,
 )
-from rslearn.utils.vector_format import VectorFormat, load_vector_format
+from rslearn.utils.vector_format import VectorFormat
 
 from .lightning_module import RslearnLightningModule
 from .tasks.task import Task
@@ -190,9 +189,9 @@ class RslearnWriter(BasePredictionWriter):
         self.format: RasterFormat | VectorFormat
         if self.layer_config.type == LayerType.RASTER:
             band_cfg = self.layer_config.band_sets[0]
-            self.format = load_raster_format(band_cfg.format)
+            self.format = band_cfg.instantiate_raster_format()
         elif self.layer_config.type == LayerType.VECTOR:
-            self.format = load_vector_format(self.layer_config.vector_format)
+            self.format = self.layer_config.instantiate_vector_format()
         else:
             raise ValueError(f"invalid layer type {self.layer_config.type}")
 

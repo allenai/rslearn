@@ -22,7 +22,6 @@ from rslearn.utils.raster_format import GeotiffRasterFormat
 from rslearn.utils.vector_format import (
     GeojsonCoordinateMode,
     GeojsonVectorFormat,
-    load_vector_format,
 )
 
 
@@ -41,7 +40,7 @@ class TestLocalFiles:
 
         window = windows[0]
         layer_config = local_files_dataset.layers["local_file"]
-        vector_format = load_vector_format(layer_config.vector_format)
+        vector_format = layer_config.instantiate_vector_format()
         features = vector_format.decode_vector(
             window.path / "layers" / "local_file", window.projection, window.bounds
         )
@@ -125,7 +124,7 @@ class TestLocalFiles:
 
         window = windows[0]
         layer_config = dataset.layers["local_file"]
-        vector_format = load_vector_format(layer_config.vector_format)
+        vector_format = layer_config.instantiate_vector_format()
         features = vector_format.decode_vector(
             window.path / "layers" / "local_file", window.projection, window.bounds
         )

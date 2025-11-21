@@ -26,8 +26,6 @@ from rslearn.train.tasks import Task
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds
 from rslearn.utils.mp import star_imap_unordered
-from rslearn.utils.raster_format import load_raster_format
-from rslearn.utils.vector_format import load_vector_format
 
 from .transforms import Sequential
 
@@ -244,7 +242,7 @@ def read_raster_layer_for_data_input(
         )
         if band_set.format is None:
             raise ValueError(f"No format specified for {layer_name}")
-        raster_format = load_raster_format(band_set.format)
+        raster_format = band_set.instantiate_raster_format()
         raster_dir = window.get_raster_dir(
             layer_name, band_set.bands, group_idx=group_idx
         )
@@ -358,7 +356,7 @@ def read_data_input(
         features: list[Feature] = []
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
-            vector_format = load_vector_format(layer_config.vector_format)
+            vector_format = layer_config.instantiate_vector_format()
             layer_dir = window.get_layer_dir(layer_name, group_idx=group_idx)
             cur_features = vector_format.decode_vector(
                 layer_dir, window.projection, window.bounds

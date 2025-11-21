@@ -6,7 +6,6 @@ from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
 
-import rslearn.data_sources
 from rslearn.config import (
     LayerConfig,
     LayerType,
@@ -161,9 +160,7 @@ def prepare_dataset_windows(
 
         # Create data source after checking for at least one window so it can be fast
         # if there are no windows to prepare.
-        data_source = rslearn.data_sources.data_source_from_config(
-            layer_cfg, dataset.path
-        )
+        data_source = layer_cfg.instantiate_data_source(dataset.path)
 
         # Get STGeometry for each window.
         geometries = []
@@ -257,9 +254,7 @@ def ingest_dataset_windows(
         if not layer_cfg.data_source.ingest:
             continue
 
-        data_source = rslearn.data_sources.data_source_from_config(
-            layer_cfg, dataset.path
-        )
+        data_source = layer_cfg.instantiate_data_source(dataset.path)
 
         geometries_by_item: dict = {}
         for window in windows:
@@ -493,9 +488,7 @@ def materialize_dataset_windows(
             total_skipped = len(windows)
         else:
             data_source_name = layer_cfg.data_source.class_path
-            data_source = rslearn.data_sources.data_source_from_config(
-                layer_cfg, dataset.path
-            )
+            data_source = layer_cfg.instantiate_data_source(dataset.path)
 
             for window in windows:
                 window_summary = materialize_window(
