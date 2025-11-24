@@ -12,9 +12,9 @@ import requests.auth
 import shapely
 from upath import UPath
 
-from rslearn.config import QueryConfig, RasterLayerConfig, SpaceMode
+from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources import DataSource, Item
+from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
@@ -47,8 +47,8 @@ class SRTM(DataSource):
         self,
         username: str | None = None,
         password: str | None = None,
-        band_name: str = "srtm",
         timeout: timedelta = timedelta(seconds=10),
+        context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new SRTM instance.
 
@@ -57,10 +57,19 @@ class SRTM(DataSource):
                 NASA_EARTHDATA_USERNAME environment variable.
             password: NASA Earthdata account password. If not set, it is read from the
                 NASA_EARTHDATA_PASSWORD environment variable.
-            band_name: what to call the band.
             timeout: timeout for requests.
+            context: the data source context.
         """
-        self.band_name = band_name
+        # Get band name from context if possible, falling back to "srtm".
+        if context.layer_config is not None:
+            if len(context.layer_config.band_sets) != 1:
+                raise ValueError("expected a single band set")
+            if len(context.layer_config.band_sets[0].bands) != 1:
+                raise ValueError("expected band set to have a single band")
+            self.band_name = context.layer_config.band_sets[0].bands[0]
+        else:
+            self.band_name = "srtm"
+
         self.timeout = timeout
 
         if username is None:
@@ -72,33 +81,6 @@ class SRTM(DataSource):
         self.password = password
 
         self.session = requests.session()
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "SRTM":
-        """Creates a new SRTM instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("config.data_source is required")
-        d = config.data_source.config_dict
-
-        # Get the band name chosen by the user.
-        # There should be a single band set with a single band.
-        if len(config.band_sets) != 1:
-            raise ValueError("expected a single band set")
-        if len(config.band_sets[0].bands) != 1:
-            raise ValueError("expected band set to have a single band")
-        kwargs: dict[str, Any] = {
-            "band_name": config.band_sets[0].bands[0],
-        }
-
-        if "timeout_seconds" in d:
-            kwargs["timeout"] = timedelta(seconds=d["timeout_seconds"])
-
-        simple_optionals = ["username", "password"]
-        for k in simple_optionals:
-            if k in d:
-                kwargs[k] = d[k]
-
-        return SRTM(**kwargs)
 
     def get_item_by_name(self, name: str) -> Item:
         """Gets an item by name.

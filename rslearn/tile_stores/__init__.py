@@ -22,17 +22,6 @@ def load_tile_store(config: dict[str, Any], ds_path: UPath) -> TileStore:
     Returns:
         the TileStore
     """
-    if config is None:
-        tile_store = DefaultTileStore()
-        tile_store.set_dataset_path(ds_path)
-        return tile_store
-
-    # Backwards compatability.
-    if "name" in config and "root_dir" in config and config["name"] == "file":
-        tile_store = DefaultTileStore(config["root_dir"])
-        tile_store.set_dataset_path(ds_path)
-        return tile_store
-
     init_jsonargparse()
     parser = jsonargparse.ArgumentParser()
     parser.add_argument("--tile_store", type=TileStore)

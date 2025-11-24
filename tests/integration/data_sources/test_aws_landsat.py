@@ -7,9 +7,9 @@ from upath import UPath
 from rslearn.config import (
     BandSetConfig,
     DType,
+    LayerConfig,
     LayerType,
     QueryConfig,
-    RasterLayerConfig,
     SpaceMode,
 )
 from rslearn.data_sources.aws_landsat import LandsatOliTirs
@@ -24,19 +24,15 @@ class TestLandsatOliTirs:
     """Tests the LandsatOliTirs data source."""
 
     @pytest.fixture
-    def landsat_layer_config(self) -> RasterLayerConfig:
-        return RasterLayerConfig(
-            LayerType.RASTER,
-            [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[TEST_BAND])],
+    def landsat_layer_config(self) -> LayerConfig:
+        return LayerConfig(
+            type=LayerType.RASTER,
+            band_sets=[BandSetConfig(dtype=DType.UINT8, bands=[TEST_BAND])],
         )
 
     @pytest.fixture
-    def landsat_data_source(
-        self, tmp_path: pathlib.Path, landsat_layer_config: RasterLayerConfig
-    ) -> LandsatOliTirs:
-        return LandsatOliTirs(
-            config=landsat_layer_config, metadata_cache_dir=UPath(tmp_path)
-        )
+    def landsat_data_source(self, tmp_path: pathlib.Path) -> LandsatOliTirs:
+        return LandsatOliTirs(metadata_cache_dir=UPath(tmp_path))
 
     def test_ingest(
         self,
@@ -65,7 +61,7 @@ class TestLandsatOliTirs:
         tmp_path: pathlib.Path,
         seattle2020: STGeometry,
         landsat_data_source: LandsatOliTirs,
-        landsat_layer_config: RasterLayerConfig,
+        landsat_layer_config: LayerConfig,
     ) -> None:
         """Test directly materializing from the data source."""
         ds_path = UPath(tmp_path)
@@ -106,13 +102,8 @@ class TestLandsatOliTirs:
         )
 
         # Initialize the data source and perform the get_items query.
-        layer_config = RasterLayerConfig(
-            LayerType.RASTER,
-            [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[TEST_BAND])],
-        )
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS, max_matches=10)
         data_source = LandsatOliTirs(
-            config=layer_config,
             metadata_cache_dir=UPath(tmp_path),
             sort_by="cloud_cover",
         )

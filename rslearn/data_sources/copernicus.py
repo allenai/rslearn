@@ -23,9 +23,9 @@ import requests
 import shapely
 from upath import UPath
 
-from rslearn.config import QueryConfig, RasterLayerConfig
+from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources.data_source import DataSource, Item
+from rslearn.data_sources.data_source import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
@@ -306,6 +306,7 @@ class Copernicus(DataSource):
         sort_by: str | None = None,
         sort_desc: bool = False,
         timeout: float = 10,
+        context: DataSourceContext = DataSourceContext(),
     ):
         """Create a new Copernicus.
 
@@ -332,6 +333,7 @@ class Copernicus(DataSource):
             sort_desc: for sort_by, sort in descending order instead of ascending
                 order.
             timeout: timeout for requests.
+            context: the data source context.
         """
         self.glob_to_bands = glob_to_bands
         self.query_filter = query_filter
@@ -350,30 +352,6 @@ class Copernicus(DataSource):
             else:
                 self.username = os.environ["COPERNICUS_USERNAME"]
                 self.password = os.environ["COPERNICUS_PASSWORD"]
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Copernicus":
-        """Creates a new Copernicus instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("config.data_source is required")
-        d = config.data_source.config_dict
-        kwargs: dict[str, Any] = dict(
-            glob_to_bands=d["glob_to_bands"],
-        )
-
-        simple_optionals = [
-            "access_token",
-            "query_filter",
-            "order_by",
-            "sort_by",
-            "sort_desc",
-            "timeout",
-        ]
-        for k in simple_optionals:
-            if k in d:
-                kwargs[k] = d[k]
-
-        return Copernicus(**kwargs)
 
     def deserialize_item(self, serialized_item: Any) -> CopernicusItem:
         """Deserializes an item from JSON-decoded data."""
@@ -763,23 +741,43 @@ class Sentinel2(Copernicus):
 
     def __init__(
         self,
-        assets: list[str],
         product_type: Sentinel2ProductType,
         harmonize: bool = False,
+        assets: list[str] | None = None,
+        context: DataSourceContext = DataSourceContext(),
         **kwargs: Any,
     ):
         """Create a new Sentinel2.
 
         Args:
-            assets: list of assets corresponding to keys in BANDS, e.g. ["TCI", "B08"].
             product_type: desired product type, L1C or L2A.
             harmonize: harmonize pixel values across different processing baselines,
                 see https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
+            assets: the assets to download, or None to download all assets. This is
+                only used if the layer config is not in the context.
+            context: the data source context.
             kwargs: additional arguments to pass to Copernicus.
         """
         # Create glob to bands map.
+        # If the context is provided, we limit to needed assets based on the configured
+        # band sets.
+        if context.layer_config is not None:
+            needed_assets = []
+            for asset_key, asset_bands in Sentinel2.BANDS.items():
+                # See if the bands provided by this asset intersect with the bands in
+                # at least one configured band set.
+                for band_set in context.layer_config.band_sets:
+                    if not set(band_set.bands).intersection(set(asset_bands)):
+                        continue
+                    needed_assets.append(asset_key)
+                    break
+        elif assets is not None:
+            needed_assets = assets
+        else:
+            needed_assets = list(Sentinel2.BANDS.keys())
+
         glob_to_bands = {}
-        for asset_key in assets:
+        for asset_key in needed_assets:
             band_names = self.BANDS[asset_key]
             glob_pattern = self.GLOB_PATTERNS[product_type][asset_key]
             glob_to_bands[glob_pattern] = band_names
@@ -788,45 +786,12 @@ class Sentinel2(Copernicus):
         query_filter = f"Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'productType' and att/OData.CSC.StringAttribute/Value eq '{quote(product_type.value)}')"
 
         super().__init__(
+            context=context,
             glob_to_bands=glob_to_bands,
             query_filter=query_filter,
             **kwargs,
         )
         self.harmonize = harmonize
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Sentinel2":
-        """Creates a new Sentinel2 instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("config.data_source is required")
-        d = config.data_source.config_dict
-
-        # Determine needed assets based on the configured band sets.
-        needed_assets: set[str] = set()
-        for asset_key, asset_bands in Sentinel2.BANDS.items():
-            for band_set in config.band_sets:
-                if not set(band_set.bands).intersection(set(asset_bands)):
-                    continue
-                needed_assets.add(asset_key)
-
-        kwargs: dict[str, Any] = dict(
-            assets=list(needed_assets),
-            product_type=Sentinel2ProductType[d["product_type"]],
-        )
-
-        simple_optionals = [
-            "harmonize",
-            "access_token",
-            "order_by",
-            "sort_by",
-            "sort_desc",
-            "timeout",
-        ]
-        for k in simple_optionals:
-            if k in d:
-                kwargs[k] = d[k]
-
-        return Sentinel2(**kwargs)
 
     # Override to support harmonization step.
     def _process_product_zip(
@@ -922,6 +887,7 @@ class Sentinel1(Copernicus):
         product_type: Sentinel1ProductType,
         polarisation: Sentinel1Polarisation,
         orbit_direction: Sentinel1OrbitDirection | None = None,
+        context: DataSourceContext = DataSourceContext(),
         **kwargs: Any,
     ):
         """Create a new Sentinel1.
@@ -930,6 +896,7 @@ class Sentinel1(Copernicus):
             product_type: desired product type.
             polarisation: desired polarisation(s).
             orbit_direction: optional orbit direction to filter by.
+            context: the data source context.
             kwargs: additional arguments to pass to Copernicus.
         """
         # Create query filter based on the product type.
@@ -945,31 +912,3 @@ class Sentinel1(Copernicus):
             query_filter=query_filter,
             **kwargs,
         )
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Sentinel1":
-        """Creates a new Sentinel1 instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("config.data_source is required")
-        d = config.data_source.config_dict
-
-        kwargs: dict[str, Any] = dict(
-            product_type=Sentinel1ProductType[d["product_type"]],
-            polarisation=Sentinel1Polarisation[d["polarisation"]],
-        )
-
-        if "orbit_direction" in d:
-            kwargs["orbit_direction"] = Sentinel1OrbitDirection[d["orbit_direction"]]
-
-        simple_optionals = [
-            "access_token",
-            "order_by",
-            "sort_by",
-            "sort_desc",
-            "timeout",
-        ]
-        for k in simple_optionals:
-            if k in d:
-                kwargs[k] = d[k]
-
-        return Sentinel1(**kwargs)

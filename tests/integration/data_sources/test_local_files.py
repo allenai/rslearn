@@ -8,7 +8,6 @@ import shapely
 from rasterio.crs import CRS
 from upath import UPath
 
-from rslearn.config import VectorLayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
 from rslearn.dataset.manage import (
@@ -23,7 +22,6 @@ from rslearn.utils.raster_format import GeotiffRasterFormat
 from rslearn.utils.vector_format import (
     GeojsonCoordinateMode,
     GeojsonVectorFormat,
-    load_vector_format,
 )
 
 
@@ -42,8 +40,7 @@ class TestLocalFiles:
 
         window = windows[0]
         layer_config = local_files_dataset.layers["local_file"]
-        assert isinstance(layer_config, VectorLayerConfig)
-        vector_format = load_vector_format(layer_config.format)
+        vector_format = layer_config.instantiate_vector_format()
         features = vector_format.decode_vector(
             window.path / "layers" / "local_file", window.projection, window.bounds
         )
@@ -87,8 +84,10 @@ class TestLocalFiles:
                 "local_file": {
                     "type": "vector",
                     "data_source": {
-                        "name": "rslearn.data_sources.local_files.LocalFiles",
-                        "src_dir": src_data_dir,
+                        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                        "init_args": {
+                            "src_dir": src_data_dir,
+                        },
                     },
                 },
             },
@@ -125,8 +124,7 @@ class TestLocalFiles:
 
         window = windows[0]
         layer_config = dataset.layers["local_file"]
-        assert isinstance(layer_config, VectorLayerConfig)
-        vector_format = load_vector_format(layer_config.format)
+        vector_format = layer_config.instantiate_vector_format()
         features = vector_format.decode_vector(
             window.path / "layers" / "local_file", window.projection, window.bounds
         )
@@ -166,14 +164,16 @@ class TestLocalFiles:
                         }
                     ],
                     "data_source": {
-                        "name": "rslearn.data_sources.local_files.LocalFiles",
-                        "src_dir": source_dir_name,
-                        "item_specs": [
-                            {
-                                "fnames": ["b1.tif", "b2.tif"],
-                                "bands": [["b1"], ["b2"]],
-                            }
-                        ],
+                        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                        "init_args": {
+                            "src_dir": source_dir_name,
+                            "raster_item_specs": [
+                                {
+                                    "fnames": ["b1.tif", "b2.tif"],
+                                    "bands": [["b1"], ["b2"]],
+                                }
+                            ],
+                        },
                     },
                 },
             },
@@ -251,14 +251,12 @@ class TestCoordinateModes:
                 "local_file": {
                     "type": "vector",
                     "data_source": {
-                        "name": "rslearn.data_sources.local_files.LocalFiles",
-                        "src_dir": src_data_dir.path,
+                        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                        "init_args": {
+                            "src_dir": src_data_dir.path,
+                        },
                     },
                 },
-            },
-            "tile_store": {
-                "name": "file",
-                "root_dir": "tiles",
             },
         }
         with (ds_path / "config.json").open("w") as f:

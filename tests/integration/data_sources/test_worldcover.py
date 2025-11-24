@@ -10,11 +10,7 @@ from pytest_httpserver import HTTPServer
 from upath import UPath
 
 from rslearn.config import (
-    BandSetConfig,
-    DType,
-    LayerType,
     QueryConfig,
-    RasterLayerConfig,
     SpaceMode,
 )
 from rslearn.const import WGS84_PROJECTION
@@ -114,13 +110,8 @@ def run_test_with_worldcover_dir(
     monkeypatch.setattr(WorldCover, "BASE_URL", httpserver.url_for("/"))
     monkeypatch.setattr(WorldCover, "ZIP_FILENAMES", ["data.zip"])
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
-    layer_config = RasterLayerConfig(
-        LayerType.RASTER,
-        [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[TEST_BAND])],
-    )
     data_source = WorldCover(
-        config=layer_config,
-        worldcover_dir=worldcover_dir,
+        worldcover_dir=str(worldcover_dir),
     )
 
     print("get items")

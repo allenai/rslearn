@@ -3,6 +3,8 @@
 from collections.abc import Generator
 from typing import Any, BinaryIO, Generic, TypeVar
 
+from upath import UPath
+
 from rslearn.config import LayerConfig, QueryConfig
 from rslearn.dataset import Window
 from rslearn.tile_stores import TileStoreWithLayer
@@ -127,3 +129,27 @@ class RetrieveItemDataSource(DataSource[ItemType]):
     ) -> Generator[tuple[str, BinaryIO], None, None]:
         """Retrieves the rasters corresponding to an item as file streams."""
         raise NotImplementedError
+
+
+class DataSourceContext:
+    """This context is passed to every data source.
+
+    When initializing data sources within rslearn, we always set the ds_path and
+    layer_config. However, for convenience (for users directly initializing the data
+    sources externally), each data source should allow for initialization when one or
+    both are missing.
+    """
+
+    def __init__(
+        self, ds_path: UPath | None = None, layer_config: LayerConfig | None = None
+    ):
+        """Create a new DataSourceContext.
+
+        Args:
+            ds_path: the path of the underlying dataset.
+            layer_config: the LayerConfig for the layer that the data source is for.
+        """
+        # We don't use dataclass here because otherwise jsonargparse will ignore our
+        # custom serializer/deserializer defined in rslearn.utils.jsonargparse.
+        self.ds_path = ds_path
+        self.layer_config = layer_config

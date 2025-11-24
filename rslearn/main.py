@@ -15,7 +15,7 @@ from upath import UPath
 
 from rslearn.config import LayerConfig
 from rslearn.const import WGS84_EPSG
-from rslearn.data_sources import Item, data_source_from_config
+from rslearn.data_sources import Item
 from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
 from rslearn.dataset.handler_summaries import (
@@ -544,7 +544,7 @@ class IngestHandler:
                 tile_store, layer_name, layer_cfg
             )
             layer_cfg = self.dataset.layers[layer_name]
-            data_source = data_source_from_config(layer_cfg, self.dataset.path)
+            data_source = layer_cfg.instantiate_data_source(self.dataset.path)
 
             attempts_counter = AttemptsCounter()
             ingest_counts: IngestCounts | UnknownIngestCounts
@@ -640,7 +640,7 @@ class IngestHandler:
             if not layer_cfg.data_source.ingest:
                 continue
 
-            data_source = data_source_from_config(layer_cfg, self.dataset.path)
+            data_source = layer_cfg.instantiate_data_source(self.dataset.path)
 
             geometries_by_item: dict = {}
             for window, layer_datas in windows_and_layer_datas:

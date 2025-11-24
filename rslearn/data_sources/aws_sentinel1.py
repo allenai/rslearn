@@ -7,7 +7,6 @@ from typing import Any
 import boto3
 from upath import UPath
 
-from rslearn.config import RasterLayerConfig
 from rslearn.data_sources.copernicus import (
     CopernicusItem,
     Sentinel1OrbitDirection,
@@ -19,7 +18,7 @@ from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
 
-from .data_source import DataSource, QueryConfig
+from .data_source import DataSource, DataSourceContext, QueryConfig
 
 WRS2_GRID_SIZE = 1.0
 
@@ -45,11 +44,13 @@ class Sentinel1(DataSource, TileStore):
     def __init__(
         self,
         orbit_direction: Sentinel1OrbitDirection | None = None,
+        context: DataSourceContext = DataSourceContext(),
     ) -> None:
         """Initialize a new Sentinel1 instance.
 
         Args:
             orbit_direction: optional orbit direction to filter by.
+            context: the data source context.
         """
         self.client = boto3.client("s3")
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
@@ -58,18 +59,6 @@ class Sentinel1(DataSource, TileStore):
             polarisation=Sentinel1Polarisation.VV_VH,
             orbit_direction=orbit_direction,
         )
-
-    @staticmethod
-    def from_config(config: RasterLayerConfig, ds_path: UPath) -> "Sentinel1":
-        """Creates a new Sentinel1 instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError(f"data_source is required for config dict {config}")
-        d = config.data_source.config_dict
-        kwargs: dict[str, Any] = {}
-        if "orbit_direction" in d:
-            d["orbit_direction"] = Sentinel1OrbitDirection[d["orbit_direction"]]
-
-        return Sentinel1(**kwargs)
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig

@@ -9,11 +9,7 @@ import shapely
 from upath import UPath
 
 from rslearn.config import (
-    BandSetConfig,
-    DType,
-    LayerType,
     QueryConfig,
-    RasterLayerConfig,
     SpaceMode,
 )
 from rslearn.const import WGS84_PROJECTION
@@ -39,10 +35,6 @@ class TestSentinel2:
         self, tile_store_dir: UPath, seattle2020: STGeometry, **kwargs: Any
     ) -> None:
         """Apply test where we ingest an item corresponding to seattle2020."""
-        layer_config = RasterLayerConfig(
-            LayerType.RASTER,
-            [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[TEST_BAND])],
-        )
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
 
         # In case rtree is enabled, use a small time range to minimize the time needed
@@ -53,7 +45,7 @@ class TestSentinel2:
             seattle2020.time_range[0] + timedelta(days=3),
         )
         data_source = Sentinel2(
-            config=layer_config, rtree_time_range=rtree_time_range, **kwargs
+            rtree_time_range=rtree_time_range, bands=[TEST_BAND], **kwargs
         )
 
         print("get items")
@@ -115,14 +107,10 @@ class TestSentinel2:
 
 @pytest.fixture
 def sentinel2_without_rtree(tmp_path: pathlib.Path) -> Sentinel2:
-    layer_config = RasterLayerConfig(
-        LayerType.RASTER,
-        [BandSetConfig(config_dict={}, dtype=DType.UINT8, bands=[TEST_BAND])],
-    )
     sentinel2 = Sentinel2(
-        config=layer_config,
         use_rtree_index=False,
         index_cache_dir=UPath(tmp_path),
+        bands=[TEST_BAND],
     )
     return sentinel2
 

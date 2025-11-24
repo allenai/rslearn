@@ -10,11 +10,10 @@ from typing import Any
 import fiona
 import requests
 from rasterio.crs import CRS
-from upath import UPath
 
-from rslearn.config import QueryConfig, VectorLayerConfig
+from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources import DataSource, Item
+from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
@@ -108,12 +107,9 @@ class EuroCrops(DataSource[EuroCropsItem]):
     }
     TIMEOUT = timedelta(seconds=10)
 
-    @staticmethod
-    def from_config(config: VectorLayerConfig, ds_path: UPath) -> "EuroCrops":
-        """Creates a new EuroCrops instance from a configuration dictionary."""
-        if config.data_source is None:
-            raise ValueError("data_source is required")
-        return EuroCrops()
+    def __init__(self, context: DataSourceContext = DataSourceContext()):
+        """Create a new EuroCrops."""
+        pass
 
     def _get_all_items(self) -> list[EuroCropsItem]:
         """Get a list of all available items in the data source."""

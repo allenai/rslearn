@@ -26,14 +26,12 @@ def test_layer_alias(local_files_dataset: Dataset) -> None:
                 "type": "vector",
                 "alias": "common",
                 "data_source": {
-                    "name": "rslearn.data_sources.local_files.LocalFiles",
-                    "src_dir": src_dir,
+                    "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                    "init_args": {
+                        "src_dir": src_dir,
+                    },
                 },
             },
-        },
-        "tile_store": {
-            "name": "file",
-            "root_dir": "tiles",
         },
     }
     with (local_files_dataset.path / "config.json").open("w") as f:
@@ -57,14 +55,12 @@ def test_layer_alias(local_files_dataset: Dataset) -> None:
                 "type": "vector",
                 "alias": "common",
                 "data_source": {
-                    "name": "rslearn.data_sources.local_files.LocalFiles",
-                    "src_dir": src_dir,
+                    "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                    "init_args": {
+                        "src_dir": src_dir,
+                    },
                 },
             },
-        },
-        "tile_store": {
-            "name": "file",
-            "root_dir": "tiles",
         },
     }
     with (local_files_dataset.path / "config.json").open("w") as f:
@@ -84,14 +80,12 @@ def test_layer_alias(local_files_dataset: Dataset) -> None:
             "layer3": {
                 "type": "vector",
                 "data_source": {
-                    "name": "rslearn.data_sources.local_files.LocalFiles",
-                    "src_dir": src_dir,
+                    "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                    "init_args": {
+                        "src_dir": src_dir,
+                    },
                 },
             },
-        },
-        "tile_store": {
-            "name": "file",
-            "root_dir": "tiles",
         },
     }
     with (local_files_dataset.path / "config.json").open("w") as f:
