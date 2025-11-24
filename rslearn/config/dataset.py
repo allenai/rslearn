@@ -410,14 +410,18 @@ class DataSourceConfig(BaseModel):
             DeprecationWarning,
         )
 
+        # Split the dict into the base config that is in the pydantic model, and the
+        # source-specific options that should be moved to init_args dict.
         class_path = d["name"]
+        base_config: dict[str, Any] = {}
         ds_init_args: dict[str, Any] = {}
         for k, v in d.items():
             if k == "name":
                 continue
             if k in cls.model_fields:
-                continue
-            ds_init_args[k] = v
+                base_config[k] = v
+            else:
+                ds_init_args[k] = v
 
         # Some legacy configs erroneously specify these keys, which are now caught by
         # validation. But we still want those specific legacy configs to work.
@@ -431,10 +435,9 @@ class DataSourceConfig(BaseModel):
             )
             del ds_init_args["max_cloud_cover"]
 
-        return dict(
-            class_path=class_path,
-            init_args=ds_init_args,
-        )
+        base_config["class_path"] = class_path
+        base_config["init_args"] = ds_init_args
+        return base_config
 
 
 class LayerType(StrEnum):
