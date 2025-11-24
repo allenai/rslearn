@@ -243,3 +243,23 @@ class TestBackwardsCompatibility:
         assert ds.query["sar:instrument_mode"] == {"eq": "IW"}
         assert ds.cache_dir is not None
         assert ds.cache_dir.path == "cache/planetary_computer"
+
+    def test_raster_format_compat(self) -> None:
+        """Check parsing for legacy raster format config format."""
+        layer_config = LayerConfig.model_validate(
+            {
+                "band_sets": [
+                    {
+                        "bands": ["mask"],
+                        "dtype": "uint8",
+                        "format": {"format": "png", "name": "single_image"},
+                    }
+                ],
+                "type": "raster",
+            }
+        )
+        assert len(layer_config.band_sets) == 1
+        assert layer_config.band_sets[0].bands == ["mask"]
+        raster_format = layer_config.band_sets[0].instantiate_raster_format()
+        assert isinstance(raster_format, SingleImageRasterFormat)
+        assert raster_format.format == "png"
