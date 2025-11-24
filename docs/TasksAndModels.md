@@ -471,6 +471,8 @@ data:
 
 ## Models
 
+### Introduction
+
 rslearn includes a variety of model components that can be composed together, including
 remote sensing foundation models like OlmoEarth, decoders like Faster R-CNN, and
 intermediate components.
@@ -520,16 +522,21 @@ model:
               anchor_sizes: [[32], [64], [128], [256]]
 ```
 
+#### Feature Extractor (First Encoder Component)
+
 This framework is somewhat rigid. The first component in the encoder is the feature
-extractor, and should input the input dict from the dataset, which is initialized with
-the passthrough DataInputs specified in the model config but then modified by the
-transforms. It should output a list of 2D feature maps. For example, Swin inputs an
-input dict like this:
+extractor, and should input the list of input dicts from the dataset (one input dict
+per example), which is initialized with the passthrough DataInputs specified in the
+model config but then modified by the transforms. It should output a list of 2D feature
+maps. For example, Swin inputs an input dict list like this:
 
 ```
-{
-  "image": BxCxHxW tensor,
-}
+[
+  {
+  "image": CxHxW tensor,
+  },
+  ... (B dicts)
+]
 ```
 
 It outputs a list of feature maps. With the selected Base architecture (swin_v2_b), and
@@ -544,6 +551,10 @@ the configured `output_layers`, this list is like this:
 ]
 ```
 
+Above, B is the batch size, H/W are the input image height/width, and C is the number
+of channels in the input image. 128, 256, 512, and 1024 are the embedding sizes from
+Swin-Base at different resolutions.
+
 In the Python code, the signature of the first encoder is:
 
 ```python
@@ -552,6 +563,8 @@ In the Python code, the signature of the first encoder is:
         inputs: list[dict[str, Any]],
     ) -> list[torch.Tensor]:
 ```
+
+#### Subsequent Encoder Components
 
 Subsequent components in the encoder should input feature maps and output updated
 feature maps. For example, the Fpn (Feature Pyramid Network) inputs the feature map
@@ -574,6 +587,8 @@ The signature of subsequent encoder components is:
     def forward(self, x: list[torch.Tensor]) -> list[torch.Tensor]:
 ```
 
+#### Decoder Components
+
 In the decoder, all components except the last should input feature maps, along with
 the original inputs to the model, and output updated feature maps. For example, the
 Conv component applies the same `nn.Conv2d` layer on each input feature map, producing
@@ -587,7 +602,14 @@ an output with the same shapes. The signature of these decoder components is:
     ) -> list[torch.Tensor]:
 ```
 
+Above, `features` is a list of feature maps at different scales, with the size of the
+list depending on the number of feature maps from the encoder or from the previous
+decoder component. On the other hand, `inputs` is a list of input dicts with one dict
+per example in the batch.
+
 Note that several components, including Conv, ignore the inputs.
+
+#### Final Decoder Component (Predictor)
 
 The final component is a predictor that should accept the targets, and compute outputs
 and the loss(es). For example, the output from Faster R-CNN is a list of dicts with the
