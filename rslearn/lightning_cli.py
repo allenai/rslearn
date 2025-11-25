@@ -325,8 +325,6 @@ class RslearnLightningCLI(LightningCLI):
                     }
                 )
                 c.trainer.callbacks.append(upload_wandb_callback)
-        else:
-            c.trainer.logger = jsonargparse.Namespace({})
 
         if subcommand == "fit":
             # Set the checkpoint directory to match the project directory.

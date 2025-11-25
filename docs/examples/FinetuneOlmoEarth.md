@@ -215,7 +215,7 @@ trainer:
         save_top_k: 1
         save_last: true
         monitor: val_accuracy
-        mode: min
+        mode: max
     # We find that freezing the model for the first few epochs helps to improve the
     # performance of the fine-tuned models.
     - class_path: rslearn.train.callbacks.freeze_unfreeze.FreezeUnfreeze
