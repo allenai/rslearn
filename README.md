@@ -256,8 +256,7 @@ model:
 data:
   class_path: rslearn.train.data_module.RslearnDataModule
   init_args:
-    # Replace this with the dataset path.
-    path: /path/to/dataset/
+    path: ${DATASET_PATH}
     # This defines the layers that should be read for each window.
     # The key ("image" / "targets") is what the data will be called in the model,
     # while the layers option specifies which layers will be read.

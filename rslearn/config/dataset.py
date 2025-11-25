@@ -244,6 +244,9 @@ class BandSetConfig(BaseModel):
             "use `{'class_path': '...', 'init_args': {...}}` instead.",
             DeprecationWarning,
         )
+        logger.warning(
+            "BandSet.format uses legacy format; support will be removed after 2026-03-01."
+        )
 
         legacy_name_to_class_path = {
             "image_tile": "rslearn.utils.raster_format.ImageTileRasterFormat",
@@ -408,6 +411,9 @@ class DataSourceConfig(BaseModel):
             "`Data source configuration {'name': ...}` is deprecated; "
             "use `{'class_path': '...', 'init_args': {...}, ...}` instead.",
             DeprecationWarning,
+        )
+        logger.warning(
+            "Data source configuration uses legacy format; support will be removed after 2026-03-01."
         )
 
         # Split the dict into the base config that is in the pydantic model, and the
