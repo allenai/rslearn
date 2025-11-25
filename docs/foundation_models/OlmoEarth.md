@@ -84,15 +84,17 @@ may need to adjust the `query_config` depending on your window time range.
           "dtype": "uint16"
       }],
       "data_source": {
+        "class_path": "rslearn.data_sources.aws_landsat.LandsatOliTirs",
+        "init_args": {
+          "metadata_cache_dir": "cache/landsat",
+          "sort_by": "cloud_cover"
+        },
         "ingest": false,
-        "metadata_cache_dir": "cache/landsat",
-        "name": "rslearn.data_sources.aws_landsat.LandsatOliTirs",
         "query_config": {
           "max_matches": 12,
           "period_duration": "30d",
           "space_mode": "PER_PERIOD_MOSAIC"
-        },
-        "sort_by": "cloud_cover"
+        }
       },
       "type": "raster"
     },
@@ -103,13 +105,15 @@ may need to adjust the `query_config` depending on your window time range.
           "nodata_vals": [-32768, -32768]
       }],
       "data_source": {
-        "cache_dir": "cache/planetary_computer",
-        "ingest": false,
-        "name": "rslearn.data_sources.planetary_computer.Sentinel1",
-        "query": {
-          "sar:instrument_mode": {"eq": "IW"},
-          "sar:polarizations": {"eq": ["VV", "VH"]}
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel1",
+        "init_args": {
+          "cache_dir": "cache/planetary_computer",
+          "query": {
+            "sar:instrument_mode": {"eq": "IW"},
+            "sar:polarizations": {"eq": ["VV", "VH"]}
+          }
         },
+        "ingest": false,
         "query_config": {
           "max_matches": 12,
           "period_duration": "30d",
@@ -124,16 +128,18 @@ may need to adjust the `query_config` depending on your window time range.
           "dtype": "uint16"
       }],
       "data_source": {
-        "cache_dir": "cache/planetary_computer",
-        "harmonize": true,
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+        "init_args": {
+          "cache_dir": "cache/planetary_computer",
+          "harmonize": true,
+          "sort_by": "eo:cloud_cover"
+        },
         "ingest": false,
-        "name": "rslearn.data_sources.planetary_computer.Sentinel2",
         "query_config": {
           "max_matches": 12,
           "period_duration": "30d",
           "space_mode": "PER_PERIOD_MOSAIC"
-        },
-        "sort_by": "eo:cloud_cover"
+        }
       },
       "type": "raster"
     }

@@ -26,11 +26,13 @@ dataset configuration file as `./bitemporal_dataset/config.json`:
           "dtype": "uint16"
       }],
       "data_source": {
-        "cache_dir": "cache/planetary_computer",
-        "harmonize": true,
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+        "init_args": {
+          "cache_dir": "cache/planetary_computer",
+          "harmonize": true,
+          "sort_by": "eo:cloud_cover"
+        },
         "ingest": false,
-        "name": "rslearn.data_sources.planetary_computer.Sentinel2",
-        "sort_by": "eo:cloud_cover",
         "time_offset": "-2920d"
       },
       "type": "raster"
@@ -41,11 +43,13 @@ dataset configuration file as `./bitemporal_dataset/config.json`:
           "dtype": "uint16"
       }],
       "data_source": {
-        "cache_dir": "cache/planetary_computer",
-        "harmonize": true,
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+        "init_args": {
+          "cache_dir": "cache/planetary_computer",
+          "harmonize": true,
+          "sort_by": "eo:cloud_cover"
+        },
         "ingest": false,
-        "name": "rslearn.data_sources.planetary_computer.Sentinel2",
-        "sort_by": "eo:cloud_cover"
       },
       "type": "raster"
     },
@@ -239,7 +243,6 @@ trainer:
     # Save both the latest checkpoint (last.ckpt) and the best one (epoch=....ckpt).
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
-        dirpath: ${CHECKPOINT_DIR}
         save_top_k: 1
         save_last: true
         monitor: val_accuracy
@@ -249,13 +252,11 @@ trainer:
       init_args:
         module_selector: ["model", "encoder", 0]
         unfreeze_at_epoch: 10
-  # Optional section to save charts to W&B.
-  logger:
-    class_path: lightning.pytorch.loggers.WandbLogger
-    init_args:
-      project: ${WANDB_PROJECT}
-      name: ${WANDB_NAME}
-      entity: ${WANDB_ENTITY}
+# Here we enable automatic checkpoint management and logging to W&B.
+# Set WANDB_MODE=offline to disable online logging.
+project_name: ${PROJECT_NAME}
+run_name: ${RUN_NAME}
+management_dir: ${MANAGEMENT_DIR}
 ```
 
 See [TasksAndModels](../TasksAndModels.md) for more details about the SimpleTimeSeries
@@ -327,10 +328,9 @@ if __name__ == "__main__":
 Finally, we can train the model:
 
 ```
-export WANDB_PROJECT=bitemporal_sentinel2
-export WANDB_NAME=model_00
-export WANDB_ENTITY=YOUR_WANDB_ENTITY
-export CHECKPOINT_DIR=./bitemporal_sentinel2_checkpoints/
+export PROJECT_NAME=bitemporal_sentinel2
+export RUN_NAME=model_00
+export MANAGEMENT_DIR=./project_data/
 python bitemporal_train.py model fit --config model.yaml
 ```
 

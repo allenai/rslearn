@@ -693,16 +693,6 @@ trainer:
         mode: max
         # We also keep the latest checkpoint.
         save_last: true
-  # The logger can be set to log to something other than the local filesystem, like
-  # W&B.
-  logger:
-    class_path: lightning.pytorch.loggers.WandbLogger
-    init_args:
-      # This is the W&B project name, and run name.
-      # You could set entity here as well, otherwise it will use the default based on
-      # the API key being used.
-      project: land_cover_model
-      name: version_00
 ```
 
 ## Using Custom Classes

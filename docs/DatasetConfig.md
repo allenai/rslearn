@@ -83,10 +83,12 @@ duration of the layers is controlled by the duration of the window's time range.
         "bands": ["R", "G", "B"]
       }],
       "data_source": {
-        "name": "rslearn.data_sources.gcp_public_data.Sentinel2",
-        "index_cache_dir": "cache/sentinel2/",
-        "sort_by": "cloud_cover",
-        "use_rtree_index": false
+        "class_path": "rslearn.data_sources.gcp_public_data.Sentinel2",
+        "init_args": {
+          "index_cache_dir": "cache/sentinel2/",
+          "sort_by": "cloud_cover",
+          "use_rtree_index": false
+        }
       },
       "alias": "sentinel2"
     },
@@ -97,10 +99,12 @@ duration of the layers is controlled by the duration of the window's time range.
         "bands": ["R", "G", "B"]
       }],
       "data_source": {
-        "name": "rslearn.data_sources.gcp_public_data.Sentinel2",
-        "index_cache_dir": "cache/sentinel2/",
-        "sort_by": "cloud_cover",
-        "use_rtree_index": false,
+        "class_path": "rslearn.data_sources.gcp_public_data.Sentinel2",
+        "init_args": {
+          "index_cache_dir": "cache/sentinel2/",
+          "sort_by": "cloud_cover",
+          "use_rtree_index": false
+        },
         // The time offset is documented later.
         "time_offset": "60d"
       },
@@ -297,7 +301,7 @@ The data source specification looks like this:
 ```jsonc
 {
   // The class path of the data source.
-  "name": "rslearn.data_sources.gcp_public_data.Sentinel2",
+  "class_path": "rslearn.data_sources.gcp_public_data.Sentinel2",
   // The query configuration specifies how items should be matched to windows. It is
   // optional, and the values below are defaults.
   "query_config": {
@@ -314,9 +318,12 @@ The data source specification looks like this:
   "duration": null,
   // The ingest flag is optional, and defaults to true.
   "ingest": true,
-  // Data sources may expose additional configuration options. These would also be
-  // configured in this section.
-  // ...
+  // Data sources may expose additional configuration options, passed via init_args.
+  // class_path and init_args are handled by jsonargparse to instantiate the data
+  // source class.
+  "init_args": {
+    // ...
+  }
 }
 ```
 
@@ -886,29 +893,31 @@ attribute is "IW".
       }
     ],
     "data_source": {
-      "collection_name": "COPERNICUS/S1_GRD",
-      "dtype": "float32",
-      "filters": [
-        [
-          "transmitterReceiverPolarisation",
+      "class_path": "rslearn.data_sources.google_earth_engine.GEE",
+      "init_args": {
+        "collection_name": "COPERNICUS/S1_GRD",
+        "dtype": "float32",
+        "filters": [
           [
-            "VV",
-            "VH"
+            "transmitterReceiverPolarisation",
+            [
+              "VV",
+              "VH"
+            ]
+          ],
+          [
+            "instrumentMode",
+            "IW"
           ]
         ],
-        [
-          "instrumentMode",
-          "IW"
-        ]
-      ],
-      "gcs_bucket_name": "YOUR_BUCKET_NAME",
-      "index_fname": "cache/sentinel1_index",
-      "name": "rslearn.data_sources.google_earth_engine.GEE",
+        "gcs_bucket_name": "YOUR_BUCKET_NAME",
+        "index_fname": "cache/sentinel1_index",
+        "service_account_credentials": "/etc/credentials/gee_credentials.json",
+        "service_account_name": "YOUR_SERVICE_ACCOUNT_NAME"
+      },
       "query_config": {
         "max_matches": 1
-      },
-      "service_account_credentials": "/etc/credentials/gee_credentials.json",
-      "service_account_name": "YOUR_SERVICE_ACCOUNT_NAME"
+      }
     },
     "type": "raster"
   }

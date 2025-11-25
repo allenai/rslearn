@@ -20,11 +20,13 @@ Create a folder `./dataset` to store the rslearn dataset, and populate
           "dtype": "uint8"
       }],
       "data_source": {
-        "cache_dir": "cache/planetary_computer",
-        "harmonize": true,
-        "ingest": false,
-        "name": "rslearn.data_sources.planetary_computer.Sentinel2",
-        "sort_by": "eo:cloud_cover"
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+        "init_args": {
+          "cache_dir": "cache/planetary_computer",
+          "harmonize": true,
+          "sort_by": "eo:cloud_cover"
+        },
+        "ingest": false
       },
       "type": "raster"
     }
@@ -312,13 +314,11 @@ trainer:
       init_args:
         module_selector: ["model", "encoder", 0]
         unfreeze_at_epoch: 10
-  # Optional section to save charts to W&B.
-  logger:
-    class_path: lightning.pytorch.loggers.WandbLogger
-    init_args:
-      project: ${WANDB_PROJECT}
-      name: ${WANDB_NAME}
-      entity: ${WANDB_ENTITY}
+# Here we enable automatic checkpoint management and logging to W&B.
+# Set WANDB_MODE=offline to disable online logging.
+project_name: ${PROJECT_NAME}
+run_name: ${RUN_NAME}
+management_dir: ${MANAGEMENT_DIR}
 ```
 
 Save this as `model.yaml` and execute training with `model fit`:
@@ -326,9 +326,9 @@ Save this as `model.yaml` and execute training with `model fit`:
 ```
 # These environment variables are only needed if including the WandbLogger in the model
 # config file.
-export WANDB_PROJECT=eurosat
-export WANDB_NAME=eurosat_00
-export WANDB_ENTITY=YOUR_WANDB_ENTITY
+export PROJECT_NAME=eurosat
+export RUN_NAME=eurosat_00
+export MANAGEMENT_DIR=./project_data
 rslearn model fit --config model.yaml
 ```
 
@@ -359,15 +359,17 @@ when converting the dataset) will be used.
         }
       ],
       "data_source": {
-        "cache_dir": "cache/planetary_computer",
-        "harmonize": true,
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+        "init_args": {
+          "cache_dir": "cache/planetary_computer",
+          "harmonize": true,
+          "sort_by": "eo:cloud_cover"
+        },
         "ingest": false,
-        "name": "rslearn.data_sources.planetary_computer.Sentinel2",
         "query_config": {
           "max_matches": 4,
           "space_mode": "MOSAIC"
-        },
-        "sort_by": "eo:cloud_cover"
+        }
       },
       "type": "raster"
     }

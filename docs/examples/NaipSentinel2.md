@@ -33,14 +33,16 @@ is a suitable dataset configuration file:
           "zoom_offset": -4
       }],
       "data_source": {
-        "cache_dir": "cache/planetary_computer",
-        "harmonize": true,
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+        "init_args": {
+          "cache_dir": "cache/planetary_computer",
+          "harmonize": true,
+          "sort_by": "eo:cloud_cover"
+        },
         "ingest": false,
-        "name": "rslearn.data_sources.planetary_computer.Sentinel2",
         "query_config": {
           "max_matches": 8
-        },
-        "sort_by": "eo:cloud_cover"
+        }
       },
       "type": "raster"
     },
@@ -53,10 +55,12 @@ is a suitable dataset configuration file:
           "dtype": "uint8"
       }],
       "data_source": {
-        "cache_dir": "cache/planetary_computer",
-        "harmonize": true,
+        "class_path": "rslearn.data_sources.planetary_computer.Naip",
+        "init_args": {
+          "cache_dir": "cache/planetary_computer",
+          "harmonize": true
+        },
         "ingest": false,
-        "name": "rslearn.data_sources.planetary_computer.Naip"
       },
       "type": "raster"
     }
