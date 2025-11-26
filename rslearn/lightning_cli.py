@@ -215,7 +215,11 @@ class RslearnLightningCLI(LightningCLI):
             # actually know which one is the best.
             best_checkpoint = None
             best_epochs = None
-            for option in project_dir.iterdir():
+
+            # Avoid error in case project_dir doesn't exist.
+            fnames = project_dir.iterdir() if project_dir.exists() else []
+
+            for option in fnames:
                 if not option.name.endswith(".ckpt"):
                     continue
 
