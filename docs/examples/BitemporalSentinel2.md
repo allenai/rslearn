@@ -49,7 +49,7 @@ dataset configuration file as `./bitemporal_dataset/config.json`:
           "harmonize": true,
           "sort_by": "eo:cloud_cover"
         },
-        "ingest": false,
+        "ingest": false
       },
       "type": "raster"
     },

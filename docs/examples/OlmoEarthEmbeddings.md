@@ -40,7 +40,7 @@ pre-training:
           "max_matches": 12,
           "period_duration": "30d",
           "space_mode": "PER_PERIOD_MOSAIC"
-        },
+        }
       },
       "type": "raster"
     },

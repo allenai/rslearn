@@ -57,10 +57,9 @@ is a suitable dataset configuration file:
       "data_source": {
         "class_path": "rslearn.data_sources.planetary_computer.Naip",
         "init_args": {
-          "cache_dir": "cache/planetary_computer",
-          "harmonize": true
+          "cache_dir": "cache/planetary_computer"
         },
-        "ingest": false,
+        "ingest": false
       },
       "type": "raster"
     }
