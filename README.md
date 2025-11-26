@@ -79,10 +79,12 @@ directory `/path/to/dataset` and corresponding configuration file at
                 "bands": ["R", "G", "B"]
             }],
             "data_source": {
-                "name": "rslearn.data_sources.gcp_public_data.Sentinel2",
-                "index_cache_dir": "cache/sentinel2/",
-                "sort_by": "cloud_cover",
-                "use_rtree_index": false
+                "class_path": "rslearn.data_sources.gcp_public_data.Sentinel2",
+                "init_args": {
+                    "index_cache_dir": "cache/sentinel2/",
+                    "sort_by": "cloud_cover",
+                    "use_rtree_index": false
+                }
             }
         }
     }
@@ -189,8 +191,10 @@ automate this process. Update the dataset `config.json` with a new layer:
         }],
         "resampling_method": "nearest",
         "data_source": {
-            "name": "rslearn.data_sources.local_files.LocalFiles",
-            "src_dir": "file:///path/to/world_cover_tifs/"
+            "class_path": "rslearn.data_sources.local_files.LocalFiles",
+            "init_args": {
+                "src_dir": "file:///path/to/world_cover_tifs/"
+            }
         }
     }
 },
@@ -252,8 +256,7 @@ model:
 data:
   class_path: rslearn.train.data_module.RslearnDataModule
   init_args:
-    # Replace this with the dataset path.
-    path: /path/to/dataset/
+    path: ${DATASET_PATH}
     # This defines the layers that should be read for each window.
     # The key ("image" / "targets") is what the data will be called in the model,
     # while the layers option specifies which layers will be read.
@@ -351,7 +354,9 @@ trainer:
       ...
     - class_path: rslearn.train.prediction_writer.RslearnWriter
       init_args:
-        path: /path/to/dataset/
+        # We need to include this argument, but it will be overridden with the dataset
+        # path from data.init_args.path.
+        path: placeholder
         output_layer: output
 ```
 
@@ -504,24 +509,43 @@ This will produce PNGs in the vis directory. The visualizations are produced by 
 SegmentationTask and overriding the visualize function.
 
 
-### Logging to Weights & Biases
+### Checkpoint and Logging Management
 
-We can log to W&B by setting the logger under trainer in the model configuration file:
+Above, we needed to configure the checkpoint directory in the model config (the
+`dirpath` option under `lightning.pytorch.callbacks.ModelCheckpoint`), and explicitly
+specify the checkpoint path when applying the model. Additionally, metrics are logged
+to the local filesystem and not well organized.
+
+We can instead let rslearn automatically manage checkpoints, along with logging to
+Weights & Biases. To do so, we add project_name, run_name, and management_dir options
+to the model config. The project_name corresponds to the W&B project, and the run name
+corresponds to the W&B name. The management_dir is a directory to store project data;
+rslearn determines a per-project directory at `{management_dir}/{project_name}/{run_name}/`
+and uses it to store checkpoints.
 
 ```yaml
+model:
+  # ...
+data:
+  # ...
 trainer:
   # ...
-  logger:
-    class_path: lightning.pytorch.loggers.WandbLogger
-    init_args:
-      project: land_cover_model
-      name: version_00
+project_name: land_cover_model
+run_name: version_00
+# This sets the option via the MANAGEMENT_DIR environment variable.
+management_dir: ${MANAGEMENT_DIR}
 ```
 
-Now, runs with this model configuration should show on W&B. For `model fit` runs,
-the training and validation loss and accuracy metric will be logged. The accuracy
-metric is provided by SegmentationTask, and additional metrics can be enabled by
-passing the relevant init_args to the task, e.g. mean IoU and F1:
+Now, set the `MANAGEMENT_DIR` environment variable and run `model fit`:
+
+```
+export MANAGEMENT_DIR=./project_data
+rslearn model fit --config land_cover_model.yaml
+```
+
+The training and validation loss and accuracy metric should now be logged to W&B. The
+accuracy metric is provided by SegmentationTask, and additional metrics can be enabled
+by passing the relevant init_args to the task, e.g. mean IoU and F1:
 
 ```yaml
       class_path: rslearn.train.tasks.segmentation.SegmentationTask
@@ -531,6 +555,13 @@ passing the relevant init_args to the task, e.g. mean IoU and F1:
         enable_miou_metric: true
         enable_f1_metric: true
 ```
+
+When calling `model test` and `model predict` with management_dir set, rslearn will
+automatically load the best checkpoint from the project directory, or raise an error if
+no existing checkpoint exists. This behavior can be overridden with the
+`--load_checkpoint_mode` and `--load_checkpoint_required` options (see `--help` for
+details). Logging will be enabled during fit but not test/predict, and this can also
+be overridden, using `--log_mode`.
 
 
 ### Inputting Multiple Sentinel-2 Images
@@ -554,10 +585,12 @@ query_config section. This can replace the sentinel2 layer:
             "bands": ["R", "G", "B"]
         }],
         "data_source": {
-            "name": "rslearn.data_sources.gcp_public_data.Sentinel2",
-            "index_cache_dir": "cache/sentinel2/",
-            "sort_by": "cloud_cover",
-            "use_rtree_index": false,
+            "class_path": "rslearn.data_sources.gcp_public_data.Sentinel2",
+            "init_args": {
+              "index_cache_dir": "cache/sentinel2/",
+              "sort_by": "cloud_cover",
+              "use_rtree_index": false
+            },
             "query_config": {
                 "max_matches": 3
             }

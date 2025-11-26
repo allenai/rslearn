@@ -21,7 +21,7 @@ configuration file to `./dataset/config.json`:
           "dtype": "uint8"
       }],
       "data_source": {
-        "name": "rslearn.data_sources.usda_cdl.CDL"
+        "class_path": "rslearn.data_sources.usda_cdl.CDL"
       },
       "resampling_method": "nearest",
       "type": "raster"
@@ -32,16 +32,18 @@ configuration file to `./dataset/config.json`:
           "dtype": "uint16"
       }],
       "data_source": {
-        "cache_dir": "cache/planetary_computer",
-        "harmonize": true,
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+        "init_args": {
+          "cache_dir": "cache/planetary_computer",
+          "harmonize": true,
+          "sort_by": "eo:cloud_cover"
+        },
         "ingest": false,
-        "name": "rslearn.data_sources.planetary_computer.Sentinel2",
         "query_config": {
           "max_matches": 4,
           "period_duration": "30d",
           "space_mode": "PER_PERIOD_MOSAIC"
-        },
-        "sort_by": "eo:cloud_cover"
+        }
       },
       "type": "raster"
     },
@@ -205,22 +207,15 @@ data:
       skip_targets: true
 trainer:
   max_epochs: 100
-  logger:
-    class_path: lightning.pytorch.loggers.WandbLogger
-    init_args:
-      project: ${WANDB_PROJECT}
-      name: ${WANDB_NAME}
-      entity: ${WANDB_ENTITY}
   callbacks:
     # Save the latest checkpoint (last.ckpt) as well as best one based on accuracy
     # metric.
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
-        dirpath: ${TRAINER_DATA_PATH}
         save_top_k: 1
         save_last: true
         monitor: val_accuracy
-        mode: min
+        mode: max
     # We find that freezing the model for the first few epochs helps to improve the
     # performance of the fine-tuned models.
     - class_path: rslearn.train.callbacks.freeze_unfreeze.FreezeUnfreeze
@@ -241,25 +236,25 @@ trainer:
             # overlap_ratio. So we keep the center 116x116 of each 128x128 output,
             # since there are 12 pixels of overlap between adjacent inference crops.
             padding: 6
+# Here we enable automatic checkpoint management and logging to W&B.
+# Set WANDB_MODE=offline to disable online logging.
+project_name: ${PROJECT_NAME}
+run_name: ${RUN_NAME}
+management_dir: ${MANAGEMENT_DIR}
 ```
 
 Save this as `model.yaml` and then run `model fit`:
 
 ```
-# Replace with your W&B entity.
-export WANDB_ENTITY=...
-export WANDB_PROJECT=olmoearth_cdl
-export WANDB_NAME=run_00
-export TRAINER_DATA_PATH=./trainer_data
+export PROJECT_NAME=olmoearth_cdl
+export RUN_NAME=run_00
+export MANAGEMENT_DIR=./project_data
 rslearn model fit --config model.yaml
 ```
 
 You should see loss and metric curves logged to W&B. The checkpoints will be stored in
-the `TRAINER_DATA_PATH`. To resume training, in case it is interrupted:
-
-```
-rslearn model fit --config model.yaml --ckpt_path trainer_data/last.ckpt
-```
+the `MANAGEMENT_DIR`, and rerunning `model fit` should automatically resume from the
+last saved checkpoint.
 
 ## Apply the Model
 
@@ -274,12 +269,10 @@ rslearn dataset prepare --root ./dataset --group predict
 rslearn dataset materialize --root ./dataset --group predict
 ```
 
-Then we apply the model. The best checkpoint should be named `epoch=....ckpt`, so we
-restore that here.
+Then we apply the model (it will automatically restore the best checkpoint):
 
 ```
-# Replace with your best checkpoint name in trainer_data folder.
-rslearn model predict --config.model.yaml --ckpt_path trainer_data/epoch=56-step=2907.ckpt
+rslearn model predict --config.model.yaml
 ```
 
 We can then open up one of the input Sentinel-2 images, the model prediction, and the

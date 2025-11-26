@@ -215,7 +215,11 @@ class RslearnLightningCLI(LightningCLI):
             # actually know which one is the best.
             best_checkpoint = None
             best_epochs = None
-            for option in project_dir.iterdir():
+
+            # Avoid error in case project_dir doesn't exist.
+            fnames = project_dir.iterdir() if project_dir.exists() else []
+
+            for option in fnames:
                 if not option.name.endswith(".ckpt"):
                     continue
 
@@ -325,8 +329,11 @@ class RslearnLightningCLI(LightningCLI):
                     }
                 )
                 c.trainer.callbacks.append(upload_wandb_callback)
-        else:
-            c.trainer.logger = jsonargparse.Namespace({})
+        elif c.trainer.logger:
+            logger.warning(
+                "Model management is enabled and logging should be off, but the model config specifies a logger. "
+                + "The logger should be removed from the model config, since it will not be automatically disabled."
+            )
 
         if subcommand == "fit":
             # Set the checkpoint directory to match the project directory.
