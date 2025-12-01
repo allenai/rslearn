@@ -25,7 +25,7 @@ from rasterio.enums import Resampling
 from upath import UPath
 
 from rslearn.log_utils import get_logger
-from rslearn.utils import PixelBounds, Projection
+from rslearn.utils.geometry import PixelBounds, Projection, ResolutionFactor
 from rslearn.utils.raster_format import RasterFormat
 from rslearn.utils.vector_format import VectorFormat
 
@@ -210,22 +210,12 @@ class BandSetConfig(BaseModel):
         Returns:
             tuple of updated projection and bounds with zoom offset applied
         """
-        if self.zoom_offset == 0:
-            return projection, bounds
-        projection = Projection(
-            projection.crs,
-            projection.x_resolution / (2**self.zoom_offset),
-            projection.y_resolution / (2**self.zoom_offset),
-        )
-        if self.zoom_offset > 0:
-            zoom_factor = 2**self.zoom_offset
-            bounds = tuple(x * zoom_factor for x in bounds)  # type: ignore
+        if self.zoom_offset >= 0:
+            factor = ResolutionFactor(numerator=2**self.zoom_offset)
         else:
-            bounds = tuple(
-                x // (2 ** (-self.zoom_offset))
-                for x in bounds  # type: ignore
-            )
-        return projection, bounds
+            factor = ResolutionFactor(denominator=2 ** (-self.zoom_offset))
+
+        return (factor.multiply_projection(projection), factor.multiply_bounds(bounds))
 
     @field_validator("format", mode="before")
     @classmethod
