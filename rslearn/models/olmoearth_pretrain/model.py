@@ -153,11 +153,8 @@ class OlmoEarth(torch.nn.Module):
         # Load the checkpoint.
         if not random_initialization:
             train_module_dir = checkpoint_upath / "model_and_optim"
-            if train_module_dir.exists():
-                load_model_and_optim_state(str(train_module_dir), model)
-                logger.info(f"loaded OlmoEarth encoder from {train_module_dir}")
-            else:
-                logger.info(f"could not find OlmoEarth encoder at {train_module_dir}")
+            load_model_and_optim_state(str(train_module_dir), model)
+            logger.info(f"loaded OlmoEarth encoder from {train_module_dir}")
 
         return model
 
