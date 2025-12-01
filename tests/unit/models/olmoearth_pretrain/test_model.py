@@ -1,5 +1,6 @@
 """Test rslearn.models.olmoearth_pretrain."""
 
+import pytest
 import torch
 
 from rslearn.models.olmoearth_pretrain.model import OlmoEarth
@@ -11,7 +12,6 @@ def test_forward() -> None:
         checkpoint_path="tests/unit/models/olmoearth_pretrain/",
         # With random initialization we only need config.json, not the weights.
         random_initialization=True,
-        selector=["encoder"],
         patch_size=4,
         embedding_size=768,
     )
@@ -34,3 +34,13 @@ def test_forward() -> None:
 
     # Backbone channels should match patch size and depth.
     assert model.get_backbone_channels() == [(4, 768)]
+
+
+def test_error_if_no_checkpoint() -> None:
+    """Should raise error if there is no distributed checkpoint."""
+    with pytest.raises(FileNotFoundError):
+        OlmoEarth(
+            checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+            patch_size=4,
+            embedding_size=768,
+        )
