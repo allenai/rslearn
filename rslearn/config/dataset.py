@@ -132,6 +132,8 @@ class BandSetConfig(BaseModel):
     bands.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     dtype: DType = Field(description="Pixel value type to store the data under")
     bands: list[str] = Field(
         default_factory=lambda: [],
@@ -329,7 +331,7 @@ class TimeMode(StrEnum):
 class QueryConfig(BaseModel):
     """A configuration for querying items in a data source."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     space_mode: SpaceMode = Field(
         default=SpaceMode.MOSAIC,
@@ -363,7 +365,7 @@ class QueryConfig(BaseModel):
 class DataSourceConfig(BaseModel):
     """Configuration for a DataSource in a dataset layer."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     class_path: str = Field(description="Class path for the data source.")
     init_args: dict[str, Any] = Field(
@@ -469,7 +471,7 @@ class CompositingMethod(StrEnum):
 class LayerConfig(BaseModel):
     """Configuration of a layer in a dataset."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     type: LayerType = Field(description="The LayerType (raster or vector).")
     data_source: DataSourceConfig | None = Field(
@@ -594,6 +596,8 @@ class LayerConfig(BaseModel):
 
 class DatasetConfig(BaseModel):
     """Overall dataset configuration."""
+
+    model_config = ConfigDict(extra="forbid")
 
     layers: dict[str, LayerConfig] = Field(description="Layers in the dataset.")
     tile_store: dict[str, Any] = Field(
