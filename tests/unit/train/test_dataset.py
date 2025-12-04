@@ -191,7 +191,7 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
     assert len(list(dataset)) == 4
 
     for _, _, metadata in dataset:
-        bounds = metadata["bounds"]
+        bounds = metadata.patch_bounds
         for col, row in list(point_coverage.keys()):
             if col < bounds[0] or col >= bounds[2]:
                 continue
@@ -215,7 +215,7 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
     assert len(list(dataset_with_overlap)) == 9
 
     for _, _, metadata in dataset:
-        bounds = metadata["bounds"]
+        bounds = metadata.patch_bounds
 
         for col, row in list(point_coverage.keys()):
             if col < bounds[0] or col >= bounds[2]:
@@ -368,7 +368,7 @@ class TestIterableAllPatchesDataset:
             )
             samples = list(all_patches_dataset)
             assert len(samples) == 1
-            window_names.add(samples[0][2]["window_name"])
+            window_names.add(samples[0][2].window_name)
         assert len(window_names) == 4
 
     def test_different_window_sizes(
@@ -397,7 +397,7 @@ class TestIterableAllPatchesDataset:
             samples = list(all_patches_dataset)
             assert len(samples) == 4
             for sample in samples:
-                patch_id = (sample[2]["window_name"], sample[2]["bounds"])
+                patch_id = (sample[2].window_name, sample[2].patch_bounds)
                 seen_patches[patch_id] = seen_patches.get(patch_id, 0) + 1
 
         assert len(seen_patches) == 5
