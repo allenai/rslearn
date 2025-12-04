@@ -1,19 +1,18 @@
 """rslearn windows."""
 
-import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import shapely
 from upath import UPath
 
+from rslearn.dataset.storage.storage import DatasetStorage
 from rslearn.log_utils import get_logger
 from rslearn.utils import Projection, STGeometry
-from rslearn.utils.fsspec import open_atomic
 from rslearn.utils.raster_format import get_bandset_dirname
 
 if TYPE_CHECKING:
-    from .index import DatasetIndex
+    pass
 
 logger = get_logger(__name__)
 
@@ -138,14 +137,13 @@ class Window:
 
     def __init__(
         self,
-        path: UPath,
+        storage: DatasetStorage,
         group: str,
         name: str,
         projection: Projection,
         bounds: tuple[int, int, int, int],
         time_range: tuple[datetime, datetime] | None,
         options: dict[str, Any] = {},
-        index: "DatasetIndex | None" = None,
     ) -> None:
         """Creates a new Window instance.
 
@@ -153,23 +151,21 @@ class Window:
         stored in metadata.json.
 
         Args:
-            path: the directory of this window
+            storage: the dataset storage for the underlying rslearn dataset.
             group: the group the window belongs to
             name: the unique name for this window
             projection: the projection of the window
             bounds: the bounds of the window in pixel coordinates
             time_range: optional time range of the window
             options: additional options (?)
-            index: DatasetIndex if it is available
         """
-        self.path = path
+        self.storage = storage
         self.group = group
         self.name = name
         self.projection = projection
         self.bounds = bounds
         self.time_range = time_range
         self.options = options
-        self.index = index
 
     def get_geometry(self) -> STGeometry:
         """Computes the STGeometry corresponding to this window."""
@@ -181,29 +177,11 @@ class Window:
 
     def load_layer_datas(self) -> dict[str, WindowLayerData]:
         """Load layer datas describing items in retrieved layers from items.json."""
-        # Load from index if it is available.
-        if self.index is not None:
-            layer_datas = self.index.layer_datas.get(self.name, [])
-
-        else:
-            items_fname = self.path / "items.json"
-            if not items_fname.exists():
-                return {}
-            with items_fname.open("r") as f:
-                layer_datas = [
-                    WindowLayerData.deserialize(layer_data)
-                    for layer_data in json.load(f)
-                ]
-
-        return {layer_data.layer_name: layer_data for layer_data in layer_datas}
+        return self.storage.get_layer_datas(self.group, self.name)
 
     def save_layer_datas(self, layer_datas: dict[str, WindowLayerData]) -> None:
         """Save layer datas to items.json."""
-        json_data = [layer_data.serialize() for layer_data in layer_datas.values()]
-        items_fname = self.path / "items.json"
-        logger.info(f"Saving window items to {items_fname}")
-        with open_atomic(items_fname, "w") as f:
-            json.dump(json_data, f)
+        self.storage.save_layer_datas(self.group, self.name, layer_datas)
 
     def list_completed_layers(self) -> list[tuple[str, int]]:
         """List the layers available for this window that are completed.
@@ -211,18 +189,7 @@ class Window:
         Returns:
             a list of (layer_name, group_idx) completed layers.
         """
-        layers_directory = self.path / LAYERS_DIRECTORY_NAME
-        if not layers_directory.exists():
-            return []
-
-        completed_layers = []
-        for layer_dir in layers_directory.iterdir():
-            layer_name, group_idx = get_layer_and_group_from_dir_name(layer_dir.name)
-            if not self.is_layer_completed(layer_name, group_idx):
-                continue
-            completed_layers.append((layer_name, group_idx))
-
-        return completed_layers
+        return self.storage.list_completed_layers(self.group, self.name)
 
     def get_layer_dir(self, layer_name: str, group_idx: int = 0) -> UPath:
         """Get the directory containing materialized data for the specified layer.
@@ -235,7 +202,9 @@ class Window:
         Returns:
             the path where data is or should be materialized.
         """
-        return get_window_layer_dir(self.path, layer_name, group_idx)
+        return get_window_layer_dir(
+            self.storage.get_window_root(self.group, self.name), layer_name, group_idx
+        )
 
     def is_layer_completed(self, layer_name: str, group_idx: int = 0) -> bool:
         """Check whether the specified layer is completed.
@@ -250,14 +219,9 @@ class Window:
         Returns:
             whether the layer is completed
         """
-        # Use the index to speed up the completed check if it is available.
-        if self.index is not None:
-            return (layer_name, group_idx) in self.index.completed_layers.get(
-                self.name, []
-            )
-
-        layer_dir = self.get_layer_dir(layer_name, group_idx)
-        return (layer_dir / "completed").exists()
+        return self.storage.is_layer_completed(
+            self.group, self.name, layer_name, group_idx
+        )
 
     def mark_layer_completed(self, layer_name: str, group_idx: int = 0) -> None:
         """Mark the specified layer completed.
@@ -272,8 +236,7 @@ class Window:
             layer_name: the layer name.
             group_idx: the index of the group within the layer.
         """
-        layer_dir = self.get_layer_dir(layer_name, group_idx)
-        (layer_dir / "completed").touch()
+        self.storage.mark_layer_completed(self.group, self.name, layer_name, group_idx)
 
     def get_raster_dir(
         self, layer_name: str, bands: list[str], group_idx: int = 0
@@ -289,7 +252,12 @@ class Window:
         Returns:
             the directory containing the raster.
         """
-        return get_window_raster_dir(self.path, layer_name, bands, group_idx)
+        return get_window_raster_dir(
+            self.storage.get_window_root(self.group, self.name),
+            layer_name,
+            bands,
+            group_idx,
+        )
 
     def get_metadata(self) -> dict[str, Any]:
         """Returns the window metadata dictionary."""
@@ -308,18 +276,14 @@ class Window:
 
     def save(self) -> None:
         """Save the window metadata to its root directory."""
-        self.path.mkdir(parents=True, exist_ok=True)
-        metadata_path = self.path / "metadata.json"
-        logger.debug(f"Saving window metadata to {metadata_path}")
-        with open_atomic(metadata_path, "w") as f:
-            json.dump(self.get_metadata(), f)
+        self.storage.create_or_update_window(self)
 
     @staticmethod
-    def from_metadata(path: UPath, metadata: dict[str, Any]) -> "Window":
+    def from_metadata(storage: DatasetStorage, metadata: dict[str, Any]) -> "Window":
         """Create a Window from its path and metadata dictionary.
 
         Args:
-            path: the root directory of the window.
+            storage: the DatasetStorage for the underlying dataset.
             metadata: the window metadata.
 
         Returns:
@@ -334,7 +298,7 @@ class Window:
         )
 
         return Window(
-            path=path,
+            storage=storage,
             group=metadata["group"],
             name=metadata["name"],
             projection=Projection.deserialize(metadata["projection"]),
@@ -349,21 +313,6 @@ class Window:
             ),
             options=metadata["options"],
         )
-
-    @staticmethod
-    def load(path: UPath) -> "Window":
-        """Load a Window from a UPath.
-
-        Args:
-            path: the root directory of the window
-
-        Returns:
-            the Window
-        """
-        metadata_fname = path / "metadata.json"
-        with metadata_fname.open("r") as f:
-            metadata = json.load(f)
-        return Window.from_metadata(path, metadata)
 
     @staticmethod
     def get_window_root(ds_path: UPath, group: str, name: str) -> UPath:

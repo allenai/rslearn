@@ -42,7 +42,7 @@ class TestLocalFiles:
         layer_config = local_files_dataset.layers["local_file"]
         vector_format = layer_config.instantiate_vector_format()
         features = vector_format.decode_vector(
-            window.path / "layers" / "local_file", window.projection, window.bounds
+            window.get_layer_dir("local_file"), window.projection, window.bounds
         )
 
         assert len(features) == 2
@@ -94,6 +94,7 @@ class TestLocalFiles:
         }
         with (ds_path / "config.json").open("w") as f:
             json.dump(dataset_config, f)
+        dataset = Dataset(ds_path)
 
         # Create UTM window where we expect the geometry.
         utm_proj = get_utm_ups_projection(
@@ -107,7 +108,7 @@ class TestLocalFiles:
             int(dst_geometry.shp.y) + 4,
         )
         Window(
-            path=Window.get_window_root(ds_path, "default", "default"),
+            storage=dataset.storage,
             group="default",
             name="default",
             projection=utm_proj,
@@ -116,7 +117,6 @@ class TestLocalFiles:
         ).save()
 
         # Now materialize the windows and check that it was done correctly.
-        dataset = Dataset(ds_path)
         windows = dataset.load_windows()
         prepare_dataset_windows(dataset, windows)
         ingest_dataset_windows(dataset, windows)
@@ -126,7 +126,7 @@ class TestLocalFiles:
         layer_config = dataset.layers["local_file"]
         vector_format = layer_config.instantiate_vector_format()
         features = vector_format.decode_vector(
-            window.path / "layers" / "local_file", window.projection, window.bounds
+            window.get_layer_dir("local_file"), window.projection, window.bounds
         )
         assert len(features) == 1
         assert features[0].properties is not None
@@ -180,17 +180,17 @@ class TestLocalFiles:
         }
         with (ds_path / "config.json").open("w") as f:
             json.dump(dataset_config, f)
+        dataset = Dataset(ds_path)
 
         # Create a window and materialize it.
         Window(
-            path=Window.get_window_root(ds_path, "default", "default"),
+            storage=dataset.storage,
             group="default",
             name="default",
             projection=projection,
             bounds=bounds,
             time_range=None,
         ).save()
-        dataset = Dataset(ds_path)
         windows = dataset.load_windows()
         prepare_dataset_windows(dataset, windows)
         ingest_dataset_windows(dataset, windows)
@@ -267,13 +267,15 @@ class TestCoordinateModes:
     def test_matching_units_in_wrong_crs(
         self, seattle_point: STGeometry, vector_ds_path: UPath
     ) -> None:
+        dataset = Dataset(vector_ds_path)
+
         # Here we make a window that has the same coordinates as the dataset's source
         # data, but it is actually in a different CRS.
         # So it shouldn't match with anything.
         window_projection = Projection(CRS.from_epsg(32610), 5, -5)
         window_center = seattle_point.to_projection(self.source_data_projection).shp
         bad_window = Window(
-            path=Window.get_window_root(vector_ds_path, "default", "bad"),
+            storage=dataset.storage,
             group="default",
             name="bad",
             projection=window_projection,
@@ -287,22 +289,23 @@ class TestCoordinateModes:
         )
         bad_window.save()
 
-        dataset = Dataset(vector_ds_path)
         windows = dataset.load_windows()
         prepare_dataset_windows(dataset, windows)
         ingest_dataset_windows(dataset, windows)
         materialize_dataset_windows(dataset, windows)
-        assert not (bad_window.path / "layers" / "local_file" / "data.geojson").exists()
+        assert not (bad_window.get_layer_dir("local_file") / "data.geojson").exists()
 
     def test_match_in_different_crs(
         self, seattle_point: STGeometry, vector_ds_path: UPath
     ) -> None:
+        dataset = Dataset(vector_ds_path)
+
         # Now create a window again in EPSG:32610 but it has the right units to match
         # with the point.
         window_projection = Projection(CRS.from_epsg(32610), 5, -5)
         window_center = seattle_point.to_projection(window_projection).shp
         good_window = Window(
-            path=Window.get_window_root(vector_ds_path, "default", "good"),
+            storage=dataset.storage,
             group="default",
             name="good",
             projection=window_projection,
@@ -316,9 +319,8 @@ class TestCoordinateModes:
         )
         good_window.save()
 
-        dataset = Dataset(vector_ds_path)
         windows = dataset.load_windows()
         prepare_dataset_windows(dataset, windows)
         ingest_dataset_windows(dataset, windows)
         materialize_dataset_windows(dataset, windows)
-        assert (good_window.path / "layers" / "local_file" / "data.geojson").exists()
+        assert (good_window.get_layer_dir("local_file") / "data.geojson").exists()

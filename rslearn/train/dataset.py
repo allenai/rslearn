@@ -615,17 +615,11 @@ class ModelDataset(torch.utils.data.Dataset):
 
         # Eliminate windows that are missing either a requisite input layer, or missing
         # all target layers.
-        # We use only main thread if the index is set, since that can take a long time
-        # to send to the worker threads, it may get serialized for each window.
         new_windows = []
-        if workers == 0 or (len(windows) >= 1 and windows[0].index is not None):
+        if workers == 0:
             for window in windows:
                 if check_window(self.inputs, window) is None:
                     continue
-                # The index may be set, but now that this check is done, from here on
-                # we no longer need it. We set it None so that we don't end up passing
-                # it later to the dataloader workers.
-                window.index = None
                 new_windows.append(window)
         else:
             p = multiprocessing.Pool(workers)

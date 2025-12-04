@@ -89,11 +89,14 @@ class TestPrepareDatasetWindows:
         with (ds_path / "config.json").open("w") as f:
             json.dump(dataset_config, f)
 
+        dataset = Dataset(ds_path)
+        storage = dataset.storage
+
         # Create two windows:
         # Window 1: Intersects 2 files (will be skipped due to min_matches=3)
         # Window 2: Intersects 4 files (will be prepared)
         Window(
-            path=Window.get_window_root(ds_path, "default", "window1"),
+            storage=storage,
             group="default",
             name="window1",
             projection=WGS84_PROJECTION,
@@ -102,7 +105,7 @@ class TestPrepareDatasetWindows:
         ).save()
 
         Window(
-            path=Window.get_window_root(ds_path, "default", "window2"),
+            storage=storage,
             group="default",
             name="window2",
             projection=WGS84_PROJECTION,
@@ -191,9 +194,12 @@ class TestPrepareDatasetWindows:
         with (ds_path / "config.json").open("w") as f:
             json.dump(dataset_config, f)
 
+        dataset = Dataset(ds_path)
+        storage = dataset.storage
+
         # Create a window that intersects the feature
         Window(
-            path=Window.get_window_root(ds_path, "default", "default"),
+            storage=storage,
             group="default",
             name="default",
             projection=WGS84_PROJECTION,
@@ -289,12 +295,15 @@ class TestPrepareDatasetWindows:
         with (ds_path / "config.json").open("w") as f:
             json.dump(dataset_config, f)
 
+        dataset = Dataset(ds_path)
+        storage = dataset.storage
+
         # Create three windows:
         # Window 1: Already prepared (will be skipped, not counted in min_matches skip)
         # Window 2: Intersects 1 file (will be skipped due to min_matches)
         # Window 3: Intersects 2 files (will be prepared)
         window1 = Window(
-            path=Window.get_window_root(ds_path, "default", "window1"),
+            storage=storage,
             group="default",
             name="window1",
             projection=WGS84_PROJECTION,
@@ -313,7 +322,7 @@ class TestPrepareDatasetWindows:
         window1.save_layer_datas(layer_datas)
 
         Window(
-            path=Window.get_window_root(ds_path, "default", "window2"),
+            storage=storage,
             group="default",
             name="window2",
             projection=WGS84_PROJECTION,
@@ -322,7 +331,7 @@ class TestPrepareDatasetWindows:
         ).save()
 
         Window(
-            path=Window.get_window_root(ds_path, "default", "window3"),
+            storage=storage,
             group="default",
             name="window3",
             projection=WGS84_PROJECTION,
@@ -399,9 +408,12 @@ class TestPrepareDatasetWindows:
         with (ds_path / "config.json").open("w") as f:
             json.dump(dataset_config, f)
 
+        dataset = Dataset(ds_path)
+        storage = dataset.storage
+
         # Create a window that intersects 1 file (will not meet min_matches=2)
         Window(
-            path=Window.get_window_root(ds_path, "default", "window1"),
+            storage=storage,
             group="default",
             name="window1",
             projection=WGS84_PROJECTION,

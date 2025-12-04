@@ -11,9 +11,10 @@ from lightning.pytorch import Trainer
 from torchmetrics import MetricCollection
 from upath import UPath
 
-from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType
+from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType, StorageConfig
 from rslearn.const import WGS84_PROJECTION
-from rslearn.dataset import Window
+from rslearn.dataset import Dataset, Window
+from rslearn.dataset.storage.file import FileDatasetStorage
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.train.prediction_writer import (
     PendingPatchOutput,
@@ -94,8 +95,9 @@ class TestRasterMerger:
 
         We make four 3x3 patches to cover a 4x4 window.
         """
+        storage = FileDatasetStorage(tmp_path)
         window = Window(
-            path=UPath(tmp_path),
+            storage=storage,
             group="fake",
             name="fake",
             projection=WGS84_PROJECTION,
@@ -132,8 +134,9 @@ class TestRasterMerger:
 
     def test_merge_with_padding(self, tmp_path: pathlib.Path) -> None:
         """Verify merging works with padding."""
+        storage = FileDatasetStorage(tmp_path)
         window = Window(
-            path=UPath(tmp_path),
+            storage=storage,
             group="fake",
             name="fake",
             projection=WGS84_PROJECTION,
@@ -198,12 +201,13 @@ def test_write_raster(tmp_path: pathlib.Path) -> None:
     }
     with (ds_path / "config.json").open("w") as f:
         json.dump(ds_config, f)
+    dataset = Dataset(ds_path)
 
     # Create the window.
     window_name = "default"
     window_group = "default"
     window = Window(
-        path=Window.get_window_root(ds_path, window_name, window_group),
+        storage=dataset.storage,
         group=window_group,
         name=window_name,
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
@@ -285,12 +289,13 @@ def test_write_raster_with_custom_output_path(tmp_path: pathlib.Path) -> None:
     }
     with (ds_path / "config.json").open("w") as f:
         json.dump(ds_config, f)
+    dataset = Dataset(ds_path)
 
     # Create the window in dataset location.
     window_name = "default"
     window_group = "default"
     window = Window(
-        path=Window.get_window_root(ds_path, window_name, window_group),
+        storage=dataset.storage,
         group=window_group,
         name=window_name,
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
@@ -344,11 +349,9 @@ def test_write_raster_with_custom_output_path(tmp_path: pathlib.Path) -> None:
     )
 
     # Ensure the output is written to the custom output path, not the dataset path.
-    custom_window_path = Window.get_window_root(
-        UPath(output_path), window_group, window_name
-    )
+    custom_storage = FileDatasetStorage(UPath(output_path))
     custom_window = Window(
-        path=custom_window_path,
+        storage=custom_storage,
         group=window_group,
         name=window_name,
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
@@ -439,9 +442,8 @@ def test_write_raster_with_layer_config(tmp_path: pathlib.Path) -> None:
     )
 
     # Ensure the output is written using the custom layer config.
-    window_path = Window.get_window_root(output_path, window_group, window_name)
     window = Window(
-        path=window_path,
+        storage=writer.dataset_storage,
         group=window_group,
         name=window_name,
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
@@ -531,9 +533,8 @@ def test_selector_with_dictionary_output(tmp_path: pathlib.Path) -> None:
     )
 
     # Verify the output was written to the correct location
-    window_path = Window.get_window_root(output_path, window_group, window_name)
     window = Window(
-        path=window_path,
+        storage=writer.dataset_storage,
         group=window_group,
         name=window_name,
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
@@ -607,6 +608,8 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
         ],
     )
 
+    storage_config = StorageConfig()
+
     output_path = UPath(tmp_path / "nested_selector_test")
     output_path.mkdir()
 
@@ -621,6 +624,7 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
         output_layer=output_layer_name,
         selector=["segment", "data"],  # Should extract output["segment"]["data"]
         layer_config=layer_config,
+        storage_config=storage_config,
         output_path=str(output_path),
     )
 
@@ -657,9 +661,10 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
     )
 
     # Verify output was written successfully
-    window_path = Window.get_window_root(output_path, "test_group", "nested_test")
     window = Window(
-        path=window_path,
+        storage=storage_config.instantiate_dataset_storage_factory().get_storage(
+            output_path
+        ),
         group="test_group",
         name="nested_test",
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),

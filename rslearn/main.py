@@ -27,7 +27,6 @@ from rslearn.dataset.handler_summaries import (
     PrepareDatasetWindowsSummary,
     UnknownIngestCounts,
 )
-from rslearn.dataset.index import DatasetIndex
 from rslearn.dataset.manage import (
     AttemptsCounter,
     materialize_dataset_windows,
@@ -796,35 +795,6 @@ def dataset_materialize() -> None:
         retry_backoff=timedelta(seconds=args.retry_backoff_seconds),
     )
     apply_on_windows_args(fn, args)
-
-
-@register_handler("dataset", "build_index")
-def dataset_build_index() -> None:
-    """Handler for the rslearn dataset build_index command."""
-    parser = argparse.ArgumentParser(
-        prog="rslearn dataset build_index",
-        description=("rslearn dataset build_index: " + "create a dataset index file"),
-    )
-    parser.add_argument(
-        "--root",
-        type=str,
-        required=True,
-        help="Dataset path",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=16,
-        help="Number of workers",
-    )
-    args = parser.parse_args(args=sys.argv[3:])
-    ds_path = UPath(args.root)
-    dataset = Dataset(ds_path)
-    index = DatasetIndex.build_index(
-        dataset=dataset,
-        workers=args.workers,
-    )
-    index.save_index(ds_path)
 
 
 @register_handler("model", "fit")

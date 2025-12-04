@@ -1,5 +1,6 @@
 """rslearn PredictionWriter implementation."""
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,10 +13,13 @@ from lightning.pytorch.callbacks import BasePredictionWriter
 from upath import UPath
 
 from rslearn.config import (
+    DatasetConfig,
     LayerConfig,
     LayerType,
+    StorageConfig,
 )
-from rslearn.dataset import Dataset, Window
+from rslearn.dataset import Window
+from rslearn.dataset.storage.storage import DatasetStorage
 from rslearn.log_utils import get_logger
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.feature import Feature
@@ -148,6 +152,7 @@ class RslearnWriter(BasePredictionWriter):
         merger: PatchPredictionMerger | None = None,
         output_path: str | Path | None = None,
         layer_config: LayerConfig | None = None,
+        storage_config: StorageConfig | None = None,
     ):
         """Create a new RslearnWriter.
 
@@ -163,28 +168,49 @@ class RslearnWriter(BasePredictionWriter):
             layer_config: optional layer configuration. If provided, this config will be
                 used instead of reading from the dataset config, allowing usage without
                 requiring dataset config at the output path.
+            storage_config: optional storage configuration, needed similar to layer_config
+                if there is no dataset config.
         """
         super().__init__(write_interval="batch")
         self.output_layer = output_layer
         self.selector = selector or []
-        self.path = UPath(path, **path_options or {})
-        self.output_path = (
+        ds_upath = UPath(path, **path_options or {})
+        output_upath = (
             UPath(output_path, **path_options or {})
             if output_path is not None
-            else None
+            else ds_upath
         )
 
-        # Handle dataset and layer config
-        self.layer_config: LayerConfig
-        if layer_config:
-            self.layer_config = layer_config
-        else:
-            dataset = Dataset(self.path)
-            if self.output_layer not in dataset.layers:
-                raise KeyError(
-                    f"Output layer '{self.output_layer}' not found in dataset layers."
+        # Handle dataset, layer, and storage config
+        dataset_storage: DatasetStorage | None = None
+        if storage_config:
+            dataset_storage = (
+                storage_config.instantiate_dataset_storage_factory().get_storage(
+                    output_upath
                 )
-            self.layer_config = dataset.layers[self.output_layer]
+            )
+        if not layer_config or not dataset_storage:
+            # Need to load dataset config since one of these is missing.
+            # We use DatasetConfig.model_validate instead of initializing the Dataset
+            # because we want to get a DatasetStorage that has the dataset path set to
+            # output_upath instead of ds_upath.
+            with (ds_upath / "config.json").open() as f:
+                dataset_config = DatasetConfig.model_validate(json.load(f))
+
+            if not layer_config:
+                if self.output_layer not in dataset_config.layers:
+                    raise KeyError(
+                        f"Output layer '{self.output_layer}' not found in dataset layers."
+                    )
+                layer_config = dataset_config.layers[self.output_layer]
+
+            if not dataset_storage:
+                dataset_storage = dataset_config.storage.instantiate_dataset_storage_factory().get_storage(
+                    output_upath
+                )
+
+        self.layer_config: LayerConfig = layer_config
+        self.dataset_storage: DatasetStorage = dataset_storage
 
         self.format: RasterFormat | VectorFormat
         if self.layer_config.type == LayerType.RASTER:
@@ -263,14 +289,8 @@ class RslearnWriter(BasePredictionWriter):
             for k in self.selector:
                 output = output[k]
 
-            # Use custom output_path if provided, otherwise use dataset path
-            window_base_path = (
-                self.output_path if self.output_path is not None else self.path
-            )
             window = Window(
-                path=Window.get_window_root(
-                    window_base_path, metadata["group"], metadata["window_name"]
-                ),
+                storage=self.storage,
                 group=metadata["group"],
                 name=metadata["window_name"],
                 projection=metadata["projection"],

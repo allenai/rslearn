@@ -6,13 +6,14 @@ from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Window
+from rslearn.dataset.storage.file import FileDatasetStorage
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
 @pytest.fixture
 def empty_window(tmp_path: pathlib.Path) -> Window:
     window = Window(
-        path=UPath(tmp_path),
+        storage=FileDatasetStorage(UPath(tmp_path)),
         group="default",
         name="default",
         projection=WGS84_PROJECTION,
@@ -45,14 +46,6 @@ def test_window_location(tmp_path: pathlib.Path) -> None:
     window_name = "window"
     window_dir = Window.get_window_root(ds_path, group_name, window_name)
     assert window_dir == ds_path / "windows" / group_name / window_name
-
-
-def test_layer_dir_location(empty_window: Window) -> None:
-    # Make sure layer directory is in the expected location.
-    # This ensures compatibility with existing datasets.
-    layer_name = "layer"
-    layer_dir = empty_window.get_layer_dir(layer_name)
-    assert layer_dir == empty_window.path / "layers" / layer_name
 
 
 def test_underscore_band_name(empty_window: Window) -> None:

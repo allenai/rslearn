@@ -47,6 +47,7 @@ def test_materialize_capitol_hill(tmp_path: pathlib.Path) -> None:
     }
     with (ds_path / "config.json").open("w") as f:
         json.dump(dataset_config, f)
+    dataset = Dataset(ds_path)
 
     # Create a UTM window corresponding to Capitol Hill neighborhood.
     lon, lat = -122.3191, 47.6174
@@ -60,7 +61,7 @@ def test_materialize_capitol_hill(tmp_path: pathlib.Path) -> None:
         int(dst_geometry.shp.y) + 4,
     )
     window = Window(
-        path=Window.get_window_root(ds_path, "default", "default"),
+        storage=dataset.storage,
         group="default",
         name="default",
         projection=utm_proj,
@@ -70,7 +71,6 @@ def test_materialize_capitol_hill(tmp_path: pathlib.Path) -> None:
     window.save()
 
     # Now materialize the windows and verify the value range.
-    dataset = Dataset(ds_path)
     windows = dataset.load_windows()
     prepare_dataset_windows(dataset, windows)
     ingest_dataset_windows(dataset, windows)
