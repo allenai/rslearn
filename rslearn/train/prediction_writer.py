@@ -290,7 +290,7 @@ class RslearnWriter(BasePredictionWriter):
                 output = output[k]
 
             window = Window(
-                storage=self.storage,
+                storage=self.dataset_storage,
                 group=metadata["group"],
                 name=metadata["window_name"],
                 projection=metadata["projection"],

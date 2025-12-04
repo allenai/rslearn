@@ -406,6 +406,7 @@ def test_write_raster_with_layer_config(tmp_path: pathlib.Path) -> None:
         path=str(tmp_path),  # This path doesn't matter since we're using layer_config
         output_layer=output_layer_name,
         layer_config=layer_config,
+        storage_config=StorageConfig(),
         output_path=str(output_path),
     )
 
@@ -495,6 +496,7 @@ def test_selector_with_dictionary_output(tmp_path: pathlib.Path) -> None:
         output_layer=output_layer_name,
         selector=["segment"],  # This should extract the 'segment' key
         layer_config=layer_config,
+        storage_config=StorageConfig(),
         output_path=str(output_path),
     )
 
@@ -608,8 +610,6 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
         ],
     )
 
-    storage_config = StorageConfig()
-
     output_path = UPath(tmp_path / "nested_selector_test")
     output_path.mkdir()
 
@@ -624,7 +624,7 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
         output_layer=output_layer_name,
         selector=["segment", "data"],  # Should extract output["segment"]["data"]
         layer_config=layer_config,
-        storage_config=storage_config,
+        storage_config=StorageConfig(),
         output_path=str(output_path),
     )
 
@@ -662,9 +662,7 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
 
     # Verify output was written successfully
     window = Window(
-        storage=storage_config.instantiate_dataset_storage_factory().get_storage(
-            output_path
-        ),
+        storage=writer.dataset_storage,
         group="test_group",
         name="nested_test",
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
