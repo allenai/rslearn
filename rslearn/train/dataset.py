@@ -680,7 +680,7 @@ class ModelDataset(torch.utils.data.Dataset):
 
     def _deserialize_item(self, d: dict[str, Any]) -> Window:
         return Window.from_metadata(
-            Window.get_window_root(self.dataset.path, d["group"], d["name"]),
+            self.dataset.storage,
             d,
         )
 
