@@ -1,9 +1,7 @@
 """rslearn dataset class."""
 
 import json
-import multiprocessing
 
-import tqdm
 from upath import UPath
 
 from rslearn.config import DatasetConfig
@@ -11,7 +9,6 @@ from rslearn.log_utils import get_logger
 from rslearn.template_params import substitute_env_vars_in_string
 from rslearn.tile_stores import TileStore, load_tile_store
 
-from .index import DatasetIndex
 from .window import Window
 
 logger = get_logger(__name__)
@@ -68,12 +65,11 @@ class Dataset:
                 self.layers[layer_name] = layer_config
 
             self.tile_store_config = config.tile_store
-
-    def _get_index(self) -> DatasetIndex | None:
-        index_fname = self.path / DatasetIndex.FNAME
-        if not index_fname.exists():
-            return None
-        return DatasetIndex.load_index(self.path)
+            self.storage = (
+                config.storage.instantiate_dataset_storage_factory().get_storage(
+                    self.path
+                )
+            )
 
     def load_windows(
         self,
@@ -81,7 +77,6 @@ class Dataset:
         names: list[str] | None = None,
         show_progress: bool = False,
         workers: int = 0,
-        no_index: bool = False,
     ) -> list[Window]:
         """Load the windows in the dataset.
 
@@ -90,58 +85,10 @@ class Dataset:
             names: an optional list of window names to filter loading
             show_progress: whether to show tqdm progress bar
             workers: number of parallel workers, default 0 (use main thread only to load windows)
-            no_index: don't use the dataset index even if it exists.
         """
-        # Load from index if it exists.
-        # We never use the index if names is set since loading the index will likely be
-        # slower than loading a few windows.
-        if not no_index and names is None:
-            dataset_index = self._get_index()
-            if dataset_index is not None:
-                return dataset_index.get_windows(groups=groups, names=names)
-
-        # Avoid directory does not exist errors later.
-        if not (self.path / "windows").exists():
-            return []
-
-        window_dirs = []
-        if not groups:
-            groups = []
-            for p in (self.path / "windows").iterdir():
-                groups.append(p.name)
-        for group in groups:
-            group_dir = self.path / "windows" / group
-            if not group_dir.exists():
-                logger.warning(
-                    f"Skipping group directory {group_dir} since it does not exist"
-                )
-                continue
-            if names:
-                cur_names = names
-            else:
-                cur_names = []
-                for p in group_dir.iterdir():
-                    cur_names.append(p.name)
-
-            for window_name in cur_names:
-                window_dir = group_dir / window_name
-                window_dirs.append(window_dir)
-
-        if workers == 0:
-            windows = [Window.load(window_dir) for window_dir in window_dirs]
-        else:
-            p = multiprocessing.Pool(workers)
-            outputs = p.imap_unordered(Window.load, window_dirs)
-            if show_progress:
-                outputs = tqdm.tqdm(
-                    outputs, total=len(window_dirs), desc="Loading windows"
-                )
-            windows = []
-            for window in outputs:
-                windows.append(window)
-            p.close()
-
-        return windows
+        return self.storage.get_windows(
+            groups=groups, names=names, show_progress=show_progress, workers=workers
+        )
 
     def get_tile_store(self) -> TileStore:
         """Get the tile store associated with this dataset.

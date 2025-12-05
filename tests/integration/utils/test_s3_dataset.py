@@ -65,17 +65,16 @@ class TestLocalFiles:
         ds_path.mkdir(parents=True, exist_ok=True)
         with (ds_path / "config.json").open("w") as f:
             json.dump(dataset_config, f)
+        dataset = Dataset(ds_path)
 
         Window(
-            path=Window.get_window_root(ds_path, "default", "default"),
+            storage=dataset.storage,
             group="default",
             name="default",
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 10, 10),
             time_range=None,
         ).save()
-
-        dataset = Dataset(ds_path)
 
         windows = dataset.load_windows()
         prepare_dataset_windows(dataset, windows)

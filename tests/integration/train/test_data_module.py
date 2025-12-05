@@ -82,7 +82,7 @@ class TestPredictLoader:
         # Make the window 4x4 so there should be 4 patches.
         # We use batch size 2 so there should be 2 batches.
         window = Window(
-            path=Window.get_window_root(empty_image_dataset.path, "group", "window"),
+            storage=empty_image_dataset.storage,
             group="group",
             name="window",
             projection=WGS84_PROJECTION,

@@ -83,9 +83,8 @@ def add_window(
         images: map from (layer_name, group_idx) to the image content, which should be
             1x4x4 since that is the window size.
     """
-    window_path = Window.get_window_root(dataset.path, group, name)
     window = Window(
-        path=window_path,
+        storage=dataset.storage,
         name=name,
         group=group,
         projection=WGS84_PROJECTION,

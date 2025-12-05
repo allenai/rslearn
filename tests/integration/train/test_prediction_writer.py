@@ -37,7 +37,7 @@ def test_predict(
         callbacks=[writer],
     )
     trainer.predict(pl_module, datamodule=image_to_class_data_module)
-    window = Dataset(writer.path).load_windows()[0]
+    window = Dataset(image_to_class_data_module.path).load_windows()[0]
     assert window.is_layer_completed("output")
 
 
@@ -89,7 +89,7 @@ def test_predict_multi_task(image_to_class_dataset: Dataset) -> None:
         callbacks=[writer],
     )
     trainer.predict(pl_module, datamodule=data_module)
-    window = Dataset(writer.path).load_windows()[0]
+    window = image_to_class_dataset.load_windows()[0]
     assert window.is_layer_completed("output")
 
 
@@ -149,5 +149,5 @@ def test_predict_with_all_patches(image_to_class_dataset: Dataset) -> None:
         callbacks=[writer],
     )
     trainer.predict(pl_module, datamodule=data_module)
-    window = Dataset(writer.path).load_windows()[0]
+    window = image_to_class_dataset.load_windows()[0]
     assert window.is_layer_completed("output")
