@@ -1,4 +1,4 @@
-"""The default file-based dataset storage backend."""
+"""The default file-based window storage backend."""
 
 import json
 import multiprocessing
@@ -40,7 +40,7 @@ def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window:
 
 
 class FileWindowStorage(WindowStorage):
-    """The default file-backed dataset storage."""
+    """The default file-backed window storage."""
 
     def __init__(self, path: UPath):
         """Create a new FileWindowStorage.

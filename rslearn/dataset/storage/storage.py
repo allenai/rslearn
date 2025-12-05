@@ -1,4 +1,4 @@
-"""Abstract classes for dataset metadata storage."""
+"""Abstract classes for window metadata storage."""
 
 import abc
 from typing import TYPE_CHECKING
@@ -10,9 +10,16 @@ if TYPE_CHECKING:
 
 
 class WindowStorage(abc.ABC):
-    """An abstract class for the storage backend for a particular rslearn dataset.
+    """An abstract class for the storage backend for window metadata.
 
-    This is instantiated by a WindowStorageFactory.
+    This is instantiated by a WindowStorageFactory for a specific rslearn dataset.
+
+    Window metadata includes the location and time range of windows (metadata.json),
+    the window layer datas (items.json), and the completed (materialized) layers. It
+    excludes the actual materialized data. All operations involving window metadata go
+    through the WindowStorage, including enumerating windows, creating new windows, and
+    updating window layer datas during `rslearn dataset prepare` or the completed
+    layers during `rslearn dataset materialize`.
     """
 
     @abc.abstractmethod
@@ -125,10 +132,10 @@ class WindowStorage(abc.ABC):
 
 
 class WindowStorageFactory(abc.ABC):
-    """An abstract class for a configurable storage backend for rslearn dataset metadata.
+    """An abstract class for a configurable storage backend for window metadata.
 
-    The dataset config configures a WindowStorageFactory, whihc creates a
-    WindowStorage given a dataset path.
+    The dataset config includes a StorageConfig that configures a WindowStorageFactory,
+    which in turn creates a WindowStorage given a dataset path.
     """
 
     @abc.abstractmethod
