@@ -1,18 +1,15 @@
 """rslearn windows."""
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import shapely
 from upath import UPath
 
-from rslearn.dataset.storage.storage import DatasetStorage
+from rslearn.dataset.storage.storage import WindowStorage
 from rslearn.log_utils import get_logger
 from rslearn.utils import Projection, STGeometry
 from rslearn.utils.raster_format import get_bandset_dirname
-
-if TYPE_CHECKING:
-    pass
 
 logger = get_logger(__name__)
 
@@ -137,7 +134,7 @@ class Window:
 
     def __init__(
         self,
-        storage: DatasetStorage,
+        storage: WindowStorage,
         group: str,
         name: str,
         projection: Projection,
@@ -279,11 +276,11 @@ class Window:
         self.storage.create_or_update_window(self)
 
     @staticmethod
-    def from_metadata(storage: DatasetStorage, metadata: dict[str, Any]) -> "Window":
+    def from_metadata(storage: WindowStorage, metadata: dict[str, Any]) -> "Window":
         """Create a Window from its path and metadata dictionary.
 
         Args:
-            storage: the DatasetStorage for the underlying dataset.
+            storage: the WindowStorage for the underlying dataset.
             metadata: the window metadata.
 
         Returns:

@@ -14,7 +14,7 @@ from upath import UPath
 from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType, StorageConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
-from rslearn.dataset.storage.file import FileDatasetStorage
+from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.train.prediction_writer import (
     PendingPatchOutput,
@@ -95,7 +95,7 @@ class TestRasterMerger:
 
         We make four 3x3 patches to cover a 4x4 window.
         """
-        storage = FileDatasetStorage(tmp_path)
+        storage = FileWindowStorage(tmp_path)
         window = Window(
             storage=storage,
             group="fake",
@@ -134,7 +134,7 @@ class TestRasterMerger:
 
     def test_merge_with_padding(self, tmp_path: pathlib.Path) -> None:
         """Verify merging works with padding."""
-        storage = FileDatasetStorage(tmp_path)
+        storage = FileWindowStorage(tmp_path)
         window = Window(
             storage=storage,
             group="fake",
@@ -349,7 +349,7 @@ def test_write_raster_with_custom_output_path(tmp_path: pathlib.Path) -> None:
     )
 
     # Ensure the output is written to the custom output path, not the dataset path.
-    custom_storage = FileDatasetStorage(UPath(output_path))
+    custom_storage = FileWindowStorage(UPath(output_path))
     custom_window = Window(
         storage=custom_storage,
         group=window_group,

@@ -19,7 +19,7 @@ from rslearn.config import (
     StorageConfig,
 )
 from rslearn.dataset import Window
-from rslearn.dataset.storage.storage import DatasetStorage
+from rslearn.dataset.storage.storage import WindowStorage
 from rslearn.log_utils import get_logger
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.feature import Feature
@@ -182,7 +182,7 @@ class RslearnWriter(BasePredictionWriter):
         )
 
         # Handle dataset, layer, and storage config
-        dataset_storage: DatasetStorage | None = None
+        dataset_storage: WindowStorage | None = None
         if storage_config:
             dataset_storage = (
                 storage_config.instantiate_dataset_storage_factory().get_storage(
@@ -192,7 +192,7 @@ class RslearnWriter(BasePredictionWriter):
         if not layer_config or not dataset_storage:
             # Need to load dataset config since one of these is missing.
             # We use DatasetConfig.model_validate instead of initializing the Dataset
-            # because we want to get a DatasetStorage that has the dataset path set to
+            # because we want to get a WindowStorage that has the dataset path set to
             # output_upath instead of ds_upath.
             with (ds_upath / "config.json").open() as f:
                 dataset_config = DatasetConfig.model_validate(json.load(f))
@@ -210,7 +210,7 @@ class RslearnWriter(BasePredictionWriter):
                 )
 
         self.layer_config: LayerConfig = layer_config
-        self.dataset_storage: DatasetStorage = dataset_storage
+        self.dataset_storage: WindowStorage = dataset_storage
 
         self.format: RasterFormat | VectorFormat
         if self.layer_config.type == LayerType.RASTER:

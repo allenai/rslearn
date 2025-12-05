@@ -6,14 +6,14 @@ from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Window
-from rslearn.dataset.storage.file import FileDatasetStorage
+from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
 @pytest.fixture
 def empty_window(tmp_path: pathlib.Path) -> Window:
     window = Window(
-        storage=FileDatasetStorage(UPath(tmp_path)),
+        storage=FileWindowStorage(UPath(tmp_path)),
         group="default",
         name="default",
         projection=WGS84_PROJECTION,

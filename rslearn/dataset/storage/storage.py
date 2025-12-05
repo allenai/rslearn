@@ -9,10 +9,10 @@ if TYPE_CHECKING:
     from rslearn.dataset.window import Window, WindowLayerData
 
 
-class DatasetStorage(abc.ABC):
+class WindowStorage(abc.ABC):
     """An abstract class for the storage backend for a particular rslearn dataset.
 
-    This is instantiated by a DatasetStorageFactory.
+    This is instantiated by a WindowStorageFactory.
     """
 
     @abc.abstractmethod
@@ -124,14 +124,14 @@ class DatasetStorage(abc.ABC):
         raise NotImplementedError
 
 
-class DatasetStorageFactory(abc.ABC):
+class WindowStorageFactory(abc.ABC):
     """An abstract class for a configurable storage backend for rslearn dataset metadata.
 
-    The dataset config configures a DatasetStorageFactory, whihc creates a
-    DatasetStorage given a dataset path.
+    The dataset config configures a WindowStorageFactory, whihc creates a
+    WindowStorage given a dataset path.
     """
 
     @abc.abstractmethod
-    def get_storage(self, ds_path: UPath) -> DatasetStorage:
-        """Get a DatasetStorage for the given dataset path."""
+    def get_storage(self, ds_path: UPath) -> WindowStorage:
+        """Get a WindowStorage for the given dataset path."""
         raise NotImplementedError

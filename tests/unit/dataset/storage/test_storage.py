@@ -7,18 +7,18 @@ from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import Item
-from rslearn.dataset.storage.file import FileDatasetStorageFactory
-from rslearn.dataset.storage.storage import DatasetStorageFactory
+from rslearn.dataset.storage.file import FileWindowStorageFactory
+from rslearn.dataset.storage.storage import WindowStorageFactory
 from rslearn.dataset.window import Window, WindowLayerData
 
-STORAGE_FACTORIES: list[DatasetStorageFactory] = [
-    FileDatasetStorageFactory(),
+STORAGE_FACTORIES: list[WindowStorageFactory] = [
+    FileWindowStorageFactory(),
 ]
 
 
 @pytest.mark.parametrize("storage_factory", STORAGE_FACTORIES)
 def test_empty_dataset(
-    storage_factory: DatasetStorageFactory, tmp_path: pathlib.Path
+    storage_factory: WindowStorageFactory, tmp_path: pathlib.Path
 ) -> None:
     """Make sure there are no windows in a new dataset."""
     storage = storage_factory.get_storage(UPath(tmp_path))
@@ -27,7 +27,7 @@ def test_empty_dataset(
 
 @pytest.mark.parametrize("storage_factory", STORAGE_FACTORIES)
 def test_create_and_update_window(
-    storage_factory: DatasetStorageFactory, tmp_path: pathlib.Path
+    storage_factory: WindowStorageFactory, tmp_path: pathlib.Path
 ) -> None:
     """Create one window and update it and make sure everything works."""
     storage = storage_factory.get_storage(UPath(tmp_path))
@@ -59,7 +59,7 @@ def test_create_and_update_window(
 
 @pytest.mark.parametrize("storage_factory", STORAGE_FACTORIES)
 def test_mark_one_layer_completed(
-    storage_factory: DatasetStorageFactory, tmp_path: pathlib.Path
+    storage_factory: WindowStorageFactory, tmp_path: pathlib.Path
 ) -> None:
     """Create two windows and mark one layer completed in one of them."""
     storage = storage_factory.get_storage(UPath(tmp_path))
@@ -90,7 +90,7 @@ def test_mark_one_layer_completed(
 
 @pytest.mark.parametrize("storage_factory", STORAGE_FACTORIES)
 def test_mark_two_item_groups_completed(
-    storage_factory: DatasetStorageFactory, tmp_path: pathlib.Path
+    storage_factory: WindowStorageFactory, tmp_path: pathlib.Path
 ) -> None:
     """Mark two item groups completed, make sure other item groups are not completed."""
     storage = storage_factory.get_storage(UPath(tmp_path))
@@ -118,7 +118,7 @@ def test_mark_two_item_groups_completed(
 
 @pytest.mark.parametrize("storage_factory", STORAGE_FACTORIES)
 def test_save_layer_datas(
-    storage_factory: DatasetStorageFactory, tmp_path: pathlib.Path
+    storage_factory: WindowStorageFactory, tmp_path: pathlib.Path
 ) -> None:
     """Save some layer datas and then load them again."""
     storage = storage_factory.get_storage(UPath(tmp_path))

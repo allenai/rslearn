@@ -2,9 +2,9 @@
 
 import json
 import multiprocessing
-from typing import override
 
 import tqdm
+from typing_extensions import override
 from upath import UPath
 
 from rslearn.dataset.window import (
@@ -18,16 +18,16 @@ from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import open_atomic
 from rslearn.utils.mp import star_imap_unordered
 
-from .storage import DatasetStorage, DatasetStorageFactory
+from .storage import WindowStorage, WindowStorageFactory
 
 logger = get_logger(__name__)
 
 
-def load_window(storage: "FileDatasetStorage", window_dir: UPath) -> Window:
+def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window:
     """Load the window from its directory by reading metadata.json.
 
     Args:
-        storage: the underlying FileDatasetStorage.
+        storage: the underlying FileWindowStorage.
         window_dir: the path where the window is stored.
 
     Returns:
@@ -39,11 +39,11 @@ def load_window(storage: "FileDatasetStorage", window_dir: UPath) -> Window:
     return Window.from_metadata(storage, metadata)
 
 
-class FileDatasetStorage(DatasetStorage):
+class FileWindowStorage(WindowStorage):
     """The default file-backed dataset storage."""
 
     def __init__(self, path: UPath):
-        """Create a new FileDatasetStorage.
+        """Create a new FileWindowStorage.
 
         Args:
             path: the path to the dataset.
@@ -185,9 +185,9 @@ class FileDatasetStorage(DatasetStorage):
         (layer_dir / "completed").touch()
 
 
-class FileDatasetStorageFactory(DatasetStorageFactory):
-    """Factory class for FileDatasetStorage."""
+class FileWindowStorageFactory(WindowStorageFactory):
+    """Factory class for FileWindowStorage."""
 
-    def get_storage(self, ds_path: UPath) -> FileDatasetStorage:
-        """Get a FileDatasetStorage for the given dataset path."""
-        return FileDatasetStorage(ds_path)
+    def get_storage(self, ds_path: UPath) -> FileWindowStorage:
+        """Get a FileWindowStorage for the given dataset path."""
+        return FileWindowStorage(ds_path)

@@ -31,7 +31,7 @@ from rslearn.utils.vector_format import VectorFormat
 
 if TYPE_CHECKING:
     from rslearn.data_sources.data_source import DataSource
-    from rslearn.dataset.storage.storage import DatasetStorageFactory
+    from rslearn.dataset.storage.storage import WindowStorageFactory
 
 logger = get_logger("__name__")
 
@@ -594,27 +594,27 @@ class LayerConfig(BaseModel):
 
 
 class StorageConfig(BaseModel):
-    """Configuration for the DatasetStorageFactory (dataset metadata storage backend)."""
+    """Configuration for the WindowStorageFactory (dataset metadata storage backend)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     class_path: str = Field(
-        default="rslearn.dataset.storage.file.FileDatasetStorageFactory",
-        description="Class path for the DatasetStorageFactory.",
+        default="rslearn.dataset.storage.file.FileWindowStorageFactory",
+        description="Class path for the WindowStorageFactory.",
     )
     init_args: dict[str, Any] = Field(
         default_factory=lambda: {},
-        description="jsonargparse init args for the DatasetStorageFactory.",
+        description="jsonargparse init args for the WindowStorageFactory.",
     )
 
-    def instantiate_dataset_storage_factory(self) -> "DatasetStorageFactory":
-        """Instantiate the DatasetStorageFactory specified by this config."""
-        from rslearn.dataset.storage.storage import DatasetStorageFactory
+    def instantiate_dataset_storage_factory(self) -> "WindowStorageFactory":
+        """Instantiate the WindowStorageFactory specified by this config."""
+        from rslearn.dataset.storage.storage import WindowStorageFactory
         from rslearn.utils.jsonargparse import init_jsonargparse
 
         init_jsonargparse()
         parser = jsonargparse.ArgumentParser()
-        parser.add_argument("--dsf", type=DatasetStorageFactory)
+        parser.add_argument("--dsf", type=WindowStorageFactory)
         cfg = parser.parse_object(
             {
                 "dsf": dict(
@@ -637,5 +637,5 @@ class DatasetConfig(BaseModel):
     )
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(),
-        description="jsonargparse configuration for the DatasetStorageFactory.",
+        description="jsonargparse configuration for the WindowStorageFactory.",
     )
