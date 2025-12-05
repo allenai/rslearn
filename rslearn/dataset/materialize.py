@@ -471,7 +471,7 @@ def build_composite(
         nodata_vals=nodata_vals,
         bands=band_cfg.bands,
         bounds=bounds,
-        band_dtype=band_cfg.dtype.value,
+        band_dtype=band_cfg.dtype.get_numpy_dtype(),
         tile_store=tile_store,
         projection=projection,
         resampling_method=layer_cfg.resampling_method.get_rasterio_resampling(),
