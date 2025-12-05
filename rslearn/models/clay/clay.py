@@ -16,6 +16,8 @@ from huggingface_hub import hf_hub_download
 # from claymodel.module import ClayMAEModule
 from terratorch.models.backbones.clay_v15.module import ClayMAEModule
 
+from rslearn.models.component import FeatureExtractor, FeatureMaps
+from rslearn.train.model_context import ModelContext
 from rslearn.train.transforms.normalize import Normalize
 from rslearn.train.transforms.transform import Transform
 
@@ -42,7 +44,7 @@ def get_clay_checkpoint_path(
     return hf_hub_download(repo_id=repo_id, filename=filename)  # nosec B615
 
 
-class Clay(torch.nn.Module):
+class Clay(FeatureExtractor):
     """Clay backbones."""
 
     def __init__(
@@ -108,23 +110,20 @@ class Clay(torch.nn.Module):
             image, size=(new_hw, new_hw), mode="bilinear", align_corners=False
         )
 
-    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
+    def forward(self, context: ModelContext) -> FeatureMaps:
         """Forward pass for the Clay model.
 
         Args:
-            inputs: input dicts that must include `self.modality` as a key
+            context: the model context. Input dicts must include `self.modality` as a key
 
         Returns:
-            List[torch.Tensor]: Single-scale feature tensors from the encoder.
+            a FeatureMaps consisting of one feature map, computed by Clay.
         """
-        if self.modality not in inputs[0]:
-            raise ValueError(f"Missing modality {self.modality} in inputs.")
-
         param = next(self.model.parameters())
         device = param.device
 
         chips = torch.stack(
-            [inp[self.modality] for inp in inputs], dim=0
+            [inp[self.modality] for inp in context.inputs], dim=0
         )  # (B, C, H, W)
         if self.do_resizing:
             chips = self._resize_image(chips, chips.shape[2])
@@ -163,7 +162,7 @@ class Clay(torch.nn.Module):
             )
 
         features = rearrange(spatial, "b (h w) d -> b d h w", h=side, w=side)
-        return [features]
+        return FeatureMaps([features])
 
     def get_backbone_channels(self) -> list:
         """Return output channels of this model when used as a backbone."""

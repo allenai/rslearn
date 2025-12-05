@@ -1,13 +1,15 @@
 """SatlasPretrain models."""
 
-from typing import Any
-
 import satlaspretrain_models
 import torch
 import torch.nn.functional as F
 
+from rslearn.train.model_context import ModelContext
 
-class SatlasPretrain(torch.nn.Module):
+from .component import FeatureExtractor, FeatureMaps
+
+
+class SatlasPretrain(FeatureExtractor):
     """SatlasPretrain backbones."""
 
     def __init__(
@@ -64,15 +66,19 @@ class SatlasPretrain(torch.nn.Module):
         else:
             return data
 
-    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
+    def forward(self, context: ModelContext) -> FeatureMaps:
         """Compute feature maps from the SatlasPretrain backbone.
 
-        Inputs:
-            inputs: input dicts that must include "image" key containing the image to
-                process.
+        Args:
+            context: the model context. Input dicts must contain an "image" key
+                containing the image input to the model.
+
+        Returns:
+            multi-resolution feature maps computed by the model.
         """
-        images = torch.stack([inp["image"] for inp in inputs], dim=0)
-        return self.model(self.maybe_resize(images))
+        images = torch.stack([inp["image"] for inp in context.inputs], dim=0)
+        feature_maps = self.model(self.maybe_resize(images))
+        return FeatureMaps(feature_maps)
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.

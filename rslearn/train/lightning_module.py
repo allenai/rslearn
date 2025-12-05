@@ -12,6 +12,7 @@ from upath import UPath
 
 from rslearn.log_utils import get_logger
 
+from .model_context import ModelContext, ModelOutput
 from .optimizer import AdamW, OptimizerFactory
 from .scheduler import PlateauScheduler, SchedulerFactory
 from .tasks import Task
@@ -231,12 +232,16 @@ class RslearnLightningModule(L.LightningModule):
         Returns:
             The loss tensor.
         """
-        inputs, targets, _ = batch
+        inputs, targets, metadatas = batch
+        context = ModelContext(
+            inputs=inputs,
+            metadatas=metadatas,
+        )
         batch_size = len(inputs)
-        model_outputs = self(inputs, targets)
-        self.on_train_forward(inputs, targets, model_outputs)
+        model_outputs = self(context, targets)
+        self.on_train_forward(context, targets, model_outputs)
 
-        loss_dict = model_outputs["loss_dict"]
+        loss_dict = model_outputs.loss_dict
         train_loss = sum(loss_dict.values())
         self.log_dict(
             {"train_" + k: v for k, v in loss_dict.items()},
@@ -266,13 +271,17 @@ class RslearnLightningModule(L.LightningModule):
             batch_idx: Integer displaying index of this batch.
             dataloader_idx: Index of the current dataloader.
         """
-        inputs, targets, _ = batch
+        inputs, targets, metadatas = batch
+        context = ModelContext(
+            inputs=inputs,
+            metadatas=metadatas,
+        )
         batch_size = len(inputs)
-        model_outputs = self(inputs, targets)
-        self.on_val_forward(inputs, targets, model_outputs)
+        model_outputs = self(context, targets)
+        self.on_val_forward(context, targets, model_outputs)
 
-        loss_dict = model_outputs["loss_dict"]
-        outputs = model_outputs["outputs"]
+        loss_dict = model_outputs.loss_dict
+        outputs = model_outputs.outputs
         val_loss = sum(loss_dict.values())
         self.log_dict(
             {"val_" + k: v for k, v in loss_dict.items()},
@@ -304,12 +313,16 @@ class RslearnLightningModule(L.LightningModule):
             dataloader_idx: Index of the current dataloader.
         """
         inputs, targets, metadatas = batch
+        context = ModelContext(
+            inputs=inputs,
+            metadatas=metadatas,
+        )
         batch_size = len(inputs)
-        model_outputs = self(inputs, targets)
-        self.on_test_forward(inputs, targets, model_outputs)
+        model_outputs = self(context, targets)
+        self.on_test_forward(context, targets, model_outputs)
 
-        loss_dict = model_outputs["loss_dict"]
-        outputs = model_outputs["outputs"]
+        loss_dict = model_outputs.loss_dict
+        outputs = model_outputs.outputs
         test_loss = sum(loss_dict.values())
         self.log_dict(
             {"test_" + k: v for k, v in loss_dict.items()},
@@ -345,7 +358,7 @@ class RslearnLightningModule(L.LightningModule):
 
     def predict_step(
         self, batch: Any, batch_idx: int, dataloader_idx: int = 0
-    ) -> torch.Tensor:
+    ) -> ModelOutput:
         """Compute the predicted class probabilities.
 
         Args:
@@ -356,63 +369,69 @@ class RslearnLightningModule(L.LightningModule):
         Returns:
             Output predicted probabilities.
         """
-        inputs, _, _ = batch
-        model_outputs = self(inputs)
+        inputs, _, metadatas = batch
+        context = ModelContext(
+            inputs=inputs,
+            metadatas=metadatas,
+        )
+        model_outputs = self(context)
         return model_outputs
 
-    def forward(self, *args: Any, **kwargs: Any) -> Any:
+    def forward(
+        self, context: ModelContext, targets: list[dict[str, Any]] | None = None
+    ) -> ModelOutput:
         """Forward pass of the model.
 
         Args:
-            args: Arguments to pass to model.
-            kwargs: Keyword arguments to pass to model.
+            context: the model context.
+            targets: the target dicts.
 
         Returns:
             Output of the model.
         """
-        return self.model(*args, **kwargs)
+        return self.model(context, targets)
 
     def on_train_forward(
         self,
-        inputs: list[dict[str, Any]],
+        context: ModelContext,
         targets: list[dict[str, Any]],
-        model_outputs: dict[str, Any],
+        model_outputs: ModelOutput,
     ) -> None:
         """Hook to run after the forward pass of the model during training.
 
         Args:
-            inputs: The input batch.
+            context: The model context.
             targets: The target batch.
-            model_outputs: The output of the model, with keys "outputs" and "loss_dict", and possibly other keys.
+            model_outputs: The output of the model.
         """
         pass
 
     def on_val_forward(
         self,
-        inputs: list[dict[str, Any]],
+        context: ModelContext,
         targets: list[dict[str, Any]],
-        model_outputs: dict[str, Any],
+        model_outputs: ModelOutput,
     ) -> None:
         """Hook to run after the forward pass of the model during validation.
 
         Args:
-            inputs: The input batch.
+            context: The model context.
             targets: The target batch.
-            model_outputs: The output of the model, with keys "outputs" and "loss_dict", and possibly other keys.
+            model_outputs: The output of the model.
         """
         pass
 
     def on_test_forward(
         self,
-        inputs: list[dict[str, Any]],
+        context: ModelContext,
         targets: list[dict[str, Any]],
-        model_outputs: dict[str, Any],
+        model_outputs: ModelOutput,
     ) -> None:
         """Hook to run after the forward pass of the model during testing.
 
         Args:
-            inputs: The input batch.
+            context: The model context.
             targets: The target batch.
-            model_outputs: The output of the model, with keys "outputs" and "loss_dict", and possibly other keys.
+            model_outputs: The output of the model.
         """
         pass

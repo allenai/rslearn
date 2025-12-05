@@ -1,9 +1,18 @@
 """The ResizeFeatures module."""
 
+from typing import Any
+
 import torch
 
+from rslearn.train.model_context import ModelContext
 
-class ResizeFeatures(torch.nn.Module):
+from .component import (
+    FeatureMaps,
+    IntermediateComponent,
+)
+
+
+class ResizeFeatures(IntermediateComponent):
     """Resize input features to new sizes."""
 
     def __init__(
@@ -30,16 +39,21 @@ class ResizeFeatures(torch.nn.Module):
             )
         self.layers = torch.nn.ModuleList(layers)
 
-    def forward(
-        self, features: list[torch.Tensor], inputs: list[torch.Tensor]
-    ) -> list[torch.Tensor]:
+    def forward(self, intermediates: Any, context: ModelContext) -> FeatureMaps:
         """Resize the input feature maps to new sizes.
 
         Args:
-            features: list of feature maps at different resolutions.
-            inputs: original inputs (ignored).
+            intermediates: the outputs from the previous component, which must be a FeatureMaps.
+            context: the model context.
 
         Returns:
             resized feature maps
         """
-        return [self.layers[idx](feat_map) for idx, feat_map in enumerate(features)]
+        if not isinstance(intermediates, FeatureMaps):
+            raise ValueError("input to ResizeFeatures must be a FeatureMaps")
+
+        feat_maps = intermediates.feature_maps
+        resized_feat_maps = [
+            self.layers[idx](feat_map) for idx, feat_map in enumerate(feat_maps)
+        ]
+        return FeatureMaps(resized_feat_maps)

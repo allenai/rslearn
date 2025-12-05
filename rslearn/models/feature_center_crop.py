@@ -2,10 +2,12 @@
 
 from typing import Any
 
-import torch
+from rslearn.train.model_context import ModelContext
+
+from .component import FeatureMaps, IntermediateComponent
 
 
-class FeatureCenterCrop(torch.nn.Module):
+class FeatureCenterCrop(IntermediateComponent):
     """Apply center cropping on the input feature maps."""
 
     def __init__(
@@ -24,20 +26,21 @@ class FeatureCenterCrop(torch.nn.Module):
         super().__init__()
         self.sizes = sizes
 
-    def forward(
-        self, features: list[torch.Tensor], inputs: list[dict[str, Any]]
-    ) -> list[torch.Tensor]:
+    def forward(self, intermediates: Any, context: ModelContext) -> FeatureMaps:
         """Apply center cropping on the feature maps.
 
         Args:
-            features: list of feature maps at different resolutions.
-            inputs: original inputs (ignored).
+            intermediates: output from the previous model component, which must be a FeatureMaps.
+            context: the model context.
 
         Returns:
             center cropped feature maps.
         """
+        if not isinstance(intermediates, FeatureMaps):
+            raise ValueError("input to FeatureCenterCrop must be FeatureMaps")
+
         new_features = []
-        for i, feat in enumerate(features):
+        for i, feat in enumerate(intermediates.feature_maps):
             height, width = self.sizes[i]
             if feat.shape[2] < height or feat.shape[3] < width:
                 raise ValueError(
@@ -47,4 +50,4 @@ class FeatureCenterCrop(torch.nn.Module):
             start_w = feat.shape[3] // 2 - width // 2
             feat = feat[:, :, start_h : start_h + height, start_w : start_w + width]
             new_features.append(feat)
-        return new_features
+        return FeatureMaps(new_features)

@@ -22,11 +22,12 @@ from rslearn.config import (
 from rslearn.dataset.dataset import Dataset
 from rslearn.dataset.window import Window, get_layer_and_group_from_dir_name
 from rslearn.log_utils import get_logger
-from rslearn.train.tasks import Task
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds
 from rslearn.utils.mp import star_imap_unordered
 
+from .model_context import SampleMetadata
+from .tasks import Task
 from .transforms import Sequential
 
 logger = get_logger(__name__)
@@ -713,7 +714,7 @@ class ModelDataset(torch.utils.data.Dataset):
 
     def get_raw_inputs(
         self, idx: int
-    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    ) -> tuple[dict[str, Any], dict[str, Any], SampleMetadata]:
         """Get the raw inputs and base metadata for this example.
 
         This is the raster or vector data before being processed by the Task. So it
@@ -775,21 +776,23 @@ class ModelDataset(torch.utils.data.Dataset):
             if data_input.passthrough:
                 passthrough_inputs[name] = raw_inputs[name]
 
-        metadata = {
-            "group": window.group,
-            "window_name": window.name,
-            "window_bounds": window.bounds,
-            "bounds": bounds,
-            "time_range": window.time_range,
-            "projection": window.projection,
-            "dataset_source": self.name,
-        }
+        metadata = SampleMetadata(
+            window_group=window.group,
+            window_name=window.name,
+            window_bounds=window.bounds,
+            patch_bounds=bounds,
+            patch_idx=0,
+            num_patches_in_window=1,
+            time_range=window.time_range,
+            projection=window.projection,
+            dataset_source=self.name,
+        )
 
         return raw_inputs, passthrough_inputs, metadata
 
     def __getitem__(
         self, idx: int
-    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    ) -> tuple[dict[str, Any], dict[str, Any], SampleMetadata]:
         """Read one training example.
 
         Args:
@@ -801,8 +804,6 @@ class ModelDataset(torch.utils.data.Dataset):
         logger.debug("__getitem__ start pid=%d item_idx=%d", os.getpid(), idx)
 
         raw_inputs, passthrough_inputs, metadata = self.get_raw_inputs(idx)
-        metadata["patch_idx"] = 0
-        metadata["num_patches"] = 1
 
         input_dict, target_dict = self.task.process_inputs(
             raw_inputs,
@@ -811,7 +812,6 @@ class ModelDataset(torch.utils.data.Dataset):
         )
         input_dict.update(passthrough_inputs)
         input_dict, target_dict = self.transforms(input_dict, target_dict)
-        input_dict["dataset_source"] = self.name
 
         logger.debug("__getitem__ finish pid=%d item_idx=%d", os.getpid(), idx)
 

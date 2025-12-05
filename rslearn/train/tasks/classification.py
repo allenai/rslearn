@@ -15,6 +15,8 @@ from torchmetrics.classification import (
     MulticlassRecall,
 )
 
+from rslearn.models.component import FeatureVector, Predictor
+from rslearn.train.model_context import ModelContext, ModelOutput, SampleMetadata
 from rslearn.utils import Feature, STGeometry
 
 from .task import BasicTask
@@ -98,7 +100,7 @@ class ClassificationTask(BasicTask):
     def process_inputs(
         self,
         raw_inputs: dict[str, torch.Tensor | list[Feature]],
-        metadata: dict[str, Any],
+        metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
@@ -154,17 +156,25 @@ class ClassificationTask(BasicTask):
         }
 
     def process_output(
-        self, raw_output: Any, metadata: dict[str, Any]
-    ) -> npt.NDArray[Any] | list[Feature]:
+        self, raw_output: Any, metadata: SampleMetadata
+    ) -> list[Feature]:
         """Processes an output into raster or vector data.
 
         Args:
-            raw_output: the output from prediction head.
+            raw_output: the output from prediction head, which must be a tensor
+                containing output probabilities (one dimension).
             metadata: metadata about the patch being read
 
         Returns:
-            either raster or vector data.
+            a list with one Feature corresponding to the input patch extent with a
+                property name containing the predicted class. It will have another
+                property containing the probabilities if prob_property was set.
         """
+        if not isinstance(raw_output, torch.Tensor) or len(raw_output.shape) != 1:
+            raise ValueError(
+                "expected output for ClassificationTask to be a Tensor with one dimension"
+            )
+
         probs = raw_output.cpu().numpy()
         if len(self.classes) == 2 and self.positive_class_threshold != 0.5:
             positive_class_prob = probs[self.positive_class_id]
@@ -184,8 +194,8 @@ class ClassificationTask(BasicTask):
 
         feature = Feature(
             STGeometry(
-                metadata["projection"],
-                shapely.Point(metadata["bounds"][0], metadata["bounds"][1]),
+                metadata.projection,
+                shapely.Point(metadata.patch_bounds[0], metadata.patch_bounds[1]),
                 None,
             ),
             {
@@ -265,25 +275,31 @@ class ClassificationTask(BasicTask):
         return MetricCollection(metrics)
 
 
-class ClassificationHead(torch.nn.Module):
+class ClassificationHead(Predictor):
     """Head for classification task."""
 
     def forward(
         self,
-        logits: torch.Tensor,
-        inputs: list[dict[str, Any]],
+        intermediates: Any,
+        context: ModelContext,
         targets: list[dict[str, Any]] | None = None,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    ) -> ModelOutput:
         """Compute the classification outputs and loss from logits and targets.
 
         Args:
-            logits: tensor that is (BatchSize, NumClasses) in shape.
-            inputs: original inputs (ignored).
-            targets: should contain class key that stores the class label.
+            intermediates: output from the previous model component, it should be a
+                FeatureVector with a tensor that is (BatchSize, NumClasses) in shape.
+            context: the model context.
+            targets: must contain "class" key that stores the class label, along with
+                "valid" key indicating whether the label is valid for each example.
 
         Returns:
             tuple of outputs and loss dict
         """
+        if not isinstance(intermediates, FeatureVector):
+            raise ValueError("the input to ClassificationHead must be a FeatureVector")
+
+        logits = intermediates.feature_vector
         outputs = torch.nn.functional.softmax(logits, dim=1)
 
         losses = {}
@@ -298,7 +314,10 @@ class ClassificationHead(torch.nn.Module):
             )
             losses["cls"] = torch.mean(loss)
 
-        return outputs, losses
+        return ModelOutput(
+            outputs=outputs,
+            loss_dict=losses,
+        )
 
 
 class ClassificationMetric(Metric):

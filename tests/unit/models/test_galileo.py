@@ -5,6 +5,7 @@ import torch
 from pytest import MonkeyPatch
 
 from rslearn.models.galileo import GalileoModel, GalileoSize
+from rslearn.train.model_context import ModelContext
 
 
 def test_galileo(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
@@ -25,7 +26,7 @@ def test_galileo(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
             "latlon": torch.zeros((2, input_hw, input_hw), dtype=torch.float32),
         }
     ]
-    feature_list = galileo(inputs)
+    feature_list = galileo(ModelContext(inputs=inputs, metadatas=[])).feature_maps
     # Should yield one feature map since there's only one output scale.
     assert len(feature_list) == 1
     features = feature_list[0]
@@ -52,7 +53,7 @@ def test_galileo_mt(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
             ),
         }
     ]
-    feature_list = galileo(inputs)
+    feature_list = galileo(ModelContext(inputs=inputs, metadatas=[])).feature_maps
     # Should yield one feature map since there's only one output scale.
     assert len(feature_list) == 1
     features = feature_list[0]
@@ -81,7 +82,7 @@ def test_galileo_hw_less_than_ps(
             "latlon": torch.zeros((2, input_hw, input_hw), dtype=torch.float32),
         }
     ]
-    feature_list = galileo(inputs)
+    feature_list = galileo(ModelContext(inputs=inputs, metadatas=[])).feature_maps
     # Should yield one feature map since there's only one output scale.
     assert len(feature_list) == 1
     features = feature_list[0]

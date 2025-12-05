@@ -19,6 +19,8 @@ from olmoearth_pretrain.train.masking import MaskedOlmoEarthSample, MaskValue
 from upath import UPath
 
 from rslearn.log_utils import get_logger
+from rslearn.models.component import FeatureExtractor, FeatureMaps
+from rslearn.train.model_context import ModelContext
 
 logger = get_logger(__name__)
 
@@ -44,7 +46,7 @@ EMBEDDING_SIZES = {
 }
 
 
-class OlmoEarth(torch.nn.Module):
+class OlmoEarth(FeatureExtractor):
     """A wrapper to support the OlmoEarth model."""
 
     def __init__(
@@ -158,12 +160,16 @@ class OlmoEarth(torch.nn.Module):
 
         return model
 
-    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
+    def forward(self, context: ModelContext) -> FeatureMaps:
         """Compute feature maps from the OlmoEarth backbone.
 
-        Inputs:
-            inputs: input dicts. It should include keys corresponding to the modalities
-                that should be passed to the OlmoEarth model.
+        Args:
+            context: the model context. Input dicts should include keys corresponding
+                to the modalities that should be passed to the OlmoEarth model.
+
+        Returns:
+            a FeatureMaps consisting of one feature map, at 1/patch_size of the input
+                resolution. Embeddings will be pooled across modalities and timesteps.
         """
         kwargs = {}
         present_modalities = []
@@ -172,10 +178,10 @@ class OlmoEarth(torch.nn.Module):
         # We assume all multitemporal modalities have the same number of timesteps.
         max_timesteps = 1
         for modality in MODALITY_NAMES:
-            if modality not in inputs[0]:
+            if modality not in context.inputs[0]:
                 continue
             present_modalities.append(modality)
-            cur = torch.stack([inp[modality] for inp in inputs], dim=0)
+            cur = torch.stack([inp[modality] for inp in context.inputs], dim=0)
             device = cur.device
             # Check if it's single or multitemporal, and reshape accordingly
             num_bands = Modality.get(modality).num_bands
@@ -196,7 +202,7 @@ class OlmoEarth(torch.nn.Module):
         # Note that only months (0 to 11) are used in OlmoEarth position encoding.
         # For now, we assign same timestamps to all inputs, but later we should handle varying timestamps per input.
         timestamps = torch.zeros(
-            (len(inputs), max_timesteps, 3), dtype=torch.int32, device=device
+            (len(context.inputs), max_timesteps, 3), dtype=torch.int32, device=device
         )
         timestamps[:, :, 0] = 1  # day
         timestamps[:, :, 1] = torch.arange(max_timesteps, device=device)[
@@ -209,14 +215,14 @@ class OlmoEarth(torch.nn.Module):
 
         # Decide context based on self.autocast_dtype.
         if self.autocast_dtype is None:
-            context = nullcontext()
+            torch_context = nullcontext()
         else:
             assert device is not None
-            context = torch.amp.autocast(
+            torch_context = torch.amp.autocast(
                 device_type=device.type, dtype=self.autocast_dtype
             )
 
-        with context:
+        with torch_context:
             # Currently we assume the provided model always returns a TokensAndMasks object.
             tokens_and_masks: TokensAndMasks
             if isinstance(self.model, Encoder):
@@ -244,7 +250,7 @@ class OlmoEarth(torch.nn.Module):
             features.append(pooled)
         # Pool over the modalities, so we get one BCHW feature map.
         pooled = torch.stack(features, dim=0).mean(dim=0)
-        return [pooled]
+        return FeatureMaps([pooled])
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.

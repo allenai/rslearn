@@ -8,6 +8,7 @@ import pytest
 import torch
 
 from rslearn.models.anysat import AnySat
+from rslearn.train.model_context import ModelContext
 
 
 @pytest.mark.slow
@@ -62,7 +63,11 @@ def test_anysat_various_modalities(tmp_path: pathlib.Path, monkeypatch: Any) -> 
             output_modality=scenario["output_modality"],
         )
         # Only one feature map returned
-        features = model.forward(scenario["inputs"])[0]
+        context = ModelContext(
+            inputs=scenario["inputs"],
+            metadatas=[],
+        )
+        features = model.forward(context).feature_maps[0]
 
         assert features.shape == scenario["expected_shape"]  # type: ignore
 

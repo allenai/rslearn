@@ -7,6 +7,7 @@ import numpy.typing as npt
 import torch
 from torchmetrics import MetricCollection
 
+from rslearn.train.model_context import SampleMetadata
 from rslearn.utils import Feature
 
 
@@ -21,7 +22,7 @@ class Task:
     def process_inputs(
         self,
         raw_inputs: dict[str, torch.Tensor | list[Feature]],
-        metadata: dict[str, Any],
+        metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
@@ -38,7 +39,7 @@ class Task:
         raise NotImplementedError
 
     def process_output(
-        self, raw_output: Any, metadata: dict[str, Any]
+        self, raw_output: Any, metadata: SampleMetadata
     ) -> npt.NDArray[Any] | list[Feature] | dict[str, Any]:
         """Processes an output into raster or vector data.
 

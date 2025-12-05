@@ -5,8 +5,15 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 
+from rslearn.train.model_context import ModelContext
 
-class UNetDecoder(torch.nn.Module):
+from .component import (
+    FeatureMaps,
+    IntermediateComponent,
+)
+
+
+class UNetDecoder(IntermediateComponent):
     """UNet-style decoder.
 
     It inputs multi-scale features. Starting from last (lowest resolution) feature map,
@@ -143,23 +150,25 @@ class UNetDecoder(torch.nn.Module):
             align_corners=False,
         )
 
-    def forward(
-        self, in_features: list[torch.Tensor], inputs: list[dict[str, Any]]
-    ) -> torch.Tensor:
+    def forward(self, intermediates: Any, context: ModelContext) -> FeatureMaps:
         """Compute output from multi-scale feature map.
 
         Args:
-            in_features: list of feature maps at different resolutions.
-            inputs: original inputs (ignored).
+            intermediates: the output from the previous model component, which must be a FeatureMaps.
+            context: the model context.
 
         Returns:
-            output image
+            output FeatureMaps consisting of one map. The embedding size is equal to the
+                configured out_channels.
         """
+        if not isinstance(intermediates, FeatureMaps):
+            raise ValueError("input to UNetDecoder must be a FeatureMaps")
+
         # Reverse the features since we will pass them in from lowest resolution to highest.
-        in_features = list(reversed(in_features))
+        in_features = list(reversed(intermediates.feature_maps))
         cur_features = self.layers[0](in_features[0])
         for in_feat, layer in zip(in_features[1:], self.layers[1:]):
             cur_features = layer(torch.cat([cur_features, in_feat], dim=1))
         if self.original_size_to_interpolate is not None:
             cur_features = self._resize(cur_features)
-        return cur_features
+        return FeatureMaps([cur_features])

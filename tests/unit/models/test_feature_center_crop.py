@@ -3,7 +3,9 @@
 import pytest
 import torch
 
+from rslearn.models.component import FeatureMaps
 from rslearn.models.feature_center_crop import FeatureCenterCrop
+from rslearn.train.model_context import ModelContext
 
 
 def test_crop_one_feature_map() -> None:
@@ -11,7 +13,9 @@ def test_crop_one_feature_map() -> None:
     feat_map = torch.zeros((1, 2, 5, 5), dtype=torch.float32)
     feat_map[:, :, 2, 2] = 1
     feature_crop = FeatureCenterCrop(sizes=[(1, 1)])
-    result = feature_crop([feat_map], None)
+    result = feature_crop(
+        FeatureMaps([feat_map]), ModelContext(inputs=[], metadatas=[])
+    ).feature_maps
     assert len(result) == 1
     assert result[0].shape == (1, 2, 1, 1)
     assert result[0][0, 0, 0, 0] == pytest.approx(1)

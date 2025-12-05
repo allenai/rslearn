@@ -13,8 +13,11 @@ import torch
 import torchvision
 from einops import rearrange
 
+from rslearn.train.model_context import ModelContext
 from rslearn.train.transforms.normalize import Normalize
 from rslearn.train.transforms.transform import Transform
+
+from .component import FeatureExtractor, FeatureMaps
 
 
 class DinoV3Models(StrEnum):
@@ -40,7 +43,7 @@ DINOV3_PTHS: dict[str, str] = {
 }
 
 
-class DinoV3(torch.nn.Module):
+class DinoV3(FeatureExtractor):
     """DinoV3 Backbones.
 
     Must have the pretrained weights downloaded in checkpoint_dir for them to be loaded.
@@ -91,16 +94,18 @@ class DinoV3(torch.nn.Module):
         self.do_resizing = do_resizing
         self.model = self._load_model(size, checkpoint_dir)
 
-    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
+    def forward(self, context: ModelContext) -> FeatureMaps:
         """Forward pass for the dinov3 model.
 
         Args:
-            inputs: input dicts that must include "image" key.
+            context: the model context. Input dicts must include "image" key.
 
         Returns:
-            List[torch.Tensor]: Single-scale feature tensors from the encoder.
+            a FeatureMaps with one feature map.
         """
-        cur = torch.stack([inp["image"] for inp in inputs], dim=0)  # (B, C, H, W)
+        cur = torch.stack(
+            [inp["image"] for inp in context.inputs], dim=0
+        )  # (B, C, H, W)
 
         if self.do_resizing and (
             cur.shape[2] != self.image_size or cur.shape[3] != self.image_size
@@ -118,7 +123,7 @@ class DinoV3(torch.nn.Module):
             height, width = int(num_patches**0.5), int(num_patches**0.5)
             features = rearrange(features, "b (h w) d -> b d h w", h=height, w=width)
 
-        return [features]
+        return FeatureMaps([features])
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.

@@ -2,6 +2,7 @@
 
 import itertools
 from collections.abc import Iterable, Iterator
+from dataclasses import replace
 from typing import Any
 
 import shapely
@@ -9,6 +10,7 @@ import torch
 
 from rslearn.dataset import Window
 from rslearn.train.dataset import ModelDataset
+from rslearn.train.model_context import SampleMetadata
 from rslearn.utils.geometry import PixelBounds, STGeometry
 
 
@@ -218,7 +220,7 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
 
     def __iter__(
         self,
-    ) -> Iterator[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
+    ) -> Iterator[tuple[dict[str, Any], dict[str, Any], SampleMetadata]]:
         """Iterate over all patches in each element of the underlying ModelDataset."""
         # Iterate over the window IDs until we have returned enough samples.
         window_ids, num_samples_needed = self._get_worker_iteration_data()
@@ -229,7 +231,7 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                 raw_inputs, passthrough_inputs, metadata = self.dataset.get_raw_inputs(
                     window_id
                 )
-                bounds = metadata["bounds"]
+                bounds = metadata.patch_bounds
 
                 # For simplicity, pad tensors by patch size to ensure that any patch bounds
                 # extending outside the window bounds will not have issues when we slice
@@ -244,7 +246,7 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                 )
                 for patch_idx, patch_bounds in enumerate(patches):
                     cur_geom = STGeometry(
-                        metadata["projection"], shapely.box(*patch_bounds), None
+                        metadata.projection, shapely.box(*patch_bounds), None
                     )
                     start_offset = (
                         patch_bounds[0] - bounds[0],
@@ -282,10 +284,12 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                     cur_passthrough_inputs = crop_input_dict(passthrough_inputs)
 
                     # Adjust the metadata as well.
-                    cur_metadata = metadata.copy()
-                    cur_metadata["bounds"] = patch_bounds
-                    cur_metadata["patch_idx"] = patch_idx
-                    cur_metadata["num_patches"] = len(patches)
+                    cur_metadata = replace(
+                        metadata,
+                        patch_bounds=patch_bounds,
+                        patch_idx=patch_idx,
+                        num_patches_in_window=len(patches),
+                    )
 
                     # Now we can compute input and target dicts via the task.
                     input_dict, target_dict = self.dataset.task.process_inputs(
@@ -297,7 +301,6 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                     input_dict, target_dict = self.dataset.transforms(
                         input_dict, target_dict
                     )
-                    input_dict["dataset_source"] = self.dataset.name
 
                     if num_samples_returned < num_samples_needed:
                         yield input_dict, target_dict, cur_metadata
@@ -346,7 +349,7 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
         )
         self.windows = self.dataset.get_dataset_examples()
         self.window_cache: dict[
-            int, tuple[dict[str, Any], dict[str, Any], dict[str, Any]]
+            int, tuple[dict[str, Any], dict[str, Any], SampleMetadata]
         ] = {}
 
         # Precompute the batch boundaries for each window
@@ -360,7 +363,7 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
 
     def get_raw_inputs(
         self, index: int
-    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    ) -> tuple[dict[str, Any], dict[str, Any], SampleMetadata]:
         """Get the raw inputs for a single patch. Retrieve from cache if possible.
 
         Also crops/pads the tensors by patch size to protect slicing near right/bottom edges.
@@ -410,13 +413,13 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
 
     def __getitem__(
         self, index: int
-    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    ) -> tuple[dict[str, Any], dict[str, Any], SampleMetadata]:
         """Return (input_dict, target_dict, metadata) for a single flattened patch."""
         (window_id, patch_bounds, (patch_idx, num_patches)) = self.patches[index]
         raw_inputs, passthrough_inputs, metadata = self.get_raw_inputs(window_id)
-        bounds = metadata["bounds"]
+        bounds = metadata.patch_bounds
 
-        cur_geom = STGeometry(metadata["projection"], shapely.box(*patch_bounds), None)
+        cur_geom = STGeometry(metadata.projection, shapely.box(*patch_bounds), None)
         start_offset = (patch_bounds[0] - bounds[0], patch_bounds[1] - bounds[1])
         end_offset = (patch_bounds[2] - bounds[0], patch_bounds[3] - bounds[1])
 
@@ -428,10 +431,12 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
         )
 
         # Adjust the metadata as well.
-        cur_metadata = metadata.copy()
-        cur_metadata["bounds"] = patch_bounds
-        cur_metadata["patch_idx"] = patch_idx
-        cur_metadata["num_patches"] = num_patches
+        cur_metadata = replace(
+            metadata,
+            patch_bounds=patch_bounds,
+            patch_idx=patch_idx,
+            num_patches_in_window=num_patches,
+        )
 
         # Now we can compute input and target dicts via the task.
         input_dict, target_dict = self.dataset.task.process_inputs(
@@ -441,7 +446,6 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
         )
         input_dict.update(cur_passthrough_inputs)
         input_dict, target_dict = self.dataset.transforms(input_dict, target_dict)
-        input_dict["dataset_source"] = self.dataset.name
 
         return input_dict, target_dict, cur_metadata
 

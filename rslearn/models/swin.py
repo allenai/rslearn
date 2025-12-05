@@ -1,7 +1,5 @@
 """Swin Transformer."""
 
-from typing import Any
-
 import torch
 import torchvision
 from torchvision.models.swin_transformer import (
@@ -13,8 +11,12 @@ from torchvision.models.swin_transformer import (
     Swin_V2_T_Weights,
 )
 
+from rslearn.train.model_context import ModelContext
 
-class Swin(torch.nn.Module):
+from .component import FeatureExtractor, FeatureMaps, FeatureVector
+
+
+class Swin(FeatureExtractor):
     """A Swin Transformer model.
 
     It can either be used stand-alone for classification, or as a feature extractor in
@@ -34,9 +36,12 @@ class Swin(torch.nn.Module):
         Args:
             arch: the architecture, e.g. "swin_v2_b" (default) or "swin_t"
             pretrained: set True to use ImageNet pre-trained weights
-            input_channels: number of input channels (default 3)
+            input_channels: number of input channels (default 3). If not 3, the first
+                layer is updated and will be randomly initialized even if pretrained is
+                set.
             output_layers: list of layers to output, default use as classification
-                model. For feature extraction, [1, 3, 5, 7] is recommended.
+                model (output FeatureVector). For feature extraction, [1, 3, 5, 7] is
+                recommended.
             num_outputs: number of output logits, defaults to 1000 which matches the
                 pretrained models.
         """
@@ -130,19 +135,23 @@ class Swin(torch.nn.Module):
 
     def forward(
         self,
-        inputs: list[dict[str, Any]],
-    ) -> list[torch.Tensor]:
+        context: ModelContext,
+    ) -> FeatureVector | FeatureMaps:
         """Compute outputs from the backbone.
 
         If output_layers is set, then the outputs are multi-scale feature maps;
         otherwise, the model is being used for classification so the outputs are class
         probabilities and the loss.
 
-        Inputs:
-            inputs: input dicts that must include "image" key containing the image to
-                process.
+        Args:
+            context: the model context. Input dicts must include "image" key containing
+                the image to process.
+
+        Returns:
+            a FeatureVector if the configured output_layers is None, or a FeatureMaps
+                otherwise containing one feature map per configured output layer.
         """
-        images = torch.stack([inp["image"] for inp in inputs], dim=0)
+        images = torch.stack([inp["image"] for inp in context.inputs], dim=0)
 
         if self.output_layers:
             layer_features = []
@@ -150,7 +159,7 @@ class Swin(torch.nn.Module):
             for layer in self.model.features:
                 x = layer(x)
                 layer_features.append(x.permute(0, 3, 1, 2))
-            return [layer_features[idx] for idx in self.output_layers]
+            return FeatureMaps([layer_features[idx] for idx in self.output_layers])
 
         else:
-            return self.model(images)
+            return FeatureVector(self.model(images))

@@ -1,13 +1,15 @@
 import pytest
 import torch
 
+from rslearn.models.component import FeatureMaps
+from rslearn.train.model_context import ModelContext, SampleMetadata
 from rslearn.train.tasks.per_pixel_regression import (
     PerPixelRegressionHead,
     PerPixelRegressionTask,
 )
 
 
-def test_process_inputs() -> None:
+def test_process_inputs(empty_sample_metadata: SampleMetadata) -> None:
     """Verify converting to input works with scale factor and nodata value."""
     task = PerPixelRegressionTask(
         scale_factor=0.1,
@@ -18,7 +20,7 @@ def test_process_inputs() -> None:
         raw_inputs={
             "targets": torch.tensor([[[1, 2], [-1, 3]]]),
         },
-        metadata={},
+        metadata=empty_sample_metadata,
     )
     assert target_dict["values"].shape == (2, 2)
     assert target_dict["values"][0, 0] == pytest.approx(0.1)
@@ -27,20 +29,20 @@ def test_process_inputs() -> None:
     assert torch.all(target_dict["valid"] == torch.tensor([[1, 1], [0, 1]]))
 
 
-def test_process_output() -> None:
+def test_process_output(empty_sample_metadata: SampleMetadata) -> None:
     """Ensure that PerPixelRegressionTask.process_output works."""
     scale_factor = 0.1
     task = PerPixelRegressionTask(
         scale_factor=scale_factor,
     )
     output = task.process_output(
-        raw_output=torch.tensor([[[0.1, 0.2], [0.3, 0.4]]], dtype=torch.float32),
-        metadata={},
+        raw_output=torch.tensor([[0.1, 0.2], [0.3, 0.4]], dtype=torch.float32),
+        metadata=empty_sample_metadata,
     )
     assert torch.all(output == torch.tensor([[[1, 2], [3, 4]]]))
 
 
-def test_head() -> None:
+def test_head(empty_sample_metadata: SampleMetadata) -> None:
     """Verify that the head masks out invalid pixels."""
     head = PerPixelRegressionHead(loss_mode="mse")
     logits = torch.tensor([[1, 1], [1, 1]], dtype=torch.float32)[None, None, :, :]
@@ -48,15 +50,16 @@ def test_head() -> None:
         "values": torch.tensor([[2, 2], [2, 4]], dtype=torch.float32),
         "valid": torch.tensor([[1, 1], [1, 0]], dtype=torch.long),
     }
-    _, losses = head(
-        logits=logits,
-        inputs=[{}],
+    output = head(
+        intermediates=FeatureMaps([logits]),
+        # Use dummy context since it is anyway not used.
+        context=ModelContext(inputs=[], metadatas=[]),
         targets=[target_dict],
     )
-    assert losses["regress"] == 1
+    assert output.loss_dict["regress"] == 1
 
 
-def test_mse_metric() -> None:
+def test_mse_metric(empty_sample_metadata: SampleMetadata) -> None:
     """Verify mean squared error metric works with customized scale_factor."""
     task = PerPixelRegressionTask(
         scale_factor=0.1,
@@ -70,7 +73,7 @@ def test_mse_metric() -> None:
         raw_inputs={
             "targets": torch.tensor([[[1, 2], [-1, 3]]]),
         },
-        metadata={},
+        metadata=empty_sample_metadata,
     )
     preds = torch.tensor([[0.1, 0.1], [0.1, 0.1]])[None, None, :, :]
 

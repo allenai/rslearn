@@ -13,6 +13,8 @@ import torch.nn.functional as F
 from torch import nn
 
 import rslearn.models.detr.box_ops as box_ops
+from rslearn.models.component import FeatureMaps, Predictor
+from rslearn.train.model_context import ModelContext, ModelOutput
 
 from .matcher import HungarianMatcher
 from .position_encoding import PositionEmbeddingSine
@@ -405,7 +407,7 @@ class PostProcess(nn.Module):
         return results
 
 
-class Detr(nn.Module):
+class Detr(Predictor):
     """DETR prediction module.
 
     This combines PositionEmbeddingSine, DetrPredictor, SetCriterion, and PostProcess.
@@ -440,33 +442,39 @@ class Detr(nn.Module):
 
     def forward(
         self,
-        features: list[torch.Tensor],
-        inputs: list[dict[str, Any]],
+        intermediates: Any,
+        context: ModelContext,
         targets: list[dict[str, Any]] | None = None,
-    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+    ) -> ModelOutput:
         """Compute the detection outputs and loss from features.
 
         DETR will use only the last feature map, which should correspond to the lowest
         resolution one.
 
         Args:
-            features: multi-scale feature maps.
-            inputs: original inputs, should contain image key for original image size.
-            targets: should contain class key that stores the class label.
+            intermediates: the output from the previous component. It must be a FeatureMaps.
+            context: the model context. Input dicts must contain an "image" key which we will
+                be used to establish the original image size.
+            targets: must contain class key that stores the class label.
 
         Returns:
-            tuple of outputs and loss dict.
+            the model output.
         """
+        if not isinstance(intermediates, FeatureMaps):
+            raise ValueError("input to Detr must be a FeatureMaps")
+
+        # We only use the last feature map (most fine-grained).
+        features = intermediates.feature_maps[-1]
+
         # Get image sizes.
         image_sizes = torch.tensor(
-            [[inp["image"].shape[2], inp["image"].shape[1]] for inp in inputs],
+            [[inp["image"].shape[2], inp["image"].shape[1]] for inp in context.inputs],
             dtype=torch.int32,
-            device=features[0].device,
+            device=features.device,
         )
 
-        feat_map = features[-1]
-        pos_embedding = self.pos_embedding(feat_map)
-        outputs = self.predictor(feat_map, pos_embedding)
+        pos_embedding = self.pos_embedding(features)
+        outputs = self.predictor(features, pos_embedding)
 
         if targets is not None:
             # Convert boxes from [x0, y0, x1, y1] to [cx, cy, w, h].
@@ -490,4 +498,7 @@ class Detr(nn.Module):
 
         results = self.postprocess(outputs, image_sizes)
 
-        return results, losses
+        return ModelOutput(
+            outputs=results,
+            loss_dict=losses,
+        )

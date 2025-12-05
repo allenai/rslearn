@@ -4,8 +4,16 @@ from typing import Any
 
 import torch
 
+from rslearn.train.model_context import ModelContext
 
-class PoolingDecoder(torch.nn.Module):
+from .component import (
+    FeatureMaps,
+    FeatureVector,
+    IntermediateComponent,
+)
+
+
+class PoolingDecoder(IntermediateComponent):
     """Decoder that computes flat vector from a 2D feature map.
 
     It inputs multi-scale features, but only uses the last feature map. Then applies a
@@ -57,25 +65,26 @@ class PoolingDecoder(torch.nn.Module):
 
         self.output_layer = torch.nn.Linear(prev_channels, out_channels)
 
-    def forward(
-        self, features: list[torch.Tensor], inputs: list[dict[str, Any]]
-    ) -> torch.Tensor:
+    def forward(self, intermediates: Any, context: ModelContext) -> Any:
         """Compute flat output vector from multi-scale feature map.
 
         Args:
-            features: list of feature maps at different resolutions.
-            inputs: original inputs (ignored).
+            intermediates: the output from the previous component, which must be a FeatureMaps.
+            context: the model context.
 
         Returns:
             flat feature vector
         """
+        if not isinstance(intermediates, FeatureMaps):
+            raise ValueError("input to PoolingDecoder must be a FeatureMaps")
+
         # Only use last feature map.
-        features = features[-1]
+        features = intermediates.feature_maps[-1]
 
         features = self.conv_layers(features)
         features = torch.amax(features, dim=(2, 3))
         features = self.fc_layers(features)
-        return self.output_layer(features)
+        return FeatureVector(self.output_layer(features))
 
 
 class SegmentationPoolingDecoder(PoolingDecoder):
@@ -108,14 +117,13 @@ class SegmentationPoolingDecoder(PoolingDecoder):
         super().__init__(in_channels=in_channels, out_channels=out_channels, **kwargs)
         self.image_key = image_key
 
-    def forward(
-        self, features: list[torch.Tensor], inputs: list[dict[str, Any]]
-    ) -> torch.Tensor:
+    def forward(self, intermediates: Any, context: ModelContext) -> Any:
         """Extend PoolingDecoder forward to upsample the output to a segmentation mask.
 
         This only works when all of the pixels have the same segmentation target.
         """
-        output_probs = super().forward(features, inputs)
+        output_probs = super().forward(intermediates, context)
         # BC -> BCHW
-        h, w = inputs[0][self.image_key].shape[1:3]
-        return output_probs[:, :, None, None].repeat([1, 1, h, w])
+        h, w = context.inputs[0][self.image_key].shape[1:3]
+        feat_map = output_probs.feature_vector[:, :, None, None].repeat([1, 1, h, w])
+        return FeatureMaps([feat_map])

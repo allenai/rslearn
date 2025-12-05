@@ -10,6 +10,8 @@ import torchmetrics
 from PIL import Image, ImageDraw
 from torchmetrics import Metric, MetricCollection
 
+from rslearn.models.component import FeatureVector, Predictor
+from rslearn.train.model_context import ModelContext, ModelOutput, SampleMetadata
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import STGeometry
 
@@ -62,7 +64,7 @@ class RegressionTask(BasicTask):
     def process_inputs(
         self,
         raw_inputs: dict[str, torch.Tensor | list[Feature]],
-        metadata: dict[str, Any],
+        metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
@@ -103,22 +105,26 @@ class RegressionTask(BasicTask):
         }
 
     def process_output(
-        self, raw_output: Any, metadata: dict[str, Any]
-    ) -> npt.NDArray[Any] | list[Feature]:
+        self, raw_output: Any, metadata: SampleMetadata
+    ) -> list[Feature]:
         """Processes an output into raster or vector data.
 
         Args:
-            raw_output: the output from prediction head.
+            raw_output: the output from prediction head, which must be a scalar tensor.
             metadata: metadata about the patch being read
 
         Returns:
-            either raster or vector data.
+            a list with a single Feature corresponding to the patch extent and with a
+                property containing the predicted value.
         """
+        if not isinstance(raw_output, torch.Tensor) or len(raw_output.shape) != 0:
+            raise ValueError("output for RegressionTask must be a scalar Tensor")
+
         output = raw_output.item() / self.scale_factor
         feature = Feature(
             STGeometry(
-                metadata["projection"],
-                shapely.Point(metadata["bounds"][0], metadata["bounds"][1]),
+                metadata.projection,
+                shapely.Point(metadata.patch_bounds[0], metadata.patch_bounds[1]),
                 None,
             ),
             {
@@ -180,7 +186,7 @@ class RegressionTask(BasicTask):
         return MetricCollection(metric_dict)
 
 
-class RegressionHead(torch.nn.Module):
+class RegressionHead(Predictor):
     """Head for regression task."""
 
     def __init__(
@@ -199,24 +205,32 @@ class RegressionHead(torch.nn.Module):
 
     def forward(
         self,
-        logits: torch.Tensor,
-        inputs: list[dict[str, Any]],
+        intermediates: Any,
+        context: ModelContext,
         targets: list[dict[str, Any]] | None = None,
-    ) -> tuple[torch.Tensor, dict[str, Any]]:
+    ) -> ModelOutput:
         """Compute the regression outputs and loss from logits and targets.
 
         Args:
-            logits: tensor that is (BatchSize, 1) or (BatchSize) in shape.
-            inputs: original inputs (ignored).
-            targets: should contain target key that stores the regression label.
+            intermediates: output from previous model component, which must be a
+                FeatureVector with channel dimension size 1 (Bx1).
+            context: the model context.
+            targets: target dicts, which each must contain a "value" key containing the
+                regression label, along with a "valid" key containing a flag indicating
+                whether each example is valid for this task.
 
         Returns:
-            tuple of outputs and loss dict
+            the model outputs. The output is a B tensor so that it is split up into a
+                scalar for each example.
         """
-        assert len(logits.shape) in [1, 2]
-        if len(logits.shape) == 2:
-            assert logits.shape[1] == 1
-            logits = logits[:, 0]
+        if not isinstance(intermediates, FeatureVector):
+            raise ValueError("the input to RegressionHead must be a FeatureVector")
+        if intermediates.feature_vector.shape[1] != 1:
+            raise ValueError(
+                f"the input to RegressionHead must have channel dimension size 1, but got shape {intermediates.feature_vector.shape}"
+            )
+
+        logits = intermediates.feature_vector[:, 0]
 
         if self.use_sigmoid:
             outputs = torch.nn.functional.sigmoid(logits)
@@ -232,9 +246,12 @@ class RegressionHead(torch.nn.Module):
             elif self.loss_mode == "l1":
                 losses["regress"] = torch.mean(torch.abs(outputs - labels) * mask)
             else:
-                assert False
+                raise ValueError(f"unknown loss mode {self.loss_mode}")
 
-        return outputs, losses
+        return ModelOutput(
+            outputs=outputs,
+            loss_dict=losses,
+        )
 
 
 class RegressionMetricWrapper(Metric):

@@ -8,6 +8,7 @@ from .fixtures.datasets.image_to_class import (
     image_to_class_dataset,
     image_to_class_model,
 )
+from .fixtures.sample_metadata import empty_sample_metadata
 
 logging.basicConfig()
 
@@ -21,4 +22,5 @@ __all__ = [
     "image_to_class_dataset",
     "image_to_class_data_module",
     "image_to_class_model",
+    "empty_sample_metadata",
 ]

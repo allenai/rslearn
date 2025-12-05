@@ -7,6 +7,7 @@ import torch
 
 from rslearn.log_utils import get_logger
 from rslearn.models.task_embedding import BaseTaskEmbedding
+from rslearn.train.model_context import ModelOutput
 
 logger = get_logger(__name__)
 
@@ -32,10 +33,11 @@ class DecoderTrunkLayer(torch.nn.Module, ABC):
             dict with key "outputs" (output tensor of shape (batch_size, seq_len, dim))
             and optionally other keys.
         """
+        raise NotImplementedError
 
     @abstractmethod
     def apply_auxiliary_losses(
-        self, trunk_out: dict[str, Any], outs: dict[str, Any]
+        self, trunk_out: dict[str, Any], outs: ModelOutput
     ) -> None:
         """Apply auxiliary losses in-place.
 
@@ -43,6 +45,7 @@ class DecoderTrunkLayer(torch.nn.Module, ABC):
             trunk_out: The output of the trunk.
             outs: The output of the decoders, with key "loss_dict" containing the losses.
         """
+        raise NotImplementedError
 
 
 class DecoderTrunk(torch.nn.Module):
@@ -122,7 +125,7 @@ class DecoderTrunk(torch.nn.Module):
         return out
 
     def apply_auxiliary_losses(
-        self, trunk_out: dict[str, Any], outs: dict[str, Any]
+        self, trunk_out: dict[str, Any], outs: ModelOutput
     ) -> None:
         """Apply auxiliary losses in-place.
 
@@ -130,7 +133,7 @@ class DecoderTrunk(torch.nn.Module):
 
         Args:
             trunk_out: The output of the trunk.
-            outs: The output of the decoders, with key "loss_dict" containing the losses.
+            outs: The output of the decoders.
         """
         for layer in self.layers:
             layer.apply_auxiliary_losses(trunk_out, outs)

@@ -4,8 +4,12 @@ from typing import Any
 
 import torch
 
+from rslearn.train.model_context import ModelContext
 
-class ConcatenateFeatures(torch.nn.Module):
+from .component import FeatureMaps, IntermediateComponent
+
+
+class ConcatenateFeatures(IntermediateComponent):
     """Concatenate feature map with additional raw data inputs."""
 
     def __init__(
@@ -55,26 +59,32 @@ class ConcatenateFeatures(torch.nn.Module):
 
         self.conv_layers = torch.nn.Sequential(*conv_layers)
 
-    def forward(
-        self, features: list[torch.Tensor], inputs: list[dict[str, Any]]
-    ) -> list[torch.Tensor]:
+    def forward(self, intermediates: Any, context: ModelContext) -> FeatureMaps:
         """Concatenate the feature map with the raw data inputs.
 
         Args:
-            features: list of feature maps at different resolutions.
-            inputs: original inputs.
+            intermediates: the previous output, which must be a FeatureMaps.
+            context: the model context. The input dicts must have a key matching the
+                configured key.
 
         Returns:
             concatenated feature maps.
         """
-        if not features:
-            raise ValueError("Expected at least one feature map, got none.")
+        if (
+            not isinstance(intermediates, FeatureMaps)
+            or len(intermediates.feature_maps) == 0
+        ):
+            raise ValueError(
+                "Expected input to be FeatureMaps with at least one feature map"
+            )
 
-        add_data = torch.stack([input_data[self.key] for input_data in inputs], dim=0)
+        add_data = torch.stack(
+            [input_data[self.key] for input_data in context.inputs], dim=0
+        )
         add_features = self.conv_layers(add_data)
 
         new_features: list[torch.Tensor] = []
-        for feature_map in features:
+        for feature_map in intermediates.feature_maps:
             # Shape of feature map: BCHW
             feat_h, feat_w = feature_map.shape[2], feature_map.shape[3]
 
@@ -90,4 +100,4 @@ class ConcatenateFeatures(torch.nn.Module):
 
             new_features.append(torch.cat([feature_map, resized_add_features], dim=1))
 
-        return new_features
+        return FeatureMaps(new_features)

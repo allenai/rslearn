@@ -7,6 +7,7 @@ import huggingface_hub.constants
 import torch
 
 from rslearn.models.terramind import Terramind, TerramindNormalize, TerramindSize
+from rslearn.train.model_context import ModelContext
 
 
 def test_terramind_without_resizing(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
@@ -27,10 +28,12 @@ def test_terramind_without_resizing(tmp_path: pathlib.Path, monkeypatch: Any) ->
     input_dict, _ = normalize.forward(inputs[0], {})
     normalized_inputs = [input_dict]
 
-    feature_list = terramind.forward(normalized_inputs)
+    feature_list = terramind.forward(
+        ModelContext(inputs=normalized_inputs, metadatas=[])
+    )
     # Should yield one feature map since there's only one output scale.
-    assert len(feature_list) == 1
-    features = feature_list[0]
+    assert len(feature_list.feature_maps) == 1
+    features = feature_list.feature_maps[0]
     # Features should be BxCxHxW
     assert features.shape[0] == 1
     assert features.shape[2] == 2
@@ -50,10 +53,10 @@ def test_terramind_with_resizing(tmp_path: pathlib.Path, monkeypatch: Any) -> No
         }
     ]
 
-    feature_list = terramind.forward(inputs)
+    feature_list = terramind.forward(ModelContext(inputs=inputs, metadatas=[]))
     # Should yield one feature map since there's only one output scale.
-    assert len(feature_list) == 1
-    features = feature_list[0]
+    assert len(feature_list.feature_maps) == 1
+    features = feature_list.feature_maps[0]
     # Features should be BxCxHxW
     assert features.shape[0] == 1
     assert features.shape[2] == 14

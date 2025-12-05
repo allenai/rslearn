@@ -1,12 +1,14 @@
 """SSL4EO-S12 models."""
 
-from typing import Any
-
 import torch
 import torchvision
 
+from rslearn.train.model_context import ModelContext
 
-class Ssl4eoS12(torch.nn.Module):
+from .component import FeatureExtractor, FeatureMaps
+
+
+class Ssl4eoS12(FeatureExtractor):
     """The SSL4EO-S12 family of pretrained models."""
 
     def __init__(
@@ -74,19 +76,22 @@ class Ssl4eoS12(torch.nn.Module):
 
     def forward(
         self,
-        inputs: list[dict[str, Any]],
-    ) -> list[torch.Tensor]:
+        context: ModelContext,
+    ) -> FeatureMaps:
         """Compute outputs from the backbone.
 
         If output_layers is set, then the outputs are multi-scale feature maps;
         otherwise, the model is being used for classification so the outputs are class
         probabilities and the loss.
 
-        Inputs:
-            inputs: input dicts that must include "image" key containing the image to
-                process.
+        Args:
+            context: the model context. Input dicts must include "image" key containing
+                the images to process.
+
+        Returns:
+            feature maps computed by the pre-trained model.
         """
-        x = torch.stack([inp["image"] for inp in inputs], dim=0)
+        x = torch.stack([inp["image"] for inp in context.inputs], dim=0)
         x = self.model.conv1(x)
         x = self.model.bn1(x)
         x = self.model.relu(x)
@@ -97,4 +102,4 @@ class Ssl4eoS12(torch.nn.Module):
         layer3 = self.model.layer3(layer2)
         layer4 = self.model.layer4(layer3)
         all_features = [layer1, layer2, layer3, layer4]
-        return [all_features[idx] for idx in self.output_layers]
+        return FeatureMaps([all_features[idx] for idx in self.output_layers])
