@@ -134,7 +134,9 @@ class BandSetConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    dtype: DType = Field(description="Pixel value type to store the data under")
+    dtype: DType = Field(
+        description="Pixel value type to store the data under. This is used during dataset materialize and model predict."
+    )
     bands: list[str] = Field(
         default_factory=lambda: [],
         description="List of band names in this BandSetConfig. One of bands or num_bands must be set.",

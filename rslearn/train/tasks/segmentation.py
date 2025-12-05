@@ -166,7 +166,7 @@ class SegmentationTask(BasicTask):
                     self.prob_scales, device=raw_output.device, dtype=raw_output.dtype
                 )[:, None, None]
             )
-        classes = raw_output.argmax(dim=0).cpu().numpy().astype(np.uint8)
+        classes = raw_output.argmax(dim=0).cpu().numpy()
         return classes[None, :, :]
 
     def visualize(

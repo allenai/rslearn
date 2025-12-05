@@ -120,7 +120,14 @@ class TestRasterMerger:
                 output=3 * np.ones((1, 3, 3), dtype=np.uint8),
             ),
         ]
-        merged = RasterMerger().merge(window, outputs)
+        merged = RasterMerger().merge(
+            window,
+            outputs,
+            LayerConfig(
+                type=LayerType.RASTER,
+                band_sets=[BandSetConfig(bands=["output"], dtype=DType.UINT8)],
+            ),
+        )
         assert merged.shape == (1, 4, 4)
         assert merged.dtype == np.uint8
         # The patches were disjoint, so we just check that those portions of the merged
@@ -164,7 +171,14 @@ class TestRasterMerger:
                 output=3 * np.ones((1, 3, 3), dtype=np.int32),
             ),
         ]
-        merged = RasterMerger(padding=1).merge(window, outputs)
+        merged = RasterMerger(padding=1).merge(
+            window,
+            outputs,
+            LayerConfig(
+                type=LayerType.RASTER,
+                band_sets=[BandSetConfig(bands=["output"], dtype=DType.INT32)],
+            ),
+        )
         assert merged.shape == (1, 4, 4)
         assert merged.dtype == np.int32
         # The top-left should use the first patch.
@@ -175,6 +189,33 @@ class TestRasterMerger:
         assert np.all(merged[0, 0:2, 2:4] == 2)
         # And finally the bottom-right should use the fourth patch.
         assert np.all(merged[0, 2:4, 2:4] == 3)
+
+    def test_merge_respect_dtype(self, tmp_path: pathlib.Path) -> None:
+        """Verify that merge respects the dtype in BandSetConfig."""
+        window = Window(
+            path=UPath(tmp_path),
+            group="fake",
+            name="fake",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 4, 4),
+            time_range=None,
+        )
+        outputs = [
+            PendingPatchOutput(
+                bounds=(0, 0, 4, 4),
+                output=0 * np.ones((1, 4, 4), dtype=np.uint8),
+            ),
+        ]
+        merged = RasterMerger().merge(
+            window,
+            outputs,
+            LayerConfig(
+                type=LayerType.RASTER,
+                band_sets=[BandSetConfig(bands=["output"], dtype=DType.UINT16)],
+            ),
+        )
+        assert merged.shape == (1, 4, 4)
+        assert merged.dtype == np.uint16
 
 
 def test_write_raster(tmp_path: pathlib.Path) -> None:

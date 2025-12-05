@@ -43,12 +43,18 @@ class PendingPatchOutput:
 class PatchPredictionMerger:
     """Base class for merging predictions from multiple patches."""
 
-    def merge(self, window: Window, outputs: Sequence[PendingPatchOutput]) -> Any:
+    def merge(
+        self,
+        window: Window,
+        outputs: Sequence[PendingPatchOutput],
+        layer_config: LayerConfig,
+    ) -> Any:
         """Merge the outputs.
 
         Args:
             window: the window we are merging the outputs for.
             outputs: the outputs to process.
+            layer_config: the output layer configuration.
 
         Returns:
             the merged outputs.
@@ -60,7 +66,10 @@ class VectorMerger(PatchPredictionMerger):
     """Merger for vector data that simply concatenates the features."""
 
     def merge(
-        self, window: Window, outputs: Sequence[PendingPatchOutput]
+        self,
+        window: Window,
+        outputs: Sequence[PendingPatchOutput],
+        layer_config: LayerConfig,
     ) -> list[Feature]:
         """Concatenate the vector features."""
         return [feat for output in outputs for feat in output.output]
@@ -83,18 +92,20 @@ class RasterMerger(PatchPredictionMerger):
         self.downsample_factor = downsample_factor
 
     def merge(
-        self, window: Window, outputs: Sequence[PendingPatchOutput]
+        self,
+        window: Window,
+        outputs: Sequence[PendingPatchOutput],
+        layer_config: LayerConfig,
     ) -> npt.NDArray:
         """Merge the raster outputs."""
         num_channels = outputs[0].output.shape[0]
-        dtype = outputs[0].output.dtype
         merged_image = np.zeros(
             (
                 num_channels,
                 (window.bounds[3] - window.bounds[1]) // self.downsample_factor,
                 (window.bounds[2] - window.bounds[0]) // self.downsample_factor,
             ),
-            dtype=dtype,
+            dtype=layer_config.band_sets[0].dtype.get_numpy_dtype(),
         )
 
         # Ensure the outputs are sorted by height then width.
@@ -320,7 +331,7 @@ class RslearnWriter(BasePredictionWriter):
 
         # Merge outputs from overlapped patches if merger is set.
         logger.debug(f"Merging and writing for window {window.name}")
-        merged_output = self.merger.merge(window, pending_output)
+        merged_output = self.merger.merge(window, pending_output, self.layer_config)
 
         if self.layer_config.type == LayerType.RASTER:
             raster_dir = window.get_raster_dir(
