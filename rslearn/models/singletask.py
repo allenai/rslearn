@@ -46,7 +46,6 @@ class SingleTaskModel(torch.nn.Module):
         Args:
             context: the model context.
             targets: optional list of target dicts
-            info: optional dictionary of info to pass to the last module
 
         Returns:
             the model output.
