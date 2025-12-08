@@ -8,6 +8,8 @@ import torch
 import torchmetrics
 from torchmetrics import Metric, MetricCollection
 
+from rslearn.models.component import FeatureMaps, Predictor
+from rslearn.train.model_context import ModelContext, ModelOutput, SampleMetadata
 from rslearn.utils.feature import Feature
 
 from .task import BasicTask
@@ -41,7 +43,7 @@ class PerPixelRegressionTask(BasicTask):
     def process_inputs(
         self,
         raw_inputs: dict[str, torch.Tensor],
-        metadata: dict[str, Any],
+        metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
@@ -72,20 +74,23 @@ class PerPixelRegressionTask(BasicTask):
         }
 
     def process_output(
-        self, raw_output: Any, metadata: dict[str, Any]
+        self, raw_output: Any, metadata: SampleMetadata
     ) -> npt.NDArray[Any] | list[Feature]:
         """Processes an output into raster or vector data.
 
         Args:
-            raw_output: the output from prediction head.
+            raw_output: the output from prediction head, which must be an HW tensor.
             metadata: metadata about the patch being read
 
         Returns:
             either raster or vector data.
         """
-        # Input could be CHW (with single channel) or just HW.
-        if len(raw_output.shape) == 2:
-            raw_output = raw_output[None, :, :]
+        if not isinstance(raw_output, torch.Tensor):
+            raise ValueError("output for PerPixelRegressionTask must be a tensor")
+        if len(raw_output.shape) != 2:
+            raise ValueError(
+                f"PerPixelRegressionTask output must be an HW tensor, but got shape {raw_output.shape}"
+            )
         return (raw_output / self.scale_factor).cpu().numpy()
 
     def visualize(
@@ -133,7 +138,7 @@ class PerPixelRegressionTask(BasicTask):
         return MetricCollection(metric_dict)
 
 
-class PerPixelRegressionHead(torch.nn.Module):
+class PerPixelRegressionHead(Predictor):
     """Head for per-pixel regression task."""
 
     def __init__(
@@ -156,24 +161,38 @@ class PerPixelRegressionHead(torch.nn.Module):
 
     def forward(
         self,
-        logits: torch.Tensor,
-        inputs: list[dict[str, Any]],
+        intermediates: Any,
+        context: ModelContext,
         targets: list[dict[str, Any]] | None = None,
-    ) -> tuple[torch.Tensor, dict[str, Any]]:
+    ) -> ModelOutput:
         """Compute the regression outputs and loss from logits and targets.
 
         Args:
-            logits: BxHxW or BxCxHxW tensor.
-            inputs: original inputs (ignored).
-            targets: should contain target key that stores the regression labels.
+            intermediates: output from previous component, which must be a FeatureMaps
+                with one feature map corresponding to the logits. The channel dimension
+                size must be 1.
+            context: the model context.
+            targets: must contain values key that stores the regression labels, and
+                valid key containing mask image indicating where the labels are valid.
 
         Returns:
-            tuple of outputs and loss dict
+            tuple of outputs and loss dict. The output is a BHW tensor so that the
+                per-sample output is an HW tensor.
         """
-        assert len(logits.shape) in [3, 4]
-        if len(logits.shape) == 4:
-            assert logits.shape[1] == 1
-            logits = logits[:, 0, :, :]
+        if not isinstance(intermediates, FeatureMaps):
+            raise ValueError(
+                "the input to PerPixelRegressionHead must be a FeatureMaps"
+            )
+        if len(intermediates.feature_maps) != 1:
+            raise ValueError(
+                "the input to PerPixelRegressionHead must have one feature map"
+            )
+        if intermediates.feature_maps[0].shape[1] != 1:
+            raise ValueError(
+                f"the input to PerPixelRegressionHead must have channel dimension size 1, but got {intermediates.feature_maps[0].shape}"
+            )
+
+        logits = intermediates.feature_maps[0][:, 0, :, :]
 
         if self.use_sigmoid:
             outputs = torch.nn.functional.sigmoid(logits)
@@ -200,7 +219,10 @@ class PerPixelRegressionHead(torch.nn.Module):
             else:
                 losses["regress"] = (scores * mask).sum() / mask_total
 
-        return outputs, losses
+        return ModelOutput(
+            outputs=outputs,
+            loss_dict=losses,
+        )
 
 
 class PerPixelRegressionMetricWrapper(Metric):

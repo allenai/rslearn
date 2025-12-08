@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from rslearn.models.clip import CLIP
+from rslearn.train.model_context import ModelContext
 
 
 @pytest.mark.parametrize(
@@ -15,7 +16,7 @@ def test_clip(model_name: str) -> None:
             "image": torch.zeros((3, 32, 32), dtype=torch.float32),
         }
     ]
-    feature_list = clip(inputs)
+    feature_list = clip(ModelContext(inputs=inputs, metadatas=[])).feature_maps
     # Should yield one feature map since there's only one output scale.
     assert len(feature_list) == 1
     features = feature_list[0]

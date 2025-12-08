@@ -6,6 +6,7 @@ from einops import rearrange
 from pytest import MonkeyPatch
 
 from rslearn.models.presto import Presto
+from rslearn.train.model_context import ModelContext
 
 
 def test_presto(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
@@ -26,7 +27,7 @@ def test_presto(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
             "era5": torch.zeros((2, input_hw, input_hw), dtype=torch.float32),
         }
     ]
-    feature_list = presto(inputs)
+    feature_list = presto(ModelContext(inputs=inputs, metadatas=[])).feature_maps
     # Should yield one feature map since there's only one output scale.
     assert len(feature_list) == 1
     features = feature_list[0]
@@ -63,7 +64,7 @@ def test_presto_mt(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
             ),
         }
     ]
-    feature_list = presto(inputs)
+    feature_list = presto(ModelContext(inputs=inputs, metadatas=[])).feature_maps
     # Should yield one feature map since there's only one output scale.
     assert len(feature_list) == 1
     features = feature_list[0]

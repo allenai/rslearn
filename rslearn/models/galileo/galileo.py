@@ -4,16 +4,16 @@ import math
 import tempfile
 from contextlib import nullcontext
 from enum import StrEnum
-from typing import Any, cast
+from typing import cast
 
 import numpy as np
 import torch
-import torch.nn as nn
 from einops import rearrange, repeat
 from huggingface_hub import hf_hub_download
 from upath import UPath
 
 from rslearn.log_utils import get_logger
+from rslearn.models.component import FeatureExtractor, FeatureMaps
 from rslearn.models.galileo.single_file_galileo import (
     CONFIG_FILENAME,
     DW_BANDS,
@@ -39,6 +39,7 @@ from rslearn.models.galileo.single_file_galileo import (
     MaskedOutput,
     Normalizer,
 )
+from rslearn.train.model_context import ModelContext
 
 logger = get_logger(__name__)
 
@@ -70,7 +71,7 @@ AUTOCAST_DTYPE_MAP = {
 }
 
 
-class GalileoModel(nn.Module):
+class GalileoModel(FeatureExtractor):
     """Galileo backbones."""
 
     input_keys = [
@@ -410,11 +411,11 @@ class GalileoModel(nn.Module):
             months=months,
         )
 
-    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
+    def forward(self, context: ModelContext) -> FeatureMaps:
         """Compute feature maps from the Galileo backbone.
 
-        Inputs:
-            inputs: a dictionary of tensors, where the keys are one of Galileo.input_keys
+        Args:
+            context: the model context. Input dicts should contain keys corresponding to Galileo.input_keys
                 (also documented below) and values are tensors of the following shapes,
                 per input key:
                     "s1": B (T * C) H W
@@ -436,10 +437,12 @@ class GalileoModel(nn.Module):
         take a pool of the space_time unmasked tokens (i.e. of the s1 and s2 tokens).
         """
         stacked_inputs = {}
-        for key in inputs[0].keys():
+        for key in context.inputs[0].keys():
             # assume all the keys in an input are consistent
             if key in self.input_keys:
-                stacked_inputs[key] = torch.stack([inp[key] for inp in inputs], dim=0)
+                stacked_inputs[key] = torch.stack(
+                    [inp[key] for inp in context.inputs], dim=0
+                )
         s_t_channels = []
         for space_time_modality in ["s1", "s2"]:
             if space_time_modality not in stacked_inputs:
@@ -502,14 +505,14 @@ class GalileoModel(nn.Module):
         # Decide context based on self.autocast_dtype.
         device = galileo_input.s_t_x.device
         if self.autocast_dtype is None:
-            context = nullcontext()
+            torch_context = nullcontext()
         else:
             assert device is not None
-            context = torch.amp.autocast(
+            torch_context = torch.amp.autocast(
                 device_type=device.type, dtype=self.autocast_dtype
             )
 
-        with context:
+        with torch_context:
             outputs = self.model(
                 s_t_x=galileo_input.s_t_x,
                 s_t_m=galileo_input.s_t_m,
@@ -530,18 +533,20 @@ class GalileoModel(nn.Module):
             averaged = self.model.average_tokens(
                 s_t_x, sp_x, t_x, st_x, s_t_m, sp_m, t_m, st_m
             )
-            return [repeat(averaged, "b d -> b d 1 1")]
+            return FeatureMaps([repeat(averaged, "b d -> b d 1 1")])
         else:
             s_t_x = outputs[0]
             # we will be assuming we only want s_t_x, and (for now) that we want s1 or s2 bands
             # s_t_x has shape [b, h, w, t, c_g, d]
             # and we want [b, d, h, w]
-            return [
-                rearrange(
-                    s_t_x[:, :, :, :, s_t_channels, :].mean(dim=3),
-                    "b h w c_g d -> b c_g d h w",
-                ).mean(dim=1)
-            ]
+            return FeatureMaps(
+                [
+                    rearrange(
+                        s_t_x[:, :, :, :, s_t_channels, :].mean(dim=3),
+                        "b h w c_g d -> b c_g d h w",
+                    ).mean(dim=1)
+                ]
+            )
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.

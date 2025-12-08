@@ -7,6 +7,7 @@ import huggingface_hub.constants
 import torch
 
 from rslearn.models.clay.clay import Clay, ClayNormalize, ClaySize
+from rslearn.train.model_context import ModelContext
 
 
 def test_clay(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
@@ -29,11 +30,11 @@ def test_clay(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
     normalized_inputs = [input_dict]
 
     # Forward pass
-    feature_list = clay.forward(normalized_inputs)
+    feature_list = clay.forward(ModelContext(inputs=normalized_inputs, metadatas=[]))
 
     # Should yield one feature map
-    assert len(feature_list) == 1
-    features = feature_list[0]
+    assert len(feature_list.feature_maps) == 1
+    features = feature_list.feature_maps[0]
 
     # Check feature shape: (B, D, H', W') with B=1, D=1024, H'=W'=16 (128/8)
     assert features.shape == (1, 1024, 16, 16)

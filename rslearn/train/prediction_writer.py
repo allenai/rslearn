@@ -1,6 +1,6 @@
 """rslearn PredictionWriter implementation."""
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,6 +17,7 @@ from rslearn.config import (
 )
 from rslearn.dataset import Dataset, Window
 from rslearn.log_utils import get_logger
+from rslearn.train.model_context import SampleMetadata
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds
@@ -27,6 +28,7 @@ from rslearn.utils.raster_format import (
 from rslearn.utils.vector_format import VectorFormat
 
 from .lightning_module import RslearnLightningModule
+from .model_context import ModelOutput
 from .tasks.task import Task
 
 logger = get_logger(__name__)
@@ -222,7 +224,7 @@ class RslearnWriter(BasePredictionWriter):
         self,
         trainer: Trainer,
         pl_module: LightningModule,
-        prediction: dict[str, Sequence],
+        prediction: ModelOutput,
         batch_indices: Sequence[int] | None,
         batch: tuple[list, list, list],
         batch_idx: int,
@@ -243,13 +245,13 @@ class RslearnWriter(BasePredictionWriter):
         assert isinstance(pl_module, RslearnLightningModule)
         task = pl_module.task
         _, _, metadatas = batch
-        self.process_output_batch(task, prediction["outputs"], metadatas)
+        self.process_output_batch(task, prediction.outputs, metadatas)
 
     def process_output_batch(
         self,
         task: Task,
-        prediction: Sequence,
-        metadatas: Sequence,
+        prediction: Iterable[Any],
+        metadatas: Iterable[SampleMetadata],
     ) -> None:
         """Write a prediction batch with simplified API.
 
@@ -280,19 +282,19 @@ class RslearnWriter(BasePredictionWriter):
             )
             window = Window(
                 path=Window.get_window_root(
-                    window_base_path, metadata["group"], metadata["window_name"]
+                    window_base_path, metadata.window_group, metadata.window_name
                 ),
-                group=metadata["group"],
-                name=metadata["window_name"],
-                projection=metadata["projection"],
-                bounds=metadata["window_bounds"],
-                time_range=metadata["time_range"],
+                group=metadata.window_group,
+                name=metadata.window_name,
+                projection=metadata.projection,
+                bounds=metadata.window_bounds,
+                time_range=metadata.time_range,
             )
             self.process_output(
                 window,
-                metadata["patch_idx"],
-                metadata["num_patches"],
-                metadata["bounds"],
+                metadata.patch_idx,
+                metadata.num_patches_in_window,
+                metadata.patch_bounds,
                 output,
             )
 

@@ -6,6 +6,8 @@ import numpy.typing as npt
 import torch
 from torchmetrics import MetricCollection
 
+from rslearn.models.component import FeatureMaps
+from rslearn.train.model_context import ModelContext, ModelOutput, SampleMetadata
 from rslearn.utils import Feature
 
 from .task import Task
@@ -21,7 +23,7 @@ class EmbeddingTask(Task):
     def process_inputs(
         self,
         raw_inputs: dict[str, torch.Tensor],
-        metadata: dict[str, Any],
+        metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
@@ -38,17 +40,22 @@ class EmbeddingTask(Task):
         return {}, {}
 
     def process_output(
-        self, raw_output: Any, metadata: dict[str, Any]
+        self, raw_output: Any, metadata: SampleMetadata
     ) -> npt.NDArray[Any] | list[Feature]:
         """Processes an output into raster or vector data.
 
         Args:
-            raw_output: the output from prediction head.
+            raw_output: the output from prediction head, which must be a CxHxW tensor.
             metadata: metadata about the patch being read
 
         Returns:
             either raster or vector data.
         """
+        if not isinstance(raw_output, torch.Tensor) or len(raw_output.shape) != 3:
+            raise ValueError(
+                "output for EmbeddingTask must be a tensor with three dimensions"
+            )
+
         # Just convert the raw output to numpy array that can be saved to GeoTIFF.
         return raw_output.cpu().numpy()
 
@@ -76,41 +83,38 @@ class EmbeddingTask(Task):
         return MetricCollection({})
 
 
-class EmbeddingHead(torch.nn.Module):
+class EmbeddingHead:
     """Head for embedding task.
 
-    This picks one feature map from the input list of feature maps to output. It also
-    returns a dummy loss.
+    It just adds a dummy loss to act as a Predictor.
     """
-
-    def __init__(self, feature_map_index: int | None = 0):
-        """Create a new EmbeddingHead.
-
-        Args:
-            feature_map_index: the index of the feature map to choose from the input
-                list of multi-scale feature maps (default 0). If the input is already
-                a single feature map, then set to None.
-        """
-        super().__init__()
-        self.feature_map_index = feature_map_index
 
     def forward(
         self,
-        features: torch.Tensor,
-        inputs: list[dict[str, Any]],
+        intermediates: Any,
+        context: ModelContext,
         targets: list[dict[str, Any]] | None = None,
-    ) -> tuple[torch.Tensor, dict[str, Any]]:
-        """Select the desired feature map and return it along with a dummy loss.
+    ) -> ModelOutput:
+        """Return the feature map along with a dummy loss.
 
         Args:
-            features: list of BCHW feature maps (or one feature map, if feature_map_index is None).
-            inputs: original inputs (ignored).
-            targets: should contain classes key that stores the per-pixel class labels.
+            intermediates: output from the previous model component, which must be a
+                FeatureMaps consisting of a single feature map.
+            context: the model context.
+            targets: the targets (ignored).
 
         Returns:
-            tuple of outputs and loss dict
+            model output with the feature map that was input to this component along
+                with a dummy loss.
         """
-        if self.feature_map_index is not None:
-            features = features[self.feature_map_index]
+        if not isinstance(intermediates, FeatureMaps):
+            raise ValueError("input to EmbeddingHead must be a FeatureMaps")
+        if len(intermediates.feature_maps) != 1:
+            raise ValueError(
+                f"input to EmbeddingHead must have one feature map, but got {len(intermediates.feature_maps)}"
+            )
 
-        return features, {"loss": 0}
+        return ModelOutput(
+            outputs=intermediates.feature_maps[0],
+            loss_dict={"loss": 0},
+        )
