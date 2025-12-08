@@ -598,7 +598,7 @@ class LayerConfig(BaseModel):
 
 
 class StorageConfig(BaseModel):
-    """Configuration for the WindowStorageFactory (dataset metadata storage backend)."""
+    """Configuration for the WindowStorageFactory (window metadata storage backend)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -611,24 +611,24 @@ class StorageConfig(BaseModel):
         description="jsonargparse init args for the WindowStorageFactory.",
     )
 
-    def instantiate_dataset_storage_factory(self) -> "WindowStorageFactory":
+    def instantiate_window_storage_factory(self) -> "WindowStorageFactory":
         """Instantiate the WindowStorageFactory specified by this config."""
         from rslearn.dataset.storage.storage import WindowStorageFactory
         from rslearn.utils.jsonargparse import init_jsonargparse
 
         init_jsonargparse()
         parser = jsonargparse.ArgumentParser()
-        parser.add_argument("--dsf", type=WindowStorageFactory)
+        parser.add_argument("--wsf", type=WindowStorageFactory)
         cfg = parser.parse_object(
             {
-                "dsf": dict(
+                "wsf": dict(
                     class_path=self.class_path,
                     init_args=self.init_args,
                 )
             }
         )
-        dsf = parser.instantiate_classes(cfg).dsf
-        return dsf
+        wsf = parser.instantiate_classes(cfg).wsf
+        return wsf
 
 
 class DatasetConfig(BaseModel):

@@ -256,7 +256,7 @@ class RslearnWriter(BasePredictionWriter):
         # Instantiate the WindowStorage from the storage_config if provided.
         if storage_config:
             dataset_storage = (
-                storage_config.instantiate_dataset_storage_factory().get_storage(
+                storage_config.instantiate_window_storage_factory().get_storage(
                     output_upath
                 )
             )
@@ -277,7 +277,7 @@ class RslearnWriter(BasePredictionWriter):
                 layer_config = dataset_config.layers[self.output_layer]
 
             if not dataset_storage:
-                dataset_storage = dataset_config.storage.instantiate_dataset_storage_factory().get_storage(
+                dataset_storage = dataset_config.storage.instantiate_window_storage_factory().get_storage(
                     output_upath
                 )
 

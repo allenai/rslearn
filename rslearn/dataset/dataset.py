@@ -67,7 +67,7 @@ class Dataset:
 
             self.tile_store_config = config.tile_store
             self.storage = (
-                config.storage.instantiate_dataset_storage_factory().get_storage(
+                config.storage.instantiate_window_storage_factory().get_storage(
                     self.path
                 )
             )

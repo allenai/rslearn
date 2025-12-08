@@ -1,1 +1,1 @@
-"""Storage backends for rslearn dataset metadata."""
+"""Storage backends for rslearn window metadata."""
