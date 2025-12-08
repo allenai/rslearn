@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from rslearn.const import WGS84_PROJECTION
+from rslearn.train.model_context import SampleMetadata
 from rslearn.train.tasks.regression import RegressionTask
 from rslearn.utils.feature import Feature
 
@@ -16,9 +17,16 @@ def test_process_output() -> None:
     )
     expected_value = 5
     raw_output = torch.tensor(expected_value * scale_factor)
-    metadata = dict(
+    metadata = SampleMetadata(
+        window_group="",
+        window_name="",
+        window_bounds=(0, 0, 1, 1),
+        patch_bounds=(0, 0, 1, 1),
+        patch_idx=0,
+        num_patches_in_window=1,
+        time_range=None,
         projection=WGS84_PROJECTION,
-        bounds=[0, 0, 1, 1],
+        dataset_source=None,
     )
     features = task.process_output(raw_output, metadata)
     assert len(features) == 1

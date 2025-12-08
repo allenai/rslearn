@@ -281,10 +281,7 @@ def get_sinusoid_encoding_table(
     sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])  # dim 2i
     sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1
 
-    if torch.cuda.is_available():
-        return torch.FloatTensor(sinusoid_table).cuda()
-    else:
-        return torch.FloatTensor(sinusoid_table)
+    return torch.FloatTensor(sinusoid_table)
 
 
 def get_month_encoding_table(d_hid: int) -> torch.Tensor:
@@ -296,10 +293,7 @@ def get_month_encoding_table(d_hid: int) -> torch.Tensor:
     cos_table = np.cos(np.stack([angles for _ in range(d_hid // 2)], axis=-1))
     month_table = np.concatenate([sin_table[:-1], cos_table[:-1]], axis=-1)
 
-    if torch.cuda.is_available():
-        return torch.FloatTensor(month_table).cuda()
-    else:
-        return torch.FloatTensor(month_table)
+    return torch.FloatTensor(month_table)
 
 
 def month_to_tensor(
@@ -405,7 +399,7 @@ class Encoder(nn.Module):
         """initialize_weights."""
         pos_embed = get_sinusoid_encoding_table(
             self.pos_embed.shape[1], self.pos_embed.shape[-1]
-        )
+        ).to(device=self.pos_embed.device)
         self.pos_embed.data.copy_(pos_embed)
 
         # initialize nn.Linear and nn.LayerNorm
@@ -640,7 +634,7 @@ class Decoder(nn.Module):
         """initialize_weights."""
         pos_embed = get_sinusoid_encoding_table(
             self.pos_embed.shape[1], self.pos_embed.shape[-1]
-        )
+        ).to(device=self.pos_embed.device)
         self.pos_embed.data.copy_(pos_embed)
 
         # initialize nn.Linear and nn.LayerNorm

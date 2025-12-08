@@ -3,6 +3,7 @@ import pathlib
 import torch
 
 from rslearn.models.prithvi import PrithviV2, PrithviV2Models
+from rslearn.train.model_context import ModelContext
 
 
 def test_prithvi(tmp_path: pathlib.Path) -> None:
@@ -21,13 +22,13 @@ def test_prithvi(tmp_path: pathlib.Path) -> None:
                 ),
             }
         ]
-        feature_list = prithvi(inputs)
-        assert len(feature_list) == len(prithvi.model.encoder.blocks)
-        for features in feature_list:
-            # features should be BxCxHxW.
-            assert features.shape[0] == 1 and len(features.shape) == 4
-            feat_hw = prithvi.image_resolution // prithvi.patch_size
-            assert features.shape[2] == feat_hw and features.shape[3] == feat_hw
+        feature_list = prithvi(ModelContext(inputs=inputs, metadatas=[])).feature_maps
+        assert len(feature_list) == 1
+        features = feature_list[0]
+        # features should be BxCxHxW
+        assert features.shape[0] == 1 and len(features.shape) == 4
+        feat_hw = prithvi.image_resolution // prithvi.patch_size
+        assert features.shape[2] == feat_hw and features.shape[3] == feat_hw
 
 
 def test_prithvi_mt(tmp_path: pathlib.Path) -> None:
@@ -49,10 +50,10 @@ def test_prithvi_mt(tmp_path: pathlib.Path) -> None:
                 ),
             }
         ]
-        feature_list = prithvi(inputs)
-        assert len(feature_list) == len(prithvi.model.encoder.blocks)
-        for features in feature_list:
-            # features should be BxCxHxW.
-            assert features.shape[0] == 1 and len(features.shape) == 4
-            # Should be one feature since for 1x1 input we only resize to patch size.
-            assert features.shape[2] == 1 and features.shape[3] == 1
+        feature_list = prithvi(ModelContext(inputs=inputs, metadatas=[])).feature_maps
+        assert len(feature_list) == 1
+        features = feature_list[0]
+        # features should be BxCxHxW.
+        assert features.shape[0] == 1 and len(features.shape) == 4
+        # Should be one feature since for 1x1 input we only resize to patch size.
+        assert features.shape[2] == 1 and features.shape[3] == 1

@@ -8,7 +8,10 @@ import torch.nn.functional as F
 from einops import rearrange
 from terratorch.registry import BACKBONE_REGISTRY
 
+from rslearn.train.model_context import ModelContext
 from rslearn.train.transforms.transform import Transform
+
+from .component import FeatureExtractor, FeatureMaps
 
 
 # TerraMind v1 provides two sizes: base and large
@@ -85,7 +88,7 @@ PRETRAINED_BANDS = {
 }
 
 
-class Terramind(torch.nn.Module):
+class Terramind(FeatureExtractor):
     """Terramind backbones."""
 
     def __init__(
@@ -123,21 +126,25 @@ class Terramind(torch.nn.Module):
         self.modalities = modalities
         self.do_resizing = do_resizing
 
-    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
+    def forward(self, context: ModelContext) -> FeatureMaps:
         """Forward pass for the Terramind model.
 
         Args:
-            inputs: input dicts that must include modalities as keys which are defined in the self.modalities list
+            context: the model context. Input dicts must include modalities as keys
+                which are defined in the self.modalities list.
 
         Returns:
-            List[torch.Tensor]: Single-scale feature tensors from the encoder.
+            a FeatureMaps with one feature map from the encoder, at 1/16 of the input
+                resolution.
         """
         model_inputs = {}
         for modality in self.modalities:
             # We assume the all the inputs include the same modalities
-            if modality not in inputs[0]:
+            if modality not in context.inputs[0]:
                 continue
-            cur = torch.stack([inp[modality] for inp in inputs], dim=0)  # (B, C, H, W)
+            cur = torch.stack(
+                [inp[modality] for inp in context.inputs], dim=0
+            )  # (B, C, H, W)
             if self.do_resizing and (
                 cur.shape[2] != IMAGE_SIZE or cur.shape[3] != IMAGE_SIZE
             ):
@@ -159,7 +166,17 @@ class Terramind(torch.nn.Module):
         image_features = self.model(model_inputs)[-1]
         batch_size, num_patches, _ = image_features.shape
         height, width = int(num_patches**0.5), int(num_patches**0.5)
-        return [rearrange(image_features, "b (h w) d -> b d h w", h=height, w=width)]
+        return FeatureMaps(
+            [
+                rearrange(
+                    image_features,
+                    "b (h w) d -> b d h w",
+                    b=batch_size,
+                    h=height,
+                    w=width,
+                )
+            ]
+        )
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.

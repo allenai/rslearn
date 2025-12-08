@@ -1,12 +1,14 @@
 """Molmo model."""
 
-from typing import Any
-
 import torch
 from transformers import AutoModelForCausalLM, AutoProcessor
 
+from rslearn.train.model_context import ModelContext
 
-class Molmo(torch.nn.Module):
+from .component import FeatureExtractor, FeatureMaps
+
+
+class Molmo(FeatureExtractor):
     """Molmo image encoder."""
 
     def __init__(
@@ -34,21 +36,21 @@ class Molmo(torch.nn.Module):
         )  # nosec
         self.encoder = model.model.vision_backbone
 
-    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
+    def forward(self, context: ModelContext) -> FeatureMaps:
         """Compute outputs from the backbone.
 
-        Inputs:
-            inputs: input dicts that must include "image" key containing the image to
-                process. The images should have values 0-255.
+        Args:
+            context: the model context. Input dicts must include "image" key containing
+                the image to process. The images should have values 0-255.
 
         Returns:
-            list of feature maps. Molmo produces features at one scale, so the list
-                contains a single Bx24x24x2048 tensor.
+            a FeatureMaps. Molmo produces features at one scale, so it will contain one
+                feature map that is a Bx24x24x2048 tensor.
         """
-        device = inputs[0]["image"].device
+        device = context.inputs[0]["image"].device
         molmo_inputs_list = []
         # Process each one so we can isolate just the full image without any crops.
-        for inp in inputs:
+        for inp in context.inputs:
             image = inp["image"].cpu().numpy().transpose(1, 2, 0)
             processed = self.processor.process(
                 images=[image],
@@ -60,6 +62,6 @@ class Molmo(torch.nn.Module):
         image_features, _ = self.encoder.encode_image(molmo_inputs.to(device))
 
         # 576x2048 -> 24x24x2048
-        return [
-            image_features[:, 0, :, :].reshape(-1, 24, 24, 2048).permute(0, 3, 1, 2)
-        ]
+        return FeatureMaps(
+            [image_features[:, 0, :, :].reshape(-1, 24, 24, 2048).permute(0, 3, 1, 2)]
+        )

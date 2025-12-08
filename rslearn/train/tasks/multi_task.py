@@ -6,6 +6,7 @@ import numpy.typing as npt
 import torch
 from torchmetrics import Metric, MetricCollection
 
+from rslearn.train.model_context import SampleMetadata
 from rslearn.utils import Feature
 
 from .task import Task
@@ -30,7 +31,7 @@ class MultiTask(Task):
     def process_inputs(
         self,
         raw_inputs: dict[str, torch.Tensor | list[Feature]],
-        metadata: dict[str, Any],
+        metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
@@ -46,14 +47,12 @@ class MultiTask(Task):
         """
         input_dict = {}
         target_dict = {}
-        if metadata["dataset_source"] is None:
+        if metadata.dataset_source is None:
             # No multi-dataset, so always compute across all tasks
             task_iter = list(self.tasks.items())
         else:
             # Multi-dataset, so only compute for the task in this dataset
-            task_iter = [
-                (metadata["dataset_source"], self.tasks[metadata["dataset_source"]])
-            ]
+            task_iter = [(metadata.dataset_source, self.tasks[metadata.dataset_source])]
 
         for task_name, task in task_iter:
             cur_raw_inputs = {}
@@ -71,12 +70,13 @@ class MultiTask(Task):
         return input_dict, target_dict
 
     def process_output(
-        self, raw_output: Any, metadata: dict[str, Any]
+        self, raw_output: Any, metadata: SampleMetadata
     ) -> dict[str, Any]:
         """Processes an output into raster or vector data.
 
         Args:
-            raw_output: the output from prediction head.
+            raw_output: the output from prediction head. It must be a dict mapping from
+                task name to per-task output for this sample.
             metadata: metadata about the patch being read
 
         Returns:

@@ -16,6 +16,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.train.lightning_module import RslearnLightningModule
+from rslearn.train.model_context import ModelOutput, SampleMetadata
 from rslearn.train.prediction_writer import (
     PendingPatchOutput,
     RasterMerger,
@@ -41,14 +42,14 @@ class MockDictionaryTask(Task):
     def process_inputs(
         self,
         raw_inputs: dict[str, torch.Tensor | list[Feature]],
-        metadata: dict[str, Any],
+        metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Process inputs (not used in prediction writer tests)."""
         return {}, {}
 
     def process_output(
-        self, raw_output: Any, metadata: dict[str, Any]
+        self, raw_output: Any, metadata: SampleMetadata
     ) -> dict[str, npt.NDArray[Any]]:
         """Process output into dictionary format to test selector.
 
@@ -122,7 +123,14 @@ class TestRasterMerger:
                 output=3 * np.ones((1, 3, 3), dtype=np.uint8),
             ),
         ]
-        merged = RasterMerger().merge(window, outputs)
+        merged = RasterMerger().merge(
+            window,
+            outputs,
+            LayerConfig(
+                type=LayerType.RASTER,
+                band_sets=[BandSetConfig(bands=["output"], dtype=DType.UINT8)],
+            ),
+        )
         assert merged.shape == (1, 4, 4)
         assert merged.dtype == np.uint8
         # The patches were disjoint, so we just check that those portions of the merged
@@ -167,7 +175,14 @@ class TestRasterMerger:
                 output=3 * np.ones((1, 3, 3), dtype=np.int32),
             ),
         ]
-        merged = RasterMerger(padding=1).merge(window, outputs)
+        merged = RasterMerger(padding=1).merge(
+            window,
+            outputs,
+            LayerConfig(
+                type=LayerType.RASTER,
+                band_sets=[BandSetConfig(bands=["output"], dtype=DType.INT32)],
+            ),
+        )
         assert merged.shape == (1, 4, 4)
         assert merged.dtype == np.int32
         # The top-left should use the first patch.
@@ -178,6 +193,33 @@ class TestRasterMerger:
         assert np.all(merged[0, 0:2, 2:4] == 2)
         # And finally the bottom-right should use the fourth patch.
         assert np.all(merged[0, 2:4, 2:4] == 3)
+
+    def test_merge_respect_dtype(self, tmp_path: pathlib.Path) -> None:
+        """Verify that merge respects the dtype in BandSetConfig."""
+        window = Window(
+            storage=FileWindowStorage(tmp_path),
+            group="fake",
+            name="fake",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 4, 4),
+            time_range=None,
+        )
+        outputs = [
+            PendingPatchOutput(
+                bounds=(0, 0, 4, 4),
+                output=0 * np.ones((1, 4, 4), dtype=np.uint8),
+            ),
+        ]
+        merged = RasterMerger().merge(
+            window,
+            outputs,
+            LayerConfig(
+                type=LayerType.RASTER,
+                band_sets=[BandSetConfig(bands=["output"], dtype=DType.UINT16)],
+            ),
+        )
+        assert merged.shape == (1, 4, 4)
+        assert merged.dtype == np.uint16
 
 
 def test_write_raster(tmp_path: pathlib.Path) -> None:
@@ -228,16 +270,17 @@ def test_write_raster(tmp_path: pathlib.Path) -> None:
     )
 
     # Write predictions.
-    metadata = {
-        "window_name": window.name,
-        "group": window.group,
-        "bounds": window.bounds,
-        "window_bounds": window.bounds,
-        "projection": window.projection,
-        "time_range": window.time_range,
-        "patch_idx": 0,
-        "num_patches": 1,
-    }
+    metadata = SampleMetadata(
+        window_group=window.group,
+        window_name=window.name,
+        window_bounds=window.bounds,
+        patch_bounds=window.bounds,
+        patch_idx=0,
+        num_patches_in_window=1,
+        time_range=window.time_range,
+        projection=window.projection,
+        dataset_source=None,
+    )
     # batch is (inputs, targets, metadatas) but writer only uses the metadatas.
     batch = ([None], [None], [metadata])
     # output for segmentation task is CHW where C axis contains per-class
@@ -251,7 +294,7 @@ def test_write_raster(tmp_path: pathlib.Path) -> None:
     writer.write_on_batch_end(
         trainer=mock_trainer,
         pl_module=pl_module,
-        prediction={"outputs": [output]},
+        prediction=ModelOutput(outputs=[output], loss_dict={}),
         batch_indices=[0],
         batch=batch,
         batch_idx=0,
@@ -321,16 +364,17 @@ def test_write_raster_with_custom_output_path(tmp_path: pathlib.Path) -> None:
     )
 
     # Write predictions.
-    metadata = {
-        "window_name": window.name,
-        "group": window.group,
-        "bounds": window.bounds,
-        "window_bounds": window.bounds,
-        "projection": window.projection,
-        "time_range": window.time_range,
-        "patch_idx": 0,
-        "num_patches": 1,
-    }
+    metadata = SampleMetadata(
+        window_group=window.group,
+        window_name=window.name,
+        window_bounds=window.bounds,
+        patch_bounds=window.bounds,
+        patch_idx=0,
+        num_patches_in_window=1,
+        time_range=window.time_range,
+        projection=window.projection,
+        dataset_source=None,
+    )
     batch = ([None], [None], [metadata])
     output = torch.zeros((2, 5, 5), dtype=torch.float32)
     # Create a mock trainer to satisfy type requirements
@@ -341,7 +385,7 @@ def test_write_raster_with_custom_output_path(tmp_path: pathlib.Path) -> None:
     writer.write_on_batch_end(
         trainer=mock_trainer,
         pl_module=pl_module,
-        prediction={"outputs": [output]},
+        prediction=ModelOutput(outputs=[output], loss_dict={}),
         batch_indices=[0],
         batch=batch,
         batch_idx=0,
@@ -413,16 +457,17 @@ def test_write_raster_with_layer_config(tmp_path: pathlib.Path) -> None:
     # Create window metadata.
     window_name = "default"
     window_group = "default"
-    metadata = {
-        "window_name": window_name,
-        "group": window_group,
-        "bounds": (0, 0, 1, 1),
-        "window_bounds": (0, 0, 1, 1),
-        "projection": Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
-        "time_range": None,
-        "patch_idx": 0,
-        "num_patches": 1,
-    }
+    metadata = SampleMetadata(
+        window_group=window_group,
+        window_name=window_name,
+        window_bounds=(0, 0, 1, 1),
+        patch_bounds=(0, 0, 1, 1),
+        patch_idx=0,
+        num_patches_in_window=1,
+        time_range=None,
+        projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
+        dataset_source=None,
+    )
 
     # Write predictions.
     batch = ([None], [None], [metadata])
@@ -435,7 +480,7 @@ def test_write_raster_with_layer_config(tmp_path: pathlib.Path) -> None:
     writer.write_on_batch_end(
         trainer=mock_trainer,
         pl_module=pl_module,
-        prediction={"outputs": [output]},
+        prediction=ModelOutput(outputs=[output], loss_dict={}),
         batch_indices=[0],
         batch=batch,
         batch_idx=0,
@@ -503,16 +548,17 @@ def test_selector_with_dictionary_output(tmp_path: pathlib.Path) -> None:
     # Create test metadata
     window_name = "test_window"
     window_group = "test_group"
-    metadata = {
-        "window_name": window_name,
-        "group": window_group,
-        "bounds": (0, 0, 5, 5),
-        "window_bounds": (0, 0, 5, 5),
-        "projection": Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
-        "time_range": None,
-        "patch_idx": 0,
-        "num_patches": 1,
-    }
+    metadata = SampleMetadata(
+        window_group=window_group,
+        window_name=window_name,
+        window_bounds=(0, 0, 5, 5),
+        patch_bounds=(0, 0, 5, 5),
+        patch_idx=0,
+        num_patches_in_window=1,
+        time_range=None,
+        projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
+        dataset_source=None,
+    )
 
     # Create model output - 3 classes, 5x5 spatial dimensions
     raw_model_output = torch.zeros((3, 5, 5), dtype=torch.float32)
@@ -527,7 +573,7 @@ def test_selector_with_dictionary_output(tmp_path: pathlib.Path) -> None:
     writer.write_on_batch_end(
         trainer=mock_trainer,
         pl_module=pl_module,
-        prediction={"outputs": [raw_model_output]},
+        prediction=ModelOutput(outputs=[raw_model_output], loss_dict={}),
         batch_indices=[0],
         batch=batch,
         batch_idx=0,
@@ -561,13 +607,13 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
         def process_inputs(
             self,
             raw_inputs: dict[str, torch.Tensor | list[Feature]],
-            metadata: dict[str, Any],
+            metadata: SampleMetadata,
             load_targets: bool = True,
         ) -> tuple[dict[str, Any], dict[str, Any]]:
             return {}, {}
 
         def process_output(
-            self, raw_output: Any, metadata: dict[str, Any]
+            self, raw_output: Any, metadata: SampleMetadata
         ) -> dict[str, Any]:
             raw_output_np = raw_output.cpu().numpy()
             classes = raw_output_np.argmax(axis=0).astype(np.uint8)
@@ -629,16 +675,17 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
     )
 
     # Create metadata and test data
-    metadata = {
-        "window_name": "nested_test",
-        "group": "test_group",
-        "bounds": (0, 0, 3, 3),
-        "window_bounds": (0, 0, 3, 3),
-        "projection": Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
-        "time_range": None,
-        "patch_idx": 0,
-        "num_patches": 1,
-    }
+    metadata = SampleMetadata(
+        window_group="test_group",
+        window_name="nested_test",
+        window_bounds=(0, 0, 3, 3),
+        patch_bounds=(0, 0, 3, 3),
+        patch_idx=0,
+        num_patches_in_window=1,
+        time_range=None,
+        projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
+        dataset_source=None,
+    )
 
     # Create simple model output
     raw_model_output = torch.zeros((2, 3, 3), dtype=torch.float32)
@@ -653,7 +700,7 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
     writer.write_on_batch_end(
         trainer=mock_trainer,
         pl_module=pl_module,
-        prediction={"outputs": [raw_model_output]},
+        prediction=ModelOutput(outputs=[raw_model_output], loss_dict={}),
         batch_indices=[0],
         batch=batch,
         batch_idx=0,

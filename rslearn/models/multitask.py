@@ -1,5 +1,6 @@
 """MultiTaskModel for rslearn."""
 
+from collections.abc import Iterable
 from copy import deepcopy
 from typing import Any
 
@@ -7,6 +8,9 @@ import torch
 
 from rslearn.log_utils import get_logger
 from rslearn.models.trunk import DecoderTrunk
+from rslearn.train.model_context import ModelContext, ModelOutput
+
+from .component import FeatureExtractor, IntermediateComponent, Predictor
 
 logger = get_logger(__name__)
 
@@ -58,8 +62,8 @@ class MultiTaskModel(torch.nn.Module):
 
     def __init__(
         self,
-        encoder: list[torch.nn.Module],
-        decoders: dict[str, list[torch.nn.Module]],
+        encoder: list[FeatureExtractor | IntermediateComponent],
+        decoders: dict[str, list[IntermediateComponent | Predictor]],
         lazy_decode: bool = False,
         loss_weights: dict[str, float] | None = None,
         trunk: DecoderTrunk | None = None,
@@ -67,8 +71,12 @@ class MultiTaskModel(torch.nn.Module):
         """Initialize a new MultiTaskModel.
 
         Args:
-            encoder: modules to compute intermediate feature representations.
+            encoder: modules to compute intermediate feature representations. The first
+                module must be a FeatureExtractor, and following modules must be
+                IntermediateComponents.
             decoders: modules to compute outputs and loss, should match number of tasks.
+                The last module must be a Predictor, while the previous modules must be
+                IntermediateComponents.
             lazy_decode: if True, only decode the outputs specified in the batch.
             loss_weights: weights for each task's loss (default: None = equal weights).
             trunk: if provided, use this trunk module to postprocess the features
@@ -76,7 +84,7 @@ class MultiTaskModel(torch.nn.Module):
         """
         super().__init__()
         self.lazy_decode = lazy_decode
-        self.encoder = torch.nn.Sequential(*encoder)
+        self.encoder = torch.nn.ModuleList(encoder)
         self.decoders = torch.nn.ModuleDict(
             sort_keys(
                 {
@@ -120,32 +128,28 @@ class MultiTaskModel(torch.nn.Module):
 
     def apply_decoder(
         self,
-        features: list[torch.Tensor],
-        inputs: list[dict[str, Any]],
+        intermediates: Any,
+        context: ModelContext,
         targets: list[dict[str, Any]] | None,
-        decoder: list[torch.nn.Module],
+        decoder: list[IntermediateComponent | Predictor],
         task_name: str,
-        outputs: list[dict[str, Any]],
-        losses: dict[str, torch.Tensor],
-    ) -> tuple[list[dict[str, Any]], dict[str, torch.Tensor]]:
+    ) -> ModelOutput:
         """Apply a decoder to a list of inputs and targets.
 
         Args:
-            features: list of features
-            inputs: list of input dicts
+            intermediates: the intermediate output from the encoder.
+            context: the model context.
             targets: list of target dicts
             decoder: list of decoder modules
             task_name: the name of the task
-            outputs: list of output dicts
-            losses: dictionary of loss values
 
         Returns:
-            tuple of (outputs, losses)
+            a ModelOutput containing outputs across all the decoders.
         """
         # First, apply all but the last module in the decoder to the features
-        cur = features
+        cur = intermediates
         for module in decoder[:-1]:
-            cur = module(cur, inputs)
+            cur = module(cur, context)
 
         if targets is None:
             cur_targets = None
@@ -153,14 +157,7 @@ class MultiTaskModel(torch.nn.Module):
             cur_targets = [target[task_name] for target in targets]
 
         # Then, apply the last module to the features and targets
-        cur_output, cur_loss_dict = decoder[-1](cur, inputs, cur_targets)
-        for idx, entry in enumerate(cur_output):
-            outputs[idx][task_name] = entry
-        for loss_name, loss_value in cur_loss_dict.items():
-            losses[f"{task_name}_{loss_name}"] = (
-                loss_value * self.loss_weights[task_name]
-            )
-        return outputs, losses
+        return decoder[-1](cur, context, cur_targets)
 
     def _get_tasks_from_decoder(self, decoder: str) -> list[str]:
         """Get the tasks corresponding to this decoder.
@@ -172,66 +169,84 @@ class MultiTaskModel(torch.nn.Module):
 
     def apply_decoders(
         self,
-        features: list[torch.Tensor],
-        inputs: list[dict[str, Any]],
+        intermediates: Any,
+        context: ModelContext,
         targets: list[dict[str, Any]] | None,
-    ) -> dict[str, Any]:
+    ) -> ModelOutput:
         """Apply all the decoders to the features and targets.
 
         Args:
-            features: list of features
-            inputs: list of input dicts
+            intermediates: the intermediates from the encoder.
+            context: the model context
             targets: list of target dicts
 
         Returns:
-            dict of outputs and losses
+            combined ModelOutput. The outputs is a list of output dicts, one per example,
+                where the dict maps from task name to the corresponding task output. The
+                losses is a flat dict but the task name is prepended to the loss names.
         """
-        outputs: list[dict[str, torch.Tensor | dict]] = [{} for _ in inputs]
+        outputs: list[dict[str, torch.Tensor | dict]] = [{} for _ in context.inputs]
         losses: dict[str, torch.Tensor] = {}
 
         if self.lazy_decode:
             # Assume that all inputs have the same dataset_source
-            dataset_source = inputs[0]["dataset_source"]
-            decoder = self.decoders[
-                self.target_to_decoder.get(dataset_source, dataset_source)
-            ]
-            self.apply_decoder(
-                features, inputs, targets, decoder, dataset_source, outputs, losses
+            task_name = context.metadatas[0].dataset_source
+
+            if task_name is None:
+                raise ValueError("dataset_source must be set for lazy decoding")
+
+            decoder = self.decoders[self.target_to_decoder.get(task_name, task_name)]
+            model_output = self.apply_decoder(
+                intermediates, context, targets, decoder, task_name
             )
+            for idx, entry in enumerate(model_output.outputs):
+                outputs[idx][task_name] = entry
+            for loss_name, loss_value in model_output.loss_dict.items():
+                losses[f"{task_name}_{loss_name}"] = (
+                    loss_value * self.loss_weights[task_name]
+                )
         else:
             for decoder_name, decoder in self.decoders.items():
                 for task_name in self._get_tasks_from_decoder(decoder_name):
-                    self.apply_decoder(
-                        features, inputs, targets, decoder, task_name, outputs, losses
+                    model_output = self.apply_decoder(
+                        intermediates, context, targets, decoder, task_name
                     )
+                    for idx, entry in enumerate(model_output.outputs):
+                        outputs[idx][task_name] = entry
+                    for loss_name, loss_value in model_output.loss_dict.items():
+                        losses[f"{task_name}_{loss_name}"] = (
+                            loss_value * self.loss_weights[task_name]
+                        )
 
-        return {
-            "outputs": outputs,
-            "loss_dict": losses,
-        }
+        return ModelOutput(
+            outputs=outputs,
+            loss_dict=losses,
+        )
 
     def forward(
         self,
-        inputs: list[dict[str, Any]],
+        context: ModelContext,
         targets: list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
+    ) -> ModelOutput:
         """Apply the sequence of modules on the inputs, including shared trunk.
 
         Args:
-            inputs: list of input dicts
+            context: the model context.
             targets: optional list of target dicts
 
         Returns:
-            dict with keys "outputs" and "loss_dict".
+            the model output from apply_decoders.
         """
-        features = self.encoder(inputs)
+        cur = self.encoder[0](context)
+        for module in self.encoder[1:]:
+            cur = module(cur, context)
         if self.trunk is not None:
-            trunk_out = self.trunk(features, inputs)
-            outs = self.apply_decoders(trunk_out.pop("outputs"), inputs, targets)
+            trunk_out = self.trunk(cur, context)
+            outs = self.apply_decoders(trunk_out.pop("outputs"), context, targets)
             self.trunk.apply_auxiliary_losses(trunk_out, outs)
             return outs | trunk_out
         else:
-            return self.apply_decoders(features, inputs, targets)
+            return self.apply_decoders(cur, context, targets)
 
 
 class MultiTaskMergedModel(MultiTaskModel):
@@ -247,8 +262,8 @@ class MultiTaskMergedModel(MultiTaskModel):
 
     def __init__(
         self,
-        encoder: list[torch.nn.Module],
-        decoders: dict[str, list[torch.nn.Module]],
+        encoder: list[FeatureExtractor | IntermediateComponent],
+        decoders: dict[str, list[IntermediateComponent | Predictor]],
         decoder_to_target: dict[str, list[str]],
         task_label_offsets: dict[str, dict[str, Any]],
         lazy_decode: bool = False,
@@ -273,7 +288,7 @@ class MultiTaskMergedModel(MultiTaskModel):
         torch.nn.Module.__init__(self)
 
         self.lazy_decode = lazy_decode
-        self.encoder = torch.nn.Sequential(*encoder)
+        self.encoder = torch.nn.ModuleList(encoder)
         self.decoders = torch.nn.ModuleDict(
             sort_keys(
                 {
@@ -329,9 +344,9 @@ class MultiTaskMergedModel(MultiTaskModel):
         return offset_targets
 
     def unmerge_output_labels(
-        self, outputs: list[dict[str, torch.Tensor | dict]], task_name: str
-    ) -> None:
-        """Unmerge the task labels in place.
+        self, outputs: Iterable[Any], task_name: str
+    ) -> list[dict[str, torch.Tensor | dict]]:
+        """Unmerge the task outputs.
 
         For most tasks, this means chopping off the corresponding label dimensions.
         For some, we might just need to subtract an offset from the target (ex: segmentation).
@@ -340,10 +355,15 @@ class MultiTaskMergedModel(MultiTaskModel):
         Args:
             outputs: the predictions
             task_name: the name of the task
+
+        Returns:
+            the unmerged outputs.
         """
         offset = self.task_label_offsets[task_name]["offset"]
         num_outputs = self.task_label_offsets[task_name]["num_outputs"]
         output_key = self.task_label_offsets[task_name]["outputs_key"]
+
+        unmerged_outputs: list[dict[str, torch.Tensor | dict]] = [{} for _ in outputs]
         with torch.no_grad():
             for i, output in enumerate(outputs):
                 if not output:
@@ -353,35 +373,44 @@ class MultiTaskMergedModel(MultiTaskModel):
                 if isinstance(output, dict):
                     # For some tasks (eg object detection), we have discrete label
                     # predictions instead of a distribution over labels
-                    output[output_key] -= offset
+                    unmerged_output = output.copy()
+                    unmerged_output[output_key] = unmerged_output[output_key] - offset
+                    unmerged_outputs[i][task_name] = unmerged_output
                 elif isinstance(output, torch.Tensor):
                     # For classification/segmentation tasks, we have a distribution
                     # over labels, so we need to scale the predictions so that they
                     # sum to 1 since we chop off some of the probability densities
-                    tensor: torch.Tensor = output[offset : offset + num_outputs, ...]
-                    tensor /= tensor.sum(dim=0, keepdim=True).type(torch.float32)
-                    outputs[i][task_name] = tensor
+                    unmerged_output = output[offset : offset + num_outputs, ...]
+                    unmerged_output /= unmerged_output.sum(dim=0, keepdim=True).type(
+                        torch.float32
+                    )
+                    unmerged_outputs[i][task_name] = unmerged_output
+
+        return unmerged_outputs
 
     def forward(
         self,
-        inputs: list[dict[str, Any]],
+        context: ModelContext,
         targets: list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
+    ) -> ModelOutput:
         """Apply the sequence of modules on the inputs.
 
         Args:
-            inputs: list of input dicts
+            context: the model context.
             targets: optional list of target dicts
 
         Returns:
-            dict with keys "outputs" and "loss_dict", and possibly other keys.
+            the model output.
         """
-        dataset_source = inputs[0].get("dataset_source", None)
-        assert isinstance(dataset_source, str)
-        targets = self.merge_task_labels(targets, dataset_source)
-        outs = super().forward(inputs, targets)
-        self.unmerge_output_labels(outs["outputs"], dataset_source)
-        return outs
+        dataset_source = context.metadatas[0].dataset_source
+        assert dataset_source is not None
+        merged_targets = self.merge_task_labels(targets, dataset_source)
+        outs = super().forward(context, merged_targets)
+        unmerged_outputs = self.unmerge_output_labels(outs.outputs, dataset_source)
+        return ModelOutput(
+            outputs=unmerged_outputs,
+            loss_dict=outs.loss_dict,
+        )
 
     def _get_tasks_from_decoder(self, decoder: str) -> list[str]:
         """Get the tasks corresponding to this decoder.
