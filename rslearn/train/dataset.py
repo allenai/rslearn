@@ -20,6 +20,7 @@ from rslearn.config import (
     LayerConfig,
 )
 from rslearn.dataset.dataset import Dataset
+from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.window import Window, get_layer_and_group_from_dir_name
 from rslearn.log_utils import get_logger
 from rslearn.utils.feature import Feature
@@ -576,37 +577,7 @@ class ModelDataset(torch.utils.data.Dataset):
         else:
             self.patch_size = split_config.get_patch_size()
 
-        if split_config.names:
-            windows = self.dataset.load_windows(
-                groups=split_config.groups,
-                names=split_config.names,
-                show_progress=True,
-                workers=workers,
-            )
-        elif split_config.groups:
-            windows = self.dataset.load_windows(
-                groups=split_config.groups, show_progress=True, workers=workers
-            )
-        else:
-            windows = self.dataset.load_windows(show_progress=True, workers=workers)
-
-        if split_config.tags:
-            # Filter the window.options.
-            new_windows = []
-            num_removed: dict[str, int] = {}
-            for window in windows:
-                for k, v in split_config.tags.items():
-                    if k not in window.options or (v and window.options[k] != v):
-                        num_removed[k] = num_removed.get(k, 0) + 1
-                        break
-                else:
-                    new_windows.append(window)
-            logger.info(
-                f"Started with {len(windows)} windows, ended with {len(new_windows)} windows for {self.dataset.path}"
-            )
-            for k, v in num_removed.items():
-                logger.info(f"Removed {v} windows due to tag {k}")
-            windows = new_windows
+        windows = self._get_initial_windows(split_config, workers)
 
         # If targets are not needed, remove them from the inputs.
         if split_config.get_skip_targets():
@@ -616,17 +587,11 @@ class ModelDataset(torch.utils.data.Dataset):
 
         # Eliminate windows that are missing either a requisite input layer, or missing
         # all target layers.
-        # We use only main thread if the index is set, since that can take a long time
-        # to send to the worker threads, it may get serialized for each window.
         new_windows = []
-        if workers == 0 or (len(windows) >= 1 and windows[0].index is not None):
+        if workers == 0:
             for window in windows:
                 if check_window(self.inputs, window) is None:
                     continue
-                # The index may be set, but now that this check is done, from here on
-                # we no longer need it. We set it None so that we don't end up passing
-                # it later to the dataloader workers.
-                window.index = None
                 new_windows.append(window)
         else:
             p = multiprocessing.Pool(workers)
@@ -682,12 +647,62 @@ class ModelDataset(torch.utils.data.Dataset):
         with open(self.dataset_examples_fname, "w") as f:
             json.dump([self._serialize_item(example) for example in windows], f)
 
+    def _get_initial_windows(
+        self, split_config: SplitConfig, workers: int
+    ) -> list[Window]:
+        """Get the initial windows before input layer filtering.
+
+        The windows are filtered based on configured window names, groups, and tags.
+
+        This is a helper for the init function.
+
+        Args:
+            split_config: the split configuration.
+            workers: number of worker processes.
+
+        Returns:
+            list of windows from the dataset after applying the aforementioned filters.
+        """
+        # Load windows from dataset.
+        # If the window storage is FileWindowStorage, we pass the workers/show_progress arguments.
+        kwargs: dict[str, Any] = {}
+        if isinstance(self.dataset.storage, FileWindowStorage):
+            kwargs["workers"] = workers
+            kwargs["show_progress"] = True
+        # We also add the name/group filters to the kwargs.
+        if split_config.names:
+            kwargs["names"] = split_config.names
+        if split_config.groups:
+            kwargs["groups"] = split_config.groups
+
+        windows = self.dataset.load_windows(**kwargs)
+
+        # Filter by tags (if provided) using the window.options.
+        if split_config.tags:
+            new_windows = []
+            num_removed: dict[str, int] = {}
+            for window in windows:
+                for k, v in split_config.tags.items():
+                    if k not in window.options or (v and window.options[k] != v):
+                        num_removed[k] = num_removed.get(k, 0) + 1
+                        break
+                else:
+                    new_windows.append(window)
+            logger.info(
+                f"Started with {len(windows)} windows, ended with {len(new_windows)} windows for {self.dataset.path}"
+            )
+            for k, v in num_removed.items():
+                logger.info(f"Removed {v} windows due to tag {k}")
+            windows = new_windows
+
+        return windows
+
     def _serialize_item(self, example: Window) -> dict[str, Any]:
         return example.get_metadata()
 
     def _deserialize_item(self, d: dict[str, Any]) -> Window:
         return Window.from_metadata(
-            Window.get_window_root(self.dataset.path, d["group"], d["name"]),
+            self.dataset.storage,
             d,
         )
 

@@ -31,6 +31,7 @@ from rslearn.utils.vector_format import VectorFormat
 
 if TYPE_CHECKING:
     from rslearn.data_sources.data_source import DataSource
+    from rslearn.dataset.storage.storage import WindowStorageFactory
 
 logger = get_logger("__name__")
 
@@ -596,6 +597,40 @@ class LayerConfig(BaseModel):
         return vector_format
 
 
+class StorageConfig(BaseModel):
+    """Configuration for the WindowStorageFactory (window metadata storage backend)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    class_path: str = Field(
+        default="rslearn.dataset.storage.file.FileWindowStorageFactory",
+        description="Class path for the WindowStorageFactory.",
+    )
+    init_args: dict[str, Any] = Field(
+        default_factory=lambda: {},
+        description="jsonargparse init args for the WindowStorageFactory.",
+    )
+
+    def instantiate_window_storage_factory(self) -> "WindowStorageFactory":
+        """Instantiate the WindowStorageFactory specified by this config."""
+        from rslearn.dataset.storage.storage import WindowStorageFactory
+        from rslearn.utils.jsonargparse import init_jsonargparse
+
+        init_jsonargparse()
+        parser = jsonargparse.ArgumentParser()
+        parser.add_argument("--wsf", type=WindowStorageFactory)
+        cfg = parser.parse_object(
+            {
+                "wsf": dict(
+                    class_path=self.class_path,
+                    init_args=self.init_args,
+                )
+            }
+        )
+        wsf = parser.instantiate_classes(cfg).wsf
+        return wsf
+
+
 class DatasetConfig(BaseModel):
     """Overall dataset configuration."""
 
@@ -605,4 +640,8 @@ class DatasetConfig(BaseModel):
     tile_store: dict[str, Any] = Field(
         default={"class_path": "rslearn.tile_stores.default.DefaultTileStore"},
         description="jsonargparse configuration for the TileStore.",
+    )
+    storage: StorageConfig = Field(
+        default_factory=lambda: StorageConfig(),
+        description="jsonargparse configuration for the WindowStorageFactory.",
     )
