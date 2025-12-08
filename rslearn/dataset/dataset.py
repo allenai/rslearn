@@ -1,6 +1,7 @@
 """rslearn dataset class."""
 
 import json
+from typing import Any
 
 from upath import UPath
 
@@ -75,20 +76,16 @@ class Dataset:
         self,
         groups: list[str] | None = None,
         names: list[str] | None = None,
-        show_progress: bool = False,
-        workers: int = 0,
+        **kwargs: Any,
     ) -> list[Window]:
         """Load the windows in the dataset.
 
         Args:
             groups: an optional list of groups to filter loading
             names: an optional list of window names to filter loading
-            show_progress: whether to show tqdm progress bar
-            workers: number of parallel workers, default 0 (use main thread only to load windows)
+            kwargs: optional keyword arguments to pass to WindowStorage.get_windows.
         """
-        return self.storage.get_windows(
-            groups=groups, names=names, show_progress=show_progress, workers=workers
-        )
+        return self.storage.get_windows(groups=groups, names=names, **kwargs)
 
     def get_tile_store(self) -> TileStore:
         """Get the tile store associated with this dataset.

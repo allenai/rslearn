@@ -33,6 +33,7 @@ from rslearn.dataset.manage import (
     prepare_dataset_windows,
     retry,
 )
+from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import get_tile_store_with_layer
 from rslearn.utils import Projection, STGeometry
@@ -314,7 +315,8 @@ def apply_on_windows(
         load_workers: optional different number of workers to use for loading the
             windows. If set, workers controls the number of workers to process the
             jobs, while load_workers controls the number of workers to use for reading
-            windows from the rslearn dataset.
+            windows from the rslearn dataset. Workers is only passed if the window
+            storage is FileWindowStorage.
         batch_size: if workers > 0, the maximum number of windows to pass to the
             function.
         jobs_per_process: optional, terminate processes after they have handled this
@@ -335,11 +337,14 @@ def apply_on_windows(
     else:
         groups = group
 
-    if load_workers is None:
-        load_workers = workers
-    windows = dataset.load_windows(
-        groups=groups, names=names, workers=load_workers, show_progress=True
-    )
+    # Load the windows. We pass workers and show_progress if it is FileWindowStorage.
+    kwargs: dict[str, Any] = {}
+    if isinstance(dataset.storage, FileWindowStorage):
+        if load_workers is None:
+            load_workers = workers
+        kwargs["workers"] = load_workers
+        kwargs["show_progress"] = True
+    windows = dataset.load_windows(groups=groups, names=names, **kwargs)
     logger.info(f"found {len(windows)} windows")
 
     if hasattr(f, "get_jobs"):

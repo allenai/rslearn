@@ -277,7 +277,7 @@ class Window:
 
     @staticmethod
     def from_metadata(storage: WindowStorage, metadata: dict[str, Any]) -> "Window":
-        """Create a Window from its path and metadata dictionary.
+        """Create a Window from the WindowStorage and the window's metadata dictionary.
 
         Args:
             storage: the WindowStorage for the underlying dataset.

@@ -32,16 +32,12 @@ class WindowStorage(abc.ABC):
         self,
         groups: list[str] | None = None,
         names: list[str] | None = None,
-        show_progress: bool = False,
-        workers: int = 0,
     ) -> list["Window"]:
         """Load the windows in the dataset.
 
         Args:
             groups: an optional list of groups to filter loading
             names: an optional list of window names to filter loading
-            show_progress: whether to show tqdm progress bar
-            workers: number of parallel workers, default 0 (use main thread only to load windows)
         """
         raise NotImplementedError
 
