@@ -98,7 +98,6 @@ jobs:
             --ignore tests/integration/ \
             --ignore tests/unit/models/test_molmo.py \
             --ignore tests/unit/models/olmoearth_pretrain/
-            --ignore tests/unit/models/test_attention_pooling.py
 
       - name: Authenticate into gcp
         uses: "google-github-actions/auth@v2"
