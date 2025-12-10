@@ -263,7 +263,7 @@ class OlmoEarth(FeatureExtractor):
                 modality_features = rearrange(
                     modality_features, "b h w t s c -> b c h w (t s)"
                 )
-                features.append(pooled)
+                features.append(modality_features)
             pooled = torch.cat(features, dim=-1)
         return FeatureMaps([pooled])
 
