@@ -60,7 +60,8 @@ class OlmoEarth(FeatureExtractor):
         random_initialization: bool = False,
         embedding_size: int | None = None,
         autocast_dtype: str | None = "bfloat16",
-        token_pooling: bool = True,
+        band_set_pooling: bool = True,
+        temporal_pooling: bool = True,
     ):
         """Create a new OlmoEarth model.
 
@@ -84,9 +85,12 @@ class OlmoEarth(FeatureExtractor):
             embedding_size: optional embedding size to report via
                 get_backbone_channels (if model_id is not set).
             autocast_dtype: which dtype to use for autocasting, or set None to disable.
-            token_pooling: whether or not to pool the tokens. If True, the output will be BxCxHxW. If False,
-                there will be an extra dimension, N, (BxCxHxWxN) representing the temporal and channel
-                dimensions.
+            band_set_pooling: whether or not to pool the tokens over the band set dimensions.
+                If True, the output will be BxCxHxW. If False, there will be an extra dimension,
+                N, (BxCxHxWxN) representing the temporal and channel dimensions.
+            temporal_pooling: whether or not to pool the tokens over the temporal dimensions.
+                If True, the output will be BxCxHxW. If False, there will be an extra dimension,
+                N, (BxCxHxWxN) representing the band set dimensions.
         """
         if (
             sum(
@@ -137,7 +141,8 @@ class OlmoEarth(FeatureExtractor):
             else:
                 model = model[part]
         self.model = model
-        self.token_pooling = token_pooling
+        self.band_set_pooling = band_set_pooling
+        self.temporal_pooling = temporal_pooling
 
     def _load_model_from_checkpoint(
         self, checkpoint_upath: UPath, random_initialization: bool
@@ -246,7 +251,7 @@ class OlmoEarth(FeatureExtractor):
 
         # Apply temporal/modality pooling so we just have one feature per patch.
         features = []
-        if self.token_pooling:
+        if self.band_set_pooling and self.temporal_pooling:
             for modality in present_modalities:
                 modality_features = getattr(tokens_and_masks, modality)
                 # Pool over band sets and timesteps (BHWTSC -> BHWC).
@@ -256,7 +261,28 @@ class OlmoEarth(FeatureExtractor):
                 features.append(pooled)
             # Pool over the modalities, so we get one BCHW feature map.
             pooled = torch.stack(features, dim=0).mean(dim=0)
+        elif self.band_set_pooling:
+            for modality in present_modalities:
+                modality_features = getattr(tokens_and_masks, modality)
+                # Pool over band sets (BHWTSC -> BHWTC).
+                pooled = modality_features.mean(dim=4)
+                # We want BHWC -> BCHW.
+                pooled = rearrange(pooled, "b h w t c -> b c h w t")
+                features.append(pooled)
+            # Pool over the modalities, so we get one BCHW feature map.
+            pooled = torch.cat(features, dim=-1)
+        elif self.temporal_pooling:
+            for modality in present_modalities:
+                modality_features = getattr(tokens_and_masks, modality)
+                # Pool over time steps (BHWTSC -> BHWSC).
+                pooled = modality_features.mean(dim=3)
+                # We want BHWC -> BCHW.
+                pooled = rearrange(pooled, "b h w s c -> b c h w s")
+                features.append(pooled)
+            # Pool over the modalities, so we get one BCHW feature map.
+            pooled = torch.cat(features, dim=-1)
         else:
+            # no pooling at all
             for modality in present_modalities:
                 modality_features = getattr(tokens_and_masks, modality)
                 # Aggregate over band sets and timesteps (BHWTSC -> BHWC).
