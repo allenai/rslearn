@@ -1,5 +1,7 @@
 """Unit tests for rslearn.train.dataset."""
 
+from collections.abc import Callable
+
 import numpy as np
 import pytest
 import torch.utils.data
@@ -13,7 +15,6 @@ from rslearn.train.dataset import (
 )
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.transforms.concatenate import Concatenate
-from tests.unit.train.conftest import add_window
 
 
 class TestException(Exception):
@@ -55,11 +56,14 @@ def test_retry_dataset() -> None:
             pass
 
 
-def test_basic_time_series(basic_classification_dataset: Dataset) -> None:
+def test_basic_time_series(
+    basic_classification_dataset: Dataset,
+    add_window_to_basic_classification_dataset: Callable,
+) -> None:
     # Create a window with two images in the first layer to make sure we will be able
     # to load it when explicitly adding a DataInput for it.
     image = np.zeros((1, 4, 4), dtype=np.uint8)
-    add_window(
+    add_window_to_basic_classification_dataset(
         basic_classification_dataset,
         images={
             ("image_layer1", 0): image,
@@ -97,12 +101,15 @@ def test_basic_time_series(basic_classification_dataset: Dataset) -> None:
     assert inputs["image"].shape == (2, 4, 4)
 
 
-def test_load_all_layers(basic_classification_dataset: Dataset) -> None:
+def test_load_all_layers(
+    basic_classification_dataset: Dataset,
+    add_window_to_basic_classification_dataset: Callable,
+) -> None:
     """Make sure we can load a time series by using load_all_layers option."""
     # Create a window with two images in the first layer to make sure we will be able
     # to load it when explicitly adding a DataInput for it.
     image = np.zeros((1, 4, 4), dtype=np.uint8)
-    add_window(
+    add_window_to_basic_classification_dataset(
         basic_classification_dataset,
         images={
             ("image_layer1", 0): image,
@@ -132,13 +139,16 @@ def test_load_all_layers(basic_classification_dataset: Dataset) -> None:
     assert inputs["image"].shape == (2, 4, 4)
 
 
-def test_load_two_layers(basic_classification_dataset: Dataset) -> None:
+def test_load_two_layers(
+    basic_classification_dataset: Dataset,
+    add_window_to_basic_classification_dataset: Callable,
+) -> None:
     """Make sure when load_all_layers is passed we load all of the layer options."""
     # We create a window with two images in the first layer and one image in the second
     # layer. Then in the DataInput we only refer to the second image in the first layer
     # and the only image in the second layer. With load_all_layers but not
     # load_all_item_groups, just these two images should be read.
-    add_window(
+    add_window_to_basic_classification_dataset(
         basic_classification_dataset,
         images={
             ("image_layer1", 0): 0 * np.ones((1, 4, 4), dtype=np.uint8),

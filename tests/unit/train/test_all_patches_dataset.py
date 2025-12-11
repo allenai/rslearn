@@ -1,5 +1,7 @@
 """Tests for rslearn.train.all_patches_dataset."""
 
+from collections.abc import Callable
+
 from rslearn.dataset import Dataset
 from rslearn.train.all_patches_dataset import (
     InMemoryAllPatchesDataset,
@@ -92,12 +94,24 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
 class TestIterableAllPatchesDataset:
     """Tests for IterableAllPatchesDataset."""
 
-    def test_one_window_per_worker(self, basic_classification_dataset: Dataset) -> None:
+    def test_one_window_per_worker(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
         """Verify that things work with one window per worker."""
-        add_window(basic_classification_dataset, name="window0")
-        add_window(basic_classification_dataset, name="window1")
-        add_window(basic_classification_dataset, name="window2")
-        add_window(basic_classification_dataset, name="window3")
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset, name="window0"
+        )
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset, name="window1"
+        )
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset, name="window2"
+        )
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset, name="window3"
+        )
         model_dataset = ModelDataset(
             basic_classification_dataset,
             split_config=SplitConfig(),
@@ -119,13 +133,19 @@ class TestIterableAllPatchesDataset:
         assert len(window_names) == 4
 
     def test_different_window_sizes(
-        self, basic_classification_dataset: Dataset
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
     ) -> None:
         """Verify that rank padding works with different window sizes."""
         # One rank should get the second window.
         # While the other rank should get first window and needs to repeat it.
-        add_window(basic_classification_dataset, name="window0", bounds=(0, 0, 4, 4))
-        add_window(basic_classification_dataset, name="window1", bounds=(0, 0, 8, 8))
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset, name="window0", bounds=(0, 0, 4, 4)
+        )
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset, name="window1", bounds=(0, 0, 8, 8)
+        )
         model_dataset = ModelDataset(
             basic_classification_dataset,
             split_config=SplitConfig(),
@@ -173,9 +193,15 @@ class TestIterableAllPatchesDataset:
             samples = list(all_patches_dataset)
             assert len(samples) == 0
 
-    def test_small_window(self, basic_classification_dataset: Dataset) -> None:
+    def test_small_window(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
         """Verify that it works when the window is smaller than the patch size."""
-        add_window(basic_classification_dataset, name="window", bounds=(0, 0, 2, 2))
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset, name="window", bounds=(0, 0, 2, 2)
+        )
         model_dataset = ModelDataset(
             basic_classification_dataset,
             split_config=SplitConfig(),
