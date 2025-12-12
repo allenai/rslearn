@@ -8,7 +8,6 @@ import random
 import tempfile
 import time
 import uuid
-from dataclasses import dataclass
 from typing import Any
 
 import torch
@@ -127,50 +126,69 @@ class WeightedRandomSamplerFactory(SamplerFactory):
         )
 
 
-@dataclass
 class DataInput:
     """Specification of a piece of data from a window that is needed for training.
 
     The DataInput includes which layer(s) the data can be obtained from for each window.
 
-    Args:
-        data_type: either "raster" or "vector"
-        layers: list of layer names that this input can be read from.
-        bands: the bands to read, if this is a raster.
-        required: whether examples lacking one of these layers should be skipped
-        passthrough: whether to expose this to the model even if it isn't returned
-            by any task
-        is_target: whether this DataInput represents a target for the task. Targets
-            are not read during prediction phase.
-        dtype: data type to load the raster as
-        load_all_layers: whether to load all of the layers specified in the list of
-            layer names. By default, we randomly pick one layer to read. When
-            reading multiple layers, the images are stacked on the channel
-            dimension. This option will also cause the dataset to only include
-            windows where all of the layers are materialized (by default, only
-            windows with none of the layers materialized would be excluded).
-        load_all_item_groups: whether to load all item groups in the layer(s) we
-            are reading from. By default, we assume the specified layer name is of
-            the form "{layer_name}.{group_idx}" and read that item group only. With
-            this option enabled, we ignore the group_idx and read all item groups.
-        resolution_factor: raster inputs are read by default at the window
-            resolution. This is a multiplier to read at a different resolution,
-            e.g. if the window resolution is 64x64 at 10 m/pixel, and
-            resolution_factor=2, then the input is read as 32x32 at 20 m/pixel.
-        resampling: resampling method (default nearest neighbor).
+    Note that this class is not a dataclass because jsonargparse does not play well
+    with dataclasses without enabling specialized options which we have not validated
+    will work with the rest of our code.
     """
 
-    data_type: str
-    layers: list[str]
-    bands: list[str] | None = None
-    required: bool = True
-    passthrough: bool = False
-    is_target: bool = False
-    dtype: DType = DType.FLOAT32
-    load_all_layers: bool = False
-    load_all_item_groups: bool = False
-    resolution_factor: ResolutionFactor = ResolutionFactor()
-    resampling: Resampling = Resampling.nearest
+    def __init__(
+        self,
+        data_type: str,
+        layers: list[str],
+        bands: list[str] | None = None,
+        required: bool = True,
+        passthrough: bool = False,
+        is_target: bool = False,
+        dtype: DType = DType.FLOAT32,
+        load_all_layers: bool = False,
+        load_all_item_groups: bool = False,
+        resolution_factor: ResolutionFactor = ResolutionFactor(),
+        resampling: Resampling = Resampling.nearest,
+    ):
+        """Initialize a new DataInput.
+
+        Args:
+            data_type: either "raster" or "vector"
+            layers: list of layer names that this input can be read from.
+            bands: the bands to read, if this is a raster.
+            required: whether examples lacking one of these layers should be skipped
+            passthrough: whether to expose this to the model even if it isn't returned
+                by any task
+            is_target: whether this DataInput represents a target for the task. Targets
+                are not read during prediction phase.
+            dtype: data type to load the raster as
+            load_all_layers: whether to load all of the layers specified in the list of
+                layer names. By default, we randomly pick one layer to read. When
+                reading multiple layers, the images are stacked on the channel
+                dimension. This option will also cause the dataset to only include
+                windows where all of the layers are materialized (by default, only
+                windows with none of the layers materialized would be excluded).
+            load_all_item_groups: whether to load all item groups in the layer(s) we
+                are reading from. By default, we assume the specified layer name is of
+                the form "{layer_name}.{group_idx}" and read that item group only. With
+                this option enabled, we ignore the group_idx and read all item groups.
+            resolution_factor: raster inputs are read by default at the window
+                resolution. This is a multiplier to read at a different resolution,
+                e.g. if the window resolution is 64x64 at 10 m/pixel, and
+                resolution_factor=2, then the input is read as 32x32 at 20 m/pixel.
+            resampling: resampling method (default nearest neighbor).
+        """
+        self.data_type = data_type
+        self.layers = layers
+        self.bands = bands
+        self.required = required
+        self.passthrough = passthrough
+        self.is_target = is_target
+        self.dtype = dtype
+        self.load_all_layers = load_all_layers
+        self.load_all_item_groups = load_all_item_groups
+        self.resolution_factor = resolution_factor
+        self.resampling = resampling
 
 
 def read_raster_layer_for_data_input(
