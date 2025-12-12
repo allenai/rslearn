@@ -14,7 +14,6 @@ from rslearn.train.dataset import (
 )
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.utils.geometry import PixelBounds
-from tests.unit.train.conftest import add_window
 
 
 def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
@@ -225,11 +224,19 @@ class TestIterableAllPatchesDataset:
 class TestInMemoryAllPatchesDataset:
     """Tests for InMemoryAllPatchesDataset."""
 
-    def test_iterable_equal(self, basic_classification_dataset: Dataset) -> None:
+    def test_iterable_equal(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
         """Verify that InMemoryAllPatchesDataset and IterableAllPatchesDataset are equivalent."""
         # Create a couple of windows with different sizes to exercise patching.
-        add_window(basic_classification_dataset, name="w0", bounds=(0, 0, 4, 4))
-        add_window(basic_classification_dataset, name="w1", bounds=(0, 0, 8, 8))
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset, name="w0", bounds=(0, 0, 4, 4)
+        )
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset, name="w1", bounds=(0, 0, 8, 8)
+        )
 
         # Build a minimal ModelDataset (only targets needed for this comparison).
         model_dataset = ModelDataset(
