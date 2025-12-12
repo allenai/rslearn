@@ -179,6 +179,8 @@ class ResolutionFactor:
                 raise ValueError(
                     f"width {width} or height {height} is not a multiple of the resolution factor {self.denominator}"
                 )
+            # TODO: an offset could be introduced by bounds not being a multiple
+            # of the denominator -> will need to decide how to handle that.
             return (
                 bounds[0] // self.denominator,
                 bounds[1] // self.denominator,
