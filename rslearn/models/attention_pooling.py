@@ -20,15 +20,21 @@ class SimpleAttentionPool(IntermediateComponent):
     the N dimension. Do this simply
     """
 
-    def __init__(self, in_dim: int) -> None:
+    def __init__(self, in_dim: int, hidden_linear: bool = False) -> None:
         """Initialize the simple attention pooling layer."""
         super().__init__()
+        if hidden_linear:
+            self.hidden_linear = nn.Linear(in_features=in_dim, out_features=in_dim)
+        else:
+            self.hidden_linear = None
         self.linear = nn.Linear(in_features=in_dim, out_features=1)
 
     def forward_for_map(self, feat_tokens: torch.Tensor) -> torch.Tensor:
         """Attention pooling for a single feature map."""
         B, D, H, W, N = feat_tokens.shape
         feat_tokens = rearrange(feat_tokens, "b d h w n -> (b h w) n d")
+        if self.hidden_linear is not None:
+            feat_tokens = torch.nn.functional.relu(self.hidden_linear(feat_tokens))
         attention_scores = torch.nn.functional.softmax(self.linear(feat_tokens), dim=1)
         feat_tokens = (attention_scores * feat_tokens).sum(dim=1)
         return rearrange(feat_tokens, "(b h w) d -> b d h w", b=B, h=H, w=W)
