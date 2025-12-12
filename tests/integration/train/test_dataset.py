@@ -13,7 +13,6 @@ from rslearn.config import BandSetConfig, DatasetConfig, DType, LayerConfig, Lay
 from rslearn.dataset import Dataset, Window
 from rslearn.models.conv import Conv
 from rslearn.models.module_wrapper import EncoderModuleWrapper
-from rslearn.models.pick_features import PickFeatures
 from rslearn.models.singletask import SingleTaskModel
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.dataset import DataInput, ModelDataset, SplitConfig
@@ -128,8 +127,9 @@ class TestResolutionFactor:
 
     def add_window(self, ds_path: UPath, group: str, name: str) -> Window:
         """Add a window with the specified name."""
+        dataset = Dataset(ds_path)
         window = Window(
-            path=Window.get_window_root(ds_path, group, name),
+            storage=dataset.storage,
             group=group,
             name=name,
             projection=Projection(CRS.from_epsg(3857), 1, -1),
@@ -212,7 +212,6 @@ class TestResolutionFactor:
                     kernel_size=3,
                     activation=torch.nn.Identity(),
                 ),
-                PickFeatures(indexes=[0], collapse=True),
                 PerPixelRegressionHead(),
             ],
         )
