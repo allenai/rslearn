@@ -20,12 +20,15 @@ class AttentionPool(IntermediateComponent):
     the N dimension.
     """
 
-    def __init__(self, in_dim: int, num_heads: int) -> None:
+    def __init__(self, in_dim: int, num_heads: int, linear_on_kv: bool = False) -> None:
         """Initialize the attention pooling layer."""
         super().__init__()
         assert in_dim % 64 == 0, "in_dim must be divisible by 64"
         self.query_token: nn.Parameter = nn.Parameter(torch.empty(in_dim))
-        self.kv: nn.Linear = nn.Linear(in_dim, in_dim * 2)
+        if linear_on_kv:
+            self.kv: nn.Linear = nn.Linear(in_dim, in_dim * 2)
+        else:
+            self.kv = None
         if in_dim % num_heads != 0:
             raise ValueError(
                 f"in_dim must be divisible by num_heads. Got {in_dim} and {num_heads}."
@@ -36,8 +39,9 @@ class AttentionPool(IntermediateComponent):
     def init_weights(self) -> None:
         """Initialize weights for the probe."""
         nn.init.trunc_normal_(self.query_token, std=0.02)
-        nn.init.trunc_normal_(self.kv.weight, std=0.02)
-        nn.init.zeros_(self.kv.bias)
+        if self.kv is not None:
+            nn.init.trunc_normal_(self.kv.weight, std=0.02)
+            nn.init.zeros_(self.kv.bias)
 
     def forward_for_map(self, feat_tokens: torch.Tensor) -> torch.Tensor:
         """Attention pooling for a single feature map."""
@@ -49,11 +53,23 @@ class AttentionPool(IntermediateComponent):
             collapsed_dim, 1, self.num_heads, D // self.num_heads
         )  # [B, 1, head, D_head]
         q = rearrange(q, "b h n d -> b n h d")
-        kv = self.kv(feat_tokens).reshape(
-            collapsed_dim, N, 2, self.num_heads, D // self.num_heads
-        )  # [B, N, 2, head, D_head]
-        kv = rearrange(kv, "b n two h d -> two b h n d")
-        k, v = torch.unbind(kv, dim=0)  # 2 * [B, head, N, D_head]
+        if self.kv is not None:
+            kv = self.kv(feat_tokens).reshape(
+                collapsed_dim, N, 2, self.num_heads, D // self.num_heads
+            )  # [B, N, 2, head, D_head]
+            kv = rearrange(kv, "b n two h d -> two b h n d")
+            k, v = torch.unbind(kv, dim=0)  # 2 * [B, head, N, D_head]
+        else:
+            k = feat_tokens.reshape(
+                collapsed_dim, N, self.num_heads, D // self.num_heads
+            )
+            k = rearrange(k, "b n h d -> b h n d")
+
+            v = feat_tokens.reshape(
+                collapsed_dim, N, self.num_heads, D // self.num_heads
+            )
+            v = rearrange(v, "b n h d -> b h n d")
+
         # Compute attention scores
         attn_scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(
             D // self.num_heads
