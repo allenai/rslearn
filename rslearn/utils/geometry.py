@@ -160,8 +160,8 @@ class ResolutionFactor:
     def multiply_bounds(self, bounds: PixelBounds) -> PixelBounds:
         """Multiply the bounds by this factor.
 
-        When working at finer resolution, the width and height of the given bounds must
-        be a multiple of the numerator.
+        When coarsening, the width and height of the given bounds must be a multiple of
+        the denominator.
         """
         if self.numerator > 1:
             return (
