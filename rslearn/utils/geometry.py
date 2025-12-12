@@ -121,9 +121,9 @@ class ResolutionFactor:
 
     The multiplier is either an integer x, or the inverse of an integer (1/x).
 
-    Factors greater than 1 increase the projection_units/pixel resolution, coarsening
-    the result (less pixels per projection unit). Factors less than 1 make it finer
-    (more pixels).
+    Factors greater than 1 increase the projection_units/pixel resolution, increasing
+    the resolution (more pixels per projection unit). Factors less than 1 make it coarser
+    (less pixels).
     """
 
     def __init__(self, numerator: int = 1, denominator: int = 1):
@@ -147,43 +147,43 @@ class ResolutionFactor:
         if self.denominator > 1:
             return Projection(
                 projection.crs,
-                projection.x_resolution // self.denominator,
-                projection.y_resolution // self.denominator,
+                projection.x_resolution * self.denominator,
+                projection.y_resolution * self.denominator,
             )
         else:
             return Projection(
                 projection.crs,
-                projection.x_resolution * self.numerator,
-                projection.y_resolution * self.numerator,
+                projection.x_resolution // self.numerator,
+                projection.y_resolution // self.numerator,
             )
 
     def multiply_bounds(self, bounds: PixelBounds) -> PixelBounds:
         """Multiply the bounds by this factor.
 
-        When coarsening, the width and height of the given bounds must be a multiple of
-        the numerator.
+        When working at finer resolution, the width and height of the given bounds must 
+        be a multiple of the numerator.
         """
-        if self.denominator > 1:
+        if self.numerator > 1:
             return (
-                bounds[0] * self.denominator,
-                bounds[1] * self.denominator,
-                bounds[2] * self.denominator,
-                bounds[3] * self.denominator,
+                bounds[0] * self.numerator,
+                bounds[1] * self.numerator,
+                bounds[2] * self.numerator,
+                bounds[3] * self.numerator,
             )
         else:
-            # Verify the width and height are multiples of the numerator.
+            # Verify the width and height are multiples of the denominator.
             # Otherwise the new width and height is not an integer.
             width = bounds[2] - bounds[0]
             height = bounds[3] - bounds[1]
-            if width % self.numerator != 0 or height % self.numerator != 0:
+            if width % self.denominator != 0 or height % self.denominator != 0:
                 raise ValueError(
-                    f"width {width} or height {height} is not a multiple of the resolution factor {self.numerator}"
+                    f"width {width} or height {height} is not a multiple of the resolution factor {self.denominator}"
                 )
             return (
-                bounds[0] // self.numerator,
-                bounds[1] // self.numerator,
-                bounds[2] // self.numerator,
-                bounds[3] // self.numerator,
+                bounds[0] // self.denominator,
+                bounds[1] // self.denominator,
+                bounds[2] // self.denominator,
+                bounds[3] // self.denominator,
             )
 
 
