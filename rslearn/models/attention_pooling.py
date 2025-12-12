@@ -12,6 +12,50 @@ from rslearn.models.component import FeatureMaps, IntermediateComponent
 from rslearn.train.model_context import ModelContext
 
 
+class SimpleAttentionPool(IntermediateComponent):
+    """Simple Attention Pooling.
+
+    Given a feature map of shape BCHWN,
+    learn an attention layer which aggregates over
+    the N dimension. Do this simply
+    """
+
+    def __init__(self, in_dim: int) -> None:
+        """Initialize the simple attention pooling layer."""
+        super().__init__()
+        self.linear = nn.Linear(in_features=in_dim, out_features=1)
+
+    def forward_for_map(self, feat_tokens: torch.Tensor) -> torch.Tensor:
+        """Attention pooling for a single feature map."""
+        B, D, H, W, N = feat_tokens.shape
+        feat_tokens = rearrange(feat_tokens, "b d h w n -> (b h w) n d")
+        attention_scores = torch.nn.functional.softmax(self.linear(feat_tokens), dim=1)
+        feat_tokens = (attention_scores * feat_tokens).sum(dim=1)
+        return rearrange(feat_tokens, "(b h w) d -> b d h w", b=B, h=H, w=W)
+
+    def forward(self, intermediates: Any, context: ModelContext) -> FeatureMaps:
+        """Forward pass for attention pooling linear probe.
+
+        Args:
+            intermediates: the output from the previous component, which must be a FeatureMaps.
+                This FeatureMaps must contain one feature map with an extra dimension at the
+                end, which will be pooled over.
+            context: the model context.
+            feat_tokens (torch.Tensor): Input feature tokens of shape (B, C, H, W, N).
+
+        Returns:
+            torch.Tensor:
+                - output, attentioned pool over the last dimension (B, C, H, W)
+        """
+        if not isinstance(intermediates, FeatureMaps):
+            raise ValueError("input to Attention Pool must be a FeatureMaps")
+
+        features = []
+        for feat in intermediates.feature_maps:
+            features.append(self.forward_for_map(feat))
+        return FeatureMaps(features)
+
+
 class AttentionPool(IntermediateComponent):
     """Attention Pooling.
 
@@ -93,7 +137,7 @@ class AttentionPool(IntermediateComponent):
                 - output, attentioned pool over the last dimension (B, C, H, W)
         """
         if not isinstance(intermediates, FeatureMaps):
-            raise ValueError("input to Upsample must be a FeatureMaps")
+            raise ValueError("input to Attention Pool must be a FeatureMaps")
 
         features = []
         for feat in intermediates.feature_maps:
