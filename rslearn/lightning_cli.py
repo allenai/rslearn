@@ -21,6 +21,7 @@ from rslearn.log_utils import get_logger
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.utils.fsspec import open_atomic
+from rslearn.utils.jsonargparse import init_jsonargparse
 
 WANDB_ID_FNAME = "wandb_id"
 
@@ -432,6 +433,8 @@ class RslearnLightningCLI(LightningCLI):
 
 def model_handler() -> None:
     """Handler for any rslearn model X commands."""
+    init_jsonargparse()
+
     RslearnLightningCLI(
         model_class=RslearnLightningModule,
         datamodule_class=RslearnDataModule,

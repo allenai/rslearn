@@ -37,7 +37,6 @@ repos:
             --install-types,
             --ignore-missing-imports,
             --disallow-untyped-defs,
-            --ignore-missing-imports,
             --non-interactive,
             # --no-namespace-packages,
             --namespace-packages,
