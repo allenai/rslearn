@@ -229,7 +229,13 @@ class SimpleTimeSeries(FeatureExtractor):
 
         # Now we can apply the underlying FeatureExtractor.
         # Its output must be a FeatureMaps.
-        encoder_output = self.encoder(batched_inputs)
+        assert batched_inputs is not None
+        encoder_output = self.encoder(
+            ModelContext(
+                inputs=batched_inputs,
+                metadatas=context.metadatas,
+            )
+        )
         if not isinstance(encoder_output, FeatureMaps):
             raise ValueError(
                 "output of underlying FeatureExtractor in SimpleTimeSeries must be a FeatureMaps"
