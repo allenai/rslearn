@@ -421,7 +421,7 @@ class RslearnLightningCLI(LightningCLI):
                 {
                     "class_path": "lightning.pytorch.strategies.DDPStrategy",
                     "init_args": jsonargparse.Namespace(
-                        {"find_unused_parameters": True}
+                        {"find_unused_parameters": False}
                     ),
                 }
             )
