@@ -26,7 +26,7 @@ from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.tasks.segmentation import SegmentationTask
 from rslearn.train.transforms.concatenate import Concatenate
 from rslearn.utils.feature import Feature
-from rslearn.utils.geometry import PixelBounds, STGeometry, ResolutionFactor
+from rslearn.utils.geometry import PixelBounds, ResolutionFactor, STGeometry
 from rslearn.utils.raster_format import GeotiffRasterFormat
 from rslearn.utils.vector_format import GeojsonVectorFormat
 
@@ -426,8 +426,9 @@ class TestIterableAllPatchesDataset:
             samples = list(all_patches_dataset)
             assert len(samples) == 0
 
-
-    def test_resolution_factor_cropping(self, basic_classification_dataset: Dataset) -> None:
+    def test_resolution_factor_cropping(
+        self, basic_classification_dataset: Dataset
+    ) -> None:
         """Verify that cropping works correctly with different resolution factors."""
 
         add_window(
@@ -439,16 +440,20 @@ class TestIterableAllPatchesDataset:
                 ("image_layer2", 0): np.ones((1, 4, 4), dtype=np.uint8),
             },
         )
-        
-        image_data_input = DataInput("raster", ["image_layer1"], bands=["band"], passthrough=True)
+
+        image_data_input = DataInput(
+            "raster", ["image_layer1"], bands=["band"], passthrough=True
+        )
         target_data_input = DataInput(
-            "raster", 
-            ["image_layer2"], 
+            "raster",
+            ["image_layer2"],
             bands=["band"],
-            resolution_factor=ResolutionFactor(numerator=1, denominator=2),  # 1/2 resolution
+            resolution_factor=ResolutionFactor(
+                numerator=1, denominator=2
+            ),  # 1/2 resolution
             is_target=True,
         )
-        
+
         model_dataset = ModelDataset(
             basic_classification_dataset,
             split_config=SplitConfig(patch_size=4, load_all_patches=True),
@@ -456,11 +461,9 @@ class TestIterableAllPatchesDataset:
             workers=1,
             inputs={"image": image_data_input, "targets": target_data_input},
         )
-        
-        dataset = IterableAllPatchesDataset(
-            model_dataset, (4, 4), rank=0, world_size=1
-        )
-        
+
+        dataset = IterableAllPatchesDataset(model_dataset, (4, 4), rank=0, world_size=1)
+
         # Verify we actually have samples to test
         sample_count = 0
         for inputs, targets, metadata in dataset:
@@ -505,7 +508,9 @@ class TestInMemoryAllPatchesDataset:
         for i in range(len(iterable_samples)):
             assert iterable_samples[i][-1] == regular_samples[i][-1]
 
-    def test_resolution_factor_cropping(self, basic_classification_dataset: Dataset) -> None:
+    def test_resolution_factor_cropping(
+        self, basic_classification_dataset: Dataset
+    ) -> None:
         """Verify that cropping works correctly with different resolution factors."""
 
         add_window(
@@ -517,16 +522,20 @@ class TestInMemoryAllPatchesDataset:
                 ("image_layer2", 0): np.ones((1, 4, 4), dtype=np.uint8),
             },
         )
-        
-        image_data_input = DataInput("raster", ["image_layer1"], bands=["band"], passthrough=True)
+
+        image_data_input = DataInput(
+            "raster", ["image_layer1"], bands=["band"], passthrough=True
+        )
         target_data_input = DataInput(
-            "raster", 
-            ["image_layer2"], 
+            "raster",
+            ["image_layer2"],
             bands=["band"],
-            resolution_factor=ResolutionFactor(numerator=1, denominator=2),  # 1/2 resolution
+            resolution_factor=ResolutionFactor(
+                numerator=1, denominator=2
+            ),  # 1/2 resolution
             is_target=True,
         )
-        
+
         model_dataset = ModelDataset(
             basic_classification_dataset,
             split_config=SplitConfig(patch_size=4, load_all_patches=True),
@@ -534,10 +543,10 @@ class TestInMemoryAllPatchesDataset:
             workers=1,
             inputs={"image": image_data_input, "targets": target_data_input},
         )
-        
+
         dataset = InMemoryAllPatchesDataset(model_dataset, (4, 4))
         assert len(dataset) > 0, "No samples were generated - test is not valid"
-        
+
         for i in range(len(dataset)):
             inputs, targets, metadata = dataset[i]
             # Target patch should have half the resolution of the input patch
