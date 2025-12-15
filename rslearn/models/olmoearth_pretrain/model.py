@@ -19,7 +19,7 @@ from olmoearth_pretrain.train.masking import MaskedOlmoEarthSample, MaskValue
 from upath import UPath
 
 from rslearn.log_utils import get_logger
-from rslearn.models.component import FeatureExtractor, FeatureMaps
+from rslearn.models.component import FeatureExtractor, FeatureMaps, TokenFeatureMaps
 from rslearn.train.model_context import ModelContext
 
 logger = get_logger(__name__)
@@ -165,7 +165,7 @@ class OlmoEarth(FeatureExtractor):
 
         return model
 
-    def forward(self, context: ModelContext) -> FeatureMaps:
+    def forward(self, context: ModelContext) -> FeatureMaps | TokenFeatureMaps:
         """Compute feature maps from the OlmoEarth backbone.
 
         Args:
@@ -175,6 +175,8 @@ class OlmoEarth(FeatureExtractor):
         Returns:
             a FeatureMaps consisting of one feature map, at 1/patch_size of the input
                 resolution. Embeddings will be pooled across modalities and timesteps.
+                If self.token_pooling is False, then a TokenFeatureMaps is returned, with
+                an additional N dimension for the tokens.
         """
         kwargs = {}
         present_modalities = []
@@ -256,16 +258,17 @@ class OlmoEarth(FeatureExtractor):
                 features.append(pooled)
             # Pool over the modalities, so we get one BCHW feature map.
             pooled = torch.stack(features, dim=0).mean(dim=0)
+            return FeatureMaps([pooled])
         else:
             for modality in present_modalities:
                 modality_features = getattr(tokens_and_masks, modality)
-                # Aggregate over band sets and timesteps (BHWTSC -> BHWC).
+                # Combine band sets and timesteps into last dim (BHWTSC -> BHWCN).
                 modality_features = rearrange(
                     modality_features, "b h w t s c -> b c h w (t s)"
                 )
                 features.append(modality_features)
             pooled = torch.cat(features, dim=-1)
-        return FeatureMaps([pooled])
+            return TokenFeatureMaps([pooled])
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.

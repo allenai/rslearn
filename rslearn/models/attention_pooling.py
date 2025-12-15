@@ -8,14 +8,18 @@ import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
 
-from rslearn.models.component import FeatureMaps, IntermediateComponent
+from rslearn.models.component import (
+    FeatureMaps,
+    IntermediateComponent,
+    TokenFeatureMaps,
+)
 from rslearn.train.model_context import ModelContext
 
 
 class SimpleAttentionPool(IntermediateComponent):
     """Simple Attention Pooling.
 
-    Given a feature map of shape BCHWN,
+    Given a token feature map of shape BCHWN,
     learn an attention layer which aggregates over
     the N dimension. Do this simply
     """
@@ -43,8 +47,8 @@ class SimpleAttentionPool(IntermediateComponent):
         """Forward pass for attention pooling linear probe.
 
         Args:
-            intermediates: the output from the previous component, which must be a FeatureMaps.
-                This FeatureMaps must contain one feature map with an extra dimension at the
+            intermediates: the output from the previous component, which must be a TokenFeatureMaps.
+                This TokenFeatureMaps must contain one feature map with an extra dimension at the
                 end, which will be pooled over.
             context: the model context.
             feat_tokens (torch.Tensor): Input feature tokens of shape (B, C, H, W, N).
@@ -53,8 +57,8 @@ class SimpleAttentionPool(IntermediateComponent):
             torch.Tensor:
                 - output, attentioned pool over the last dimension (B, C, H, W)
         """
-        if not isinstance(intermediates, FeatureMaps):
-            raise ValueError("input to Attention Pool must be a FeatureMaps")
+        if not isinstance(intermediates, TokenFeatureMaps):
+            raise ValueError("input to Attention Pool must be a TokenFeatureMaps")
 
         features = []
         for feat in intermediates.feature_maps:
@@ -73,7 +77,6 @@ class AttentionPool(IntermediateComponent):
     def __init__(self, in_dim: int, num_heads: int, linear_on_kv: bool = False) -> None:
         """Initialize the attention pooling layer."""
         super().__init__()
-        assert in_dim % 64 == 0, "in_dim must be divisible by 64"
         self.query_token: nn.Parameter = nn.Parameter(torch.empty(in_dim))
         if linear_on_kv:
             self.kv: nn.Linear = nn.Linear(in_dim, in_dim * 2)
@@ -132,8 +135,8 @@ class AttentionPool(IntermediateComponent):
         """Forward pass for attention pooling linear probe.
 
         Args:
-            intermediates: the output from the previous component, which must be a FeatureMaps.
-                This FeatureMaps must contain one feature map with an extra dimension at the
+            intermediates: the output from the previous component, which must be a TokenFeatureMaps.
+                This TokenFeatureMaps must contain one feature map with an extra dimension at the
                 end, which will be pooled over.
             context: the model context.
             feat_tokens (torch.Tensor): Input feature tokens of shape (B, C, H, W, N).
@@ -142,8 +145,8 @@ class AttentionPool(IntermediateComponent):
             torch.Tensor:
                 - output, attentioned pool over the last dimension (B, C, H, W)
         """
-        if not isinstance(intermediates, FeatureMaps):
-            raise ValueError("input to Attention Pool must be a FeatureMaps")
+        if not isinstance(intermediates, TokenFeatureMaps):
+            raise ValueError("input to Attention Pool must be a TokenFeatureMaps")
 
         features = []
         for feat in intermediates.feature_maps:
