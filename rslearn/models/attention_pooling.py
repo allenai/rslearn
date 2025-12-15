@@ -21,11 +21,23 @@ class SimpleAttentionPool(IntermediateComponent):
 
     Given a token feature map of shape BCHWN,
     learn an attention layer which aggregates over
-    the N dimension. Do this simply
+    the N dimension.
+
+    This is done simply by learning a mapping D->1 which is the weight
+    which should be assigned to each token during averaging:
+
+    output = sum [feat_token * W(feat_token) for feat_token in feat_tokens]
     """
 
     def __init__(self, in_dim: int, hidden_linear: bool = False) -> None:
-        """Initialize the simple attention pooling layer."""
+        """Initialize the simple attention pooling layer.
+
+        Args:
+            in_dim: the encoding dimension D
+            hidden_linear: whether to apply an additional linear transformation D -> D
+                to the feat tokens. If this is True, a ReLU activation is applied
+                after the first linear transformation.
+        """
         super().__init__()
         if hidden_linear:
             self.hidden_linear = nn.Linear(in_features=in_dim, out_features=in_dim)
@@ -34,7 +46,7 @@ class SimpleAttentionPool(IntermediateComponent):
         self.linear = nn.Linear(in_features=in_dim, out_features=1)
 
     def forward_for_map(self, feat_tokens: torch.Tensor) -> torch.Tensor:
-        """Attention pooling for a single feature map."""
+        """Attention pooling for a single feature map (BCHWN tensor)."""
         B, D, H, W, N = feat_tokens.shape
         feat_tokens = rearrange(feat_tokens, "b d h w n -> (b h w) n d")
         if self.hidden_linear is not None:
@@ -48,8 +60,8 @@ class SimpleAttentionPool(IntermediateComponent):
 
         Args:
             intermediates: the output from the previous component, which must be a TokenFeatureMaps.
-                This TokenFeatureMaps must contain one feature map with an extra dimension at the
-                end, which will be pooled over.
+                We pool over the final dimension in the TokenFeatureMaps. If multiple maps
+                are passed, we apply the same linear layers to all of them.
             context: the model context.
             feat_tokens (torch.Tensor): Input feature tokens of shape (B, C, H, W, N).
 
@@ -72,6 +84,9 @@ class AttentionPool(IntermediateComponent):
     Given a feature map of shape BCHWN,
     learn an attention layer which aggregates over
     the N dimension.
+
+    We do this by learning a query token, and applying a standard
+    attention mechanism against this learned query token.
     """
 
     def __init__(self, in_dim: int, num_heads: int, linear_on_kv: bool = False) -> None:
@@ -79,9 +94,11 @@ class AttentionPool(IntermediateComponent):
         super().__init__()
         self.query_token: nn.Parameter = nn.Parameter(torch.empty(in_dim))
         if linear_on_kv:
-            self.kv: nn.Linear = nn.Linear(in_dim, in_dim * 2)
+            self.k_linear = nn.Linear(in_dim, in_dim)
+            self.v_linear = nn.Linear(in_dim, in_dim)
         else:
-            self.kv = None
+            self.k_linear = None
+            self.v_linear = None
         if in_dim % num_heads != 0:
             raise ValueError(
                 f"in_dim must be divisible by num_heads. Got {in_dim} and {num_heads}."
@@ -92,12 +109,9 @@ class AttentionPool(IntermediateComponent):
     def init_weights(self) -> None:
         """Initialize weights for the probe."""
         nn.init.trunc_normal_(self.query_token, std=0.02)
-        if self.kv is not None:
-            nn.init.trunc_normal_(self.kv.weight, std=0.02)
-            nn.init.zeros_(self.kv.bias)
 
     def forward_for_map(self, feat_tokens: torch.Tensor) -> torch.Tensor:
-        """Attention pooling for a single feature map."""
+        """Attention pooling for a single feature map (BCHWN tensor)."""
         B, D, H, W, N = feat_tokens.shape
         feat_tokens = rearrange(feat_tokens, "b d h w n -> (b h w) n d")
         collapsed_dim = B * H * W
@@ -106,22 +120,23 @@ class AttentionPool(IntermediateComponent):
             collapsed_dim, 1, self.num_heads, D // self.num_heads
         )  # [B, 1, head, D_head]
         q = rearrange(q, "b h n d -> b n h d")
-        if self.kv is not None:
-            kv = self.kv(feat_tokens).reshape(
-                collapsed_dim, N, 2, self.num_heads, D // self.num_heads
-            )  # [B, N, 2, head, D_head]
-            kv = rearrange(kv, "b n two h d -> two b h n d")
-            k, v = torch.unbind(kv, dim=0)  # 2 * [B, head, N, D_head]
+        if self.k_linear is not None:
+            assert self.v_linear is not None
+            k = self.k_linear(feat_tokens).reshape(
+                collapsed_dim, N, self.num_heads, D // self.num_heads
+            )
+            v = self.v_linear(feat_tokens).reshape(
+                collapsed_dim, N, self.num_heads, D // self.num_heads
+            )
         else:
             k = feat_tokens.reshape(
                 collapsed_dim, N, self.num_heads, D // self.num_heads
             )
-            k = rearrange(k, "b n h d -> b h n d")
-
             v = feat_tokens.reshape(
                 collapsed_dim, N, self.num_heads, D // self.num_heads
             )
-            v = rearrange(v, "b n h d -> b h n d")
+        k = rearrange(k, "b n h d -> b h n d")
+        v = rearrange(v, "b n h d -> b h n d")
 
         # Compute attention scores
         attn_scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(
@@ -136,8 +151,9 @@ class AttentionPool(IntermediateComponent):
 
         Args:
             intermediates: the output from the previous component, which must be a TokenFeatureMaps.
-                This TokenFeatureMaps must contain one feature map with an extra dimension at the
-                end, which will be pooled over.
+                We pool over the final dimension in the TokenFeatureMaps. If multiple feature
+                maps are passed, we apply the same attention weights (query token and linear k, v layers)
+                to all the maps.
             context: the model context.
             feat_tokens (torch.Tensor): Input feature tokens of shape (B, C, H, W, N).
 

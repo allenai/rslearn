@@ -93,7 +93,7 @@ class FeatureMaps:
 
 @dataclass
 class TokenFeatureMaps:
-    """An intermediate output type for multi-resolution feature maps.
+    """An intermediate output type for multi-resolution BCHWN feature maps with a token dimension.
 
     Unlike `FeatureMaps`, these include an additional dimension for unpooled tokens.
     """
