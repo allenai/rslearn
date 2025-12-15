@@ -2,13 +2,30 @@ import json
 import pathlib
 from typing import Any
 
+import lightning.pytorch as pl
+import numpy as np
+import pytest
+import torch
 from rasterio.crs import CRS
 from upath import UPath
 
+from rslearn.config import BandSetConfig, DatasetConfig, DType, LayerConfig, LayerType
 from rslearn.dataset import Dataset, Window
-from rslearn.train.dataset import ModelDataset, SplitConfig
+from rslearn.models.conv import Conv
+from rslearn.models.module_wrapper import EncoderModuleWrapper
+from rslearn.models.singletask import SingleTaskModel
+from rslearn.train.data_module import RslearnDataModule
+from rslearn.train.dataset import DataInput, ModelDataset, SplitConfig
+from rslearn.train.lightning_module import RslearnLightningModule
+from rslearn.train.model_context import ModelContext
+from rslearn.train.optimizer import AdamW
 from rslearn.train.tasks.classification import ClassificationTask
-from rslearn.utils.geometry import Projection
+from rslearn.train.tasks.per_pixel_regression import (
+    PerPixelRegressionHead,
+    PerPixelRegressionTask,
+)
+from rslearn.utils.geometry import Projection, ResolutionFactor
+from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
 class TestDataset:
@@ -73,3 +90,161 @@ class TestDataset:
             workers=4,
         )
         assert len(dataset) == 0
+
+
+class TestResolutionFactor:
+    """Integration test for ModelDataset with DataInputs that have resolution factor.
+
+    We verify we can train a model to input 4x4 but output 2x2 for PerPixelRegressionTask.
+    """
+
+    def create_dataset(self, ds_path: UPath) -> Dataset:
+        """Write the dataset config and return dataset."""
+        cfg = DatasetConfig(
+            layers=dict(
+                image=LayerConfig(
+                    type=LayerType.RASTER,
+                    band_sets=[
+                        BandSetConfig(
+                            dtype=DType.UINT8,
+                            bands=["B1"],
+                        )
+                    ],
+                ),
+                label=LayerConfig(
+                    type=LayerType.RASTER,
+                    band_sets=[
+                        BandSetConfig(
+                            dtype=DType.UINT8,
+                            bands=["B1"],
+                        )
+                    ],
+                ),
+            )
+        )
+        with (ds_path / "config.json").open("w") as f:
+            f.write(cfg.model_dump_json())
+        return Dataset(ds_path)
+
+    def add_window(self, ds_path: UPath, group: str, name: str) -> Window:
+        """Add a window with the specified name."""
+        dataset = Dataset(ds_path)
+        window = Window(
+            storage=dataset.storage,
+            group=group,
+            name=name,
+            projection=Projection(CRS.from_epsg(3857), 1, -1),
+            bounds=(0, 0, 4, 4),
+            time_range=None,
+        )
+        window.save()
+
+        # Add image layer.
+        GeotiffRasterFormat().encode_raster(
+            window.get_raster_dir("image", ["B1"]),
+            window.projection,
+            window.bounds,
+            np.ones((1, 4, 4), dtype=np.uint8),
+        )
+        window.mark_layer_completed("image")
+
+        # Add label layer.
+        GeotiffRasterFormat().encode_raster(
+            window.get_raster_dir("label", ["B1"]),
+            window.projection,
+            window.bounds,
+            2 * np.ones((1, 4, 4), dtype=np.uint8),
+        )
+        window.mark_layer_completed("label")
+
+        return window
+
+    def test_per_pixel_regression(self, tmp_path: pathlib.Path) -> None:
+        """Run the test with PerPixelRegressionTask."""
+        ds_path = UPath(tmp_path)
+        self.create_dataset(ds_path)
+        for idx in range(16):
+            self.add_window(ds_path, "default", f"window{idx}")
+
+        task = PerPixelRegressionTask()
+
+        # Create the data module.
+        data_module = RslearnDataModule(
+            task=task,
+            inputs=dict(
+                image=DataInput(
+                    data_type="raster",
+                    layers=["image"],
+                    bands=["B1"],
+                    dtype=DType.FLOAT32,
+                    passthrough=True,
+                ),
+                targets=DataInput(
+                    data_type="raster",
+                    layers=["label"],
+                    bands=["B1"],
+                    dtype=DType.INT32,
+                    is_target=True,
+                    # Here we set the resolution factor so the target is 2x2.
+                    resolution_factor=ResolutionFactor(numerator=2),
+                ),
+            ),
+            path=str(ds_path),
+        )
+
+        # Create the model architecture. It is just two convs, one to downsample and
+        # another to make the prediction.
+        model = SingleTaskModel(
+            encoder=[
+                EncoderModuleWrapper(
+                    module=Conv(
+                        in_channels=1,
+                        out_channels=32,
+                        kernel_size=3,
+                        stride=2,
+                        padding=1,
+                    ),
+                ),
+            ],
+            decoder=[
+                Conv(
+                    in_channels=32,
+                    out_channels=1,
+                    kernel_size=3,
+                    activation=torch.nn.Identity(),
+                ),
+                PerPixelRegressionHead(),
+            ],
+        )
+
+        # Perform fit.
+        lm = RslearnLightningModule(
+            model,
+            task=task,
+            optimizer=AdamW(lr=0.001),
+        )
+        trainer = pl.Trainer(max_epochs=10)
+        trainer.fit(lm, datamodule=data_module)
+
+        # Make sure model produces the right output.
+        model.eval()
+        output = (
+            model(
+                ModelContext(
+                    inputs=[
+                        {
+                            "image": torch.ones((1, 4, 4), dtype=torch.float32),
+                        }
+                    ],
+                    metadatas=[],
+                )
+            )
+            .outputs.detach()
+            .numpy()
+        )
+        print(output)
+        # Index into BCHW tensor.
+        assert output[0, 0, 0] == pytest.approx(2, abs=0.01)
+        assert output[0, 0, 1] == pytest.approx(2, abs=0.01)
+        assert output[0, 1, 0] == pytest.approx(2, abs=0.01)
+        assert output[0, 1, 1] == pytest.approx(2, abs=0.01)
