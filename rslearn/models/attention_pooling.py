@@ -89,8 +89,15 @@ class AttentionPool(IntermediateComponent):
     attention mechanism against this learned query token.
     """
 
-    def __init__(self, in_dim: int, num_heads: int, linear_on_kv: bool = False) -> None:
-        """Initialize the attention pooling layer."""
+    def __init__(self, in_dim: int, num_heads: int, linear_on_kv: bool = True) -> None:
+        """Initialize the attention pooling layer.
+
+        Args:
+            in_dim: the encoding dimension D
+            num_heads: the number of heads to use
+            linear_on_kv: Whether to apply a linear layer on the input tokens
+            to create the key and value tokens.
+        """
         super().__init__()
         self.query_token: nn.Parameter = nn.Parameter(torch.empty(in_dim))
         if linear_on_kv:
