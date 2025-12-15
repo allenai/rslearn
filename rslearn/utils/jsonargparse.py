@@ -101,6 +101,11 @@ def resolution_factor_serializer(v: ResolutionFactor) -> str:
     Returns:
         the ResolutionFactor encoded to string
     """
+    # Handle Namespace from class_path syntax (used during config save)
+    if hasattr(v, "init_args"):
+        init_args = v.init_args
+        return f"{init_args.numerator}/{init_args.denominator}"
+
     return f"{v.numerator}/{v.denominator}"
 
 
@@ -113,6 +118,18 @@ def resolution_factor_deserializer(v: int | str) -> ResolutionFactor:
     Returns:
         the decoded ResolutionFactor object
     """
+    # Handle already-instantiated ResolutionFactor
+    if isinstance(v, ResolutionFactor):
+        return v
+
+    # Handle Namespace from class_path syntax (used during config save/validation)
+    if hasattr(v, "init_args"):
+        init_args = v.init_args
+        return ResolutionFactor(
+            numerator=init_args.numerator,
+            denominator=init_args.denominator,
+        )
+
     if isinstance(v, int):
         return ResolutionFactor(numerator=v)
     elif isinstance(v, str):
