@@ -23,9 +23,10 @@ from rslearn.train.dataset import (
     SplitConfig,
 )
 from rslearn.train.tasks.classification import ClassificationTask
+from rslearn.train.tasks.segmentation import SegmentationTask
 from rslearn.train.transforms.concatenate import Concatenate
 from rslearn.utils.feature import Feature
-from rslearn.utils.geometry import PixelBounds, STGeometry
+from rslearn.utils.geometry import PixelBounds, STGeometry, ResolutionFactor
 from rslearn.utils.raster_format import GeotiffRasterFormat
 from rslearn.utils.vector_format import GeojsonVectorFormat
 
@@ -426,6 +427,49 @@ class TestIterableAllPatchesDataset:
             assert len(samples) == 0
 
 
+    def test_resolution_factor_cropping(self, basic_classification_dataset: Dataset) -> None:
+        """Verify that cropping works correctly with different resolution factors."""
+
+        add_window(
+            basic_classification_dataset,
+            name="window0",
+            bounds=(0, 0, 8, 8),
+            images={
+                ("image_layer1", 0): np.ones((1, 8, 8), dtype=np.uint8),
+                ("image_layer2", 0): np.ones((1, 4, 4), dtype=np.uint8),
+            },
+        )
+        
+        image_data_input = DataInput("raster", ["image_layer1"], bands=["band"], passthrough=True)
+        target_data_input = DataInput(
+            "raster", 
+            ["image_layer2"], 
+            bands=["band"],
+            resolution_factor=ResolutionFactor(numerator=1, denominator=2),  # 1/2 resolution
+            is_target=True,
+        )
+        
+        model_dataset = ModelDataset(
+            basic_classification_dataset,
+            split_config=SplitConfig(patch_size=4, load_all_patches=True),
+            task=SegmentationTask(num_classes=2),
+            workers=1,
+            inputs={"image": image_data_input, "targets": target_data_input},
+        )
+        
+        dataset = IterableAllPatchesDataset(
+            model_dataset, (4, 4), rank=0, world_size=1
+        )
+        
+        # Verify we actually have samples to test
+        sample_count = 0
+        for inputs, targets, metadata in dataset:
+            sample_count += 1
+            assert inputs["image"].shape[-2:] == (4, 4)
+            assert targets["classes"].shape == (2, 2)
+        assert sample_count > 0, "No samples were generated - test is not valid"
+
+
 class TestInMemoryAllPatchesDataset:
     """Tests for InMemoryAllPatchesDataset."""
 
@@ -460,3 +504,42 @@ class TestInMemoryAllPatchesDataset:
         assert len(iterable_samples) == len(regular_samples)
         for i in range(len(iterable_samples)):
             assert iterable_samples[i][-1] == regular_samples[i][-1]
+
+    def test_resolution_factor_cropping(self, basic_classification_dataset: Dataset) -> None:
+        """Verify that cropping works correctly with different resolution factors."""
+
+        add_window(
+            basic_classification_dataset,
+            name="window0",
+            bounds=(0, 0, 8, 8),
+            images={
+                ("image_layer1", 0): np.ones((1, 8, 8), dtype=np.uint8),
+                ("image_layer2", 0): np.ones((1, 4, 4), dtype=np.uint8),
+            },
+        )
+        
+        image_data_input = DataInput("raster", ["image_layer1"], bands=["band"], passthrough=True)
+        target_data_input = DataInput(
+            "raster", 
+            ["image_layer2"], 
+            bands=["band"],
+            resolution_factor=ResolutionFactor(numerator=1, denominator=2),  # 1/2 resolution
+            is_target=True,
+        )
+        
+        model_dataset = ModelDataset(
+            basic_classification_dataset,
+            split_config=SplitConfig(patch_size=4, load_all_patches=True),
+            task=SegmentationTask(num_classes=2),
+            workers=1,
+            inputs={"image": image_data_input, "targets": target_data_input},
+        )
+        
+        dataset = InMemoryAllPatchesDataset(model_dataset, (4, 4))
+        assert len(dataset) > 0, "No samples were generated - test is not valid"
+        
+        for i in range(len(dataset)):
+            inputs, targets, metadata = dataset[i]
+            # Target patch should have half the resolution of the input patch
+            assert inputs["image"].shape[-2:] == (4, 4)
+            assert targets["classes"].shape == (2, 2)
