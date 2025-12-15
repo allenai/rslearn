@@ -13,11 +13,11 @@ from rslearn.config import BandSetConfig, DatasetConfig, DType, LayerConfig, Lay
 from rslearn.dataset import Dataset, Window
 from rslearn.models.conv import Conv
 from rslearn.models.module_wrapper import EncoderModuleWrapper
-from rslearn.models.pick_features import PickFeatures
 from rslearn.models.singletask import SingleTaskModel
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.dataset import DataInput, ModelDataset, SplitConfig
 from rslearn.train.lightning_module import RslearnLightningModule
+from rslearn.train.model_context import ModelContext
 from rslearn.train.optimizer import AdamW
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.tasks.per_pixel_regression import (
@@ -128,8 +128,9 @@ class TestResolutionFactor:
 
     def add_window(self, ds_path: UPath, group: str, name: str) -> Window:
         """Add a window with the specified name."""
+        dataset = Dataset(ds_path)
         window = Window(
-            path=Window.get_window_root(ds_path, group, name),
+            storage=dataset.storage,
             group=group,
             name=name,
             projection=Projection(CRS.from_epsg(3857), 1, -1),
@@ -212,7 +213,6 @@ class TestResolutionFactor:
                     kernel_size=3,
                     activation=torch.nn.Identity(),
                 ),
-                PickFeatures(indexes=[0], collapse=True),
                 PerPixelRegressionHead(),
             ],
         )
@@ -230,13 +230,16 @@ class TestResolutionFactor:
         model.eval()
         output = (
             model(
-                [
-                    {
-                        "image": torch.ones((1, 4, 4), dtype=torch.float32),
-                    }
-                ]
-            )["outputs"]
-            .detach()
+                ModelContext(
+                    inputs=[
+                        {
+                            "image": torch.ones((1, 4, 4), dtype=torch.float32),
+                        }
+                    ],
+                    metadatas=[],
+                )
+            )
+            .outputs.detach()
             .numpy()
         )
         print(output)

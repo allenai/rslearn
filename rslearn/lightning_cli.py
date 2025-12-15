@@ -9,13 +9,13 @@ import tempfile
 
 import fsspec
 import jsonargparse
+import wandb
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
 from lightning.pytorch.utilities import rank_zero_only
 from upath import UPath
 
-import wandb
 from rslearn.arg_parser import RslearnArgumentParser
 from rslearn.log_utils import get_logger
 from rslearn.train.data_module import RslearnDataModule
