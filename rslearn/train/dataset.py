@@ -172,10 +172,10 @@ class DataInput:
                 are reading from. By default, we assume the specified layer name is of
                 the form "{layer_name}.{group_idx}" and read that item group only. With
                 this option enabled, we ignore the group_idx and read all item groups.
-            resolution_factor: raster inputs are read by default at the window
-                resolution. This is a multiplier to read at a different resolution,
-                e.g. if the window resolution is 64x64 at 10 m/pixel, and
-                resolution_factor=2, then the input is read as 32x32 at 20 m/pixel.
+            resolution_factor: controls the resolution at which raster data is loaded for training.
+                By default (factor=1), data is loaded at the window resolution.
+                E.g. for a 64x64 window at 10 m/pixel with resolution_factor=1/2,
+                the resulting tensor is 32x32 (covering the same geographic area at 20 m/pixel).
             resampling: resampling method (default nearest neighbor).
         """
         self.data_type = data_type

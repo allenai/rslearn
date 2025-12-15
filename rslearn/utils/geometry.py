@@ -163,14 +163,7 @@ class ResolutionFactor:
         When coarsening, the width and height of the given bounds must be a multiple of
         the denominator.
         """
-        if self.numerator > 1:
-            return (
-                bounds[0] * self.numerator,
-                bounds[1] * self.numerator,
-                bounds[2] * self.numerator,
-                bounds[3] * self.numerator,
-            )
-        else:
+        if self.denominator > 1:
             # Verify the width and height are multiples of the denominator.
             # Otherwise the new width and height is not an integer.
             width = bounds[2] - bounds[0]
@@ -186,6 +179,13 @@ class ResolutionFactor:
                 bounds[1] // self.denominator,
                 bounds[2] // self.denominator,
                 bounds[3] // self.denominator,
+            )
+        else:
+            return (
+                bounds[0] * self.denominator,
+                bounds[1] * self.numerator,
+                bounds[2] * self.numerator,
+                bounds[3] * self.numerator,
             )
 
 
