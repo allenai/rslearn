@@ -182,7 +182,7 @@ class ResolutionFactor:
             )
         else:
             return (
-                bounds[0] * self.denominator,
+                bounds[0] * self.numerator,
                 bounds[1] * self.numerator,
                 bounds[2] * self.numerator,
                 bounds[3] * self.numerator,
