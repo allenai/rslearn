@@ -15,7 +15,7 @@ def test_forward() -> None:
         # With random initialization we only need config.json, not the weights.
         random_initialization=True,
         patch_size=4,
-        embedding_size=768,
+        embedding_size=128,
     )
 
     T = 2
@@ -34,10 +34,10 @@ def test_forward() -> None:
     assert len(feature_map.feature_maps) == 1
     features = feature_map.feature_maps[0]
     # Feature shape should correspond to using patch_size=4.
-    assert features.shape == (1, 768, 1, 1)
+    assert features.shape == (1, 128, 1, 1)
 
     # Backbone channels should match patch size and depth.
-    assert model.get_backbone_channels() == [(4, 768)]
+    assert model.get_backbone_channels() == [(4, 128)]
 
 
 def test_forward_no_pooling() -> None:
@@ -47,7 +47,7 @@ def test_forward_no_pooling() -> None:
         # With random initialization we only need config.json, not the weights.
         random_initialization=True,
         patch_size=4,
-        embedding_size=768,
+        embedding_size=128,
         token_pooling=False,
     )
 
@@ -68,10 +68,10 @@ def test_forward_no_pooling() -> None:
     features = feature_map.feature_maps[0]
     # Feature shape should correspond to using patch_size=4.
     # 6 = 3 band sets * 2 timesteps
-    assert features.shape == (1, 768, 1, 1, 6)
+    assert features.shape == (1, 128, 1, 1, 6)
 
     # Backbone channels should match patch size and depth.
-    assert model.get_backbone_channels() == [(4, 768)]
+    assert model.get_backbone_channels() == [(4, 128)]
 
 
 def test_error_if_no_checkpoint() -> None:
@@ -80,7 +80,7 @@ def test_error_if_no_checkpoint() -> None:
         OlmoEarth(
             checkpoint_path="tests/unit/models/olmoearth_pretrain/",
             patch_size=4,
-            embedding_size=768,
+            embedding_size=128,
         )
 
 
@@ -91,11 +91,11 @@ def test_with_attnpool() -> None:
         # With random initialization we only need config.json, not the weights.
         random_initialization=True,
         patch_size=4,
-        embedding_size=768,
+        embedding_size=128,
         # we now expect an extra N dimension on the back of this.
         token_pooling=False,
     )
-    pooling = AttentionPool(in_dim=768, num_heads=768 // 64)
+    pooling = AttentionPool(in_dim=128, num_heads=2)
 
     T = 2
     H = 4
@@ -114,7 +114,7 @@ def test_with_attnpool() -> None:
     interim_features = interim_feature_list[0]
     # Feature shape should correspond to using patch_size=4.
     # 3 band sets in s2, 2 timesteps
-    assert interim_features.shape == (1, 768, 1, 1, 3 * 2)
+    assert interim_features.shape == (1, 128, 1, 1, 3 * 2)
 
     feature_list = pooling(
         feature_maps, ModelContext(inputs=[], metadatas=[])
@@ -123,10 +123,10 @@ def test_with_attnpool() -> None:
     assert len(feature_list) == 1
     features = feature_list[0]
     # Feature shape should correspond to using patch_size=4.
-    assert features.shape == (1, 768, 1, 1)
+    assert features.shape == (1, 128, 1, 1)
 
     # Backbone channels should match patch size and depth.
-    assert model.get_backbone_channels() == [(4, 768)]
+    assert model.get_backbone_channels() == [(4, 128)]
 
 
 def test_with_simple_attnpool() -> None:
@@ -136,11 +136,11 @@ def test_with_simple_attnpool() -> None:
         # With random initialization we only need config.json, not the weights.
         random_initialization=True,
         patch_size=4,
-        embedding_size=768,
+        embedding_size=128,
         # we now expect an extra N dimension on the back of this.
         token_pooling=False,
     )
-    pooling = SimpleAttentionPool(in_dim=768)
+    pooling = SimpleAttentionPool(in_dim=128)
 
     T = 2
     H = 4
@@ -159,7 +159,7 @@ def test_with_simple_attnpool() -> None:
     interim_features = interim_feature_list[0]
     # Feature shape should correspond to using patch_size=4.
     # 3 band sets in s2, 2 timesteps
-    assert interim_features.shape == (1, 768, 1, 1, 3 * 2)
+    assert interim_features.shape == (1, 128, 1, 1, 3 * 2)
 
     feature_list = pooling(
         feature_maps, ModelContext(inputs=[], metadatas=[])
@@ -168,7 +168,7 @@ def test_with_simple_attnpool() -> None:
     assert len(feature_list) == 1
     features = feature_list[0]
     # Feature shape should correspond to using patch_size=4.
-    assert features.shape == (1, 768, 1, 1)
+    assert features.shape == (1, 128, 1, 1)
 
     # Backbone channels should match patch size and depth.
-    assert model.get_backbone_channels() == [(4, 768)]
+    assert model.get_backbone_channels() == [(4, 128)]
