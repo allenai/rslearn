@@ -24,8 +24,8 @@ from rslearn.utils.geometry import STGeometry
 logger = get_logger(__name__)
 
 
-class ERA5LandMonthlyMeans(DataSource):
-    """A data source for ingesting ERA5 land monthly averaged data from the Copernicus Climate Data Store.
+class ERA5Land(DataSource):
+    """Base class for ingesting ERA5 land data from the Copernicus Climate Data Store.
 
     An API key must be passed either in the configuration or via the CDSAPI_KEY
     environment variable. You can acquire an API key by going to the Climate Data Store
@@ -37,31 +37,29 @@ class ERA5LandMonthlyMeans(DataSource):
     replace "_" with "-" in the variable names when specifying bands in the layer
     configuration.
 
-    This data source corresponds to the reanalysis-era5-land-monthly-means product.
-
     All requests to the API will be for the whole globe. Although the API supports arbitrary
     bounds in the requests, using the whole available area helps to reduce the total number of
     requests.
     """
 
     api_url = "https://cds.climate.copernicus.eu/api"
-
-    # see: https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-land-monthly-means
-    DATASET = "reanalysis-era5-land-monthly-means"
-    PRODUCT_TYPE = "monthly_averaged_reanalysis"
     DATA_FORMAT = "netcdf"
     DOWNLOAD_FORMAT = "unarchived"
     PIXEL_SIZE = 0.1  # degrees, native resolution is 9km
 
     def __init__(
         self,
+        dataset: str,
+        product_type: str,
         band_names: list[str] | None = None,
         api_key: str | None = None,
         context: DataSourceContext = DataSourceContext(),
     ):
-        """Initialize a new ERA5LandMonthlyMeans instance.
+        """Initialize a new ERA5Land instance.
 
         Args:
+            dataset: the CDS dataset name (e.g., "reanalysis-era5-land-monthly-means").
+            product_type: the CDS product type (e.g., "monthly_averaged_reanalysis").
             band_names: list of band names to acquire. These should correspond to CDS
                 variable names but with "_" replaced with "-". This will only be used
                 if the layer config is missing from the context.
@@ -69,6 +67,9 @@ class ERA5LandMonthlyMeans(DataSource):
                 environment variable.
             context: the data source context.
         """
+        self.dataset = dataset
+        self.product_type = product_type
+        
         self.band_names: list[str]
         if context.layer_config is not None:
             self.band_names = []
@@ -172,7 +173,9 @@ class ERA5LandMonthlyMeans(DataSource):
         # But the list of variables should include the bands we want in the correct
         # order. And we can distinguish those bands from other "variables" because they
         # will be 3D while the others will be scalars or 1D.
-        bands_data = []
+        
+        band_arrays = []
+        num_time_steps = None
         for band_name in nc.variables:
             band_data = nc.variables[band_name]
             if len(band_data.shape) != 3:
@@ -182,18 +185,25 @@ class ERA5LandMonthlyMeans(DataSource):
             logger.debug(
                 f"NC file {nc_path} has variable {band_name} with shape {band_data.shape}"
             )
-            # Variable data is stored in a 3D array (1, height, width)
-            if band_data.shape[0] != 1:
+            # Variable data is stored in a 3D array (time, height, width)
+            # For hourly data, time is number of days in the month x 24 hours
+            if num_time_steps is None:
+                num_time_steps = band_data.shape[0]
+            elif band_data.shape[0] != num_time_steps:
                 raise ValueError(
-                    f"Bad shape for band {band_name}, expected 1 band but got {band_data.shape[0]}"
+                    f"Variable {band_name} has {band_data.shape[0]} time steps, "
+                    f"but expected {num_time_steps}"
                 )
-            bands_data.append(band_data[0, :, :])
-
-        array = np.array(bands_data)  # (num_bands, height, width)
-        if array.shape[0] != len(self.band_names):
-            raise ValueError(
-                f"Expected to get {len(self.band_names)} bands but got {array.shape[0]}"
-            )
+            # Original shape: (time, height, width)
+            band_array = np.array(band_data[:])
+            band_array = np.expand_dims(band_array, axis=1)
+            band_arrays.append(band_array)
+        
+        # After concatenation: (time, num_variables, height, width)
+        stacked_array = np.concatenate(band_arrays, axis=1)
+        
+        # After reshaping: (time x num_variables, height, width)
+        array = stacked_array.reshape(-1, stacked_array.shape[2], stacked_array.shape[3])
 
         # Get metadata for the GeoTIFF
         lat = nc.variables["latitude"][:]
@@ -243,6 +253,54 @@ class ERA5LandMonthlyMeans(DataSource):
     ) -> None:
         """Ingest items into the given tile store.
 
+        This method should be overridden by subclasses.
+
+        Args:
+            tile_store: the tile store to ingest into
+            items: the items to ingest
+            geometries: a list of geometries needed for each item
+        """
+        raise NotImplementedError("Subclasses must implement ingest method")
+
+
+class ERA5LandMonthlyMeans(ERA5Land):
+    """A data source for ingesting ERA5 land monthly averaged data from the Copernicus Climate Data Store.
+
+    This data source corresponds to the reanalysis-era5-land-monthly-means product.
+    """
+
+    def __init__(
+        self,
+        band_names: list[str] | None = None,
+        api_key: str | None = None,
+        context: DataSourceContext = DataSourceContext(),
+    ):
+        """Initialize a new ERA5LandMonthlyMeans instance.
+
+        Args:
+            band_names: list of band names to acquire. These should correspond to CDS
+                variable names but with "_" replaced with "-". This will only be used
+                if the layer config is missing from the context.
+            api_key: the API key. If not set, it should be set via the CDSAPI_KEY
+                environment variable.
+            context: the data source context.
+        """
+        super().__init__(
+            dataset="reanalysis-era5-land-monthly-means",
+            product_type="monthly_averaged_reanalysis",
+            band_names=band_names,
+            api_key=api_key,
+            context=context,
+        )
+
+    def ingest(
+        self,
+        tile_store: TileStoreWithLayer,
+        items: list[Item],
+        geometries: list[list[STGeometry]],
+    ) -> None:
+        """Ingest items into the given tile store.
+
         Args:
             tile_store: the tile store to ingest into
             items: the items to ingest
@@ -258,7 +316,7 @@ class ERA5LandMonthlyMeans(DataSource):
             # Send the request to the CDS API
             # If area is not specified, the whole globe will be requested
             request = {
-                "product_type": [self.PRODUCT_TYPE],
+                "product_type": [self.product_type],
                 "variable": variable_names,
                 "year": [f"{item.geometry.time_range[0].year}"],  # type: ignore
                 "month": [
@@ -274,7 +332,107 @@ class ERA5LandMonthlyMeans(DataSource):
             with tempfile.TemporaryDirectory() as tmp_dir:
                 local_nc_fname = os.path.join(tmp_dir, f"{item.name}.nc")
                 local_tif_fname = os.path.join(tmp_dir, f"{item.name}.tif")
-                self.client.retrieve(self.DATASET, request, local_nc_fname)
+                self.client.retrieve(self.dataset, request, local_nc_fname)
+                self._convert_nc_to_tif(
+                    UPath(local_nc_fname),
+                    UPath(local_tif_fname),
+                )
+                tile_store.write_raster_file(
+                    item.name, self.band_names, UPath(local_tif_fname)
+                )
+
+
+class ERA5LandHourly(ERA5Land):
+    """A data source for ingesting ERA5 land hourly data from the Copernicus Climate Data Store.
+
+    This data source corresponds to the reanalysis-era5-land product.
+    """
+
+    def __init__(
+        self,
+        band_names: list[str] | None = None,
+        api_key: str | None = None,
+        context: DataSourceContext = DataSourceContext(),
+    ):
+        """Initialize a new ERA5LandHourly instance.
+
+        Args:
+            band_names: list of band names to acquire. These should correspond to CDS
+                variable names but with "_" replaced with "-". This will only be used
+                if the layer config is missing from the context.
+            api_key: the API key. If not set, it should be set via the CDSAPI_KEY
+                environment variable.
+            context: the data source context.
+        """
+        super().__init__(
+            dataset="reanalysis-era5-land",
+            product_type="reanalysis",
+            band_names=band_names,
+            api_key=api_key,
+            context=context,
+        )
+
+    def ingest(
+        self,
+        tile_store: TileStoreWithLayer,
+        items: list[Item],
+        geometries: list[list[STGeometry]],
+    ) -> None:
+        """Ingest items into the given tile store.
+
+        Args:
+            tile_store: the tile store to ingest into
+            items: the items to ingest
+            geometries: a list of geometries needed for each item
+        """
+        # for CDS variable names, replace "-" with "_"
+        variable_names = [band.replace("-", "_") for band in self.band_names]
+
+        for item in items:
+            if tile_store.is_raster_ready(item.name, self.band_names):
+                continue
+
+            # Send the request to the CDS API
+            # If area is not specified, the whole globe will be requested
+            time_range = item.geometry.time_range
+            if time_range is None:
+                raise ValueError("Item must have a time range")
+            
+            # For hourly data, request all days in the month and all 24 hours
+            start_time = time_range[0]
+            
+            # Get all days in the month
+            year = start_time.year
+            month = start_time.month
+            # Get the last day of the month
+            if month == 12:
+                last_day = 31
+            else:
+                next_month = datetime(year, month + 1, 1, tzinfo=UTC)
+                last_day = (next_month - relativedelta(days=1)).day
+            
+            days = [f"{day:02d}" for day in range(1, last_day + 1)]
+            
+            # Get all 24 hours
+            hours = [f"{hour:02d}:00" for hour in range(24)]
+            
+            request = {
+                "product_type": [self.product_type],
+                "variable": variable_names,
+                "year": [f"{year}"],
+                "month": [f"{month:02d}"],
+                "day": days,
+                "time": hours,
+                "data_format": self.DATA_FORMAT,
+                "download_format": self.DOWNLOAD_FORMAT,
+            }
+            logger.debug(
+                f"CDS API request for the whole globe for year={request['year']} month={request['month']} days={len(days)} hours={len(hours)}"
+            )
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                local_nc_fname = os.path.join(tmp_dir, f"{item.name}.nc")
+                local_tif_fname = os.path.join(tmp_dir, f"{item.name}.tif")
+                self.client.retrieve(self.dataset, request, local_nc_fname)
                 self._convert_nc_to_tif(
                     UPath(local_nc_fname),
                     UPath(local_tif_fname),
