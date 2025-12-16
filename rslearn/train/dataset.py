@@ -26,6 +26,7 @@ from rslearn.log_utils import get_logger
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
 from rslearn.utils.mp import star_imap_unordered
+from rslearn.utils.jsonargparse import resolution_factor_deserializer
 
 from .model_context import SampleMetadata
 from .tasks import Task
@@ -147,7 +148,7 @@ class DataInput:
         dtype: DType = DType.FLOAT32,
         load_all_layers: bool = False,
         load_all_item_groups: bool = False,
-        resolution_factor: ResolutionFactor = ResolutionFactor(),
+        resolution_factor: int | str = 1,
         resampling: Resampling = Resampling.nearest,
     ):
         """Initialize a new DataInput.
@@ -187,7 +188,7 @@ class DataInput:
         self.dtype = dtype
         self.load_all_layers = load_all_layers
         self.load_all_item_groups = load_all_item_groups
-        self.resolution_factor = resolution_factor
+        self.resolution_factor = resolution_factor_deserializer(resolution_factor)
         self.resampling = resampling
 
 
