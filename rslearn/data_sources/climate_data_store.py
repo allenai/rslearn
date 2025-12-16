@@ -53,6 +53,7 @@ class ERA5Land(DataSource):
         product_type: str,
         band_names: list[str] | None = None,
         api_key: str | None = None,
+        bounds: list[float] | None = None,
         context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new ERA5Land instance.
@@ -65,10 +66,13 @@ class ERA5Land(DataSource):
                 if the layer config is missing from the context.
             api_key: the API key. If not set, it should be set via the CDSAPI_KEY
                 environment variable.
+            bounds: optional bounding box as [min_lon, min_lat, max_lon, max_lat].
+                If not specified, the whole globe will be used.
             context: the data source context.
         """
         self.dataset = dataset
         self.product_type = product_type
+        self.bounds = bounds
         
         self.band_names: list[str]
         if context.layer_config is not None:
@@ -135,8 +139,12 @@ class ERA5Land(DataSource):
                 # Collect Item list corresponding to the current month.
                 items = []
                 item_name = f"era5land_monthlyaveraged_{cur_date.year}_{cur_date.month}"
-                # Space is the whole globe.
-                bounds = (-180, -90, 180, 90)
+                # Use bounds if set, otherwise use whole globe
+                if self.bounds is not None:
+                    min_lon, min_lat, max_lon, max_lat = self.bounds
+                    bounds = (min_lon, min_lat, max_lon, max_lat)
+                else:
+                    bounds = (-180, -90, 180, 90)
                 # Time is just the given month.
                 start_date = datetime(cur_date.year, cur_date.month, 1, tzinfo=UTC)
                 time_range = (
@@ -273,6 +281,7 @@ class ERA5LandMonthlyMeans(ERA5Land):
         self,
         band_names: list[str] | None = None,
         api_key: str | None = None,
+        bounds: list[float] | None = None,
         context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new ERA5LandMonthlyMeans instance.
@@ -283,6 +292,8 @@ class ERA5LandMonthlyMeans(ERA5Land):
                 if the layer config is missing from the context.
             api_key: the API key. If not set, it should be set via the CDSAPI_KEY
                 environment variable.
+            bounds: optional bounding box as [min_lon, min_lat, max_lon, max_lat].
+                If not specified, the whole globe will be used.
             context: the data source context.
         """
         super().__init__(
@@ -290,6 +301,7 @@ class ERA5LandMonthlyMeans(ERA5Land):
             product_type="monthly_averaged_reanalysis",
             band_names=band_names,
             api_key=api_key,
+            bounds=bounds,
             context=context,
         )
 
@@ -314,7 +326,12 @@ class ERA5LandMonthlyMeans(ERA5Land):
                 continue
 
             # Send the request to the CDS API
-            # If area is not specified, the whole globe will be requested
+            if self.bounds is not None:
+                min_lon, min_lat, max_lon, max_lat = self.bounds
+                area = [max_lat, min_lon, min_lat, max_lon]
+            else:
+                area = [90, -180, -90, 180]  # Whole globe
+            
             request = {
                 "product_type": [self.product_type],
                 "variable": variable_names,
@@ -323,11 +340,12 @@ class ERA5LandMonthlyMeans(ERA5Land):
                     f"{item.geometry.time_range[0].month:02d}"  # type: ignore
                 ],
                 "time": ["00:00"],
+                "area": area,
                 "data_format": self.DATA_FORMAT,
                 "download_format": self.DOWNLOAD_FORMAT,
             }
             logger.debug(
-                f"CDS API request for the whole globe for year={request['year']} month={request['month']}"
+                f"CDS API request for year={request['year']} month={request['month']} area={area}"
             )
             with tempfile.TemporaryDirectory() as tmp_dir:
                 local_nc_fname = os.path.join(tmp_dir, f"{item.name}.nc")
@@ -352,6 +370,7 @@ class ERA5LandHourly(ERA5Land):
         self,
         band_names: list[str] | None = None,
         api_key: str | None = None,
+        bounds: list[float] | None = None,
         context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new ERA5LandHourly instance.
@@ -362,6 +381,8 @@ class ERA5LandHourly(ERA5Land):
                 if the layer config is missing from the context.
             api_key: the API key. If not set, it should be set via the CDSAPI_KEY
                 environment variable.
+            bounds: optional bounding box as [min_lon, min_lat, max_lon, max_lat].
+                If not specified, the whole globe will be used.
             context: the data source context.
         """
         super().__init__(
@@ -369,6 +390,7 @@ class ERA5LandHourly(ERA5Land):
             product_type="reanalysis",
             band_names=band_names,
             api_key=api_key,
+            bounds=bounds,
             context=context,
         )
 
@@ -416,6 +438,12 @@ class ERA5LandHourly(ERA5Land):
             # Get all 24 hours
             hours = [f"{hour:02d}:00" for hour in range(24)]
             
+            if self.bounds is not None:
+                min_lon, min_lat, max_lon, max_lat = self.bounds
+                area = [max_lat, min_lon, min_lat, max_lon]
+            else:
+                area = [90, -180, -90, 180]  # Whole globe
+            
             request = {
                 "product_type": [self.product_type],
                 "variable": variable_names,
@@ -423,11 +451,12 @@ class ERA5LandHourly(ERA5Land):
                 "month": [f"{month:02d}"],
                 "day": days,
                 "time": hours,
+                "area": area,
                 "data_format": self.DATA_FORMAT,
                 "download_format": self.DOWNLOAD_FORMAT,
             }
             logger.debug(
-                f"CDS API request for the whole globe for year={request['year']} month={request['month']} days={len(days)} hours={len(hours)}"
+                f"CDS API request for year={request['year']} month={request['month']} days={len(days)} hours={len(hours)} area={area}"
             )
             with tempfile.TemporaryDirectory() as tmp_dir:
                 local_nc_fname = os.path.join(tmp_dir, f"{item.name}.nc")
