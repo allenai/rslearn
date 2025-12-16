@@ -416,16 +416,17 @@ class RslearnLightningCLI(LightningCLI):
         if subcommand == "predict":
             c.return_predictions = False
 
-        # For now we use DDP strategy with find_unused_parameters=True.
+        # Default to DDP with find_unused_parameters. Likely won't get called with unified config
         if subcommand == "fit":
-            c.trainer.strategy = jsonargparse.Namespace(
-                {
-                    "class_path": "lightning.pytorch.strategies.DDPStrategy",
-                    "init_args": jsonargparse.Namespace(
-                        {"find_unused_parameters": True}
-                    ),
-                }
-            )
+            if not c.trainer.strategy:
+                c.trainer.strategy = jsonargparse.Namespace(
+                    {
+                        "class_path": "lightning.pytorch.strategies.DDPStrategy",
+                        "init_args": jsonargparse.Namespace(
+                            {"find_unused_parameters": True}
+                        ),
+                    }
+                )
 
         if c.management_dir:
             self.enable_project_management(c.management_dir)
