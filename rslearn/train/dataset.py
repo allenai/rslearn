@@ -8,6 +8,8 @@ import random
 import tempfile
 import time
 import uuid
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import torch
@@ -21,7 +23,11 @@ from rslearn.config import (
 )
 from rslearn.dataset.dataset import Dataset
 from rslearn.dataset.storage.file import FileWindowStorage
-from rslearn.dataset.window import Window, get_layer_and_group_from_dir_name
+from rslearn.dataset.window import (
+    Window,
+    WindowLayerData,
+    get_layer_and_group_from_dir_name,
+)
 from rslearn.log_utils import get_logger
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
@@ -32,6 +38,16 @@ from .tasks import Task
 from .transforms import Sequential
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class RasterImage:
+    """A raster image is a torch.tensor containing the images and their associated timestamps."""
+
+    # image will have an extra temporal dimension, CTHW
+    # TODO - should we collapse if it is only one timestamp?
+    image: torch.Tensor
+    timestamps: list[tuple[datetime, datetime]] | None = None
 
 
 def get_torch_dtype(dtype: DType) -> torch.dtype:
@@ -198,7 +214,8 @@ def read_raster_layer_for_data_input(
     group_idx: int,
     layer_config: LayerConfig,
     data_input: DataInput,
-) -> torch.Tensor:
+    layer_data: WindowLayerData,
+) -> tuple[torch.Tensor, tuple[datetime, datetime] | None]:
     """Read a raster layer for a DataInput.
 
     This scans the available rasters for the layer at the window to determine which
@@ -211,9 +228,11 @@ def read_raster_layer_for_data_input(
         group_idx: the item group.
         layer_config: the layer configuration.
         data_input: the DataInput that specifies the bands and dtype.
+        layer_data: the WindowLayerData associated with this layer and window.
 
     Returns:
-        tensor containing raster data.
+        RasterImage containing raster data and the timestamp associated
+            with that data.
     """
     # See what different sets of bands we need to read to get all the
     # configured bands.
@@ -284,7 +303,29 @@ def read_raster_layer_for_data_input(
             src[src_indexes, :, :].astype(data_input.dtype.get_numpy_dtype())
         )
 
-    return image
+    # add the timestamp. it can be the middle of the time range but for now
+    # lets just make it the beginning. TODO is to update that
+    if "time_range" in layer_data.serialized_item_groups:
+        time_ranges = [
+            (
+                datetime.fromisoformat(
+                    layer_data.serialized_item_groups[group_idx][idx]["time_range"][0]
+                ),
+                datetime.fromisoformat(
+                    layer_data.serialized_item_groups[group_idx][idx]["time_range"][1]
+                ),
+            )
+            for idx in range(len(layer_data.serialized_item_groups[group_idx]))
+        ]
+        # take the min and max
+        time_range = (
+            min([t[0] for t in time_ranges]),
+            max([t[1] for t in time_ranges]),
+        )
+    else:
+        time_range = None
+
+    return image, time_range
 
 
 def read_data_input(
@@ -293,7 +334,7 @@ def read_data_input(
     bounds: PixelBounds,
     data_input: DataInput,
     rng: random.Random,
-) -> torch.Tensor | list[Feature]:
+) -> RasterImage | list[Feature]:
     """Read the data specified by the DataInput from the window.
 
     Args:
@@ -335,15 +376,32 @@ def read_data_input(
         layers_to_read = [rng.choice(layer_options)]
 
     if data_input.data_type == "raster":
+        # load it once here
+        layer_datas = window.load_layer_datas()
         images: list[torch.Tensor] = []
+        time_ranges: list[tuple[datetime, datetime] | None] = []
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
-            images.append(
-                read_raster_layer_for_data_input(
-                    window, bounds, layer_name, group_idx, layer_config, data_input
-                )
+            image, time_range = read_raster_layer_for_data_input(
+                window,
+                bounds,
+                layer_name,
+                group_idx,
+                layer_config,
+                data_input,
+                layer_datas[layer_name],
             )
-        return torch.cat(images, dim=0)
+            if len(time_ranges) > 0:
+                if type(time_ranges[-1]) is not type(time_range):
+                    raise ValueError(
+                        f"All time ranges should be datetime tuples or None. Got {type(time_range)} amd {type(time_ranges[-1])}"
+                    )
+            images.append(image)
+            time_ranges.append(time_range)
+        return RasterImage(
+            torch.stack(images, dim=1),
+            time_ranges if time_ranges[0] is not None else None,  # type: ignore
+        )
 
     elif data_input.data_type == "vector":
         # We don't really support time series for vector data currently, we just
