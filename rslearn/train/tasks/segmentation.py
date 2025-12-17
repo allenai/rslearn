@@ -8,7 +8,8 @@ import torch
 import torchmetrics.classification
 from torchmetrics import Metric, MetricCollection
 
-from rslearn.utils import Feature
+from rslearn.models.component import FeatureMaps, Predictor
+from rslearn.train.model_context import ModelContext, ModelOutput, SampleMetadata
 
 from .task import BasicTask
 
@@ -108,7 +109,7 @@ class SegmentationTask(BasicTask):
     def process_inputs(
         self,
         raw_inputs: dict[str, torch.Tensor],
-        metadata: dict[str, Any],
+        metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Processes the data into targets.
@@ -148,17 +149,20 @@ class SegmentationTask(BasicTask):
         }
 
     def process_output(
-        self, raw_output: Any, metadata: dict[str, Any]
-    ) -> npt.NDArray[Any] | list[Feature]:
+        self, raw_output: Any, metadata: SampleMetadata
+    ) -> npt.NDArray[Any]:
         """Processes an output into raster or vector data.
 
         Args:
-            raw_output: the output from prediction head.
+            raw_output: the output from prediction head, which must be a CHW tensor.
             metadata: metadata about the patch being read
 
         Returns:
-            either raster or vector data.
+            CHW numpy array with one channel, containing the predicted class IDs.
         """
+        if not isinstance(raw_output, torch.Tensor) or len(raw_output.shape) != 3:
+            raise ValueError("the output for SegmentationTask must be a CHW tensor")
+
         if self.prob_scales is not None:
             raw_output = (
                 raw_output
@@ -166,7 +170,7 @@ class SegmentationTask(BasicTask):
                     self.prob_scales, device=raw_output.device, dtype=raw_output.dtype
                 )[:, None, None]
             )
-        classes = raw_output.argmax(dim=0).cpu().numpy().astype(np.uint8)
+        classes = raw_output.argmax(dim=0).cpu().numpy()
         return classes[None, :, :]
 
     def visualize(
@@ -258,25 +262,36 @@ class SegmentationTask(BasicTask):
         return MetricCollection(metrics)
 
 
-class SegmentationHead(torch.nn.Module):
+class SegmentationHead(Predictor):
     """Head for segmentation task."""
 
     def forward(
         self,
-        logits: torch.Tensor,
-        inputs: list[dict[str, Any]],
+        intermediates: Any,
+        context: ModelContext,
         targets: list[dict[str, Any]] | None = None,
-    ) -> tuple[torch.Tensor, dict[str, Any]]:
+    ) -> ModelOutput:
         """Compute the segmentation outputs from logits and targets.
 
         Args:
-            logits: tensor that is (BatchSize, NumClasses, Height, Width) in shape.
-            inputs: original inputs (ignored).
-            targets: should contain classes key that stores the per-pixel class labels.
+            intermediates: a FeatureMaps with a single feature map containing the
+                segmentation logits.
+            context: the model context
+            targets: list of target dicts, where each target dict must contain a key
+                "classes" containing the per-pixel class labels, along with "valid"
+                containing a mask indicating where the example is valid.
 
         Returns:
             tuple of outputs and loss dict
         """
+        if not isinstance(intermediates, FeatureMaps):
+            raise ValueError("input to SegmentationHead must be a FeatureMaps")
+        if len(intermediates.feature_maps) != 1:
+            raise ValueError(
+                f"input to SegmentationHead must have one feature map, but got {len(intermediates.feature_maps)}"
+            )
+
+        logits = intermediates.feature_maps[0]
         outputs = torch.nn.functional.softmax(logits, dim=1)
 
         losses = {}
@@ -295,7 +310,10 @@ class SegmentationHead(torch.nn.Module):
                 # the summed mask loss be zero.
                 losses["cls"] = torch.sum(per_pixel_loss * mask)
 
-        return outputs, losses
+        return ModelOutput(
+            outputs=outputs,
+            loss_dict=losses,
+        )
 
 
 class SegmentationMetric(Metric):

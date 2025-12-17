@@ -20,13 +20,15 @@ from rslearn.config import (
     LayerConfig,
 )
 from rslearn.dataset.dataset import Dataset
+from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.window import Window, get_layer_and_group_from_dir_name
 from rslearn.log_utils import get_logger
-from rslearn.train.tasks import Task
 from rslearn.utils.feature import Feature
-from rslearn.utils.geometry import PixelBounds
+from rslearn.utils.geometry import PixelBounds, ResolutionFactor
 from rslearn.utils.mp import star_imap_unordered
 
+from .model_context import SampleMetadata
+from .tasks import Task
 from .transforms import Sequential
 
 logger = get_logger(__name__)
@@ -128,6 +130,10 @@ class DataInput:
     """Specification of a piece of data from a window that is needed for training.
 
     The DataInput includes which layer(s) the data can be obtained from for each window.
+
+    Note that this class is not a dataclass because jsonargparse does not play well
+    with dataclasses without enabling specialized options which we have not validated
+    will work with the rest of our code.
     """
 
     def __init__(
@@ -141,7 +147,9 @@ class DataInput:
         dtype: DType = DType.FLOAT32,
         load_all_layers: bool = False,
         load_all_item_groups: bool = False,
-    ) -> None:
+        resolution_factor: ResolutionFactor = ResolutionFactor(),
+        resampling: Resampling = Resampling.nearest,
+    ):
         """Initialize a new DataInput.
 
         Args:
@@ -164,6 +172,11 @@ class DataInput:
                 are reading from. By default, we assume the specified layer name is of
                 the form "{layer_name}.{group_idx}" and read that item group only. With
                 this option enabled, we ignore the group_idx and read all item groups.
+            resolution_factor: controls the resolution at which raster data is loaded for training.
+                By default (factor=1), data is loaded at the window resolution.
+                E.g. for a 64x64 window at 10 m/pixel with resolution_factor=1/2,
+                the resulting tensor is 32x32 (covering the same geographic area at 20 m/pixel).
+            resampling: resampling method (default nearest neighbor).
         """
         self.data_type = data_type
         self.layers = layers
@@ -174,6 +187,8 @@ class DataInput:
         self.dtype = dtype
         self.load_all_layers = load_all_layers
         self.load_all_item_groups = load_all_item_groups
+        self.resolution_factor = resolution_factor
+        self.resampling = resampling
 
 
 def read_raster_layer_for_data_input(
@@ -231,15 +246,23 @@ def read_raster_layer_for_data_input(
             + f"window {window.name} layer {layer_name} group {group_idx}"
         )
 
+    # Get the projection and bounds to read under (multiply window resolution # by
+    # the specified resolution factor).
+    final_projection = data_input.resolution_factor.multiply_projection(
+        window.projection
+    )
+    final_bounds = data_input.resolution_factor.multiply_bounds(bounds)
+
     image = torch.zeros(
-        (len(needed_bands), bounds[3] - bounds[1], bounds[2] - bounds[0]),
+        (
+            len(needed_bands),
+            final_bounds[3] - final_bounds[1],
+            final_bounds[2] - final_bounds[0],
+        ),
         dtype=get_torch_dtype(data_input.dtype),
     )
 
     for band_set, src_indexes, dst_indexes in needed_sets_and_indexes:
-        final_projection, final_bounds = band_set.get_final_projection_and_bounds(
-            window.projection, bounds
-        )
         if band_set.format is None:
             raise ValueError(f"No format specified for {layer_name}")
         raster_format = band_set.instantiate_raster_format()
@@ -247,44 +270,16 @@ def read_raster_layer_for_data_input(
             layer_name, band_set.bands, group_idx=group_idx
         )
 
-        # Previously we always read in the native projection of the data, and then
-        # zoom in or out (the resolution must be a power of two off) to match the
-        # window's resolution.
-        # However, this fails if the bounds are not multiples of the resolution factor.
-        # So we fallback to reading directly in the window projection if that is the
-        # case (which may be a bit slower).
-        is_bounds_zoomable = True
-        if band_set.zoom_offset < 0:
-            zoom_factor = 2 ** (-band_set.zoom_offset)
-            is_bounds_zoomable = (final_bounds[2] - final_bounds[0]) * zoom_factor == (
-                bounds[2] - bounds[0]
-            ) and (final_bounds[3] - final_bounds[1]) * zoom_factor == (
-                bounds[3] - bounds[1]
-            )
+        # TODO: previously we try to read based on band_set.zoom_offset when possible,
+        # and handle zooming in with torch.repeat (if resampling method is nearest
+        # neighbor). However, we have not benchmarked whether this actually improves
+        # data loading speed, so for simplicity, for now we let rasterio handle the
+        # resampling. If it really is much faster to handle it via torch, then it may
+        # make sense to bring back that functionality.
 
-        if is_bounds_zoomable:
-            src = raster_format.decode_raster(
-                raster_dir, final_projection, final_bounds
-            )
-
-            # Resize to patch size if needed.
-            # This is for band sets that are stored at a lower resolution.
-            # Here we assume that it is a multiple.
-            if src.shape[1:3] != image.shape[1:3]:
-                if src.shape[1] < image.shape[1]:
-                    factor = image.shape[1] // src.shape[1]
-                    src = src.repeat(repeats=factor, axis=1).repeat(
-                        repeats=factor, axis=2
-                    )
-                else:
-                    factor = src.shape[1] // image.shape[1]
-                    src = src[:, ::factor, ::factor]
-
-        else:
-            src = raster_format.decode_raster(
-                raster_dir, window.projection, bounds, resampling=Resampling.nearest
-            )
-
+        src = raster_format.decode_raster(
+            raster_dir, final_projection, final_bounds, resampling=Resampling.nearest
+        )
         image[dst_indexes, :, :] = torch.as_tensor(
             src[src_indexes, :, :].astype(data_input.dtype.get_numpy_dtype())
         )
@@ -575,37 +570,7 @@ class ModelDataset(torch.utils.data.Dataset):
         else:
             self.patch_size = split_config.get_patch_size()
 
-        if split_config.names:
-            windows = self.dataset.load_windows(
-                groups=split_config.groups,
-                names=split_config.names,
-                show_progress=True,
-                workers=workers,
-            )
-        elif split_config.groups:
-            windows = self.dataset.load_windows(
-                groups=split_config.groups, show_progress=True, workers=workers
-            )
-        else:
-            windows = self.dataset.load_windows(show_progress=True, workers=workers)
-
-        if split_config.tags:
-            # Filter the window.options.
-            new_windows = []
-            num_removed: dict[str, int] = {}
-            for window in windows:
-                for k, v in split_config.tags.items():
-                    if k not in window.options or (v and window.options[k] != v):
-                        num_removed[k] = num_removed.get(k, 0) + 1
-                        break
-                else:
-                    new_windows.append(window)
-            logger.info(
-                f"Started with {len(windows)} windows, ended with {len(new_windows)} windows for {self.dataset.path}"
-            )
-            for k, v in num_removed.items():
-                logger.info(f"Removed {v} windows due to tag {k}")
-            windows = new_windows
+        windows = self._get_initial_windows(split_config, workers)
 
         # If targets are not needed, remove them from the inputs.
         if split_config.get_skip_targets():
@@ -615,17 +580,11 @@ class ModelDataset(torch.utils.data.Dataset):
 
         # Eliminate windows that are missing either a requisite input layer, or missing
         # all target layers.
-        # We use only main thread if the index is set, since that can take a long time
-        # to send to the worker threads, it may get serialized for each window.
         new_windows = []
-        if workers == 0 or (len(windows) >= 1 and windows[0].index is not None):
+        if workers == 0:
             for window in windows:
                 if check_window(self.inputs, window) is None:
                     continue
-                # The index may be set, but now that this check is done, from here on
-                # we no longer need it. We set it None so that we don't end up passing
-                # it later to the dataloader workers.
-                window.index = None
                 new_windows.append(window)
         else:
             p = multiprocessing.Pool(workers)
@@ -681,12 +640,62 @@ class ModelDataset(torch.utils.data.Dataset):
         with open(self.dataset_examples_fname, "w") as f:
             json.dump([self._serialize_item(example) for example in windows], f)
 
+    def _get_initial_windows(
+        self, split_config: SplitConfig, workers: int
+    ) -> list[Window]:
+        """Get the initial windows before input layer filtering.
+
+        The windows are filtered based on configured window names, groups, and tags.
+
+        This is a helper for the init function.
+
+        Args:
+            split_config: the split configuration.
+            workers: number of worker processes.
+
+        Returns:
+            list of windows from the dataset after applying the aforementioned filters.
+        """
+        # Load windows from dataset.
+        # If the window storage is FileWindowStorage, we pass the workers/show_progress arguments.
+        kwargs: dict[str, Any] = {}
+        if isinstance(self.dataset.storage, FileWindowStorage):
+            kwargs["workers"] = workers
+            kwargs["show_progress"] = True
+        # We also add the name/group filters to the kwargs.
+        if split_config.names:
+            kwargs["names"] = split_config.names
+        if split_config.groups:
+            kwargs["groups"] = split_config.groups
+
+        windows = self.dataset.load_windows(**kwargs)
+
+        # Filter by tags (if provided) using the window.options.
+        if split_config.tags:
+            new_windows = []
+            num_removed: dict[str, int] = {}
+            for window in windows:
+                for k, v in split_config.tags.items():
+                    if k not in window.options or (v and window.options[k] != v):
+                        num_removed[k] = num_removed.get(k, 0) + 1
+                        break
+                else:
+                    new_windows.append(window)
+            logger.info(
+                f"Started with {len(windows)} windows, ended with {len(new_windows)} windows for {self.dataset.path}"
+            )
+            for k, v in num_removed.items():
+                logger.info(f"Removed {v} windows due to tag {k}")
+            windows = new_windows
+
+        return windows
+
     def _serialize_item(self, example: Window) -> dict[str, Any]:
         return example.get_metadata()
 
     def _deserialize_item(self, d: dict[str, Any]) -> Window:
         return Window.from_metadata(
-            Window.get_window_root(self.dataset.path, d["group"], d["name"]),
+            self.dataset.storage,
             d,
         )
 
@@ -713,7 +722,7 @@ class ModelDataset(torch.utils.data.Dataset):
 
     def get_raw_inputs(
         self, idx: int
-    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    ) -> tuple[dict[str, Any], dict[str, Any], SampleMetadata]:
         """Get the raw inputs and base metadata for this example.
 
         This is the raster or vector data before being processed by the Task. So it
@@ -775,21 +784,23 @@ class ModelDataset(torch.utils.data.Dataset):
             if data_input.passthrough:
                 passthrough_inputs[name] = raw_inputs[name]
 
-        metadata = {
-            "group": window.group,
-            "window_name": window.name,
-            "window_bounds": window.bounds,
-            "bounds": bounds,
-            "time_range": window.time_range,
-            "projection": window.projection,
-            "dataset_source": self.name,
-        }
+        metadata = SampleMetadata(
+            window_group=window.group,
+            window_name=window.name,
+            window_bounds=window.bounds,
+            patch_bounds=bounds,
+            patch_idx=0,
+            num_patches_in_window=1,
+            time_range=window.time_range,
+            projection=window.projection,
+            dataset_source=self.name,
+        )
 
         return raw_inputs, passthrough_inputs, metadata
 
     def __getitem__(
         self, idx: int
-    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    ) -> tuple[dict[str, Any], dict[str, Any], SampleMetadata]:
         """Read one training example.
 
         Args:
@@ -801,8 +812,6 @@ class ModelDataset(torch.utils.data.Dataset):
         logger.debug("__getitem__ start pid=%d item_idx=%d", os.getpid(), idx)
 
         raw_inputs, passthrough_inputs, metadata = self.get_raw_inputs(idx)
-        metadata["patch_idx"] = 0
-        metadata["num_patches"] = 1
 
         input_dict, target_dict = self.task.process_inputs(
             raw_inputs,
@@ -811,7 +820,6 @@ class ModelDataset(torch.utils.data.Dataset):
         )
         input_dict.update(passthrough_inputs)
         input_dict, target_dict = self.transforms(input_dict, target_dict)
-        input_dict["dataset_source"] = self.name
 
         logger.debug("__getitem__ finish pid=%d item_idx=%d", os.getpid(), idx)
 

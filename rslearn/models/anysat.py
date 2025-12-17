@@ -4,10 +4,12 @@ This code loads the AnySat model from torch hub. See
 https://github.com/gastruc/AnySat for applicable license and copyright information.
 """
 
-from typing import Any
-
 import torch
 from einops import rearrange
+
+from rslearn.train.model_context import ModelContext
+
+from .component import FeatureExtractor, FeatureMaps
 
 # AnySat github: https://github.com/gastruc/AnySat
 # Modalities and expected resolutions (meters)
@@ -44,7 +46,7 @@ MODALITY_BANDS: dict[str, list[str]] = {
 TIME_SERIES_MODALITIES = {"s2", "s1-asc", "s1", "alos", "l7", "l8", "modis"}
 
 
-class AnySat(torch.nn.Module):
+class AnySat(FeatureExtractor):
     """AnySat backbone (outputs one feature map)."""
 
     def __init__(
@@ -117,17 +119,17 @@ class AnySat(torch.nn.Module):
         )
         self._embed_dim = 768  # base width, 'dense' returns 2x
 
-    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
+    def forward(self, context: ModelContext) -> FeatureMaps:
         """Forward pass for the AnySat model.
 
         Args:
-            inputs: input dicts that must include modalities as keys which are defined in the self.modalities list
+            context: the model context. Input dicts must include modalities as keys
+                which are defined in the self.modalities list
 
         Returns:
-            List[torch.Tensor]: Single-scale feature tensors from the encoder.
+            a FeatureMaps with one feature map at the configured patch size.
         """
-        if not inputs:
-            raise ValueError("empty inputs")
+        inputs = context.inputs
 
         batch: dict[str, torch.Tensor] = {}
         spatial_extent: tuple[float, float] | None = None
@@ -192,7 +194,7 @@ class AnySat(torch.nn.Module):
             kwargs["output_modality"] = self.output_modality
 
         features = self.model(batch, **kwargs)
-        return [rearrange(features, "b h w d -> b d h w")]
+        return FeatureMaps([rearrange(features, "b h w d -> b d h w")])
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.

@@ -2,14 +2,13 @@
 
 import logging
 import tempfile
-from typing import Any
 
 import torch
 from einops import rearrange, repeat
 from huggingface_hub import hf_hub_download
-from torch import nn
 from upath import UPath
 
+from rslearn.models.component import FeatureExtractor, FeatureMaps
 from rslearn.models.presto.single_file_presto import (
     ERA5_BANDS,
     NUM_DYNAMIC_WORLD_CLASSES,
@@ -21,6 +20,7 @@ from rslearn.models.presto.single_file_presto import (
     SRTM_BANDS,
 )
 from rslearn.models.presto.single_file_presto import Presto as SFPresto
+from rslearn.train.model_context import ModelContext
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ HF_HUB_ID = "nasaharvest/presto"
 MODEL_FILENAME = "default_model.pt"
 
 
-class Presto(nn.Module):
+class Presto(FeatureExtractor):
     """Presto."""
 
     input_keys = [
@@ -184,22 +184,26 @@ class Presto(nn.Module):
             x = (x + PRESTO_ADD_BY.to(device=device)) / PRESTO_DIV_BY.to(device=device)
         return x, mask, dynamic_world.long(), months.long()
 
-    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
+    def forward(self, context: ModelContext) -> FeatureMaps:
         """Compute feature maps from the Presto backbone.
 
-        Inputs:
-            inputs
+        Args:
+            context: the model context. Input dicts should have some subset of Presto.input_keys.
+
+        Returns:
+            a FeatureMaps with one feature map that is at the same resolution as the
+                input (since Presto operates per-pixel).
         """
         stacked_inputs = {}
         latlons: torch.Tensor | None = None
-        for key in inputs[0].keys():
+        for key in context.inputs[0].keys():
             # assume all the keys in an input are consistent
             if key in self.input_keys:
                 if key == "latlon":
-                    latlons = torch.stack([inp[key] for inp in inputs], dim=0)
+                    latlons = torch.stack([inp[key] for inp in context.inputs], dim=0)
                 else:
                     stacked_inputs[key] = torch.stack(
-                        [inp[key] for inp in inputs], dim=0
+                        [inp[key] for inp in context.inputs], dim=0
                     )
 
         (
@@ -247,7 +251,9 @@ class Presto(nn.Module):
             )
             output_features[batch_idx : batch_idx + self.pixel_batch_size] = output_b
 
-        return [rearrange(output_features, "(b h w) d -> b d h w", h=h, w=w, b=b)]
+        return FeatureMaps(
+            [rearrange(output_features, "(b h w) d -> b d h w", h=h, w=w, b=b)]
+        )
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.

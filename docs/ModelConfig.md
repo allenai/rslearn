@@ -30,6 +30,10 @@ data:
     # other data related options
 trainer:
   # Lightning trainer options and callbacks.
+# Model management options.
+run_name: # ...
+project_name: # ...
+management_dir: ${MANAGEMENT_DIR}
 ```
 
 The YAML is parsed by jsonargparse, so each section directly configures a Python class
@@ -693,16 +697,51 @@ trainer:
         mode: max
         # We also keep the latest checkpoint.
         save_last: true
-  # The logger can be set to log to something other than the local filesystem, like
-  # W&B.
-  logger:
-    class_path: lightning.pytorch.loggers.WandbLogger
-    init_args:
-      # This is the W&B project name, and run name.
-      # You could set entity here as well, otherwise it will use the default based on
-      # the API key being used.
-      project: land_cover_model
-      name: version_00
+```
+
+## Model Management Options
+
+rslearn provides functionality to automatically manage checkpoints and logging. Without
+it, when running `model test` and `model predict`, the checkpoint needs to be
+explicitly specified using `--ckpt_path`.
+
+If enabled, model management will:
+1. Adjust the `dirpath` of any `ModelCheckpoint` callbacks to save checkpoints in
+   a project directory at `{management_dir}/{project_name}/{run_name}/`.
+2. If training is restarted, resume from the last checkpoint.
+3. During test/predict, automatically load the best checkpoint.
+4. Enable W&B logging and save the W&B run ID to the save project directory (so it can
+   be reused when resuming training).
+5. Save the model config with the W&B run.
+
+Common options are summarized below:
+
+```yaml
+# The management directory. Setting this (default null) enables model management. We
+# recommend setting it to ${MANAGEMENT_DIR} so that it can easily be changed in
+# different environments.
+management_dir: ${MANAGEMENT_DIR}
+# The project name; corresponds to the W&B project.
+project_name: my_project
+# The run name (a name for this experiment); corresponds to the W&B run.
+run_name: my_first_experiment
+# Optional description that will be added to the W&B run.
+run_description: this is my first experiment
+# Which checkpoint to load, if any (default 'auto').
+# 'none' never loads any checkpoint.
+# 'last' loads the most recent checkpoint.
+# 'best' loads the best checkpoint.
+# 'auto' will use 'last' during fit and 'best' during val/test/predict.
+load_checkpoint_mode: auto
+# Whether to fail if the expected checkpoint based on load_checkpoint_mode does not exist (default 'auto').
+# 'yes' will fail while 'no' won't.
+# 'auto' will use 'no' during fit and 'yes' during val/test/predict.
+load_checkpoint_required: auto
+# Whether to log to W&B (default 'auto').
+# 'yes' will enable logging.
+# 'no' will disable logging.
+# 'auto' will use 'yes' during fit and 'no' during val/test/predict.
+log_mode: auto
 ```
 
 ## Using Custom Classes

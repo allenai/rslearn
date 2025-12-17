@@ -19,6 +19,8 @@ from olmoearth_pretrain.train.masking import MaskedOlmoEarthSample, MaskValue
 from upath import UPath
 
 from rslearn.log_utils import get_logger
+from rslearn.models.component import FeatureExtractor, FeatureMaps, TokenFeatureMaps
+from rslearn.train.model_context import ModelContext
 
 logger = get_logger(__name__)
 
@@ -44,7 +46,7 @@ EMBEDDING_SIZES = {
 }
 
 
-class OlmoEarth(torch.nn.Module):
+class OlmoEarth(FeatureExtractor):
     """A wrapper to support the OlmoEarth model."""
 
     def __init__(
@@ -58,6 +60,7 @@ class OlmoEarth(torch.nn.Module):
         random_initialization: bool = False,
         embedding_size: int | None = None,
         autocast_dtype: str | None = "bfloat16",
+        token_pooling: bool = True,
     ):
         """Create a new OlmoEarth model.
 
@@ -81,6 +84,9 @@ class OlmoEarth(torch.nn.Module):
             embedding_size: optional embedding size to report via
                 get_backbone_channels (if model_id is not set).
             autocast_dtype: which dtype to use for autocasting, or set None to disable.
+            token_pooling: whether or not to pool the tokens. If True, the output will be BxCxHxW. If False,
+                there will be an extra dimension, N, (BxCxHxWxN) representing the temporal and channel
+                dimensions.
         """
         if (
             sum(
@@ -131,6 +137,7 @@ class OlmoEarth(torch.nn.Module):
             else:
                 model = model[part]
         self.model = model
+        self.token_pooling = token_pooling
 
     def _load_model_from_checkpoint(
         self, checkpoint_upath: UPath, random_initialization: bool
@@ -153,20 +160,23 @@ class OlmoEarth(torch.nn.Module):
         # Load the checkpoint.
         if not random_initialization:
             train_module_dir = checkpoint_upath / "model_and_optim"
-            if train_module_dir.exists():
-                load_model_and_optim_state(str(train_module_dir), model)
-                logger.info(f"loaded OlmoEarth encoder from {train_module_dir}")
-            else:
-                logger.info(f"could not find OlmoEarth encoder at {train_module_dir}")
+            load_model_and_optim_state(str(train_module_dir), model)
+            logger.info(f"loaded OlmoEarth encoder from {train_module_dir}")
 
         return model
 
-    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
+    def forward(self, context: ModelContext) -> FeatureMaps | TokenFeatureMaps:
         """Compute feature maps from the OlmoEarth backbone.
 
-        Inputs:
-            inputs: input dicts. It should include keys corresponding to the modalities
-                that should be passed to the OlmoEarth model.
+        Args:
+            context: the model context. Input dicts should include keys corresponding
+                to the modalities that should be passed to the OlmoEarth model.
+
+        Returns:
+            a FeatureMaps consisting of one feature map, at 1/patch_size of the input
+                resolution. Embeddings will be pooled across modalities and timesteps.
+                If self.token_pooling is False, then a TokenFeatureMaps is returned, with
+                an additional N dimension for the tokens.
         """
         kwargs = {}
         present_modalities = []
@@ -175,10 +185,10 @@ class OlmoEarth(torch.nn.Module):
         # We assume all multitemporal modalities have the same number of timesteps.
         max_timesteps = 1
         for modality in MODALITY_NAMES:
-            if modality not in inputs[0]:
+            if modality not in context.inputs[0]:
                 continue
             present_modalities.append(modality)
-            cur = torch.stack([inp[modality] for inp in inputs], dim=0)
+            cur = torch.stack([inp[modality] for inp in context.inputs], dim=0)
             device = cur.device
             # Check if it's single or multitemporal, and reshape accordingly
             num_bands = Modality.get(modality).num_bands
@@ -199,7 +209,7 @@ class OlmoEarth(torch.nn.Module):
         # Note that only months (0 to 11) are used in OlmoEarth position encoding.
         # For now, we assign same timestamps to all inputs, but later we should handle varying timestamps per input.
         timestamps = torch.zeros(
-            (len(inputs), max_timesteps, 3), dtype=torch.int32, device=device
+            (len(context.inputs), max_timesteps, 3), dtype=torch.int32, device=device
         )
         timestamps[:, :, 0] = 1  # day
         timestamps[:, :, 1] = torch.arange(max_timesteps, device=device)[
@@ -212,14 +222,14 @@ class OlmoEarth(torch.nn.Module):
 
         # Decide context based on self.autocast_dtype.
         if self.autocast_dtype is None:
-            context = nullcontext()
+            torch_context = nullcontext()
         else:
             assert device is not None
-            context = torch.amp.autocast(
+            torch_context = torch.amp.autocast(
                 device_type=device.type, dtype=self.autocast_dtype
             )
 
-        with context:
+        with torch_context:
             # Currently we assume the provided model always returns a TokensAndMasks object.
             tokens_and_masks: TokensAndMasks
             if isinstance(self.model, Encoder):
@@ -238,16 +248,27 @@ class OlmoEarth(torch.nn.Module):
 
         # Apply temporal/modality pooling so we just have one feature per patch.
         features = []
-        for modality in present_modalities:
-            modality_features = getattr(tokens_and_masks, modality)
-            # Pool over band sets and timesteps (BHWTSC -> BHWC).
-            pooled = modality_features.mean(dim=[3, 4])
-            # We want BHWC -> BCHW.
-            pooled = rearrange(pooled, "b h w c -> b c h w")
-            features.append(pooled)
-        # Pool over the modalities, so we get one BCHW feature map.
-        pooled = torch.stack(features, dim=0).mean(dim=0)
-        return [pooled]
+        if self.token_pooling:
+            for modality in present_modalities:
+                modality_features = getattr(tokens_and_masks, modality)
+                # Pool over band sets and timesteps (BHWTSC -> BHWC).
+                pooled = modality_features.mean(dim=[3, 4])
+                # We want BHWC -> BCHW.
+                pooled = rearrange(pooled, "b h w c -> b c h w")
+                features.append(pooled)
+            # Pool over the modalities, so we get one BCHW feature map.
+            pooled = torch.stack(features, dim=0).mean(dim=0)
+            return FeatureMaps([pooled])
+        else:
+            for modality in present_modalities:
+                modality_features = getattr(tokens_and_masks, modality)
+                # Combine band sets and timesteps into last dim (BHWTSC -> BHWCN).
+                modality_features = rearrange(
+                    modality_features, "b h w t s c -> b c h w (t s)"
+                )
+                features.append(modality_features)
+            pooled = torch.cat(features, dim=-1)
+            return TokenFeatureMaps([pooled])
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.

@@ -131,6 +131,9 @@ be merged/mosaicked together to form one raster or vector file for the window. I
 are multiple sub-lists, it typically corresponds to multi-temporal data, and each one
 will result in a different raster or vector file after the data is materialized.
 
+Materialization will use the first item group in `item_groups` to populate
+`layers/LAYER_NAME`, the second to populate `layers/LAYER_NAME.1`, and so on.
+
 For example, consider this query configuration for a data source
 (see [DatasetConfig](DatasetConfig.md) for details):
 

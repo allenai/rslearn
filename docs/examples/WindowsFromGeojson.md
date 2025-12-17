@@ -25,10 +25,12 @@ create the dataset configuration file at `/path/to/dataset/config.json` as follo
                 "bands": ["R", "G", "B"]
             }],
             "data_source": {
-                "name": "rslearn.data_sources.gcp_public_data.Sentinel2",
-                "index_cache_dir": "cache/sentinel2/",
-                "sort_by": "cloud_cover",
-                "use_rtree_index": false
+                "class_path": "rslearn.data_sources.gcp_public_data.Sentinel2",
+                "init_args": {
+                  "index_cache_dir": "cache/sentinel2/",
+                  "sort_by": "cloud_cover",
+                  "use_rtree_index": false
+                }
             }
         }
     }
@@ -101,8 +103,10 @@ Add a new layer to the dataset configuration file:
                 "coordinate_mode": "crs"
             },
             "data_source": {
-                "name": "rslearn.data_sources.local_files.LocalFiles",
-                "src_dir": "source_data/all/"
+                "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                "init_args": {
+                  "src_dir": "source_data/all/"
+                }
             }
         }
     }
@@ -328,23 +332,22 @@ trainer:
         save_last: true
         monitor: val_mAP
         mode: max
-        dirpath: ./marine_infrastructure_checkpoints/
     # We freeze the SatlasPretrain backbone for one epoch before unfreezing.
     - class_path: rslearn.train.callbacks.freeze_unfreeze.FreezeUnfreeze
       init_args:
         module_selector: ["model", "encoder", 0, "model"]
         unfreeze_at_epoch: 1
-  # Here we configure logging to W&B. You can omit this if you do not use W&B.
-  logger:
-    class_path: lightning.pytorch.loggers.WandbLogger
-    init_args:
-      project: marine_infrastructure
-      name: satlaspretrain_finetune
+# Here we enable automatic checkpoint management and logging to W&B.
+# Set WANDB_MODE=offline to disable online logging.
+project_name: marine_infrastructure
+run_name: satlaspretrain_finetune
+management_dir: ${MANAGEMENT_DIR}
 ```
 
 After saving this as `model.yaml`, we can now start the fine-tuning:
 
 ```
+export MANAGEMENT_DIR=./project_data
 rslearn model fit --config model.yaml
 ```
 
@@ -354,10 +357,7 @@ We can evaluate the model on the validation set, and visualize its outputs as we
 
 ```
 mkdir ./vis/
-# Replace with the name of the checkpoint other than last.ckpt in the
-# marine_infrastructure_checkpoints folder. This should correspond to the one that had
-# the highest mAP on the validation set.
-rslearn model test --config model.yaml --model.init_args.visualize_dir=./vis --ckpt_path marine_infrastructure_checkpoints/epoch=82-step=996.ckpt
+rslearn model test --config model.yaml --model.init_args.visualize_dir=./vis
 ```
 
 It should print out the metrics. The F1_0.05 should correspond to the best F1 over many

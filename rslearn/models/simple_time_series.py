@@ -4,11 +4,15 @@ from typing import Any
 
 import torch
 
+from rslearn.train.model_context import ModelContext
 
-class SimpleTimeSeries(torch.nn.Module):
-    """SimpleTimeSeries wraps another encoder and applies it on an image time series.
+from .component import FeatureExtractor, FeatureMaps
 
-    It independently applies the other encoder on each image in the time series to
+
+class SimpleTimeSeries(FeatureExtractor):
+    """SimpleTimeSeries wraps another FeatureExtractor and applies it on an image time series.
+
+    It independently applies the other FeatureExtractor on each image in the time series to
     extract feature maps. It then provides a few ways to combine the features into one
     final feature map:
     - Temporal max pooling.
@@ -19,7 +23,7 @@ class SimpleTimeSeries(torch.nn.Module):
 
     def __init__(
         self,
-        encoder: torch.nn.Module,
+        encoder: FeatureExtractor,
         image_channels: int | None = None,
         op: str = "max",
         groups: list[list[int]] | None = None,
@@ -31,9 +35,9 @@ class SimpleTimeSeries(torch.nn.Module):
         """Create a new SimpleTimeSeries.
 
         Args:
-            encoder: the underlying encoder. It must provide get_backbone_channels
-                function that returns the output channels, or backbone_channels must be
-                set.
+            encoder: the underlying FeatureExtractor. It must provide get_backbone_channels
+                function that returns the output channels, or backbone_channels must be set.
+                It must output a FeatureMaps.
             image_channels: the number of channels per image of the time series. The
                 input should have multiple images concatenated on the channel axis, so
                 this parameter is used to distinguish the different images.
@@ -179,24 +183,27 @@ class SimpleTimeSeries(torch.nn.Module):
 
     def forward(
         self,
-        inputs: list[dict[str, Any]],
-    ) -> list[torch.Tensor]:
+        context: ModelContext,
+    ) -> FeatureMaps:
         """Compute outputs from the backbone.
 
-        Inputs:
-            inputs: input dicts that must include "image" key containing the image time
+        Args:
+            context: the model context. Input dicts must include "image" key containing the image time
                 series to process (with images concatenated on the channel dimension).
+
+        Returns:
+            the FeatureMaps aggregated temporally.
         """
         # First get features of each image.
         # To do so, we need to split up each grouped image into its component images (which have had their channels stacked).
         batched_inputs: list[dict[str, Any]] | None = None
-        n_batch = len(inputs)
+        n_batch = len(context.inputs)
         n_images: int | None = None
 
         if self.image_keys is not None:
             for image_key, image_channels in self.image_keys.items():
                 batched_images = self._get_batched_images(
-                    inputs, image_key, image_channels
+                    context.inputs, image_key, image_channels
                 )
 
                 if batched_inputs is None:
@@ -213,13 +220,26 @@ class SimpleTimeSeries(torch.nn.Module):
         else:
             assert self.image_channels is not None
             batched_images = self._get_batched_images(
-                inputs, self.image_key, self.image_channels
+                context.inputs, self.image_key, self.image_channels
             )
             batched_inputs = [{self.image_key: image} for image in batched_images]
             n_images = batched_images.shape[0] // n_batch
 
         assert n_images is not None
 
+        # Now we can apply the underlying FeatureExtractor.
+        # Its output must be a FeatureMaps.
+        assert batched_inputs is not None
+        encoder_output = self.encoder(
+            ModelContext(
+                inputs=batched_inputs,
+                metadatas=context.metadatas,
+            )
+        )
+        if not isinstance(encoder_output, FeatureMaps):
+            raise ValueError(
+                "output of underlying FeatureExtractor in SimpleTimeSeries must be a FeatureMaps"
+            )
         all_features = [
             feat_map.reshape(
                 n_batch,
@@ -228,7 +248,7 @@ class SimpleTimeSeries(torch.nn.Module):
                 feat_map.shape[2],
                 feat_map.shape[3],
             )
-            for feat_map in self.encoder(batched_inputs)
+            for feat_map in encoder_output.feature_maps
         ]
 
         # Groups defaults to flattening all the feature maps.
@@ -284,7 +304,7 @@ class SimpleTimeSeries(torch.nn.Module):
                         .permute(0, 3, 1, 2)
                     )
                 else:
-                    raise Exception(f"unknown aggregation op {self.op}")
+                    raise ValueError(f"unknown aggregation op {self.op}")
 
                 aggregated_features.append(group_features)
 
@@ -293,4 +313,4 @@ class SimpleTimeSeries(torch.nn.Module):
 
             output_features.append(aggregated_features)
 
-        return output_features
+        return FeatureMaps(output_features)

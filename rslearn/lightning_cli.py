@@ -21,6 +21,7 @@ from rslearn.log_utils import get_logger
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.utils.fsspec import open_atomic
+from rslearn.utils.jsonargparse import init_jsonargparse
 
 WANDB_ID_FNAME = "wandb_id"
 
@@ -215,7 +216,11 @@ class RslearnLightningCLI(LightningCLI):
             # actually know which one is the best.
             best_checkpoint = None
             best_epochs = None
-            for option in project_dir.iterdir():
+
+            # Avoid error in case project_dir doesn't exist.
+            fnames = project_dir.iterdir() if project_dir.exists() else []
+
+            for option in fnames:
                 if not option.name.endswith(".ckpt"):
                     continue
 
@@ -325,8 +330,11 @@ class RslearnLightningCLI(LightningCLI):
                     }
                 )
                 c.trainer.callbacks.append(upload_wandb_callback)
-        else:
-            c.trainer.logger = jsonargparse.Namespace({})
+        elif c.trainer.logger:
+            logger.warning(
+                "Model management is enabled and logging should be off, but the model config specifies a logger. "
+                + "The logger should be removed from the model config, since it will not be automatically disabled."
+            )
 
         if subcommand == "fit":
             # Set the checkpoint directory to match the project directory.
@@ -415,16 +423,17 @@ class RslearnLightningCLI(LightningCLI):
         if subcommand == "predict":
             c.return_predictions = False
 
-        # For now we use DDP strategy with find_unused_parameters=True.
+        # Default to DDP with find_unused_parameters. Likely won't get called with unified config
         if subcommand == "fit":
-            c.trainer.strategy = jsonargparse.Namespace(
-                {
-                    "class_path": "lightning.pytorch.strategies.DDPStrategy",
-                    "init_args": jsonargparse.Namespace(
-                        {"find_unused_parameters": True}
-                    ),
-                }
-            )
+            if not c.trainer.strategy:
+                c.trainer.strategy = jsonargparse.Namespace(
+                    {
+                        "class_path": "lightning.pytorch.strategies.DDPStrategy",
+                        "init_args": jsonargparse.Namespace(
+                            {"find_unused_parameters": True}
+                        ),
+                    }
+                )
 
         if c.management_dir:
             self.enable_project_management(c.management_dir)
@@ -432,6 +441,8 @@ class RslearnLightningCLI(LightningCLI):
 
 def model_handler() -> None:
     """Handler for any rslearn model X commands."""
+    init_jsonargparse()
+
     RslearnLightningCLI(
         model_class=RslearnLightningModule,
         datamodule_class=RslearnDataModule,

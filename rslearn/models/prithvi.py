@@ -25,8 +25,11 @@ from timm.layers import to_2tuple
 from timm.models.vision_transformer import Block
 from torch.nn import functional as F
 
+from rslearn.train.model_context import ModelContext
 from rslearn.train.transforms.normalize import Normalize
 from rslearn.train.transforms.transform import Transform
+
+from .component import FeatureExtractor, FeatureMaps
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +80,7 @@ def get_config(cache_dir: Path, hf_hub_id: str, hf_hub_revision: str) -> dict[st
         return json.load(f)["pretrained_cfg"]
 
 
-class PrithviV2(nn.Module):
+class PrithviV2(FeatureExtractor):
     """An Rslearn wrapper for Prithvi 2.0."""
 
     INPUT_KEY = "image"
@@ -157,18 +160,18 @@ class PrithviV2(nn.Module):
         )
         return data
 
-    def forward(self, inputs: list[dict[str, Any]]) -> list[torch.Tensor]:
+    def forward(self, context: ModelContext) -> FeatureMaps:
         """Compute feature maps from the Prithvi V2 backbone.
 
         Args:
-            inputs: input dicts that must include "image" key containing HLS
-                (Harmonized Landsat-Sentinel) data.
+            context: the model context. Input dicts must include "image" key containing
+                HLS (Harmonized Landsat-Sentinel) data.
 
         Returns:
-            11 feature maps (one per transformer block in the Prithvi model),
-            of shape [B, H/p_s, W/p_s, D=1024] where p_s=16 is the patch size.
+            a FeatureMaps with one map of shape [B, H/p_s, W/p_s, 11*1024] that contains stacked
+                feature maps across the 11 transformer blocks.
         """
-        x = torch.stack([inp[self.INPUT_KEY] for inp in inputs], dim=0)
+        x = torch.stack([inp[self.INPUT_KEY] for inp in context.inputs], dim=0)
         x = self._resize_data(x)
         num_timesteps = x.shape[1] // len(self.bands)
         x = rearrange(x, "b (t c) h w -> b c t h w", t=num_timesteps)
@@ -177,9 +180,10 @@ class PrithviV2(nn.Module):
         # know the number of timesteps and don't need to recompute it.
         # in addition we average along the time dimension (instead of concatenating)
         # to keep the embeddings reasonably sized.
-        return self.model.encoder.prepare_features_for_image_model(
+        result = self.model.encoder.prepare_features_for_image_model(
             features, num_timesteps
         )
+        return FeatureMaps([torch.cat(result, dim=1)])
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.

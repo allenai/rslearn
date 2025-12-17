@@ -2,13 +2,15 @@
 
 import itertools
 from collections.abc import Iterable, Iterator
+from dataclasses import replace
 from typing import Any
 
 import shapely
 import torch
 
 from rslearn.dataset import Window
-from rslearn.train.dataset import ModelDataset
+from rslearn.train.dataset import DataInput, ModelDataset
+from rslearn.train.model_context import SampleMetadata
 from rslearn.utils.geometry import PixelBounds, STGeometry
 
 
@@ -60,13 +62,17 @@ def pad_slice_protect(
     raw_inputs: dict[str, Any],
     passthrough_inputs: dict[str, Any],
     patch_size: tuple[int, int],
+    inputs: dict[str, DataInput],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Pad tensors in-place by patch size to protect slicing near right/bottom edges.
+
+    The padding is scaled based on each input's resolution_factor.
 
     Args:
         raw_inputs: the raw inputs to pad.
         passthrough_inputs: the passthrough inputs to pad.
-        patch_size: the size of the patches to extract.
+        patch_size: the size of the patches to extract (at window resolution).
+        inputs: the DataInput definitions, used to get resolution_factor per input.
 
     Returns:
         a tuple of (raw_inputs, passthrough_inputs).
@@ -75,8 +81,14 @@ def pad_slice_protect(
         for input_name, value in list(d.items()):
             if not isinstance(value, torch.Tensor):
                 continue
+            # Get resolution scale for this input
+            rf = inputs[input_name].resolution_factor
+            scale = rf.numerator / rf.denominator
+            # Scale the padding amount
+            scaled_pad_x = int(patch_size[0] * scale)
+            scaled_pad_y = int(patch_size[1] * scale)
             d[input_name] = torch.nn.functional.pad(
-                value, pad=(0, patch_size[0], 0, patch_size[1])
+                value, pad=(0, scaled_pad_x, 0, scaled_pad_y)
             )
     return raw_inputs, passthrough_inputs
 
@@ -121,6 +133,7 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
         self.rank = rank
         self.world_size = world_size
         self.windows = self.dataset.get_dataset_examples()
+        self.inputs = dataset.inputs
 
     def set_name(self, name: str) -> None:
         """Sets dataset name.
@@ -218,7 +231,7 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
 
     def __iter__(
         self,
-    ) -> Iterator[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
+    ) -> Iterator[tuple[dict[str, Any], dict[str, Any], SampleMetadata]]:
         """Iterate over all patches in each element of the underlying ModelDataset."""
         # Iterate over the window IDs until we have returned enough samples.
         window_ids, num_samples_needed = self._get_worker_iteration_data()
@@ -229,12 +242,14 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                 raw_inputs, passthrough_inputs, metadata = self.dataset.get_raw_inputs(
                     window_id
                 )
-                bounds = metadata["bounds"]
+                bounds = metadata.patch_bounds
 
                 # For simplicity, pad tensors by patch size to ensure that any patch bounds
                 # extending outside the window bounds will not have issues when we slice
-                # the tensors later.
-                pad_slice_protect(raw_inputs, passthrough_inputs, self.patch_size)
+                # the tensors later. Padding is scaled per-input based on resolution_factor.
+                pad_slice_protect(
+                    raw_inputs, passthrough_inputs, self.patch_size, self.inputs
+                )
 
                 # Now iterate over the patches and extract/yield the crops.
                 # Note that, in case user is leveraging RslearnWriter, it is important that
@@ -244,7 +259,7 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                 )
                 for patch_idx, patch_bounds in enumerate(patches):
                     cur_geom = STGeometry(
-                        metadata["projection"], shapely.box(*patch_bounds), None
+                        metadata.projection, shapely.box(*patch_bounds), None
                     )
                     start_offset = (
                         patch_bounds[0] - bounds[0],
@@ -256,15 +271,28 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                     )
 
                     # Define a helper function to handle each input dict.
+                    # Crop coordinates are scaled based on each input's resolution_factor.
                     def crop_input_dict(d: dict[str, Any]) -> dict[str, Any]:
                         cropped = {}
                         for input_name, value in d.items():
                             if isinstance(value, torch.Tensor):
-                                # Crop the CHW tensor.
+                                # Get resolution scale for this input
+                                rf = self.inputs[input_name].resolution_factor
+                                scale = rf.numerator / rf.denominator
+                                # Scale the crop coordinates
+                                scaled_start = (
+                                    int(start_offset[0] * scale),
+                                    int(start_offset[1] * scale),
+                                )
+                                scaled_end = (
+                                    int(end_offset[0] * scale),
+                                    int(end_offset[1] * scale),
+                                )
+                                # Crop the CHW tensor with scaled coordinates.
                                 cropped[input_name] = value[
                                     :,
-                                    start_offset[1] : end_offset[1],
-                                    start_offset[0] : end_offset[0],
+                                    scaled_start[1] : scaled_end[1],
+                                    scaled_start[0] : scaled_end[0],
                                 ].clone()
                             elif isinstance(value, list):
                                 cropped[input_name] = [
@@ -282,10 +310,12 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                     cur_passthrough_inputs = crop_input_dict(passthrough_inputs)
 
                     # Adjust the metadata as well.
-                    cur_metadata = metadata.copy()
-                    cur_metadata["bounds"] = patch_bounds
-                    cur_metadata["patch_idx"] = patch_idx
-                    cur_metadata["num_patches"] = len(patches)
+                    cur_metadata = replace(
+                        metadata,
+                        patch_bounds=patch_bounds,
+                        patch_idx=patch_idx,
+                        num_patches_in_window=len(patches),
+                    )
 
                     # Now we can compute input and target dicts via the task.
                     input_dict, target_dict = self.dataset.task.process_inputs(
@@ -297,7 +327,6 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                     input_dict, target_dict = self.dataset.transforms(
                         input_dict, target_dict
                     )
-                    input_dict["dataset_source"] = self.dataset.name
 
                     if num_samples_returned < num_samples_needed:
                         yield input_dict, target_dict, cur_metadata
@@ -345,8 +374,9 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
             round(self.patch_size[1] * overlap_ratio),
         )
         self.windows = self.dataset.get_dataset_examples()
+        self.inputs = dataset.inputs
         self.window_cache: dict[
-            int, tuple[dict[str, Any], dict[str, Any], dict[str, Any]]
+            int, tuple[dict[str, Any], dict[str, Any], SampleMetadata]
         ] = {}
 
         # Precompute the batch boundaries for each window
@@ -360,7 +390,7 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
 
     def get_raw_inputs(
         self, index: int
-    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    ) -> tuple[dict[str, Any], dict[str, Any], SampleMetadata]:
         """Get the raw inputs for a single patch. Retrieve from cache if possible.
 
         Also crops/pads the tensors by patch size to protect slicing near right/bottom edges.
@@ -375,26 +405,41 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
             return self.window_cache[index]
 
         raw_inputs, passthrough_inputs, metadata = self.dataset.get_raw_inputs(index)
-        pad_slice_protect(raw_inputs, passthrough_inputs, self.patch_size)
+        pad_slice_protect(raw_inputs, passthrough_inputs, self.patch_size, self.inputs)
 
         self.window_cache[index] = (raw_inputs, passthrough_inputs, metadata)
         return self.window_cache[index]
 
-    @staticmethod
     def _crop_input_dict(
+        self,
         d: dict[str, Any],
         start_offset: tuple[int, int],
         end_offset: tuple[int, int],
         cur_geom: STGeometry,
     ) -> dict[str, Any]:
-        """Crop a dictionary of inputs to the given bounds."""
+        """Crop a dictionary of inputs to the given bounds.
+
+        Crop coordinates are scaled based on each input's resolution_factor.
+        """
         cropped = {}
         for input_name, value in d.items():
             if isinstance(value, torch.Tensor):
+                # Get resolution scale for this input
+                rf = self.inputs[input_name].resolution_factor
+                scale = rf.numerator / rf.denominator
+                # Scale the crop coordinates
+                scaled_start = (
+                    int(start_offset[0] * scale),
+                    int(start_offset[1] * scale),
+                )
+                scaled_end = (
+                    int(end_offset[0] * scale),
+                    int(end_offset[1] * scale),
+                )
                 cropped[input_name] = value[
                     :,
-                    start_offset[1] : end_offset[1],
-                    start_offset[0] : end_offset[0],
+                    scaled_start[1] : scaled_end[1],
+                    scaled_start[0] : scaled_end[0],
                 ].clone()
             elif isinstance(value, list):
                 cropped[input_name] = [
@@ -410,13 +455,13 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
 
     def __getitem__(
         self, index: int
-    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    ) -> tuple[dict[str, Any], dict[str, Any], SampleMetadata]:
         """Return (input_dict, target_dict, metadata) for a single flattened patch."""
         (window_id, patch_bounds, (patch_idx, num_patches)) = self.patches[index]
         raw_inputs, passthrough_inputs, metadata = self.get_raw_inputs(window_id)
-        bounds = metadata["bounds"]
+        bounds = metadata.patch_bounds
 
-        cur_geom = STGeometry(metadata["projection"], shapely.box(*patch_bounds), None)
+        cur_geom = STGeometry(metadata.projection, shapely.box(*patch_bounds), None)
         start_offset = (patch_bounds[0] - bounds[0], patch_bounds[1] - bounds[1])
         end_offset = (patch_bounds[2] - bounds[0], patch_bounds[3] - bounds[1])
 
@@ -428,10 +473,12 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
         )
 
         # Adjust the metadata as well.
-        cur_metadata = metadata.copy()
-        cur_metadata["bounds"] = patch_bounds
-        cur_metadata["patch_idx"] = patch_idx
-        cur_metadata["num_patches"] = num_patches
+        cur_metadata = replace(
+            metadata,
+            patch_bounds=patch_bounds,
+            patch_idx=patch_idx,
+            num_patches_in_window=num_patches,
+        )
 
         # Now we can compute input and target dicts via the task.
         input_dict, target_dict = self.dataset.task.process_inputs(
@@ -441,7 +488,6 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
         )
         input_dict.update(cur_passthrough_inputs)
         input_dict, target_dict = self.dataset.transforms(input_dict, target_dict)
-        input_dict["dataset_source"] = self.dataset.name
 
         return input_dict, target_dict, cur_metadata
 

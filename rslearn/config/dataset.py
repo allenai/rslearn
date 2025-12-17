@@ -25,12 +25,13 @@ from rasterio.enums import Resampling
 from upath import UPath
 
 from rslearn.log_utils import get_logger
-from rslearn.utils import PixelBounds, Projection
+from rslearn.utils.geometry import PixelBounds, Projection, ResolutionFactor
 from rslearn.utils.raster_format import RasterFormat
 from rslearn.utils.vector_format import VectorFormat
 
 if TYPE_CHECKING:
     from rslearn.data_sources.data_source import DataSource
+    from rslearn.dataset.storage.storage import WindowStorageFactory
 
 logger = get_logger("__name__")
 
@@ -132,7 +133,11 @@ class BandSetConfig(BaseModel):
     bands.
     """
 
-    dtype: DType = Field(description="Pixel value type to store the data under")
+    model_config = ConfigDict(extra="forbid")
+
+    dtype: DType = Field(
+        description="Pixel value type to store the data under. This is used during dataset materialize and model predict."
+    )
     bands: list[str] = Field(
         default_factory=lambda: [],
         description="List of band names in this BandSetConfig. One of bands or num_bands must be set.",
@@ -210,22 +215,12 @@ class BandSetConfig(BaseModel):
         Returns:
             tuple of updated projection and bounds with zoom offset applied
         """
-        if self.zoom_offset == 0:
-            return projection, bounds
-        projection = Projection(
-            projection.crs,
-            projection.x_resolution / (2**self.zoom_offset),
-            projection.y_resolution / (2**self.zoom_offset),
-        )
-        if self.zoom_offset > 0:
-            zoom_factor = 2**self.zoom_offset
-            bounds = tuple(x * zoom_factor for x in bounds)  # type: ignore
+        if self.zoom_offset >= 0:
+            factor = ResolutionFactor(numerator=2**self.zoom_offset)
         else:
-            bounds = tuple(
-                x // (2 ** (-self.zoom_offset))
-                for x in bounds  # type: ignore
-            )
-        return projection, bounds
+            factor = ResolutionFactor(denominator=2 ** (-self.zoom_offset))
+
+        return (factor.multiply_projection(projection), factor.multiply_bounds(bounds))
 
     @field_validator("format", mode="before")
     @classmethod
@@ -243,6 +238,9 @@ class BandSetConfig(BaseModel):
             "`format = {'name': ...}` is deprecated; "
             "use `{'class_path': '...', 'init_args': {...}}` instead.",
             DeprecationWarning,
+        )
+        logger.warning(
+            "BandSet.format uses legacy format; support will be removed after 2026-03-01."
         )
 
         legacy_name_to_class_path = {
@@ -326,7 +324,7 @@ class TimeMode(StrEnum):
 class QueryConfig(BaseModel):
     """A configuration for querying items in a data source."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     space_mode: SpaceMode = Field(
         default=SpaceMode.MOSAIC,
@@ -360,7 +358,7 @@ class QueryConfig(BaseModel):
 class DataSourceConfig(BaseModel):
     """Configuration for a DataSource in a dataset layer."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     class_path: str = Field(description="Class path for the data source.")
     init_args: dict[str, Any] = Field(
@@ -408,6 +406,9 @@ class DataSourceConfig(BaseModel):
             "`Data source configuration {'name': ...}` is deprecated; "
             "use `{'class_path': '...', 'init_args': {...}, ...}` instead.",
             DeprecationWarning,
+        )
+        logger.warning(
+            "Data source configuration uses legacy format; support will be removed after 2026-03-01."
         )
 
         # Split the dict into the base config that is in the pydantic model, and the
@@ -463,7 +464,7 @@ class CompositingMethod(StrEnum):
 class LayerConfig(BaseModel):
     """Configuration of a layer in a dataset."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     type: LayerType = Field(description="The LayerType (raster or vector).")
     data_source: DataSourceConfig | None = Field(
@@ -586,11 +587,51 @@ class LayerConfig(BaseModel):
         return vector_format
 
 
+class StorageConfig(BaseModel):
+    """Configuration for the WindowStorageFactory (window metadata storage backend)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    class_path: str = Field(
+        default="rslearn.dataset.storage.file.FileWindowStorageFactory",
+        description="Class path for the WindowStorageFactory.",
+    )
+    init_args: dict[str, Any] = Field(
+        default_factory=lambda: {},
+        description="jsonargparse init args for the WindowStorageFactory.",
+    )
+
+    def instantiate_window_storage_factory(self) -> "WindowStorageFactory":
+        """Instantiate the WindowStorageFactory specified by this config."""
+        from rslearn.dataset.storage.storage import WindowStorageFactory
+        from rslearn.utils.jsonargparse import init_jsonargparse
+
+        init_jsonargparse()
+        parser = jsonargparse.ArgumentParser()
+        parser.add_argument("--wsf", type=WindowStorageFactory)
+        cfg = parser.parse_object(
+            {
+                "wsf": dict(
+                    class_path=self.class_path,
+                    init_args=self.init_args,
+                )
+            }
+        )
+        wsf = parser.instantiate_classes(cfg).wsf
+        return wsf
+
+
 class DatasetConfig(BaseModel):
     """Overall dataset configuration."""
+
+    model_config = ConfigDict(extra="forbid")
 
     layers: dict[str, LayerConfig] = Field(description="Layers in the dataset.")
     tile_store: dict[str, Any] = Field(
         default={"class_path": "rslearn.tile_stores.default.DefaultTileStore"},
         description="jsonargparse configuration for the TileStore.",
+    )
+    storage: StorageConfig = Field(
+        default_factory=lambda: StorageConfig(),
+        description="jsonargparse configuration for the WindowStorageFactory.",
     )
