@@ -178,7 +178,7 @@ class OlmoEarth(FeatureExtractor):
         present_modalities = []
         device = None
 
-        # First pass: find global max_timesteps across all modalities
+        # First pass: find global max_timesteps across all modalities and samples
         # TODO: currently we assume all modalities have the same number of timesteps,
         # which is not true for all cases, and time series time steps are assumed to
         # be 1-month apart. It also assumes continuity between available timesteps.
@@ -232,9 +232,9 @@ class OlmoEarth(FeatureExtractor):
                 dtype=torch.int32,
                 device=device,
             )
-            for i, orig_t in enumerate(original_timesteps):
+            for sample_idx, orig_t in enumerate(original_timesteps):
                 if orig_t < max_timesteps:
-                    mask[i, :, :, orig_t:, :] = MaskValue.MISSING.value
+                    mask[sample_idx, :, :, orig_t:, :] = MaskValue.MISSING.value
             kwargs[f"{modality}_mask"] = mask
 
         # Timestamps is required.
@@ -280,9 +280,16 @@ class OlmoEarth(FeatureExtractor):
             tokens_and_masks: TokensAndMasks
             if isinstance(self.model, Encoder):
                 # Encoder has a fast_pass argument to indicate mask is not needed.
+                # Check if we can bypass masks (fast_pass=True)
+                fast_pass = True
+                for modality in present_modalities:
+                    if torch.any(sample[f"{modality}_mask"] == MaskValue.MISSING.value):
+                        fast_pass = False
+                        break
+                
                 tokens_and_masks = self.model(
                     sample,
-                    fast_pass=True,
+                    fast_pass=fast_pass,
                     patch_size=self.patch_size,
                     **self.forward_kwargs,
                 )["tokens_and_masks"]
