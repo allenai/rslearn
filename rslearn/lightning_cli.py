@@ -21,6 +21,7 @@ from rslearn.log_utils import get_logger
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.utils.fsspec import open_atomic
+from rslearn.utils.jsonargparse import init_jsonargparse
 
 WANDB_ID_FNAME = "wandb_id"
 
@@ -415,16 +416,17 @@ class RslearnLightningCLI(LightningCLI):
         if subcommand == "predict":
             c.return_predictions = False
 
-        # For now we use DDP strategy with find_unused_parameters=True.
+        # Default to DDP with find_unused_parameters. Likely won't get called with unified config
         if subcommand == "fit":
-            c.trainer.strategy = jsonargparse.Namespace(
-                {
-                    "class_path": "lightning.pytorch.strategies.DDPStrategy",
-                    "init_args": jsonargparse.Namespace(
-                        {"find_unused_parameters": True}
-                    ),
-                }
-            )
+            if not c.trainer.strategy:
+                c.trainer.strategy = jsonargparse.Namespace(
+                    {
+                        "class_path": "lightning.pytorch.strategies.DDPStrategy",
+                        "init_args": jsonargparse.Namespace(
+                            {"find_unused_parameters": True}
+                        ),
+                    }
+                )
 
         if c.management_dir:
             self.enable_project_management(c.management_dir)
@@ -432,6 +434,8 @@ class RslearnLightningCLI(LightningCLI):
 
 def model_handler() -> None:
     """Handler for any rslearn model X commands."""
+    init_jsonargparse()
+
     RslearnLightningCLI(
         model_class=RslearnLightningModule,
         datamodule_class=RslearnDataModule,

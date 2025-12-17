@@ -186,7 +186,7 @@ class TestResolutionFactor:
                     dtype=DType.INT32,
                     is_target=True,
                     # Here we set the resolution factor so the target is 2x2.
-                    resolution_factor=ResolutionFactor(numerator=2),
+                    resolution_factor=ResolutionFactor(denominator=2),
                 ),
             ),
             path=str(ds_path),
