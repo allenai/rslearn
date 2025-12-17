@@ -41,9 +41,19 @@ class Resize(Transform):
     def apply_resize(self, image: torch.Tensor) -> torch.Tensor:
         """Apply resizing on the specified image.
 
+        If the image is 2D, it is unsqueezed to 3D and then squeezed
+        back after resizing.
+
         Args:
             image: the image to transform.
         """
+        if image.dim() == 2:
+            image = image.unsqueeze(0)  # (H, W) -> (1, H, W)
+            result = torchvision.transforms.functional.resize(
+                image, self.target_size, self.interpolation
+            )
+            return result.squeeze(0)  # (1, H, W) -> (H, W)
+
         return torchvision.transforms.functional.resize(
             image, self.target_size, self.interpolation
         )
