@@ -34,6 +34,11 @@ class RasterImage:
     image: torch.Tensor
     timestamps: list[tuple[datetime, datetime]] | None = None
 
+    @property
+    def shape(self) -> torch.Size:
+        """The shape of the image."""
+        return self.image.shape
+
 
 def get_bandset_dirname(bands: list[str]) -> str:
     """Get the directory name that should be used to store the given group of bands."""
