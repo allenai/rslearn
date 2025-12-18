@@ -2,6 +2,7 @@
 
 import json
 from contextlib import nullcontext
+from datetime import datetime
 from typing import Any
 
 import torch
@@ -165,6 +166,24 @@ class OlmoEarth(FeatureExtractor):
 
         return model
 
+    @staticmethod
+    def time_ranges_to_timestamps(
+        time_ranges: list[tuple[datetime, datetime]], device: torch.device
+    ) -> torch.Tensor:
+        """Turn the time ranges stored in a RasterImage to timestamps accepted by OlmoEarth."""
+        timestamps = torch.zeros(
+            (len(time_ranges), 3), dtype=torch.int32, device=device
+        )
+        mid_ranges = (t[0] + ((t[1] - t[0]) / 2) for t in time_ranges)
+
+        timestamps[:, 0] = torch.tensor([d.day for d in mid_ranges], dtype=torch.int32)
+        # months are indexed 0-11
+        timestamps[:, 1] = torch.tensor(
+            [d.month - 1 for d in mid_ranges], dtype=torch.int32
+        )
+        timestamps[:, 2] = torch.tensor([d.year for d in mid_ranges], dtype=torch.int32)
+        return timestamps
+
     def forward(self, context: ModelContext) -> FeatureMaps | TokenFeatureMaps:
         """Compute feature maps from the OlmoEarth backbone.
 
@@ -184,17 +203,41 @@ class OlmoEarth(FeatureExtractor):
         # Handle the case where some modalities are multitemporal and some are not.
         # We assume all multitemporal modalities have the same number of timesteps.
         max_timesteps = 1
+        timestamps = None
         for modality in MODALITY_NAMES:
             if modality not in context.inputs[0]:
                 continue
             present_modalities.append(modality)
-            cur = torch.stack([inp[modality] for inp in context.inputs], dim=0)
+            cur = torch.stack([inp[modality].image for inp in context.inputs], dim=0)
             device = cur.device
             # Check if it's single or multitemporal, and reshape accordingly
-            num_bands = Modality.get(modality).num_bands
-            num_timesteps = cur.shape[1] // num_bands
+            num_timesteps = cur.image.shape[2]
+            # check if we need to recompute timesteps. For now, we assign the
+            # same timestamps to all inputs. Future iterations of OlmoEarth should
+            # handle varying timestamps per input.
+            if context.inputs[0][modality].timestamps is not None:
+                if timestamps is None:
+                    timestamps = torch.stack(
+                        [
+                            self.time_ranges_to_timestamps(
+                                inp[modality].timestamps, device
+                            )
+                            for inp in context.inputs
+                        ],
+                        dim=0,
+                    )
+                elif len(context.inputs[0][modality].timestamps) > timestamps.shape[0]:
+                    timestamps = torch.stack(
+                        [
+                            self.time_ranges_to_timestamps(
+                                inp[modality].timestamps, device
+                            )
+                            for inp in context.inputs
+                        ],
+                        dim=0,
+                    )
             max_timesteps = max(max_timesteps, num_timesteps)
-            cur = rearrange(cur, "b (t c) h w -> b h w t c", t=num_timesteps)
+            cur = rearrange(cur, "b c t h w -> b h w t c")
             kwargs[modality] = cur
             # Create mask array which is BHWTS (without channels but with band sets).
             num_band_sets = len(Modality.get(modality).band_sets)
@@ -205,17 +248,10 @@ class OlmoEarth(FeatureExtractor):
             )
             kwargs[f"{modality}_mask"] = mask
 
-        # Timestamps is required.
+        if timestamps is None:
+            # Timestamps is required.
+            raise ValueError("No inputs had timestamps.")
         # Note that only months (0 to 11) are used in OlmoEarth position encoding.
-        # For now, we assign same timestamps to all inputs, but later we should handle varying timestamps per input.
-        timestamps = torch.zeros(
-            (len(context.inputs), max_timesteps, 3), dtype=torch.int32, device=device
-        )
-        timestamps[:, :, 0] = 1  # day
-        timestamps[:, :, 1] = torch.arange(max_timesteps, device=device)[
-            None, :
-        ]  # month
-        timestamps[:, :, 2] = 2024  # year
         kwargs["timestamps"] = timestamps
 
         sample = MaskedOlmoEarthSample(**kwargs)

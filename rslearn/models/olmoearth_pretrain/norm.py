@@ -73,7 +73,9 @@ class OlmoEarthNormalize(Transform):
                     band_idx = cur_band_names.index(band) + t * len(cur_band_names)
                     min_val = norm_dict["mean"] - self.std_multiplier * norm_dict["std"]
                     max_val = norm_dict["mean"] + self.std_multiplier * norm_dict["std"]
-                    image[band_idx] = (image[band_idx] - min_val) / (max_val - min_val)
+                    image.image[band_idx] = (image.image[band_idx] - min_val) / (
+                        max_val - min_val
+                    )
                     needed_band_indices.remove(band_idx)
 
             if len(needed_band_indices) > 0:
