@@ -30,16 +30,15 @@ class ERA5Land(DataSource):
     An API key must be passed either in the configuration or via the CDSAPI_KEY
     environment variable. You can acquire an API key by going to the Climate Data Store
     website (https://cds.climate.copernicus.eu/), registering an account and logging
-    in, and then
+    in, and then getting the API key from the user profile page.
 
     The band names should match CDS variable names (see the reference at
     https://confluence.ecmwf.int/display/CKB/ERA5-Land%3A+data+documentation). However,
     replace "_" with "-" in the variable names when specifying bands in the layer
     configuration.
 
-    All requests to the API will be for the whole globe. Although the API supports arbitrary
-    bounds in the requests, using the whole available area helps to reduce the total number of
-    requests.
+    By default, all requests to the API will be for the whole globe. To speed up ingestion,
+    we recommend specifying the bounds of the area of interest, in particular for hourly data.
     """
 
     api_url = "https://cds.climate.copernicus.eu/api"
@@ -141,10 +140,9 @@ class ERA5Land(DataSource):
                 item_name = f"era5land_monthlyaveraged_{cur_date.year}_{cur_date.month}"
                 # Use bounds if set, otherwise use whole globe
                 if self.bounds is not None:
-                    min_lon, min_lat, max_lon, max_lat = self.bounds
-                    bounds = (min_lon, min_lat, max_lon, max_lat)
+                    bounds = self.bounds
                 else:
-                    bounds = (-180, -90, 180, 90)
+                    bounds = [-180, -90, 180, 90]
                 # Time is just the given month.
                 start_date = datetime(cur_date.year, cur_date.month, 1, tzinfo=UTC)
                 time_range = (
