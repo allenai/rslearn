@@ -73,7 +73,7 @@ class ERA5Land(DataSource):
         self.dataset = dataset
         self.product_type = product_type
         self.bounds = bounds
-        
+
         self.band_names: list[str]
         if context.layer_config is not None:
             self.band_names = []
@@ -181,7 +181,7 @@ class ERA5Land(DataSource):
         # But the list of variables should include the bands we want in the correct
         # order. And we can distinguish those bands from other "variables" because they
         # will be 3D while the others will be scalars or 1D.
-        
+
         band_arrays = []
         num_time_steps = None
         for band_name in nc.variables:
@@ -206,12 +206,14 @@ class ERA5Land(DataSource):
             band_array = np.array(band_data[:])
             band_array = np.expand_dims(band_array, axis=1)
             band_arrays.append(band_array)
-        
+
         # After concatenation: (time, num_variables, height, width)
         stacked_array = np.concatenate(band_arrays, axis=1)
-        
+
         # After reshaping: (time x num_variables, height, width)
-        array = stacked_array.reshape(-1, stacked_array.shape[2], stacked_array.shape[3])
+        array = stacked_array.reshape(
+            -1, stacked_array.shape[2], stacked_array.shape[3]
+        )
 
         # Get metadata for the GeoTIFF
         lat = nc.variables["latitude"][:]
@@ -331,7 +333,7 @@ class ERA5LandMonthlyMeans(ERA5Land):
                 area = [max_lat, min_lon, min_lat, max_lon]
             else:
                 area = [90, -180, -90, 180]  # Whole globe
-            
+
             request = {
                 "product_type": [self.product_type],
                 "variable": variable_names,
@@ -419,10 +421,10 @@ class ERA5LandHourly(ERA5Land):
             time_range = item.geometry.time_range
             if time_range is None:
                 raise ValueError("Item must have a time range")
-            
+
             # For hourly data, request all days in the month and all 24 hours
             start_time = time_range[0]
-            
+
             # Get all days in the month
             year = start_time.year
             month = start_time.month
@@ -432,18 +434,18 @@ class ERA5LandHourly(ERA5Land):
             else:
                 next_month = datetime(year, month + 1, 1, tzinfo=UTC)
                 last_day = (next_month - relativedelta(days=1)).day
-            
+
             days = [f"{day:02d}" for day in range(1, last_day + 1)]
-            
+
             # Get all 24 hours
             hours = [f"{hour:02d}:00" for hour in range(24)]
-            
+
             if self.bounds is not None:
                 min_lon, min_lat, max_lon, max_lat = self.bounds
                 area = [max_lat, min_lon, min_lat, max_lon]
             else:
                 area = [90, -180, -90, 180]  # Whole globe
-            
+
             request = {
                 "product_type": [self.product_type],
                 "variable": variable_names,
