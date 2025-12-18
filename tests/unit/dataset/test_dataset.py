@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from upath import UPath
 
+from rslearn.config import BandSetConfig, DatasetConfig, DType, LayerConfig, LayerType
 from rslearn.dataset import Dataset
 
 
@@ -110,3 +111,25 @@ class TestDataset:
                 dataset.tile_store_config["init_args"]["path_suffix"]
                 == "/static/path/to/tiles"
             )
+
+    def test_load_from_config_object(self) -> None:
+        """Test that Dataset can be initialized with a pre-built DatasetConfig object."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dataset_path = Path(temp_dir)
+
+            # Create a DatasetConfig object directly (no config.json file needed)
+            config = DatasetConfig(
+                layers={
+                    "images": LayerConfig(
+                        type=LayerType.RASTER,
+                        band_sets=[
+                            BandSetConfig(dtype=DType.UINT8, bands=["R", "G", "B"])
+                        ],
+                    ),
+                    "labels": LayerConfig(type=LayerType.VECTOR),
+                },
+            )
+
+            dataset = Dataset(UPath(dataset_path), dataset_config=config)
+
+            assert set(dataset.layers.keys()) == {"images", "labels"}
