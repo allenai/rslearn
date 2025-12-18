@@ -9,6 +9,7 @@ import torchmetrics
 from torchmetrics import Metric, MetricCollection
 
 from rslearn.models.component import FeatureMaps, Predictor
+from rslearn.train.dataset import RasterImage
 from rslearn.train.model_context import ModelContext, ModelOutput, SampleMetadata
 from rslearn.utils.feature import Feature
 
@@ -42,7 +43,7 @@ class PerPixelRegressionTask(BasicTask):
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, torch.Tensor],
+        raw_inputs: dict[str, RasterImage | torch.Tensor],
         metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -60,6 +61,7 @@ class PerPixelRegressionTask(BasicTask):
         if not load_targets:
             return {}, {}
 
+        assert isinstance(raw_inputs["targets"], torch.Tensor)
         assert raw_inputs["targets"].shape[0] == 1
         labels = raw_inputs["targets"][0, :, :].float() * self.scale_factor
 

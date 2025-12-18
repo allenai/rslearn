@@ -15,6 +15,7 @@ from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType, Storage
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
 from rslearn.dataset.storage.file import FileWindowStorage
+from rslearn.train.dataset import RasterImage
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.train.model_context import ModelOutput, SampleMetadata
 from rslearn.train.prediction_writer import (
@@ -41,7 +42,7 @@ class MockDictionaryTask(Task):
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, torch.Tensor | list[Feature]],
+        raw_inputs: dict[str, RasterImage | torch.Tensor | list[Feature]],
         metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -606,7 +607,7 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
     class MockNestedTask(Task):
         def process_inputs(
             self,
-            raw_inputs: dict[str, torch.Tensor | list[Feature]],
+            raw_inputs: dict[str, RasterImage | torch.Tensor | list[Feature]],
             metadata: SampleMetadata,
             load_targets: bool = True,
         ) -> tuple[dict[str, Any], dict[str, Any]]:
