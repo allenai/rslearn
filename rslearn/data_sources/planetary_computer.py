@@ -77,15 +77,14 @@ class PlanetaryComputer(StacDataSource, TileStore):
             context: the data source context.
         """
         # Determine the cache_dir to use.
+        cache_upath: UPath | None = None
         if cache_dir is not None:
             if context.ds_path is not None:
-                self.cache_dir = join_upath(context.ds_path, cache_dir)
+                cache_upath = join_upath(context.ds_path, cache_dir)
             else:
-                self.cache_dir = UPath(cache_dir)
+                cache_upath = UPath(cache_dir)
 
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
-        else:
-            self.cache_dir = None
+            cache_upath.mkdir(parents=True, exist_ok=True)
 
         # We pass required_assets to StacDataSource of skip_items_missing_assets is set.
         required_assets: list[str] | None = None
@@ -99,7 +98,7 @@ class PlanetaryComputer(StacDataSource, TileStore):
             sort_by=sort_by,
             sort_ascending=sort_ascending,
             required_assets=required_assets,
-            cache_dir=cache_dir,
+            cache_dir=cache_upath,
         )
         self.asset_bands = asset_bands
         self.timeout = timeout

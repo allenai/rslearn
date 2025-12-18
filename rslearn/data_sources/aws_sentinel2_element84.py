@@ -82,16 +82,15 @@ class Sentinel2(StacDataSource, TileStore):
             timeout: timeout to use for requests.
             context: the data source context.
         """  # noqa: E501
-        # Determine the cache_dir to use.
+        # Determine the cache_upath to use.
+        cache_upath: UPath | None = None
         if cache_dir is not None:
             if context.ds_path is not None:
-                self.cache_dir = join_upath(context.ds_path, cache_dir)
+                cache_upath = join_upath(context.ds_path, cache_dir)
             else:
-                self.cache_dir = UPath(cache_dir)
+                cache_upath = UPath(cache_dir)
 
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
-        else:
-            self.cache_dir = None
+            cache_upath.mkdir(parents=True, exist_ok=True)
 
         # Determine which assets we need based on the bands in the layer config.
         self.asset_bands: dict[str, list[str]]
