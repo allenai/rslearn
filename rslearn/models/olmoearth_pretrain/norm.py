@@ -64,8 +64,8 @@ class OlmoEarthNormalize(Transform):
             band_norms = self.norm_config[modality_name]
             image = input_dict[modality_name]
             # Keep a set of indices to make sure that we normalize all of them.
-            needed_band_indices = set(range(image.shape[0]))
-            num_timesteps = image.shape[0] // len(cur_band_names)
+            needed_band_indices = set(range(image.image.shape[0]))
+            num_timesteps = image.image.shape[0] // len(cur_band_names)
 
             for band, norm_dict in band_norms.items():
                 # If multitemporal, normalize each timestep separately.
