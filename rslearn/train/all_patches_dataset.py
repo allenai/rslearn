@@ -12,6 +12,7 @@ from rslearn.dataset import Window
 from rslearn.train.dataset import DataInput, ModelDataset
 from rslearn.train.model_context import SampleMetadata
 from rslearn.utils.geometry import PixelBounds, STGeometry
+from rslearn.utils.raster_format import RasterImage
 
 
 def get_window_patch_options(
@@ -294,6 +295,30 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                                     scaled_start[1] : scaled_end[1],
                                     scaled_start[0] : scaled_end[0],
                                 ].clone()
+                            elif isinstance(value, RasterImage):
+                                # Get resolution scale for this input
+                                rf = self.inputs[input_name].resolution_factor
+                                scale = rf.numerator / rf.denominator
+                                # Scale the crop coordinates
+                                scaled_start = (
+                                    int(start_offset[0] * scale),
+                                    int(start_offset[1] * scale),
+                                )
+                                scaled_end = (
+                                    int(end_offset[0] * scale),
+                                    int(end_offset[1] * scale),
+                                )
+                                # Crop the CTHW tensor with scaled coordinates.
+                                cropped[input_name] = RasterImage(
+                                    value.image[
+                                        :,
+                                        :,
+                                        scaled_start[1] : scaled_end[1],
+                                        scaled_start[0] : scaled_end[0],
+                                    ].clone(),
+                                    value.timestamps,
+                                )
+
                             elif isinstance(value, list):
                                 cropped[input_name] = [
                                     feat

@@ -204,7 +204,7 @@ def read_raster_layer_for_data_input(
     group_idx: int,
     layer_config: LayerConfig,
     data_input: DataInput,
-    layer_data: WindowLayerData,
+    layer_data: WindowLayerData | None,
 ) -> tuple[torch.Tensor, tuple[datetime, datetime] | None]:
     """Read a raster layer for a DataInput.
 
@@ -295,25 +295,29 @@ def read_raster_layer_for_data_input(
 
     # add the timestamp. it can be the middle of the time range but for now
     # lets just make it the beginning. TODO is to update that
-    if "time_range" in layer_data.serialized_item_groups:
-        time_ranges = [
-            (
-                datetime.fromisoformat(
-                    layer_data.serialized_item_groups[group_idx][idx]["time_range"][0]
-                ),
-                datetime.fromisoformat(
-                    layer_data.serialized_item_groups[group_idx][idx]["time_range"][1]
-                ),
+    time_range = None
+    if layer_data is not None:
+        if "time_range" in layer_data.serialized_item_groups:
+            time_ranges = [
+                (
+                    datetime.fromisoformat(
+                        layer_data.serialized_item_groups[group_idx][idx]["time_range"][
+                            0
+                        ]
+                    ),
+                    datetime.fromisoformat(
+                        layer_data.serialized_item_groups[group_idx][idx]["time_range"][
+                            1
+                        ]
+                    ),
+                )
+                for idx in range(len(layer_data.serialized_item_groups[group_idx]))
+            ]
+            # take the min and max
+            time_range = (
+                min([t[0] for t in time_ranges]),
+                max([t[1] for t in time_ranges]),
             )
-            for idx in range(len(layer_data.serialized_item_groups[group_idx]))
-        ]
-        # take the min and max
-        time_range = (
-            min([t[0] for t in time_ranges]),
-            max([t[1] for t in time_ranges]),
-        )
-    else:
-        time_range = None
 
     return image, time_range
 
@@ -379,7 +383,9 @@ def read_data_input(
                 group_idx,
                 layer_config,
                 data_input,
-                layer_datas[layer_name],
+                # some layers (e.g. "label_raster") won't have associated
+                # layer datas
+                layer_datas[layer_name] if layer_name in layer_datas else None,
             )
             if len(time_ranges) > 0:
                 if type(time_ranges[-1]) is not type(time_range):
