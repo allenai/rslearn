@@ -43,7 +43,7 @@ class PerPixelRegressionTask(BasicTask):
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, RasterImage | torch.Tensor],
+        raw_inputs: dict[str, RasterImage | list[Feature]],
         metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -61,12 +61,13 @@ class PerPixelRegressionTask(BasicTask):
         if not load_targets:
             return {}, {}
 
-        assert isinstance(raw_inputs["targets"], torch.Tensor)
-        assert raw_inputs["targets"].shape[0] == 1
-        labels = raw_inputs["targets"][0, :, :].float() * self.scale_factor
+        assert isinstance(raw_inputs["targets"], RasterImage)
+        assert raw_inputs["targets"].image.shape[0] == 1
+        assert raw_inputs["targets"].image.shape[1] == 1
+        labels = raw_inputs["targets"].image[0, 0, :, :].float() * self.scale_factor
 
         if self.nodata_value is not None:
-            valid = (raw_inputs["targets"][0, :, :] != self.nodata_value).float()
+            valid = (raw_inputs["targets"].image[0, :, :] != self.nodata_value).float()
         else:
             valid = torch.ones(labels.shape, dtype=torch.float32)
 

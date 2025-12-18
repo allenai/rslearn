@@ -3,7 +3,6 @@
 from typing import Any
 
 import numpy.typing as npt
-import torch
 from torchmetrics import Metric, MetricCollection
 
 from rslearn.train.model_context import SampleMetadata
@@ -31,7 +30,7 @@ class MultiTask(Task):
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, RasterImage | torch.Tensor | list[Feature]],
+        raw_inputs: dict[str, RasterImage | list[Feature]],
         metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
