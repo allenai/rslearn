@@ -54,7 +54,7 @@ class TestERA5LandHourly:
             max_matches=2,  # We expect two items to match
         )
         data_source = ERA5LandHourly(
-            band_names=self.TEST_BANDS, bounds=[-122.5, 47.5, -122.0, 48.0]
+            band_names=self.TEST_BANDS, bounds=[-122.4, 47.6, -122.3, 47.7]
         )
         print("get items")
         item_groups = data_source.get_items([seattle2020], query_config)[0]  # type: ignore
