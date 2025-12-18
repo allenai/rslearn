@@ -34,22 +34,28 @@ def get_window_patch_options(
             bottommost patches may extend beyond the provided bounds.
     """
     # We stride the patches by patch_size - overlap_size until the last patch.
+    # We handle the first patch with a special case to ensure it is always used.
     # We handle the last patch with a special case to ensure it does not exceed the
     # window bounds. Instead, it may overlap the previous patch.
-    cols = list(
+    cols = [bounds[0]] + list(
         range(
-            bounds[0],
+            bounds[0] + patch_size[0],
             bounds[2] - patch_size[0],
             patch_size[0] - overlap_size[0],
         )
-    ) + [bounds[2] - patch_size[0]]
-    rows = list(
+    )
+    rows = [bounds[1]] + list(
         range(
-            bounds[1],
+            bounds[1] + patch_size[1],
             bounds[3] - patch_size[1],
             patch_size[1] - overlap_size[1],
         )
-    ) + [bounds[3] - patch_size[1]]
+    )
+    # Add last patches only if the input is larger than one patch.
+    if bounds[2] - patch_size[0] > bounds[0]:
+        cols.append(bounds[2] - patch_size[0])
+    if bounds[3] - patch_size[1] > bounds[1]:
+        rows.append(bounds[3] - patch_size[1])
 
     patch_bounds: list[PixelBounds] = []
     for col in cols:
