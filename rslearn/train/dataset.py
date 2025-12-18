@@ -297,18 +297,21 @@ def read_raster_layer_for_data_input(
     # lets just make it the beginning. TODO is to update that
     time_range = None
     if layer_data is not None:
-        if "time_range" in layer_data.serialized_item_groups:
+        if "time_range" in layer_data.serialized_item_groups[group_idx][0].get(
+            "geometry", {}
+        ):
+            # we assume if one layer data has a geometry & time range, all of them do
             time_ranges = [
                 (
                     datetime.fromisoformat(
-                        layer_data.serialized_item_groups[group_idx][idx]["time_range"][
-                            0
-                        ]
+                        layer_data.serialized_item_groups[group_idx][idx]["geometry"][
+                            "time_range"
+                        ][0]
                     ),
                     datetime.fromisoformat(
-                        layer_data.serialized_item_groups[group_idx][idx]["time_range"][
-                            1
-                        ]
+                        layer_data.serialized_item_groups[group_idx][idx]["geometry"][
+                            "time_range"
+                        ][1]
                     ),
                 )
                 for idx in range(len(layer_data.serialized_item_groups[group_idx]))
