@@ -765,6 +765,22 @@ class Sentinel2(DataSource):
             for item in self._read_bigquery(
                 time_range=geometry.time_range, wgs84_bbox=wgs84_bbox
             ):
+                # Get the item from XML to get its exact geometry (BigQuery only knows
+                # the bounding box of the item).
+                try:
+                    item = self.get_item_by_name(item.name)
+                except CorruptItemException as e:
+                    logger.warning("skipping corrupt item %s: %s", item.name, e.message)
+                    continue
+                except MissingXMLException:
+                    # Sometimes a scene that appears in the BigQuery index does not
+                    # actually have an XML file on GCS. Since we know this happens
+                    # occasionally, we ignore the error here.
+                    logger.warning(
+                        "skipping item %s that is missing XML file", item.name
+                    )
+                    continue
+
                 candidates[idx].append(item)
 
         return candidates
