@@ -258,7 +258,7 @@ class OlmoEarth(FeatureExtractor):
 
         return MaskedOlmoEarthSample(**kwargs), present_modalities, device
 
-    def forward(self, context: ModelContext) -> FeatureMaps:
+    def forward(self, context: ModelContext) -> FeatureMaps | TokenFeatureMaps:
         """Compute feature maps from the OlmoEarth backbone.
 
         Args:
@@ -280,21 +280,22 @@ class OlmoEarth(FeatureExtractor):
                 device_type=device.type, dtype=self.autocast_dtype
             )
 
+        # Check if we can bypass masks (fast_pass=True)
+        missing_tokens = False
+        for modality in present_modalities:
+            modality_mask = getattr(sample, f"{modality}_mask")
+            if torch.any(modality_mask == MaskValue.MISSING.value):
+                missing_tokens = True
+                break
+
         with torch_context:
             # Currently we assume the provided model always returns a TokensAndMasks object.
             tokens_and_masks: TokensAndMasks
             if isinstance(self.model, Encoder):
                 # Encoder has a fast_pass argument to indicate mask is not needed.
-                # Check if we can bypass masks (fast_pass=True)
-                fast_pass = True
-                for modality in present_modalities:
-                    if torch.any(sample[f"{modality}_mask"] == MaskValue.MISSING.value):
-                        fast_pass = False
-                        break
-                
                 tokens_and_masks = self.model(
                     sample,
-                    fast_pass=fast_pass,
+                    fast_pass=not missing_tokens,
                     patch_size=self.patch_size,
                     **self.forward_kwargs,
                 )["tokens_and_masks"]
@@ -308,9 +309,23 @@ class OlmoEarth(FeatureExtractor):
         features = []
         if self.token_pooling:
             for modality in present_modalities:
-                modality_features = getattr(tokens_and_masks, modality)
-                # Pool over band sets and timesteps (BHWTSC -> BHWC).
-                pooled = modality_features.mean(dim=[3, 4])
+                modality_features = getattr(tokens_and_masks, modality)  # BHWTSC
+                # If fast_pass is False, we need to mask the missing tokens before pooling.
+                if missing_tokens:
+                    modality_masks = getattr(
+                        tokens_and_masks, f"{modality}_mask"
+                    )  # BHWTS
+                    modality_masks_bool = (
+                        modality_masks != MaskValue.MISSING.value
+                    ).unsqueeze(-1)
+                    count = modality_masks_bool.sum(dim=[3, 4])
+                    # Masked average over band sets and timesteps (BHWTSC -> BHWC).
+                    pooled = (modality_features * modality_masks_bool).sum(
+                        dim=[3, 4]
+                    ) / count.clamp(min=1)
+                else:
+                    # Pool over band sets and timesteps (BHWTSC -> BHWC).
+                    pooled = modality_features.mean(dim=[3, 4])
                 # We want BHWC -> BCHW.
                 pooled = rearrange(pooled, "b h w c -> b c h w")
                 features.append(pooled)
