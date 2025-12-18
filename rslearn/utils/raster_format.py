@@ -2,12 +2,15 @@
 
 import hashlib
 import json
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, BinaryIO
 
 import affine
 import numpy as np
 import numpy.typing as npt
 import rasterio
+import torch
 from PIL import Image
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
@@ -20,6 +23,16 @@ from rslearn.utils.fsspec import open_rasterio_upath_reader, open_rasterio_upath
 from .geometry import PixelBounds, Projection
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class RasterImage:
+    """A raster image is a torch.tensor containing the images and their associated timestamps."""
+
+    # image will have an extra temporal dimension, CTHW
+    # TODO - should we collapse if it is only one timestamp?
+    image: torch.Tensor
+    timestamps: list[tuple[datetime, datetime]] | None = None
 
 
 def get_bandset_dirname(bands: list[str]) -> str:

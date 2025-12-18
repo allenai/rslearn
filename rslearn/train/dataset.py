@@ -8,7 +8,6 @@ import random
 import tempfile
 import time
 import uuid
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -32,22 +31,13 @@ from rslearn.log_utils import get_logger
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
 from rslearn.utils.mp import star_imap_unordered
+from rslearn.utils.raster_format import RasterImage
 
 from .model_context import SampleMetadata
 from .tasks import Task
 from .transforms import Sequential
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class RasterImage:
-    """A raster image is a torch.tensor containing the images and their associated timestamps."""
-
-    # image will have an extra temporal dimension, CTHW
-    # TODO - should we collapse if it is only one timestamp?
-    image: torch.Tensor
-    timestamps: list[tuple[datetime, datetime]] | None = None
 
 
 def get_torch_dtype(dtype: DType) -> torch.dtype:

@@ -4,7 +4,7 @@ from typing import Any
 
 import torch
 
-from rslearn.train.dataset import RasterImage
+from rslearn.utils.raster_format import RasterImage
 
 from .transform import Transform
 

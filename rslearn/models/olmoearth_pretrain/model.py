@@ -174,8 +174,7 @@ class OlmoEarth(FeatureExtractor):
         timestamps = torch.zeros(
             (len(time_ranges), 3), dtype=torch.int32, device=device
         )
-        mid_ranges = (t[0] + ((t[1] - t[0]) / 2) for t in time_ranges)
-
+        mid_ranges = [t[0] + ((t[1] - t[0]) / 2) for t in time_ranges]
         timestamps[:, 0] = torch.tensor([d.day for d in mid_ranges], dtype=torch.int32)
         # months are indexed 0-11
         timestamps[:, 1] = torch.tensor(
@@ -211,7 +210,7 @@ class OlmoEarth(FeatureExtractor):
             cur = torch.stack([inp[modality].image for inp in context.inputs], dim=0)
             device = cur.device
             # Check if it's single or multitemporal, and reshape accordingly
-            num_timesteps = cur.image.shape[2]
+            num_timesteps = cur.shape[2]
             # check if we need to recompute timesteps. For now, we assign the
             # same timestamps to all inputs. Future iterations of OlmoEarth should
             # handle varying timestamps per input.

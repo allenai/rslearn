@@ -7,9 +7,9 @@ import numpy.typing as npt
 import torch
 from torchmetrics import MetricCollection
 
-from rslearn.train.dataset import RasterImage
 from rslearn.train.model_context import SampleMetadata
 from rslearn.utils import Feature
+from rslearn.utils.raster_format import RasterImage
 
 
 class Task:

@@ -1,11 +1,14 @@
 """Test rslearn.models.olmoearth_pretrain."""
 
+from datetime import datetime
+
 import pytest
 import torch
 
 from rslearn.models.attention_pooling import AttentionPool, SimpleAttentionPool
 from rslearn.models.olmoearth_pretrain.model import OlmoEarth
 from rslearn.train.model_context import ModelContext
+from rslearn.utils.raster_format import RasterImage
 
 
 def test_forward() -> None:
@@ -24,9 +27,15 @@ def test_forward() -> None:
     inputs = [
         {
             # 12 channels per timestep.
-            "sentinel2_l2a": torch.zeros(
-                (T * 12, H, W), dtype=torch.float32, device=torch.device("cpu")
-            ),
+            "sentinel2_l2a": RasterImage(
+                image=torch.zeros(
+                    (12, T, H, W), dtype=torch.float32, device=torch.device("cpu")
+                ),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1))
+                    for x in range(1, T + 1)
+                ],
+            )
         }
     ]
     feature_map = model(ModelContext(inputs=inputs, metadatas=[]))
@@ -57,9 +66,15 @@ def test_forward_no_pooling() -> None:
     inputs = [
         {
             # 12 channels per timestep.
-            "sentinel2_l2a": torch.zeros(
-                (T * 12, H, W), dtype=torch.float32, device=torch.device("cpu")
-            ),
+            "sentinel2_l2a": RasterImage(
+                image=torch.zeros(
+                    (12, T, H, W), dtype=torch.float32, device=torch.device("cpu")
+                ),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1))
+                    for x in range(1, T + 1)
+                ],
+            )
         }
     ]
     feature_map = model(ModelContext(inputs=inputs, metadatas=[]))
@@ -103,7 +118,15 @@ def test_with_attnpool() -> None:
     inputs = [
         {
             # 12 channels per timestep.
-            "sentinel2_l2a": torch.zeros((T * 12, H, W), dtype=torch.float32),
+            "sentinel2_l2a": RasterImage(
+                image=torch.zeros(
+                    (12, T, H, W), dtype=torch.float32, device=torch.device("cpu")
+                ),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1))
+                    for x in range(1, T + 1)
+                ],
+            )
         }
     ]
     feature_maps = model(ModelContext(inputs=inputs, metadatas=[]))
@@ -148,7 +171,15 @@ def test_with_simple_attnpool() -> None:
     inputs = [
         {
             # 12 channels per timestep.
-            "sentinel2_l2a": torch.zeros((T * 12, H, W), dtype=torch.float32),
+            "sentinel2_l2a": RasterImage(
+                image=torch.zeros(
+                    (12, T, H, W), dtype=torch.float32, device=torch.device("cpu")
+                ),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1))
+                    for x in range(1, T + 1)
+                ],
+            )
         }
     ]
     feature_maps = model(ModelContext(inputs=inputs, metadatas=[]))

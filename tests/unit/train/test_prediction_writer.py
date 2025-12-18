@@ -15,7 +15,6 @@ from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType, Storage
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
 from rslearn.dataset.storage.file import FileWindowStorage
-from rslearn.train.dataset import RasterImage
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.train.model_context import ModelOutput, SampleMetadata
 from rslearn.train.prediction_writer import (
@@ -27,6 +26,7 @@ from rslearn.train.tasks.segmentation import SegmentationTask
 from rslearn.train.tasks.task import Task
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import Projection
+from rslearn.utils.raster_format import RasterImage
 
 
 class MockDictionaryTask(Task):
