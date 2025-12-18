@@ -62,7 +62,7 @@ class Flip(Transform):
                 image.image = torch.flip(image.image, dims=[-1])
             if state["vertical"]:
                 image.image = torch.flip(image.image, dims=[-2])
-        elif isinstance(torch.Tensor):
+        elif isinstance(image, torch.Tensor):
             if state["horizontal"]:
                 image = torch.flip(image, dims=[-1])
             if state["vertical"]:
