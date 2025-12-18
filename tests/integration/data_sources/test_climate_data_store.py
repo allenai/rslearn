@@ -5,7 +5,7 @@ from upath import UPath
 from rslearn.config import (
     QueryConfig,
 )
-from rslearn.data_sources.climate_data_store import ERA5LandMonthlyMeans, ERA5LandHourly
+from rslearn.data_sources.climate_data_store import ERA5LandHourly, ERA5LandMonthlyMeans
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils import STGeometry
 
