@@ -5,6 +5,8 @@ from typing import Any
 import torch
 import torchvision
 
+from rslearn.train.dataset import RasterImage
+
 from .transform import Transform, read_selector
 
 
@@ -69,7 +71,7 @@ class Crop(Transform):
             "remove_from_top": remove_from_top,
         }
 
-    def apply_image(self, image: torch.Tensor, state: dict[str, Any]) -> torch.Tensor:
+    def apply_image(self, image: RasterImage, state: dict[str, Any]) -> RasterImage:
         """Apply the sampled state on the specified image.
 
         Args:
@@ -77,16 +79,21 @@ class Crop(Transform):
             state: the sampled state.
         """
         image_shape = state["image_shape"]
-        crop_size = state["crop_size"] * image.shape[-1] // image_shape[1]
-        remove_from_left = state["remove_from_left"] * image.shape[-1] // image_shape[1]
-        remove_from_top = state["remove_from_top"] * image.shape[-2] // image_shape[0]
-        return torchvision.transforms.functional.crop(
+        crop_size = state["crop_size"] * image.image.shape[-1] // image_shape[1]
+        remove_from_left = (
+            state["remove_from_left"] * image.image.shape[-1] // image_shape[1]
+        )
+        remove_from_top = (
+            state["remove_from_top"] * image.image.shape[-2] // image_shape[0]
+        )
+        image.image = torchvision.transforms.functional.crop(
             image,
             top=remove_from_top,
             left=remove_from_left,
             height=crop_size,
             width=crop_size,
         )
+        return image
 
     def apply_boxes(self, boxes: Any, state: dict[str, bool]) -> torch.Tensor:
         """Apply the sampled state on the specified image.
@@ -114,9 +121,9 @@ class Crop(Transform):
             image = read_selector(input_dict, target_dict, selector)
             if (
                 smallest_image_shape is None
-                or image.shape[-1] < smallest_image_shape[1]
+                or image.image.shape[-1] < smallest_image_shape[1]
             ):
-                smallest_image_shape = image.shape[-2:]
+                smallest_image_shape = image.image.shape[-2:]
 
         if smallest_image_shape is None:
             raise ValueError("No image found to crop")
