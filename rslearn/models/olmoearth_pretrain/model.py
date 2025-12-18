@@ -165,49 +165,87 @@ class OlmoEarth(FeatureExtractor):
 
         return model
 
-    def forward(self, context: ModelContext) -> FeatureMaps | TokenFeatureMaps:
-        """Compute feature maps from the OlmoEarth backbone.
+    def _prepare_modality_inputs(
+        self, context: ModelContext
+    ) -> tuple[MaskedOlmoEarthSample, list[str], torch.device]:
+        """Prepare modality tensors and masks for the OlmoEarth model.
+
+        Uses a two-pass approach to ensure all modalities have consistent timestep
+        dimensions for position encoding.
 
         Args:
-            context: the model context. Input dicts should include keys corresponding
-                to the modalities that should be passed to the OlmoEarth model.
+            context: the model context with input tensors.
 
         Returns:
-            a FeatureMaps consisting of one feature map, at 1/patch_size of the input
-                resolution. Embeddings will be pooled across modalities and timesteps.
-                If self.token_pooling is False, then a TokenFeatureMaps is returned, with
-                an additional N dimension for the tokens.
+            tuple of (sample, present_modalities, device)
         """
         kwargs = {}
         present_modalities = []
         device = None
-        # Handle the case where some modalities are multitemporal and some are not.
-        # We assume all multitemporal modalities have the same number of timesteps.
+
+        # First pass: find global max_timesteps across all modalities and samples
+        # TODO: currently we assume all modalities have the same number of timesteps,
+        # which is not true for all cases, and time series time steps are assumed to
+        # be 1-month apart. It also assumes continuity between available timesteps.
+        # We'll have to fix all that.
         max_timesteps = 1
+        modality_data = {}
         for modality in MODALITY_NAMES:
             if modality not in context.inputs[0]:
                 continue
             present_modalities.append(modality)
-            cur = torch.stack([inp[modality] for inp in context.inputs], dim=0)
-            device = cur.device
-            # Check if it's single or multitemporal, and reshape accordingly
+            tensors = [inp[modality] for inp in context.inputs]
+            device = tensors[0].device
             num_bands = Modality.get(modality).num_bands
-            num_timesteps = cur.shape[1] // num_bands
-            max_timesteps = max(max_timesteps, num_timesteps)
-            cur = rearrange(cur, "b (t c) h w -> b h w t c", t=num_timesteps)
-            kwargs[modality] = cur
-            # Create mask array which is BHWTS (without channels but with band sets).
-            num_band_sets = len(Modality.get(modality).band_sets)
-            mask_shape = cur.shape[0:4] + (num_band_sets,)
-            mask = (
-                torch.ones(mask_shape, dtype=torch.int32, device=device)
-                * MaskValue.ONLINE_ENCODER.value
+            max_t = max(t.shape[0] for t in tensors) // num_bands
+            max_timesteps = max(max_timesteps, max_t)
+            modality_data[modality] = (
+                tensors,
+                num_bands,
+                len(Modality.get(modality).band_sets),
             )
+
+        # Second pass: pad and process each modality with global max_timesteps
+        for modality in present_modalities:
+            tensors, num_bands, num_band_sets = modality_data[modality]
+            target_ch = max_timesteps * num_bands
+
+            # Pad tensors to target_ch and track original timesteps for masking
+            padded = []
+            original_timesteps = []
+            for t in tensors:
+                orig_t = t.shape[0] // num_bands
+                original_timesteps.append(orig_t)
+                if t.shape[0] < target_ch:
+                    pad = torch.zeros(
+                        (target_ch - t.shape[0],) + t.shape[1:],
+                        dtype=t.dtype,
+                        device=device,
+                    )
+                    t = torch.cat([t, pad], dim=0)
+                padded.append(t)
+
+            cur = torch.stack(padded, dim=0)
+            cur = rearrange(cur, "b (t c) h w -> b h w t c", t=max_timesteps)
+            kwargs[modality] = cur
+
+            # Create mask: ONLINE_ENCODER for valid, MISSING for padded timesteps
+            b, h, w = cur.shape[0], cur.shape[1], cur.shape[2]
+            mask = torch.full(
+                (b, h, w, max_timesteps, num_band_sets),
+                fill_value=MaskValue.ONLINE_ENCODER.value,
+                dtype=torch.int32,
+                device=device,
+            )
+            for sample_idx, orig_t in enumerate(original_timesteps):
+                if orig_t < max_timesteps:
+                    mask[sample_idx, :, :, orig_t:, :] = MaskValue.MISSING.value
             kwargs[f"{modality}_mask"] = mask
 
         # Timestamps is required.
         # Note that only months (0 to 11) are used in OlmoEarth position encoding.
-        # For now, we assign same timestamps to all inputs, but later we should handle varying timestamps per input.
+        # For now, we assign same timestamps to all inputs, but later we should
+        # handle varying timestamps per input.
         timestamps = torch.zeros(
             (len(context.inputs), max_timesteps, 3), dtype=torch.int32, device=device
         )
@@ -218,7 +256,20 @@ class OlmoEarth(FeatureExtractor):
         timestamps[:, :, 2] = 2024  # year
         kwargs["timestamps"] = timestamps
 
-        sample = MaskedOlmoEarthSample(**kwargs)
+        return MaskedOlmoEarthSample(**kwargs), present_modalities, device
+
+    def forward(self, context: ModelContext) -> FeatureMaps | TokenFeatureMaps:
+        """Compute feature maps from the OlmoEarth backbone.
+
+        Args:
+            context: the model context. Input dicts should include keys corresponding
+                to the modalities that should be passed to the OlmoEarth model.
+
+        Returns:
+            a FeatureMaps consisting of one feature map, at 1/patch_size of the input
+                resolution. Embeddings will be pooled across modalities and timesteps.
+        """
+        sample, present_modalities, device = self._prepare_modality_inputs(context)
 
         # Decide context based on self.autocast_dtype.
         if self.autocast_dtype is None:
@@ -229,6 +280,14 @@ class OlmoEarth(FeatureExtractor):
                 device_type=device.type, dtype=self.autocast_dtype
             )
 
+        # Check if we can bypass masks (fast_pass=True)
+        missing_tokens = False
+        for modality in present_modalities:
+            modality_mask = getattr(sample, f"{modality}_mask")
+            if torch.any(modality_mask == MaskValue.MISSING.value):
+                missing_tokens = True
+                break
+
         with torch_context:
             # Currently we assume the provided model always returns a TokensAndMasks object.
             tokens_and_masks: TokensAndMasks
@@ -236,7 +295,7 @@ class OlmoEarth(FeatureExtractor):
                 # Encoder has a fast_pass argument to indicate mask is not needed.
                 tokens_and_masks = self.model(
                     sample,
-                    fast_pass=True,
+                    fast_pass=not missing_tokens,
                     patch_size=self.patch_size,
                     **self.forward_kwargs,
                 )["tokens_and_masks"]
@@ -250,9 +309,23 @@ class OlmoEarth(FeatureExtractor):
         features = []
         if self.token_pooling:
             for modality in present_modalities:
-                modality_features = getattr(tokens_and_masks, modality)
-                # Pool over band sets and timesteps (BHWTSC -> BHWC).
-                pooled = modality_features.mean(dim=[3, 4])
+                modality_features = getattr(tokens_and_masks, modality)  # BHWTSC
+                # If fast_pass is False, we need to mask the missing tokens before pooling.
+                if missing_tokens:
+                    modality_masks = getattr(
+                        tokens_and_masks, f"{modality}_mask"
+                    )  # BHWTS
+                    modality_masks_bool = (
+                        modality_masks != MaskValue.MISSING.value
+                    ).unsqueeze(-1)
+                    count = modality_masks_bool.sum(dim=[3, 4])
+                    # Masked average over band sets and timesteps (BHWTSC -> BHWC).
+                    pooled = (modality_features * modality_masks_bool).sum(
+                        dim=[3, 4]
+                    ) / count.clamp(min=1)
+                else:
+                    # Pool over band sets and timesteps (BHWTSC -> BHWC).
+                    pooled = modality_features.mean(dim=[3, 4])
                 # We want BHWC -> BCHW.
                 pooled = rearrange(pooled, "b h w c -> b c h w")
                 features.append(pooled)
