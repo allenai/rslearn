@@ -43,29 +43,26 @@ class Dataset:
     def __init__(
         self,
         path: UPath,
-        dataset_config: DatasetConfig | None = None,
         disabled_layers: list[str] = [],
+        dataset_config: DatasetConfig | None = None,
     ) -> None:
         """Initializes a new Dataset.
 
         Args:
             path: the root directory of the dataset
-            dataset_config: optional dataset configuration to use instead of loading from the dataset directory
             disabled_layers: list of layers to disable
+            dataset_config: optional dataset configuration to use instead of loading from the dataset directory
         """
         self.path = path
 
-        config_content: str
         if dataset_config is None:
             # Load dataset configuration from the dataset directory.
             with (self.path / "config.json").open("r") as f:
                 config_content = f.read()
-        else:
-            # Reserialize so we can perform template substitution on the config.
-            config_content = json.dumps(dataset_config.model_dump(mode="json"))
-
-        config_content = substitute_env_vars_in_string(config_content)
-        dataset_config = DatasetConfig.model_validate(json.loads(config_content))
+                config_content = substitute_env_vars_in_string(config_content)
+                dataset_config = DatasetConfig.model_validate(
+                    json.loads(config_content)
+                )
 
         self.layers = {}
         for layer_name, layer_config in dataset_config.layers.items():
