@@ -210,7 +210,8 @@ class FasterRCNN(Predictor):
                     ),
                 )
 
-        image_list = [inp["image"].image for inp in context.inputs]
+        # take the first (and assumed to be only) timestep
+        image_list = [inp["image"].image[:, 0] for inp in context.inputs]
         images, targets = self.noop_transform(image_list, targets)
 
         feature_dict = collections.OrderedDict()
