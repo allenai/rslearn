@@ -279,7 +279,12 @@ def test_forward_with_different_timesteps() -> None:
     assert (sample.sentinel1_mask[1, :, :, 4:, :] == MaskValue.MISSING.value).all()
 
     assert sample.timestamps.shape == (2, max_timesteps, 3)
-    assert (sample.timestamps[:, :, 1] == torch.arange(max_timesteps)).all()
+    # first instance's timestamps are fully populated
+    assert (sample.timestamps[0, :, 1] == torch.arange(max_timesteps)).all()
+    # second instance's timestamps only go to 7 since that's the max
+    # sequence length
+    assert (sample.timestamps[1, :-1, 1] == torch.arange(max_timesteps)[:7]).all()
+    assert (sample.timestamps[1, -1, :] == 0).all()
 
     feature_list = model(context)
 
