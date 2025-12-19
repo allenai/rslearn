@@ -38,6 +38,10 @@ class RasterImage:
         """The shape of the image."""
         return self.image.shape
 
+    def dim(self) -> int:
+        """The dim of the image."""
+        return self.image.dim()
+
 
 def get_bandset_dirname(bands: list[str]) -> str:
     """Get the directory name that should be used to store the given group of bands."""

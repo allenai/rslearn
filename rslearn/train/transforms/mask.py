@@ -3,6 +3,7 @@
 import torch
 
 from rslearn.train.transforms.transform import Transform, read_selector
+from rslearn.utils.raster_format import RasterImage
 
 
 class Mask(Transform):
@@ -31,7 +32,9 @@ class Mask(Transform):
         self.mask_selector = mask_selector
         self.mask_value = mask_value
 
-    def apply_image(self, image: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    def apply_image(
+        self, image: torch.Tensor | RasterImage, mask: torch.Tensor | RasterImage
+    ) -> torch.Tensor | RasterImage:
         """Apply the mask on the image.
 
         Args:
@@ -42,6 +45,9 @@ class Mask(Transform):
             masked image
         """
         # Tile the mask to have same number of bands as the image.
+        if isinstance(mask, RasterImage):
+            mask = mask.image
+
         if image.shape[0] != mask.shape[0]:
             if mask.shape[0] != 1:
                 raise ValueError(
@@ -49,7 +55,10 @@ class Mask(Transform):
                 )
             mask = mask.repeat(image.shape[0], 1, 1)
 
-        image[mask == 0] = self.mask_value
+        if isinstance(image, torch.Tensor):
+            image[mask == 0] = self.mask_value
+        else:
+            image.image[mask == 0] = self.mask_value
         return image
 
     def forward(self, input_dict: dict, target_dict: dict) -> tuple[dict, dict]:
