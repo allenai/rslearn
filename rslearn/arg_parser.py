@@ -20,6 +20,7 @@ class RslearnArgumentParser(LightningArgumentParser):
     def parse_string(
         self,
         cfg_str: str,
+        *args: Any,
         **kwargs: Any,
     ) -> Namespace:
         """Pre-processes string for environment variable substitution before parsing."""
@@ -27,4 +28,4 @@ class RslearnArgumentParser(LightningArgumentParser):
         substituted_cfg_str = substitute_env_vars_in_string(cfg_str)
 
         # Call the parent method with the substituted config
-        return super().parse_string(substituted_cfg_str, **kwargs)
+        return super().parse_string(substituted_cfg_str, *args, **kwargs)

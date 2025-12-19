@@ -8,6 +8,7 @@ from typing import Any
 import torch
 
 from rslearn.utils.geometry import PixelBounds, Projection
+from rslearn.utils.raster_format import RasterImage
 
 
 @dataclass
@@ -32,7 +33,7 @@ class ModelContext:
     """Context to pass to all model components."""
 
     # One input dict per example in the batch.
-    inputs: list[dict[str, torch.Tensor]]
+    inputs: list[dict[str, torch.Tensor | RasterImage]]
     # One SampleMetadata per example in the batch.
     metadatas: list[SampleMetadata]
     # Arbitrary dict that components can add to.

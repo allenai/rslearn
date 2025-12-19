@@ -391,8 +391,15 @@ class RslearnLightningCLI(LightningCLI):
 
         Sets the dataset path for any configured RslearnPredictionWriter callbacks.
         """
-        subcommand = self.config.subcommand
-        c = self.config[subcommand]
+        if not hasattr(self.config, "subcommand"):
+            logger.warning(
+                "Config does not have subcommand attribute, assuming we are in run=False mode"
+            )
+            subcommand = None
+            c = self.config
+        else:
+            subcommand = self.config.subcommand
+            c = self.config[subcommand]
 
         # If there is a RslearnPredictionWriter, set its path.
         prediction_writer_callback = None
