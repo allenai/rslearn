@@ -43,9 +43,11 @@ class CLIP(FeatureExtractor):
             a FeatureMaps with one feature map from the ViT, which is always Bx24x24x1024.
         """
         inputs = context.inputs
-        device = inputs[0]["image"].device
+        device = inputs[0]["image"].image.device
         clip_inputs = self.processor(
-            images=[inp["image"].cpu().numpy().transpose(1, 2, 0) for inp in inputs],
+            images=[
+                inp["image"].image.cpu().numpy().transpose(1, 2, 0) for inp in inputs
+            ],
             return_tensors="pt",
             padding=True,
         )

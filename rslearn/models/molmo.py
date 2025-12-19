@@ -47,11 +47,11 @@ class Molmo(FeatureExtractor):
             a FeatureMaps. Molmo produces features at one scale, so it will contain one
                 feature map that is a Bx24x24x2048 tensor.
         """
-        device = context.inputs[0]["image"].device
+        device = context.inputs[0]["image"].image.device
         molmo_inputs_list = []
         # Process each one so we can isolate just the full image without any crops.
         for inp in context.inputs:
-            image = inp["image"].cpu().numpy().transpose(1, 2, 0)
+            image = inp["image"].image.cpu().numpy().transpose(1, 2, 0)
             processed = self.processor.process(
                 images=[image],
                 text="",
