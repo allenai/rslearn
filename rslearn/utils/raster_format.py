@@ -42,6 +42,11 @@ class RasterImage:
         """The dim of the image."""
         return self.image.dim()
 
+    @property
+    def dtype(self) -> torch.dtype:
+        """The image dtype."""
+        return self.image.dtype
+
 
 def get_bandset_dirname(bands: list[str]) -> str:
     """Get the directory name that should be used to store the given group of bands."""
