@@ -23,7 +23,7 @@ class Dataset:
     .. code-block:: none
 
         dataset/
-            config.json
+            config.json  # optional, if config provided as runtime object
             windows/
                 group1/
                     epsg:3857_10_623565_1528020/
@@ -40,37 +40,43 @@ class Dataset:
     materialize.
     """
 
-    def __init__(self, path: UPath, disabled_layers: list[str] = []) -> None:
+    def __init__(
+        self,
+        path: UPath,
+        disabled_layers: list[str] = [],
+        dataset_config: DatasetConfig | None = None,
+    ) -> None:
         """Initializes a new Dataset.
 
         Args:
             path: the root directory of the dataset
             disabled_layers: list of layers to disable
+            dataset_config: optional dataset configuration to use instead of loading from the dataset directory
         """
         self.path = path
 
-        # Load dataset configuration.
-        with (self.path / "config.json").open("r") as f:
-            config_content = f.read()
-            config_content = substitute_env_vars_in_string(config_content)
-            config = DatasetConfig.model_validate(json.loads(config_content))
-
-            self.layers = {}
-            for layer_name, layer_config in config.layers.items():
-                # Layer names must not contain period, since we use period to
-                # distinguish different materialized groups within a layer.
-                assert "." not in layer_name, "layer names must not contain periods"
-                if layer_name in disabled_layers:
-                    logger.warning(f"Layer {layer_name} is disabled")
-                    continue
-                self.layers[layer_name] = layer_config
-
-            self.tile_store_config = config.tile_store
-            self.storage = (
-                config.storage.instantiate_window_storage_factory().get_storage(
-                    self.path
+        if dataset_config is None:
+            # Load dataset configuration from the dataset directory.
+            with (self.path / "config.json").open("r") as f:
+                config_content = f.read()
+                config_content = substitute_env_vars_in_string(config_content)
+                dataset_config = DatasetConfig.model_validate(
+                    json.loads(config_content)
                 )
+
+        self.layers = {}
+        for layer_name, layer_config in dataset_config.layers.items():
+            if layer_name in disabled_layers:
+                logger.warning(f"Layer {layer_name} is disabled")
+                continue
+            self.layers[layer_name] = layer_config
+
+        self.tile_store_config = dataset_config.tile_store
+        self.storage = (
+            dataset_config.storage.instantiate_window_storage_factory().get_storage(
+                self.path
             )
+        )
 
     def load_windows(
         self,

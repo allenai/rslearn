@@ -380,7 +380,7 @@ def apply_on_windows(
 
 def apply_on_windows_args(f: Callable[..., Any], args: argparse.Namespace) -> None:
     """Call apply_on_windows with arguments passed via command-line interface."""
-    dataset = Dataset(UPath(args.root), args.disabled_layers)
+    dataset = Dataset(UPath(args.root), disabled_layers=args.disabled_layers)
     apply_on_windows(
         f=f,
         dataset=dataset,

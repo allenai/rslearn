@@ -635,3 +635,12 @@ class DatasetConfig(BaseModel):
         default_factory=lambda: StorageConfig(),
         description="jsonargparse configuration for the WindowStorageFactory.",
     )
+
+    @field_validator("layers", mode="after")
+    @classmethod
+    def layer_names_validator(cls, v: dict[str, LayerConfig]) -> dict[str, LayerConfig]:
+        """Ensure layer names don't contain periods, since we use periods to distinguish different materialized groups within a layer."""
+        for layer_name in v.keys():
+            if "." in layer_name:
+                raise ValueError(f"layer names must not contain periods: {layer_name}")
+        return v
