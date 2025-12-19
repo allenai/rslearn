@@ -62,6 +62,7 @@ class OlmoEarth(FeatureExtractor):
         embedding_size: int | None = None,
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
+        use_legacy_timestamps: bool = False,
     ):
         """Create a new OlmoEarth model.
 
@@ -88,6 +89,9 @@ class OlmoEarth(FeatureExtractor):
             token_pooling: whether or not to pool the tokens. If True, the output will be BxCxHxW. If False,
                 there will be an extra dimension, N, (BxCxHxWxN) representing the temporal and channel
                 dimensions.
+            use_legacy_timestamps: In our original implementation of OlmoEarth, we applied timestamps starting
+                from 0 (instead of the actual timestamps of the input). The option to do this is preserved
+                for backwards compatability with finetuned models which were trained against this implementation.
         """
         if (
             sum(
@@ -139,6 +143,7 @@ class OlmoEarth(FeatureExtractor):
                 model = model[part]
         self.model = model
         self.token_pooling = token_pooling
+        self.use_legacy_timestamps = use_legacy_timestamps
 
     def _load_model_from_checkpoint(
         self, checkpoint_upath: UPath, random_initialization: bool
@@ -170,7 +175,12 @@ class OlmoEarth(FeatureExtractor):
     def time_ranges_to_timestamps(
         time_ranges: list[tuple[datetime, datetime]], device: torch.device
     ) -> torch.Tensor:
-        """Turn the time ranges stored in a RasterImage to timestamps accepted by OlmoEarth."""
+        """Turn the time ranges stored in a RasterImage to timestamps accepted by OlmoEarth.
+
+        OlmoEarth only uses the month associated with each timestamp, so we take the midpoint
+        the time range. For some inputs (e.g. Sentinel 2) we take an image from a specific
+        time so that start_time == end_time == mid_time.
+        """
         timestamps = torch.zeros(
             (len(time_ranges), 3), dtype=torch.int32, device=device
         )
@@ -247,11 +257,25 @@ class OlmoEarth(FeatureExtractor):
             )
             kwargs[f"{modality}_mask"] = mask
 
-        if timestamps is None:
-            # Timestamps is required.
-            raise ValueError("No inputs had timestamps.")
-        # Note that only months (0 to 11) are used in OlmoEarth position encoding.
-        kwargs["timestamps"] = timestamps
+        if self.use_legacy_timestamps:
+            # Note that only months (0 to 11) are used in OlmoEarth position encoding.
+            timestamps = torch.zeros(
+                (len(context.inputs), max_timesteps, 3),
+                dtype=torch.int32,
+                device=device,
+            )
+            timestamps[:, :, 0] = 1  # day
+            timestamps[:, :, 1] = torch.arange(max_timesteps, device=device)[
+                None, :
+            ]  # month
+            timestamps[:, :, 2] = 2024  # year
+            kwargs["timestamps"] = timestamps
+        else:
+            if timestamps is None:
+                # Timestamps is required.
+                raise ValueError("No inputs had timestamps.")
+            # Note that only months (0 to 11) are used in OlmoEarth position encoding.
+            kwargs["timestamps"] = timestamps
 
         sample = MaskedOlmoEarthSample(**kwargs)
 

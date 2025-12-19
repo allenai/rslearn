@@ -29,8 +29,7 @@ logger = get_logger(__name__)
 class RasterImage:
     """A raster image is a torch.tensor containing the images and their associated timestamps."""
 
-    # image will have an extra temporal dimension, CTHW
-    # TODO - should we collapse if it is only one timestamp?
+    # image will have a temporal dimension, CTHW
     image: torch.Tensor
     timestamps: list[tuple[datetime, datetime]] | None = None
 
