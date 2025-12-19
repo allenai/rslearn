@@ -248,6 +248,8 @@ def test_basic_time_series(basic_classification_dataset: Dataset) -> None:
                         "image1": [],
                     },
                     "image",
+                    # concatenate on the time dimension
+                    concatenate_dim=1,
                 )
             ],
         ),
@@ -266,7 +268,7 @@ def test_basic_time_series(basic_classification_dataset: Dataset) -> None:
 
     assert len(dataset) == 1
     inputs, _, _ = dataset[0]
-    assert inputs["image"].image.shape == (2, 4, 4)
+    assert inputs["image"].image.shape == (1, 2, 4, 4)
 
 
 def test_load_all_layers(basic_classification_dataset: Dataset) -> None:
