@@ -46,7 +46,9 @@ class CLIP(FeatureExtractor):
         device = inputs[0]["image"].image.device
         clip_inputs = self.processor(
             images=[
-                inp["image"].image.cpu().numpy().transpose(1, 2, 0) for inp in inputs
+                # take the first (and assumed to be only) timestep
+                inp["image"].image[:, 0].cpu().numpy().transpose(1, 2, 0)
+                for inp in inputs
             ],
             return_tensors="pt",
             padding=True,

@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from rslearn.models.dinov3 import DinoV3
+from rslearn.utils.raster_format import RasterImage
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -17,14 +18,17 @@ def test_dinov3() -> None:
 
     inputs = [
         {
-            "image": torch.zeros(
-                (
-                    3,
-                    input_hw,
-                    input_hw,
-                ),
-                dtype=torch.float32,
-                device=DEVICE,
+            "image": RasterImage(
+                torch.zeros(
+                    (
+                        3,
+                        1,
+                        input_hw,
+                        input_hw,
+                    ),
+                    dtype=torch.float32,
+                    device=DEVICE,
+                )
             ),
         }
     ]
