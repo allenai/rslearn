@@ -6,6 +6,8 @@ import torch
 import torchvision
 from torchvision.transforms import InterpolationMode
 
+from rslearn.utils.raster_format import RasterImage
+
 from .transform import Transform
 
 INTERPOLATION_MODES = {
@@ -38,7 +40,9 @@ class Resize(Transform):
         self.selectors = selectors
         self.interpolation = INTERPOLATION_MODES[interpolation]
 
-    def apply_resize(self, image: torch.Tensor) -> torch.Tensor:
+    def apply_resize(
+        self, image: torch.Tensor | RasterImage
+    ) -> torch.Tensor | RasterImage:
         """Apply resizing on the specified image.
 
         If the image is 2D, it is unsqueezed to 3D and then squeezed
@@ -48,15 +52,24 @@ class Resize(Transform):
             image: the image to transform.
         """
         if image.dim() == 2:
+            assert isinstance(image, torch.Tensor), (
+                "RasterImage should have 4 dimensions (CTHW)"
+            )
             image = image.unsqueeze(0)  # (H, W) -> (1, H, W)
             result = torchvision.transforms.functional.resize(
                 image, self.target_size, self.interpolation
             )
             return result.squeeze(0)  # (1, H, W) -> (H, W)
 
-        return torchvision.transforms.functional.resize(
-            image, self.target_size, self.interpolation
-        )
+        if isinstance(image, torch.Tensor):
+            return torchvision.transforms.functional.resize(
+                image, self.target_size, self.interpolation
+            )
+        else:
+            image.image = torchvision.transforms.functional.resize(
+                image.image, self.target_size, self.interpolation
+            )
+            return image
 
     def forward(
         self, input_dict: dict[str, Any], target_dict: dict[str, Any]

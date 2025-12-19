@@ -144,13 +144,15 @@ class PrithviV2(FeatureExtractor):
         """Process individual modality data.
 
         Args:
-            data: Input tensor of shape [B, C, H, W]
+            data: Input tensor of shape [B, C, T, H, W]
 
         Returns:
-            list of tensors of shape [B, C, H, W]
+            list of tensors of shape [B, C, T, H, W]
         """
         # Get original dimensions
-        original_height = data.shape[2]
+        B, C, T, H, W = data.shape
+        data = rearrange(data, "b c t h w -> b (c t) h w")
+        original_height = H
         new_height = self.patch_size if original_height == 1 else self.image_resolution
         data = F.interpolate(
             data,
@@ -158,6 +160,7 @@ class PrithviV2(FeatureExtractor):
             mode="bilinear",
             align_corners=False,
         )
+        data = rearrange(data, "b (c t) h w -> b c t h w", c=C, t=T)
         return data
 
     def forward(self, context: ModelContext) -> FeatureMaps:
@@ -171,17 +174,16 @@ class PrithviV2(FeatureExtractor):
             a FeatureMaps with one map of shape [B, H/p_s, W/p_s, 11*1024] that contains stacked
                 feature maps across the 11 transformer blocks.
         """
-        x = torch.stack([inp[self.INPUT_KEY] for inp in context.inputs], dim=0)
+        # x has shape BCTHW
+        x = torch.stack([inp[self.INPUT_KEY].image for inp in context.inputs], dim=0)
         x = self._resize_data(x)
-        num_timesteps = x.shape[1] // len(self.bands)
-        x = rearrange(x, "b (t c) h w -> b c t h w", t=num_timesteps)
         features = self.model.encoder.forward_features(x)
         # prepare_features_for_image_model was slightly modified since we already
         # know the number of timesteps and don't need to recompute it.
         # in addition we average along the time dimension (instead of concatenating)
         # to keep the embeddings reasonably sized.
         result = self.model.encoder.prepare_features_for_image_model(
-            features, num_timesteps
+            features, x.shape[2]
         )
         return FeatureMaps([torch.cat(result, dim=1)])
 

@@ -175,10 +175,18 @@ class Croma(FeatureExtractor):
         sentinel1: torch.Tensor | None = None
         sentinel2: torch.Tensor | None = None
         if self.modality in [CromaModality.BOTH, CromaModality.SENTINEL1]:
-            sentinel1 = torch.stack([inp["sentinel1"] for inp in context.inputs], dim=0)
+            sentinel1 = torch.stack(
+                # take the first (and assumed to be only) timestep
+                [inp["sentinel1"].image[:, 0] for inp in context.inputs],
+                dim=0,
+            )
             sentinel1 = self._resize_image(sentinel1) if self.do_resizing else sentinel1
         if self.modality in [CromaModality.BOTH, CromaModality.SENTINEL2]:
-            sentinel2 = torch.stack([inp["sentinel2"] for inp in context.inputs], dim=0)
+            sentinel2 = torch.stack(
+                # take the first (and assumed to be only) timestep
+                [inp["sentinel2"].image[:, 0] for inp in context.inputs],
+                dim=0,
+            )
             sentinel2 = self._resize_image(sentinel2) if self.do_resizing else sentinel2
 
         outputs = self.model(
@@ -294,5 +302,7 @@ class CromaNormalize(Transform):
         for modality in MODALITY_BANDS.keys():
             if modality not in input_dict:
                 continue
-            input_dict[modality] = self.apply_image(input_dict[modality], modality)
+            input_dict[modality].image = self.apply_image(
+                input_dict[modality].image, modality
+            )
         return input_dict, target_dict

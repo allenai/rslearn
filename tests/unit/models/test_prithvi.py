@@ -4,6 +4,7 @@ import torch
 
 from rslearn.models.prithvi import PrithviV2, PrithviV2Models
 from rslearn.train.model_context import ModelContext
+from rslearn.utils.raster_format import RasterImage
 
 
 def test_prithvi(tmp_path: pathlib.Path) -> None:
@@ -17,8 +18,10 @@ def test_prithvi(tmp_path: pathlib.Path) -> None:
 
         inputs = [
             {
-                "image": torch.zeros(
-                    (len(prithvi.bands), input_hw, input_hw), dtype=torch.float32
+                "image": RasterImage(
+                    torch.zeros(
+                        (len(prithvi.bands), 1, input_hw, input_hw), dtype=torch.float32
+                    )
                 ),
             }
         ]
@@ -44,9 +47,11 @@ def test_prithvi_mt(tmp_path: pathlib.Path) -> None:
 
         inputs = [
             {
-                "image": torch.zeros(
-                    (len(prithvi.bands) * num_timesteps, input_hw, input_hw),
-                    dtype=torch.float32,
+                "image": RasterImage(
+                    torch.zeros(
+                        (len(prithvi.bands), num_timesteps, input_hw, input_hw),
+                        dtype=torch.float32,
+                    )
                 ),
             }
         ]

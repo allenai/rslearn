@@ -26,6 +26,7 @@ from rslearn.train.tasks.segmentation import SegmentationTask
 from rslearn.train.tasks.task import Task
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import Projection
+from rslearn.utils.raster_format import RasterImage
 
 
 class MockDictionaryTask(Task):
@@ -41,7 +42,7 @@ class MockDictionaryTask(Task):
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, torch.Tensor | list[Feature]],
+        raw_inputs: dict[str, RasterImage | torch.Tensor | list[Feature]],
         metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -606,7 +607,7 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
     class MockNestedTask(Task):
         def process_inputs(
             self,
-            raw_inputs: dict[str, torch.Tensor | list[Feature]],
+            raw_inputs: dict[str, RasterImage | torch.Tensor | list[Feature]],
             metadata: SampleMetadata,
             load_targets: bool = True,
         ) -> tuple[dict[str, Any], dict[str, Any]]:

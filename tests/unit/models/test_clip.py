@@ -3,6 +3,7 @@ import torch
 
 from rslearn.models.clip import CLIP
 from rslearn.train.model_context import ModelContext
+from rslearn.utils.raster_format import RasterImage
 
 
 @pytest.mark.parametrize(
@@ -13,7 +14,7 @@ def test_clip(model_name: str) -> None:
     clip = CLIP(model_name=model_name)
     inputs = [
         {
-            "image": torch.zeros((3, 32, 32), dtype=torch.float32),
+            "image": RasterImage(torch.zeros((3, 1, 32, 32), dtype=torch.float32)),
         }
     ]
     feature_list = clip(ModelContext(inputs=inputs, metadatas=[])).feature_maps

@@ -12,6 +12,7 @@ from rslearn.dataset import Window
 from rslearn.train.dataset import DataInput, ModelDataset
 from rslearn.train.model_context import SampleMetadata
 from rslearn.utils.geometry import PixelBounds, STGeometry
+from rslearn.utils.raster_format import RasterImage
 
 
 def get_window_patch_options(
@@ -275,7 +276,7 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                     def crop_input_dict(d: dict[str, Any]) -> dict[str, Any]:
                         cropped = {}
                         for input_name, value in d.items():
-                            if isinstance(value, torch.Tensor):
+                            if isinstance(value, torch.Tensor | RasterImage):
                                 # Get resolution scale for this input
                                 rf = self.inputs[input_name].resolution_factor
                                 scale = rf.numerator / rf.denominator
@@ -288,12 +289,24 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                                     int(end_offset[0] * scale),
                                     int(end_offset[1] * scale),
                                 )
-                                # Crop the CHW tensor with scaled coordinates.
-                                cropped[input_name] = value[
-                                    :,
-                                    scaled_start[1] : scaled_end[1],
-                                    scaled_start[0] : scaled_end[0],
-                                ].clone()
+                                if isinstance(value, torch.Tensor):
+                                    # Crop the CHW tensor with scaled coordinates.
+                                    cropped[input_name] = value[
+                                        :,
+                                        scaled_start[1] : scaled_end[1],
+                                        scaled_start[0] : scaled_end[0],
+                                    ].clone()
+                                else:
+                                    # Crop the CTHW tensor with scaled coordinates.
+                                    cropped[input_name] = RasterImage(
+                                        value.image[
+                                            :,
+                                            :,
+                                            scaled_start[1] : scaled_end[1],
+                                            scaled_start[0] : scaled_end[0],
+                                        ].clone(),
+                                        value.timestamps,
+                                    )
                             elif isinstance(value, list):
                                 cropped[input_name] = [
                                     feat
@@ -423,7 +436,7 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
         """
         cropped = {}
         for input_name, value in d.items():
-            if isinstance(value, torch.Tensor):
+            if isinstance(value, torch.Tensor | RasterImage):
                 # Get resolution scale for this input
                 rf = self.inputs[input_name].resolution_factor
                 scale = rf.numerator / rf.denominator
@@ -436,11 +449,23 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
                     int(end_offset[0] * scale),
                     int(end_offset[1] * scale),
                 )
-                cropped[input_name] = value[
-                    :,
-                    scaled_start[1] : scaled_end[1],
-                    scaled_start[0] : scaled_end[0],
-                ].clone()
+                if isinstance(value, torch.Tensor):
+                    cropped[input_name] = value[
+                        :,
+                        scaled_start[1] : scaled_end[1],
+                        scaled_start[0] : scaled_end[0],
+                    ].clone()
+                else:
+                    # Crop the CTHW tensor with scaled coordinates.
+                    cropped[input_name] = RasterImage(
+                        value.image[
+                            :,
+                            :,
+                            scaled_start[1] : scaled_end[1],
+                            scaled_start[0] : scaled_end[0],
+                        ].clone(),
+                        value.timestamps,
+                    )
             elif isinstance(value, list):
                 cropped[input_name] = [
                     feat for feat in value if cur_geom.intersects(feat.geometry)

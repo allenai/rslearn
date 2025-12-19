@@ -14,6 +14,7 @@ from rslearn.models.component import FeatureVector, Predictor
 from rslearn.train.model_context import ModelContext, ModelOutput, SampleMetadata
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import STGeometry
+from rslearn.utils.raster_format import RasterImage
 
 from .task import BasicTask
 
@@ -63,7 +64,7 @@ class RegressionTask(BasicTask):
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, torch.Tensor | list[Feature]],
+        raw_inputs: dict[str, RasterImage | list[Feature]],
         metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -82,6 +83,7 @@ class RegressionTask(BasicTask):
             return {}, {}
 
         data = raw_inputs["targets"]
+        assert isinstance(data, list)
         for feat in data:
             if feat.properties is None or self.filters is None:
                 continue

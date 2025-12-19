@@ -248,6 +248,8 @@ def test_basic_time_series(basic_classification_dataset: Dataset) -> None:
                         "image1": [],
                     },
                     "image",
+                    # concatenate on the time dimension
+                    concatenate_dim=1,
                 )
             ],
         ),
@@ -266,7 +268,7 @@ def test_basic_time_series(basic_classification_dataset: Dataset) -> None:
 
     assert len(dataset) == 1
     inputs, _, _ = dataset[0]
-    assert inputs["image"].shape == (2, 4, 4)
+    assert inputs["image"].image.shape == (1, 2, 4, 4)
 
 
 def test_load_all_layers(basic_classification_dataset: Dataset) -> None:
@@ -301,7 +303,8 @@ def test_load_all_layers(basic_classification_dataset: Dataset) -> None:
 
     assert len(dataset) == 1
     inputs, _, _ = dataset[0]
-    assert inputs["image"].shape == (2, 4, 4)
+    # two layers - timesteps - have been loaded
+    assert inputs["image"].image.shape == (1, 2, 4, 4)
 
 
 def test_load_two_layers(basic_classification_dataset: Dataset) -> None:
@@ -337,9 +340,10 @@ def test_load_two_layers(basic_classification_dataset: Dataset) -> None:
 
     assert len(dataset) == 1
     inputs, _, _ = dataset[0]
-    assert inputs["image"].shape == (2, 4, 4)
-    assert torch.all(inputs["image"][0] == 1)
-    assert torch.all(inputs["image"][1] == 2)
+    # one channel, two timesteps
+    assert inputs["image"].image.shape == (1, 2, 4, 4)
+    assert torch.all(inputs["image"].image[:, 0] == 1)
+    assert torch.all(inputs["image"].image[:, 1] == 2)
 
 
 class TestIterableAllPatchesDataset:
@@ -468,7 +472,7 @@ class TestIterableAllPatchesDataset:
         sample_count = 0
         for inputs, targets, metadata in dataset:
             sample_count += 1
-            assert inputs["image"].shape[-2:] == (4, 4)
+            assert inputs["image"].image.shape[-2:] == (4, 4)
             assert targets["classes"].shape == (2, 2)
         assert sample_count > 0, "No samples were generated - test is not valid"
 
@@ -550,5 +554,5 @@ class TestInMemoryAllPatchesDataset:
         for i in range(len(dataset)):
             inputs, targets, metadata = dataset[i]
             # Target patch should have half the resolution of the input patch
-            assert inputs["image"].shape[-2:] == (4, 4)
+            assert inputs["image"].image.shape[-2:] == (4, 4)
             assert targets["classes"].shape == (2, 2)
