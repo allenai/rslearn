@@ -144,13 +144,15 @@ class PrithviV2(FeatureExtractor):
         """Process individual modality data.
 
         Args:
-            data: Input tensor of shape [B, C, H, W]
+            data: Input tensor of shape [B, C, T, H, W]
 
         Returns:
-            list of tensors of shape [B, C, H, W]
+            list of tensors of shape [B, C, T, H, W]
         """
         # Get original dimensions
-        original_height = data.shape[2]
+        B, C, T, H, W = data.shape
+        data = rearrange(data, "b c t h w -> b (c t) h w")
+        original_height = H
         new_height = self.patch_size if original_height == 1 else self.image_resolution
         data = F.interpolate(
             data,
@@ -158,6 +160,7 @@ class PrithviV2(FeatureExtractor):
             mode="bilinear",
             align_corners=False,
         )
+        data = rearrange(data, "b (c t) h w -> b c t h w", c=C, t=T)
         return data
 
     def forward(self, context: ModelContext) -> FeatureMaps:
