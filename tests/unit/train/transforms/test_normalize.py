@@ -144,3 +144,27 @@ def test_list_mean_and_std_with_band_indices() -> None:
     # Third band should be (1-1)/1 = 0.0.
     assert result[2, 0, 0] == pytest.approx(0.0)
     assert result[5, 0, 0] == pytest.approx(0.0)
+
+
+def test_list_mean_and_std_with_band_indices_rasterimage() -> None:
+    """Make sure list of means and stds works when passing band index list."""
+    normalize = Normalize(
+        mean=[0, 1],
+        std=[2, 1],
+        bands=[0, 2],
+        num_bands=3,
+    )
+    input_dict = {
+        "image": RasterImage(torch.ones((3, 2, 1, 1), dtype=torch.float32)),
+    }
+    input_dict, _ = normalize(input_dict, None)
+    result = input_dict["image"].image
+    # First band should be (1-0)/2 = 0.5.
+    assert result[0, :, 0, 0] == pytest.approx(0.5)
+    assert result[3, :, 0, 0] == pytest.approx(0.5)
+    # Second band should be unchanged.
+    assert result[1, :, 0, 0] == pytest.approx(1.0)
+    assert result[4, :, 0, 0] == pytest.approx(1.0)
+    # Third band should be (1-1)/1 = 0.0.
+    assert result[2, :, 0, 0] == pytest.approx(0.0)
+    assert result[5, :, 0, 0] == pytest.approx(0.0)
