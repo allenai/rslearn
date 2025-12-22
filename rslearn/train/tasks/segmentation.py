@@ -265,6 +265,20 @@ class SegmentationTask(BasicTask):
 class SegmentationHead(Predictor):
     """Head for segmentation task."""
 
+    def __init__(self, weights: list[float] | None = None, dice_loss: bool = False):
+        """Initialize a new SegmentationTask.
+
+        Args:
+            weights: weights for cross entropy loss (Tensor of size C)
+            dice_loss: weather to add dice loss to cross entropy
+        """
+        super().__init__()
+        if weights is not None:
+            self.register_buffer("weights", torch.Tensor(weights))
+        else:
+            self.weights = None
+        self.dice_loss = dice_loss
+
     def forward(
         self,
         intermediates: Any,
@@ -299,7 +313,7 @@ class SegmentationHead(Predictor):
             labels = torch.stack([target["classes"] for target in targets], dim=0)
             mask = torch.stack([target["valid"] for target in targets], dim=0)
             per_pixel_loss = torch.nn.functional.cross_entropy(
-                logits, labels, reduction="none"
+                logits, labels, weight=self.weights, reduction="none"
             )
             mask_sum = torch.sum(mask)
             if mask_sum > 0:
@@ -309,6 +323,9 @@ class SegmentationHead(Predictor):
                 # If there are no valid pixels, we avoid dividing by zero and just let
                 # the summed mask loss be zero.
                 losses["cls"] = torch.sum(per_pixel_loss * mask)
+            if self.dice_loss:
+                dice_loss = DiceLoss()(outputs, labels, mask)
+                losses["dice"] = dice_loss
 
         return ModelOutput(
             outputs=outputs,
@@ -593,3 +610,48 @@ class MeanIoUMetric(Metric):
             per_class_scores.append(intersection / union)
 
         return torch.mean(torch.stack(per_class_scores))
+
+
+class DiceLoss(torch.nn.Module):
+    """Mean Dice Loss for segmentation.
+
+    This is the mean of the per-class dice loss (1 - 2*intersection / union scores).
+    The per-class intersection is the number of pixels across all examples where
+    the predicted label and ground truth label are both that class, and the per-class
+    union is defined similarly.
+    """
+
+    def __init__(self, smooth: float = 1e-7):
+        """Initialize a new DiceLoss."""
+        super().__init__()
+        self.smooth = smooth
+
+    def forward(
+        self, inputs: torch.Tensor, targets: torch.Tensor, mask: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute Dice Loss.
+
+        Returns:
+            the mean Dicen Loss across classes
+        """
+        num_classes = inputs.shape[1]
+        targets_one_hot = (
+            torch.nn.functional.one_hot(targets, num_classes)
+            .permute(0, 3, 1, 2)
+            .float()
+        )
+
+        # Expand mask to [B, C, H, W]
+        mask = mask.unsqueeze(1).expand_as(inputs)
+
+        dice_per_class = []
+        for c in range(num_classes):
+            pred_c = inputs[:, c] * mask[:, c]
+            target_c = targets_one_hot[:, c] * mask[:, c]
+
+            intersection = (pred_c * target_c).sum()
+            union = pred_c.sum() + target_c.sum()
+            dice_c = (2.0 * intersection + self.smooth) / (union + self.smooth)
+            dice_per_class.append(dice_c)
+
+        return 1 - torch.stack(dice_per_class).mean()
