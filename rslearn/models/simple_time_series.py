@@ -3,8 +3,10 @@
 from typing import Any
 
 import torch
+from einops import rearrange
 
 from rslearn.train.model_context import ModelContext
+from rslearn.utils.raster_format import RasterImage
 
 from .component import FeatureExtractor, FeatureMaps
 
@@ -19,6 +21,10 @@ class SimpleTimeSeries(FeatureExtractor):
     - ConvRNN.
     - 3D convolutions.
     - 1D convolutions (per-pixel, just apply it over time).
+
+    We assume that a FeatureExtractor used within a SimpleTimeSeries is not time-aware. This means
+    we discard the timestep information from the RasterImage when passing the inputs to the
+    FeatureExtractor.
     """
 
     def __init__(
@@ -163,23 +169,18 @@ class SimpleTimeSeries(FeatureExtractor):
 
     def _get_batched_images(
         self, input_dicts: list[dict[str, Any]], image_key: str, image_channels: int
-    ) -> torch.Tensor:
+    ) -> list[RasterImage]:
         """Collect and reshape images across input dicts.
 
         The BTCHW image time series are reshaped to (B*T)CHW so they can be passed to
         the forward pass of a per-image (unitemporal) model.
         """
         images = torch.stack(
-            [input_dict[image_key] for input_dict in input_dicts], dim=0
-        )
-        n_batch = images.shape[0]
-        n_images = images.shape[1] // image_channels
-        n_height = images.shape[2]
-        n_width = images.shape[3]
-        batched_images = images.reshape(
-            n_batch * n_images, image_channels, n_height, n_width
-        )
-        return batched_images
+            [input_dict[image_key].image for input_dict in input_dicts], dim=0
+        )  # B, C, T, H, W
+        # 1 since the RasterImage format expects a time dimension
+        images = rearrange(images, "b c t h w -> (b t) c 1 h w")
+        return [RasterImage(image) for image in images]  # C, T, H, W
 
     def forward(
         self,
@@ -208,8 +209,8 @@ class SimpleTimeSeries(FeatureExtractor):
 
                 if batched_inputs is None:
                     batched_inputs = [{} for _ in batched_images]
-                    n_images = batched_images.shape[0] // n_batch
-                elif n_images != batched_images.shape[0] // n_batch:
+                    n_images = len(batched_images) // n_batch
+                elif n_images != len(batched_images) // n_batch:
                     raise ValueError(
                         "expected all modalities to have the same number of timesteps"
                     )
@@ -223,7 +224,7 @@ class SimpleTimeSeries(FeatureExtractor):
                 context.inputs, self.image_key, self.image_channels
             )
             batched_inputs = [{self.image_key: image} for image in batched_images]
-            n_images = batched_images.shape[0] // n_batch
+            n_images = len(batched_images) // n_batch
 
         assert n_images is not None
 
