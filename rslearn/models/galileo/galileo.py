@@ -417,7 +417,7 @@ class GalileoModel(FeatureExtractor):
         time_ranges: list[tuple[datetime, datetime]],
         device: torch.device,
     ) -> torch.Tensor:
-        """Turn the time ranges stored in a RasterImage to timestamps accepted by OlmoEarth.
+        """Turn the time ranges stored in a RasterImage to timestamps accepted by Galileo.
 
         Galileo only uses the month associated with each timestamp, so we take the midpoint
         the time range. For some inputs (e.g. Sentinel 2) we take an image from a specific
@@ -425,7 +425,9 @@ class GalileoModel(FeatureExtractor):
         """
         mid_ranges = [t[0] + ((t[1] - t[0]) / 2) for t in time_ranges]
         # months are indexed 0-11
-        return torch.tensor([d.month - 1 for d in mid_ranges], dtype=torch.int32)
+        return torch.tensor(
+            [d.month - 1 for d in mid_ranges], dtype=torch.int32, device=device
+        )
 
     def forward(self, context: ModelContext) -> FeatureMaps:
         """Compute feature maps from the Galileo backbone.
