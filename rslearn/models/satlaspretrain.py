@@ -76,7 +76,10 @@ class SatlasPretrain(FeatureExtractor):
         Returns:
             multi-resolution feature maps computed by the model.
         """
-        images = torch.stack([inp["image"] for inp in context.inputs], dim=0)
+        # take the first (assumed to be only) timestep
+        images = torch.stack(
+            [inp["image"].image[:, 0] for inp in context.inputs], dim=0
+        )
         feature_maps = self.model(self.maybe_resize(images))
         return FeatureMaps(feature_maps)
 

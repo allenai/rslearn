@@ -53,7 +53,7 @@ class EncoderModuleWrapper(FeatureExtractor):
         Returns:
             the output from the last wrapped module.
         """
-        images = torch.stack([inp["image"] for inp in context.inputs], dim=0)
+        images = torch.stack([inp["image"].image for inp in context.inputs], dim=0)
         cur: Any = FeatureMaps([images])
         for m in self.encoder_modules:
             cur = m(cur, context)
