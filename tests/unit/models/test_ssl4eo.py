@@ -1,20 +1,19 @@
 import torch
 
-from rslearn.models.swin import Swin
+from rslearn.models.ssl4eo_s12 import Ssl4eoS12
 from rslearn.train.model_context import ModelContext
 from rslearn.utils.raster_format import RasterImage
 
 
-def test_swin() -> None:
+def test_ssl4eo() -> None:
     """Verify that the forward pass for Prithvi works."""
-    input_bands = 3
-    input_hw = 32
-    model = Swin(input_channels=input_bands, output_layers=[1, 3, 5, 7])
+    input_hw = 512
+    model = Ssl4eoS12(backbone_ckpt_path=None)
 
     inputs = [
         {
             "image": RasterImage(
-                torch.zeros((input_bands, 1, input_hw, input_hw), dtype=torch.float32)
+                torch.zeros((13, 1, input_hw, input_hw), dtype=torch.float32)
             ),
         }
     ]
