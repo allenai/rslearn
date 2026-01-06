@@ -54,6 +54,9 @@ data:
             segment_label: "targets
 ```
 
+See [ModelConfig.md](./ModelConfig.md#inputs) for details about how to configure the
+inputs section.
+
 ### ClassificationTask
 
 ClassificationTask trains a model to make global window-level classification
