@@ -1,8 +1,7 @@
 import torch
 
 from rslearn.models.satlaspretrain import SatlasPretrain
-from rslearn.train.model_context import ModelContext
-from rslearn.utils.raster_format import RasterImage
+from rslearn.train.model_context import ModelContext, RasterImage
 
 
 def test_satlas() -> None:

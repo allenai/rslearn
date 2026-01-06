@@ -2,7 +2,7 @@ import pytest
 import torch
 
 from rslearn.models.molmo import Molmo
-from rslearn.utils.raster_format import RasterImage
+from rslearn.train.model_context import RasterImage
 
 
 @pytest.mark.parametrize(

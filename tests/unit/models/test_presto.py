@@ -7,8 +7,7 @@ from einops import rearrange
 from pytest import MonkeyPatch
 
 from rslearn.models.presto import Presto
-from rslearn.train.model_context import ModelContext
-from rslearn.utils.raster_format import RasterImage
+from rslearn.train.model_context import ModelContext, RasterImage
 
 
 def test_presto(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:

@@ -8,8 +8,7 @@ from olmoearth_pretrain.train.masking import MaskValue
 
 from rslearn.models.attention_pooling import AttentionPool, SimpleAttentionPool
 from rslearn.models.olmoearth_pretrain.model import OlmoEarth
-from rslearn.train.model_context import ModelContext
-from rslearn.utils.raster_format import RasterImage
+from rslearn.train.model_context import ModelContext, RasterImage
 
 
 def test_forward() -> None:

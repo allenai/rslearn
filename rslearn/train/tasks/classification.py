@@ -16,9 +16,13 @@ from torchmetrics.classification import (
 )
 
 from rslearn.models.component import FeatureVector, Predictor
-from rslearn.train.model_context import ModelContext, ModelOutput, SampleMetadata
+from rslearn.train.model_context import (
+    ModelContext,
+    ModelOutput,
+    RasterImage,
+    SampleMetadata,
+)
 from rslearn.utils import Feature, STGeometry
-from rslearn.utils.raster_format import RasterImage
 
 from .task import BasicTask
 

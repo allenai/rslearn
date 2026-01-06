@@ -11,10 +11,14 @@ from PIL import Image, ImageDraw
 from torchmetrics import Metric, MetricCollection
 
 from rslearn.models.component import FeatureVector, Predictor
-from rslearn.train.model_context import ModelContext, ModelOutput, SampleMetadata
+from rslearn.train.model_context import (
+    ModelContext,
+    ModelOutput,
+    RasterImage,
+    SampleMetadata,
+)
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import STGeometry
-from rslearn.utils.raster_format import RasterImage
 
 from .task import BasicTask
 

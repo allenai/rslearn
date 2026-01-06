@@ -6,8 +6,7 @@ import torch
 from pytest import MonkeyPatch
 
 from rslearn.models.galileo import GalileoModel, GalileoSize
-from rslearn.train.model_context import ModelContext
-from rslearn.utils.raster_format import RasterImage
+from rslearn.train.model_context import ModelContext, RasterImage
 
 
 def test_galileo(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:

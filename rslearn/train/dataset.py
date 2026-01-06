@@ -28,10 +28,10 @@ from rslearn.dataset.window import (
     get_layer_and_group_from_dir_name,
 )
 from rslearn.log_utils import get_logger
+from rslearn.train.model_context import RasterImage
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
 from rslearn.utils.mp import star_imap_unordered
-from rslearn.utils.raster_format import RasterImage
 
 from .model_context import SampleMetadata
 from .tasks import Task

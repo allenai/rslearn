@@ -7,8 +7,7 @@ import huggingface_hub.constants
 import torch
 
 from rslearn.models.terramind import Terramind, TerramindNormalize, TerramindSize
-from rslearn.train.model_context import ModelContext
-from rslearn.utils.raster_format import RasterImage
+from rslearn.train.model_context import ModelContext, RasterImage
 
 
 def test_terramind_without_resizing(tmp_path: pathlib.Path, monkeypatch: Any) -> None:

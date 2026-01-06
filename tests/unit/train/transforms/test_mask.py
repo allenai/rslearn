@@ -2,8 +2,8 @@
 
 import torch
 
+from rslearn.train.model_context import RasterImage
 from rslearn.train.transforms.mask import Mask
-from rslearn.utils.raster_format import RasterImage
 
 
 def test_mask_to_zero() -> None:

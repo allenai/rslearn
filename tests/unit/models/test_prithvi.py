@@ -3,8 +3,7 @@ import pathlib
 import torch
 
 from rslearn.models.prithvi import PrithviV2, PrithviV2Models
-from rslearn.train.model_context import ModelContext
-from rslearn.utils.raster_format import RasterImage
+from rslearn.train.model_context import ModelContext, RasterImage
 
 
 def test_prithvi(tmp_path: pathlib.Path) -> None:

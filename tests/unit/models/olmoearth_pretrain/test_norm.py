@@ -5,7 +5,7 @@ from datetime import datetime
 import torch
 
 from rslearn.models.olmoearth_pretrain.norm import OlmoEarthNormalize
-from rslearn.utils.raster_format import RasterImage
+from rslearn.train.model_context import RasterImage
 
 
 def test_forward() -> None:

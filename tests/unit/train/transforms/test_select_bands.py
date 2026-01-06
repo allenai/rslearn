@@ -3,8 +3,8 @@
 import pytest
 import torch
 
+from rslearn.train.model_context import RasterImage
 from rslearn.train.transforms.select_bands import SelectBands
-from rslearn.utils.raster_format import RasterImage
 
 
 def test_select_bands_timeseries() -> None:

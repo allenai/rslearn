@@ -3,8 +3,8 @@
 import pytest
 import torch
 
+from rslearn.train.model_context import RasterImage
 from rslearn.train.transforms.normalize import Normalize
-from rslearn.utils.raster_format import RasterImage
 
 
 def test_normalize_time_series() -> None:

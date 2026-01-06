@@ -8,7 +8,29 @@ from typing import Any
 import torch
 
 from rslearn.utils.geometry import PixelBounds, Projection
-from rslearn.utils.raster_format import RasterImage
+
+
+@dataclass
+class RasterImage:
+    """A raster image is a torch.tensor containing the images and their associated timestamps."""
+
+    # image will have a temporal dimension, CTHW
+    image: torch.Tensor
+    timestamps: list[tuple[datetime, datetime]] | None = None
+
+    @property
+    def shape(self) -> torch.Size:
+        """The shape of the image."""
+        return self.image.shape
+
+    def dim(self) -> int:
+        """The dim of the image."""
+        return self.image.dim()
+
+    @property
+    def dtype(self) -> torch.dtype:
+        """The image dtype."""
+        return self.image.dtype
 
 
 @dataclass

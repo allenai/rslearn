@@ -8,8 +8,7 @@ from typing_extensions import override
 
 from rslearn.models.component import FeatureExtractor, FeatureMaps
 from rslearn.models.simple_time_series import SimpleTimeSeries
-from rslearn.train.model_context import ModelContext
-from rslearn.utils.raster_format import RasterImage
+from rslearn.train.model_context import ModelContext, RasterImage
 
 
 class IdentityFeatureExtractor(FeatureExtractor):

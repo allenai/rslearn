@@ -2,15 +2,12 @@
 
 import hashlib
 import json
-from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, BinaryIO
 
 import affine
 import numpy as np
 import numpy.typing as npt
 import rasterio
-import torch
 from PIL import Image
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
@@ -23,29 +20,6 @@ from rslearn.utils.fsspec import open_rasterio_upath_reader, open_rasterio_upath
 from .geometry import PixelBounds, Projection
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class RasterImage:
-    """A raster image is a torch.tensor containing the images and their associated timestamps."""
-
-    # image will have a temporal dimension, CTHW
-    image: torch.Tensor
-    timestamps: list[tuple[datetime, datetime]] | None = None
-
-    @property
-    def shape(self) -> torch.Size:
-        """The shape of the image."""
-        return self.image.shape
-
-    def dim(self) -> int:
-        """The dim of the image."""
-        return self.image.dim()
-
-    @property
-    def dtype(self) -> torch.dtype:
-        """The image dtype."""
-        return self.image.dtype
 
 
 def get_bandset_dirname(bands: list[str]) -> str:

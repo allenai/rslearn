@@ -5,8 +5,7 @@ from typing import Any
 import torch
 from einops import rearrange
 
-from rslearn.train.model_context import ModelContext
-from rslearn.utils.raster_format import RasterImage
+from rslearn.train.model_context import ModelContext, RasterImage
 
 from .component import FeatureExtractor, FeatureMaps
 

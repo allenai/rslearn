@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from rslearn.models.dinov3 import DinoV3
-from rslearn.utils.raster_format import RasterImage
+from rslearn.train.model_context import RasterImage
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

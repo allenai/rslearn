@@ -2,8 +2,8 @@
 
 import torch
 
+from rslearn.train.model_context import RasterImage
 from rslearn.train.transforms.transform import Transform, read_selector
-from rslearn.utils.raster_format import RasterImage
 
 
 class Mask(Transform):

@@ -2,9 +2,8 @@ import numpy as np
 import pytest
 import torch
 
-from rslearn.train.model_context import SampleMetadata
+from rslearn.train.model_context import RasterImage, SampleMetadata
 from rslearn.train.tasks.segmentation import SegmentationTask
-from rslearn.utils.raster_format import RasterImage
 
 
 class TestProcessInputs:

@@ -9,8 +9,7 @@ import pytest
 import torch
 
 from rslearn.models.anysat import AnySat
-from rslearn.train.model_context import ModelContext
-from rslearn.utils.raster_format import RasterImage
+from rslearn.train.model_context import ModelContext, RasterImage
 
 
 @pytest.mark.slow

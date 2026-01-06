@@ -5,7 +5,7 @@ from typing import Any
 import torch
 import torchvision
 
-from rslearn.utils.raster_format import RasterImage
+from rslearn.train.model_context import RasterImage
 
 from .transform import Transform, read_selector
 

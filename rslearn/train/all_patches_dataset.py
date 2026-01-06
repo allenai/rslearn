@@ -10,9 +10,8 @@ import torch
 
 from rslearn.dataset import Window
 from rslearn.train.dataset import DataInput, ModelDataset
-from rslearn.train.model_context import SampleMetadata
+from rslearn.train.model_context import RasterImage, SampleMetadata
 from rslearn.utils.geometry import PixelBounds, STGeometry
-from rslearn.utils.raster_format import RasterImage
 
 
 def get_window_patch_options(

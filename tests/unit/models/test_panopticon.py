@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from rslearn.models.panopticon import Panopticon, PanopticonModalities
-from rslearn.utils.raster_format import RasterImage
+from rslearn.train.model_context import RasterImage
 
 logger = logging.getLogger(__name__)
 

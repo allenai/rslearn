@@ -2,12 +2,11 @@ import pytest
 import torch
 
 from rslearn.models.component import FeatureMaps
-from rslearn.train.model_context import ModelContext, SampleMetadata
+from rslearn.train.model_context import ModelContext, RasterImage, SampleMetadata
 from rslearn.train.tasks.per_pixel_regression import (
     PerPixelRegressionHead,
     PerPixelRegressionTask,
 )
-from rslearn.utils.raster_format import RasterImage
 
 
 def test_process_inputs(empty_sample_metadata: SampleMetadata) -> None:

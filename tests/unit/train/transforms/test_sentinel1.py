@@ -3,8 +3,8 @@
 import pytest
 import torch
 
+from rslearn.train.model_context import RasterImage
 from rslearn.train.transforms.sentinel1 import Sentinel1ToDecibels
-from rslearn.utils.raster_format import RasterImage
 
 
 def test_to_decibels() -> None:

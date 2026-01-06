@@ -3,8 +3,8 @@ from typing import Any
 import pytest
 import torch
 
+from rslearn.train.model_context import RasterImage
 from rslearn.train.transforms.resize import Resize
-from rslearn.utils.raster_format import RasterImage
 
 
 def test_resize() -> None:

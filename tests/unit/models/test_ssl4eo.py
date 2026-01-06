@@ -1,8 +1,7 @@
 import torch
 
 from rslearn.models.ssl4eo_s12 import Ssl4eoS12
-from rslearn.train.model_context import ModelContext
-from rslearn.utils.raster_format import RasterImage
+from rslearn.train.model_context import ModelContext, RasterImage
 
 
 def test_ssl4eo() -> None:

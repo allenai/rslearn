@@ -11,8 +11,7 @@ from rslearn.models.croma import (
     CromaModality,
     CromaSize,
 )
-from rslearn.train.model_context import ModelContext
-from rslearn.utils.raster_format import RasterImage
+from rslearn.train.model_context import ModelContext, RasterImage
 
 
 def test_croma(tmp_path: pathlib.Path, monkeypatch: Any) -> None:

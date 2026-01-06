@@ -5,9 +5,8 @@ from typing import Any
 import numpy.typing as npt
 from torchmetrics import Metric, MetricCollection
 
-from rslearn.train.model_context import SampleMetadata
+from rslearn.train.model_context import RasterImage, SampleMetadata
 from rslearn.utils import Feature
-from rslearn.utils.raster_format import RasterImage
 
 from .task import Task
 
