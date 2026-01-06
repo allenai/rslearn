@@ -17,7 +17,7 @@ from rslearn.models.singletask import SingleTaskModel
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.dataset import DataInput, ModelDataset, SplitConfig
 from rslearn.train.lightning_module import RslearnLightningModule
-from rslearn.train.model_context import ModelContext
+from rslearn.train.model_context import ModelContext, RasterImage
 from rslearn.train.optimizer import AdamW
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.tasks.per_pixel_regression import (
@@ -233,7 +233,9 @@ class TestResolutionFactor:
                 ModelContext(
                     inputs=[
                         {
-                            "image": torch.ones((1, 4, 4), dtype=torch.float32),
+                            "image": RasterImage(
+                                torch.ones((1, 1, 4, 4), dtype=torch.float32)
+                            ),
                         }
                     ],
                     metadatas=[],

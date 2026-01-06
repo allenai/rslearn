@@ -53,7 +53,12 @@ class EncoderModuleWrapper(FeatureExtractor):
         Returns:
             the output from the last wrapped module.
         """
-        images = torch.stack([inp["image"].image for inp in context.inputs], dim=0)
+        # take the first (and assumed only) timestep. Currently no intermediate
+        # components support multi temporal inputs, so if the input is
+        # multitemporal it should be wrapped in a simple time series wrapper.
+        images = torch.stack(
+            [inp["image"].image[:, 0] for inp in context.inputs], dim=0
+        )
         cur: Any = FeatureMaps([images])
         for m in self.encoder_modules:
             cur = m(cur, context)
