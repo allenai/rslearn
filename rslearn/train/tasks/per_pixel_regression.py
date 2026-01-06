@@ -67,7 +67,9 @@ class PerPixelRegressionTask(BasicTask):
         labels = raw_inputs["targets"].image[0, 0, :, :].float() * self.scale_factor
 
         if self.nodata_value is not None:
-            valid = (raw_inputs["targets"].image[0, :, :] != self.nodata_value).float()
+            valid = (
+                raw_inputs["targets"].image[0, 0, :, :] != self.nodata_value
+            ).float()
         else:
             valid = torch.ones(labels.shape, dtype=torch.float32)
 

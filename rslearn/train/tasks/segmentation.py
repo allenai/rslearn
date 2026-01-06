@@ -1,5 +1,6 @@
 """Segmentation task."""
 
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -110,7 +111,7 @@ class SegmentationTask(BasicTask):
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, RasterImage | list[Feature]],
+        raw_inputs: Mapping[str, RasterImage | list[Feature]],
         metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
