@@ -656,7 +656,8 @@ def forward(self, intermediates: Any, context: ModelContext) -> Any:
 
 The predictor accepts the targets, along with the arbitrary output of the previous
 model component, and computes outputs compatible with the configured Task, along with
-loss(es).
+loss(es). The targets are those computed by the Task's `process_inputs` function, so
+their form would depend on the configured Task.
 
 For example, the output from Faster R-CNN is a list of dicts with the "boxes",
 "scores", and "labels" keys. It outputs a loss dict with the "rpn_box_reg",
