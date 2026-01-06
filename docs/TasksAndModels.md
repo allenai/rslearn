@@ -675,6 +675,9 @@ def forward(
 ) -> ModelOutput:
 ```
 
+`targets` is a list with one target dict per example in the batch, or None during the
+predict stage.
+
 ModelOutput is defined as follows in `rslearn.train.model_context`:
 
 ```python
