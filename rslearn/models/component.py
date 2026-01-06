@@ -92,6 +92,18 @@ class FeatureMaps:
 
 
 @dataclass
+class TokenFeatureMaps:
+    """An intermediate output type for multi-resolution BCHWN feature maps with a token dimension.
+
+    Unlike `FeatureMaps`, these include an additional dimension for unpooled tokens.
+    """
+
+    # List of BxCxHxWxN feature maps at different scales, ordered from highest resolution
+    # (most fine-grained) to lowest resolution (coarsest).
+    feature_maps: list[torch.Tensor]
+
+
+@dataclass
 class FeatureVector:
     """An intermediate output type for a flat feature vector."""
 

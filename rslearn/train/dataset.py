@@ -24,7 +24,7 @@ from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.window import Window, get_layer_and_group_from_dir_name
 from rslearn.log_utils import get_logger
 from rslearn.utils.feature import Feature
-from rslearn.utils.geometry import PixelBounds
+from rslearn.utils.geometry import PixelBounds, ResolutionFactor
 from rslearn.utils.mp import star_imap_unordered
 
 from .model_context import SampleMetadata
@@ -130,6 +130,10 @@ class DataInput:
     """Specification of a piece of data from a window that is needed for training.
 
     The DataInput includes which layer(s) the data can be obtained from for each window.
+
+    Note that this class is not a dataclass because jsonargparse does not play well
+    with dataclasses without enabling specialized options which we have not validated
+    will work with the rest of our code.
     """
 
     def __init__(
@@ -143,7 +147,9 @@ class DataInput:
         dtype: DType = DType.FLOAT32,
         load_all_layers: bool = False,
         load_all_item_groups: bool = False,
-    ) -> None:
+        resolution_factor: ResolutionFactor = ResolutionFactor(),
+        resampling: Resampling = Resampling.nearest,
+    ):
         """Initialize a new DataInput.
 
         Args:
@@ -166,6 +172,11 @@ class DataInput:
                 are reading from. By default, we assume the specified layer name is of
                 the form "{layer_name}.{group_idx}" and read that item group only. With
                 this option enabled, we ignore the group_idx and read all item groups.
+            resolution_factor: controls the resolution at which raster data is loaded for training.
+                By default (factor=1), data is loaded at the window resolution.
+                E.g. for a 64x64 window at 10 m/pixel with resolution_factor=1/2,
+                the resulting tensor is 32x32 (covering the same geographic area at 20 m/pixel).
+            resampling: resampling method (default nearest neighbor).
         """
         self.data_type = data_type
         self.layers = layers
@@ -176,6 +187,8 @@ class DataInput:
         self.dtype = dtype
         self.load_all_layers = load_all_layers
         self.load_all_item_groups = load_all_item_groups
+        self.resolution_factor = resolution_factor
+        self.resampling = resampling
 
 
 def read_raster_layer_for_data_input(
@@ -233,15 +246,23 @@ def read_raster_layer_for_data_input(
             + f"window {window.name} layer {layer_name} group {group_idx}"
         )
 
+    # Get the projection and bounds to read under (multiply window resolution # by
+    # the specified resolution factor).
+    final_projection = data_input.resolution_factor.multiply_projection(
+        window.projection
+    )
+    final_bounds = data_input.resolution_factor.multiply_bounds(bounds)
+
     image = torch.zeros(
-        (len(needed_bands), bounds[3] - bounds[1], bounds[2] - bounds[0]),
+        (
+            len(needed_bands),
+            final_bounds[3] - final_bounds[1],
+            final_bounds[2] - final_bounds[0],
+        ),
         dtype=get_torch_dtype(data_input.dtype),
     )
 
     for band_set, src_indexes, dst_indexes in needed_sets_and_indexes:
-        final_projection, final_bounds = band_set.get_final_projection_and_bounds(
-            window.projection, bounds
-        )
         if band_set.format is None:
             raise ValueError(f"No format specified for {layer_name}")
         raster_format = band_set.instantiate_raster_format()
@@ -249,44 +270,16 @@ def read_raster_layer_for_data_input(
             layer_name, band_set.bands, group_idx=group_idx
         )
 
-        # Previously we always read in the native projection of the data, and then
-        # zoom in or out (the resolution must be a power of two off) to match the
-        # window's resolution.
-        # However, this fails if the bounds are not multiples of the resolution factor.
-        # So we fallback to reading directly in the window projection if that is the
-        # case (which may be a bit slower).
-        is_bounds_zoomable = True
-        if band_set.zoom_offset < 0:
-            zoom_factor = 2 ** (-band_set.zoom_offset)
-            is_bounds_zoomable = (final_bounds[2] - final_bounds[0]) * zoom_factor == (
-                bounds[2] - bounds[0]
-            ) and (final_bounds[3] - final_bounds[1]) * zoom_factor == (
-                bounds[3] - bounds[1]
-            )
+        # TODO: previously we try to read based on band_set.zoom_offset when possible,
+        # and handle zooming in with torch.repeat (if resampling method is nearest
+        # neighbor). However, we have not benchmarked whether this actually improves
+        # data loading speed, so for simplicity, for now we let rasterio handle the
+        # resampling. If it really is much faster to handle it via torch, then it may
+        # make sense to bring back that functionality.
 
-        if is_bounds_zoomable:
-            src = raster_format.decode_raster(
-                raster_dir, final_projection, final_bounds
-            )
-
-            # Resize to patch size if needed.
-            # This is for band sets that are stored at a lower resolution.
-            # Here we assume that it is a multiple.
-            if src.shape[1:3] != image.shape[1:3]:
-                if src.shape[1] < image.shape[1]:
-                    factor = image.shape[1] // src.shape[1]
-                    src = src.repeat(repeats=factor, axis=1).repeat(
-                        repeats=factor, axis=2
-                    )
-                else:
-                    factor = src.shape[1] // image.shape[1]
-                    src = src[:, ::factor, ::factor]
-
-        else:
-            src = raster_format.decode_raster(
-                raster_dir, window.projection, bounds, resampling=Resampling.nearest
-            )
-
+        src = raster_format.decode_raster(
+            raster_dir, final_projection, final_bounds, resampling=Resampling.nearest
+        )
         image[dst_indexes, :, :] = torch.as_tensor(
             src[src_indexes, :, :].astype(data_input.dtype.get_numpy_dtype())
         )

@@ -8,6 +8,7 @@ from rasterio.crs import CRS
 from upath import UPath
 
 from rslearn.config.dataset import LayerConfig
+from rslearn.utils.geometry import ResolutionFactor
 
 if TYPE_CHECKING:
     from rslearn.data_sources.data_source import DataSourceContext
@@ -91,6 +92,68 @@ def data_source_context_deserializer(v: dict[str, Any]) -> "DataSourceContext":
     )
 
 
+def resolution_factor_serializer(v: ResolutionFactor) -> str:
+    """Serialize ResolutionFactor for jsonargparse.
+
+    Args:
+        v: the ResolutionFactor object.
+
+    Returns:
+        the ResolutionFactor encoded to string
+    """
+    if hasattr(v, "init_args"):
+        init_args = v.init_args
+        return f"{init_args.numerator}/{init_args.denominator}"
+
+    return f"{v.numerator}/{v.denominator}"
+
+
+def resolution_factor_deserializer(v: int | str | dict) -> ResolutionFactor:
+    """Deserialize ResolutionFactor for jsonargparse.
+
+    Args:
+        v: the encoded ResolutionFactor.
+
+    Returns:
+        the decoded ResolutionFactor object
+    """
+    # Handle already-instantiated ResolutionFactor
+    if isinstance(v, ResolutionFactor):
+        return v
+
+    # Handle Namespace from class_path syntax (used during config save/validation)
+    if hasattr(v, "init_args"):
+        init_args = v.init_args
+        return ResolutionFactor(
+            numerator=init_args.numerator,
+            denominator=init_args.denominator,
+        )
+
+    # Handle dict from class_path syntax in YAML config
+    if isinstance(v, dict) and "init_args" in v:
+        init_args = v["init_args"]
+        return ResolutionFactor(
+            numerator=init_args.get("numerator", 1),
+            denominator=init_args.get("denominator", 1),
+        )
+
+    if isinstance(v, int):
+        return ResolutionFactor(numerator=v)
+    elif isinstance(v, str):
+        parts = v.split("/")
+        if len(parts) == 1:
+            return ResolutionFactor(numerator=int(parts[0]))
+        elif len(parts) == 2:
+            return ResolutionFactor(
+                numerator=int(parts[0]),
+                denominator=int(parts[1]),
+            )
+        else:
+            raise ValueError("expected resolution factor to be of the form x or 1/x")
+    else:
+        raise ValueError("expected resolution factor to be str or int")
+
+
 def init_jsonargparse() -> None:
     """Initialize custom jsonargparse serializers."""
     global INITIALIZED
@@ -99,6 +162,9 @@ def init_jsonargparse() -> None:
     jsonargparse.typing.register_type(CRS, crs_serializer, crs_deserializer)
     jsonargparse.typing.register_type(
         datetime, datetime_serializer, datetime_deserializer
+    )
+    jsonargparse.typing.register_type(
+        ResolutionFactor, resolution_factor_serializer, resolution_factor_deserializer
     )
 
     from rslearn.data_sources.data_source import DataSourceContext
