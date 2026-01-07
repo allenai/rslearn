@@ -51,17 +51,13 @@ class Resize(Transform):
         Args:
             image: the image to transform.
         """
-        if image.dim() == 2:
-            assert isinstance(image, torch.Tensor), (
-                "RasterImage should have 4 dimensions (CTHW)"
-            )
-            image = image.unsqueeze(0)  # (H, W) -> (1, H, W)
-            result = torchvision.transforms.functional.resize(
-                image, self.target_size, self.interpolation
-            )
-            return result.squeeze(0)  # (1, H, W) -> (H, W)
-
         if isinstance(image, torch.Tensor):
+            if image.dim() == 2:
+                image = image.unsqueeze(0)  # (H, W) -> (1, H, W)
+                result = torchvision.transforms.functional.resize(
+                    image, self.target_size, self.interpolation
+                )
+                return result.squeeze(0)  # (1, H, W) -> (H, W)
             return torchvision.transforms.functional.resize(
                 image, self.target_size, self.interpolation
             )

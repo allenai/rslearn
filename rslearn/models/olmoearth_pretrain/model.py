@@ -1,6 +1,7 @@
 """OlmoEarth model wrapper for fine-tuning in rslearn."""
 
 import json
+import warnings
 from contextlib import nullcontext
 from datetime import datetime
 from typing import Any
@@ -93,7 +94,9 @@ class OlmoEarth(FeatureExtractor):
                 for backwards compatability with finetuned models which were trained against this implementation.
         """
         if use_legacy_timestamps:
-            raise DeprecationWarning("For new projects, don't use legacy timesteps.")
+            warnings.warn(
+                "For new projects, don't use legacy timesteps.", DeprecationWarning
+            )
 
         if (
             sum(
