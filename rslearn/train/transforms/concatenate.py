@@ -25,7 +25,7 @@ class Concatenate(Transform):
         self,
         selections: dict[str, list[int]],
         output_selector: str,
-        concatenate_dim: ConcatenateDim = ConcatenateDim.TIME,
+        concatenate_dim: ConcatenateDim | int = ConcatenateDim.TIME,
     ):
         """Initialize a new Concatenate.
 
@@ -38,7 +38,11 @@ class Concatenate(Transform):
         super().__init__()
         self.selections = selections
         self.output_selector = output_selector
-        self.concatenate_dim = concatenate_dim
+        self.concatenate_dim = (
+            concatenate_dim.value
+            if isinstance(concatenate_dim, ConcatenateDim)
+            else concatenate_dim
+        )
 
     def forward(
         self, input_dict: dict[str, Any], target_dict: dict[str, Any]
@@ -75,10 +79,10 @@ class Concatenate(Transform):
                         timestamps = image.timestamps
         if return_raster_image:
             result = RasterImage(
-                torch.concatenate(images, dim=self.concatenate_dim.value),
+                torch.concatenate(images, dim=self.concatenate_dim),
                 timestamps=timestamps,
             )
         else:
-            result = torch.concatenate(images, dim=self.concatenate_dim.value)
+            result = torch.concatenate(images, dim=self.concatenate_dim)
         write_selector(input_dict, target_dict, self.output_selector, result)
         return input_dict, target_dict
