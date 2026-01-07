@@ -99,6 +99,30 @@ def pad_slice_protect(
     return raw_inputs, passthrough_inputs
 
 
+def crop_tensor_or_rasterimage(
+    x: torch.Tensor | RasterImage, start: tuple[int, int], end: tuple[int, int]
+) -> torch.Tensor | RasterImage:
+    """Crop a tensor or a RasterImage."""
+    if isinstance(x, torch.Tensor):
+        # Crop the CHW tensor with scaled coordinates.
+        return x[
+            :,
+            start[1] : end[1],
+            start[0] : end[0],
+        ].clone()
+    else:
+        # Crop the CTHW tensor with scaled coordinates.
+        return RasterImage(
+            x.image[
+                :,
+                :,
+                start[1] : end[1],
+                start[0] : end[0],
+            ].clone(),
+            x.timestamps,
+        )
+
+
 class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
     """This wraps a ModelDataset to iterate over all patches in that dataset.
 
@@ -294,24 +318,9 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                                     int(end_offset[0] * scale),
                                     int(end_offset[1] * scale),
                                 )
-                                if isinstance(value, torch.Tensor):
-                                    # Crop the CHW tensor with scaled coordinates.
-                                    cropped[input_name] = value[
-                                        :,
-                                        scaled_start[1] : scaled_end[1],
-                                        scaled_start[0] : scaled_end[0],
-                                    ].clone()
-                                else:
-                                    # Crop the CTHW tensor with scaled coordinates.
-                                    cropped[input_name] = RasterImage(
-                                        value.image[
-                                            :,
-                                            :,
-                                            scaled_start[1] : scaled_end[1],
-                                            scaled_start[0] : scaled_end[0],
-                                        ].clone(),
-                                        value.timestamps,
-                                    )
+                                cropped[input_name] = crop_tensor_or_rasterimage(
+                                    value, scaled_start, scaled_end
+                                )
                             elif isinstance(value, list):
                                 cropped[input_name] = [
                                     feat
@@ -454,23 +463,10 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
                     int(end_offset[0] * scale),
                     int(end_offset[1] * scale),
                 )
-                if isinstance(value, torch.Tensor):
-                    cropped[input_name] = value[
-                        :,
-                        scaled_start[1] : scaled_end[1],
-                        scaled_start[0] : scaled_end[0],
-                    ].clone()
-                else:
-                    # Crop the CTHW tensor with scaled coordinates.
-                    cropped[input_name] = RasterImage(
-                        value.image[
-                            :,
-                            :,
-                            scaled_start[1] : scaled_end[1],
-                            scaled_start[0] : scaled_end[0],
-                        ].clone(),
-                        value.timestamps,
-                    )
+                cropped[input_name] = crop_tensor_or_rasterimage(
+                    value, scaled_start, scaled_end
+                )
+
             elif isinstance(value, list):
                 cropped[input_name] = [
                     feat for feat in value if cur_geom.intersects(feat.geometry)

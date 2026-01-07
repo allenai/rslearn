@@ -20,10 +20,6 @@ class SimpleTimeSeries(FeatureExtractor):
     - ConvRNN.
     - 3D convolutions.
     - 1D convolutions (per-pixel, just apply it over time).
-
-    We assume that a FeatureExtractor used within a SimpleTimeSeries is not time-aware. This means
-    we discard the timestep information from the RasterImage when passing the inputs to the
-    FeatureExtractor.
     """
 
     def __init__(

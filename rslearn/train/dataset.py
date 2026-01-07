@@ -293,8 +293,7 @@ def read_raster_layer_for_data_input(
             src[src_indexes, :, :].astype(data_input.dtype.get_numpy_dtype())
         )
 
-    # add the timestamp. it can be the middle of the time range but for now
-    # lets just make it the beginning. TODO is to update that
+    # add the timestamp. this is a tuple defining the start and end of the time range.
     time_range = None
     if layer_data is not None:
         if "time_range" in layer_data.serialized_item_groups[group_idx][0].get(
