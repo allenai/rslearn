@@ -20,6 +20,7 @@ from rslearn.config import (
     DType,
     LayerConfig,
 )
+from rslearn.data_sources.data_source import Item
 from rslearn.dataset.dataset import Dataset
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.window import (
@@ -296,21 +297,20 @@ def read_raster_layer_for_data_input(
     # add the timestamp. this is a tuple defining the start and end of the time range.
     time_range = None
     if layer_data is not None:
-        if "time_range" in layer_data.serialized_item_groups[group_idx][0].get(
-            "geometry", {}
-        ):
+        item = Item.deserialize(layer_data.serialized_item_groups[group_idx][0])
+        if item.geometry.time_range is not None:
             # we assume if one layer data has a geometry & time range, all of them do
             time_ranges = [
                 (
                     datetime.fromisoformat(
-                        layer_data.serialized_item_groups[group_idx][idx]["geometry"][
-                            "time_range"
-                        ][0]
+                        Item.deserialize(
+                            layer_data.serialized_item_groups[group_idx][idx]
+                        ).geometry.time_range[0]  # type: ignore
                     ),
                     datetime.fromisoformat(
-                        layer_data.serialized_item_groups[group_idx][idx]["geometry"][
-                            "time_range"
-                        ][1]
+                        Item.deserialize(
+                            layer_data.serialized_item_groups[group_idx][idx]
+                        ).geometry.time_range[1]  # type: ignore
                     ),
                 )
                 for idx in range(len(layer_data.serialized_item_groups[group_idx]))
