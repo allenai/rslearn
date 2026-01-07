@@ -147,10 +147,9 @@ class OlmoEarth(FeatureExtractor):
         that contains the distributed checkpoint. This is the format produced by
         pre-training runs in olmoearth_pretrain.
         """
-        # Load the model config and initialize it.
         # We avoid loading the train module here because it depends on running within
         # olmo_core.
-        # NOT A PRODUCTION CODE PATH
+        # Only pull in olmo_core when trying to load a distributed checkpoint to avoid dependency.
         require_olmo_core("_load_model_from_checkpoint")
         from olmo_core.distributed.checkpoint import load_model_and_optim_state
 
