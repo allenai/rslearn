@@ -1,4 +1,4 @@
-"""Unit tests for rslearn.train.transforms.normalize."""
+"""Unit tests for rslearn.train.transforms.mask."""
 
 import torch
 

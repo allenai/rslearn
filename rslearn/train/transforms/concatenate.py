@@ -1,6 +1,7 @@
 """Concatenate bands across multiple image inputs."""
 
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 import torch
@@ -10,6 +11,13 @@ from rslearn.train.model_context import RasterImage
 from .transform import Transform, read_selector, write_selector
 
 
+class ConcatenateDim(Enum):
+    """Enum for concatenation dimensions."""
+
+    CHANNEL = 0
+    TIME = 1
+
+
 class Concatenate(Transform):
     """Concatenate bands across multiple image inputs."""
 
@@ -17,7 +25,7 @@ class Concatenate(Transform):
         self,
         selections: dict[str, list[int]],
         output_selector: str,
-        concatenate_dim: int = 0,
+        concatenate_dim: ConcatenateDim = ConcatenateDim.TIME,
     ):
         """Initialize a new Concatenate.
 
@@ -48,6 +56,7 @@ class Concatenate(Transform):
         return_raster_image: bool = False
         timestamps: list[tuple[datetime, datetime]] | None = None
         for selector, wanted_bands in self.selections.items():
+            print(wanted_bands)
             image = read_selector(input_dict, target_dict, selector)
             if isinstance(image, torch.Tensor):
                 if wanted_bands:
@@ -66,10 +75,10 @@ class Concatenate(Transform):
                         timestamps = image.timestamps
         if return_raster_image:
             result = RasterImage(
-                torch.concatenate(images, dim=self.concatenate_dim),
+                torch.concatenate(images, dim=self.concatenate_dim.value),
                 timestamps=timestamps,
             )
         else:
-            result = torch.concatenate(images, dim=self.concatenate_dim)
+            result = torch.concatenate(images, dim=self.concatenate_dim.value)
         write_selector(input_dict, target_dict, self.output_selector, result)
         return input_dict, target_dict

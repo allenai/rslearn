@@ -62,7 +62,7 @@ class OlmoEarth(FeatureExtractor):
         embedding_size: int | None = None,
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
-        use_legacy_timestamps: bool = False,
+        use_legacy_timestamps: bool = True,
     ):
         """Create a new OlmoEarth model.
 
@@ -93,6 +93,9 @@ class OlmoEarth(FeatureExtractor):
                 from 0 (instead of the actual timestamps of the input). The option to do this is preserved
                 for backwards compatability with finetuned models which were trained against this implementation.
         """
+        if use_legacy_timestamps:
+            raise DeprecationWarning("For new projects, don't use legacy timesteps.")
+
         if (
             sum(
                 [
