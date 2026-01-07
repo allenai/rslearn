@@ -104,8 +104,7 @@ class DinoV3(FeatureExtractor):
             a FeatureMaps with one feature map.
         """
         cur = torch.stack(
-            # take the first (and assumed to be only) timestep
-            [inp["image"].image[:, 0] for inp in context.inputs],
+            [inp["image"].single_ts_to_chw_tensor() for inp in context.inputs],
             dim=0,
         )  # (B, C, H, W)
 

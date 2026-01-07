@@ -143,8 +143,7 @@ class Terramind(FeatureExtractor):
             if modality not in context.inputs[0]:
                 continue
             cur = torch.stack(
-                # take the first (and assumed only) timestep
-                [inp[modality].image[:, 0] for inp in context.inputs],
+                [inp[modality].single_ts_to_chw_tensor() for inp in context.inputs],
                 dim=0,
             )  # (B, C, H, W)
             if self.do_resizing and (

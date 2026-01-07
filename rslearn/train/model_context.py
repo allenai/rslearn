@@ -32,6 +32,16 @@ class RasterImage:
         """The image dtype."""
         return self.image.dtype
 
+    def single_ts_to_chw_tensor(self) -> torch.Tensor:
+        """Single timestep models expect single timestep inputs.
+
+        This function (1) checks this raster image only has 1 timestep and
+        (2) returns the tensor for that (single) timestep (going from CTHW to CHW).
+        """
+        if self.image.shape[1] != 1:
+            raise ValueError(f"Expected a single timestep, got {self.image.shape[1]}")
+        return self.image[:, 0]
+
 
 @dataclass
 class SampleMetadata:

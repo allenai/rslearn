@@ -95,9 +95,8 @@ class SAM2Encoder(FeatureExtractor):
         Returns:
             feature maps from the encoder.
         """
-        # take the first (and assumed only) timestep
         images = torch.stack(
-            [inp["image"].image[:, 0] for inp in context.inputs], dim=0
+            [inp["image"].single_ts_to_chw_tensor() for inp in context.inputs], dim=0
         )
         features = self.encoder(images)
         return FeatureMaps(features)

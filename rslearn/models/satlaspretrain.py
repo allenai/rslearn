@@ -78,7 +78,7 @@ class SatlasPretrain(FeatureExtractor):
         """
         # take the first (assumed to be only) timestep
         images = torch.stack(
-            [inp["image"].image[:, 0] for inp in context.inputs], dim=0
+            [inp["image"].single_ts_to_chw_tensor() for inp in context.inputs], dim=0
         )
         feature_maps = self.model(self.maybe_resize(images))
         return FeatureMaps(feature_maps)

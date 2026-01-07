@@ -21,7 +21,7 @@ from upath import UPath
 
 from rslearn.log_utils import get_logger
 from rslearn.models.component import FeatureExtractor, FeatureMaps, TokenFeatureMaps
-from rslearn.train.model_context import ModelContext
+from rslearn.train.model_context import ModelContext, RasterImage
 
 logger = get_logger(__name__)
 
@@ -234,13 +234,13 @@ class OlmoEarth(FeatureExtractor):
             present_modalities.append(modality)
             tensors = []
             for idx, inp in enumerate(context.inputs):
+                assert isinstance(inp, RasterImage)
                 tensors.append(inp[modality].image)
-                if inp[modality].timestamps is not None:
-                    assert isinstance(inp[modality].timestamps, list)
-                    if len(inp[modality].timestamps) > len(  # type: ignore
-                        timestamps_per_instance[idx]
-                    ):
-                        timestamps_per_instance[idx] = inp[modality].timestamps  # type: ignore
+                cur_timestamps = inp[modality].timestamps
+                if cur_timestamps is not None and len(cur_timestamps) > len(
+                    timestamps_per_instance[idx]
+                ):
+                    timestamps_per_instance[idx] = cur_timestamps
             tensors = [inp[modality].image for inp in context.inputs]
             device = tensors[0].device
             max_t = max(t.shape[1] for t in tensors)

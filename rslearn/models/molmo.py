@@ -51,8 +51,9 @@ class Molmo(FeatureExtractor):
         molmo_inputs_list = []
         # Process each one so we can isolate just the full image without any crops.
         for inp in context.inputs:
-            # take the first (and assumed to be only) timestep
-            image = inp["image"].image[:, 0].cpu().numpy().transpose(1, 2, 0)
+            image = (
+                inp["image"].single_ts_to_chw_tensor().cpu().numpy().transpose(1, 2, 0)
+            )
             processed = self.processor.process(
                 images=[image],
                 text="",

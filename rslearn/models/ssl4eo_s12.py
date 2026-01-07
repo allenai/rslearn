@@ -94,8 +94,9 @@ class Ssl4eoS12(FeatureExtractor):
         Returns:
             feature maps computed by the pre-trained model.
         """
-        # take the first (and assumed only) timestep
-        x = torch.stack([inp["image"].image[:, 0] for inp in context.inputs], dim=0)
+        x = torch.stack(
+            [inp["image"].single_ts_to_chw_tensor() for inp in context.inputs], dim=0
+        )
         x = self.model.conv1(x)
         x = self.model.bn1(x)
         x = self.model.relu(x)

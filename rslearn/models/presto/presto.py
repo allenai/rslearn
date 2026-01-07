@@ -183,9 +183,9 @@ class Presto(FeatureExtractor):
         time_ranges: list[tuple[datetime, datetime]],
         device: torch.device,
     ) -> torch.Tensor:
-        """Turn the time ranges stored in a RasterImage to timestamps accepted by Galileo.
+        """Turn the time ranges stored in a RasterImage to timestamps accepted by Presto.
 
-        Galileo only uses the month associated with each timestamp, so we take the midpoint
+        Presto only uses the month associated with each timestamp, so we take the midpoint
         the time range. For some inputs (e.g. Sentinel 2) we take an image from a specific
         time so that start_time == end_time == mid_time.
         """
