@@ -14,8 +14,9 @@ from rslearn.utils.geometry import PixelBounds, Projection
 class RasterImage:
     """A raster image is a torch.tensor containing the images and their associated timestamps."""
 
-    # image will have a temporal dimension, CTHW
+    # image is a 4D CTHW tensor
     image: torch.Tensor
+    # if timestamps is not None, len(timestamps) must match the T dimension of the tensor
     timestamps: list[tuple[datetime, datetime]] | None = None
 
     @property

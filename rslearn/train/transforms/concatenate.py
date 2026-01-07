@@ -54,13 +54,14 @@ class Concatenate(Transform):
             target_dict: the target
 
         Returns:
-            normalized (input_dicts, target_dicts) tuple
+            concatenated (input_dicts, target_dicts) tuple. If one of the
+            specified inputs is a RasterImage, a RasterImage will be returned.
+            Otherwise it will be a torch.Tensor.
         """
         images = []
         return_raster_image: bool = False
         timestamps: list[tuple[datetime, datetime]] | None = None
         for selector, wanted_bands in self.selections.items():
-            print(wanted_bands)
             image = read_selector(input_dict, target_dict, selector)
             if isinstance(image, torch.Tensor):
                 if wanted_bands:
