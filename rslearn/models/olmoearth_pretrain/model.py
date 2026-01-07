@@ -6,16 +6,15 @@ from typing import Any
 
 import torch
 from einops import rearrange
-from olmo_core.config import Config
-from olmo_core.distributed.checkpoint import load_model_and_optim_state
+from olmoearth_pretrain.config import Config, require_olmo_core
 from olmoearth_pretrain.data.constants import Modality
+from olmoearth_pretrain.datatypes import MaskedOlmoEarthSample, MaskValue
 from olmoearth_pretrain.model_loader import (
     ModelID,
     load_model_from_id,
     load_model_from_path,
 )
 from olmoearth_pretrain.nn.flexihelios import Encoder, TokensAndMasks
-from olmoearth_pretrain.train.masking import MaskedOlmoEarthSample, MaskValue
 from upath import UPath
 
 from rslearn.log_utils import get_logger
@@ -151,6 +150,10 @@ class OlmoEarth(FeatureExtractor):
         # Load the model config and initialize it.
         # We avoid loading the train module here because it depends on running within
         # olmo_core.
+        # NOT A PRODUCTION CODE PATH
+        require_olmo_core("_load_model_from_checkpoint")
+        from olmo_core.distributed.checkpoint import load_model_and_optim_state
+
         with (checkpoint_upath / "config.json").open() as f:
             config_dict = json.load(f)
             model_config = Config.from_dict(config_dict["model"])
