@@ -1,5 +1,6 @@
 """Tests for rslearn.models.simple_time_series."""
 
+from datetime import datetime
 from typing import Any
 
 import pytest
@@ -42,7 +43,11 @@ def test_simple_time_series() -> None:
                     6 * torch.ones((1, 4, 4), dtype=torch.float32),
                 ],
                 dim=1,
-            )
+            ),
+            timestamps=[
+                (datetime(2026, 1, 7), datetime(2026, 1, 7)),
+                (datetime(2026, 1, 8), datetime(2026, 1, 8)),
+            ],
         ),
     }
     context = ModelContext(

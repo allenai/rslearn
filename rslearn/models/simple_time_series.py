@@ -177,9 +177,35 @@ class SimpleTimeSeries(FeatureExtractor):
         images = torch.stack(
             [input_dict[image_key].image for input_dict in input_dicts], dim=0
         )  # B, C, T, H, W
-        # 1 since the RasterImage format expects a time dimension
-        images = rearrange(images, "b c t h w -> (b t) c 1 h w")
-        return [RasterImage(image) for image in images]  # C, T, H, W
+        timestamps = [input_dict[image_key].timestamps for input_dict in input_dicts]
+        # if image channels is not equal to the actual number of channels, then
+        # then every N images should be batched together. For example, if the
+        # number of input channels c == 2, and image_channels == 4, then we
+        # want to pass 2 timesteps to the model.
+        # TODO is probably to make this behaviour clearer but lets leave it like
+        # this for now to not break things.
+        num_timesteps = images.shape[1] // image_channels
+        batched_timesteps = images.shape[2] // num_timesteps
+        images = rearrange(
+            images,
+            "b c (b_t k_t) h w -> (b b_t) c k_t h w",
+            b_t=batched_timesteps,
+            k_t=num_timesteps,
+        )
+        if timestamps[0] is None:
+            new_timestamps = [None] * images.shape[0]
+        else:
+            # we also need to split the timestamps
+            new_timestamps = []
+            for t in timestamps:
+                for i in range(batched_timesteps):
+                    new_timestamps.append(
+                        t[i * num_timesteps : (i + 1) * num_timesteps]
+                    )
+        return [
+            RasterImage(image=image, timestamps=timestamps)
+            for image, timestamps in zip(images, new_timestamps)
+        ]  # C, T, H, W
 
     def forward(
         self,
@@ -226,7 +252,6 @@ class SimpleTimeSeries(FeatureExtractor):
             n_images = len(batched_images) // n_batch
 
         assert n_images is not None
-
         # Now we can apply the underlying FeatureExtractor.
         # Its output must be a FeatureMaps.
         assert batched_inputs is not None
@@ -250,7 +275,6 @@ class SimpleTimeSeries(FeatureExtractor):
             )
             for feat_map in encoder_output.feature_maps
         ]
-
         # Groups defaults to flattening all the feature maps.
         groups = self.groups
         if not groups:
