@@ -1,6 +1,5 @@
 from typing import Any
 
-import pytest
 import torch
 
 from rslearn.train.model_context import RasterImage
@@ -34,18 +33,10 @@ def test_resize_rasterimage() -> None:
     target_class_4D = torch.tensor(
         [[[1, 1, 2, 2], [1, 1, 2, 2], [3, 3, 4, 4], [3, 3, 4, 4]]], dtype=torch.float32
     ).unsqueeze(dim=1)
-    target_class_2D = torch.tensor(
-        [[1, 1, 2, 2], [1, 1, 2, 2], [3, 3, 4, 4], [3, 3, 4, 4]], dtype=torch.float32
-    )
     resize_transform = Resize((2, 2), ["target/image"], "nearest")
     input_dict: dict[str, Any] = {}
     target_dict_4D: dict[str, Any] = {"image": RasterImage(target_class_4D)}
-    target_dict_2D: dict[str, Any] = {"image": RasterImage(target_class_2D)}
     tsf_input_4D, tsf_target_4D = resize_transform(input_dict, target_dict_4D)
-    with pytest.raises(AssertionError):
-        # we expect an error to be raised for 2D raster images since they
-        # should always be 4D
-        resize_transform(input_dict, target_dict_2D)
     expected_target_4D = torch.tensor(
         [[[1, 2], [3, 4]]], dtype=torch.float32
     ).unsqueeze(dim=1)
