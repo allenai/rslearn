@@ -80,6 +80,8 @@ def test_basic_time_series(
                         "image1": [],
                     },
                     "image",
+                    # concatenate on the time dimension
+                    concatenate_dim=1,
                 )
             ],
         ),
@@ -98,7 +100,7 @@ def test_basic_time_series(
 
     assert len(dataset) == 1
     inputs, _, _ = dataset[0]
-    assert inputs["image"].shape == (2, 4, 4)
+    assert inputs["image"].image.shape == (1, 2, 4, 4)
 
 
 def test_load_all_layers(
@@ -136,7 +138,8 @@ def test_load_all_layers(
 
     assert len(dataset) == 1
     inputs, _, _ = dataset[0]
-    assert inputs["image"].shape == (2, 4, 4)
+    # two layers - timesteps - have been loaded
+    assert inputs["image"].image.shape == (1, 2, 4, 4)
 
 
 def test_load_two_layers(
@@ -175,6 +178,6 @@ def test_load_two_layers(
 
     assert len(dataset) == 1
     inputs, _, _ = dataset[0]
-    assert inputs["image"].shape == (2, 4, 4)
-    assert torch.all(inputs["image"][0] == 1)
-    assert torch.all(inputs["image"][1] == 2)
+    assert inputs["image"].image.shape == (1, 2, 4, 4)
+    assert torch.all(inputs["image"].image[:, 0] == 1)
+    assert torch.all(inputs["image"].image[:, 1] == 2)

@@ -2,7 +2,7 @@ import pytest
 import torch
 
 from rslearn.models.component import FeatureMaps
-from rslearn.train.model_context import ModelContext, SampleMetadata
+from rslearn.train.model_context import ModelContext, RasterImage, SampleMetadata
 from rslearn.train.tasks.per_pixel_regression import (
     PerPixelRegressionHead,
     PerPixelRegressionTask,
@@ -15,10 +15,10 @@ def test_process_inputs(empty_sample_metadata: SampleMetadata) -> None:
         scale_factor=0.1,
         nodata_value=-1,
     )
-    # We use 1x2x2 input with one invalid pixel and three different values.
+    # We use 1x1x2x2 input with one invalid pixel and three different values.
     _, target_dict = task.process_inputs(
         raw_inputs={
-            "targets": torch.tensor([[[1, 2], [-1, 3]]]),
+            "targets": RasterImage(torch.tensor([[[[1, 2], [-1, 3]]]])),
         },
         metadata=empty_sample_metadata,
     )
@@ -71,7 +71,7 @@ def test_mse_metric(empty_sample_metadata: SampleMetadata) -> None:
     # Prepare example.
     _, target_dict = task.process_inputs(
         raw_inputs={
-            "targets": torch.tensor([[[1, 2], [-1, 3]]]),
+            "targets": RasterImage(torch.tensor([[[[1, 2], [-1, 3]]]])),
         },
         metadata=empty_sample_metadata,
     )

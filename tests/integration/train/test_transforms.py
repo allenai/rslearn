@@ -1,5 +1,6 @@
 from rslearn.dataset import Dataset
 from rslearn.train.dataset import DataInput, ModelDataset, SplitConfig
+from rslearn.train.model_context import RasterImage
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.transforms.flip import Flip
 from rslearn.train.transforms.pad import Pad
@@ -25,7 +26,8 @@ class TestTransforms:
             task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
         )
         input_dict, _, _ = model_dataset[0]
-        assert input_dict["image"].shape == (1, 4, 4)
+        assert isinstance(input_dict["image"], RasterImage)
+        assert input_dict["image"].shape == (1, 1, 4, 4)
 
     def test_pad(self, image_to_class_dataset: Dataset) -> None:
         # pad one smaller than the input shape
@@ -46,4 +48,5 @@ class TestTransforms:
         )
         input_dict, _, _ = model_dataset[0]
         # check we have padded to input - 1
-        assert input_dict["image"].shape == (1, 3, 3)
+        assert isinstance(input_dict["image"], RasterImage)
+        assert input_dict["image"].shape == (1, 1, 3, 3)

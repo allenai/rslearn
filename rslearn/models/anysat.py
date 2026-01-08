@@ -4,6 +4,8 @@ This code loads the AnySat model from torch hub. See
 https://github.com/gastruc/AnySat for applicable license and copyright information.
 """
 
+from datetime import datetime
+
 import torch
 from einops import rearrange
 
@@ -53,7 +55,6 @@ class AnySat(FeatureExtractor):
         self,
         modalities: list[str],
         patch_size_meters: int,
-        dates: dict[str, list[int]],
         output: str = "patch",
         output_modality: str | None = None,
         hub_repo: str = "gastruc/anysat",
@@ -85,14 +86,6 @@ class AnySat(FeatureExtractor):
             if m not in MODALITY_RESOLUTIONS:
                 raise ValueError(f"Invalid modality: {m}")
 
-        if not all(m in TIME_SERIES_MODALITIES for m in dates.keys()):
-            raise ValueError("`dates` keys must be time-series modalities only.")
-        for m in modalities:
-            if m in TIME_SERIES_MODALITIES and m not in dates:
-                raise ValueError(
-                    f"Missing required dates for time-series modality '{m}'."
-                )
-
         if patch_size_meters % 10 != 0:
             raise ValueError(
                 "In AnySat, `patch_size` is in meters and must be a multiple of 10."
@@ -106,7 +99,6 @@ class AnySat(FeatureExtractor):
 
         self.modalities = modalities
         self.patch_size_meters = int(patch_size_meters)
-        self.dates = dates
         self.output = output
         self.output_modality = output_modality
 
@@ -118,6 +110,20 @@ class AnySat(FeatureExtractor):
             flash_attn=flash_attn,
         )
         self._embed_dim = 768  # base width, 'dense' returns 2x
+
+    @staticmethod
+    def time_ranges_to_doy(
+        time_ranges: list[tuple[datetime, datetime]],
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Turn the time ranges stored in a RasterImage to timestamps accepted by AnySat.
+
+        AnySat uses the doy with each timestamp, so we take the midpoint
+        the time range. For some inputs (e.g. Sentinel 2) we take an image from a specific
+        time so that start_time == end_time == mid_time.
+        """
+        doys = [(t[0] + ((t[1] - t[0]) / 2)).timetuple().tm_yday for t in time_ranges]
+        return torch.tensor(doys, dtype=torch.int32, device=device)
 
     def forward(self, context: ModelContext) -> FeatureMaps:
         """Forward pass for the AnySat model.
@@ -139,17 +145,29 @@ class AnySat(FeatureExtractor):
                 raise ValueError(f"Modality '{modality}' not present in inputs.")
 
             cur = torch.stack(
-                [inp[modality] for inp in inputs], dim=0
-            )  # (B, C, H, W) or (B, T*C, H, W)
+                [inp[modality].image for inp in inputs], dim=0
+            )  # (B, C, T, H, W)
 
             if modality in TIME_SERIES_MODALITIES:
-                num_dates = len(self.dates[modality])
-                num_bands = cur.shape[1] // num_dates
-                cur = rearrange(
-                    cur, "b (t c) h w -> b t c h w", t=num_dates, c=num_bands
-                )
+                num_bands = cur.shape[1]
+                cur = rearrange(cur, "b c t h w -> b t c h w")
                 H, W = cur.shape[-2], cur.shape[-1]
+
+                if inputs[0][modality].timestamps is None:
+                    raise ValueError(
+                        f"Require timestamps for time series modality {modality}"
+                    )
+                timestamps = torch.stack(
+                    [
+                        self.time_ranges_to_doy(inp[modality].timestamps, cur.device)  # type: ignore
+                        for inp in inputs
+                    ],
+                    dim=0,
+                )
+                batch[f"{modality}_dates"] = timestamps
             else:
+                # take the first (assumed only) timestep
+                cur = cur[:, :, 0]
                 num_bands = cur.shape[1]
                 H, W = cur.shape[-2], cur.shape[-1]
 
@@ -172,22 +190,6 @@ class AnySat(FeatureExtractor):
                 raise ValueError(
                     "All modalities must share the same spatial extent (H*res, W*res)."
                 )
-
-        # Add *_dates
-        to_add = {}
-        for modality, x in list(batch.items()):
-            if modality in TIME_SERIES_MODALITIES:
-                B, T = x.shape[0], x.shape[1]
-                d = torch.as_tensor(
-                    self.dates[modality], dtype=torch.long, device=x.device
-                )
-                if d.ndim != 1 or d.numel() != T:
-                    raise ValueError(
-                        f"dates for '{modality}' must be 1D length {T}, got {tuple(d.shape)}"
-                    )
-                to_add[f"{modality}_dates"] = d.unsqueeze(0).repeat(B, 1)
-
-        batch.update(to_add)
 
         kwargs = {"patch_size": self.patch_size_meters, "output": self.output}
         if self.output == "dense":

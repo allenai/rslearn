@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import torch
 
-from rslearn.train.model_context import SampleMetadata
+from rslearn.train.model_context import RasterImage, SampleMetadata
 from rslearn.train.tasks.segmentation import SegmentationTask
 
 
@@ -15,8 +15,8 @@ class TestProcessInputs:
 
         # Create test data with 0s (invalid) and other values
         raw_inputs = {
-            "targets": torch.tensor(
-                [[[0, 1, 2], [0, 1, 0], [2, 1, 0]]], dtype=torch.uint8
+            "targets": RasterImage(
+                torch.tensor([[[[0, 1, 2], [0, 1, 0], [2, 1, 0]]]], dtype=torch.uint8)
             )
         }
 
@@ -40,8 +40,8 @@ class TestProcessInputs:
 
         # Create test data with 0s and other values
         raw_inputs = {
-            "targets": torch.tensor(
-                [[[0, 1, 2], [0, 1, 0], [2, 1, 0]]], dtype=torch.uint8
+            "targets": RasterImage(
+                torch.tensor([[[[0, 1, 2], [0, 1, 0], [2, 1, 0]]]], dtype=torch.uint8)
             )
         }
 
@@ -63,8 +63,8 @@ class TestProcessInputs:
 
         # Create test data
         raw_inputs = {
-            "targets": torch.tensor(
-                [[[0, 1, 2], [0, 1, 0], [2, 1, 0]]], dtype=torch.uint8
+            "targets": RasterImage(
+                torch.tensor([[[[0, 1, 2], [0, 1, 0], [2, 1, 0]]]], dtype=torch.uint8)
             )
         }
 
@@ -88,8 +88,8 @@ class TestProcessInputs:
 
         # Create test data with 1s as nodata
         raw_inputs = {
-            "targets": torch.tensor(
-                [[[0, 1, 2], [1, 1, 0], [2, 1, 0]]], dtype=torch.uint8
+            "targets": RasterImage(
+                torch.tensor([[[[0, 1, 2], [1, 1, 0], [2, 1, 0]]]], dtype=torch.uint8)
             )
         }
 
@@ -115,8 +115,8 @@ class TestProcessInputs:
 
         # Create test data with 5s as nodata
         raw_inputs = {
-            "targets": torch.tensor(
-                [[[0, 1, 2], [5, 5, 0], [2, 5, 0]]], dtype=torch.uint8
+            "targets": RasterImage(
+                torch.tensor([[[[0, 1, 2], [5, 5, 0], [2, 5, 0]]]], dtype=torch.uint8)
             )
         }
 
@@ -142,8 +142,8 @@ class TestProcessInputs:
 
         # Create test data with 3s as nodata
         raw_inputs = {
-            "targets": torch.tensor(
-                [[[0, 1, 2], [3, 3, 0], [2, 3, 0]]], dtype=torch.uint8
+            "targets": RasterImage(
+                torch.tensor([[[[0, 1, 2], [3, 3, 0], [2, 3, 0]]]], dtype=torch.uint8)
             )
         }
 
@@ -173,8 +173,8 @@ class TestProcessInputs:
         task = SegmentationTask(num_classes=3, nodata_value=1)
 
         raw_inputs = {
-            "targets": torch.tensor(
-                [[[0, 1, 2], [1, 1, 0], [2, 1, 0]]], dtype=torch.uint8
+            "targets": RasterImage(
+                torch.tensor([[[[0, 1, 2], [1, 1, 0], [2, 1, 0]]]], dtype=torch.uint8)
             )
         }
 
@@ -194,8 +194,11 @@ class TestProcessInputs:
 
         # Create multi-channel input (should fail)
         raw_inputs = {
-            "targets": torch.tensor(
-                [[[0, 1, 2], [1, 1, 0]], [[2, 1, 0], [0, 1, 2]]], dtype=torch.uint8
+            "targets": RasterImage(
+                torch.tensor(
+                    [[[[0, 1, 2], [1, 1, 0]], [[2, 1, 0], [0, 1, 2]]]],
+                    dtype=torch.uint8,
+                )
             )
         }
 

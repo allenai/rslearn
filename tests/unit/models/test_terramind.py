@@ -7,7 +7,7 @@ import huggingface_hub.constants
 import torch
 
 from rslearn.models.terramind import Terramind, TerramindNormalize, TerramindSize
-from rslearn.train.model_context import ModelContext
+from rslearn.train.model_context import ModelContext, RasterImage
 
 
 def test_terramind_without_resizing(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
@@ -19,7 +19,7 @@ def test_terramind_without_resizing(tmp_path: pathlib.Path, monkeypatch: Any) ->
 
     inputs = [
         {
-            "RGB": torch.zeros((3, 32, 32), dtype=torch.float32),
+            "RGB": RasterImage(torch.zeros((3, 1, 32, 32), dtype=torch.float32)),
         }
     ]
 
@@ -49,7 +49,7 @@ def test_terramind_with_resizing(tmp_path: pathlib.Path, monkeypatch: Any) -> No
 
     inputs = [
         {
-            "RGB": torch.zeros((3, 32, 32), dtype=torch.float32),
+            "RGB": RasterImage(torch.zeros((3, 1, 32, 32), dtype=torch.float32)),
         }
     ]
 
