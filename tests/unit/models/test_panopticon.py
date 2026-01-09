@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from rslearn.models.panopticon import Panopticon, PanopticonModalities
+from rslearn.train.model_context import RasterImage
 
 logger = logging.getLogger(__name__)
 
@@ -37,25 +38,31 @@ def test_panopticon() -> None:
     input_hw = 32
     inputs = [
         {
-            PanopticonModalities.SENTINEL2.value: torch.randn(
-                (
-                    len(band_order[PanopticonModalities.SENTINEL2.value]),
-                    input_hw,
-                    input_hw,
-                ),
-                dtype=torch.float32,
-                device=DEVICE,
+            PanopticonModalities.SENTINEL2.value: RasterImage(
+                torch.randn(
+                    (
+                        len(band_order[PanopticonModalities.SENTINEL2.value]),
+                        1,
+                        input_hw,
+                        input_hw,
+                    ),
+                    dtype=torch.float32,
+                    device=DEVICE,
+                )
             ),
         },
         {
-            PanopticonModalities.SENTINEL2.value: torch.randn(
-                (
-                    len(band_order[PanopticonModalities.SENTINEL2.value]),
-                    input_hw,
-                    input_hw,
-                ),
-                dtype=torch.float32,
-                device=DEVICE,
+            PanopticonModalities.SENTINEL2.value: RasterImage(
+                torch.randn(
+                    (
+                        len(band_order[PanopticonModalities.SENTINEL2.value]),
+                        1,
+                        input_hw,
+                        input_hw,
+                    ),
+                    dtype=torch.float32,
+                    device=DEVICE,
+                )
             ),
         },
     ]
@@ -102,32 +109,41 @@ def test_panopticon_multiple_modalities() -> None:
     input_hw = 32
     inputs = [
         {
-            PanopticonModalities.SENTINEL2.value: torch.randn(
-                (
-                    len(band_order[PanopticonModalities.SENTINEL2.value]),
-                    input_hw,
-                    input_hw,
-                ),
-                dtype=torch.float32,
-                device=DEVICE,
+            PanopticonModalities.SENTINEL2.value: RasterImage(
+                torch.randn(
+                    (
+                        len(band_order[PanopticonModalities.SENTINEL2.value]),
+                        1,
+                        input_hw,
+                        input_hw,
+                    ),
+                    dtype=torch.float32,
+                    device=DEVICE,
+                )
             ),
-            PanopticonModalities.SENTINEL1.value: torch.randn(
-                (
-                    len(band_order[PanopticonModalities.SENTINEL1.value]),
-                    input_hw,
-                    input_hw,
-                ),
-                dtype=torch.float32,
-                device=DEVICE,
+            PanopticonModalities.SENTINEL1.value: RasterImage(
+                torch.randn(
+                    (
+                        len(band_order[PanopticonModalities.SENTINEL1.value]),
+                        1,
+                        input_hw,
+                        input_hw,
+                    ),
+                    dtype=torch.float32,
+                    device=DEVICE,
+                )
             ),
-            PanopticonModalities.LANDSAT8.value: torch.randn(
-                (
-                    len(band_order[PanopticonModalities.LANDSAT8.value]),
-                    input_hw,
-                    input_hw,
-                ),
-                dtype=torch.float32,
-                device=DEVICE,
+            PanopticonModalities.LANDSAT8.value: RasterImage(
+                torch.randn(
+                    (
+                        len(band_order[PanopticonModalities.LANDSAT8.value]),
+                        1,
+                        input_hw,
+                        input_hw,
+                    ),
+                    dtype=torch.float32,
+                    device=DEVICE,
+                )
             ),
         },
     ]

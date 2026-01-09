@@ -4,6 +4,8 @@ from typing import Any
 
 import torch
 
+from rslearn.train.model_context import RasterImage
+
 from .transform import Transform
 
 
@@ -55,7 +57,9 @@ class Normalize(Transform):
         self.bands = torch.tensor(bands) if bands is not None else None
         self.num_bands = num_bands
 
-    def apply_image(self, image: torch.Tensor) -> torch.Tensor:
+    def apply_image(
+        self, image: torch.Tensor | RasterImage
+    ) -> torch.Tensor | RasterImage:
         """Normalize the specified image.
 
         Args:
@@ -63,7 +67,7 @@ class Normalize(Transform):
         """
 
         def _repeat_mean_and_std(
-            image_channels: int, num_bands: int | None
+            image_channels: int, num_bands: int | None, is_raster_image: bool
         ) -> tuple[torch.Tensor, torch.Tensor]:
             """Get mean and std tensor that are suitable for applying on the image."""
             # We only need to repeat the tensor if both of these are true:
@@ -74,9 +78,16 @@ class Normalize(Transform):
             if num_bands is None:
                 return self.mean, self.std
             num_images = image_channels // num_bands
-            return self.mean.repeat(num_images)[:, None, None], self.std.repeat(
-                num_images
-            )[:, None, None]
+            if is_raster_image:
+                # add an extra T dimension, CTHW
+                return self.mean.repeat(num_images)[
+                    :, None, None, None
+                ], self.std.repeat(num_images)[:, None, None, None]
+            else:
+                # add an extra T dimension, CTHW
+                return self.mean.repeat(num_images)[:, None, None], self.std.repeat(
+                    num_images
+                )[:, None, None]
 
         if self.bands is not None:
             # User has provided band indices to normalize.
@@ -96,20 +107,40 @@ class Normalize(Transform):
             # We use len(self.bands) here because that is how many bands per timestep
             # we are actually processing with the mean/std.
             mean, std = _repeat_mean_and_std(
-                image_channels=len(band_indices), num_bands=len(self.bands)
+                image_channels=len(band_indices),
+                num_bands=len(self.bands),
+                is_raster_image=isinstance(image, RasterImage),
             )
-            image[band_indices] = (image[band_indices] - mean) / std
-            if self.valid_min is not None:
-                image[band_indices] = torch.clamp(
-                    image[band_indices], min=self.valid_min, max=self.valid_max
-                )
+            if isinstance(image, torch.Tensor):
+                image[band_indices] = (image[band_indices] - mean) / std
+                if self.valid_min is not None:
+                    image[band_indices] = torch.clamp(
+                        image[band_indices], min=self.valid_min, max=self.valid_max
+                    )
+            else:
+                image.image[band_indices] = (image.image[band_indices] - mean) / std
+                if self.valid_min is not None:
+                    image.image[band_indices] = torch.clamp(
+                        image.image[band_indices],
+                        min=self.valid_min,
+                        max=self.valid_max,
+                    )
         else:
             mean, std = _repeat_mean_and_std(
-                image_channels=image.shape[0], num_bands=self.num_bands
+                image_channels=image.shape[0],
+                num_bands=self.num_bands,
+                is_raster_image=isinstance(image, RasterImage),
             )
-            image = (image - mean) / std
-            if self.valid_min is not None:
-                image = torch.clamp(image, min=self.valid_min, max=self.valid_max)
+            if isinstance(image, torch.Tensor):
+                image = (image - mean) / std
+                if self.valid_min is not None:
+                    image = torch.clamp(image, min=self.valid_min, max=self.valid_max)
+            else:
+                image.image = (image.image - mean) / std
+                if self.valid_min is not None:
+                    image.image = torch.clamp(
+                        image.image, min=self.valid_min, max=self.valid_max
+                    )
         return image
 
     def forward(

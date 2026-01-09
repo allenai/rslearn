@@ -1,26 +1,27 @@
 """OlmoEarth model wrapper for fine-tuning in rslearn."""
 
 import json
+import warnings
 from contextlib import nullcontext
+from datetime import datetime
 from typing import Any
 
 import torch
 from einops import rearrange
-from olmo_core.config import Config
-from olmo_core.distributed.checkpoint import load_model_and_optim_state
+from olmoearth_pretrain.config import Config, require_olmo_core
 from olmoearth_pretrain.data.constants import Modality
+from olmoearth_pretrain.datatypes import MaskedOlmoEarthSample, MaskValue
 from olmoearth_pretrain.model_loader import (
     ModelID,
     load_model_from_id,
     load_model_from_path,
 )
 from olmoearth_pretrain.nn.flexihelios import Encoder, TokensAndMasks
-from olmoearth_pretrain.train.masking import MaskedOlmoEarthSample, MaskValue
 from upath import UPath
 
 from rslearn.log_utils import get_logger
 from rslearn.models.component import FeatureExtractor, FeatureMaps, TokenFeatureMaps
-from rslearn.train.model_context import ModelContext
+from rslearn.train.model_context import ModelContext, RasterImage
 
 logger = get_logger(__name__)
 
@@ -61,6 +62,7 @@ class OlmoEarth(FeatureExtractor):
         embedding_size: int | None = None,
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
+        use_legacy_timestamps: bool = True,
     ):
         """Create a new OlmoEarth model.
 
@@ -87,7 +89,15 @@ class OlmoEarth(FeatureExtractor):
             token_pooling: whether or not to pool the tokens. If True, the output will be BxCxHxW. If False,
                 there will be an extra dimension, N, (BxCxHxWxN) representing the temporal and channel
                 dimensions.
+            use_legacy_timestamps: In our original implementation of OlmoEarth, we applied timestamps starting
+                from 0 (instead of the actual timestamps of the input). The option to do this is preserved
+                for backwards compatability with finetuned models which were trained against this implementation.
         """
+        if use_legacy_timestamps:
+            warnings.warn(
+                "For new projects, don't use legacy timesteps.", DeprecationWarning
+            )
+
         if (
             sum(
                 [
@@ -138,6 +148,7 @@ class OlmoEarth(FeatureExtractor):
                 model = model[part]
         self.model = model
         self.token_pooling = token_pooling
+        self.use_legacy_timestamps = use_legacy_timestamps
 
     def _load_model_from_checkpoint(
         self, checkpoint_upath: UPath, random_initialization: bool
@@ -148,9 +159,12 @@ class OlmoEarth(FeatureExtractor):
         that contains the distributed checkpoint. This is the format produced by
         pre-training runs in olmoearth_pretrain.
         """
-        # Load the model config and initialize it.
         # We avoid loading the train module here because it depends on running within
         # olmo_core.
+        # Only pull in olmo_core when trying to load a distributed checkpoint to avoid dependency.
+        require_olmo_core("_load_model_from_checkpoint")
+        from olmo_core.distributed.checkpoint import load_model_and_optim_state
+
         with (checkpoint_upath / "config.json").open() as f:
             config_dict = json.load(f)
             model_config = Config.from_dict(config_dict["model"])
@@ -164,6 +178,32 @@ class OlmoEarth(FeatureExtractor):
             logger.info(f"loaded OlmoEarth encoder from {train_module_dir}")
 
         return model
+
+    @staticmethod
+    def time_ranges_to_timestamps(
+        time_ranges: list[tuple[datetime, datetime]],
+        max_timestamps: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Turn the time ranges stored in a RasterImage to timestamps accepted by OlmoEarth.
+
+        OlmoEarth only uses the month associated with each timestamp, so we take the midpoint
+        the time range. For some inputs (e.g. Sentinel 2) we take an image from a specific
+        time so that start_time == end_time == mid_time.
+        """
+        timestamps = torch.zeros((max_timestamps, 3), dtype=torch.int32, device=device)
+        mid_ranges = [t[0] + ((t[1] - t[0]) / 2) for t in time_ranges]
+        timestamps[: len(time_ranges), 0] = torch.tensor(
+            [d.day for d in mid_ranges], dtype=torch.int32
+        )
+        # months are indexed 0-11
+        timestamps[: len(time_ranges), 1] = torch.tensor(
+            [d.month - 1 for d in mid_ranges], dtype=torch.int32
+        )
+        timestamps[: len(time_ranges), 2] = torch.tensor(
+            [d.year for d in mid_ranges], dtype=torch.int32
+        )
+        return timestamps
 
     def _prepare_modality_inputs(
         self, context: ModelContext
@@ -190,43 +230,55 @@ class OlmoEarth(FeatureExtractor):
         # We'll have to fix all that.
         max_timesteps = 1
         modality_data = {}
+        # we will just store the longest time range
+        # per instance in the batch. This means it may not be
+        # aligned per modality
+        timestamps_per_instance: list[list[tuple[datetime, datetime]]] = [[]] * len(
+            context.inputs
+        )
         for modality in MODALITY_NAMES:
             if modality not in context.inputs[0]:
                 continue
             present_modalities.append(modality)
-            tensors = [inp[modality] for inp in context.inputs]
+            tensors = []
+            for idx, inp in enumerate(context.inputs):
+                assert isinstance(inp, RasterImage)
+                tensors.append(inp[modality].image)
+                cur_timestamps = inp[modality].timestamps
+                if cur_timestamps is not None and len(cur_timestamps) > len(
+                    timestamps_per_instance[idx]
+                ):
+                    timestamps_per_instance[idx] = cur_timestamps
+            tensors = [inp[modality].image for inp in context.inputs]
             device = tensors[0].device
-            num_bands = Modality.get(modality).num_bands
-            max_t = max(t.shape[0] for t in tensors) // num_bands
+            max_t = max(t.shape[1] for t in tensors)
             max_timesteps = max(max_timesteps, max_t)
             modality_data[modality] = (
                 tensors,
-                num_bands,
                 len(Modality.get(modality).band_sets),
             )
 
         # Second pass: pad and process each modality with global max_timesteps
         for modality in present_modalities:
-            tensors, num_bands, num_band_sets = modality_data[modality]
-            target_ch = max_timesteps * num_bands
+            tensors, num_band_sets = modality_data[modality]
 
             # Pad tensors to target_ch and track original timesteps for masking
             padded = []
             original_timesteps = []
             for t in tensors:
-                orig_t = t.shape[0] // num_bands
+                orig_t = t.shape[1]
                 original_timesteps.append(orig_t)
-                if t.shape[0] < target_ch:
+                if orig_t < max_timesteps:
                     pad = torch.zeros(
-                        (target_ch - t.shape[0],) + t.shape[1:],
+                        t.shape[:1] + (max_timesteps - orig_t,) + t.shape[2:],
                         dtype=t.dtype,
                         device=device,
                     )
-                    t = torch.cat([t, pad], dim=0)
+                    t = torch.cat([t, pad], dim=1)
                 padded.append(t)
 
             cur = torch.stack(padded, dim=0)
-            cur = rearrange(cur, "b (t c) h w -> b h w t c", t=max_timesteps)
+            cur = rearrange(cur, "b c t h w -> b h w t c")
             kwargs[modality] = cur
 
             # Create mask: ONLINE_ENCODER for valid, MISSING for padded timesteps
@@ -242,19 +294,31 @@ class OlmoEarth(FeatureExtractor):
                     mask[sample_idx, :, :, orig_t:, :] = MaskValue.MISSING.value
             kwargs[f"{modality}_mask"] = mask
 
-        # Timestamps is required.
-        # Note that only months (0 to 11) are used in OlmoEarth position encoding.
-        # For now, we assign same timestamps to all inputs, but later we should
-        # handle varying timestamps per input.
-        timestamps = torch.zeros(
-            (len(context.inputs), max_timesteps, 3), dtype=torch.int32, device=device
-        )
-        timestamps[:, :, 0] = 1  # day
-        timestamps[:, :, 1] = torch.arange(max_timesteps, device=device)[
-            None, :
-        ]  # month
-        timestamps[:, :, 2] = 2024  # year
-        kwargs["timestamps"] = timestamps
+        if self.use_legacy_timestamps:
+            # Note that only months (0 to 11) are used in OlmoEarth position encoding.
+            timestamps = torch.zeros(
+                (len(context.inputs), max_timesteps, 3),
+                dtype=torch.int32,
+                device=device,
+            )
+            timestamps[:, :, 0] = 1  # day
+            timestamps[:, :, 1] = torch.arange(max_timesteps, device=device)[
+                None, :
+            ]  # month
+            timestamps[:, :, 2] = 2024  # year
+            kwargs["timestamps"] = timestamps
+        else:
+            if max([len(t) for t in timestamps_per_instance]) == 0:
+                # Timestamps is required.
+                raise ValueError("No inputs had timestamps.")
+            # Note that only months (0 to 11) are used in OlmoEarth position encoding.
+            kwargs["timestamps"] = torch.stack(
+                [
+                    self.time_ranges_to_timestamps(time_range, max_timesteps, device)
+                    for time_range in timestamps_per_instance
+                ],
+                dim=0,
+            )
 
         return MaskedOlmoEarthSample(**kwargs), present_modalities, device
 

@@ -11,6 +11,40 @@ from rslearn.utils.geometry import PixelBounds, Projection
 
 
 @dataclass
+class RasterImage:
+    """A raster image is a torch.tensor containing the images and their associated timestamps."""
+
+    # image is a 4D CTHW tensor
+    image: torch.Tensor
+    # if timestamps is not None, len(timestamps) must match the T dimension of the tensor
+    timestamps: list[tuple[datetime, datetime]] | None = None
+
+    @property
+    def shape(self) -> torch.Size:
+        """The shape of the image."""
+        return self.image.shape
+
+    def dim(self) -> int:
+        """The dim of the image."""
+        return self.image.dim()
+
+    @property
+    def dtype(self) -> torch.dtype:
+        """The image dtype."""
+        return self.image.dtype
+
+    def single_ts_to_chw_tensor(self) -> torch.Tensor:
+        """Single timestep models expect single timestep inputs.
+
+        This function (1) checks this raster image only has 1 timestep and
+        (2) returns the tensor for that (single) timestep (going from CTHW to CHW).
+        """
+        if self.image.shape[1] != 1:
+            raise ValueError(f"Expected a single timestep, got {self.image.shape[1]}")
+        return self.image[:, 0]
+
+
+@dataclass
 class SampleMetadata:
     """Metadata pertaining to an example."""
 
@@ -32,7 +66,7 @@ class ModelContext:
     """Context to pass to all model components."""
 
     # One input dict per example in the batch.
-    inputs: list[dict[str, torch.Tensor]]
+    inputs: list[dict[str, torch.Tensor | RasterImage]]
     # One SampleMetadata per example in the batch.
     metadatas: list[SampleMetadata]
     # Arbitrary dict that components can add to.

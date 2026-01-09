@@ -4,6 +4,8 @@ from typing import Any
 
 import torch
 
+from rslearn.train.model_context import RasterImage
+
 from .transform import Transform
 
 
@@ -48,17 +50,23 @@ class Flip(Transform):
             "vertical": vertical,
         }
 
-    def apply_image(self, image: torch.Tensor, state: dict[str, bool]) -> torch.Tensor:
+    def apply_image(self, image: RasterImage, state: dict[str, bool]) -> RasterImage:
         """Apply the sampled state on the specified image.
 
         Args:
             image: the image to transform.
             state: the sampled state.
         """
-        if state["horizontal"]:
-            image = torch.flip(image, dims=[-1])
-        if state["vertical"]:
-            image = torch.flip(image, dims=[-2])
+        if isinstance(image, RasterImage):
+            if state["horizontal"]:
+                image.image = torch.flip(image.image, dims=[-1])
+            if state["vertical"]:
+                image.image = torch.flip(image.image, dims=[-2])
+        elif isinstance(image, torch.Tensor):
+            if state["horizontal"]:
+                image = torch.flip(image, dims=[-1])
+            if state["vertical"]:
+                image = torch.flip(image, dims=[-2])
         return image
 
     def apply_boxes(

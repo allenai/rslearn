@@ -4,6 +4,8 @@ from typing import Any
 
 import torch
 
+from rslearn.train.model_context import RasterImage
+
 from .transform import Transform
 
 
@@ -31,18 +33,31 @@ class Sentinel1ToDecibels(Transform):
         self.from_decibels = from_decibels
         self.epsilon = epsilon
 
-    def apply_image(self, image: torch.Tensor) -> torch.Tensor:
+    def apply_image(
+        self, image: torch.Tensor | RasterImage
+    ) -> torch.Tensor | RasterImage:
         """Normalize the specified image.
 
         Args:
             image: the image to transform.
         """
+        if isinstance(image, torch.Tensor):
+            image_to_process = image
+        else:
+            image_to_process = image.image
         if self.from_decibels:
             # Decibels to linear scale.
-            return torch.pow(10.0, image / 10.0)
+            image_to_process = torch.pow(10.0, image_to_process / 10.0)
         else:
             # Linear scale to decibels.
-            return 10 * torch.log10(torch.clamp(image, min=self.epsilon))
+            image_to_process = 10 * torch.log10(
+                torch.clamp(image_to_process, min=self.epsilon)
+            )
+        if isinstance(image, torch.Tensor):
+            return image_to_process
+        else:
+            image.image = image_to_process
+            return image
 
     def forward(
         self, input_dict: dict[str, Any], target_dict: dict[str, Any]

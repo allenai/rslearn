@@ -13,7 +13,7 @@ class Ssl4eoS12(FeatureExtractor):
 
     def __init__(
         self,
-        backbone_ckpt_path: str,
+        backbone_ckpt_path: str | None,
         arch: str = "resnet50",
         output_layers: list[int] = [0, 1, 2, 3],
     ) -> None:
@@ -39,19 +39,22 @@ class Ssl4eoS12(FeatureExtractor):
         else:
             raise ValueError(f"unknown SSL4EO-S12 architecture {arch}")
 
-        state_dict = torch.load(backbone_ckpt_path, weights_only=True)
-        state_dict = state_dict["teacher"]
-        prefix = "module.backbone."
-        state_dict = {
-            k[len(prefix) :]: v for k, v in state_dict.items() if k.startswith(prefix)
-        }
-        missing_keys, unexpected_keys = self.model.load_state_dict(
-            state_dict, strict=False
-        )
-        if missing_keys or unexpected_keys:
-            print(
-                f"warning: got missing_keys={missing_keys}, unexpected_keys={unexpected_keys} when loading SSL4EO-S12 state dict"
+        if backbone_ckpt_path is not None:
+            state_dict = torch.load(backbone_ckpt_path, weights_only=True)
+            state_dict = state_dict["teacher"]
+            prefix = "module.backbone."
+            state_dict = {
+                k[len(prefix) :]: v
+                for k, v in state_dict.items()
+                if k.startswith(prefix)
+            }
+            missing_keys, unexpected_keys = self.model.load_state_dict(
+                state_dict, strict=False
             )
+            if missing_keys or unexpected_keys:
+                print(
+                    f"warning: got missing_keys={missing_keys}, unexpected_keys={unexpected_keys} when loading SSL4EO-S12 state dict"
+                )
 
     def get_backbone_channels(self) -> list[tuple[int, int]]:
         """Returns the output channels of this model when used as a backbone.
@@ -91,7 +94,9 @@ class Ssl4eoS12(FeatureExtractor):
         Returns:
             feature maps computed by the pre-trained model.
         """
-        x = torch.stack([inp["image"] for inp in context.inputs], dim=0)
+        x = torch.stack(
+            [inp["image"].single_ts_to_chw_tensor() for inp in context.inputs], dim=0
+        )
         x = self.model.conv1(x)
         x = self.model.bn1(x)
         x = self.model.relu(x)
