@@ -404,6 +404,7 @@ class F1Metric(Metric):
         num_classes: int,
         score_thresholds: list[float],
         metric_mode: str = "f1",
+        report_per_class: bool = False,
     ):
         """Create a new F1Metric.
 
@@ -502,8 +503,10 @@ class F1Metric(Metric):
                     best_score = score
 
             best_scores.append(best_score)
-
-        return torch.mean(torch.stack(best_scores))
+        if self.report_per_class:
+            return best_scores
+        else:
+            return torch.mean(torch.stack(best_scores))
 
 
 class MeanIoUMetric(Metric):
