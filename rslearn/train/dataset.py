@@ -8,6 +8,7 @@ import random
 import tempfile
 import time
 import uuid
+from datetime import datetime
 from typing import Any
 
 import torch
@@ -19,10 +20,16 @@ from rslearn.config import (
     DType,
     LayerConfig,
 )
+from rslearn.data_sources.data_source import Item
 from rslearn.dataset.dataset import Dataset
 from rslearn.dataset.storage.file import FileWindowStorage
-from rslearn.dataset.window import Window, get_layer_and_group_from_dir_name
+from rslearn.dataset.window import (
+    Window,
+    WindowLayerData,
+    get_layer_and_group_from_dir_name,
+)
 from rslearn.log_utils import get_logger
+from rslearn.train.model_context import RasterImage
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
 from rslearn.utils.mp import star_imap_unordered
@@ -172,10 +179,10 @@ class DataInput:
                 are reading from. By default, we assume the specified layer name is of
                 the form "{layer_name}.{group_idx}" and read that item group only. With
                 this option enabled, we ignore the group_idx and read all item groups.
-            resolution_factor: raster inputs are read by default at the window
-                resolution. This is a multiplier to read at a different resolution,
-                e.g. if the window resolution is 64x64 at 10 m/pixel, and
-                resolution_factor=2, then the input is read as 32x32 at 20 m/pixel.
+            resolution_factor: controls the resolution at which raster data is loaded for training.
+                By default (factor=1), data is loaded at the window resolution.
+                E.g. for a 64x64 window at 10 m/pixel with resolution_factor=1/2,
+                the resulting tensor is 32x32 (covering the same geographic area at 20 m/pixel).
             resampling: resampling method (default nearest neighbor).
         """
         self.data_type = data_type
@@ -198,7 +205,8 @@ def read_raster_layer_for_data_input(
     group_idx: int,
     layer_config: LayerConfig,
     data_input: DataInput,
-) -> torch.Tensor:
+    layer_data: WindowLayerData | None,
+) -> tuple[torch.Tensor, tuple[datetime, datetime] | None]:
     """Read a raster layer for a DataInput.
 
     This scans the available rasters for the layer at the window to determine which
@@ -211,9 +219,11 @@ def read_raster_layer_for_data_input(
         group_idx: the item group.
         layer_config: the layer configuration.
         data_input: the DataInput that specifies the bands and dtype.
+        layer_data: the WindowLayerData associated with this layer and window.
 
     Returns:
-        tensor containing raster data.
+        RasterImage containing raster data and the timestamp associated
+            with that data.
     """
     # See what different sets of bands we need to read to get all the
     # configured bands.
@@ -284,7 +294,34 @@ def read_raster_layer_for_data_input(
             src[src_indexes, :, :].astype(data_input.dtype.get_numpy_dtype())
         )
 
-    return image
+    # add the timestamp. this is a tuple defining the start and end of the time range.
+    time_range = None
+    if layer_data is not None:
+        item = Item.deserialize(layer_data.serialized_item_groups[group_idx][0])
+        if item.geometry.time_range is not None:
+            # we assume if one layer data has a geometry & time range, all of them do
+            time_ranges = [
+                (
+                    datetime.fromisoformat(
+                        Item.deserialize(
+                            layer_data.serialized_item_groups[group_idx][idx]
+                        ).geometry.time_range[0]  # type: ignore
+                    ),
+                    datetime.fromisoformat(
+                        Item.deserialize(
+                            layer_data.serialized_item_groups[group_idx][idx]
+                        ).geometry.time_range[1]  # type: ignore
+                    ),
+                )
+                for idx in range(len(layer_data.serialized_item_groups[group_idx]))
+            ]
+            # take the min and max
+            time_range = (
+                min([t[0] for t in time_ranges]),
+                max([t[1] for t in time_ranges]),
+            )
+
+    return image, time_range
 
 
 def read_data_input(
@@ -293,7 +330,7 @@ def read_data_input(
     bounds: PixelBounds,
     data_input: DataInput,
     rng: random.Random,
-) -> torch.Tensor | list[Feature]:
+) -> RasterImage | list[Feature]:
     """Read the data specified by the DataInput from the window.
 
     Args:
@@ -335,15 +372,34 @@ def read_data_input(
         layers_to_read = [rng.choice(layer_options)]
 
     if data_input.data_type == "raster":
+        # load it once here
+        layer_datas = window.load_layer_datas()
         images: list[torch.Tensor] = []
+        time_ranges: list[tuple[datetime, datetime] | None] = []
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
-            images.append(
-                read_raster_layer_for_data_input(
-                    window, bounds, layer_name, group_idx, layer_config, data_input
-                )
+            image, time_range = read_raster_layer_for_data_input(
+                window,
+                bounds,
+                layer_name,
+                group_idx,
+                layer_config,
+                data_input,
+                # some layers (e.g. "label_raster") won't have associated
+                # layer datas
+                layer_datas[layer_name] if layer_name in layer_datas else None,
             )
-        return torch.cat(images, dim=0)
+            if len(time_ranges) > 0:
+                if type(time_ranges[-1]) is not type(time_range):
+                    raise ValueError(
+                        f"All time ranges should be datetime tuples or None. Got {type(time_range)} amd {type(time_ranges[-1])}"
+                    )
+            images.append(image)
+            time_ranges.append(time_range)
+        return RasterImage(
+            torch.stack(images, dim=1),
+            time_ranges if time_ranges[0] is not None else None,  # type: ignore
+        )
 
     elif data_input.data_type == "vector":
         # We don't really support time series for vector data currently, we just

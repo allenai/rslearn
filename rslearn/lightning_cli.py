@@ -391,8 +391,15 @@ class RslearnLightningCLI(LightningCLI):
 
         Sets the dataset path for any configured RslearnPredictionWriter callbacks.
         """
-        subcommand = self.config.subcommand
-        c = self.config[subcommand]
+        if not hasattr(self.config, "subcommand"):
+            logger.warning(
+                "Config does not have subcommand attribute, assuming we are in run=False mode"
+            )
+            subcommand = None
+            c = self.config
+        else:
+            subcommand = self.config.subcommand
+            c = self.config[subcommand]
 
         # If there is a RslearnPredictionWriter, set its path.
         prediction_writer_callback = None
@@ -416,16 +423,17 @@ class RslearnLightningCLI(LightningCLI):
         if subcommand == "predict":
             c.return_predictions = False
 
-        # For now we use DDP strategy with find_unused_parameters=True.
+        # Default to DDP with find_unused_parameters. Likely won't get called with unified config
         if subcommand == "fit":
-            c.trainer.strategy = jsonargparse.Namespace(
-                {
-                    "class_path": "lightning.pytorch.strategies.DDPStrategy",
-                    "init_args": jsonargparse.Namespace(
-                        {"find_unused_parameters": True}
-                    ),
-                }
-            )
+            if not c.trainer.strategy:
+                c.trainer.strategy = jsonargparse.Namespace(
+                    {
+                        "class_path": "lightning.pytorch.strategies.DDPStrategy",
+                        "init_args": jsonargparse.Namespace(
+                            {"find_unused_parameters": True}
+                        ),
+                    }
+                )
 
         if c.management_dir:
             self.enable_project_management(c.management_dir)

@@ -16,7 +16,12 @@ from torchmetrics.classification import (
 )
 
 from rslearn.models.component import FeatureVector, Predictor
-from rslearn.train.model_context import ModelContext, ModelOutput, SampleMetadata
+from rslearn.train.model_context import (
+    ModelContext,
+    ModelOutput,
+    RasterImage,
+    SampleMetadata,
+)
 from rslearn.utils import Feature, STGeometry
 
 from .task import BasicTask
@@ -99,7 +104,7 @@ class ClassificationTask(BasicTask):
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, torch.Tensor | list[Feature]],
+        raw_inputs: dict[str, RasterImage | list[Feature]],
         metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -118,6 +123,7 @@ class ClassificationTask(BasicTask):
             return {}, {}
 
         data = raw_inputs["targets"]
+        assert isinstance(data, list)
         for feat in data:
             if feat.properties is None:
                 continue

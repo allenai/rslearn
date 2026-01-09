@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from rslearn.train.model_context import RasterImage
+
 from .transform import Transform, read_selector, write_selector
 
 
@@ -49,6 +51,10 @@ class SelectBands(Transform):
             if self.num_bands_per_timestep is not None
             else image.shape[0]
         )
+        if isinstance(image, RasterImage):
+            assert num_bands_per_timestep == image.shape[0], (
+                "Expect a seperate dimension for timesteps in RasterImages."
+            )
 
         if image.shape[0] % num_bands_per_timestep != 0:
             raise ValueError(
@@ -62,6 +68,9 @@ class SelectBands(Transform):
                 [(start_channel_idx + band_idx) for band_idx in self.band_indices]
             )
 
-        result = image[wanted_bands]
-        write_selector(input_dict, target_dict, self.output_selector, result)
+        if isinstance(image, RasterImage):
+            image.image = image.image[wanted_bands]
+        else:
+            image = image[wanted_bands]
+        write_selector(input_dict, target_dict, self.output_selector, image)
         return input_dict, target_dict

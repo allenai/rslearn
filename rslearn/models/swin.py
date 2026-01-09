@@ -151,7 +151,9 @@ class Swin(FeatureExtractor):
             a FeatureVector if the configured output_layers is None, or a FeatureMaps
                 otherwise containing one feature map per configured output layer.
         """
-        images = torch.stack([inp["image"] for inp in context.inputs], dim=0)
+        images = torch.stack(
+            [inp["image"].single_ts_to_chw_tensor() for inp in context.inputs], dim=0
+        )
 
         if self.output_layers:
             layer_features = []

@@ -7,7 +7,7 @@ import numpy.typing as npt
 import torch
 from torchmetrics import MetricCollection
 
-from rslearn.train.model_context import SampleMetadata
+from rslearn.train.model_context import RasterImage, SampleMetadata
 from rslearn.utils import Feature
 
 
@@ -21,7 +21,7 @@ class Task:
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, torch.Tensor | list[Feature]],
+        raw_inputs: dict[str, RasterImage | list[Feature]],
         metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:

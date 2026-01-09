@@ -120,7 +120,7 @@ class TestPredictLoader:
         assert len(input_dicts2) == 2
         # All patches should be zero except the first one which should correspond to
         # the topleft of the image where we have set one pixel to 1.
-        assert input_dicts1[0]["image"].max() == 1
-        assert input_dicts1[1]["image"].max() == 0
-        assert input_dicts2[0]["image"].max() == 0
-        assert input_dicts2[1]["image"].max() == 0
+        assert input_dicts1[0]["image"].image.max() == 1
+        assert input_dicts1[1]["image"].image.max() == 0
+        assert input_dicts2[0]["image"].image.max() == 0
+        assert input_dicts2[1]["image"].image.max() == 0

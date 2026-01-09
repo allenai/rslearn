@@ -142,7 +142,9 @@ class Panopticon(FeatureExtractor):
     def forward(self, context: ModelContext) -> FeatureMaps:
         """Forward pass through the panopticon model."""
         batch_inputs = {
-            key: torch.stack([inp[key] for inp in context.inputs], dim=0)
+            key: torch.stack(
+                [inp[key].single_ts_to_chw_tensor() for inp in context.inputs], dim=0
+            )
             for key in context.inputs[0].keys()
         }
         panopticon_inputs = self.prepare_input(batch_inputs)

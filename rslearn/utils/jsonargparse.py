@@ -101,10 +101,14 @@ def resolution_factor_serializer(v: ResolutionFactor) -> str:
     Returns:
         the ResolutionFactor encoded to string
     """
+    if hasattr(v, "init_args"):
+        init_args = v.init_args
+        return f"{init_args.numerator}/{init_args.denominator}"
+
     return f"{v.numerator}/{v.denominator}"
 
 
-def resolution_factor_deserializer(v: int | str) -> ResolutionFactor:
+def resolution_factor_deserializer(v: int | str | dict) -> ResolutionFactor:
     """Deserialize ResolutionFactor for jsonargparse.
 
     Args:
@@ -113,6 +117,26 @@ def resolution_factor_deserializer(v: int | str) -> ResolutionFactor:
     Returns:
         the decoded ResolutionFactor object
     """
+    # Handle already-instantiated ResolutionFactor
+    if isinstance(v, ResolutionFactor):
+        return v
+
+    # Handle Namespace from class_path syntax (used during config save/validation)
+    if hasattr(v, "init_args"):
+        init_args = v.init_args
+        return ResolutionFactor(
+            numerator=init_args.numerator,
+            denominator=init_args.denominator,
+        )
+
+    # Handle dict from class_path syntax in YAML config
+    if isinstance(v, dict) and "init_args" in v:
+        init_args = v["init_args"]
+        return ResolutionFactor(
+            numerator=init_args.get("numerator", 1),
+            denominator=init_args.get("denominator", 1),
+        )
+
     if isinstance(v, int):
         return ResolutionFactor(numerator=v)
     elif isinstance(v, str):

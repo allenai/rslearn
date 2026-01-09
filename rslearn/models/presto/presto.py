@@ -2,6 +2,7 @@
 
 import logging
 import tempfile
+from datetime import datetime
 
 import torch
 from einops import rearrange, repeat
@@ -118,21 +119,21 @@ class Presto(FeatureExtractor):
             of each timestep for that pixel
         """
         bs = [x.shape[0] for x in [s1, s2, era5, srtm] if x is not None]
-        hs = [x.shape[2] for x in [s1, s2, era5, srtm] if x is not None]
-        ws = [x.shape[3] for x in [s1, s2, era5, srtm] if x is not None]
+        ts = [x.shape[2] for x in [s1, s2, era5, srtm] if x is not None]
+        hs = [x.shape[3] for x in [s1, s2, era5, srtm] if x is not None]
+        ws = [x.shape[4] for x in [s1, s2, era5, srtm] if x is not None]
         devices = [x.device for x in [s1, s2, era5, srtm] if x is not None]
 
         assert len(set(bs)) == 1
         assert len(set(hs)) == 1
         assert len(set(ws)) == 1
         assert len(set(devices)) == 1
-        b, h, w, device = bs[0], hs[0], ws[0], devices[0]
-
+        assert len(set(ts)) == 1
+        b, h, w, t, device = bs[0], hs[0], ws[0], ts[0], devices[0]
         # these values will be initialized as
         # we iterate through the data
         x: torch.Tensor | None = None
         mask: torch.Tensor | None = None
-        t: int | None = None
 
         for band_group in [
             (s1, s1_bands),
@@ -146,14 +147,7 @@ class Presto(FeatureExtractor):
             else:
                 continue
 
-            m_t = data.shape[1] // len(input_bands)
-            if t is None:
-                t = m_t
-            else:
-                if t != m_t:
-                    raise ValueError("inconsistent values for t")
-
-            data = rearrange(data, "b (t c) h w -> b t h w c", t=m_t)
+            data = rearrange(data, "b c t h w -> b t h w c")
             if x is None:
                 x = torch.zeros(b, t, h, w, len(INPUT_PRESTO_BANDS), device=device)
             if mask is None:
@@ -184,6 +178,23 @@ class Presto(FeatureExtractor):
             x = (x + PRESTO_ADD_BY.to(device=device)) / PRESTO_DIV_BY.to(device=device)
         return x, mask, dynamic_world.long(), months.long()
 
+    @staticmethod
+    def time_ranges_to_timestamps(
+        time_ranges: list[tuple[datetime, datetime]],
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Turn the time ranges stored in a RasterImage to timestamps accepted by Presto.
+
+        Presto only uses the month associated with each timestamp, so we take the midpoint
+        the time range. For some inputs (e.g. Sentinel 2) we take an image from a specific
+        time so that start_time == end_time == mid_time.
+        """
+        mid_ranges = [t[0] + ((t[1] - t[0]) / 2) for t in time_ranges]
+        # months are indexed 0-11
+        return torch.tensor(
+            [d.month - 1 for d in mid_ranges], dtype=torch.int32, device=device
+        )
+
     def forward(self, context: ModelContext) -> FeatureMaps:
         """Compute feature maps from the Presto backbone.
 
@@ -194,17 +205,36 @@ class Presto(FeatureExtractor):
             a FeatureMaps with one feature map that is at the same resolution as the
                 input (since Presto operates per-pixel).
         """
+        time_modalities = ["s1", "s2", "era5"]
         stacked_inputs = {}
         latlons: torch.Tensor | None = None
+        months: torch.Tensor | None = None
         for key in context.inputs[0].keys():
             # assume all the keys in an input are consistent
             if key in self.input_keys:
                 if key == "latlon":
-                    latlons = torch.stack([inp[key] for inp in context.inputs], dim=0)
+                    latlons = torch.stack(
+                        [inp[key].image for inp in context.inputs], dim=0
+                    )
                 else:
                     stacked_inputs[key] = torch.stack(
-                        [inp[key] for inp in context.inputs], dim=0
+                        [inp[key].image for inp in context.inputs], dim=0
                     )
+                if key in time_modalities:
+                    if months is None:
+                        if context.inputs[0][key].timestamps is not None:
+                            months = torch.stack(
+                                [
+                                    self.time_ranges_to_timestamps(
+                                        inp[key].timestamps,  # type: ignore
+                                        device=stacked_inputs[key].device,
+                                    )
+                                    for inp in context.inputs
+                                ],
+                                dim=0,
+                            )
+        if months is not None:
+            stacked_inputs["months"] = months
 
         (
             x,
