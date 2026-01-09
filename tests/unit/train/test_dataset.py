@@ -181,3 +181,53 @@ def test_load_two_layers(
     assert inputs["image"].image.shape == (1, 2, 4, 4)
     assert torch.all(inputs["image"].image[:, 0] == 1)
     assert torch.all(inputs["image"].image[:, 1] == 2)
+
+
+
+def test_load_missing_layers(
+    basic_classification_dataset: Dataset,
+    add_window_to_basic_classification_dataset: Callable,
+) -> None:
+    """Make sure when required is false, a missing layer is skipped correctly"""
+    # We create a window with two images in the first layer and no second layer.
+    # Then in the DataInput we refer to 2 layers, with required=false for the second.
+    # Layers are set with load_all_layers and load_all_item_groups, just the 2 first layer images 
+    # should be read, and the second layer should be skipped.
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        images={
+            ("image_layer1", 0): 0 * np.ones((1, 4, 4), dtype=np.uint8),
+            ("image_layer1", 1): 1 * np.ones((1, 4, 4), dtype=np.uint8)
+        },
+    )
+    dataset = ModelDataset(
+        basic_classification_dataset,
+        split_config=SplitConfig(),
+        task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+        workers=1,
+        inputs={
+            "layer1": DataInput(
+                "raster",
+                ["image_layer1"],
+                bands=["band"],
+                passthrough=True,
+                load_all_layers=True,
+                load_all_item_groups=True
+            ),
+            "layer2": DataInput(
+                "raster",
+                ["image_layer2"],
+                bands=["band"],
+                passthrough=True,
+                load_all_layers=True,
+                required=False
+            ),
+            "targets": DataInput("vector", ["vector_layer"]),
+        },
+    )
+
+    assert len(dataset) == 1
+    inputs, _, _ = dataset[0]
+    assert inputs["layer1"].image.shape == (1, 2, 4, 4)
+    assert torch.all(inputs["layer1"].image[:, 0] == 0)
+    assert torch.all(inputs["layer1"].image[:, 1] == 1)

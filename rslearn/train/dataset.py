@@ -330,7 +330,7 @@ def read_data_input(
     bounds: PixelBounds,
     data_input: DataInput,
     rng: random.Random,
-) -> RasterImage | list[Feature]:
+) -> RasterImage | list[Feature] | None:
     """Read the data specified by the DataInput from the window.
 
     Args:
@@ -341,7 +341,8 @@ def read_data_input(
         rng: random number generator
 
     Returns:
-        the raster or vector data.
+        the raster or vector data, or None if the input is not required and no layers
+        are available.
     """
     # We first enumerate which layers are available.
     # If load_all_item_groups is set, we need to check each item group within the
@@ -359,6 +360,16 @@ def read_data_input(
             if not window.is_layer_completed(layer_name, group_idx):
                 continue
             layer_options.append((layer_name, group_idx))
+
+    # Handle case where no layers are available.
+    # This can happen for non-required inputs when the layer is missing from the window.
+    if len(layer_options) == 0:
+        if data_input.required:
+            raise ValueError(
+                f"No layers available for required input from layers {data_input.layers} "
+                f"in window {window.name}"
+            )
+        return None
 
     # Now determine the layers that we should actually read.
     # We randomly pick one, unless load_all_layers is set, in which case we read all of
@@ -834,9 +845,13 @@ class ModelDataset(torch.utils.data.Dataset):
         raw_inputs = {}
         passthrough_inputs = {}
         for name, data_input in self.inputs.items():
-            raw_inputs[name] = read_data_input(
+            result = read_data_input(
                 self.dataset, window, bounds, data_input, rng
             )
+            # Skip None results (non-required inputs that are missing from the window).
+            if result is None:
+                continue
+            raw_inputs[name] = result
             if data_input.passthrough:
                 passthrough_inputs[name] = raw_inputs[name]
 
