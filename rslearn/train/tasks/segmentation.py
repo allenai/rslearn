@@ -53,6 +53,7 @@ class SegmentationTask(BasicTask):
         enable_accuracy_metric: bool = True,
         enable_miou_metric: bool = False,
         enable_f1_metric: bool = False,
+        report_metric_per_class: bool = False,
         f1_metric_thresholds: list[list[float]] = [[0.5]],
         metric_kwargs: dict[str, Any] = {},
         miou_metric_kwargs: dict[str, Any] = {},
@@ -74,6 +75,8 @@ class SegmentationTask(BasicTask):
             enable_accuracy_metric: whether to enable the accuracy metric (default
                 true).
             enable_f1_metric: whether to enable the F1 metric (default false).
+            report_metric_per_class: whether to report chosen metrics for each class, in
+                addition to the average score across classes.
             enable_miou_metric: whether to enable the mean IoU metric (default false).
             f1_metric_thresholds: list of list of thresholds to apply for F1 metric.
                 Each inner list is used to initialize a separate F1 metric where the
@@ -107,6 +110,7 @@ class SegmentationTask(BasicTask):
         self.enable_accuracy_metric = enable_accuracy_metric
         self.enable_f1_metric = enable_f1_metric
         self.enable_miou_metric = enable_miou_metric
+        self.report_metric_per_class = report_metric_per_class
         self.f1_metric_thresholds = f1_metric_thresholds
         self.metric_kwargs = metric_kwargs
         self.miou_metric_kwargs = miou_metric_kwargs
@@ -238,13 +242,18 @@ class SegmentationTask(BasicTask):
                     suffix = "_" + str(thresholds[0]).replace(".", ",")
 
                 metrics["F1" + suffix] = SegmentationMetric(
-                    F1Metric(num_classes=self.num_classes, score_thresholds=thresholds)
+                    F1Metric(
+                        num_classes=self.num_classes, 
+                        score_thresholds=thresholds,
+                        report_per_class = self.report_metric_per_class
+                    )
                 )
                 metrics["precision" + suffix] = SegmentationMetric(
                     F1Metric(
                         num_classes=self.num_classes,
                         score_thresholds=thresholds,
                         metric_mode="precision",
+                        report_per_class = self.report_metric_per_class
                     )
                 )
                 metrics["recall" + suffix] = SegmentationMetric(
@@ -252,11 +261,15 @@ class SegmentationTask(BasicTask):
                         num_classes=self.num_classes,
                         score_thresholds=thresholds,
                         metric_mode="recall",
+                        report_per_class = self.report_metric_per_class
                     )
                 )
 
         if self.enable_miou_metric:
-            miou_metric_kwargs: dict[str, Any] = dict(num_classes=self.num_classes)
+            miou_metric_kwargs: dict[str, Any] = dict(
+                num_classes=self.num_classes,
+                report_per_class=self.report_metric_per_class,
+            )
             if self.nodata_value is not None:
                 miou_metric_kwargs["nodata_value"] = self.nodata_value
             miou_metric_kwargs.update(self.miou_metric_kwargs)
@@ -331,8 +344,7 @@ class SegmentationMetric(Metric):
     def __init__(
         self,
         metric: Metric,
-        pass_probabilities: bool = True,
-        class_idx: int | None = None,
+        pass_probabilities: bool = True
     ):
         """Initialize a new SegmentationMetric.
 
@@ -341,13 +353,11 @@ class SegmentationMetric(Metric):
                 classes from the targets and masking out invalid pixels.
             pass_probabilities: whether to pass predicted probabilities to the metric.
                 If False, argmax is applied to pass the predicted classes instead.
-            class_idx: if metric returns value for multiple classes, select this class.
         """
         super().__init__()
         self.metric = metric
         self.pass_probablities = pass_probabilities
-        self.class_idx = class_idx
-
+        
     def update(
         self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
     ) -> None:
@@ -378,8 +388,6 @@ class SegmentationMetric(Metric):
     def compute(self) -> Any:
         """Returns the computed metric."""
         result = self.metric.compute()
-        if self.class_idx is not None:
-            result = result[self.class_idx]
         return result
 
     def reset(self) -> None:
@@ -414,11 +422,14 @@ class F1Metric(Metric):
                 metric is the best F1 across score thresholds.
             metric_mode: set to "precision" or "recall" to return that instead of F1
                 (default "f1")
+            report_per_class: whether to include per-class scores in addition to
+                the average. (default False)
         """
         super().__init__()
         self.num_classes = num_classes
         self.score_thresholds = score_thresholds
         self.metric_mode = metric_mode
+        self.report_per_class = report_per_class
 
         assert self.metric_mode in ["f1", "precision", "recall"]
 
@@ -465,7 +476,7 @@ class F1Metric(Metric):
         Returns:
             the best F1 score across score thresholds and classes.
         """
-        best_scores = []
+        cls_best_scores = {}
 
         for cls_idx in range(self.num_classes):
             best_score = None
@@ -502,11 +513,11 @@ class F1Metric(Metric):
                 if best_score is None or score > best_score:
                     best_score = score
 
-            best_scores.append(best_score)
+            cls_best_scores[f"cls_{cls_idx}"] = best_score
+        report_scores = {"avg": torch.mean(torch.stack(list(cls_best_scores.values())))}
         if self.report_per_class:
-            return best_scores
-        else:
-            return torch.mean(torch.stack(best_scores))
+            report_scores.update(cls_best_scores)
+        return report_scores
 
 
 class MeanIoUMetric(Metric):
@@ -526,7 +537,7 @@ class MeanIoUMetric(Metric):
         num_classes: int,
         nodata_value: int | None = None,
         ignore_missing_classes: bool = False,
-        class_idx: int | None = None,
+        report_per_class: bool = False,
     ):
         """Create a new MeanIoUMetric.
 
@@ -538,15 +549,14 @@ class MeanIoUMetric(Metric):
             ignore_missing_classes: whether to ignore classes that don't appear in
                 either the predictions or the ground truth. If false, the IoU for a
                 missing class will be 0.
-            class_idx: only compute and return the IoU for this class. This option is
-                provided so the user can get per-class IoU results, since Lightning
-                only supports scalar return values from metrics.
+            report_per_class: whether to include per-class IoU scores in addition to
+                the mean. (default False)
         """
         super().__init__()
         self.num_classes = num_classes
         self.nodata_value = nodata_value
         self.ignore_missing_classes = ignore_missing_classes
-        self.class_idx = class_idx
+        self.report_per_class = report_per_class
 
         self.add_state(
             "intersections", default=torch.zeros(self.num_classes), dist_reduce_fx="sum"
@@ -587,9 +597,11 @@ class MeanIoUMetric(Metric):
         """Compute metric.
 
         Returns:
-            the mean IoU across classes.
+            A dictionary with "avg" containing the mean IoU across classes,
+            and optionally per-class IoU scores if report_per_class is True.
         """
-        per_class_scores = []
+        cls_scores = {}
+        valid_scores = []
 
         for cls_idx in range(self.num_classes):
             # Check if nodata_value is set and is one of the classes
@@ -602,6 +614,11 @@ class MeanIoUMetric(Metric):
             if union == 0 and self.ignore_missing_classes:
                 continue
 
-            per_class_scores.append(intersection / union)
+            score = intersection / union
+            cls_scores[f"cls_{cls_idx}"] = score
+            valid_scores.append(score)
 
-        return torch.mean(torch.stack(per_class_scores))
+        report_scores = {"avg": torch.mean(torch.stack(valid_scores))}
+        if self.report_per_class:
+            report_scores.update(cls_scores)
+        return report_scores
