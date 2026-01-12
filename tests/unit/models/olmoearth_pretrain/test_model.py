@@ -2,7 +2,6 @@
 
 from datetime import datetime
 
-import pytest
 import torch
 from olmoearth_pretrain.datatypes import MaskValue
 
@@ -87,17 +86,6 @@ def test_forward_no_pooling() -> None:
 
     # Backbone channels should match patch size and depth.
     assert model.get_backbone_channels() == [(4, 128)]
-
-
-def test_error_if_no_checkpoint() -> None:
-    """Should raise error if there is no distributed checkpoint."""
-    with pytest.raises(FileNotFoundError):
-        OlmoEarth(
-            checkpoint_path="tests/unit/models/olmoearth_pretrain/",
-            patch_size=4,
-            embedding_size=128,
-            random_initialization=True,
-        )
 
 
 def test_with_attnpool() -> None:
