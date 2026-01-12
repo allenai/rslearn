@@ -1,20 +1,31 @@
 """Unit tests for rslearn.train.dataset."""
 
 from collections.abc import Callable
+from datetime import datetime
 
 import numpy as np
 import pytest
+import shapely
+import torch
 import torch.utils.data
+from upath import UPath
 
-from rslearn.dataset import Dataset
+from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType
+from rslearn.const import WGS84_PROJECTION
+from rslearn.data_sources.data_source import Item
+from rslearn.dataset import Dataset, Window
+from rslearn.dataset.window import WindowLayerData
 from rslearn.train.dataset import (
     DataInput,
     ModelDataset,
     RetryDataset,
     SplitConfig,
+    read_raster_layer_for_data_input,
 )
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.transforms.concatenate import Concatenate
+from rslearn.utils.geometry import STGeometry
+from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
 class TestException(Exception):
@@ -181,3 +192,103 @@ def test_load_two_layers(
     assert inputs["image"].image.shape == (1, 2, 4, 4)
     assert torch.all(inputs["image"].image[:, 0] == 1)
     assert torch.all(inputs["image"].image[:, 1] == 2)
+
+
+def test_read_raster_layer_with_time_range(tmp_path: UPath) -> None:
+    """Test that time_range is correctly deserialized from layer_data items.
+
+    This test verifies that when items in layer_data have time_range set,
+    the read_raster_layer_for_data_input function correctly returns the
+    min/max time range from all items without double-converting datetime.
+    """
+    ds_path = UPath(tmp_path)
+
+    # Create dataset config with a raster layer
+    dataset_config = {
+        "layers": {
+            "image": {
+                "type": "raster",
+                "band_sets": [
+                    {
+                        "dtype": "uint8",
+                        "bands": ["band"],
+                    }
+                ],
+            },
+        },
+    }
+    ds_path.mkdir(parents=True, exist_ok=True)
+    import json
+
+    with (ds_path / "config.json").open("w") as f:
+        json.dump(dataset_config, f)
+
+    dataset = Dataset(ds_path)
+
+    # Create a window
+    window = Window(
+        storage=dataset.storage,
+        name="test_window",
+        group="default",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 4, 4),
+        time_range=(datetime(2024, 1, 1), datetime(2024, 1, 31)),
+    )
+    window.save()
+
+    # Write raster data
+    image = np.ones((1, 4, 4), dtype=np.uint8)
+    raster_dir = window.get_raster_dir("image", ["band"])
+    GeotiffRasterFormat().encode_raster(
+        raster_dir, window.projection, window.bounds, image
+    )
+    window.mark_layer_completed("image")
+
+    # Create layer data with items that have time_range set
+    item1_time_range = (datetime(2024, 1, 5), datetime(2024, 1, 10))
+    item2_time_range = (datetime(2024, 1, 15), datetime(2024, 1, 20))
+
+    item1 = Item(
+        "item1",
+        STGeometry(
+            WGS84_PROJECTION,
+            shapely.box(*window.bounds),
+            item1_time_range,
+        ),
+    )
+    item2 = Item(
+        "item2",
+        STGeometry(
+            WGS84_PROJECTION,
+            shapely.box(*window.bounds),
+            item2_time_range,
+        ),
+    )
+
+    layer_data = WindowLayerData(
+        "image",
+        serialized_item_groups=[[item1.serialize(), item2.serialize()]],
+    )
+
+    # Create layer config and data input
+    layer_config = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT8, bands=["band"])],
+    )
+    data_input = DataInput("raster", ["image"], bands=["band"])
+
+    # Call the function that had the datetime deserialization bug
+    _, time_range = read_raster_layer_for_data_input(
+        window=window,
+        bounds=window.bounds,
+        layer_name="image",
+        group_idx=0,
+        layer_config=layer_config,
+        data_input=data_input,
+        layer_data=layer_data,
+    )
+
+    # Verify the time_range is correct (min of starts, max of ends)
+    assert time_range is not None
+    assert time_range[0] == datetime(2024, 1, 5)  # min of item1 and item2 start
+    assert time_range[1] == datetime(2024, 1, 20)  # max of item1 and item2 end
