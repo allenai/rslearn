@@ -96,6 +96,7 @@ def test_error_if_no_checkpoint() -> None:
             checkpoint_path="tests/unit/models/olmoearth_pretrain/",
             patch_size=4,
             embedding_size=128,
+            random_initialization=False,
         )
 
 
