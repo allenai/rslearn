@@ -241,42 +241,86 @@ class SegmentationTask(BasicTask):
                     # Metric name can't contain "." so change to ",".
                     suffix = "_" + str(thresholds[0]).replace(".", ",")
 
+                # Create avg metrics (always)
                 metrics["F1" + suffix] = SegmentationMetric(
                     F1Metric(
-                        num_classes=self.num_classes, 
+                        num_classes=self.num_classes,
                         score_thresholds=thresholds,
-                        report_per_class = self.report_metric_per_class
-                    )
+                    ),
+                    output_key="avg",
                 )
                 metrics["precision" + suffix] = SegmentationMetric(
                     F1Metric(
                         num_classes=self.num_classes,
                         score_thresholds=thresholds,
                         metric_mode="precision",
-                        report_per_class = self.report_metric_per_class
-                    )
+                    ),
+                    output_key="avg",
                 )
                 metrics["recall" + suffix] = SegmentationMetric(
                     F1Metric(
                         num_classes=self.num_classes,
                         score_thresholds=thresholds,
                         metric_mode="recall",
-                        report_per_class = self.report_metric_per_class
-                    )
+                    ),
+                    output_key="avg",
                 )
+
+                # Create per-class metrics if requested
+                if self.report_metric_per_class:
+                    for cls_idx in range(self.num_classes):
+                        cls_key = f"cls_{cls_idx}"
+                        metrics[f"F1{suffix}_{cls_key}"] = SegmentationMetric(
+                            F1Metric(
+                                num_classes=self.num_classes,
+                                score_thresholds=thresholds,
+                            ),
+                            output_key=cls_key,
+                        )
+                        metrics[f"precision{suffix}_{cls_key}"] = SegmentationMetric(
+                            F1Metric(
+                                num_classes=self.num_classes,
+                                score_thresholds=thresholds,
+                                metric_mode="precision",
+                            ),
+                            output_key=cls_key,
+                        )
+                        metrics[f"recall{suffix}_{cls_key}"] = SegmentationMetric(
+                            F1Metric(
+                                num_classes=self.num_classes,
+                                score_thresholds=thresholds,
+                                metric_mode="recall",
+                            ),
+                            output_key=cls_key,
+                        )
 
         if self.enable_miou_metric:
             miou_metric_kwargs: dict[str, Any] = dict(
                 num_classes=self.num_classes,
-                report_per_class=self.report_metric_per_class,
             )
             if self.nodata_value is not None:
                 miou_metric_kwargs["nodata_value"] = self.nodata_value
             miou_metric_kwargs.update(self.miou_metric_kwargs)
+            
+            # Create avg metric (always)
             metrics["mean_iou"] = SegmentationMetric(
                 MeanIoUMetric(**miou_metric_kwargs),
                 pass_probabilities=False,
+                output_key="avg",
             )
+            
+            # Create per-class metrics if requested
+            if self.report_metric_per_class:
+                for cls_idx in range(self.num_classes):
+                    # Skip nodata class if applicable
+                    if self.nodata_value is not None and cls_idx == self.nodata_value:
+                        continue
+                    cls_key = f"cls_{cls_idx}"
+                    metrics[f"iou_{cls_key}"] = SegmentationMetric(
+                        MeanIoUMetric(**miou_metric_kwargs),
+                        pass_probabilities=False,
+                        output_key=cls_key,
+                    )
 
         if self.other_metrics:
             metrics.update(self.other_metrics)
@@ -361,7 +405,8 @@ class SegmentationMetric(Metric):
     def __init__(
         self,
         metric: Metric,
-        pass_probabilities: bool = True
+        pass_probabilities: bool = True,
+        output_key: str | None = None,
     ):
         """Initialize a new SegmentationMetric.
 
@@ -370,10 +415,13 @@ class SegmentationMetric(Metric):
                 classes from the targets and masking out invalid pixels.
             pass_probabilities: whether to pass predicted probabilities to the metric.
                 If False, argmax is applied to pass the predicted classes instead.
+            output_key: if the wrapped metric returns a dict, return only this key's
+                value. If None and the metric returns a dict, the full dict is returned.
         """
         super().__init__()
         self.metric = metric
         self.pass_probablities = pass_probabilities
+        self.output_key = output_key
         
     def update(
         self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
@@ -405,6 +453,8 @@ class SegmentationMetric(Metric):
     def compute(self) -> Any:
         """Returns the computed metric."""
         result = self.metric.compute()
+        if self.output_key is not None and isinstance(result, dict):
+            return result[self.output_key]
         return result
 
     def reset(self) -> None:
@@ -429,7 +479,6 @@ class F1Metric(Metric):
         num_classes: int,
         score_thresholds: list[float],
         metric_mode: str = "f1",
-        report_per_class: bool = False,
     ):
         """Create a new F1Metric.
 
@@ -439,14 +488,11 @@ class F1Metric(Metric):
                 metric is the best F1 across score thresholds.
             metric_mode: set to "precision" or "recall" to return that instead of F1
                 (default "f1")
-            report_per_class: whether to include per-class scores in addition to
-                the average. (default False)
         """
         super().__init__()
         self.num_classes = num_classes
         self.score_thresholds = score_thresholds
         self.metric_mode = metric_mode
-        self.report_per_class = report_per_class
 
         assert self.metric_mode in ["f1", "precision", "recall"]
 
@@ -491,7 +537,8 @@ class F1Metric(Metric):
         """Compute metric.
 
         Returns:
-            the best F1 score across score thresholds and classes.
+            dict with "avg" key containing mean score across classes, and
+            "cls_N" keys for each class N containing per-class scores.
         """
         cls_best_scores = {}
 
@@ -531,9 +578,10 @@ class F1Metric(Metric):
                     best_score = score
 
             cls_best_scores[f"cls_{cls_idx}"] = best_score
+
+        # Always return both avg and per-class scores
         report_scores = {"avg": torch.mean(torch.stack(list(cls_best_scores.values())))}
-        if self.report_per_class:
-            report_scores.update(cls_best_scores)
+        report_scores.update(cls_best_scores)
         return report_scores
 
 
@@ -554,7 +602,6 @@ class MeanIoUMetric(Metric):
         num_classes: int,
         nodata_value: int | None = None,
         ignore_missing_classes: bool = False,
-        report_per_class: bool = False,
     ):
         """Create a new MeanIoUMetric.
 
@@ -566,14 +613,11 @@ class MeanIoUMetric(Metric):
             ignore_missing_classes: whether to ignore classes that don't appear in
                 either the predictions or the ground truth. If false, the IoU for a
                 missing class will be 0.
-            report_per_class: whether to include per-class IoU scores in addition to
-                the mean. (default False)
         """
         super().__init__()
         self.num_classes = num_classes
         self.nodata_value = nodata_value
         self.ignore_missing_classes = ignore_missing_classes
-        self.report_per_class = report_per_class
 
         self.add_state(
             "intersections", default=torch.zeros(self.num_classes), dist_reduce_fx="sum"
@@ -614,8 +658,8 @@ class MeanIoUMetric(Metric):
         """Compute metric.
 
         Returns:
-            A dictionary with "avg" containing the mean IoU across classes,
-            and optionally per-class IoU scores if report_per_class is True.
+            dict with "avg" containing the mean IoU across classes, and
+            "cls_N" keys for each valid class N containing per-class IoU scores.
         """
         cls_scores = {}
         valid_scores = []
@@ -635,9 +679,9 @@ class MeanIoUMetric(Metric):
             cls_scores[f"cls_{cls_idx}"] = score
             valid_scores.append(score)
 
+        # Always return both avg and per-class scores
         report_scores = {"avg": torch.mean(torch.stack(valid_scores))}
-        if self.report_per_class:
-            report_scores.update(cls_scores)
+        report_scores.update(cls_scores)
         return report_scores
 
 

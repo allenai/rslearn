@@ -231,6 +231,7 @@ class RslearnDataModule(L.LightningDataModule):
                 num_replicas=self.trainer.world_size,
                 rank=self.trainer.global_rank,
                 shuffle=should_shuffle,
+                drop_last=(split == "val"),  # Ensure even batches for validation
             )
         else:
             kwargs["shuffle"] = should_shuffle
