@@ -205,8 +205,7 @@ def read_raster_layer_for_data_input(
     group_idx: int,
     layer_config: LayerConfig,
     data_input: DataInput,
-    layer_data: WindowLayerData | None,
-) -> tuple[torch.Tensor, tuple[datetime, datetime] | None]:
+) -> torch.Tensor:
     """Read a raster layer for a DataInput.
 
     This scans the available rasters for the layer at the window to determine which
@@ -219,11 +218,9 @@ def read_raster_layer_for_data_input(
         group_idx: the item group.
         layer_config: the layer configuration.
         data_input: the DataInput that specifies the bands and dtype.
-        layer_data: the WindowLayerData associated with this layer and window.
 
     Returns:
-        RasterImage containing raster data and the timestamp associated
-            with that data.
+        Raster data as a tensor.
     """
     # See what different sets of bands we need to read to get all the
     # configured bands.
@@ -294,12 +291,10 @@ def read_raster_layer_for_data_input(
             src[src_indexes, :, :].astype(data_input.dtype.get_numpy_dtype())
         )
 
-    # add the timestamp. this is a tuple defining the start and end of the time range.
-    time_range = _extract_time_range_from_layer_data(layer_data, group_idx)
-    return image, time_range
+    return image
 
 
-def _extract_time_range_from_layer_data(
+def read_layer_time_range(
     layer_data: WindowLayerData | None, group_idx: int
 ) -> tuple[datetime, datetime] | None:
     """Extract the combined time range from all items in a layer data group.
@@ -392,17 +387,17 @@ def read_data_input(
         time_ranges: list[tuple[datetime, datetime] | None] = []
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
-            image, time_range = read_raster_layer_for_data_input(
+            image = read_raster_layer_for_data_input(
                 window,
                 bounds,
                 layer_name,
                 group_idx,
                 layer_config,
                 data_input,
-                # some layers (e.g. "label_raster") won't have associated
-                # layer datas
-                layer_datas[layer_name] if layer_name in layer_datas else None,
             )
+            # some layers (e.g. "label_raster") won't have associated layer datas
+            layer_data = layer_datas.get(layer_name)
+            time_range = read_layer_time_range(layer_data, group_idx)
             if len(time_ranges) > 0:
                 if type(time_ranges[-1]) is not type(time_range):
                     raise ValueError(
