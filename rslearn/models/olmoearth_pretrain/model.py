@@ -242,7 +242,7 @@ class OlmoEarth(FeatureExtractor):
             present_modalities.append(modality)
             tensors = []
             for idx, inp in enumerate(context.inputs):
-                assert isinstance(inp, RasterImage)
+                assert isinstance(inp[modality], RasterImage)
                 tensors.append(inp[modality].image)
                 cur_timestamps = inp[modality].timestamps
                 if cur_timestamps is not None and len(cur_timestamps) > len(
