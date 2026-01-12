@@ -28,8 +28,6 @@ dependencies = [
 
 [project.optional-dependencies]
 # These are requirements that are specific to a subset of data sources or models.
-# NOTE: olmoearth_pretrain is required for OlmoEarth model but not declared here due to licensing.
-# Install with constraints file: pip install olmoearth-pretrain ai2-olmo-core -c constraints-olmoearth.txt && pip install -e ".[extra,dev]" -c constraints-olmoearth.txt
 extra = [
     "accelerate>=1.10",
     "cdsapi>=0.7.6",
