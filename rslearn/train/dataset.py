@@ -205,8 +205,7 @@ def read_raster_layer_for_data_input(
     group_idx: int,
     layer_config: LayerConfig,
     data_input: DataInput,
-    layer_data: WindowLayerData | None,
-) -> tuple[torch.Tensor, tuple[datetime, datetime] | None]:
+) -> torch.Tensor:
     """Read a raster layer for a DataInput.
 
     This scans the available rasters for the layer at the window to determine which
@@ -219,11 +218,9 @@ def read_raster_layer_for_data_input(
         group_idx: the item group.
         layer_config: the layer configuration.
         data_input: the DataInput that specifies the bands and dtype.
-        layer_data: the WindowLayerData associated with this layer and window.
 
     Returns:
-        RasterImage containing raster data and the timestamp associated
-            with that data.
+        Raster data as a tensor.
     """
     # See what different sets of bands we need to read to get all the
     # configured bands.
@@ -294,34 +291,46 @@ def read_raster_layer_for_data_input(
             src[src_indexes, :, :].astype(data_input.dtype.get_numpy_dtype())
         )
 
-    # add the timestamp. this is a tuple defining the start and end of the time range.
-    time_range = None
-    if layer_data is not None:
-        item = Item.deserialize(layer_data.serialized_item_groups[group_idx][0])
-        if item.geometry.time_range is not None:
-            # we assume if one layer data has a geometry & time range, all of them do
-            time_ranges = [
-                (
-                    datetime.fromisoformat(
-                        Item.deserialize(
-                            layer_data.serialized_item_groups[group_idx][idx]
-                        ).geometry.time_range[0]  # type: ignore
-                    ),
-                    datetime.fromisoformat(
-                        Item.deserialize(
-                            layer_data.serialized_item_groups[group_idx][idx]
-                        ).geometry.time_range[1]  # type: ignore
-                    ),
-                )
-                for idx in range(len(layer_data.serialized_item_groups[group_idx]))
-            ]
-            # take the min and max
-            time_range = (
-                min([t[0] for t in time_ranges]),
-                max([t[1] for t in time_ranges]),
-            )
+    return image
 
-    return image, time_range
+
+def read_layer_time_range(
+    layer_data: WindowLayerData | None, group_idx: int
+) -> tuple[datetime, datetime] | None:
+    """Extract the combined time range from all items in a layer data group.
+
+    Returns the min start time and max end time across all items, or None if
+    no items have time ranges.
+
+    Raises:
+        ValueError: If some items have time_range and others don't.
+    """
+    if layer_data is None:
+        return None
+
+    serialized_items = layer_data.serialized_item_groups[group_idx]
+    if not serialized_items:
+        return None
+
+    first_item = Item.deserialize(serialized_items[0])
+    if first_item.geometry.time_range is None:
+        return None
+
+    # If the first item has a time_range, all items must have one
+    time_ranges: list[tuple[datetime, datetime]] = []
+    for serialized_item in serialized_items:
+        item = Item.deserialize(serialized_item)
+        if item.geometry.time_range is None:
+            raise ValueError(
+                f"Item '{item.name}' has no time_range, but first item does. "
+                "All items in a group must consistently have or lack time_range."
+            )
+        time_ranges.append(item.geometry.time_range)
+
+    return (
+        min(tr[0] for tr in time_ranges),
+        max(tr[1] for tr in time_ranges),
+    )
 
 
 def read_data_input(
@@ -378,17 +387,17 @@ def read_data_input(
         time_ranges: list[tuple[datetime, datetime] | None] = []
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
-            image, time_range = read_raster_layer_for_data_input(
+            image = read_raster_layer_for_data_input(
                 window,
                 bounds,
                 layer_name,
                 group_idx,
                 layer_config,
                 data_input,
-                # some layers (e.g. "label_raster") won't have associated
-                # layer datas
-                layer_datas[layer_name] if layer_name in layer_datas else None,
             )
+            # some layers (e.g. "label_raster") won't have associated layer datas
+            layer_data = layer_datas.get(layer_name)
+            time_range = read_layer_time_range(layer_data, group_idx)
             if len(time_ranges) > 0:
                 if type(time_ranges[-1]) is not type(time_range):
                     raise ValueError(
