@@ -301,18 +301,9 @@ def read_raster_layer_for_data_input(
         if item.geometry.time_range is not None:
             # we assume if one layer data has a geometry & time range, all of them do
             time_ranges = [
-                (
-                    datetime.fromisoformat(
-                        Item.deserialize(
-                            layer_data.serialized_item_groups[group_idx][idx]
-                        ).geometry.time_range[0]  # type: ignore
-                    ),
-                    datetime.fromisoformat(
-                        Item.deserialize(
-                            layer_data.serialized_item_groups[group_idx][idx]
-                        ).geometry.time_range[1]  # type: ignore
-                    ),
-                )
+                Item.deserialize(
+                    layer_data.serialized_item_groups[group_idx][idx]
+                ).geometry.time_range  # type: ignore
                 for idx in range(len(layer_data.serialized_item_groups[group_idx]))
             ]
             # take the min and max
