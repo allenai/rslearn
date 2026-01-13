@@ -52,7 +52,7 @@ class Sentinel2(StacDataSource, TileStore):
         "nir": ["B08"],
         "nir09": ["B09"],
         "swir16": ["B11"],
-        "swin22": ["B12"],
+        "swir22": ["B12"],
         "nir08": ["B8A"],
         "visual": ["R", "G", "B"],
     }
@@ -118,7 +118,7 @@ class Sentinel2(StacDataSource, TileStore):
             sort_by=sort_by,
             sort_ascending=sort_ascending,
             required_assets=list(self.asset_bands.keys()),
-            cache_dir=self.cache_dir,
+            cache_dir=cache_upath,
         )
 
         self.harmonize = harmonize
@@ -197,7 +197,7 @@ class Sentinel2(StacDataSource, TileStore):
             whether there is a raster in the store matching the source, item, and
                 bands.
         """
-        # Always ready since we wrap accesses to Planetary Computer.
+        # Always ready since we wrap accesses to underlying API.
         return True
 
     def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:

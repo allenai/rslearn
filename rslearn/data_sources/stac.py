@@ -129,7 +129,7 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
                 return SourceItem.deserialize(json.load(f))
 
         # No cache or not in cache, so we need to make the STAC request.
-        logger.debug("Getting STAC item {name}")
+        logger.debug(f"Getting STAC item {name}")
         stac_items = self.client.search(ids=[name], collections=[self.collection_name])
 
         if len(stac_items) == 0:
