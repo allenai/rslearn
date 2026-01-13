@@ -1,12 +1,13 @@
 import pathlib
 import tempfile
+from datetime import datetime
 
 import torch
 from einops import rearrange
 from pytest import MonkeyPatch
 
 from rslearn.models.presto import Presto
-from rslearn.train.model_context import ModelContext
+from rslearn.train.model_context import ModelContext, RasterImage
 
 
 def test_presto(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
@@ -22,9 +23,24 @@ def test_presto(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
 
     inputs = [
         {
-            "s2": torch.zeros((10, input_hw, input_hw), dtype=torch.float32),
-            "s1": torch.zeros((2, input_hw, input_hw), dtype=torch.float32),
-            "era5": torch.zeros((2, input_hw, input_hw), dtype=torch.float32),
+            "s2": RasterImage(
+                torch.zeros((10, 1, input_hw, input_hw), dtype=torch.float32),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1)) for x in range(1, 2)
+                ],
+            ),
+            "s1": RasterImage(
+                torch.zeros((2, 1, input_hw, input_hw), dtype=torch.float32),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1)) for x in range(1, 2)
+                ],
+            ),
+            "era5": RasterImage(
+                torch.zeros((2, 1, input_hw, input_hw), dtype=torch.float32),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1)) for x in range(1, 2)
+                ],
+            ),
         }
     ]
     feature_list = presto(ModelContext(inputs=inputs, metadatas=[])).feature_maps
@@ -53,14 +69,32 @@ def test_presto_mt(tmp_path: pathlib.Path, monkeypatch: MonkeyPatch) -> None:
     presto = Presto(pixel_batch_size=7)
     inputs = [
         {
-            "s2": torch.zeros(
-                (10 * num_timesteps, input_hw, input_hw), dtype=torch.float32
+            "s2": RasterImage(
+                torch.zeros(
+                    (10, num_timesteps, input_hw, input_hw), dtype=torch.float32
+                ),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1))
+                    for x in range(1, num_timesteps + 1)
+                ],
             ),
-            "s1": torch.zeros(
-                (2 * num_timesteps, input_hw, input_hw), dtype=torch.float32
+            "s1": RasterImage(
+                torch.zeros(
+                    (2, num_timesteps, input_hw, input_hw), dtype=torch.float32
+                ),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1))
+                    for x in range(1, num_timesteps + 1)
+                ],
             ),
-            "era5": torch.zeros(
-                (2 * num_timesteps, input_hw, input_hw), dtype=torch.float32
+            "era5": RasterImage(
+                torch.zeros(
+                    (2, num_timesteps, input_hw, input_hw), dtype=torch.float32
+                ),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1))
+                    for x in range(1, num_timesteps + 1)
+                ],
             ),
         }
     ]

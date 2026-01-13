@@ -143,7 +143,8 @@ class Terramind(FeatureExtractor):
             if modality not in context.inputs[0]:
                 continue
             cur = torch.stack(
-                [inp[modality] for inp in context.inputs], dim=0
+                [inp[modality].single_ts_to_chw_tensor() for inp in context.inputs],
+                dim=0,
             )  # (B, C, H, W)
             if self.do_resizing and (
                 cur.shape[2] != IMAGE_SIZE or cur.shape[3] != IMAGE_SIZE
@@ -219,7 +220,7 @@ class TerramindNormalize(Transform):
         Returns:
             The normalized image.
         """
-        images = image.float()  # (C, H, W)
+        images = image.float()  # (C, 1, H, W)
         if images.shape[0] % len(means) != 0:
             raise ValueError(
                 f"the number of image channels {images.shape[0]} is not multiple of expected number of bands {len(means)}"
@@ -247,8 +248,8 @@ class TerramindNormalize(Transform):
             band_info = PRETRAINED_BANDS[modality]
             means = [band_info[band][0] for band in band_info]
             stds = [band_info[band][1] for band in band_info]
-            input_dict[modality] = self.apply_image(
-                input_dict[modality],
+            input_dict[modality].image = self.apply_image(
+                input_dict[modality].image,
                 means,
                 stds,
             )

@@ -1,5 +1,6 @@
 """Segmentation task."""
 
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -9,7 +10,13 @@ import torchmetrics.classification
 from torchmetrics import Metric, MetricCollection
 
 from rslearn.models.component import FeatureMaps, Predictor
-from rslearn.train.model_context import ModelContext, ModelOutput, SampleMetadata
+from rslearn.train.model_context import (
+    ModelContext,
+    ModelOutput,
+    RasterImage,
+    SampleMetadata,
+)
+from rslearn.utils import Feature
 
 from .task import BasicTask
 
@@ -108,7 +115,7 @@ class SegmentationTask(BasicTask):
 
     def process_inputs(
         self,
-        raw_inputs: dict[str, torch.Tensor],
+        raw_inputs: Mapping[str, RasterImage | list[Feature]],
         metadata: SampleMetadata,
         load_targets: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -126,8 +133,10 @@ class SegmentationTask(BasicTask):
         if not load_targets:
             return {}, {}
 
-        assert raw_inputs["targets"].shape[0] == 1
-        labels = raw_inputs["targets"][0, :, :].long()
+        assert isinstance(raw_inputs["targets"], RasterImage)
+        assert raw_inputs["targets"].image.shape[0] == 1
+        assert raw_inputs["targets"].image.shape[1] == 1
+        labels = raw_inputs["targets"].image[0, 0, :, :].long()
 
         if self.class_id_mapping is not None:
             new_labels = labels.clone()

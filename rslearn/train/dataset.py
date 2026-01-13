@@ -8,6 +8,7 @@ import random
 import tempfile
 import time
 import uuid
+from datetime import datetime
 from typing import Any
 
 import torch
@@ -19,10 +20,16 @@ from rslearn.config import (
     DType,
     LayerConfig,
 )
+from rslearn.data_sources.data_source import Item
 from rslearn.dataset.dataset import Dataset
 from rslearn.dataset.storage.file import FileWindowStorage
-from rslearn.dataset.window import Window, get_layer_and_group_from_dir_name
+from rslearn.dataset.window import (
+    Window,
+    WindowLayerData,
+    get_layer_and_group_from_dir_name,
+)
 from rslearn.log_utils import get_logger
+from rslearn.train.model_context import RasterImage
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
 from rslearn.utils.mp import star_imap_unordered
@@ -213,7 +220,7 @@ def read_raster_layer_for_data_input(
         data_input: the DataInput that specifies the bands and dtype.
 
     Returns:
-        tensor containing raster data.
+        Raster data as a tensor.
     """
     # See what different sets of bands we need to read to get all the
     # configured bands.
@@ -287,13 +294,52 @@ def read_raster_layer_for_data_input(
     return image
 
 
+def read_layer_time_range(
+    layer_data: WindowLayerData | None, group_idx: int
+) -> tuple[datetime, datetime] | None:
+    """Extract the combined time range from all items in a layer data group.
+
+    Returns the min start time and max end time across all items, or None if
+    no items have time ranges.
+
+    Raises:
+        ValueError: If some items have time_range and others don't.
+    """
+    if layer_data is None:
+        return None
+
+    serialized_items = layer_data.serialized_item_groups[group_idx]
+    if not serialized_items:
+        return None
+
+    first_item = Item.deserialize(serialized_items[0])
+    if first_item.geometry.time_range is None:
+        return None
+
+    # If the first item has a time_range, all items must have one
+    time_ranges: list[tuple[datetime, datetime]] = []
+    for serialized_item in serialized_items:
+        item = Item.deserialize(serialized_item)
+        if item.geometry.time_range is None:
+            raise ValueError(
+                f"Item '{item.name}' has no time_range, but first item does. "
+                "All items in a group must consistently have or lack time_range."
+            )
+        time_ranges.append(item.geometry.time_range)
+
+    return (
+        min(tr[0] for tr in time_ranges),
+        max(tr[1] for tr in time_ranges),
+    )
+
+
 def read_data_input(
     dataset: Dataset,
     window: Window,
     bounds: PixelBounds,
     data_input: DataInput,
     rng: random.Random,
-) -> torch.Tensor | list[Feature]:
+) -> RasterImage | list[Feature]:
     """Read the data specified by the DataInput from the window.
 
     Args:
@@ -335,15 +381,34 @@ def read_data_input(
         layers_to_read = [rng.choice(layer_options)]
 
     if data_input.data_type == "raster":
+        # load it once here
+        layer_datas = window.load_layer_datas()
         images: list[torch.Tensor] = []
+        time_ranges: list[tuple[datetime, datetime] | None] = []
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
-            images.append(
-                read_raster_layer_for_data_input(
-                    window, bounds, layer_name, group_idx, layer_config, data_input
-                )
+            image = read_raster_layer_for_data_input(
+                window,
+                bounds,
+                layer_name,
+                group_idx,
+                layer_config,
+                data_input,
             )
-        return torch.cat(images, dim=0)
+            # some layers (e.g. "label_raster") won't have associated layer datas
+            layer_data = layer_datas.get(layer_name)
+            time_range = read_layer_time_range(layer_data, group_idx)
+            if len(time_ranges) > 0:
+                if type(time_ranges[-1]) is not type(time_range):
+                    raise ValueError(
+                        f"All time ranges should be datetime tuples or None. Got {type(time_range)} amd {type(time_ranges[-1])}"
+                    )
+            images.append(image)
+            time_ranges.append(time_range)
+        return RasterImage(
+            torch.stack(images, dim=1),
+            time_ranges if time_ranges[0] is not None else None,  # type: ignore
+        )
 
     elif data_input.data_type == "vector":
         # We don't really support time series for vector data currently, we just

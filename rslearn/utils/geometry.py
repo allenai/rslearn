@@ -153,8 +153,8 @@ class ResolutionFactor:
         else:
             return Projection(
                 projection.crs,
-                projection.x_resolution // self.numerator,
-                projection.y_resolution // self.numerator,
+                projection.x_resolution / self.numerator,
+                projection.y_resolution / self.numerator,
             )
 
     def multiply_bounds(self, bounds: PixelBounds) -> PixelBounds:

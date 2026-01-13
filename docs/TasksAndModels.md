@@ -5,7 +5,10 @@ This document details the tasks and model components available in rslearn.
 ## Tasks
 
 Currently, all rslearn tasks are for supervised training for different types of
-predictions (classification, bounding box detection, segmentation, etc.). All tasks
+predictions (classification, bounding box detection, segmentation, etc.). Tasks
+implement a `process_inputs` function that computes targets suitable for training from
+the input dict, and a `process_output` function that computes raster or vector outputs
+(either a CHW tensor or list of vector features) from the model output. All tasks
 expect the input dict that they receive to include a key "targets" containing the
 labels for that task.
 
@@ -51,6 +54,9 @@ data:
             segment_label: "targets
 ```
 
+See [ModelConfig.md](./ModelConfig.md#inputs) for details about how to configure the
+inputs section.
+
 ### ClassificationTask
 
 ClassificationTask trains a model to make global window-level classification
@@ -90,8 +96,15 @@ The configuration snippet below summarizes the most common options. See
         positive_class_threshold: 0.75 # predict as cls_name if corresponding probability exceeds this threshold
 ```
 
-For each training example, ClassificationTask computes a target dict containing the
-"class" (class ID) and "valid" (flag indicating whether it is valid) keys.
+In `process_inputs`, ClassificationTask computes a target dict containing the "class"
+(class ID) and "valid" (flag indicating whether it is valid) keys from the vector
+targets.
+
+In `process_output`, the output from the model must be a BxC tensor of predicted
+probabilities for each class. A list of vector features is returned, where the geometry
+of each feature corresponds to the input patch, and where each feature has a property
+matching `property_name` containing the class name. Typically, the model output is
+computed through the ClassificationHead predictor.
 
 Here is an example usage:
 
@@ -169,9 +182,19 @@ The configuration snippet below summarizes the most common options. See
         enable_f1_metric: false
 ```
 
-For each training example, DetectionTask computes a target dict containing the
-"boxes" (bounding box coordinates), "labels" (class labels), "valid" (flag indicating
-whether the example is valid), and "width"/"height" (window width and height) keys.
+In `process_inputs`, DetectionTask computes a target dict containing the "boxes"
+(bounding box coordinates), "labels" (class labels), "valid" (flag indicating whether
+the example is valid), and "width"/"height" (window width and height) keys.
+
+In `process_output`, the expected output from the model is a list of dicts (one dict
+per example in the batch) with the "boxes", "scores", and "labels" keys:
+
+- boxes: a (N, 4) float tensor, where N is the number of predicted boxes for this example,
+  containing the predicted bounding box coordinates. The coordinates are in
+  (x1, y1, x2, y2) order, and in relative pixel coordinates corresponding to the input
+  resolution.
+- scores: a (N,) float tensor containing the output probabilities.
+- labels: a (N,) integer tensor containing the predicted class ID for each box.
 
 Here is an example usage:
 
@@ -234,16 +257,6 @@ data:
         box_size: 10
 ```
 
-The expected output from the model is a list of dicts (one dict per example in the
-batch) with the "boxes", "scores", and "labels" keys:
-
-- boxes: a (N, 4) float tensor, where N is the number of predicted boxes for this example,
-  containing the predicted bounding box coordinates. The coordinates are in
-  (x1, y1, x2, y2) order, and in relative pixel coordinates corresponding to the input
-  resolution.
-- scores: a (N,) float tensor containing the output probabilities.
-- labels: a (N,) integer tensor containing the predicted class ID for each box.
-
 ### PerPixelRegressionTask
 
 PerPixelRegressionTask trains a model to predict a real value at each input pixel. For
@@ -270,9 +283,14 @@ The configuration snippet below summarizes the most common options. See
         nodata_value: -1
 ```
 
-For each training example, PerPixelRegressionTask computes a target dict containing the
+In `process_inputs`, PerPixelRegressionTask computes a target dict containing the
 "values" (scaled ground truth values) and "valid" (mask indicating which pixels are
 valid for training) keys.
+
+In `process_output`, the output from the model must be a BHW tensor containing the
+predicted scaled value for each pixel. The unscaled raster is returned, with a
+singleton channel dimension. Typically, the model output is computed through the
+PerPixelRegressionHead predictor.
 
 Here is an example usage:
 
@@ -347,9 +365,16 @@ The configuration snippet below summarizes the most common options. See
         metric_mode: "mse"
 ```
 
-For each training example, RegressionTask computes a target dict containing the
-"value" (ground truth regression value) and "valid" (flag indicating whether the sample
-is valid) keys.
+In `process_inputs`, RegressionTask computes a target dict containing the "value"
+(ground truth regression value) and "valid" (flag indicating whether the sample is
+valid) keys.
+
+In `process_output`, the output from the model must be a single-dimension tensor
+containing the predicted scaled value for each example in the batch. A list of vector
+features is returned, where the geometry of each feature corresponds to the input
+patch, and where each feature has a property matching `property_name` containing the
+unscaled value. Typically, the model output is computed through the RegressionHead
+predictor.
 
 Here is an example usage:
 
@@ -422,9 +447,14 @@ The configuration snippet below summarizes the most common options. See
         enable_miou_metric: true
 ```
 
-For each training example, SegmentationTask computes a target dict containing the
-"classes" (ground truth class IDs) and "valid" (mask indicating which pixels are valid
-for training) keys.
+In `process_inputs`, SegmentationTask computes a target dict containing the "classes"
+(ground truth class IDs) and "valid" (mask indicating which pixels are valid for
+training) keys.
+
+In `process_output`, the output from the model must be a BCHW tensor containing the
+predicted class probabilities for each pixel. A raster with a singleton channel
+dimension is returned, containing the highest probability class IDs at each pixel.
+Typically, the model output is computed through the SegmentationHead predictor.
 
 Here is an example usage:
 
@@ -474,13 +504,16 @@ data:
 ### Introduction
 
 rslearn includes a variety of model components that can be composed together, including
-remote sensing foundation models like OlmoEarth, decoders like Faster R-CNN, and
-intermediate components.
+feature extractors like OlmoEarth, predictors like Faster R-CNN, and intermediate
+components.
 
-`SingleTaskModel` and `MultiTaskModel` provide a framework for composing encoders and
-decoders. `SingleTaskModel` applies a single sequence of decoder components to make a
-prediction for one task, while `MultiTaskModel` can be used with `MultiTask` to have
-parallel decoders making multiple predictions for training no multiple tasks.
+`SingleTaskModel` and `MultiTaskModel` provide a framework for composing feature
+extractors, intermediate components, and predictors. These are composed into one
+encoder (feature extractor plus an arbitrary number of intermediate components) and one
+or more decoders (arbitrary intermediate components plus one predictor).
+`SingleTaskModel` applies a single sequence of decoder components to make a prediction
+for one task, while `MultiTaskModel` can be used with `MultiTask` to have parallel
+decoders making multiple predictions for training on multiple tasks.
 
 Here is an example of using `SingleTaskModel`:
 
@@ -493,8 +526,8 @@ model:
       init_args:
         encoder:
           # We compose two components in the encoder:
-          # (1) A Swin encoder, which processes input images and computes feature maps.
-          # (2) An Fpn, which inputs feature maps and outputs updated feature maps.
+          # (1) A Swin feature extractor, which processes input images and computes FeatureMaps.
+          # (2) An Fpn, which inputs a FeatureMaps and outputs updated FeatureMaps.
           - class_path: rslearn.models.swin.Swin
             init_args:
               arch: "swin_v2_b"
@@ -507,8 +540,8 @@ model:
               out_channels: 128
         decoder:
           # We also compose two components in the decoder:
-          # (1) A Conv layer, which applies a Conv2D on each input feature map.
-          # (2) A FasterRCNN to predict bounding boxes.
+          # (1) A Conv layer, which applies a Conv2D on each feature map in the input FeatureMaps.
+          # (2) A FasterRCNN that inputs FeatureMaps and predicts bounding boxes.
           - class_path: rslearn.models.conv.Conv
             init_args:
               in_channels: 128
@@ -522,25 +555,41 @@ model:
               anchor_sizes: [[32], [64], [128], [256]]
 ```
 
+#### Intermediate Types
+
+Feature extractors and intermediate components can output arbitrary types. However, all
+components in rslearn output one of the following types, defined in
+`rslearn.models.component`.
+
+- FeatureMaps: a list of multi-scale feature maps. Each feature map is a BCHW tensor,
+  where the channel dimension contains the features (embeddings).
+- FeatureVector: a flat feature vector. It consists of a single BxC tensor.
+
 #### Feature Extractor (First Encoder Component)
 
 This framework is somewhat rigid. The first component in the encoder is the feature
-extractor, and should input the list of input dicts from the dataset (one input dict
-per example), which is initialized with the passthrough DataInputs specified in the
-model config but then modified by the transforms. It should output a list of 2D feature
-maps. For example, Swin inputs an input dict list like this:
+extractor. It inputs a ModelContext object, which includes the list of input dicts from
+the dataset (one input dict per example) and a corresponding list of SampleMetadatas
+(describes the location and time range of each example). The input dicts are
+initialized with the passthrough DataInputs specified in the model config but then
+modified by the transforms. The output of the feature extractor can be an arbitrary
+type.
+
+It should output a list of 2D feature maps.
+
+For example, Swin requires an input dict list like this:
 
 ```
 [
   {
-  "image": CxHxW tensor,
+    "image": CxHxW tensor,
   },
   ... (B dicts)
 ]
 ```
 
-It outputs a list of feature maps. With the selected Base architecture (swin_v2_b), and
-the configured `output_layers`, this list is like this:
+It outputs a FeatureMaps. With the selected Base architecture (swin_v2_b) and the
+configured `output_layers` in the example above, the FeatureMaps is like this:
 
 ```
 [
@@ -555,22 +604,38 @@ Above, B is the batch size, H/W are the input image height/width, and C is the n
 of channels in the input image. 128, 256, 512, and 1024 are the embedding sizes from
 Swin-Base at different resolutions.
 
-In the Python code, the signature of the first encoder is:
+In the Python code, the FeatureExtractor provides a forward function with this
+signature:
 
 ```python
-    def forward(
-        self,
-        inputs: list[dict[str, Any]],
-    ) -> list[torch.Tensor]:
+def forward(self, context: ModelContext) -> Any:
 ```
 
-#### Subsequent Encoder Components
+ModelContext is defined as follows in `rslearn.train.model_context`:
 
-Subsequent components in the encoder should input feature maps and output updated
-feature maps. For example, the Fpn (Feature Pyramid Network) inputs the feature map
-above and outputs feature maps that have a consistent number of channels
-(configured by `out_channels`, which we have set to 128). The `in_channels` specifies
-the embedding size of each input feature map, in order. Then, the output is like this:
+```python
+class ModelContext:
+    """Context to pass to all model components."""
+
+    # One input dict per example in the batch.
+    inputs: list[dict[str, torch.Tensor]]
+    # One SampleMetadata per example in the batch.
+    metadatas: list[SampleMetadata]
+    # Arbitrary dict that components can add to.
+    context_dict: dict[str, Any] = field(default_factory=lambda: {})
+```
+
+#### Intermediate Components
+
+Intermediate components input and output arbitrary types. They can be used as elements
+of the encoder after the FeatureExtractor, or elements of the decoder(s) before the
+final Predictor.
+
+For example, the Fpn (Feature Pyramid Network) inputs a FeatureMaps and outputs an
+updated FeatureMaps that has a consistent number of channels (configured by
+`out_channels`, which we have set to 128 in the example above). The `in_channels` specifies
+the embedding size of each input feature map, in order. Then, in the above example, the
+output of Fpn would be like this:
 
 ```
 [
@@ -581,50 +646,53 @@ the embedding size of each input feature map, in order. Then, the output is like
 ]
 ```
 
-The signature of subsequent encoder components is:
+The IntermediateComponent provides a forward function with this signature:
 
 ```python
-    def forward(self, x: list[torch.Tensor]) -> list[torch.Tensor]:
+def forward(self, intermediates: Any, context: ModelContext) -> Any:
 ```
 
-#### Decoder Components
+#### Predictor (Final Decoder Component)
 
-In the decoder, all components except the last should input feature maps, along with
-the original inputs to the model, and output updated feature maps. For example, the
-Conv component applies the same `nn.Conv2d` layer on each input feature map, producing
-an output with the same shapes. The signature of these decoder components is:
+The predictor accepts the targets, along with the arbitrary output of the previous
+model component, and computes outputs compatible with the configured Task, along with
+loss(es). The targets are those computed by the Task's `process_inputs` function, so
+their form would depend on the configured Task.
 
-```python
-    def forward(
-        self,
-        features: list[torch.Tensor],
-        inputs: list[dict[str, Any]],
-    ) -> list[torch.Tensor]:
-```
-
-Above, `features` is a list of feature maps at different scales, with the size of the
-list depending on the number of feature maps from the encoder or from the previous
-decoder component. On the other hand, `inputs` is a list of input dicts with one dict
-per example in the batch.
-
-Note that several components, including Conv, ignore the inputs.
-
-#### Final Decoder Component (Predictor)
-
-The final component is a predictor that should accept the targets, and compute outputs
-and the loss(es). For example, the output from Faster R-CNN is a list of dicts with the
-"boxes", "scores", and "labels" keys. It outputs a loss dict with the "rpn_box_reg",
+For example, the output from Faster R-CNN is a list of dicts with the "boxes",
+"scores", and "labels" keys. It outputs a loss dict with the "rpn_box_reg",
 "objectness", "classifier", and "box_reg" keys. These will be logged separately, but
-are summed for computing gradients during training. The signature of the final decoder
-component is:
+are summed for computing gradients during training.
+
+The Predictor provides a forward function with this signature:
 
 ```python
-    def forward(
-        self,
-        features: list[torch.Tensor],
-        inputs: list[dict[str, Any]],
-        targets: list[dict[str, Any]] | None = None,
-    ) -> tuple[list[Any], dict[str, torch.Tensor]]:
+def forward(
+    self,
+    intermediates: Any,
+    context: ModelContext,
+    targets: list[dict[str, torch.Tensor]] | None = None,
+) -> ModelOutput:
+```
+
+`targets` is a list with one target dict per example in the batch, or None during the
+predict stage.
+
+ModelOutput is defined as follows in `rslearn.train.model_context`:
+
+```python
+class ModelOutput:
+    """The output from the Predictor.
+
+    Args:
+        outputs: output compatible with the configured Task.
+        loss_dict: map from loss names to scalar tensors.
+        metadata: arbitrary dict that can be used to store other outputs.
+    """
+
+    outputs: Iterable[Any]
+    loss_dict: dict[str, torch.Tensor]
+    metadata: dict[str, Any] = field(default_factory=lambda: {})
 ```
 
 ## Feature Extractors
@@ -676,21 +744,20 @@ model:
 The [main README](../README.md) has an example of using SimpleTimeSeries with
 SatlasPretrain.
 
-## Encoder Components
+## Intermediate Components
 
-This section documents model components that can be used in the encoder, after the
-initial feature extractor.
+This section documents intermediate model components that can be used in the
+encoder/decoder between the FeatureExtractor and the Predictor.
 
 ### Feature Pyramid Network
 
-Fpn implements a Feature Pyramid Network (FPN). The FPN inputs a multi-scale feature
-map. At each scale, it computes new features of a configurable depth based on all input
-features. So it is best used for maps that were computed sequentially, where earlier
-features don't have the context from later features, but comprehensive features at each
-resolution are desired.
+Fpn implements a Feature Pyramid Network (FPN). The FPN inputs a FeatureMaps. At each
+scale, it computes new features of a configurable depth based on all input features. So
+it is best used for maps that were computed sequentially, where earlier features don't
+have the context from later features, but comprehensive features at each resolution are
+desired.
 
-Here is a summary, see `rslearn.models.fpn` for all of the available
-options.
+Here is a summary, see `rslearn.models.fpn` for all of the available options.
 
 ```yaml
         encoder:
@@ -740,15 +807,10 @@ model:
               anchor_sizes: [[32], [64], [128], [256]]
 ```
 
-## Decoder Components
-
-The predictors (final decoder components) are documented with the tasks. Here, we
-document the available decoder components before the predictor.
-
 ### PickFeatures
 
-`PickFeatures` picks a subset of feature maps from a multi-scale feature map list to pass
-to the next component.
+`PickFeatures` picks a subset of feature maps from a FeatureMaps to pass to the next
+component. It outputs the updated FeatureMaps list.
 
 Here is a summary, see `rslearn.models.pick_features` for all of the available
 options.
@@ -764,14 +826,15 @@ options.
 
 ### PoolingDecoder
 
-`PoolingDecoder` computes a flat vector from a 2D feature map.
+`PoolingDecoder` computes a FeatureVector from a FeatureMaps.
 
-It inputs multi-scale features, but only uses the last feature map. Then it applies a
+It inputs a FeatureMaps, but only uses the last feature map. Then it applies a
 configurable number of convolutional layers before pooling, and a configurable number
 of fully connected layers after pooling.
 
-The output is a vector and not a list of feature maps, so the next component is
-typically a predictor (either `ClassificationHead` or `RegressionHead`).
+The output is a FeatureVector. Most intermediate components currently input a
+FeatureMaps, so the next component is typically a predictor (either
+`ClassificationHead` or `RegressionHead`).
 
 Here is a summary, see `rslearn.models.pooling_decoder` for all of the available
 options.
@@ -803,8 +866,8 @@ options.
 
 `Conv` implements a standard 2D convolutional layer.
 
-If there are multiple input feature maps, the same weights are convolved with each
-feature map.
+It inputs a FeatureMaps. If there are multiple input feature maps, the same weights are
+convolved with each feature map.
 
 ```yaml
         decoder:
@@ -829,3 +892,74 @@ feature map.
                 class_path: torch.nn.ReLU
           # ...
 ```
+
+## Predictors
+
+### ClassificationHead
+
+ClassificationHead computes cross entropy loss given the logits and targets. It does
+not take any arguments.
+
+It inputs a FeatureVector of logits, where the channel dimension size must match the
+number of classes. It outputs the class probabilities after applying softmax on those
+input logits. It also produces a loss dict with one key, "cls", containing the softmax
+cross entropy loss.
+
+### PerPixelRegressionHead
+
+PerPixelRegressionHead computes mean squared error or L1 loss. It is configured like
+this:
+
+```yaml
+        decoder:
+          # ...
+          - class_path: rslearn.train.tasks.per_pixel_regression.PerPixelRegressionHead
+            init_args:
+              # The loss function to use, either "mse" (default) or "l1".
+              loss_mode: "mse"
+              # Whether to apply a sigmoid activation on the output. This requires the
+              # targets to be between 0-1. Otherwise, the previous output is
+              # unmodified.
+              use_sigmoid: false
+```
+
+It inputs a FeatureMaps, which must contain a single feature map consisting of the
+predicted values at each pixel. If `use_sigmoid` is false, those should correspond to
+the scaled values (actual value multiplied by the scale factor configured in the task).
+
+It outputs the scaled values as a BHW tensor. It also produces a loss dict with one
+key, "regress", containing the mean squared error or L1 loss.
+
+### RegressionHead
+
+RegressionHead computes mean squared error or L1 loss. It is configured like this:
+
+```yaml
+        decoder:
+          # ...
+          - class_path: rslearn.train.tasks.regression.RegressionHead
+            init_args:
+              # The loss function to use, either "mse" (default) or "l1".
+              loss_mode: "mse"
+              # Whether to apply a sigmoid activation on the output. This requires the
+              # targets to be between 0-1. Otherwise, the previous output is
+              # unmodified.
+              use_sigmoid: false
+```
+
+It inputs a FeatureVector containing the predicted values for each example in the
+batch. If `use_sigmoid` is false, those should correspond to the scaled values (actual
+value multiplied by the scale factor configured in the task).
+
+It outputs the scaled values as a single-dimension tensor. It also produces a loss dict
+with one key, "regress", containing the mean squared error or L1 loss.
+
+### SegmentationHead
+
+SegmentationHead computes cross entropy loss given the logits and targets. It does not
+take any arguments.
+
+It inputs a FeatureMaps, which must contain a single feature map of logits, with the
+channel dimension size matching the number of classes. It outputs the class
+probabilities after applying softmax on those input logits. It also produces a loss
+dict with one key, "cls", containing the softmax cross entropy loss.

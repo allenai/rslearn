@@ -9,6 +9,7 @@ from rasterio import CRS
 from rslearn.const import WGS84_PROJECTION
 from rslearn.utils.geometry import (
     Projection,
+    ResolutionFactor,
     STGeometry,
     safely_reproject_and_clip,
     split_shape_at_antimeridian,
@@ -264,3 +265,25 @@ class TestSafelyReprojectAndClip:
         assert result_wgs84.shp.bounds[1] == pytest.approx(10)
         assert result_wgs84.shp.bounds[2] == pytest.approx(-179.9)
         assert result_wgs84.shp.bounds[3] == pytest.approx(10.1)
+
+
+class TestResolutionFactor:
+    """Tests for ResolutionFactor."""
+
+    def test_floating_point_resolution(self) -> None:
+        """Verify that ResolutionFactor works correctly with non-integer resolution."""
+        # We test this because previously we had bug where it would round non-integer
+        # resolution to integer.
+        proj = Projection(CRS.from_epsg(4326), 0.001, -0.001)
+        factor = ResolutionFactor()
+        result = factor.multiply_projection(proj)
+        assert result.x_resolution == pytest.approx(0.001)
+        assert result.y_resolution == pytest.approx(-0.001)
+
+    def test_divide_resolution(self) -> None:
+        """Verify that ResolutionFactor can make resolution smaller (more fine-grained)."""
+        proj = Projection(CRS.from_epsg(32610), 10, -10)
+        factor = ResolutionFactor(numerator=3)
+        result = factor.multiply_projection(proj)
+        assert result.x_resolution == pytest.approx(10 / 3)
+        assert result.y_resolution == pytest.approx(-10 / 3)
