@@ -301,14 +301,14 @@ class SegmentationTask(BasicTask):
             if self.nodata_value is not None:
                 miou_metric_kwargs["nodata_value"] = self.nodata_value
             miou_metric_kwargs.update(self.miou_metric_kwargs)
-            
+
             # Create avg metric (always)
             metrics["mean_iou"] = SegmentationMetric(
                 MeanIoUMetric(**miou_metric_kwargs),
                 pass_probabilities=False,
                 output_key="avg",
             )
-            
+
             # Create per-class metrics if requested
             if self.report_metric_per_class:
                 for cls_idx in range(self.num_classes):
@@ -422,7 +422,7 @@ class SegmentationMetric(Metric):
         self.metric = metric
         self.pass_probablities = pass_probabilities
         self.output_key = output_key
-        
+
     def update(
         self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
     ) -> None:
