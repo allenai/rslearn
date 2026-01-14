@@ -68,7 +68,7 @@ class RslearnDataModule(L.LightningDataModule):
         predict_config: SplitConfig = SplitConfig(),
         name: str | None = None,
         retries: int = 0,
-        use_in_memory_all_patches_dataset: bool = False,
+        use_in_memory_all_patches_dataset: bool = True,
     ) -> None:
         """Initialize a new RslearnDataModule.
 
@@ -91,7 +91,10 @@ class RslearnDataModule(L.LightningDataModule):
             name: name of the dataset
             retries: number of retries to attempt for getitem calls
             use_in_memory_all_patches_dataset: whether to use InMemoryAllPatchesDataset
-                instead of IterableAllPatchesDataset if load_all_patches is set to true.
+                instead of IterableAllPatchesDataset if load_all_patches is set to true
+                (default True). InMemoryAllPatchesDataset avoids metric pollution from
+                duplicate samples that can occur with IterableAllPatchesDataset in
+                distributed training.
         """
         super().__init__()
         self.inputs = inputs
@@ -148,6 +151,19 @@ class RslearnDataModule(L.LightningDataModule):
                 logger.info(
                     f"using AllPatchesDataset (in_memory={use_in_memory_all_patches_dataset})"
                 )
+
+                # Warn if using IterableAllPatchesDataset for val/test/predict splits
+                # as it can cause duplicate samples and metric pollution in distributed
+                # training due to DDP padding.
+                if not use_in_memory_all_patches_dataset and split != "train":
+                    logger.warning(
+                        f"Using IterableAllPatchesDataset for '{split}' split with "
+                        "load_all_patches=True. This can cause duplicate samples and "
+                        "metric pollution in distributed training (multiple GPUs or "
+                        "dataloader workers). Consider setting "
+                        "use_in_memory_all_patches_dataset=True to avoid this issue."
+                    )
+
                 patch_size = split_config.get_patch_size()
                 if patch_size is None:
                     raise ValueError(
