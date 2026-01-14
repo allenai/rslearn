@@ -158,9 +158,9 @@ class RslearnDataModule(L.LightningDataModule):
                     logger.warning(
                         f"Using IterableAllPatchesDataset for '{split}' split with "
                         "load_all_patches=True. This can cause duplicate samples and "
-                        "metric pollution in distributed training (multiple GPUs or "
-                        "dataloader workers). Consider setting "
-                        "use_in_memory_all_patches_dataset=True to avoid this issue."
+                        "metric pollution with distributed dataloader if windows have "
+                        " variable sizes. Set use_in_memory_all_patches_dataset=True to "
+                        " avoid this issue."
                     )
 
                 patch_size = split_config.get_patch_size()
