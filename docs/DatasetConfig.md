@@ -621,6 +621,33 @@ The additional data source configuration looks like this:
 }
 ```
 
+### rslearn.data_sources.climate_data_store.ERA5LandHourly
+
+This data source is for ingesting ERA5 land hourly data from the Copernicus Climate Data Store.
+
+We recommend using the default number of workers (`--workers 0`, which means using the
+main process only) and batch size equal to the number of windows when preparing the
+ERA5LandHourly dataset, as it will combine multiple geometries into a single CDS
+API request for each month to speed up dataset ingestion.
+
+Valid bands are the variable names listed [here](https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land?tab=download) - use the **API request** tool to check valid values. Note it is necessary to replace "_" with "-" in the variable names, e.g. `total_precipitation` becomes `total-precipitation`
+
+**Important:** It is highly recommended to specify the `bounds` parameter to limit the geographic extent of data retrieval, especially for hourly data, as downloading global hourly data can be very slow and resource-intensive.
+
+The additional data source configuration looks like this:
+
+```jsonc
+{
+  // Optional API key. If not provided in the data source configuration, it must be set
+  // via the CDSAPI_KEY environment variable.
+  "api_key": null,
+  // Optional bounding box as [min_lon, min_lat, max_lon, max_lat]. Highly recommended
+  // for hourly data to speed up ingestion.
+  // Example: [-122.4, 47.6, -122.3, 47.7]
+  "bounds": null
+}
+```
+
 ### rslearn.data_sources.copernicus.Copernicus
 
 This data source is for images from the ESA Copernicus OData API. See
