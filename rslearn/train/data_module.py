@@ -152,9 +152,8 @@ class RslearnDataModule(L.LightningDataModule):
                     f"using AllPatchesDataset (in_memory={use_in_memory_all_patches_dataset})"
                 )
 
-                # Warn if using IterableAllPatchesDataset for val/test/predict splits
-                # as it can cause duplicate samples and metric pollution in distributed
-                # training due to DDP padding.
+                # Warning if using IterableAllPatchesDataset for val/test/predict splits
+                # as it can cause duplicate samples and metric pollution
                 if not use_in_memory_all_patches_dataset and split != "train":
                     logger.warning(
                         f"Using IterableAllPatchesDataset for '{split}' split with "
