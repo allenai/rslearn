@@ -20,21 +20,30 @@ logger = get_logger(__name__)
 class SourceItem(Item):
     """An item in the StacDataSource data source."""
 
-    def __init__(self, name: str, geometry: STGeometry, asset_urls: dict[str, str]):
+    def __init__(
+        self,
+        name: str,
+        geometry: STGeometry,
+        asset_urls: dict[str, str],
+        properties: dict[str, str],
+    ):
         """Creates a new SourceItem.
 
         Args:
             name: unique name of the item
             geometry: the spatial and temporal extent of the item
             asset_urls: map from asset key to the unsigned asset URL.
+            properties: properties requested by the data source implementation.
         """
         super().__init__(name, geometry)
         self.asset_urls = asset_urls
+        self.properties = properties
 
     def serialize(self) -> dict[str, Any]:
         """Serializes the item to a JSON-encodable dictionary."""
         d = super().serialize()
         d["asset_urls"] = self.asset_urls
+        d["properties"] = self.properties
         return d
 
     @staticmethod
@@ -45,6 +54,7 @@ class SourceItem(Item):
             name=item.name,
             geometry=item.geometry,
             asset_urls=d["asset_urls"],
+            properties=d["properties"],
         )
 
 
@@ -65,6 +75,7 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
         required_assets: list[str] | None = None,
         cache_dir: UPath | None = None,
         limit: int = 100,
+        properties_to_record: list[str] = [],
     ):
         """Create a new StacDataSource.
 
@@ -83,6 +94,8 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
                 materialization. TODO: give direct materialization access to the Item
                 object.
             limit: limit to pass to search queries.
+            properties_to_record: if these properties on the STAC item exist, they are
+                are retained in the SourceItem when we initialize it.
         """
         self.client = StacClient(endpoint)
         self.collection_name = collection_name
@@ -92,6 +105,7 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
         self.required_assets = required_assets
         self.cache_dir = cache_dir
         self.limit = limit
+        self.properties_to_record = properties_to_record
 
     def _stac_item_to_item(self, stac_item: StacItem) -> SourceItem:
         # Make sure geometry, time range, and assets are set.
@@ -108,7 +122,15 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
             asset_key: asset_obj.href
             for asset_key, asset_obj in stac_item.assets.items()
         }
-        return SourceItem(stac_item.id, geom, asset_urls)
+
+        # Keep any properties requested by the data source implementation.
+        properties = {}
+        for prop_name in self.properties_to_record:
+            if prop_name not in stac_item.properties:
+                continue
+            properties[prop_name] = stac_item.properties[prop_name]
+
+        return SourceItem(stac_item.id, geom, asset_urls, properties)
 
     def get_item_by_name(self, name: str) -> SourceItem:
         """Gets an item by name.

@@ -2,11 +2,12 @@
 
 import os
 import tempfile
-import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
 
 import affine
+import numpy as np
 import numpy.typing as npt
 import rasterio
 import requests
@@ -22,6 +23,7 @@ from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils import Projection, STGeometry
 from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import PixelBounds
+from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 from .data_source import (
     DataSourceContext,
@@ -56,6 +58,8 @@ class Sentinel2(StacDataSource, TileStore):
         "nir08": ["B8A"],
         "visual": ["R", "G", "B"],
     }
+    HARMONIZE_OFFSET = -1000
+    HARMONIZE_PROPERTY_NAME = "earthsearch:boa_offset_applied"
 
     def __init__(
         self,
@@ -119,16 +123,34 @@ class Sentinel2(StacDataSource, TileStore):
             sort_ascending=sort_ascending,
             required_assets=list(self.asset_bands.keys()),
             cache_dir=cache_upath,
+            properties_to_record=[self.HARMONIZE_PROPERTY_NAME],
         )
 
         self.harmonize = harmonize
         self.timeout = timeout
 
-    def _get_product_xml(self, item: SourceItem) -> ET.Element:
-        asset_url = item.asset_urls["product_metadata"]
-        response = requests.get(asset_url, timeout=self.timeout.total_seconds())
-        response.raise_for_status()
-        return ET.fromstring(response.content)
+    def _get_harmonize_callback(
+        self, item: SourceItem
+    ) -> Callable[[npt.NDArray], npt.NDArray] | None:
+        """Get the harmonization callback to remove offset for newly processed scenes.
+
+        We do not use copernicus.get_harmonize_callback here because the S3 bucket does
+        not seem to provide the product metadata XML file. So instead we check the
+        earthsearch:boa_offset_applied property on the item.
+        """
+        if not item.properties[self.HARMONIZE_PROPERTY_NAME]:
+            # This means no offset was applied so we don't need to subtract it.
+            return None
+
+        def harmonize_callback(array: npt.NDArray) -> npt.NDArray:
+            # We assume the offset is -1000 since that is the standard.
+            # To work with uint16 array, we clip to 1000+ and then subtract 1000.
+            assert array.shape[0] == 1 and array.dtype == np.uint16
+            return np.clip(array, -self.HARMONIZE_OFFSET, None) - (
+                -self.HARMONIZE_OFFSET
+            )
+
+        return harmonize_callback
 
     def ingest(
         self,
@@ -173,9 +195,28 @@ class Sentinel2(StacDataSource, TileStore):
                         item.name,
                         asset_key,
                     )
-                    tile_store.write_raster_file(
-                        item.name, band_names, UPath(local_fname)
-                    )
+
+                    # Harmonize values if needed.
+                    # TCI does not need harmonization.
+                    harmonize_callback = None
+                    if self.harmonize and asset_key != "visual":
+                        harmonize_callback = self._get_harmonize_callback(item)
+
+                    if harmonize_callback is not None:
+                        # In this case we need to read the array, convert the pixel
+                        # values, and pass modified array directly to the TileStore.
+                        with rasterio.open(local_fname) as src:
+                            array = src.read()
+                            projection, bounds = get_raster_projection_and_bounds(src)
+                        array = harmonize_callback(array)
+                        tile_store.write_raster(
+                            item.name, band_names, projection, bounds, array
+                        )
+
+                    else:
+                        tile_store.write_raster_file(
+                            item.name, band_names, UPath(local_fname)
+                        )
 
                 logger.debug(
                     "Done ingesting item %s asset %s",
@@ -283,6 +324,7 @@ class Sentinel2(StacDataSource, TileStore):
             bounds[1] * projection.y_resolution,
         )
 
+        # Read from the raster under the specified projection/bounds.
         with rasterio.open(asset_url) as src:
             with rasterio.vrt.WarpedVRT(
                 src,
@@ -292,7 +334,21 @@ class Sentinel2(StacDataSource, TileStore):
                 height=bounds[3] - bounds[1],
                 resampling=resampling,
             ) as vrt:
-                return vrt.read()
+                raw_data = vrt.read()
+
+        # We can return the data now if harmonization is not needed.
+        if not self.harmonize or bands == self.ASSET_BANDS["visual"]:
+            return raw_data
+
+        # Otherwise we apply the harmonize_callback.
+        item = self.get_item_by_name(item_name)
+        harmonize_callback = self._get_harmonize_callback(item)
+
+        if harmonize_callback is None:
+            return raw_data
+
+        array = harmonize_callback(raw_data)
+        return array
 
     def materialize(
         self,
