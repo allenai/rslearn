@@ -640,7 +640,7 @@ The additional data source configuration looks like this:
 This data source is for ingesting ERA5 land monthly averaged data from the Copernicus
 Climate Data Store. This corresponds to the `reanalysis-era5-land-monthly-means` dataset.
 
-See [ERA5Land](#rslearndatasourcesclimatedatastoreera5land) above for common configuration
+See rslearn.data_sources.climate_data_store.ERA5Land above for common configuration
 and usage information.
 
 Valid bands: See the [CDS dataset page](https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means?tab=download).
@@ -650,7 +650,7 @@ Valid bands: See the [CDS dataset page](https://cds.climate.copernicus.eu/datase
 This data source is for ingesting ERA5 land hourly data from the Copernicus Climate Data
 Store. This corresponds to the `reanalysis-era5-land` dataset.
 
-See [ERA5Land](#rslearndatasourcesclimatedatastoreera5land) above for common configuration
+See rslearn.data_sources.climate_data_store.ERA5Land above for common configuration
 and usage information. **Note:** The `bounds` parameter is especially important for hourly
 data to avoid very slow global downloads.
 
