@@ -178,12 +178,7 @@ class SoilGrids(DataSource, TileStore):
         resx: float | None,
         resy: float | None,
     ) -> None:
-        try:
-            from soilgrids import SoilGrids as SoilGridsClient
-        except Exception as e:  # pragma: no cover
-            raise ImportError(
-                "Missing dependency 'soilgrids'. Install rslearn with its dependencies."
-            ) from e
+        from soilgrids import SoilGrids as SoilGridsClient
 
         client = SoilGridsClient()
         kwargs: dict[str, Any] = dict(
