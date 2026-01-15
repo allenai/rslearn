@@ -44,7 +44,7 @@ def test_soilgrids_clay_scale_offset_applied(
             w,
             h,
         )
-        arr = (np.ones((h, w), dtype=np.int16) * 10)  # raw value
+        arr = np.ones((h, w), dtype=np.int16) * 10  # raw value
         profile = dict(
             driver="GTiff",
             height=h,
@@ -63,7 +63,9 @@ def test_soilgrids_clay_scale_offset_applied(
 
         return None
 
-    monkeypatch.setattr(soilgrids.SoilGrids, "get_coverage_data", fake_get_coverage_data)
+    monkeypatch.setattr(
+        soilgrids.SoilGrids, "get_coverage_data", fake_get_coverage_data
+    )
 
     # Create a window whose pixel grid matches the requested bbox/width/height.
     xres = (east - west) / width

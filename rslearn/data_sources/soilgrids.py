@@ -153,7 +153,9 @@ class SoilGrids(DataSource, TileStore):
             "SoilGrids is intended for direct materialization; set data_source.ingest=false."
         )
 
-    def is_raster_ready(self, layer_name: str, item_name: str, bands: list[str]) -> bool:
+    def is_raster_ready(
+        self, layer_name: str, item_name: str, bands: list[str]
+    ) -> bool:
         """Return whether the requested raster is ready (always true for direct reads)."""
         return True
 
@@ -167,7 +169,7 @@ class SoilGrids(DataSource, TileStore):
         """Return (approximate) bounds for this raster in the requested projection."""
         # We don't know bounds without an extra metadata request; treat as "very large"
         # so materialization always attempts reads for windows.
-        return (-10**9, -10**9, 10**9, 10**9)
+        return (-(10**9), -(10**9), 10**9, 10**9)
 
     def _download_geotiff(
         self,
@@ -217,7 +219,9 @@ class SoilGrids(DataSource, TileStore):
     ) -> npt.NDArray[Any]:
         """Read and reproject a SoilGrids coverage subset into the requested grid."""
         if bands != self.band_names:
-            raise ValueError(f"expected request for bands {self.band_names} but got {bands}")
+            raise ValueError(
+                f"expected request for bands {self.band_names} but got {bands}"
+            )
 
         # Compute bounding box in CRS coordinates for the request.
         request_crs = _crs_to_rasterio(self.crs)
@@ -292,7 +296,9 @@ class SoilGrids(DataSource, TileStore):
                     dst_nodata,
                     dtype=np.float32,
                 )
-                dst_transform = get_transform_from_projection_and_bounds(projection, bounds)
+                dst_transform = get_transform_from_projection_and_bounds(
+                    projection, bounds
+                )
 
                 rasterio.warp.reproject(
                     source=src_chw,
@@ -330,12 +336,18 @@ class SoilGrids(DataSource, TileStore):
         raise NotImplementedError("SoilGrids does not support vector data.")
 
     def read_vector(
-        self, layer_name: str, item_name: str, projection: Projection, bounds: PixelBounds
+        self,
+        layer_name: str,
+        item_name: str,
+        projection: Projection,
+        bounds: PixelBounds,
     ) -> list[Feature]:
         """Vector access is not supported."""
         raise NotImplementedError("SoilGrids does not support vector data.")
 
-    def write_vector(self, layer_name: str, item_name: str, features: list[Feature]) -> None:
+    def write_vector(
+        self, layer_name: str, item_name: str, features: list[Feature]
+    ) -> None:
         """Vector access is not supported."""
         raise NotImplementedError("SoilGrids does not support vector data.")
 

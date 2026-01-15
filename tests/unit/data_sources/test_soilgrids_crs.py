@@ -37,4 +37,3 @@ def test_crs_to_rasterio_parses_urn() -> None:
 def test_crs_to_rasterio_raises_on_unknown() -> None:
     with pytest.raises(Exception):
         _crs_to_rasterio("definitely-not-a-crs")
-
