@@ -50,12 +50,20 @@ def _crs_to_soilgrids_urn(crs: str) -> str:
     simpler forms like "EPSG:3857" while still working.
     """
     s = crs.strip()
-    if s.lower().startswith("urn:ogc:def:crs:"):
+
+    # If already an EPSG URN, canonicalize to the form soilgrids expects.
+    if s.lower().startswith("urn:ogc:def:crs:") and "epsg" in s.lower():
+        parts = [p for p in s.replace(":", " ").split() if p.isdigit()]
+        if parts:
+            return f"urn:ogc:def:crs:EPSG::{parts[-1]}"
         return s
+
     # Accept "EPSG:3857", "epsg:3857", or other strings containing an EPSG code.
-    parts = [p for p in s.replace(":", " ").split() if p.isdigit()]
-    if parts:
-        return f"urn:ogc:def:crs:EPSG::{parts[-1]}"
+    if "epsg" in s.lower():
+        parts = [p for p in s.replace(":", " ").split() if p.isdigit()]
+        if parts:
+            return f"urn:ogc:def:crs:EPSG::{parts[-1]}"
+
     return s
 
 
