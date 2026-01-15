@@ -118,13 +118,16 @@ class MultiTask(Task):
 
     def get_metrics(self) -> MetricCollection:
         """Get metrics for this task."""
-        metrics = []
+        # Flatten metrics into a single dict with task_name/ prefix to avoid nested
+        # MetricCollections. Nested collections cause issues because MetricCollection
+        # has postfix=None which breaks MetricCollection.compute().
+        all_metrics = {}
         for task_name, task in self.tasks.items():
-            cur_metrics = {}
             for metric_name, metric in task.get_metrics().items():
-                cur_metrics[metric_name] = MetricWrapper(task_name, metric)
-            metrics.append(MetricCollection(cur_metrics, prefix=f"{task_name}/"))
-        return MetricCollection(metrics)
+                all_metrics[f"{task_name}/{metric_name}"] = MetricWrapper(
+                    task_name, metric
+                )
+        return MetricCollection(all_metrics)
 
 
 class MetricWrapper(Metric):

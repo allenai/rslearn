@@ -210,11 +210,30 @@ class RslearnLightningModule(L.LightningModule):
             # Fail silently for single-dataset case, which is okay
             pass
 
+    def on_validation_epoch_end(self) -> None:
+        """Compute and log validation metrics at epoch end.
+
+        We manually compute and log metrics here (instead of passing the MetricCollection
+        to log_dict) because MetricCollection.compute() properly flattens dict-returning
+        metrics, while log_dict expects each metric to return a scalar tensor.
+        """
+        metrics = self.val_metrics.compute()
+        self.log_dict(metrics)
+        self.val_metrics.reset()
+
     def on_test_epoch_end(self) -> None:
-        """Optionally save the test metrics to a file."""
+        """Compute and log test metrics at epoch end, optionally save to file.
+
+        We manually compute and log metrics here (instead of passing the MetricCollection
+        to log_dict) because MetricCollection.compute() properly flattens dict-returning
+        metrics, while log_dict expects each metric to return a scalar tensor.
+        """
+        metrics = self.test_metrics.compute()
+        self.log_dict(metrics)
+        self.test_metrics.reset()
+
         if self.metrics_file:
             with open(self.metrics_file, "w") as f:
-                metrics = self.test_metrics.compute()
                 metrics_dict = {k: v.item() for k, v in metrics.items()}
                 json.dump(metrics_dict, f, indent=4)
                 logger.info(f"Saved metrics to {self.metrics_file}")
@@ -300,9 +319,6 @@ class RslearnLightningModule(L.LightningModule):
             sync_dist=True,
         )
         self.val_metrics.update(outputs, targets)
-        self.log_dict(
-            self.val_metrics, batch_size=batch_size, on_epoch=True, sync_dist=True
-        )
 
     def test_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> None:
         """Compute the test loss and additional metrics.
@@ -340,9 +356,6 @@ class RslearnLightningModule(L.LightningModule):
             sync_dist=True,
         )
         self.test_metrics.update(outputs, targets)
-        self.log_dict(
-            self.test_metrics, batch_size=batch_size, on_epoch=True, sync_dist=True
-        )
 
         if self.visualize_dir:
             for idx, (inp, target, output, metadata) in enumerate(
