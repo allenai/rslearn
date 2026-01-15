@@ -11,6 +11,8 @@ from enum import Enum
 from typing import Any, BinaryIO
 
 import boto3
+import botocore
+import botocore.client
 import dateutil.parser
 import fiona
 import fiona.transform
@@ -405,7 +407,8 @@ class Sentinel2(
     See https://aws.amazon.com/marketplace/pp/prodview-2ostsvrguftb2 for details about
     the buckets.
 
-    AWS credentials must be configured for use with boto3.
+    The buckets were previously requester pays but now appear to allow anonymous/free
+    access, so AWS credentials are not needed.
     """
 
     bucket_names = {
@@ -478,7 +481,9 @@ class Sentinel2(
         self.harmonize = harmonize
 
         bucket_name = self.bucket_names[modality]
-        self.bucket = boto3.resource("s3").Bucket(bucket_name)
+        self.bucket = boto3.resource(
+            "s3", config=botocore.client.Config(signature_version=botocore.UNSIGNED)
+        ).Bucket(bucket_name)
 
     def _read_products(
         self, needed_cell_months: set[tuple[str, int, int]]
@@ -505,15 +510,11 @@ class Sentinel2(
                 )
 
                 products = []
-                for obj in self.bucket.objects.filter(
-                    Prefix=prefix, RequestPayer="requester"
-                ):
+                for obj in self.bucket.objects.filter(Prefix=prefix):
                     if not obj.key.endswith("tileInfo.json"):
                         continue
                     buf = io.BytesIO()
-                    self.bucket.download_fileobj(
-                        obj.key, buf, ExtraArgs={"RequestPayer": "requester"}
-                    )
+                    self.bucket.download_fileobj(obj.key, buf)
                     buf.seek(0)
                     product = json.load(buf)
                     if "tileDataGeometry" not in product:
@@ -649,9 +650,7 @@ class Sentinel2(
         """Retrieves the rasters corresponding to an item as file streams."""
         for fname, _ in self.band_fnames[self.modality]:
             buf = io.BytesIO()
-            self.bucket.download_fileobj(
-                item.blob_path + fname, buf, ExtraArgs={"RequestPayer": "requester"}
-            )
+            self.bucket.download_fileobj(item.blob_path + fname, buf)
             buf.seek(0)
             yield (fname, buf)
 
@@ -677,9 +676,7 @@ class Sentinel2(
             f"products/{ts.year}/{ts.month}/{ts.day}/{item.name}/metadata.xml"
         )
         buf = io.BytesIO()
-        self.bucket.download_fileobj(
-            metadata_fname, buf, ExtraArgs={"RequestPayer": "requester"}
-        )
+        self.bucket.download_fileobj(metadata_fname, buf)
         buf.seek(0)
         tree: ET.ElementTree[ET.Element[str]] = ET.ElementTree(
             ET.fromstring(buf.getvalue())
@@ -711,7 +708,6 @@ class Sentinel2(
                         self.bucket.download_file(
                             item.blob_path + fname,
                             local_fname,
-                            ExtraArgs={"RequestPayer": "requester"},
                         )
                     except Exception as e:
                         # TODO: sometimes for some reason object doesn't exist
