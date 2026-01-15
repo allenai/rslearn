@@ -38,7 +38,8 @@ def _crs_to_rasterio(crs: str) -> CRS:
     try:
         return CRS.from_string(crs)
     except Exception:
-        # Handle URNs like "urn:ogc:def:crs:EPSG::4326".
+        # Fallback: if rasterio can't parse the string but it contains an EPSG code,
+        # extract the trailing integer and build a CRS from it.
         parts = [p for p in crs.replace(":", " ").split() if p.isdigit()]
         if parts:
             return CRS.from_epsg(int(parts[-1]))
