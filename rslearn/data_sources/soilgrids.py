@@ -22,7 +22,7 @@ from rslearn.config import LayerConfig, QueryConfig
 from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
-from rslearn.utils import Feature, PixelBounds, Projection, STGeometry
+from rslearn.utils import PixelBounds, Projection, STGeometry
 from rslearn.utils.geometry import get_global_geometry
 from rslearn.utils.raster_format import get_transform_from_projection_and_bounds
 
@@ -307,38 +307,6 @@ class SoilGrids(DataSource, TileStore):
                     resampling=resampling,
                 )
                 return dst
-
-    def write_raster(
-        self,
-        layer_name: str,
-        item_name: str,
-        bands: list[str],
-        projection: Projection,
-        bounds: PixelBounds,
-        array: npt.NDArray[Any],
-    ) -> None:
-        """Writing is not supported (read-only source)."""
-        raise NotImplementedError("SoilGrids is read-only.")
-
-    def write_raster_file(
-        self, layer_name: str, item_name: str, bands: list[str], fname: UPath
-    ) -> None:
-        """Writing is not supported (read-only source)."""
-        raise NotImplementedError("SoilGrids is read-only.")
-
-    def is_vector_ready(self, layer_name: str, item_name: str) -> bool:
-        """Vector access is not supported."""
-        raise NotImplementedError("SoilGrids does not support vector data.")
-
-    def read_vector(
-        self, layer_name: str, item_name: str, projection: Projection, bounds: PixelBounds
-    ) -> list[Feature]:
-        """Vector access is not supported."""
-        raise NotImplementedError("SoilGrids does not support vector data.")
-
-    def write_vector(self, layer_name: str, item_name: str, features: list[Feature]) -> None:
-        """Vector access is not supported."""
-        raise NotImplementedError("SoilGrids does not support vector data.")
 
     def materialize(
         self,
