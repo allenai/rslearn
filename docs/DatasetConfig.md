@@ -1172,6 +1172,29 @@ Available bands:
 - B10
 - B11
 
+### rslearn.data_sources.soilgrids.SoilGrids
+
+This data source provides access to [ISRIC SoilGrids](https://www.isric.org/explore/soilgrids)
+via the public WCS endpoints (e.g. `https://maps.isric.org/mapserv?map=/map/clay.map`).
+
+This source is intended for **direct materialization** (set `"ingest": false` in the
+layer's `data_source` config), since data is fetched on-demand per window.
+
+Example (clay, user-provided WCS subset parameters):
+
+```jsonc
+{
+  "service_id": "clay",
+  "coverage_id": "clay_0-5cm_mean",
+  "crs": "urn:ogc:def:crs:EPSG::4326",
+  "width": 316,
+  "height": 275
+}
+```
+
+Available bands:
+- B1 (float32 recommended; scale/offset applied; set `nodata_vals` to `-32768`)
+
 ### rslearn.data_sources.worldcover.WorldCover
 
 This data source is for the ESA WorldCover 2021 land cover map.
