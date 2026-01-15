@@ -1186,7 +1186,8 @@ Example (clay, user-provided WCS subset parameters):
 {
   "service_id": "clay",
   "coverage_id": "clay_0-5cm_mean",
-  // Optional request CRS, defaults to EPSG:3857.
+  // Optional request CRS, defaults to EPSG:3857. You can specify either "EPSG:3857"
+  // or the URN form "urn:ogc:def:crs:EPSG::3857".
   // "crs": "EPSG:3857"
 }
 ```

@@ -42,6 +42,23 @@ def _crs_to_rasterio(crs: str) -> CRS:
         raise
 
 
+def _crs_to_soilgrids_urn(crs: str) -> str:
+    """Convert common CRS spellings to the URN form expected by `soilgrids`.
+
+    The `soilgrids` package compares CRS strings against the supported CRS URNs from
+    OWSLib (e.g. "urn:ogc:def:crs:EPSG::3857"). This helper allows users to specify
+    simpler forms like "EPSG:3857" while still working.
+    """
+    s = crs.strip()
+    if s.lower().startswith("urn:ogc:def:crs:"):
+        return s
+    # Accept "EPSG:3857", "epsg:3857", or other strings containing an EPSG code.
+    parts = [p for p in s.replace(":", " ").split() if p.isdigit()]
+    if parts:
+        return f"urn:ogc:def:crs:EPSG::{parts[-1]}"
+    return s
+
+
 class SoilGrids(DataSource, TileStore):
     """Access SoilGrids coverages as an rslearn raster data source."""
 
@@ -164,7 +181,7 @@ class SoilGrids(DataSource, TileStore):
         kwargs: dict[str, Any] = dict(
             service_id=self.service_id,
             coverage_id=self.coverage_id,
-            crs=self.crs,
+            crs=_crs_to_soilgrids_urn(self.crs),
             west=west,
             south=south,
             east=east,
@@ -179,7 +196,7 @@ class SoilGrids(DataSource, TileStore):
             kwargs["resy"] = resy
 
         if self.response_crs is not None:
-            kwargs["response_crs"] = self.response_crs
+            kwargs["response_crs"] = _crs_to_soilgrids_urn(self.response_crs)
 
         client.get_coverage_data(**kwargs)
 
