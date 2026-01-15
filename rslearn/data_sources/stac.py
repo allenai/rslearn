@@ -93,7 +93,7 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
                 likely be necessary to make lots of get_item_by_name calls during
                 materialization. TODO: give direct materialization access to the Item
                 object.
-            limit: limit to pass to search queries.
+            limit: per-page item count limit to pass to search queries.
             properties_to_record: if these properties on the STAC item exist, they are
                 are retained in the SourceItem when we initialize it.
         """
