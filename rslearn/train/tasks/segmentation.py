@@ -406,6 +406,7 @@ class SegmentationMetric(Metric):
         self,
         metric: Metric,
         pass_probabilities: bool = True,
+        class_idx: int | None = None,
         output_key: str | None = None,
     ):
         """Initialize a new SegmentationMetric.
@@ -415,12 +416,18 @@ class SegmentationMetric(Metric):
                 classes from the targets and masking out invalid pixels.
             pass_probabilities: whether to pass predicted probabilities to the metric.
                 If False, argmax is applied to pass the predicted classes instead.
-            output_key: if the wrapped metric returns a dict, return only this key's
-                value. If None and the metric returns a dict, the full dict is returned.
+            class_idx: if set, return only this class index's value. For backward
+                compatibility with configs using standard torchmetrics. Internally
+                converted to output_key="cls_{class_idx}".
+            output_key: if the wrapped metric returns a dict (or a tensor that gets
+                converted to a dict), return only this key's value. For standard
+                torchmetrics with average=None, tensors are converted to dicts with
+                keys "cls_0", "cls_1", etc. If None, the full dict is returned.
         """
         super().__init__()
         self.metric = metric
         self.pass_probablities = pass_probabilities
+        self.class_idx = class_idx
         self.output_key = output_key
 
     def update(
@@ -451,10 +458,32 @@ class SegmentationMetric(Metric):
         self.metric.update(preds, labels)
 
     def compute(self) -> Any:
-        """Returns the computed metric."""
+        """Returns the computed metric.
+
+        If the wrapped metric returns a multi-element tensor (e.g., standard torchmetrics
+        with average=None), it is converted to a dict with keys like "cls_0", "cls_1", etc.
+        This allows uniform handling via output_key for both standard torchmetrics and
+        custom dict-returning metrics.
+        """
         result = self.metric.compute()
-        if self.output_key is not None and isinstance(result, dict):
+
+        # Convert multi-element tensors to dict for uniform handling.
+        # This supports standard torchmetrics with average=None which return per-class tensors.
+        if isinstance(result, torch.Tensor) and result.ndim >= 1 and result.numel() > 1:
+            result = {f"cls_{i}": result[i] for i in range(len(result))}
+
+        if self.output_key is not None:
+            if not isinstance(result, dict):
+                raise TypeError(
+                    f"output_key is set to '{self.output_key}' but metric returned "
+                    f"{type(result).__name__} instead of dict"
+                )
             return result[self.output_key]
+        if self.class_idx is not None:
+            # For backward compatibility: class_idx can index into the converted dict
+            if isinstance(result, dict):
+                return result[f"cls_{self.class_idx}"]
+            return result[self.class_idx]
         return result
 
     def reset(self) -> None:
