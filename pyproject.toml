@@ -108,8 +108,3 @@ addopts = [
     "--import-mode=importlib",
 ]
 tmp_path_retention_policy = "failed"
-
-[dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-]
