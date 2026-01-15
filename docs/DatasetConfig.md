@@ -1186,11 +1186,15 @@ Example (clay, user-provided WCS subset parameters):
 {
   "service_id": "clay",
   "coverage_id": "clay_0-5cm_mean",
-  "crs": "urn:ogc:def:crs:EPSG::4326",
-  "width": 316,
-  "height": 275
+  // Optional request CRS, defaults to EPSG:3857.
+  // "crs": "EPSG:3857"
 }
 ```
+
+If `"width"`/`"height"` and `"resx"`/`"resy"` are omitted, rslearn will default to
+requesting at ~250 m resolution in the request CRS and then reprojecting to the window
+grid. For EPSG:4326 requests, SoilGrids requires `"width"`/`"height"` so rslearn will
+default those to the window pixel size.
 
 Available bands:
 - B1 (float32 recommended; scale/offset applied; set `nodata_vals` to `-32768`)

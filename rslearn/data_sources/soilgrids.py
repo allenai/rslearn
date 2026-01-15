@@ -49,7 +49,7 @@ class SoilGrids(DataSource, TileStore):
         self,
         service_id: str,
         coverage_id: str,
-        crs: str,
+        crs: str = "EPSG:3857",
         width: int | None = None,
         height: int | None = None,
         resx: float | None = None,
@@ -150,6 +150,8 @@ class SoilGrids(DataSource, TileStore):
         output: str,
         width: int | None,
         height: int | None,
+        resx: float | None,
+        resy: float | None,
     ) -> None:
         try:
             from soilgrids import SoilGrids as SoilGridsClient
@@ -172,9 +174,9 @@ class SoilGrids(DataSource, TileStore):
         if width is not None and height is not None:
             kwargs["width"] = width
             kwargs["height"] = height
-        elif self.resx is not None and self.resy is not None:
-            kwargs["resx"] = self.resx
-            kwargs["resy"] = self.resy
+        elif resx is not None and resy is not None:
+            kwargs["resx"] = resx
+            kwargs["resy"] = resy
 
         if self.response_crs is not None:
             kwargs["response_crs"] = self.response_crs
@@ -202,13 +204,34 @@ class SoilGrids(DataSource, TileStore):
         )
         west, south, east, north = request_geom.shp.bounds
 
-        # Determine output size for WCS request. The SoilGrids WCS requires width/height
-        # for EPSG:4326 requests. If not configured, default to the window pixel size.
+        # Determine output grid for the WCS request.
+        #
+        # If the user explicitly configured an output grid (width/height or resx/resy),
+        # we respect it.
+        #
+        # Otherwise, default to requesting at ~250 m resolution in the request CRS
+        # (when it is projected), and then reprojecting to the window grid.
+        #
+        # For EPSG:4326 requests, SoilGrids WCS requires WIDTH/HEIGHT, so we default
+        # to matching the window pixel size.
+        window_width = bounds[2] - bounds[0]
+        window_height = bounds[3] - bounds[1]
+
         out_width = self.width
         out_height = self.height
-        if "4326" in str(request_crs) and out_width is None:
-            out_width = bounds[2] - bounds[0]
-            out_height = bounds[3] - bounds[1]
+        out_resx = self.resx
+        out_resy = self.resy
+
+        if request_crs.to_epsg() == 4326 and out_width is None:
+            # Required by the SoilGrids WCS for EPSG:4326; resx/resy is not accepted.
+            out_width = window_width
+            out_height = window_height
+            out_resx = None
+            out_resy = None
+        elif out_width is None and out_resx is None:
+            # Default to native-ish SoilGrids resolution (~250 m) in projected CRSs.
+            out_resx = 250.0
+            out_resy = 250.0
 
         with tempfile.TemporaryDirectory(prefix="rslearn_soilgrids_") as tmpdir:
             output_path = str(UPath(tmpdir) / "coverage.tif")
@@ -220,6 +243,8 @@ class SoilGrids(DataSource, TileStore):
                 output=output_path,
                 width=out_width,
                 height=out_height,
+                resx=out_resx,
+                resy=out_resy,
             )
 
             with rasterio.open(output_path) as src:
