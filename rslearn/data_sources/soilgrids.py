@@ -29,6 +29,9 @@ from rslearn.utils.raster_format import get_transform_from_projection_and_bounds
 from .data_source import DataSource, DataSourceContext, Item
 from .utils import match_candidate_items_to_window
 
+SOILGRIDS_NODATA_VALUE = -32768.0
+"""Default nodata value used by SoilGrids GeoTIFF responses (GEOTIFF_INT16)."""
+
 
 def _crs_to_rasterio(crs: str) -> CRS:
     """Best-effort conversion of CRS strings used by `soilgrids` to rasterio CRS."""
@@ -280,7 +283,7 @@ class SoilGrids(DataSource, TileStore):
                     src_nodata_val = dst_nodata
                 else:
                     src_array = src_array * scale + offset
-                    dst_nodata = -32768.0
+                    dst_nodata = SOILGRIDS_NODATA_VALUE
                     src_nodata_val = None
 
                 src_chw = src_array[None, :, :]

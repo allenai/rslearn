@@ -15,7 +15,7 @@ from rslearn.config import (
     QueryConfig,
     SpaceMode,
 )
-from rslearn.data_sources.soilgrids import SoilGrids
+from rslearn.data_sources.soilgrids import SOILGRIDS_NODATA_VALUE, SoilGrids
 from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.utils.geometry import Projection
@@ -53,7 +53,7 @@ def test_soilgrids_clay_scale_offset_applied(
             dtype="int16",
             crs="EPSG:4326",
             transform=transform,
-            nodata=-32768,
+            nodata=int(SOILGRIDS_NODATA_VALUE),
         )
         with rasterio.open(out, "w", **profile) as dst:
             dst.write(arr, 1)
@@ -91,7 +91,7 @@ def test_soilgrids_clay_scale_offset_applied(
             BandSetConfig(
                 dtype=DType.FLOAT32,
                 bands=["B1"],
-                nodata_vals=[-32768],
+                nodata_vals=[SOILGRIDS_NODATA_VALUE],
             )
         ],
     )
