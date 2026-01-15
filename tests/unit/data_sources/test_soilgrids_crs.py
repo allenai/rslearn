@@ -34,6 +34,12 @@ def test_crs_to_rasterio_parses_urn() -> None:
     assert _crs_to_rasterio("urn:ogc:def:crs:EPSG::4326") == CRS.from_epsg(4326)
 
 
+def test_crs_to_rasterio_fallback_extracts_epsg_code() -> None:
+    # rasterio can't parse this string, but it contains an EPSG code that we can
+    # extract in the fallback path.
+    assert _crs_to_rasterio("invalid EPSG:4326") == CRS.from_epsg(4326)
+
+
 def test_crs_to_rasterio_raises_on_unknown() -> None:
     with pytest.raises(Exception):
         _crs_to_rasterio("definitely-not-a-crs")
