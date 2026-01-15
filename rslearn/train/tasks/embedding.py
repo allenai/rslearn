@@ -6,7 +6,7 @@ import numpy.typing as npt
 import torch
 from torchmetrics import MetricCollection
 
-from rslearn.models.component import FeatureMaps
+from rslearn.models.component import FeatureMaps, Predictor
 from rslearn.train.model_context import ModelContext, ModelOutput, SampleMetadata
 from rslearn.utils import Feature
 
@@ -83,7 +83,7 @@ class EmbeddingTask(Task):
         return MetricCollection({})
 
 
-class EmbeddingHead:
+class EmbeddingHead(Predictor):
     """Head for embedding task.
 
     It just adds a dummy loss to act as a Predictor.
