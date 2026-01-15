@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14' and platform_machine == 'ARM64' and sys_platform == 'win32'",
@@ -4139,11 +4139,6 @@ extra = [
     { name = "wandb" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "accelerate", marker = "extra == 'extra'", specifier = ">=1.10" },
@@ -4194,9 +4189,6 @@ requires-dist = [
     { name = "wandb", marker = "extra == 'extra'", specifier = ">=0.21" },
 ]
 provides-extras = ["extra", "dev"]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=9.0.2" }]
 
 [[package]]
 name = "rtree"
