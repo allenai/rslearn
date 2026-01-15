@@ -87,21 +87,13 @@ def embedding_dataset(tmp_path: pathlib.Path) -> Dataset:
     return dataset
 
 
-def test_embedding_prediction_writes_to_dataset(
-    embedding_dataset: Dataset, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Test that embedding model config can be parsed and embeddings are written.
+@pytest.fixture
+def embedding_model_config() -> dict:
+    """Model config for embedding prediction, similar to OlmoEarthEmbeddings.md.
 
-    This test:
-    1. Parses a model config via RslearnLightningCLI (similar to OlmoEarthEmbeddings.md, but with Swin-Tiny)
-    2. Runs prediction with predict subcommand.
-    3. Verifies embeddings are written to the dataset
+    Uses Swin-Tiny encoder so the test runs faster.
     """
-    init_jsonargparse()
-
-    # Define a model config similar to OlmoEarthEmbeddings.md but with Swin-Tiny encoder
-    # (so the test runs faster).
-    cfg = {
+    return {
         "model": {
             "class_path": "rslearn.train.lightning_module.RslearnLightningModule",
             "init_args": {
@@ -153,7 +145,6 @@ def test_embedding_prediction_writes_to_dataset(
                 {
                     "class_path": "rslearn.train.prediction_writer.RslearnWriter",
                     "init_args": {
-                        # This path will be set from data.init_args.path.
                         "path": "${DATASET_PATH}",
                         "output_layer": "embeddings",
                     },
@@ -162,10 +153,26 @@ def test_embedding_prediction_writes_to_dataset(
         },
     }
 
+
+def test_embedding_prediction_writes_to_dataset(
+    embedding_dataset: Dataset,
+    embedding_model_config: dict,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that embedding model config can be parsed and embeddings are written.
+
+    This test:
+    1. Parses a model config via RslearnLightningCLI (similar to OlmoEarthEmbeddings.md, but with Swin-Tiny)
+    2. Runs prediction with predict subcommand.
+    3. Verifies embeddings are written to the dataset
+    """
+    init_jsonargparse()
+
     # Write config to file.
     tmp_fname = tmp_path / "embedding_model.yaml"
     with tmp_fname.open("w") as f:
-        json.dump(cfg, f)
+        json.dump(embedding_model_config, f)
 
     monkeypatch.setenv("DATASET_PATH", str(embedding_dataset.path))
     RslearnLightningCLI(
