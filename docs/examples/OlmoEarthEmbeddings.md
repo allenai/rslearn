@@ -5,7 +5,7 @@ of interest. We will use rslearn to materialize satellite images that we will th
 to the OlmoEarth encoder. For an introduction to rslearn, see
 [the main README](../../README.md) and [CoreConcepts](../CoreConcepts.md).
 
-We proceed in four steps:
+We proceed in three steps:
 
 1. Create windows in an rslearn dataset that define the spatiotemporal boxes for which
    we want to compute embeddings.
