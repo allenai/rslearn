@@ -653,6 +653,7 @@ class ModelDataset(torch.utils.data.Dataset):
         index_key: str | None = None
         indexed_windows: list[dict] | None = None
         if use_index:
+            logger.debug(f"Loading windows from index for dataset {dataset.path}")
             index = DatasetIndex(dataset.path)
             index_key = index.get_index_key(
                 groups=split_config.groups,
@@ -671,6 +672,7 @@ class ModelDataset(torch.utils.data.Dataset):
                 Window.from_metadata(dataset.storage, w) for w in indexed_windows
             ]
         else:
+            logger.debug("No windows found in index, loading from dataset...")
             windows = self._get_initial_windows(split_config, workers)
 
             # Eliminate windows that are missing either a requisite input layer, or

@@ -352,6 +352,7 @@ def test_model_dataset_index_caching(
     examples2 = dataset2.get_dataset_examples()
     assert len(examples1) == len(examples2)
     assert {w.name for w in examples1} == {w.name for w in examples2}
+    assert False
 
     # Third run: refresh index
     dataset3 = ModelDataset(
