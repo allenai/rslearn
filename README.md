@@ -53,6 +53,7 @@ for how to setup these data sources.
 - Xyz (Slippy) Tiles (e.g., Mapbox tiles)
 - Planet Labs (PlanetScope, SkySat)
 - ESA WorldCover 2021
+- ISRIC SoilGrids (WCS)
 
 rslearn can also be used to easily mosaic, crop, and re-project any sets of local
 raster and vector files you may have.

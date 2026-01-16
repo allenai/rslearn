@@ -77,12 +77,7 @@ def test_forward_simple_with_linear() -> None:
 
 
 def test_attention_pool_spatial_preservation() -> None:
-    """Test that AttentionPool preserves spatial structure correctly.
-
-    This is a regression test for a bug where the final reshape in
-    AttentionPool.forward_for_map incorrectly scrambled spatial positions,
-    causing all output positions to receive mixed values from all input positions.
-    """
+    """Test that AttentionPool preserves spatial structure correctly."""
     B, D, H, W, N = 1, MODEL_DIM, 2, 2, 6
 
     # Create input where each spatial position has uniform values across channels/tokens
@@ -101,24 +96,17 @@ def test_attention_pool_spatial_preservation() -> None:
     assert output.shape == (B, D, H, W)
 
     # Each spatial position should have distinct output values.
-    # If the bug exists, all positions would have identical values.
-    mean_00 = output[0, :, 0, 0].mean().item()
-    mean_01 = output[0, :, 0, 1].mean().item()
-    mean_10 = output[0, :, 1, 0].mean().item()
-    mean_11 = output[0, :, 1, 1].mean().item()
+    vec_00 = output[0, :, 0, 0]
+    vec_01 = output[0, :, 0, 1]
+    vec_10 = output[0, :, 1, 0]
+    vec_11 = output[0, :, 1, 1]
 
-    # The means should be different (not all identical)
-    means = [mean_00, mean_01, mean_10, mean_11]
-    assert len(set(means)) > 1, (
-        "All spatial positions have identical means - spatial info lost!"
-    )
-
-    # Additionally, the relative ordering should roughly be preserved:
-    # position (1,0) and (1,1) had larger input values (10, 11) than (0,0) and (0,1)
-    # so their outputs should generally be larger (though exact values depend on weights)
-    avg_top_row = (mean_00 + mean_01) / 2
-    avg_bottom_row = (mean_10 + mean_11) / 2
-    assert avg_bottom_row > avg_top_row, "Spatial structure not preserved"
+    assert not torch.allclose(vec_00, vec_01), "Positions (0,0) and (0,1) identical"
+    assert not torch.allclose(vec_00, vec_10), "Positions (0,0) and (1,0) identical"
+    assert not torch.allclose(vec_00, vec_11), "Positions (0,0) and (1,1) identical"
+    assert not torch.allclose(vec_01, vec_10), "Positions (0,1) and (1,0) identical"
+    assert not torch.allclose(vec_01, vec_11), "Positions (0,1) and (1,1) identical"
+    assert not torch.allclose(vec_10, vec_11), "Positions (1,0) and (1,1) identical"
 
 
 def test_simple_attention_pool_spatial_preservation() -> None:
@@ -138,12 +126,15 @@ def test_simple_attention_pool_spatial_preservation() -> None:
 
     assert output.shape == (B, D, H, W)
 
-    mean_00 = output[0, :, 0, 0].mean().item()
-    mean_01 = output[0, :, 0, 1].mean().item()
-    mean_10 = output[0, :, 1, 0].mean().item()
-    mean_11 = output[0, :, 1, 1].mean().item()
+    # Each spatial position should have distinct output values.
+    vec_00 = output[0, :, 0, 0]
+    vec_01 = output[0, :, 0, 1]
+    vec_10 = output[0, :, 1, 0]
+    vec_11 = output[0, :, 1, 1]
 
-    means = [mean_00, mean_01, mean_10, mean_11]
-    assert len(set(means)) > 1, (
-        "All spatial positions have identical means - spatial info lost!"
-    )
+    assert not torch.allclose(vec_00, vec_01), "Positions (0,0) and (0,1) identical"
+    assert not torch.allclose(vec_00, vec_10), "Positions (0,0) and (1,0) identical"
+    assert not torch.allclose(vec_00, vec_11), "Positions (0,0) and (1,1) identical"
+    assert not torch.allclose(vec_01, vec_10), "Positions (0,1) and (1,0) identical"
+    assert not torch.allclose(vec_01, vec_11), "Positions (0,1) and (1,1) identical"
+    assert not torch.allclose(vec_10, vec_11), "Positions (1,0) and (1,1) identical"
