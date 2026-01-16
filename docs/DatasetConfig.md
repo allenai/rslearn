@@ -1120,6 +1120,28 @@ Available bands:
 
 Note that B10 is not present in L2A.
 
+### rslearn.data_sources.planetary_computer.Naip
+
+NAIP imagery on Microsoft Planetary Computer. Direct materialization is supported.
+
+This data source uses the Planetary Computer `naip` collection, and reads the `image`
+asset which contains four bands: `R`, `G`, `B`, `NIR`.
+
+Note: this class currently always ingests/reads the full 4-band asset as a single band
+set. Configure your raster layer band set to exactly `["R", "G", "B", "NIR"]`. If you
+need a different band grouping, use `rslearn.data_sources.planetary_computer.PlanetaryComputer`
+directly with a custom `asset_bands` mapping.
+
+```jsonc
+{
+  // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
+  "query": null,
+  "sort_by": null,
+  "sort_ascending": true,
+  "timeout_seconds": 10
+}
+```
+
 ### rslearn.data_sources.planetary_computer.CopDemGlo30
 
 Copernicus DEM GLO-30 (30m) data on Microsoft Planetary Computer. Direct materialization
