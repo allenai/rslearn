@@ -608,11 +608,6 @@ An API key must be provided either in the data source configuration or via the C
 environment variable. You can acquire an API key by registering at the Climate Data Store
 website (https://cds.climate.copernicus.eu/).
 
-We recommend using the default number of workers (`--workers 0`, which means using the
-main process only) and batch size equal to the number of windows when preparing ERA5Land
-datasets, as this will combine multiple geometries into a single CDS API request for each
-month to speed up dataset ingestion.
-
 Valid bands are the variable names listed on the CDS dataset page (use the **API request**
 tool to check valid values). Note it is necessary to replace "_" with "-" in the variable
 names, e.g. `total_precipitation` becomes `total-precipitation`.
