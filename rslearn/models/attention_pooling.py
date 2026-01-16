@@ -150,8 +150,11 @@ class AttentionPool(IntermediateComponent):
             D // self.num_heads
         )
         attn_weights = F.softmax(attn_scores, dim=-1)
-        x = torch.matmul(attn_weights, v)  # [B, head, 1, D_head]
-        return x.reshape(B, D, H, W)
+        x = torch.matmul(attn_weights, v)  # [B*H*W, num_heads, 1, D_head]
+        x = x.squeeze(-2)  # [B*H*W, num_heads, D_head]
+        return rearrange(
+            x, "(b h w) nh dh -> b (nh dh) h w", b=B, h=H, w=W
+        )  # [B, D, H, W]
 
     def forward(self, intermediates: Any, context: ModelContext) -> FeatureMaps:
         """Forward pass for attention pooling linear probe.
