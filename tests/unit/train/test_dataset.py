@@ -13,6 +13,7 @@ from upath import UPath
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import Item
 from rslearn.dataset import Dataset, Window
+from rslearn.dataset.index import DatasetIndex
 from rslearn.dataset.window import WindowLayerData
 from rslearn.train.dataset import (
     DataInput,
@@ -276,3 +277,120 @@ def test_read_layer_time_range(tmp_path: UPath) -> None:
     assert time_range is not None
     assert time_range[0] == datetime(2024, 1, 5)  # min of item1 and item2 start
     assert time_range[1] == datetime(2024, 1, 20)  # max of item1 and item2 end
+
+
+def test_model_dataset_index_caching(
+    basic_classification_dataset: Dataset,
+    add_window_to_basic_classification_dataset: Callable,
+) -> None:
+    """Test that ModelDataset index caching works correctly.
+
+    This test verifies that:
+    1. With use_index=True, the index is created on first run
+    2. On second run, the index is loaded (same results)
+    3. With refresh_index=True, the index is rebuilt
+    """
+    # Create windows
+    image = np.zeros((1, 4, 4), dtype=np.uint8)
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        name="window1",
+        images={("image_layer1", 0): image},
+    )
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        name="window2",
+        images={("image_layer1", 0): image},
+    )
+
+    inputs = {
+        "image": DataInput("raster", ["image_layer1"], bands=["band"]),
+        "targets": DataInput("vector", ["vector_layer"]),
+    }
+    task = ClassificationTask("label", ["cls0", "cls1"], read_class_id=True)
+    split_config = SplitConfig()
+
+    # First run: create index
+    dataset1 = ModelDataset(
+        basic_classification_dataset,
+        split_config=split_config,
+        task=task,
+        workers=0,
+        inputs=inputs,
+        use_index=True,
+    )
+    assert len(dataset1) == 2
+
+    # Verify index was created
+    index = DatasetIndex(basic_classification_dataset.path)
+    index_key = index.get_index_key(
+        groups=split_config.groups,
+        names=split_config.names,
+        tags=split_config.tags,
+        num_samples=split_config.num_samples,
+        skip_targets=split_config.get_skip_targets(),
+        inputs=inputs,
+        disabled_layers=[],
+    )
+    cached_windows = index.load_windows(index_key)
+    assert cached_windows is not None
+    assert len(cached_windows) == 2
+
+    # Second run: load from index
+    dataset2 = ModelDataset(
+        basic_classification_dataset,
+        split_config=split_config,
+        task=task,
+        workers=0,
+        inputs=inputs,
+        use_index=True,
+    )
+    assert len(dataset2) == 2
+
+    # Verify both datasets have the same windows
+    examples1 = dataset1.get_dataset_examples()
+    examples2 = dataset2.get_dataset_examples()
+    assert len(examples1) == len(examples2)
+    assert {w.name for w in examples1} == {w.name for w in examples2}
+
+    # Third run: refresh index
+    dataset3 = ModelDataset(
+        basic_classification_dataset,
+        split_config=split_config,
+        task=task,
+        workers=0,
+        inputs=inputs,
+        use_index=True,
+        refresh_index=True,
+    )
+    assert len(dataset3) == 2
+
+
+def test_model_dataset_without_index(
+    basic_classification_dataset: Dataset,
+    add_window_to_basic_classification_dataset: Callable,
+) -> None:
+    """Test that ModelDataset works correctly with use_index=False (default)."""
+    image = np.zeros((1, 4, 4), dtype=np.uint8)
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        images={("image_layer1", 0): image},
+    )
+
+    # With use_index=False (default), no index should be created
+    dataset = ModelDataset(
+        basic_classification_dataset,
+        split_config=SplitConfig(),
+        task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+        workers=0,
+        inputs={
+            "image": DataInput("raster", ["image_layer1"], bands=["band"]),
+            "targets": DataInput("vector", ["vector_layer"]),
+        },
+        use_index=False,
+    )
+    assert len(dataset) == 1
+
+    # Verify no index directory was created
+    index_dir = basic_classification_dataset.path / ".rslearn_index"
+    assert not index_dir.exists()

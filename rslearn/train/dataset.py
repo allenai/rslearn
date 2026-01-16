@@ -22,6 +22,7 @@ from rslearn.config import (
 )
 from rslearn.data_sources.data_source import Item
 from rslearn.dataset.dataset import Dataset
+from rslearn.dataset.index import DatasetIndex
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.window import (
     Window,
@@ -603,6 +604,8 @@ class ModelDataset(torch.utils.data.Dataset):
         workers: int,
         name: str | None = None,
         fix_patch_pick: bool = False,
+        use_index: bool = False,
+        refresh_index: bool = False,
     ) -> None:
         """Instantiate a new ModelDataset.
 
@@ -612,9 +615,13 @@ class ModelDataset(torch.utils.data.Dataset):
             inputs: data to read from the dataset for training
             task: the task to train on
             workers: number of workers to use for initializing the dataset
-            name: name of the dataset (default: None)
+            name: name of the dataset
             fix_patch_pick: if True, fix the patch pick to be the same every time
                 for a given window. Useful for testing (default: False)
+            use_index: if True, use cached index of windows to speed up subsequent
+                runs
+            refresh_index: if True, ignore existing index and rebuild it
+
         """
         self.dataset = dataset
         self.split_config = split_config
@@ -635,58 +642,88 @@ class ModelDataset(torch.utils.data.Dataset):
         else:
             self.patch_size = split_config.get_patch_size()
 
-        windows = self._get_initial_windows(split_config, workers)
-
         # If targets are not needed, remove them from the inputs.
         if split_config.get_skip_targets():
             for k in list(self.inputs.keys()):
                 if self.inputs[k].is_target:
                     del self.inputs[k]
 
-        # Eliminate windows that are missing either a requisite input layer, or missing
-        # all target layers.
-        new_windows = []
-        if workers == 0:
-            for window in windows:
-                if check_window(self.inputs, window) is None:
-                    continue
-                new_windows.append(window)
-        else:
-            p = multiprocessing.Pool(workers)
-            outputs = star_imap_unordered(
-                p,
-                check_window,
-                [
-                    dict(
-                        inputs=self.inputs,
-                        window=window,
-                    )
-                    for window in windows
-                ],
+        # Try to load from index
+        index: DatasetIndex | None = None
+        index_key: str | None = None
+        indexed_windows: list[dict] | None = None
+        if use_index:
+            index = DatasetIndex(dataset.path)
+            index_key = index.get_index_key(
+                groups=split_config.groups,
+                names=split_config.names,
+                tags=split_config.tags,
+                num_samples=split_config.num_samples,
+                skip_targets=split_config.get_skip_targets(),
+                inputs=self.inputs,
+                disabled_layers=[],
             )
-            for window in tqdm.tqdm(
-                outputs, total=len(windows), desc="Checking available layers in windows"
-            ):
-                if window is None:
-                    continue
-                new_windows.append(window)
-            p.close()
-        windows = new_windows
+            indexed_windows = index.load_windows(index_key, refresh_index)
 
-        # Sort the windows to ensure that the dataset is consistent across GPUs.
-        # Inconsistent ordering can lead to a subset of windows being processed during
-        # "model test" / "model predict" when using multiple GPUs.
-        # We use a hash so that functionality like num_samples limit gets a random
-        # subset of windows (with respect to the hash function choice).
-        windows.sort(
-            key=lambda window: hashlib.sha256(window.name.encode()).hexdigest()
-        )
+        if indexed_windows is not None:
+            logger.info(f"Loaded {len(indexed_windows)} windows from index")
+            windows = [
+                Window.from_metadata(dataset.storage, w) for w in indexed_windows
+            ]
+        else:
+            windows = self._get_initial_windows(split_config, workers)
 
-        # Limit windows to num_samples if requested.
-        if split_config.num_samples:
-            # The windows are sorted by hash of window name so this distribution should
-            # be representative of the population.
-            windows = windows[0 : split_config.num_samples]
+            # Eliminate windows that are missing either a requisite input layer, or
+            # missing all target layers.
+            new_windows = []
+            if workers == 0:
+                for window in windows:
+                    if check_window(self.inputs, window) is None:
+                        continue
+                    new_windows.append(window)
+            else:
+                p = multiprocessing.Pool(workers)
+                outputs = star_imap_unordered(
+                    p,
+                    check_window,
+                    [
+                        dict(
+                            inputs=self.inputs,
+                            window=window,
+                        )
+                        for window in windows
+                    ],
+                )
+                for window in tqdm.tqdm(
+                    outputs,
+                    total=len(windows),
+                    desc="Checking available layers in windows",
+                ):
+                    if window is None:
+                        continue
+                    new_windows.append(window)
+                p.close()
+            windows = new_windows
+
+            # Sort the windows to ensure that the dataset is consistent across GPUs.
+            # Inconsistent ordering can lead to a subset of windows being processed
+            # during "model test" / "model predict" when using multiple GPUs.
+            # We use a hash so that functionality like num_samples limit gets a random
+            # subset of windows (with respect to the hash function choice).
+            windows.sort(
+                key=lambda window: hashlib.sha256(window.name.encode()).hexdigest()
+            )
+
+            # Limit windows to num_samples if requested.
+            if split_config.num_samples:
+                # The windows are sorted by hash of window name so this distribution
+                # should be representative of the population.
+                windows = windows[0 : split_config.num_samples]
+
+            # Save to index if enabled
+            if index is not None and index_key is not None:
+                serialized = [self._serialize_item(w) for w in windows]
+                index.save_windows(index_key, serialized)
 
         # Write dataset_examples to a file so that we can load it lazily in the worker
         # processes. Otherwise it takes a long time to transmit it when spawning each
