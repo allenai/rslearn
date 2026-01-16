@@ -591,6 +591,41 @@ def check_window(inputs: dict[str, DataInput], window: Window) -> Window | None:
     return window
 
 
+def _compute_cache_key(
+    inputs: dict[str, DataInput],
+    split_config: SplitConfig,
+) -> str:
+    """Compute a cache key based on inputs and split configuration.
+
+    The cache key captures the configuration that affects which windows are valid.
+
+    Args:
+        inputs: the data inputs configuration.
+        split_config: the split configuration.
+
+    Returns:
+        a hex string representing the cache key.
+    """
+    key_data: dict[str, Any] = {
+        "inputs": {},
+        "split_config": {
+            "groups": split_config.groups,
+            "names": split_config.names,
+            "tags": split_config.tags,
+            "skip_targets": split_config.get_skip_targets(),
+        },
+    }
+    for name, data_input in sorted(inputs.items()):
+        key_data["inputs"][name] = {
+            "layers": data_input.layers,
+            "required": data_input.required,
+            "is_target": data_input.is_target,
+            "load_all_layers": data_input.load_all_layers,
+        }
+    key_str = json.dumps(key_data, sort_keys=True)
+    return hashlib.sha256(key_str.encode()).hexdigest()[:16]
+
+
 class ModelDataset(torch.utils.data.Dataset):
     """The default pytorch dataset implementation for rslearn."""
 
@@ -603,6 +638,7 @@ class ModelDataset(torch.utils.data.Dataset):
         workers: int,
         name: str | None = None,
         fix_patch_pick: bool = False,
+        cache_index_path: str | None = None,
     ) -> None:
         """Instantiate a new ModelDataset.
 
@@ -615,6 +651,9 @@ class ModelDataset(torch.utils.data.Dataset):
             name: name of the dataset (default: None)
             fix_patch_pick: if True, fix the patch pick to be the same every time
                 for a given window. Useful for testing (default: False)
+            cache_index_path: optional path to cache the dataset index. If provided,
+                the validated window list will be cached to this path, and subsequent
+                runs will load from the cache instead of re-validating windows.
         """
         self.dataset = dataset
         self.split_config = split_config
@@ -622,6 +661,7 @@ class ModelDataset(torch.utils.data.Dataset):
         self.task = task
         self.name = name
         self.fix_patch_pick = fix_patch_pick
+        self.cache_index_path = cache_index_path
         if split_config.transforms:
             self.transforms = Sequential(*split_config.transforms)
         else:
@@ -635,52 +675,62 @@ class ModelDataset(torch.utils.data.Dataset):
         else:
             self.patch_size = split_config.get_patch_size()
 
-        windows = self._get_initial_windows(split_config, workers)
-
         # If targets are not needed, remove them from the inputs.
         if split_config.get_skip_targets():
             for k in list(self.inputs.keys()):
                 if self.inputs[k].is_target:
                     del self.inputs[k]
 
-        # Eliminate windows that are missing either a requisite input layer, or missing
-        # all target layers.
-        new_windows = []
-        if workers == 0:
-            for window in windows:
-                if check_window(self.inputs, window) is None:
-                    continue
-                new_windows.append(window)
-        else:
-            p = multiprocessing.Pool(workers)
-            outputs = star_imap_unordered(
-                p,
-                check_window,
-                [
-                    dict(
-                        inputs=self.inputs,
-                        window=window,
-                    )
-                    for window in windows
-                ],
-            )
-            for window in tqdm.tqdm(
-                outputs, total=len(windows), desc="Checking available layers in windows"
-            ):
-                if window is None:
-                    continue
-                new_windows.append(window)
-            p.close()
-        windows = new_windows
+        # Try to load windows from cache if available.
+        windows = self._try_load_from_cache()
 
-        # Sort the windows to ensure that the dataset is consistent across GPUs.
-        # Inconsistent ordering can lead to a subset of windows being processed during
-        # "model test" / "model predict" when using multiple GPUs.
-        # We use a hash so that functionality like num_samples limit gets a random
-        # subset of windows (with respect to the hash function choice).
-        windows.sort(
-            key=lambda window: hashlib.sha256(window.name.encode()).hexdigest()
-        )
+        if windows is None:
+            # No valid cache, so load and validate windows.
+            windows = self._get_initial_windows(split_config, workers)
+
+            # Eliminate windows that are missing either a requisite input layer, or
+            # missing all target layers.
+            new_windows = []
+            if workers == 0:
+                for window in windows:
+                    if check_window(self.inputs, window) is None:
+                        continue
+                    new_windows.append(window)
+            else:
+                p = multiprocessing.Pool(workers)
+                outputs = star_imap_unordered(
+                    p,
+                    check_window,
+                    [
+                        dict(
+                            inputs=self.inputs,
+                            window=window,
+                        )
+                        for window in windows
+                    ],
+                )
+                for window in tqdm.tqdm(
+                    outputs,
+                    total=len(windows),
+                    desc="Checking available layers in windows",
+                ):
+                    if window is None:
+                        continue
+                    new_windows.append(window)
+                p.close()
+            windows = new_windows
+
+            # Sort the windows to ensure that the dataset is consistent across GPUs.
+            # Inconsistent ordering can lead to a subset of windows being processed
+            # during "model test" / "model predict" when using multiple GPUs.
+            # We use a hash so that functionality like num_samples limit gets a random
+            # subset of windows (with respect to the hash function choice).
+            windows.sort(
+                key=lambda window: hashlib.sha256(window.name.encode()).hexdigest()
+            )
+
+            # Save to cache if cache_index_path is configured.
+            self._save_to_cache(windows)
 
         # Limit windows to num_samples if requested.
         if split_config.num_samples:
@@ -704,6 +754,72 @@ class ModelDataset(torch.utils.data.Dataset):
         os.makedirs(os.path.dirname(self.dataset_examples_fname), exist_ok=True)
         with open(self.dataset_examples_fname, "w") as f:
             json.dump([self._serialize_item(example) for example in windows], f)
+
+    def _try_load_from_cache(self) -> list[Window] | None:
+        """Try to load validated windows from cache.
+
+        Returns:
+            A list of Window objects if the cache is valid, or None if the cache
+            doesn't exist or is invalid.
+        """
+        if self.cache_index_path is None:
+            return None
+
+        try:
+            with open(self.cache_index_path) as f:
+                cache_data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
+
+        # Verify the cache key matches.
+        expected_key = _compute_cache_key(self.inputs, self.split_config)
+        if cache_data.get("cache_key") != expected_key:
+            logger.info(
+                f"Cache key mismatch: expected {expected_key}, "
+                f"got {cache_data.get('cache_key')}. Re-validating windows."
+            )
+            return None
+
+        # Load the windows by name.
+        window_metadatas = cache_data.get("windows", [])
+        logger.info(
+            f"Loading {len(window_metadatas)} windows from cache at "
+            f"{self.cache_index_path}"
+        )
+
+        windows = []
+        for metadata in window_metadatas:
+            window = Window.from_metadata(self.dataset.storage, metadata)
+            windows.append(window)
+
+        return windows
+
+    def _save_to_cache(self, windows: list[Window]) -> None:
+        """Save the validated windows to cache.
+
+        Args:
+            windows: the validated windows to cache.
+        """
+        if self.cache_index_path is None:
+            return
+
+        cache_key = _compute_cache_key(self.inputs, self.split_config)
+        cache_data = {
+            "cache_key": cache_key,
+            "windows": [self._serialize_item(window) for window in windows],
+        }
+
+        # Ensure parent directory exists.
+        cache_dir = os.path.dirname(self.cache_index_path)
+        if cache_dir:
+            os.makedirs(cache_dir, exist_ok=True)
+
+        with open(self.cache_index_path, "w") as f:
+            json.dump(cache_data, f)
+
+        logger.info(
+            f"Saved {len(windows)} validated windows to cache at {self.cache_index_path}"
+        )
 
     def _get_initial_windows(
         self, split_config: SplitConfig, workers: int

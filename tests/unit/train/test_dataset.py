@@ -1,5 +1,7 @@
 """Unit tests for rslearn.train.dataset."""
 
+import json
+import os
 from collections.abc import Callable
 from datetime import datetime
 
@@ -19,6 +21,7 @@ from rslearn.train.dataset import (
     ModelDataset,
     RetryDataset,
     SplitConfig,
+    _compute_cache_key,
     read_layer_time_range,
 )
 from rslearn.train.tasks.classification import ClassificationTask
@@ -276,3 +279,174 @@ def test_read_layer_time_range(tmp_path: UPath) -> None:
     assert time_range is not None
     assert time_range[0] == datetime(2024, 1, 5)  # min of item1 and item2 start
     assert time_range[1] == datetime(2024, 1, 20)  # max of item1 and item2 end
+
+
+def test_compute_cache_key() -> None:
+    """Test that cache keys are computed correctly based on inputs and split config."""
+    inputs1 = {
+        "image": DataInput("raster", ["image_layer1"], bands=["band"]),
+        "targets": DataInput("vector", ["vector_layer"], is_target=True),
+    }
+    inputs2 = {
+        "image": DataInput("raster", ["image_layer1"], bands=["band"]),
+        "targets": DataInput("vector", ["vector_layer"], is_target=True),
+    }
+    inputs3 = {
+        "image": DataInput("raster", ["image_layer2"], bands=["band"]),
+        "targets": DataInput("vector", ["vector_layer"], is_target=True),
+    }
+
+    split_config1 = SplitConfig(groups=["train"])
+    split_config2 = SplitConfig(groups=["train"])
+    split_config3 = SplitConfig(groups=["val"])
+
+    # Same inputs and split config should produce the same key.
+    key1 = _compute_cache_key(inputs1, split_config1)
+    key2 = _compute_cache_key(inputs2, split_config2)
+    assert key1 == key2
+
+    # Different layer in inputs should produce different key.
+    key3 = _compute_cache_key(inputs3, split_config1)
+    assert key1 != key3
+
+    # Different split config should produce different key.
+    key4 = _compute_cache_key(inputs1, split_config3)
+    assert key1 != key4
+
+
+def test_dataset_index_caching(
+    basic_classification_dataset: Dataset,
+    add_window_to_basic_classification_dataset: Callable,
+    tmp_path: UPath,
+) -> None:
+    """Test that dataset index caching works correctly."""
+    image = np.zeros((1, 4, 4), dtype=np.uint8)
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        images={
+            ("image_layer1", 0): image,
+        },
+    )
+
+    cache_path = str(tmp_path / "cache" / "dataset_index.json")
+    inputs = {
+        "image": DataInput("raster", ["image_layer1"], bands=["band"], passthrough=True),
+        "targets": DataInput("vector", ["vector_layer"]),
+    }
+
+    # First run: cache should be created.
+    dataset1 = ModelDataset(
+        basic_classification_dataset,
+        split_config=SplitConfig(),
+        task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+        workers=0,
+        inputs=inputs,
+        cache_index_path=cache_path,
+    )
+    assert len(dataset1) == 1
+
+    # Verify the cache file was created.
+    assert os.path.exists(cache_path)
+    with open(cache_path) as f:
+        cache_data = json.load(f)
+    assert "cache_key" in cache_data
+    assert "windows" in cache_data
+    assert len(cache_data["windows"]) == 1
+
+    # Second run: should load from cache.
+    dataset2 = ModelDataset(
+        basic_classification_dataset,
+        split_config=SplitConfig(),
+        task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+        workers=0,
+        inputs=inputs,
+        cache_index_path=cache_path,
+    )
+    assert len(dataset2) == 1
+
+
+def test_dataset_index_cache_invalidation(
+    basic_classification_dataset: Dataset,
+    add_window_to_basic_classification_dataset: Callable,
+    tmp_path: UPath,
+) -> None:
+    """Test that cache is invalidated when inputs change."""
+    image = np.zeros((1, 4, 4), dtype=np.uint8)
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        images={
+            ("image_layer1", 0): image,
+            ("image_layer2", 0): image,
+        },
+    )
+
+    cache_path = str(tmp_path / "cache" / "dataset_index.json")
+    inputs1 = {
+        "image": DataInput("raster", ["image_layer1"], bands=["band"], passthrough=True),
+        "targets": DataInput("vector", ["vector_layer"]),
+    }
+
+    # First run: cache should be created with inputs1.
+    dataset1 = ModelDataset(
+        basic_classification_dataset,
+        split_config=SplitConfig(),
+        task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+        workers=0,
+        inputs=inputs1,
+        cache_index_path=cache_path,
+    )
+    assert len(dataset1) == 1
+
+    # Get the original cache key.
+    with open(cache_path) as f:
+        original_cache_key = json.load(f)["cache_key"]
+
+    # Second run with different inputs: cache should be invalidated and recreated.
+    inputs2 = {
+        "image": DataInput("raster", ["image_layer2"], bands=["band"], passthrough=True),
+        "targets": DataInput("vector", ["vector_layer"]),
+    }
+    dataset2 = ModelDataset(
+        basic_classification_dataset,
+        split_config=SplitConfig(),
+        task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+        workers=0,
+        inputs=inputs2,
+        cache_index_path=cache_path,
+    )
+    assert len(dataset2) == 1
+
+    # Verify the cache key was updated.
+    with open(cache_path) as f:
+        new_cache_key = json.load(f)["cache_key"]
+    assert original_cache_key != new_cache_key
+
+
+def test_dataset_without_cache(
+    basic_classification_dataset: Dataset,
+    add_window_to_basic_classification_dataset: Callable,
+) -> None:
+    """Test that dataset works correctly without caching (cache_index_path=None)."""
+    image = np.zeros((1, 4, 4), dtype=np.uint8)
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        images={
+            ("image_layer1", 0): image,
+        },
+    )
+
+    inputs = {
+        "image": DataInput("raster", ["image_layer1"], bands=["band"], passthrough=True),
+        "targets": DataInput("vector", ["vector_layer"]),
+    }
+
+    # Run without cache_index_path - should work normally.
+    dataset = ModelDataset(
+        basic_classification_dataset,
+        split_config=SplitConfig(),
+        task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+        workers=0,
+        inputs=inputs,
+        cache_index_path=None,
+    )
+    assert len(dataset) == 1

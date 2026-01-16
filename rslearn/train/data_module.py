@@ -69,6 +69,7 @@ class RslearnDataModule(L.LightningDataModule):
         name: str | None = None,
         retries: int = 0,
         use_in_memory_all_patches_dataset: bool = False,
+        cache_index_dir: str | None = None,
     ) -> None:
         """Initialize a new RslearnDataModule.
 
@@ -92,6 +93,10 @@ class RslearnDataModule(L.LightningDataModule):
             retries: number of retries to attempt for getitem calls
             use_in_memory_all_patches_dataset: whether to use InMemoryAllPatchesDataset
                 instead of IterableAllPatchesDataset if load_all_patches is set to true.
+            cache_index_dir: optional directory to cache the dataset index. If provided,
+                the validated window list for each split will be cached in this
+                directory, and subsequent runs will load from cache instead of
+                re-validating windows. The cache file name includes the split name.
         """
         super().__init__()
         self.inputs = inputs
@@ -103,6 +108,7 @@ class RslearnDataModule(L.LightningDataModule):
         self.name = name
         self.retries = retries
         self.use_in_memory_all_patches_dataset = use_in_memory_all_patches_dataset
+        self.cache_index_dir = cache_index_dir
         self.split_configs = {
             "train": default_config.update(train_config),
             "val": default_config.update(val_config),
@@ -130,6 +136,16 @@ class RslearnDataModule(L.LightningDataModule):
         self.datasets = {}
         for split in stage_to_splits[stage]:
             split_config = self.split_configs[split]
+
+            # Determine cache index path for this split.
+            cache_index_path = None
+            if self.cache_index_dir is not None:
+                import os
+
+                cache_index_path = os.path.join(
+                    self.cache_index_dir, f"dataset_index_{split}.json"
+                )
+
             dataset = ModelDataset(
                 dataset=Dataset(path=self.path),
                 split_config=self.split_configs[split],
@@ -138,6 +154,7 @@ class RslearnDataModule(L.LightningDataModule):
                 workers=self.init_workers,
                 name=self.name,
                 fix_patch_pick=(split != "train"),
+                cache_index_path=cache_index_path,
             )
             logger.info(f"got {len(dataset)} examples in split {split}")
             if split_config.get_load_all_patches():
