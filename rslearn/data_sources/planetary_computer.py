@@ -46,6 +46,9 @@ class PlanetaryComputer(StacDataSource, TileStore):
     """
 
     STAC_ENDPOINT = "https://planetarycomputer.microsoft.com/api/stac/v1"
+    # Planetary Computer supports returning up to 1000 items in response.
+    # However, it does not support pagination, so we just use 1000.
+    LIMIT = 1000
 
     def __init__(
         self,
@@ -99,6 +102,7 @@ class PlanetaryComputer(StacDataSource, TileStore):
             sort_ascending=sort_ascending,
             required_assets=required_assets,
             cache_dir=cache_upath,
+            limit=self.LIMIT,
         )
         self.asset_bands = asset_bands
         self.timeout = timeout
