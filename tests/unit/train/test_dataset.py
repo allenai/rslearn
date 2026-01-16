@@ -392,5 +392,5 @@ def test_model_dataset_without_index(
     assert len(dataset) == 1
 
     # Verify no index directory was created
-    index_dir = basic_classification_dataset.path / ".rslearn_index"
+    index_dir = basic_classification_dataset.path / ".rslearn_dataset_index"
     assert not index_dir.exists()

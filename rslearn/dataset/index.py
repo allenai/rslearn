@@ -11,9 +11,16 @@ from rslearn.log_utils import get_logger
 
 logger = get_logger(__name__)
 
+# Increment this when the index format changes to force rebuild
+INDEX_VERSION = 1
+
 
 class DatasetIndex:
-    """Manages indexed window lists for faster ModelDataset initialization."""
+    """Manages indexed window lists for faster ModelDataset initialization.
+
+    Note: The index does NOT automatically detect when windows are added or removed
+    from the dataset. Use refresh_index=True after modifying dataset windows.
+    """
 
     def __init__(self, dataset_path: UPath) -> None:
         """Initialize DatasetIndex.
@@ -22,7 +29,7 @@ class DatasetIndex:
             dataset_path: Path to the dataset directory.
         """
         self.dataset_path = dataset_path
-        self.index_dir = dataset_path / ".rslearn_index"
+        self.index_dir = dataset_path / ".rslearn_dataset_index"
 
     def get_index_key(
         self,
@@ -98,10 +105,12 @@ class DatasetIndex:
             List of serialized window dicts if index is valid, None otherwise.
         """
         if refresh_index:
+            logger.info("refresh_index=True, rebuilding index")
             return None
 
         index_file = self.index_dir / f"{index_key}.json"
         if not index_file.exists():
+            logger.info(f"No index found at {index_file}, will build")
             return None
 
         try:
@@ -109,6 +118,14 @@ class DatasetIndex:
                 index_data = json.load(f)
         except (OSError, json.JSONDecodeError):
             logger.warning(f"Corrupted index file at {index_file}, will rebuild")
+            return None
+
+        # Check index version
+        if index_data.get("version") != INDEX_VERSION:
+            logger.info(
+                f"Index version mismatch (got {index_data.get('version')}, "
+                f"expected {INDEX_VERSION}), will rebuild"
+            )
             return None
 
         # Quick validation: check config hash
@@ -132,6 +149,7 @@ class DatasetIndex:
         self.index_dir.mkdir(parents=True, exist_ok=True)
         index_file = self.index_dir / f"{index_key}.json"
         index_data = {
+            "version": INDEX_VERSION,
             "config_hash": self.get_config_hash(),
             "created_at": datetime.now().isoformat(),
             "num_windows": len(windows),

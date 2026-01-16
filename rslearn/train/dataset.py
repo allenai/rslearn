@@ -746,7 +746,7 @@ class ModelDataset(torch.utils.data.Dataset):
         index_key: str | None = None
 
         if use_index:
-            logger.debug(f"Checking index for dataset {self.dataset.path}")
+            logger.info(f"Checking index for dataset {self.dataset.path}")
             index = DatasetIndex(self.dataset.path)
             index_key = index.get_index_key(
                 groups=split_config.groups,

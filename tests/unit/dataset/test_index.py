@@ -190,7 +190,7 @@ class TestDatasetIndex:
         index_key = "test_index_key"
 
         # Create index directory and write invalid JSON
-        index_dir = tmp_path / ".rslearn_index"
+        index_dir = tmp_path / ".rslearn_dataset_index"
         index_dir.mkdir(parents=True, exist_ok=True)
         index_file = index_dir / f"{index_key}.json"
         with index_file.open("w") as f:
@@ -209,8 +209,8 @@ class TestDatasetIndex:
         index.save_windows(index_key, windows)
 
         # Check that final file exists and temp file doesn't
-        index_file = tmp_path / ".rslearn_index" / f"{index_key}.json"
-        tmp_file = tmp_path / ".rslearn_index" / f"{index_key}.tmp"
+        index_file = tmp_path / ".rslearn_dataset_index" / f"{index_key}.json"
+        tmp_file = tmp_path / ".rslearn_dataset_index" / f"{index_key}.tmp"
 
         assert index_file.exists()
         assert not tmp_file.exists()
@@ -218,8 +218,33 @@ class TestDatasetIndex:
         # Verify content is valid JSON
         with index_file.open() as f:
             data = json.load(f)
+        assert "version" in data
         assert "windows" in data
         assert "config_hash" in data
         assert "created_at" in data
         assert "num_windows" in data
         assert data["num_windows"] == 1
+
+    def test_version_mismatch_invalidates_index(self, tmp_path: Path) -> None:
+        """Test that index with wrong version is invalidated."""
+        index = DatasetIndex(UPath(tmp_path))
+        index_key = "test_index_key"
+
+        # Create index with wrong version
+        index_dir = tmp_path / ".rslearn_dataset_index"
+        index_dir.mkdir(parents=True, exist_ok=True)
+        index_file = index_dir / f"{index_key}.json"
+        with index_file.open("w") as f:
+            json.dump(
+                {
+                    "version": 999,  # Wrong version
+                    "config_hash": "",
+                    "num_windows": 1,
+                    "windows": [{"name": "test"}],
+                },
+                f,
+            )
+
+        # Should return None due to version mismatch
+        loaded = index.load_windows(index_key)
+        assert loaded is None
