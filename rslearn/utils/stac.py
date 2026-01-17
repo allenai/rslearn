@@ -101,6 +101,7 @@ class StacClient:
         ids: list[str] | None = None,
         limit: int | None = None,
         query: dict[str, Any] | None = None,
+        sortby: list[dict[str, str]] | None = None,
     ) -> list[StacItem]:
         """Execute a STAC item search.
 
@@ -117,6 +118,7 @@ class StacClient:
             limit: number of items per page. We will read all the pages.
             query: query dict, if STAC query extension is supported by this API. See
                 https://github.com/stac-api-extensions/query.
+            sortby: list of sort specifications, e.g. [{"field": "id", "direction": "asc"}].
 
         Returns:
             list of matching STAC items.
@@ -142,6 +144,8 @@ class StacClient:
             request_data["limit"] = limit
         if query is not None:
             request_data["query"] = query
+        if sortby is not None:
+            request_data["sortby"] = sortby
 
         # Handle pagination.
         cur_url = self.endpoint + "/search"
