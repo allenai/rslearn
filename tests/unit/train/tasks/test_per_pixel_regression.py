@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 import torch
 
@@ -39,7 +40,11 @@ def test_process_output(empty_sample_metadata: SampleMetadata) -> None:
         raw_output=torch.tensor([[0.1, 0.2], [0.3, 0.4]], dtype=torch.float32),
         metadata=empty_sample_metadata,
     )
-    assert torch.all(output == torch.tensor([[[1, 2], [3, 4]]]))
+    
+    assert isinstance(output, np.ndarray)
+    assert output.shape == (1, 2, 2)
+    assert output.dtype in (np.float32, np.float64)
+    assert np.allclose(output, np.array([[[1, 2], [3, 4]]]))
 
 
 def test_head(empty_sample_metadata: SampleMetadata) -> None:

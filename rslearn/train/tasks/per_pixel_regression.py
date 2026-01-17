@@ -100,7 +100,7 @@ class PerPixelRegressionTask(BasicTask):
             raise ValueError(
                 f"PerPixelRegressionTask output must be an HW tensor, but got shape {raw_output.shape}"
             )
-        return (raw_output / self.scale_factor).cpu().numpy()
+        return (raw_output[None, :, :] / self.scale_factor).cpu().numpy()
 
     def visualize(
         self,
