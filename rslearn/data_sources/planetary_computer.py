@@ -567,3 +567,55 @@ class Naip(PlanetaryComputer):
             context=context,
             **kwargs,
         )
+
+
+class CopDemGlo30(PlanetaryComputer):
+    """A data source for Copernicus DEM GLO-30 (30m) on Microsoft Planetary Computer.
+
+    See https://planetarycomputer.microsoft.com/dataset/cop-dem-glo-30.
+    """
+
+    COLLECTION_NAME = "cop-dem-glo-30"
+    DATA_ASSET = "data"
+
+    def __init__(
+        self,
+        band_name: str = "DEM",
+        context: DataSourceContext = DataSourceContext(),
+        **kwargs: Any,
+    ):
+        """Initialize a new CopDemGlo30 instance.
+
+        Args:
+            band_name: band name to use if the layer config is missing from the
+                context.
+            context: the data source context.
+            kwargs: additional arguments to pass to PlanetaryComputer.
+        """
+        if context.layer_config is not None:
+            if len(context.layer_config.band_sets) != 1:
+                raise ValueError("expected a single band set")
+            if len(context.layer_config.band_sets[0].bands) != 1:
+                raise ValueError("expected band set to have a single band")
+            band_name = context.layer_config.band_sets[0].bands[0]
+
+        super().__init__(
+            collection_name=self.COLLECTION_NAME,
+            asset_bands={self.DATA_ASSET: [band_name]},
+            # Skip since all items should have the same asset(s).
+            skip_items_missing_assets=True,
+            context=context,
+            **kwargs,
+        )
+
+    def _stac_item_to_item(self, stac_item: Any) -> SourceItem:
+        # Copernicus DEM is static; ignore item timestamps so it matches any window.
+        item = super()._stac_item_to_item(stac_item)
+        item.geometry = STGeometry(item.geometry.projection, item.geometry.shp, None)
+        return item
+
+    def _get_search_time_range(
+        self, geometry: STGeometry
+    ) -> None:
+        # Copernicus DEM is static; do not filter STAC searches by time.
+        return None

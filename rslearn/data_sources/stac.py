@@ -1,6 +1,7 @@
 """A partial data source implementation providing get_items using a STAC API."""
 
 import json
+from datetime import datetime
 from typing import Any
 
 import shapely
@@ -132,6 +133,24 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
 
         return SourceItem(stac_item.id, geom, asset_urls, properties)
 
+    def _get_search_time_range(
+        self, geometry: STGeometry
+    ) -> datetime | tuple[datetime, datetime] | None:
+        """Get time range to include in STAC API search.
+
+        By default, we filter STAC searches to the window's time range. Subclasses can
+        override this to disable time filtering for "static" datasets.
+
+        Args:
+            geometry: the geometry we are searching for.
+
+        Returns:
+            the time range (or timestamp) to pass to the STAC search, or None to avoid
+                temporal filtering in the search request.
+        """
+        # Note: StacClient.search accepts either a datetime or a (start, end) tuple.
+        return geometry.time_range
+
     def get_item_by_name(self, name: str) -> SourceItem:
         """Gets an item by name.
 
@@ -191,10 +210,11 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
             # for each requested geometry.
             wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
             logger.debug("performing STAC search for geometry %s", wgs84_geometry)
+            search_time_range = self._get_search_time_range(wgs84_geometry)
             stac_items = self.client.search(
                 collections=[self.collection_name],
                 intersects=json.loads(shapely.to_geojson(wgs84_geometry.shp)),
-                date_time=wgs84_geometry.time_range,
+                date_time=search_time_range,
                 query=self.query,
                 limit=self.limit,
             )
