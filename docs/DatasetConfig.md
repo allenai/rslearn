@@ -1127,10 +1127,12 @@ NAIP imagery on Microsoft Planetary Computer. Direct materialization is supporte
 This data source uses the Planetary Computer `naip` collection, and reads the `image`
 asset which contains four bands: `R`, `G`, `B`, `NIR`.
 
-Note: this class currently always ingests/reads the full 4-band asset as a single band
-set. Configure your raster layer band set to exactly `["R", "G", "B", "NIR"]`. If you
-need a different band grouping, use `rslearn.data_sources.planetary_computer.PlanetaryComputer`
-directly with a custom `asset_bands` mapping.
+Note: NAIP provides a single 4-band GeoTIFF asset (`image`). Internally, rslearn will
+still ingest/read this full 4-band asset, but you can configure your raster layer band
+set to materialize any subset of `["R", "G", "B", "NIR"]` (for example `["NIR"]`).
+If you need a different asset/band mapping, use
+`rslearn.data_sources.planetary_computer.PlanetaryComputer` directly with a custom
+`asset_bands` mapping.
 
 ```jsonc
 {
