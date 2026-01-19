@@ -83,6 +83,40 @@ def get_rgb_bands_from_config(layer_config):
     return None
 
 
+def band_names_to_indices(band_names, layer_config):
+    """Convert band names to 1-indexed band indices based on layer config.
+    
+    Args:
+        band_names: List of band names (e.g., ["B04", "B03", "B02"])
+        layer_config: Layer config dictionary with band_sets
+        
+    Returns:
+        List of band indices (1-indexed) in the same order as band_names, or None if not all bands found
+    """
+    band_sets = layer_config.get("band_sets", [])
+    if not band_sets:
+        return None
+    
+    band_set = band_sets[0]
+    config_bands = band_set.get("bands", [])
+    if not config_bands:
+        return None
+    
+    # Create a mapping from band name to index (1-indexed)
+    name_to_index = {name: i for i, name in enumerate(config_bands, start=1)}
+    
+    # Convert band names to indices
+    indices = []
+    for band_name in band_names:
+        if band_name in name_to_index:
+            indices.append(name_to_index[band_name])
+        else:
+            logger.warning(f"Band name '{band_name}' not found in layer config bands: {config_bands}")
+            return None
+    
+    return indices
+
+
 def visualize_tif(input_path, output_path, bands=None, normalize_method="sentinel2_rgb", layer_config=None):
     """Convert GeoTIFF to PNG visualization.
 
@@ -167,7 +201,7 @@ def detect_label_classes(window_dirs):
 def generate_label_colors(label_classes):
     """Generate color mapping for label classes.
     
-    Always assigns "no_data" to red. Other classes get distinct colors from palette.
+    Always assigns "no_data" to black. Other classes get distinct colors from palette.
     
     Args:
         label_classes: Set of label class names
@@ -175,7 +209,7 @@ def generate_label_colors(label_classes):
     Returns:
         Dictionary mapping label class name to RGB color tuple
     """
-    NO_DATA_COLOR = (255, 0, 0)
+    NO_DATA_COLOR = (0, 0, 0)  # Black
     
     color_palette = [
         (0, 255, 0),
@@ -524,16 +558,17 @@ def find_geotiff_in_layer(layer_dir):
     return None
 
 
-def process_window(window_dir, layers, output_dir, normalize_method="sentinel2_rgb", label_colors=None, is_classification_task=False):
+def process_window(window_dir, layers, output_dir, normalization=None, bands=None, label_colors=None, task_type=None):
     """Process a single window: generate PNGs for layers and mask.
 
     Args:
         window_dir: Path to window directory
         layers: Dictionary of layer configs (excluding label)
         output_dir: Directory to save generated PNGs
-        normalize_method: Normalization method for raster visualization
+        normalization: Dictionary mapping layer_name -> normalization_method
+        bands: Dictionary mapping layer_name -> list of band indices (1-indexed)
         label_colors: Dictionary mapping label class names to RGB color tuples
-        is_classification_task: If True, extract text label instead of generating mask
+        task_type: Task type (classification, regression, detection, segmentation)
 
     Returns:
         Dictionary with layer names -> PNG paths, mask path (if segmentation), or label_text (if classification)
@@ -566,81 +601,73 @@ def process_window(window_dir, layers, output_dir, normalize_method="sentinel2_r
             continue
 
         output_png = output_dir / window_name / f"{layer_name}.png"
-        try:
-            layer_config = layers.get(layer_name)
-            visualize_tif(geotiff_path, output_png, normalize_method=normalize_method, layer_config=layer_config)
-            result["layer_images"][layer_name] = output_png
-            logger.debug(f"Generated image for {layer_name} in {window_name}")
-        except Exception as e:
-            logger.warning(f"Failed to visualize {layer_name} for {window_name}: {e}")
+        layer_config = layers.get(layer_name)
+        normalize_method = normalization[layer_name]
+        # Use bands from dataset server class (required)
+        layer_bands = None
+        if bands and layer_name in bands:
+            layer_bands = bands[layer_name]
+        visualize_tif(geotiff_path, output_png, bands=layer_bands, normalize_method=normalize_method, layer_config=layer_config)
+        result["layer_images"][layer_name] = output_png
+        logger.debug(f"Generated image for {layer_name} in {window_name}")
 
     label_dir = layers_dir / "label"
     if label_dir.exists():
         geojson_path = label_dir / "data.geojson"
         if geojson_path.exists():
-            if is_classification_task:
+            if task_type == "classification":
                 # For classification tasks, extract text label
-                try:
-                    with open(geojson_path, "r") as f:
-                        geojson_data = json.load(f)
-                    features = geojson_data.get("features", [])
-                    if features:
-                        props = features[0].get("properties", {})
-                        label_text = props.get("label") or props.get("category") or props.get("class") or props.get("type") or "unknown"
-                        result["label_text"] = label_text
-                        logger.debug(f"Classification label for {window_name}: {label_text}")
-                except Exception as e:
-                    logger.warning(f"Failed to extract classification label for {window_name}: {e}")
+                with open(geojson_path, "r") as f:
+                    geojson_data = json.load(f)
+                features = geojson_data.get("features", [])
+                if features:
+                    props = features[0].get("properties", {})
+                    label_text = props.get("label") or props.get("category") or props.get("class") or props.get("type") or "unknown"
+                    result["label_text"] = label_text
+                    logger.info(f"Classification label for {window_name}: {label_text}")
+                else:
+                    logger.warning(f"No features found in {geojson_path} for classification task")
             else:
                 # Check if this is object detection (Point geometries) or segmentation (Polygon geometries)
-                try:
-                    with open(geojson_path, "r") as f:
-                        geojson_data = json.load(f)
-                    features = geojson_data.get("features", [])
-                    has_points = False
-                    has_polygons = False
-                    for feature in features:
-                        geom_type = feature.get("geometry", {}).get("type", "")
-                        if geom_type in ["Point", "MultiPoint"]:
-                            has_points = True
-                        elif geom_type in ["Polygon", "MultiPolygon"]:
-                            has_polygons = True
-                    
-                    logger.debug(f"Geometry detection for {window_name}: has_points={has_points}, has_polygons={has_polygons}")
-                    
-                    reference_tif = None
-                    for layer_name in layers.keys():
-                        layer_dir = layers_dir / layer_name
-                        if layer_dir.exists():
-                            ref_tif = find_geotiff_in_layer(layer_dir)
-                            if ref_tif:
-                                reference_tif = ref_tif
-                                break
-                    
-                    if has_points and not has_polygons and reference_tif and label_colors:
-                        logger.debug(f"Object detection detected for {window_name}, will overlay points on image")
-                        # Object detection: overlay points on first layer image
-                        if result["layer_images"]:
-                            first_layer_name = list(result["layer_images"].keys())[0]
-                            first_layer_image = result["layer_images"][first_layer_name]
-                            overlay_output = output_dir / window_name / f"{first_layer_name}_with_detections.png"
-                            try:
-                                overlay_points_on_image(first_layer_image, overlay_output, geojson_path, reference_tif, label_colors)
-                                # Replace the original image with the overlaid version
-                                result["layer_images"][first_layer_name] = overlay_output
-                                logger.info(f"Overlaid detection points on {first_layer_name} for {window_name}")
-                            except Exception as e:
-                                logger.warning(f"Failed to overlay points on image for {window_name}: {e}")
-                    elif has_polygons and reference_tif and label_colors:
-                        # Segmentation: generate mask
-                        mask_output = output_dir / window_name / "label_mask.png"
-                        try:
-                            generate_mask_from_geojson(geojson_path, mask_output, reference_tif, label_colors)
-                            result["mask_path"] = mask_output
-                        except Exception as e:
-                            logger.warning(f"Failed to generate mask for {window_name}: {e}")
-                except Exception as e:
-                    logger.warning(f"Failed to process label for {window_name}: {e}")
+                with open(geojson_path, "r") as f:
+                    geojson_data = json.load(f)
+                features = geojson_data.get("features", [])
+                has_points = False
+                has_polygons = False
+                for feature in features:
+                    geom_type = feature.get("geometry", {}).get("type", "")
+                    if geom_type in ["Point", "MultiPoint"]:
+                        has_points = True
+                    elif geom_type in ["Polygon", "MultiPolygon"]:
+                        has_polygons = True
+                
+                logger.debug(f"Geometry detection for {window_name}: has_points={has_points}, has_polygons={has_polygons}")
+                
+                reference_tif = None
+                for layer_name in layers.keys():
+                    layer_dir = layers_dir / layer_name
+                    if layer_dir.exists():
+                        ref_tif = find_geotiff_in_layer(layer_dir)
+                        if ref_tif:
+                            reference_tif = ref_tif
+                            break
+                
+                if has_points and not has_polygons and reference_tif and label_colors:
+                    logger.debug(f"Object detection detected for {window_name}, will overlay points on image")
+                    # Object detection: overlay points on first layer image
+                    if result["layer_images"]:
+                        first_layer_name = list(result["layer_images"].keys())[0]
+                        first_layer_image = result["layer_images"][first_layer_name]
+                        overlay_output = output_dir / window_name / f"{first_layer_name}_with_detections.png"
+                        overlay_points_on_image(first_layer_image, overlay_output, geojson_path, reference_tif, label_colors)
+                        # Replace the original image with the overlaid version
+                        result["layer_images"][first_layer_name] = overlay_output
+                        logger.info(f"Overlaid detection points on {first_layer_name} for {window_name}")
+                elif has_polygons and reference_tif and label_colors:
+                    # Segmentation: generate mask
+                    mask_output = output_dir / window_name / "label_mask.png"
+                    generate_mask_from_geojson(geojson_path, mask_output, reference_tif, label_colors)
+                    result["mask_path"] = mask_output
 
     return result
 

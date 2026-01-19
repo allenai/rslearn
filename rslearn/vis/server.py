@@ -17,15 +17,13 @@ from pathlib import Path
 from rslearn.log_utils import get_logger
 from rslearn.vis.utils import (
     detect_label_classes,
-    find_geotiff_in_layer,
     generate_label_colors,
-    generate_mask_from_geojson,
     process_window,
     save_html_to_outputs,
-    visualize_tif,
 )
 
 logger = get_logger(__name__)
+
 
 def get_window_dirs(dataset_path):
     """Get list of window directories from dataset path.
@@ -50,7 +48,8 @@ def get_window_dirs(dataset_path):
 
 
 def sample_windows(window_dirs, max_samples):
-    """Randomly sample windows.
+    """
+    Sample up to max_samples windows from window_dirs.
 
     Args:
         window_dirs: List of window directory paths
@@ -59,66 +58,115 @@ def sample_windows(window_dirs, max_samples):
     Returns:
         List of sampled window directory paths
     """
-    if max_samples is None or len(window_dirs) <= max_samples:
+    if len(window_dirs) <= max_samples:
         return window_dirs
 
     return sorted(random.sample(window_dirs, max_samples))
 
 
-def format_window_info(metadata):
-    """Format window metadata for display.
-
-    Args:
-        metadata: Dictionary with window metadata
-
-    Returns:
-        Tuple of (formatted info HTML, lat, lon) for Google Maps link
-    """
-    if not metadata:
-        return "Unknown", None, None
-    parts = []
-    lat = None
-    lon = None
-    if "options" in metadata:
-        opts = metadata["options"]
-        if "latitude" in opts and "longitude" in opts:
-            lat = opts["latitude"]
-            lon = opts["longitude"]
-            parts.append(f"Lat: {lat:.4f}, Lon: {lon:.4f}")
-        if "time_range_start" in opts and "time_range_end" in opts:
-            start = opts["time_range_start"][:10]  # Just date part
-            end = opts["time_range_end"][:10]
-            parts.append(f"Time: {start} to {end}")
-    return "<br>".join(parts), lat, lon
-
-
-def generate_html(window_results, layers, output_dir, html_output_path, layer_order=None, label_colors=None):
-    """Generate HTML gallery for visualization.
-
-    Args:
-        window_results: List of dictionaries with window processing results
-        layers: Dictionary of layer configs (already filtered if --layers was specified)
-        output_dir: Directory where PNGs are stored
-        html_output_path: Path to save HTML file
-        layer_order: Optional list of layer names specifying which layers to display and in what order
-        label_colors: Dictionary mapping label class names to RGB color tuples
-    """
-    output_dir = Path(output_dir)
-    html_output_path = Path(html_output_path)
-    html_dir = html_output_path.parent
-
-    # Get layer names from the provided layers dict (already filtered if --layers was specified)
-    all_layer_names = list(layers.keys())
+class VisualizationServer:
+    """Base class for visualization servers.
     
-    if layer_order:
-        # Use only the specified layers in the specified order
-        # Only include layers that exist in the layers dict
-        layer_names = [name for name in layer_order if name in all_layer_names]
-    else:
-        # Default: alphabetical order of all available layers
-        layer_names = sorted(all_layer_names)
+    Dataset-specific classes can inherit from this and override methods
+    like format_window_info() to handle dataset-specific metadata formats.
+    """
+    
+    # Default layers to visualize (None means use all layers)
+    layers = None
+    
+    # Task type for this dataset (classification, regression, detection, segmentation)
+    task_type = None
+    
+    # Normalization methods per layer (dict mapping layer_name -> normalization_method)
+    normalization = None
+    
+    # Bands per layer (dict mapping layer_name -> list of band indices (1-indexed))
+    bands = None
+    
+    def format_window_info(self, metadata):
+        """Format window metadata for display.
+        
+        This method can be overridden by dataset-specific classes to handle
+        different metadata formats.
 
-    html_content = """<!DOCTYPE html>
+        Args:
+            metadata: Dictionary with window metadata
+
+        Returns:
+            Tuple of (formatted info HTML, lat, lon) for Google Maps link
+        """
+        if not metadata:
+            return "Unknown", None, None
+        parts = []
+        lat = None
+        lon = None
+        
+        # Check for lat/lon in options (legacy format) or extract from bounds/name
+        if "options" in metadata:
+            opts = metadata["options"]
+            if "latitude" in opts and "longitude" in opts:
+                lat = opts["latitude"]
+                lon = opts["longitude"]
+                parts.append(f"Lat: {lat:.4f}, Lon: {lon:.4f}")
+            if "time_range_start" in opts and "time_range_end" in opts:
+                start = opts["time_range_start"][:10]  # Just date part
+                end = opts["time_range_end"][:10]
+                parts.append(f"Time: {start} to {end}")
+        
+        # Handle standard rslearn format: time_range at top level
+        if "time_range" in metadata and metadata["time_range"]:
+            start = metadata["time_range"][0][:10]  # Just date part
+            end = metadata["time_range"][1][:10]
+            parts.append(f"Time: {start} to {end}")
+        
+        # Extract lat/lon from window name if present (format: name_lat_lon_...)
+        if lat is None and lon is None and "name" in metadata:
+            name = metadata["name"]
+            # Try to extract coordinates from name (e.g., "15_0.3788750002417029_35.034375000140685")
+            parts_split = name.split("_")
+            if len(parts_split) >= 3:
+                try:
+                    # Try parsing as lat, lon (order may vary, but typically lon first, then lat)
+                    potential_lon = float(parts_split[-2])
+                    potential_lat = float(parts_split[-1])
+                    # Validate reasonable lat/lon ranges
+                    if -180 <= potential_lon <= 180 and -90 <= potential_lat <= 90:
+                        lon = potential_lon
+                        lat = potential_lat
+                        parts.insert(0, f"Lat: {lat:.4f}, Lon: {lon:.4f}")
+                except (ValueError, IndexError):
+                    pass
+        
+        return "<br>".join(parts) if parts else "Unknown", lat, lon
+    
+    def generate_html(self, window_results, layers, output_dir, html_output_path, layer_order=None, label_colors=None, task_type=None):
+        """Generate HTML gallery for visualization.
+
+        Args:
+            window_results: List of dictionaries with window processing results
+            layers: Dictionary of layer configs (filtered based on server class layers)
+            output_dir: Directory where PNGs are stored
+            html_output_path: Path to save HTML file
+            layer_order: Optional list of layer names specifying which layers to display and in what order
+            label_colors: Dictionary mapping label class names to RGB color tuples
+            task_type: Task type (classification, regression, detection, segmentation)
+        """
+        output_dir = Path(output_dir)
+        html_output_path = Path(html_output_path)
+        html_dir = html_output_path.parent
+
+        # Get layer names from the provided layers dict (filtered based on server class layers)
+        all_layer_names = list(layers.keys())
+        
+        if layer_order:
+            # Use only the specified layers in the specified order
+            # Only include layers that exist in the layers dict
+            layer_names = [name for name in layer_order if name in all_layer_names]
+        else:
+            # Default: alphabetical order of all available layers
+            layer_names = sorted(all_layer_names)
+
+        html_content = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -214,93 +262,80 @@ def generate_html(window_results, layers, output_dir, html_output_path, layer_or
 <body>
     <h1>rslearn Dataset Visualization</h1>
 """
-    
-    # Generate legend dynamically from label colors
-    if label_colors:
-        html_content += """
+        
+        # Generate legend dynamically from label colors (skip for classification tasks)
+        if label_colors and task_type != "classification":
+            html_content += """
     <div class="legend">
         <h3>Mask Color Legend</h3>
         <div class="legend-items">
 """
-        # Sort classes for consistent display
-        sorted_labels = sorted(label_colors.keys())
-        for label in sorted_labels:
-            color = label_colors[label]
-            color_hex = f"rgb({color[0]}, {color[1]}, {color[2]})"
-            html_content += f"""
+            # Sort classes for consistent display
+            sorted_labels = sorted(label_colors.keys())
+            for label in sorted_labels:
+                color = label_colors[label]
+                color_hex = f"rgb({color[0]}, {color[1]}, {color[2]})"
+                html_content += f"""
             <div class="legend-item">
                 <div class="legend-color" style="background: {color_hex};"></div>
                 <span>{label}</span>
             </div>
 """
-        html_content += """
+            html_content += """
         </div>
     </div>
 """
 
-    html_content += """
+        html_content += """
 """
 
-    # Add each window section
-    for result in window_results:
-        window_name = result["window_name"]
-        window_info, lat, lon = format_window_info(result.get("metadata"))
-        
-        # Add Google Maps link if lat/lon available
-        maps_link_html = ""
-        if lat is not None and lon is not None:
-            maps_url = f"https://www.google.com/maps?q={lat},{lon}"
-            maps_link_html = f' <a href="{maps_url}" target="_blank" style="color: #3498db; text-decoration: none; margin-left: 10px;">🗺️ View on Google Maps</a>'
+        # Add each window section
+        for result in window_results:
+            window_name = result["window_name"]
+            window_info, lat, lon = self.format_window_info(result.get("metadata"))
+            
+            # Add Google Maps link if lat/lon available
+            maps_link_html = ""
+            if lat is not None and lon is not None:
+                maps_url = f"https://www.google.com/maps?q={lat},{lon}"
+                maps_link_html = f' <a href="{maps_url}" target="_blank" style="color: #3498db; text-decoration: none; margin-left: 10px;">🗺️ View on Google Maps</a>'
 
-        html_content += f"""
+            html_content += f"""
     <div class="window-section">
         <div class="window-header">{window_name}{maps_link_html}</div>
         <div class="window-info">{window_info}</div>
         <div class="window-grid">
 """
 
-        # Add layer images
-        for layer_name in layer_names:
-            if layer_name in result["layer_images"]:
-                img_path = Path(result["layer_images"][layer_name])
-                # Calculate relative path from HTML file's directory
-                try:
+            # Add layer images
+            for layer_name in layer_names:
+                if layer_name in result["layer_images"]:
+                    img_path = Path(result["layer_images"][layer_name])
+                    # Calculate relative path from HTML file's directory
                     rel_path = img_path.relative_to(html_dir)
-                    # Convert to string with forward slashes for URLs
                     rel_path_str = rel_path.as_posix()
-                except ValueError:
-                    # If paths are on different drives (Windows), fall back to absolute
-                    # This shouldn't happen in normal usage
-                    logger.warning(f"Could not compute relative path for {img_path} from {html_dir}")
-                    rel_path_str = str(img_path)
-                html_content += f"""
+                    html_content += f"""
             <div class="image-container">
                 <img src="{rel_path_str}" alt="{layer_name}">
                 <div class="image-label">{layer_name}</div>
             </div>
 """
 
-        # Add mask or label text if available (once per window, not per layer)
-        if result.get("mask_path"):
-            mask_path = Path(result["mask_path"])
-            # Calculate relative path from HTML file's directory
-            try:
+            # Add mask or label text if available (once per window, not per layer)
+            if result.get("mask_path"):
+                mask_path = Path(result["mask_path"])
+                # Calculate relative path from HTML file's directory
                 rel_path = mask_path.relative_to(html_dir)
-                # Convert to string with forward slashes for URLs
                 rel_path_str = rel_path.as_posix()
-            except ValueError:
-                # If paths are on different drives (Windows), fall back to absolute
-                logger.warning(f"Could not compute relative path for {mask_path} from {html_dir}")
-                rel_path_str = str(mask_path)
-            html_content += f"""
+                html_content += f"""
             <div class="image-container">
                 <img src="{rel_path_str}" alt="Label Mask">
                 <div class="image-label">Label Mask</div>
             </div>
 """
-        elif result.get("label_text"):
-            label_text = result["label_text"]
-            html_content += f"""
+            elif result.get("label_text"):
+                label_text = result["label_text"]
+                html_content += f"""
             <div class="image-container">
                 <div style="padding: 40px; text-align: center; font-size: 24px; font-weight: bold; color: #333;">
                     Label: {label_text}
@@ -308,174 +343,185 @@ def generate_html(window_results, layers, output_dir, html_output_path, layer_or
             </div>
 """
 
-        html_content += """
+            html_content += """
         </div>
     </div>
 """
 
-    html_content += """
+        html_content += """
 </body>
 </html>
 """
 
-    # Write HTML file
-    html_output_path.parent.mkdir(parents=True, exist_ok=True)
-    html_output_path.write_text(html_content, encoding="utf-8")
-    logger.info(f"HTML gallery saved to {html_output_path}")
+        html_output_path.parent.mkdir(parents=True, exist_ok=True)
+        html_output_path.write_text(html_content, encoding="utf-8")
+        logger.info(f"HTML gallery saved to {html_output_path}")
+    
+    def run(self, dataset_path, config_path, max_samples=100, port=8000, host="0.0.0.0", save_html=False):
+        """Run the visualization server.
+        
+        Args:
+            dataset_path: Path to dataset windows directory
+            config_path: Path to config.json file
+            max_samples: Maximum number of windows to sample
+            port: Port to serve on
+            host: Host to bind to
+            save_html: Whether to save HTML file to outputs directory
+        """
+        with open(config_path, "r") as f:
+            config = json.load(f)
+
+        layers_dict = config.get("layers", {})
+        logger.info(f"Task type: {self.task_type}")
+        
+        # Exclude label layer from visualization layers, we visualize that later
+        all_visualization_layers = {k: v for k, v in layers_dict.items() if k != "label"}
+        
+        # Use self.layers if defined, otherwise use all layers
+        if self.layers is not None:
+            # Validate that all specified layers exist
+            invalid_layers = [layer for layer in self.layers if layer not in all_visualization_layers]
+            if invalid_layers:
+                logger.error(f"Invalid layer names in server class: {invalid_layers}")
+                logger.error(f"Available layers: {sorted(all_visualization_layers.keys())}")
+                raise ValueError(f"Invalid layer names: {invalid_layers}")
+            
+            visualization_layers = {k: all_visualization_layers[k] for k in self.layers if k in all_visualization_layers}
+            logger.info(f"Using layers from server class: {list(visualization_layers.keys())}")
+        else:
+            visualization_layers = all_visualization_layers
+            logger.info(f"Using all available layers: {list(visualization_layers.keys())}")
+
+        window_dirs = get_window_dirs(dataset_path)
+        logger.info(f"Found {len(window_dirs)} windows")
+
+        # Detect label classes from GeoJSON files (only needed for segmentation and detection tasks)
+        label_classes = set()
+        label_colors = {}
+        if self.task_type in ("segmentation", "detection"):
+            label_classes = detect_label_classes(window_dirs)
+            label_colors = generate_label_colors(label_classes)
+            if label_classes:
+                logger.info(f"Detected {len(label_classes)} label classes: {sorted(label_classes)}")
+                logger.info(f"Generated color mapping:")
+                for label, color in sorted(label_colors.items()):
+                    logger.info(f"  {label}: RGB{color}")
+            else:
+                logger.info("No label classes detected")
+
+        # Create output directory (persistent, not temporary, since server runs indefinitely)
+        output_dir = Path(tempfile.mkdtemp(prefix="rslearn_vis_"))
+        logger.info(f"Output directory: {output_dir}")
+
+        # Register cleanup function
+        def cleanup():
+            if output_dir.exists():
+                shutil.rmtree(output_dir, ignore_errors=True)
+                logger.info(f"Cleaned up {output_dir}")
+
+        atexit.register(cleanup)
+
+        # Get expected layer names (only specified layers if layers was provided)
+        expected_layer_names = set(visualization_layers.keys())
+        logger.info(f"Expecting {len(expected_layer_names)} layers: {sorted(expected_layer_names)}")
+
+        # Process windows and filter to only keep those with all required layers
+        window_results = []
+        processed_count = 0
+        skipped_count = 0
+        
+        # Shuffle windows for random sampling
+        window_dirs_shuffled = list(window_dirs)
+        random.shuffle(window_dirs_shuffled)
+        
+        for window_dir in window_dirs_shuffled:
+            if len(window_results) >= max_samples:
+                break
+                
+            try:
+                result = process_window(window_dir, visualization_layers, output_dir, normalization=self.normalization, bands=self.bands, label_colors=label_colors, task_type=self.task_type)
+                processed_count += 1
+                
+                # Check if window has all required layers
+                found_layer_names = set(result["layer_images"].keys())
+                if found_layer_names == expected_layer_names:
+                    window_results.append(result)
+                    logger.debug(f"Accepted window {result['window_name']} with all {len(expected_layer_names)} layers")
+                else:
+                    skipped_count += 1
+                    missing_layers = expected_layer_names - found_layer_names
+                    logger.debug(f"Skipped window {result['window_name']} - missing layers: {sorted(missing_layers)}")
+            except Exception as e:
+                processed_count += 1
+                skipped_count += 1
+                logger.error(f"Failed to process window {window_dir}: {e}")
+
+        logger.info(f"Processed {processed_count} windows, kept {len(window_results)} with all layers, skipped {skipped_count}")
+        
+        if len(window_results) < max_samples:
+            logger.warning(f"Only found {len(window_results)} windows with all required layers (requested {max_samples})")
+        
+        # Log image generation results for debugging
+        total_images = sum(len(r.get("layer_images", {})) for r in window_results)
+        total_masks = sum(1 for r in window_results if r.get("mask_path"))
+        logger.info(f"Generated {total_images} layer images and {total_masks} masks")
+
+        # Generate HTML
+        html_path = output_dir / "index.html"
+        # Pass the layer order (which layers to display and in what order)
+        layer_order = self.layers if self.layers else None
+        self.generate_html(window_results, visualization_layers, output_dir, html_path, layer_order=layer_order, label_colors=label_colors, task_type=self.task_type)
+        
+        # Save HTML to outputs directory if requested
+        if save_html:
+            save_html_to_outputs(html_path, dataset_path, host, port)
+
+        # Start HTTP server
+        class Handler(http.server.SimpleHTTPRequestHandler):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, directory=str(output_dir), **kwargs)
+
+        try:
+            with socketserver.TCPServer((host, port), Handler) as httpd:
+                logger.info(f"Serving on http://{host}:{port}")
+                logger.info(f"Open http://localhost:{port} in your browser")
+                httpd.serve_forever()
+        except OSError as e:
+            if e.errno == 48:  # Address already in use
+                logger.error(f"Port {port} is already in use. Try a different port with --port")
+                raise
+            raise
 
 
 def main():
-    """Main entry point for visualization server."""
     parser = argparse.ArgumentParser(description="Visualize rslearn dataset in a web browser")
     parser.add_argument("dataset_path", type=str, help="Path to dataset windows directory")
     parser.add_argument("config_path", type=str, help="Path to config.json file")
     parser.add_argument("--max_samples", type=int, default=100, help="Maximum number of windows to sample")
     parser.add_argument("--port", type=int, default=8000, help="Port to serve on (default: 8000)")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
-    parser.add_argument("--normalize", type=str, default="sentinel2_rgb", choices=["sentinel2_rgb", "percentile", "minmax"], help="Normalization method")
-    parser.add_argument("--layers", type=str, nargs="+", default=None, help="Specific layers to include in visualization, in the desired order (e.g., --layers pre_sentinel2 post_sentinel2). If not specified, all layers are shown.")
     parser.add_argument("--save_html", action="store_true", help="Save HTML file to outputs/{dataset_name}_{YYYYMMDD}.html")
+    parser.add_argument("--server-class", type=str, required=True, choices=["kenya_crop", "landslide"], help="Server class to use (options: kenya_crop, landslide)")
 
     args = parser.parse_args()
 
-    # Load config
-    with open(args.config_path, "r") as f:
-        config = json.load(f)
-
-    layers = config.get("layers", {})
-    # Check if this is a classification task (has label_raster layer)
-    is_classification_task = "label_raster" in layers
-    if is_classification_task:
-        logger.info("Classification task detected (label_raster layer found)")
-    
-    # Exclude label layer from visualization layers
-    all_visualization_layers = {k: v for k, v in layers.items() if k != "label"}
-    
-    # Filter to only specified layers if --layers is provided
-    if args.layers:
-        # Validate that all specified layers exist
-        invalid_layers = [layer for layer in args.layers if layer not in all_visualization_layers]
-        if invalid_layers:
-            logger.error(f"Invalid layer names specified: {invalid_layers}")
-            logger.error(f"Available layers: {sorted(all_visualization_layers.keys())}")
-            raise ValueError(f"Invalid layer names: {invalid_layers}")
-        
-        # Filter to only specified layers, preserving the order
-        visualization_layers = {k: all_visualization_layers[k] for k in args.layers if k in all_visualization_layers}
-        logger.info(f"Filtering to {len(visualization_layers)} specified layers: {list(visualization_layers.keys())}")
+    if args.server_class == "kenya_crop":
+        from rslearn.vis.dataset_servers import KenyaCropVisualizationServer
+        server = KenyaCropVisualizationServer()
+    elif args.server_class == "landslide":
+        from rslearn.vis.dataset_servers import LandslideVisualizationServer
+        server = LandslideVisualizationServer()
     else:
-        visualization_layers = all_visualization_layers
-
-    # Get window directories
-    window_dirs = get_window_dirs(args.dataset_path)
-    logger.info(f"Found {len(window_dirs)} windows")
-
-    # Detect label classes from GeoJSON files
-    label_classes = detect_label_classes(window_dirs)
-    label_colors = generate_label_colors(label_classes)
-    if label_classes:
-        logger.info(f"Detected {len(label_classes)} label classes: {sorted(label_classes)}")
-        logger.info(f"Generated color mapping:")
-        for label, color in sorted(label_colors.items()):
-            logger.info(f"  {label}: RGB{color}")
-    else:
-        logger.info("No label classes detected")
-
-    # Create output directory (persistent, not temporary, since server runs indefinitely)
-    output_dir = Path(tempfile.mkdtemp(prefix="rslearn_vis_"))
-    logger.info(f"Output directory: {output_dir}")
-
-    # Register cleanup function
-    def cleanup():
-        if output_dir.exists():
-            shutil.rmtree(output_dir, ignore_errors=True)
-            logger.info(f"Cleaned up {output_dir}")
-
-    atexit.register(cleanup)
-
-    # Get expected layer names (only specified layers if --layers was provided)
-    expected_layer_names = set(visualization_layers.keys())
-    logger.info(f"Expecting {len(expected_layer_names)} layers: {sorted(expected_layer_names)}")
-
-    # Process windows and filter to only keep those with all required layers
-    window_results = []
-    processed_count = 0
-    skipped_count = 0
-    
-    # Shuffle windows for random sampling
-    window_dirs_shuffled = list(window_dirs)
-    random.shuffle(window_dirs_shuffled)
-    
-    for window_dir in window_dirs_shuffled:
-        if len(window_results) >= args.max_samples:
-            break
-            
-        try:
-            result = process_window(window_dir, visualization_layers, output_dir, args.normalize, label_colors, is_classification_task=is_classification_task)
-            processed_count += 1
-            
-            # Check if window has all required layers
-            found_layer_names = set(result["layer_images"].keys())
-            if found_layer_names == expected_layer_names:
-                window_results.append(result)
-                logger.debug(f"Accepted window {result['window_name']} with all {len(expected_layer_names)} layers")
-            else:
-                skipped_count += 1
-                missing_layers = expected_layer_names - found_layer_names
-                logger.debug(f"Skipped window {result['window_name']} - missing layers: {sorted(missing_layers)}")
-        except Exception as e:
-            processed_count += 1
-            skipped_count += 1
-            logger.error(f"Failed to process window {window_dir}: {e}")
-
-    logger.info(f"Processed {processed_count} windows, kept {len(window_results)} with all layers, skipped {skipped_count}")
-    
-    if len(window_results) < args.max_samples:
-        logger.warning(f"Only found {len(window_results)} windows with all required layers (requested {args.max_samples})")
-    
-    # Log image generation results for debugging
-    total_images = sum(len(r.get("layer_images", {})) for r in window_results)
-    total_masks = sum(1 for r in window_results if r.get("mask_path"))
-    logger.info(f"Generated {total_images} layer images and {total_masks} masks")
-
-    # Generate HTML
-    html_path = output_dir / "index.html"
-    # Pass the layer order (which layers to display and in what order)
-    layer_order = args.layers if args.layers else None
-    generate_html(window_results, visualization_layers, output_dir, html_path, layer_order=layer_order, label_colors=label_colors)
-    
-    # Save HTML to outputs directory if requested
-    if args.save_html:
-        save_html_to_outputs(html_path, args.dataset_path, args.host, args.port)
-
-    # Start HTTP server
-    class Handler(http.server.SimpleHTTPRequestHandler):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, directory=str(output_dir), **kwargs)
-
-    try:
-        with socketserver.TCPServer((args.host, args.port), Handler) as httpd:
-            logger.info(f"Serving on http://{args.host}:{args.port}")
-            logger.info(f"Open http://localhost:{args.port} in your browser")
-            logger.info(f"Press Ctrl+C to stop the server")
-            try:
-                httpd.serve_forever()
-            except KeyboardInterrupt:
-                logger.info("\nShutting down server")
-                cleanup()
-    except OSError as e:
-        if e.errno == 48:  # Address already in use
-            logger.error(f"Port {args.port} is already in use. Please:")
-            logger.error(f"  1. Stop the existing server on that port, or")
-            logger.error(f"  2. Use a different port with --port <port_number>")
-            cleanup()
-            raise
-        else:
-            cleanup()
-            raise
+        raise ValueError(f"Unknown server class: {args.server_class}")
+    server.run(
+        dataset_path=args.dataset_path,
+        config_path=args.config_path,
+        max_samples=args.max_samples,
+        port=args.port,
+        host=args.host,
+        save_html=args.save_html
+    )
 
 
 if __name__ == "__main__":
     main()
-
-
