@@ -11,6 +11,7 @@ import rasterio
 from PIL import Image, ImageDraw
 from rasterio.warp import transform
 from rasterio.crs import CRS
+import rasterio.transform
 
 from rslearn.log_utils import get_logger
 
@@ -58,7 +59,7 @@ def get_rgb_bands_from_config(layer_config):
         layer_config: Layer config dictionary with band_sets
         
     Returns:
-        List of band indices (1-indexed) for RGB, or None if not determinable
+        List of band indices (1-indexed) for RGB in order [Red, Green, Blue], or None if not determinable
     """
     band_sets = layer_config.get("band_sets", [])
     if not band_sets:
@@ -69,14 +70,16 @@ def get_rgb_bands_from_config(layer_config):
     if not bands:
         return None
     
-    rgb_band_names = ["B04", "B03", "B02"]
-    rgb_indices = []
-    for band_name in rgb_band_names:
-        if band_name in bands:
-            rgb_indices.append(bands.index(band_name) + 1)
+    # For RGB visualization, we need: Red=B04, Green=B03, Blue=B02
+    # Find the indices of these bands in the config
+    rgb_band_map = {"B04": None, "B03": None, "B02": None}
+    for i, band_name in enumerate(bands, start=1):
+        if band_name in rgb_band_map:
+            rgb_band_map[band_name] = i
     
-    if len(rgb_indices) == 3:
-        return rgb_indices
+    # Return in RGB order: [Red_idx, Green_idx, Blue_idx] = [B04_idx, B03_idx, B02_idx]
+    if all(rgb_band_map[bn] is not None for bn in ["B04", "B03", "B02"]):
+        return [rgb_band_map["B04"], rgb_band_map["B03"], rgb_band_map["B02"]]
     return None
 
 
@@ -93,22 +96,27 @@ def visualize_tif(input_path, output_path, bands=None, normalize_method="sentine
     with rasterio.open(input_path) as src:
         if bands is None and layer_config:
             bands = get_rgb_bands_from_config(layer_config)
+            if bands:
+                logger.debug(f"Using config bands {bands} for RGB visualization")
         
         if bands is None:
             if src.count >= 4:
-                bands = [3, 2, 1]
+                bands = [3, 2, 1]  # Default fallback
             elif src.count >= 3:
                 bands = [1, 2, 3]
             elif src.count == 1:
                 bands = [1]
             else:
                 raise ValueError(f"Unexpected number of bands: {src.count}")
+            logger.debug(f"Using default bands {bands} for RGB visualization (band count: {src.count})")
 
         if len(bands) == 1:
             band_data = src.read(bands[0])
             band_normalized = normalize_band(band_data, method=normalize_method)
             img = Image.fromarray(band_normalized, mode="L")
         else:
+            # Read bands in order: [Red_band, Green_band, Blue_band]
+            # and stack them so rgb_arr[:,:,0]=Red, rgb_arr[:,:,1]=Green, rgb_arr[:,:,2]=Blue
             rgb = []
             for b in bands[:3]:
                 band_data = src.read(b)
@@ -211,6 +219,136 @@ def generate_label_colors(label_classes):
     return label_colors
 
 
+def overlay_points_on_image(image_path, output_path, geojson_path, reference_tif_path, label_colors):
+    """Overlay point geometries from GeoJSON onto an existing image.
+    
+    Args:
+        image_path: Path to input PNG image
+        output_path: Path to save output PNG with overlaid points
+        geojson_path: Path to data.geojson file with Point geometries
+        reference_tif_path: Path to reference GeoTIFF for coordinate transformation
+        label_colors: Dictionary mapping label class names to RGB color tuples
+    """
+    with open(geojson_path, "r") as f:
+        geojson_data = json.load(f)
+
+    features = geojson_data.get("features", [])
+    if not features:
+        logger.warning(f"No features found in {geojson_path}")
+        return
+
+    # Load the image
+    img = Image.open(image_path).convert("RGB")
+    draw = ImageDraw.Draw(img)
+    width, height = img.size
+
+    # Get CRS and transform info from reference GeoTIFF
+    try:
+        with rasterio.open(reference_tif_path) as src:
+            bounds = src.bounds
+            tif_crs = src.crs
+            tif_transform = src.transform
+            min_x, min_y, max_x, max_y = bounds.left, bounds.bottom, bounds.right, bounds.top
+            logger.debug(f"Reference GeoTIFF bounds: [{min_x:.2f}, {min_y:.2f}, {max_x:.2f}, {max_y:.2f}], CRS: {tif_crs}, image size: {width}x{height}")
+    except Exception as e:
+        logger.error(f"Could not read reference GeoTIFF: {e}")
+        return
+
+    # Parse GeoJSON CRS (same logic as generate_mask_from_geojson)
+    geojson_crs = geojson_data.get("crs", {})
+    src_crs = None
+    
+    if geojson_crs:
+        crs_props = geojson_crs.get("properties", {})
+        crs_name = crs_props.get("name", "")
+        if "EPSG" in crs_name or "epsg" in crs_name:
+            import re
+            match = re.search(r"EPSG[:/](\d+)", crs_name, re.IGNORECASE)
+            if match:
+                src_crs = CRS.from_epsg(int(match.group(1)))
+    
+    if src_crs is None:
+        props = geojson_data.get("properties", {})
+        crs_str = props.get("crs", "")
+        if crs_str and ("EPSG" in crs_str or "epsg" in crs_str):
+            import re
+            match = re.search(r"EPSG[:/](\d+)", crs_str, re.IGNORECASE)
+            if match:
+                src_crs = CRS.from_epsg(int(match.group(1)))
+    
+    if src_crs is None:
+        src_crs = CRS.from_epsg(4326)
+
+    # Collect points by label
+    points_by_label = defaultdict(list)
+    
+    for feature in features:
+        geometry = feature.get("geometry", {})
+        geom_type = geometry.get("type")
+        props = feature.get("properties", {})
+        label = props.get("label") or props.get("category") or props.get("class") or props.get("type") or "unknown"
+
+        if geom_type == "Point":
+            coordinates = geometry.get("coordinates", [])
+            if len(coordinates) >= 2:
+                points_by_label[label].append((coordinates[0], coordinates[1]))
+        elif geom_type == "MultiPoint":
+            for point_coords in geometry.get("coordinates", []):
+                if len(point_coords) >= 2:
+                    points_by_label[label].append((point_coords[0], point_coords[1]))
+
+    if not points_by_label:
+        logger.warning(f"No point geometries found in {geojson_path}")
+        return
+
+    total_points = sum(len(pts) for pts in points_by_label.values())
+    logger.info(f"Found {total_points} points in {len(points_by_label)} labels: {list(points_by_label.keys())}")
+
+    def coords_to_pixel(x, y):
+        px = int((x - min_x) / (max_x - min_x) * width) if max_x != min_x else width // 2
+        py = int((max_y - y) / (max_y - min_y) * height) if max_y != min_y else height // 2
+        return (px, py)
+
+    points_drawn = 0
+    points_out_of_bounds = 0
+    points_transform_failed = 0
+    
+    for label, point_list in points_by_label.items():
+        color = label_colors.get(label, (255, 0, 0))  # Default to red if color not found
+        
+        for x, y in point_list:
+            # Transform coordinates if CRS differs
+            if src_crs != tif_crs:
+                try:
+                    xs_transformed, ys_transformed = transform(src_crs, tif_crs, [x], [y])
+                    x_transformed, y_transformed = xs_transformed[0], ys_transformed[0]
+                except Exception as e:
+                    logger.warning(f"Failed to transform point coordinates for {label}: {e}")
+                    points_transform_failed += 1
+                    continue
+            else:
+                x_transformed, y_transformed = x, y
+
+            # Skip points that are out of bounds
+            if not (min_x <= x_transformed <= max_x and min_y <= y_transformed <= max_y):
+                points_out_of_bounds += 1
+                continue
+
+            px, py = coords_to_pixel(x_transformed, y_transformed)
+            # Draw point as a circle with radius 5 pixels
+            radius = 5
+            draw.ellipse([px - radius, py - radius, px + radius, py + radius], fill=color, outline=(255, 255, 255), width=2)
+            points_drawn += 1
+    
+    if points_drawn == 0:
+        logger.warning(f"No points drawn: {points_out_of_bounds} out of bounds, {points_transform_failed} transform failed, total points: {total_points}")
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(output_path)
+    logger.info(f"Overlaid {points_drawn} points on image {output_path.name}")
+
+
 def generate_mask_from_geojson(geojson_path, output_path, reference_tif_path, label_colors):
     """Generate a multi-class mask image from GeoJSON polygons.
 
@@ -290,8 +428,9 @@ def generate_mask_from_geojson(geojson_path, output_path, reference_tif_path, la
     
     logger.info(f"GeoJSON CRS: {src_crs}")
 
+    # Determine background color - use background label color if available, otherwise black
     background_labels = {"no_landslide", "background", "unknown"}
-    background_color = (0, 0, 0)
+    background_color = (0, 0, 0)  # Default to black
     for bg_label in background_labels:
         if bg_label in label_colors:
             background_color = label_colors[bg_label]
@@ -300,25 +439,14 @@ def generate_mask_from_geojson(geojson_path, output_path, reference_tif_path, la
     img = Image.new("RGB", (width, height), background_color)
     draw = ImageDraw.Draw(img)
 
-    draw_order = []
-    background_classes = []
-    buffer_classes = []
-    important_classes = []
+    # Drawing order: background labels first, then no_data (buffer), then all other labels alphabetically
+    # This ensures background labels are the base, no_data is the buffer, and other labels appear on top
+    all_labels = sorted(polygons_by_label.keys())
+    background_class_labels = [label for label in all_labels if label in background_labels]
+    no_data_label = ["no_data"] if "no_data" in all_labels else []
+    other_labels = [label for label in all_labels if label not in background_labels and label != "no_data"]
     
-    buffer_labels = {"no_data"}
-    important_labels = {"landslide"}
-    
-    for label in polygons_by_label.keys():
-        if label in background_labels:
-            background_classes.append(label)
-        elif label in buffer_labels:
-            buffer_classes.append(label)
-        elif label in important_labels:
-            important_classes.append(label)
-        else:
-            buffer_classes.append(label)
-    
-    draw_order = sorted(background_classes) + sorted(buffer_classes) + sorted(important_classes)
+    draw_order = background_class_labels + no_data_label + sorted(other_labels)
     
     logger.info(f"Drawing order: {draw_order}")
     polygons_drawn = 0
@@ -464,23 +592,55 @@ def process_window(window_dir, layers, output_dir, normalize_method="sentinel2_r
                 except Exception as e:
                     logger.warning(f"Failed to extract classification label for {window_name}: {e}")
             else:
-                # For segmentation tasks, generate mask
-                reference_tif = None
-                for layer_name in layers.keys():
-                    layer_dir = layers_dir / layer_name
-                    if layer_dir.exists():
-                        ref_tif = find_geotiff_in_layer(layer_dir)
-                        if ref_tif:
-                            reference_tif = ref_tif
-                            break
-
-                if reference_tif and label_colors:
-                    mask_output = output_dir / window_name / "label_mask.png"
-                    try:
-                        generate_mask_from_geojson(geojson_path, mask_output, reference_tif, label_colors)
-                        result["mask_path"] = mask_output
-                    except Exception as e:
-                        logger.warning(f"Failed to generate mask for {window_name}: {e}")
+                # Check if this is object detection (Point geometries) or segmentation (Polygon geometries)
+                try:
+                    with open(geojson_path, "r") as f:
+                        geojson_data = json.load(f)
+                    features = geojson_data.get("features", [])
+                    has_points = False
+                    has_polygons = False
+                    for feature in features:
+                        geom_type = feature.get("geometry", {}).get("type", "")
+                        if geom_type in ["Point", "MultiPoint"]:
+                            has_points = True
+                        elif geom_type in ["Polygon", "MultiPolygon"]:
+                            has_polygons = True
+                    
+                    logger.debug(f"Geometry detection for {window_name}: has_points={has_points}, has_polygons={has_polygons}")
+                    
+                    reference_tif = None
+                    for layer_name in layers.keys():
+                        layer_dir = layers_dir / layer_name
+                        if layer_dir.exists():
+                            ref_tif = find_geotiff_in_layer(layer_dir)
+                            if ref_tif:
+                                reference_tif = ref_tif
+                                break
+                    
+                    if has_points and not has_polygons and reference_tif and label_colors:
+                        logger.debug(f"Object detection detected for {window_name}, will overlay points on image")
+                        # Object detection: overlay points on first layer image
+                        if result["layer_images"]:
+                            first_layer_name = list(result["layer_images"].keys())[0]
+                            first_layer_image = result["layer_images"][first_layer_name]
+                            overlay_output = output_dir / window_name / f"{first_layer_name}_with_detections.png"
+                            try:
+                                overlay_points_on_image(first_layer_image, overlay_output, geojson_path, reference_tif, label_colors)
+                                # Replace the original image with the overlaid version
+                                result["layer_images"][first_layer_name] = overlay_output
+                                logger.info(f"Overlaid detection points on {first_layer_name} for {window_name}")
+                            except Exception as e:
+                                logger.warning(f"Failed to overlay points on image for {window_name}: {e}")
+                    elif has_polygons and reference_tif and label_colors:
+                        # Segmentation: generate mask
+                        mask_output = output_dir / window_name / "label_mask.png"
+                        try:
+                            generate_mask_from_geojson(geojson_path, mask_output, reference_tif, label_colors)
+                            result["mask_path"] = mask_output
+                        except Exception as e:
+                            logger.warning(f"Failed to generate mask for {window_name}: {e}")
+                except Exception as e:
+                    logger.warning(f"Failed to process label for {window_name}: {e}")
 
     return result
 
