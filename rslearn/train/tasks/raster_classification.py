@@ -18,6 +18,7 @@ from rslearn.train.model_context import (
     SampleMetadata,
 )
 
+from .classification import ClassificationMetric
 from .task import BasicTask
 
 
@@ -141,32 +142,21 @@ class RasterClassificationTask(BasicTask):
         kwargs.update(self.metric_kwargs)
 
         metrics = {
-            "Accuracy": MulticlassAccuracy(**kwargs),
+            "Accuracy": ClassificationMetric(MulticlassAccuracy(**kwargs)),
         }
 
         if self.enable_f1_metric:
-            metrics["F1"] = MulticlassF1Score(
-                num_classes=self.num_classes, average="macro"
+            metrics["F1"] = ClassificationMetric(
+                MulticlassF1Score(num_classes=self.num_classes, average="macro")
             )
             # Per-class F1
             for i in range(self.num_classes):
-                metrics[f"F1_cls_{i}"] = PerClassF1(
-                    num_classes=self.num_classes, class_idx=i
+                metrics[f"F1_cls_{i}"] = ClassificationMetric(
+                    MulticlassF1Score(num_classes=self.num_classes, average="none"),
+                    class_idx=i,
                 )
 
         return MetricCollection(metrics)
-
-
-class PerClassF1(MulticlassF1Score):
-    """Wrapper to report F1 for a specific class."""
-
-    def __init__(self, num_classes: int, class_idx: int, **kwargs: Any):
-        super().__init__(num_classes=num_classes, average="none", **kwargs)
-        self.class_idx = class_idx
-
-    def compute(self) -> torch.Tensor:
-        f1_per_class = super().compute()
-        return f1_per_class[self.class_idx]
 
 
 class RasterClassificationHead(Predictor):
