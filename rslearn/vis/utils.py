@@ -1,7 +1,9 @@
 """Utility functions for rslearn dataset visualization."""
 
 import json
+import shutil
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -279,6 +281,7 @@ def generate_mask_from_geojson(geojson_path, output_path, reference_tif_path, la
             bounds = src.bounds
             width, height = src.width, src.height
             tif_crs = src.crs
+            tif_transform = src.transform
             min_x, min_y, max_x, max_y = bounds.left, bounds.bottom, bounds.right, bounds.top
             logger.info(f"Reference GeoTIFF: {width}x{height}, CRS={tif_crs}, bounds=[{min_x:.2f}, {min_y:.2f}, {max_x:.2f}, {max_y:.2f}]")
     except Exception as e:
@@ -329,11 +332,12 @@ def generate_mask_from_geojson(geojson_path, output_path, reference_tif_path, la
 
         for polygon_coords in polygon_list:
             points = [(x, y) for x, y in polygon_coords]
+            src_crs_for_transform = src_crs
 
-            if src_crs != tif_crs:
+            if src_crs_for_transform != tif_crs:
                 try:
                     xs, ys = zip(*points)
-                    xs_transformed, ys_transformed = transform(src_crs, tif_crs, xs, ys)
+                    xs_transformed, ys_transformed = transform(src_crs_for_transform, tif_crs, xs, ys)
                     points_transformed = list(zip(xs_transformed, ys_transformed))
                 except Exception as e:
                     logger.warning(f"Failed to transform coordinates for {label}: {e}")
@@ -392,7 +396,7 @@ def find_geotiff_in_layer(layer_dir):
     return None
 
 
-def process_window(window_dir, layers, output_dir, normalize_method="sentinel2_rgb", label_colors=None):
+def process_window(window_dir, layers, output_dir, normalize_method="sentinel2_rgb", label_colors=None, is_classification_task=False):
     """Process a single window: generate PNGs for layers and mask.
 
     Args:
@@ -401,9 +405,10 @@ def process_window(window_dir, layers, output_dir, normalize_method="sentinel2_r
         output_dir: Directory to save generated PNGs
         normalize_method: Normalization method for raster visualization
         label_colors: Dictionary mapping label class names to RGB color tuples
+        is_classification_task: If True, extract text label instead of generating mask
 
     Returns:
-        Dictionary with layer names -> PNG paths and mask path if available
+        Dictionary with layer names -> PNG paths, mask path (if segmentation), or label_text (if classification)
     """
     window_dir = Path(window_dir)
     window_name = window_dir.name
@@ -445,22 +450,78 @@ def process_window(window_dir, layers, output_dir, normalize_method="sentinel2_r
     if label_dir.exists():
         geojson_path = label_dir / "data.geojson"
         if geojson_path.exists():
-            reference_tif = None
-            for layer_name in layers.keys():
-                layer_dir = layers_dir / layer_name
-                if layer_dir.exists():
-                    ref_tif = find_geotiff_in_layer(layer_dir)
-                    if ref_tif:
-                        reference_tif = ref_tif
-                        break
-
-            if reference_tif and label_colors:
-                mask_output = output_dir / window_name / "label_mask.png"
+            if is_classification_task:
+                # For classification tasks, extract text label
                 try:
-                    generate_mask_from_geojson(geojson_path, mask_output, reference_tif, label_colors)
-                    result["mask_path"] = mask_output
+                    with open(geojson_path, "r") as f:
+                        geojson_data = json.load(f)
+                    features = geojson_data.get("features", [])
+                    if features:
+                        props = features[0].get("properties", {})
+                        label_text = props.get("label") or props.get("category") or props.get("class") or props.get("type") or "unknown"
+                        result["label_text"] = label_text
+                        logger.debug(f"Classification label for {window_name}: {label_text}")
                 except Exception as e:
-                    logger.warning(f"Failed to generate mask for {window_name}: {e}")
+                    logger.warning(f"Failed to extract classification label for {window_name}: {e}")
+            else:
+                # For segmentation tasks, generate mask
+                reference_tif = None
+                for layer_name in layers.keys():
+                    layer_dir = layers_dir / layer_name
+                    if layer_dir.exists():
+                        ref_tif = find_geotiff_in_layer(layer_dir)
+                        if ref_tif:
+                            reference_tif = ref_tif
+                            break
+
+                if reference_tif and label_colors:
+                    mask_output = output_dir / window_name / "label_mask.png"
+                    try:
+                        generate_mask_from_geojson(geojson_path, mask_output, reference_tif, label_colors)
+                        result["mask_path"] = mask_output
+                    except Exception as e:
+                        logger.warning(f"Failed to generate mask for {window_name}: {e}")
 
     return result
 
+
+def save_html_to_outputs(html_path, dataset_path, host="0.0.0.0", port=8000):
+    """Save HTML file to outputs directory with dataset name and date.
+
+    Args:
+        html_path: Path to the HTML file to copy
+        dataset_path: Path to dataset windows directory (used to extract dataset name)
+        host: Server host (for log message)
+        port: Server port (for log message)
+
+    Returns:
+        Path to the saved HTML file
+    """
+    html_path = Path(html_path)
+    dataset_path_obj = Path(dataset_path)
+    
+    path_parts = dataset_path_obj.parts
+    dataset_name_parts = []
+    for i, part in enumerate(path_parts):
+        if part == "windows" and i > 0:
+            dataset_name_parts.append(path_parts[i - 1])
+            if i > 1:
+                dataset_name_parts.insert(0, path_parts[i - 2])
+            break
+    if not dataset_name_parts:
+        dataset_name_parts = [dataset_path_obj.parent.name]
+    dataset_name = "_".join(dataset_name_parts).replace("/", "_")
+    
+    date_str = datetime.now().strftime("%Y%m%d")
+    
+    outputs_dir = Path("outputs")
+    outputs_dir.mkdir(exist_ok=True)
+    
+    saved_html_path = outputs_dir / f"{dataset_name}_{date_str}.html"
+    
+    shutil.copy2(html_path, saved_html_path)
+    logger.info(f"Saved HTML to {saved_html_path}")
+    logger.info(f"Note: When opening the saved HTML directly, images may not load (they are in the temp directory)")
+    logger.info(f"The server at http://{host}:{port} serves the complete visualization with images")
+    
+    return saved_html_path

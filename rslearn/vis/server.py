@@ -12,7 +12,6 @@ import random
 import shutil
 import socketserver
 import tempfile
-from datetime import datetime
 from pathlib import Path
 
 from rslearn.log_utils import get_logger
@@ -22,6 +21,7 @@ from rslearn.vis.utils import (
     generate_label_colors,
     generate_mask_from_geojson,
     process_window,
+    save_html_to_outputs,
     visualize_tif,
 )
 
@@ -279,8 +279,9 @@ def generate_html(window_results, layers, output_dir, html_output_path, layer_or
                 <div class="image-label">{layer_name}</div>
             </div>
 """
-        # Add mask if available
-        if result["mask_path"]:
+
+        # Add mask or label text if available (once per window, not per layer)
+        if result.get("mask_path"):
             mask_path = Path(result["mask_path"])
             # Calculate relative path from HTML file's directory
             try:
@@ -295,6 +296,15 @@ def generate_html(window_results, layers, output_dir, html_output_path, layer_or
             <div class="image-container">
                 <img src="{rel_path_str}" alt="Label Mask">
                 <div class="image-label">Label Mask</div>
+            </div>
+"""
+        elif result.get("label_text"):
+            label_text = result["label_text"]
+            html_content += f"""
+            <div class="image-container">
+                <div style="padding: 40px; text-align: center; font-size: 24px; font-weight: bold; color: #333;">
+                    Label: {label_text}
+                </div>
             </div>
 """
 
@@ -323,7 +333,7 @@ def main():
     parser.add_argument("--port", type=int, default=8000, help="Port to serve on (default: 8000)")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
     parser.add_argument("--normalize", type=str, default="sentinel2_rgb", choices=["sentinel2_rgb", "percentile", "minmax"], help="Normalization method")
-    parser.add_argument("--layers", type=str, nargs="+", default=None, help="Specific layers to include in visualization, in the provided order (e.g., --layers pre_sentinel2 post_sentinel2). If not specified, all layers are shown.")
+    parser.add_argument("--layers", type=str, nargs="+", default=None, help="Specific layers to include in visualization, in the desired order (e.g., --layers pre_sentinel2 post_sentinel2). If not specified, all layers are shown.")
     parser.add_argument("--save_html", action="store_true", help="Save HTML file to outputs/{dataset_name}_{YYYYMMDD}.html")
 
     args = parser.parse_args()
@@ -333,6 +343,11 @@ def main():
         config = json.load(f)
 
     layers = config.get("layers", {})
+    # Check if this is a classification task (has label_raster layer)
+    is_classification_task = "label_raster" in layers
+    if is_classification_task:
+        logger.info("Classification task detected (label_raster layer found)")
+    
     # Exclude label layer from visualization layers
     all_visualization_layers = {k: v for k, v in layers.items() if k != "label"}
     
@@ -396,7 +411,7 @@ def main():
             break
             
         try:
-            result = process_window(window_dir, visualization_layers, output_dir, args.normalize, label_colors)
+            result = process_window(window_dir, visualization_layers, output_dir, args.normalize, label_colors, is_classification_task=is_classification_task)
             processed_count += 1
             
             # Check if window has all required layers
@@ -431,41 +446,7 @@ def main():
     
     # Save HTML to outputs directory if requested
     if args.save_html:
-        # Extract dataset name from dataset path
-        # The dataset_path points to the windows directory, so we need to go up to get dataset name
-        dataset_path_obj = Path(args.dataset_path)
-        # Extract meaningful name: use parent directory name or last part of path
-        # e.g., .../sample_landslide/20260114_positives/windows/... -> sample_landslide_20260114_positives
-        path_parts = dataset_path_obj.parts
-        # Find "windows" in path and use the part before it
-        dataset_name_parts = []
-        for i, part in enumerate(path_parts):
-            if part == "windows" and i > 0:
-                # Get the directory before "windows"
-                dataset_name_parts.append(path_parts[i - 1])
-                if i > 1:
-                    dataset_name_parts.insert(0, path_parts[i - 2])
-                break
-        if not dataset_name_parts:
-            # Fallback: use last directory name before windows directory
-            dataset_name_parts = [dataset_path_obj.parent.name]
-        dataset_name = "_".join(dataset_name_parts).replace("/", "_")
-        
-        # Get current date in YYYYMMDD format
-        date_str = datetime.now().strftime("%Y%m%d")
-        
-        # Create outputs directory if it doesn't exist
-        outputs_dir = Path("outputs")
-        outputs_dir.mkdir(exist_ok=True)
-        
-        # Save HTML file
-        saved_html_path = outputs_dir / f"{dataset_name}_{date_str}.html"
-        
-        # Copy the HTML file
-        shutil.copy2(html_path, saved_html_path)
-        logger.info(f"Saved HTML to {saved_html_path}")
-        logger.info(f"Note: When opening the saved HTML directly, images may not load (they are in the temp directory)")
-        logger.info(f"The server at http://{args.host}:{args.port} serves the complete visualization with images")
+        save_html_to_outputs(html_path, args.dataset_path, args.host, args.port)
 
     # Start HTTP server
     class Handler(http.server.SimpleHTTPRequestHandler):
