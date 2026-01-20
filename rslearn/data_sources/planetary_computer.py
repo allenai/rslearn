@@ -614,8 +614,6 @@ class CopDemGlo30(PlanetaryComputer):
         item.geometry = STGeometry(item.geometry.projection, item.geometry.shp, None)
         return item
 
-    def _get_search_time_range(
-        self, geometry: STGeometry
-    ) -> None:
+    def _get_search_time_range(self, geometry: STGeometry) -> None:
         # Copernicus DEM is static; do not filter STAC searches by time.
         return None

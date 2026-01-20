@@ -41,4 +41,3 @@ def test_cop_dem_glo_30_rejects_multiple_bands_in_context_band_set() -> None:
 
     with pytest.raises(ValueError, match="expected band set to have a single band"):
         CopDemGlo30(context=context)
-
