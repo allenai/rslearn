@@ -600,16 +600,21 @@ Available bands:
 - vv
 - vh
 
-### rslearn.data_sources.climate_data_store.ERA5LandMonthlyMeans
+### rslearn.data_sources.climate_data_store.ERA5Land
 
-This data source is for ingesting ERA5 land monthly averaged data from the Copernicus Climate Data Store.
+Base class for ingesting ERA5 land data from the Copernicus Climate Data Store.
 
-We recommend using the default number of workers (`--workers 0`, which means using the
-main process only) and batch size equal to the number of windows when preparing the
-ERA5LandMonthlyMeans dataset, as it will combine multiple geometries into a single CDS
-API request for each month to speed up dataset ingestion.
+An API key must be provided either in the data source configuration or via the CDSAPI_KEY
+environment variable. You can acquire an API key by registering at the Climate Data Store
+website (https://cds.climate.copernicus.eu/).
 
-Valid bands are the variable names listed [here](https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means?tab=download) - use the **API request** tool to check valid values. Note it is necessary to replace "_" with "-" in the variable names, e.g. `total_precipitation` becomes `total-precipitation`
+Valid bands are the variable names listed on the CDS dataset page (use the **API request**
+tool to check valid values). Note it is necessary to replace "_" with "-" in the variable
+names, e.g. `total_precipitation` becomes `total-precipitation`.
+
+**Performance:** Specifying the `bounds` parameter to limit the geographic extent of data
+retrieval is highly recommended, especially for hourly data, as downloading global data can
+be very slow and resource-intensive.
 
 The additional data source configuration looks like this:
 
@@ -617,9 +622,34 @@ The additional data source configuration looks like this:
 {
   // Optional API key. If not provided in the data source configuration, it must be set
   // via the CDSAPI_KEY environment variable.
-  "api_key": null
+  "api_key": null,
+  // Optional bounding box as [min_lon, min_lat, max_lon, max_lat]. Recommended to speed
+  // up ingestion, especially for hourly data.
+  // Example: [-122.4, 47.6, -122.3, 47.7]
+  "bounds": null
 }
 ```
+
+### rslearn.data_sources.climate_data_store.ERA5LandMonthlyMeans
+
+This data source is for ingesting ERA5 land monthly averaged data from the Copernicus
+Climate Data Store. This corresponds to the `reanalysis-era5-land-monthly-means` dataset.
+
+See rslearn.data_sources.climate_data_store.ERA5Land above for common configuration
+and usage information.
+
+Valid bands: See the [CDS dataset page](https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means?tab=download).
+
+### rslearn.data_sources.climate_data_store.ERA5LandHourly
+
+This data source is for ingesting ERA5 land hourly data from the Copernicus Climate Data
+Store. This corresponds to the `reanalysis-era5-land` dataset.
+
+See rslearn.data_sources.climate_data_store.ERA5Land above for common configuration
+and usage information. **Note:** The `bounds` parameter is especially important for hourly
+data to avoid very slow global downloads.
+
+Valid bands: See the [CDS dataset page](https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land?tab=download).
 
 ### rslearn.data_sources.copernicus.Copernicus
 
@@ -1119,6 +1149,50 @@ Available bands:
 - visual
 
 Note that B10 is not present in L2A.
+
+### rslearn.data_sources.planetary_computer.Naip
+
+NAIP imagery on Microsoft Planetary Computer. Direct materialization is supported.
+
+This data source uses the Planetary Computer `naip` collection, and reads the `image`
+asset which contains four bands: `R`, `G`, `B`, `NIR`.
+
+Note: NAIP provides a single 4-band GeoTIFF asset (`image`). Internally, rslearn will
+still ingest/read this full 4-band asset, but you can configure your raster layer band
+set to materialize any subset of `["R", "G", "B", "NIR"]` (for example `["NIR"]`).
+If you need a different asset/band mapping, use
+`rslearn.data_sources.planetary_computer.PlanetaryComputer` directly with a custom
+`asset_bands` mapping.
+
+```jsonc
+{
+  // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
+  "query": null,
+  "sort_by": null,
+  "sort_ascending": true,
+  "timeout_seconds": 10
+}
+```
+
+### rslearn.data_sources.planetary_computer.CopDemGlo30
+
+Copernicus DEM GLO-30 (30m) data on Microsoft Planetary Computer. Direct materialization
+is supported.
+
+This is a "static" dataset (no meaningful temporal coverage), so it ignores window time
+ranges when searching and matching STAC items.
+
+The Copernicus DEM items expose the DEM GeoTIFF as the `data` asset, and this data
+source maps it to a single band.
+
+```jsonc
+{
+  // Optional band name to use if the layer config is missing from context (default "DEM").
+  "band_name": "DEM",
+  // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
+  "timeout_seconds": 10
+}
+```
 
 ### rslearn.data_sources.usda_cdl.CDL
 
