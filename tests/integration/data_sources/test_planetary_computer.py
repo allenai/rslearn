@@ -11,7 +11,7 @@ from rslearn.config import (
     SpaceMode,
 )
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources.planetary_computer import Sentinel1, Sentinel2
+from rslearn.data_sources.planetary_computer import CopDemGlo30, Sentinel1, Sentinel2
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils import Projection, STGeometry
 
@@ -130,3 +130,23 @@ class TestSentinel2Pagination:
         assert len(all_items) > 1000, (
             f"Expected more than 1000 items, got {len(all_items)}"
         )
+
+
+def test_cop_dem_glo_30(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
+    """Test retrieving Copernicus DEM items without time filtering."""
+    band_name = "DEM"
+    data_source = CopDemGlo30(band_name=band_name)
+
+    query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
+    item_groups = data_source.get_items([seattle2020], query_config)[0]
+    item = item_groups[0][0]
+
+    tile_store_dir = UPath(tmp_path)
+    tile_store = DefaultTileStore(str(tile_store_dir))
+    tile_store.set_dataset_path(tile_store_dir)
+
+    layer_name = "layer"
+    data_source.ingest(
+        TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+    )
+    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
