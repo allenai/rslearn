@@ -238,15 +238,17 @@ class VisualizationServer:
             gap: 20px;
         }
         .image-container {
-            border: 1px solid #ddd;
             border-radius: 4px;
             overflow: hidden;
-            background: #fafafa;
+            background: #fff;
+            display: inline-block;
+            width: fit-content;
         }
         .image-container img {
-            width: 100%;
+            max-width: 100%;
             height: auto;
             display: block;
+            background: #fff;
         }
         .image-label {
             padding: 8px;
@@ -501,7 +503,7 @@ def main():
     parser.add_argument("--port", type=int, default=8000, help="Port to serve on (default: 8000)")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
     parser.add_argument("--save_html", action="store_true", help="Save HTML file to outputs/{dataset_name}_{YYYYMMDD}.html")
-    parser.add_argument("--server-class", type=str, required=True, choices=["kenya_crop", "landslide"], help="Server class to use (options: kenya_crop, landslide)")
+    parser.add_argument("--server-class", type=str, required=True, choices=["kenya_crop", "landslide", "s2_vessels"], help="Server class to use (options: kenya_crop, landslide, s2_vessels)")
 
     args = parser.parse_args()
 
@@ -511,6 +513,9 @@ def main():
     elif args.server_class == "landslide":
         from rslearn.vis.dataset_servers import LandslideVisualizationServer
         server = LandslideVisualizationServer()
+    elif args.server_class == "s2_vessels":
+        from rslearn.vis.dataset_servers import S2VesselsVisualizationServer
+        server = S2VesselsVisualizationServer()
     else:
         raise ValueError(f"Unknown server class: {args.server_class}")
     server.run(

@@ -101,3 +101,15 @@ class LandslideVisualizationServer(VisualizationServer):
         
         return "<br>".join(parts) if parts else "Unknown", lat, lon
 
+
+class S2VesselsVisualizationServer(VisualizationServer):
+    """Visualization server customized for Sentinel-2 Vessels datasets.
+    
+    This class handles the vessels dataset for object detection tasks.
+    """
+    
+    layers = ["sentinel2"]
+    task_type = "detection"
+    normalization = {"sentinel2": "sentinel2_rgb"}
+    bands = {"sentinel2": [3, 2, 1]}  # B04, B03, B02 for RGB (bands in order: B02, B03, B04, B08)
+
