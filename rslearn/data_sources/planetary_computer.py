@@ -63,6 +63,8 @@ class PlanetaryComputerStacClient(StacClient):
         # We always use PLANETARY_COMPUTER_LIMIT for the request because PC doesn't
         # support standard pagination, and we need to detect when we hit the limit
         # to switch to ID-based pagination.
+        # We could just start sorting by ID here and do pagination, but we treate it as
+        # a special case to avoid sorting since that seems to speed up the query.
         stac_items = super().search(
             collections=collections,
             bbox=bbox,
