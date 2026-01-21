@@ -272,6 +272,73 @@ class TestMosaic:
         ]
 
 
+class TestMosaicCompositingOverlaps:
+    """Tests for the mosaic_compositing_overlaps option in QueryConfig."""
+
+    @pytest.fixture
+    def six_items(self) -> list[Item]:
+        """Create six items that need to be mosaicked.
+
+        Items are arranged in two parts (left and right halves of the window).
+        Three items cover each half.
+        """
+        part1 = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 0.5, 1), None)
+        part2 = STGeometry(WGS84_PROJECTION, shapely.box(0.5, 0, 1, 1), None)
+        return [
+            Item("part1_item1", part1),
+            Item("part1_item2", part1),
+            Item("part1_item3", part1),
+            Item("part2_item1", part2),
+            Item("part2_item2", part2),
+            Item("part2_item3", part2),
+        ]
+
+    def test_overlaps_two(self, six_items: list[Item]) -> None:
+        """Test overlaps=2.
+
+        With overlaps=2, pairs of single-coverage mosaics are consolidated. We have 6
+        items that form 3 complete mosaics, so after consolidation we should have one
+        item group from the first 2 mosaics and another with the 3rd mosaic.
+        """
+        window_geom = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), None)
+        query_config = QueryConfig(
+            space_mode=SpaceMode.MOSAIC, max_matches=2, mosaic_compositing_overlaps=2
+        )
+        item_groups = match_candidate_items_to_window(
+            window_geom, six_items, query_config
+        )
+        # We get 2 groups: first consolidates 2 mosaics, second has partial (1 mosaic)
+        assert len(item_groups) == 2
+        # First group should have items from first two mosaics (4 items)
+        assert set(item.name for item in item_groups[0]) == {
+            "part1_item1",
+            "part2_item1",
+            "part1_item2",
+            "part2_item2",
+        }
+        # Second group has the third mosaic (2 items)
+        assert set(item.name for item in item_groups[1]) == {
+            "part1_item3",
+            "part2_item3",
+        }
+
+    def test_overlaps_high_value(self, six_items: list[Item]) -> None:
+        """Test very high overlaps value.
+
+        With overlaps=100, all mosaics should be consolidated into one group.
+        """
+        window_geom = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), None)
+        query_config = QueryConfig(
+            space_mode=SpaceMode.MOSAIC, max_matches=1, mosaic_compositing_overlaps=100
+        )
+        item_groups = match_candidate_items_to_window(
+            window_geom, six_items, query_config
+        )
+        # All items should be in one group
+        assert len(item_groups) == 1
+        assert len(item_groups[0]) == 6
+
+
 class TestPerPeriodMosaic:
     """Tests for the PER_PERIOD_MOSAIC SpaceMode."""
 
@@ -421,8 +488,8 @@ class TestMinMatches:
         item_groups = match_candidate_items_to_window(window_geom, items, query_config)
         assert item_groups == []
 
-    def test_min_matches_composite(self) -> None:
-        """Test min_matches with COMPOSITE mode."""
+    def test_min_matches_mosaic_with_overlaps(self) -> None:
+        """Test min_matches with MOSAIC mode and high overlaps (compositing behavior)."""
         bbox = shapely.box(0, 0, 1, 1)
         time_range = (
             datetime(2024, 1, 1, tzinfo=UTC),
@@ -433,9 +500,13 @@ class TestMinMatches:
             Item("item0", STGeometry(WGS84_PROJECTION, bbox, time_range)),
             Item("item1", STGeometry(WGS84_PROJECTION, bbox, time_range)),
         ]
-        # COMPOSITE always returns 1 group, but min_matches=2, so should return empty
+        # MOSAIC with high overlaps consolidates items, returning 1 group
+        # But min_matches=2, so should return empty
         query_config = QueryConfig(
-            space_mode=SpaceMode.COMPOSITE, max_matches=10, min_matches=2
+            space_mode=SpaceMode.MOSAIC,
+            max_matches=10,
+            min_matches=2,
+            mosaic_compositing_overlaps=100,
         )
         item_groups = match_candidate_items_to_window(geom, item_list, query_config)
         assert item_groups == []

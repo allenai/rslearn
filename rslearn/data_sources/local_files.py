@@ -236,8 +236,8 @@ class RasterImporter(Importer):
                     "windows in the rslearn dataset. When using settings like "
                     "max_matches=1 and space_mode=MOSAIC, this may cause windows outside "
                     "the geometry’s valid bounds to be materialized from the global raster "
-                    "instead of a more appropriate source. Consider using COMPOSITE mode, "
-                    "or increasing max_matches if this behavior is unintended."
+                    "instead of a more appropriate source. Consider increasing max_matches"
+                    "if this behavior is unintended."
                 )
 
             if spec.name:
