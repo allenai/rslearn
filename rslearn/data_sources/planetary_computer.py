@@ -12,6 +12,7 @@ import planetary_computer
 import rasterio
 import requests
 from rasterio.enums import Resampling
+from typing_extensions import override
 from upath import UPath
 
 from rslearn.config import LayerConfig
@@ -42,6 +43,7 @@ class PlanetaryComputerStacClient(StacClient):
     by sorting by ID and using gt (greater than) queries to fetch subsequent pages.
     """
 
+    @override
     def search(
         self,
         collections: list[str] | None = None,
@@ -53,25 +55,10 @@ class PlanetaryComputerStacClient(StacClient):
         query: dict[str, Any] | None = None,
         sortby: list[dict[str, str]] | None = None,
     ) -> list[StacItem]:
-        """Execute a STAC item search with automatic ID pagination fallback.
+        # We will use sortby for pagination, so the caller must not set it.
+        if sortby is not None:
+            raise ValueError("sortby must not be set for PlanetaryComputerStacClient")
 
-        If the initial query returns PLANETARY_COMPUTER_LIMIT items, this method
-        switches to ID-based pagination to retrieve all matching items.
-
-        Args:
-            collections: only search within the provided collection(s).
-            bbox: only return features intersecting the provided bounding box.
-            intersects: only return features intersecting this GeoJSON geometry.
-            date_time: only return features that have a temporal property intersecting
-                the provided time range or timestamp.
-            ids: only return the provided item IDs.
-            limit: number of items per page.
-            query: query dict for STAC query extension.
-            sortby: list of sort specifications.
-
-        Returns:
-            list of matching STAC items.
-        """
         # First, try a simple query with the PC limit to detect if pagination is needed.
         # We always use PLANETARY_COMPUTER_LIMIT for the request because PC doesn't
         # support standard pagination, and we need to detect when we hit the limit
@@ -84,7 +71,6 @@ class PlanetaryComputerStacClient(StacClient):
             ids=ids,
             limit=PLANETARY_COMPUTER_LIMIT,
             query=query,
-            sortby=sortby,
         )
 
         # If we got fewer than the PC limit, we have all the results.
