@@ -227,16 +227,47 @@ class RslearnLightningModule(L.LightningModule):
         We manually compute and log metrics here (instead of passing the MetricCollection
         to log_dict) because MetricCollection.compute() properly flattens dict-returning
         metrics, while log_dict expects each metric to return a scalar tensor.
+
+        If metrics_file is set, the metrics are saved to a JSON file. The file is
+        organized by test groups, allowing multiple test runs on different splits.
         """
         metrics = self.test_metrics.compute()
         self.log_dict(metrics)
         self.test_metrics.reset()
 
         if self.metrics_file:
+            metrics_dict = {k: v.item() for k, v in metrics.items()}
+
+            # Get the groups key from the datamodule's test_config
+            groups_key = "default"
+            if (
+                hasattr(self.trainer, "datamodule")
+                and self.trainer.datamodule is not None
+                and hasattr(self.trainer.datamodule, "split_configs")
+            ):
+                test_config = self.trainer.datamodule.split_configs.get("test")
+                if test_config and test_config.groups:
+                    groups_key = "_".join(test_config.groups)
+
+            # Load existing metrics file if it exists, otherwise start fresh
+            all_metrics: dict[str, Any] = {}
+            if os.path.exists(self.metrics_file):
+                try:
+                    with open(self.metrics_file, "r") as f:
+                        all_metrics = json.load(f)
+                except (json.JSONDecodeError, IOError):
+                    logger.warning(
+                        f"Could not read existing metrics file {self.metrics_file}, starting fresh"
+                    )
+
+            # Add/update metrics under the groups key
+            all_metrics[groups_key] = metrics_dict
+
             with open(self.metrics_file, "w") as f:
-                metrics_dict = {k: v.item() for k, v in metrics.items()}
-                json.dump(metrics_dict, f, indent=4)
-                logger.info(f"Saved metrics to {self.metrics_file}")
+                json.dump(all_metrics, f, indent=4)
+                logger.info(
+                    f"Saved metrics for groups '{groups_key}' to {self.metrics_file}"
+                )
 
     def training_step(
         self, batch: Any, batch_idx: int, dataloader_idx: int = 0
