@@ -263,6 +263,10 @@ class RslearnLightningModule(L.LightningModule):
             # Add/update metrics under the groups key
             all_metrics[groups_key] = metrics_dict
 
+            # Record the checkpoint path if available (from --ckpt_path CLI argument)
+            if self.trainer.ckpt_path:
+                all_metrics["_checkpoint_path"] = self.trainer.ckpt_path
+
             with open(self.metrics_file, "w") as f:
                 json.dump(all_metrics, f, indent=4)
                 logger.info(

@@ -162,6 +162,13 @@ class RslearnLightningCLI(LightningCLI):
             help="Whether to log to W&B (used with --management_dir). 'yes' will enable logging, 'no' will disable logging, and 'auto' will use 'yes' during fit and 'no' during val/test/predict.",
             default="auto",
         )
+        parser.add_argument(
+            "--write_test_metrics",
+            type=bool,
+            help="Write test metrics to a JSON file (used with --management_dir). "
+            "Defaults to project_dir/test_metrics.json unless model.init_args.metrics_file is set.",
+            default=False,
+        )
 
     def _get_checkpoint_path(
         self,
@@ -385,6 +392,18 @@ class RslearnLightningCLI(LightningCLI):
                 with (project_dir / WANDB_ID_FNAME).open("r") as f:
                     wandb_id = f.read().strip()
                     c.trainer.logger.init_args.id = wandb_id
+
+        # Set up test metrics writing if enabled.
+        if subcommand == "test" and c.write_test_metrics:
+            # Use user-provided metrics_file if set, otherwise default to project dir.
+            if not c.model.init_args.metrics_file:
+                metrics_file = project_dir / "test_metrics.json"
+                c.model.init_args.metrics_file = str(metrics_file)
+                logger.info(f"test metrics will be saved to {metrics_file}")
+            else:
+                logger.info(
+                    f"test metrics will be saved to {c.model.init_args.metrics_file}"
+                )
 
     def before_instantiate_classes(self) -> None:
         """Called before Lightning class initialization.
