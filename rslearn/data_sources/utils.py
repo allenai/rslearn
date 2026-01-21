@@ -1,5 +1,6 @@
 """Utilities shared by data sources."""
 
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -265,8 +266,12 @@ def match_with_space_mode_per_period_mosaic(
 
     We divide the time range of the geometry into shorter periods. Within each period,
     we use the items corresponding to that period to create a mosaic. The returned item
-    groups include one group per period, starting from the most recent periods, up to
-    the provided max_matches.
+    groups include one group per period, up to the provided max_matches.
+
+    By default (reverse_time_order=True), groups are returned starting from the most
+    recent periods. When reverse_time_order=False, groups are returned in chronological
+    order (oldest first). reverse_time_order should always be set False, and
+    FutureWarning will be warned if it is not.
 
     The periods are also bounded to the window's time range, and aligned with the end
     of that time range, i.e. the most recent window is
@@ -299,6 +304,18 @@ def match_with_space_mode_per_period_mosaic(
     if geometry.time_range is None:
         raise ValueError(
             "all windows must have time range for per period mosaic matching"
+        )
+
+    # Emit warning if per_period_mosaic_reverse_time_order is True (the default).
+    if query_config.per_period_mosaic_reverse_time_order:
+        warnings.warn(
+            "QueryConfig.per_period_mosaic_reverse_time_order defaults to True, which "
+            "returns item groups in reverse temporal order (most recent first) for "
+            "PER_PERIOD_MOSAIC mode. This default will change to False (chronological "
+            "order) after 2026-04-01. To silence this warning, explicitly set "
+            "per_period_mosaic_reverse_time_order=False.",
+            FutureWarning,
+            stacklevel=3,
         )
 
     period_duration = query_config.period_duration
@@ -336,6 +353,11 @@ def match_with_space_mode_per_period_mosaic(
             # No matches for this period.
             continue
         cur_groups.append(period_groups[0])
+
+    # Currently the item groups are in reverse chronologic order.
+    # Reverse it to correct chronological order if requested.
+    if not query_config.per_period_mosaic_reverse_time_order:
+        cur_groups.reverse()
 
     return cur_groups
 

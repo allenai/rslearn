@@ -236,11 +236,9 @@ class BandSetConfig(BaseModel):
 
         warnings.warn(
             "`format = {'name': ...}` is deprecated; "
-            "use `{'class_path': '...', 'init_args': {...}}` instead.",
-            DeprecationWarning,
-        )
-        logger.warning(
-            "BandSet.format uses legacy format; support will be removed after 2026-03-01."
+            "use `{'class_path': '...', 'init_args': {...}}` instead. "
+            "Support will be removed after 2026-03-01.",
+            FutureWarning,
         )
 
         legacy_name_to_class_path = {
@@ -350,6 +348,13 @@ class QueryConfig(BaseModel):
         "(default mosaic behavior), or higher for compositing multiple overlapping items."
         "with mean or median compositing method.",
     )
+    per_period_mosaic_reverse_time_order: bool = Field(
+        default=True,
+        description="For PER_PERIOD_MOSAIC mode, whether to return item groups in reverse "
+        "temporal order (most recent first). Set to False for chronological order (oldest first). "
+        "Default True is deprecated and will change to False with error if still unset or set True "
+        "after 2026-04-01.",
+    )
 
 
 class DataSourceConfig(BaseModel):
@@ -401,11 +406,9 @@ class DataSourceConfig(BaseModel):
 
         warnings.warn(
             "`Data source configuration {'name': ...}` is deprecated; "
-            "use `{'class_path': '...', 'init_args': {...}, ...}` instead.",
-            DeprecationWarning,
-        )
-        logger.warning(
-            "Data source configuration uses legacy format; support will be removed after 2026-03-01."
+            "use `{'class_path': '...', 'init_args': {...}, ...}` instead. "
+            "Support will be removed after 2026-03-01.",
+            FutureWarning,
         )
 
         # Split the dict into the base config that is in the pydantic model, and the
@@ -428,8 +431,9 @@ class DataSourceConfig(BaseModel):
             and "max_cloud_cover" in ds_init_args
         ):
             warnings.warn(
-                "Data source configuration specifies invalid 'max_cloud_cover' option.",
-                DeprecationWarning,
+                "Data source configuration specifies invalid 'max_cloud_cover' option."
+                "Support for ignoring this option will be removed after 2026-03-01.",
+                FutureWarning,
             )
             del ds_init_args["max_cloud_cover"]
 
