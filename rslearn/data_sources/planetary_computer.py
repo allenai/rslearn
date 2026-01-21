@@ -3,7 +3,7 @@
 import os
 import tempfile
 import xml.etree.ElementTree as ET
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import affine
@@ -12,6 +12,7 @@ import planetary_computer
 import rasterio
 import requests
 from rasterio.enums import Resampling
+from typing_extensions import override
 from upath import UPath
 
 from rslearn.config import LayerConfig
@@ -24,10 +25,103 @@ from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
+from rslearn.utils.stac import StacClient, StacItem
 
 from .copernicus import get_harmonize_callback
 
 logger = get_logger(__name__)
+
+# Max limit accepted by Planetary Computer API.
+PLANETARY_COMPUTER_LIMIT = 1000
+
+
+class PlanetaryComputerStacClient(StacClient):
+    """A StacClient subclass that handles Planetary Computer's pagination limits.
+
+    Planetary Computer STAC API does not support standard pagination and has a max
+    limit of 1000. If the initial query returns 1000 items, this client paginates
+    by sorting by ID and using gt (greater than) queries to fetch subsequent pages.
+    """
+
+    @override
+    def search(
+        self,
+        collections: list[str] | None = None,
+        bbox: tuple[float, float, float, float] | None = None,
+        intersects: dict[str, Any] | None = None,
+        date_time: datetime | tuple[datetime, datetime] | None = None,
+        ids: list[str] | None = None,
+        limit: int | None = None,
+        query: dict[str, Any] | None = None,
+        sortby: list[dict[str, str]] | None = None,
+    ) -> list[StacItem]:
+        # We will use sortby for pagination, so the caller must not set it.
+        if sortby is not None:
+            raise ValueError("sortby must not be set for PlanetaryComputerStacClient")
+
+        # First, try a simple query with the PC limit to detect if pagination is needed.
+        # We always use PLANETARY_COMPUTER_LIMIT for the request because PC doesn't
+        # support standard pagination, and we need to detect when we hit the limit
+        # to switch to ID-based pagination.
+        # We could just start sorting by ID here and do pagination, but we treate it as
+        # a special case to avoid sorting since that seems to speed up the query.
+        stac_items = super().search(
+            collections=collections,
+            bbox=bbox,
+            intersects=intersects,
+            date_time=date_time,
+            ids=ids,
+            limit=PLANETARY_COMPUTER_LIMIT,
+            query=query,
+        )
+
+        # If we got fewer than the PC limit, we have all the results.
+        if len(stac_items) < PLANETARY_COMPUTER_LIMIT:
+            return stac_items
+
+        # We hit the limit, so we need to paginate by ID.
+        # Re-fetch with sorting by ID to ensure consistent ordering for pagination.
+        logger.debug(
+            "Initial request returned %d items (at limit), switching to ID pagination",
+            len(stac_items),
+        )
+
+        all_items: list[StacItem] = []
+        last_id: str | None = None
+
+        while True:
+            # Build query with id > last_id if we're paginating.
+            combined_query: dict[str, Any] = dict(query) if query else {}
+            if last_id is not None:
+                combined_query["id"] = {"gt": last_id}
+
+            stac_items = super().search(
+                collections=collections,
+                bbox=bbox,
+                intersects=intersects,
+                date_time=date_time,
+                ids=ids,
+                limit=PLANETARY_COMPUTER_LIMIT,
+                query=combined_query if combined_query else None,
+                sortby=[{"field": "id", "direction": "asc"}],
+            )
+
+            all_items.extend(stac_items)
+
+            # If we got fewer than the limit, we've fetched everything.
+            if len(stac_items) < PLANETARY_COMPUTER_LIMIT:
+                break
+
+            # Otherwise, paginate using the last item's ID.
+            last_id = stac_items[-1].id
+            logger.debug(
+                "Got %d items, paginating with id > %s",
+                len(stac_items),
+                last_id,
+            )
+
+        logger.debug("Total items fetched: %d", len(all_items))
+        return all_items
 
 
 class PlanetaryComputer(StacDataSource, TileStore):
@@ -100,6 +194,10 @@ class PlanetaryComputer(StacDataSource, TileStore):
             required_assets=required_assets,
             cache_dir=cache_upath,
         )
+
+        # Replace the client with PlanetaryComputerStacClient to handle PC's pagination limits.
+        self.client = PlanetaryComputerStacClient(self.STAC_ENDPOINT)
+
         self.asset_bands = asset_bands
         self.timeout = timeout
         self.skip_items_missing_assets = skip_items_missing_assets
