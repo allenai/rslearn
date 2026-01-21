@@ -339,18 +339,23 @@ def _overlay_points_on_array(
         # So we can use it directly
         shp = feature.geometry.shp
 
-        # Draw points
+        # Draw bounding boxes around points
         if shp.geom_type == "Point":
             x, y = shp.x, shp.y
             px = int((x - bounds[0]) * width / actual_width)
             py = int((y - bounds[1]) * height / actual_height)
             logger.info(f"Point at ({x:.2f}, {y:.2f}) -> pixel ({px}, {py}), bounds: {bounds}, image size: {width}x{height}, actual_size: {actual_width}x{actual_height}")
             if 0 <= px < width and 0 <= py < height:
-                radius = 5
-                draw.ellipse(
-                    [px - radius, py - radius, px + radius, py + radius],
-                    fill=color,
+                # Draw a bounding box (e.g., 20x20 pixels centered on the point)
+                box_size = 20
+                x1 = max(0, px - box_size // 2)
+                y1 = max(0, py - box_size // 2)
+                x2 = min(width, px + box_size // 2)
+                y2 = min(height, py + box_size // 2)
+                draw.rectangle(
+                    [x1, y1, x2, y2],
                     outline=color,
+                    width=2,
                 )
                 points_drawn += 1
             else:
@@ -362,11 +367,16 @@ def _overlay_points_on_array(
                 py = int((y - bounds[1]) * height / actual_height)
                 logger.debug(f"MultiPoint at ({x:.2f}, {y:.2f}) -> pixel ({px}, {py}), bounds: {bounds}, image size: {width}x{height}")
                 if 0 <= px < width and 0 <= py < height:
-                    radius = 5
-                    draw.ellipse(
-                        [px - radius, py - radius, px + radius, py + radius],
-                        fill=color,
+                    # Draw a bounding box (e.g., 20x20 pixels centered on the point)
+                    box_size = 20
+                    x1 = max(0, px - box_size // 2)
+                    y1 = max(0, py - box_size // 2)
+                    x2 = min(width, px + box_size // 2)
+                    y2 = min(height, py + box_size // 2)
+                    draw.rectangle(
+                        [x1, y1, x2, y2],
                         outline=color,
+                        width=2,
                     )
                     points_drawn += 1
                 else:

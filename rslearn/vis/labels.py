@@ -13,26 +13,6 @@ from rslearn.utils.feature import Feature
 logger = get_logger(__name__)
 
 
-def read_label_features(
-    window: Window,
-    layer_config: LayerConfig,
-    layer_name: str,
-    group_idx: int = 0,
-) -> list[Feature]:
-    """Read label features from a window.
-
-    Args:
-        window: The window to read from
-        layer_config: The label layer configuration
-        layer_name: The name of the label layer ('label' or 'labels')
-        group_idx: The item group index (default 0)
-
-    Returns:
-        List of Feature objects from the label layer
-    """
-    from rslearn.vis.layers import read_vector_layer
-
-    return read_vector_layer(window, layer_name, layer_config, group_idx=group_idx)
 
 
 def detect_label_classes(windows: list[Window], layer_config: LayerConfig, layer_name: str) -> set[str]:
@@ -70,7 +50,8 @@ def _detect_label_classes_from_vector(windows: list[Window], layer_config: Layer
 
     for window in windows:
         try:
-            features = read_label_features(window, layer_config, layer_name)
+            from rslearn.vis.layers import read_vector_layer
+            features = read_vector_layer(window, layer_name, layer_config)
             for feature in features:
                 if feature.properties:
                     for prop_name in property_names:
@@ -224,7 +205,8 @@ def get_classification_label(
     """
     if layer_config.type == LayerType.VECTOR:
         # Vector labels: read from GeoJSON features
-        features = read_label_features(window, layer_config, layer_name, group_idx=group_idx)
+        from rslearn.vis.layers import read_vector_layer
+        features = read_vector_layer(window, layer_name, layer_config, group_idx=group_idx)
         if not features:
             logger.warning(f"No features in classification label for {window.name}")
             return None
