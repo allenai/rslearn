@@ -1,6 +1,6 @@
 [project]
 name = "rslearn"
-version = "0.0.22"
+version = "0.0.23"
 description = "A library for developing remote sensing datasets and models"
 authors = [
     { name = "OlmoEarth Team" },
@@ -39,8 +39,8 @@ extra = [
     # https://github.com/fsspec/universal_pathlib?tab=readme-ov-file#adding-universal_pathlib-to-your-project
     # https://github.com/fsspec/filesystem_spec?tab=readme-ov-file#install
     "fsspec[gcs, s3]", # for both direct use via fsspec and indirect use via universal_pathlib, docs suggest enabling specific backends like this
-    "google-cloud-bigquery>=3.35",
-    "google-cloud-storage>=2.18",
+    "google-cloud-bigquery>=3.40",
+    "google-cloud-storage>=3.8",
     "huggingface_hub>=0.34.4",
     "netCDF4>=1.7.2",
     "osmium>=4.0.2",
