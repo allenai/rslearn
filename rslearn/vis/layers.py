@@ -45,7 +45,6 @@ def read_raster_layer(
     if bounds is None:
         bounds = window.bounds
 
-    # See what different sets of bands we need to read to get all the configured bands.
     needed_band_indexes = {band: i for i, band in enumerate(band_names)}
     needed_sets_and_indexes = []
     

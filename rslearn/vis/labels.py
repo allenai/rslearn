@@ -38,7 +38,16 @@ def detect_label_classes(windows: list[Window], layer_config: LayerConfig, layer
 
 
 def _detect_label_classes_from_vector(windows: list[Window], layer_config: LayerConfig, layer_name: str) -> set[str]:
-    """Detect label classes from vector (GeoJSON) labels."""
+    """Detect label classes from vector (GeoJSON) labels.
+    
+    If class_names is specified in the config, use it directly.
+    Otherwise, sample windows to detect classes from the data.
+    """
+    # If class_names is specified in config, use it directly
+    if layer_config.class_names:
+        return set(layer_config.class_names)
+    
+    # Otherwise, detect from data by sampling windows
     label_classes = set()
     property_name = layer_config.class_property_name
 
@@ -72,12 +81,10 @@ def _detect_label_classes_from_raster(windows: list[Window], layer_config: Layer
     
     label_values = set()
     
-    # Sample a subset of windows to detect classes (don't need to check all)
     sample_windows = windows[:min(20, len(windows))]
     
     for window in sample_windows:
         try:
-            # Read the first band of the raster label layer
             if not layer_config.band_sets:
                 continue
             
@@ -85,15 +92,12 @@ def _detect_label_classes_from_raster(windows: list[Window], layer_config: Layer
             if not band_set.bands:
                 continue
             
-            # Read the first band
             band_name = band_set.bands[0]
             label_array = read_raster_layer(
                 window, layer_name, layer_config, [band_name], group_idx=0
             )
             
-            # Get unique values (excluding NaN and ignoring no_data if it's 0)
             unique_values = np.unique(label_array[0, :, :])
-            # Filter out NaN values
             unique_values = unique_values[~np.isnan(unique_values)]
             
             for val in unique_values:
@@ -145,8 +149,6 @@ def generate_label_colors(label_classes: set[str]) -> dict[str, tuple[int, int, 
     # Hardcoded color for "no_data" (always black - rslearn convention)
     NO_DATA_COLOR = (0, 0, 0)
 
-    # Generate distinct colors for other classes
-    # Use a color palette (excluding black, reserved for no_data)
     colors = [
         (255, 0, 0),  # Red
         (0, 255, 0),  # Green
@@ -204,21 +206,18 @@ def get_classification_label(
         The label string, or None if not found
     """
     if layer_config.type == LayerType.VECTOR:
-        # Vector labels: read from GeoJSON features
         from rslearn.vis.layers import read_vector_layer
         features = read_vector_layer(window, layer_name, layer_config, group_idx=group_idx)
         if not features:
             logger.warning(f"No features in classification label for {window.name}")
             return None
 
-        # Get label from first feature
         first_feature = features[0]
         if not first_feature.properties:
             return None
 
         property_name = layer_config.class_property_name
         if property_name is None:
-            # Try common property names
             property_names = ["label", "category", "class", "type"]
         else:
             property_names = [property_name]
@@ -233,7 +232,6 @@ def get_classification_label(
         return None
     
     elif layer_config.type == LayerType.RASTER:
-        # Raster labels: find the single non-zero pixel value
         from rslearn.vis.layers import read_raster_layer
         
         if not layer_config.band_sets:
@@ -245,21 +243,17 @@ def get_classification_label(
             logger.warning(f"No bands in raster label layer {layer_name} for {window.name}")
             return None
         
-        # Read the first band
         band_name = band_set.bands[0]
         label_array = read_raster_layer(
             window, layer_name, layer_config, [band_name], group_idx=group_idx
         )
         
-        # Extract 2D array
         if label_array.ndim == 3:
             label_2d = label_array[0, :, :]
         else:
             label_2d = label_array
         
-        # Find unique non-zero values
         unique_vals = np.unique(label_2d)
-        # Filter out zeros and NaN
         non_zero_vals = unique_vals[(unique_vals != 0) & ~np.isnan(unique_vals)]
         
         if len(non_zero_vals) == 0:
@@ -274,9 +268,7 @@ def get_classification_label(
         
         label_value = non_zero_vals[0]
         
-        # Map to class name if class_names is provided
         if layer_config.class_names:
-            # Convert to integer index
             idx = int(label_value)
             if 0 <= idx < len(layer_config.class_names):
                 class_name = layer_config.class_names[idx]
@@ -289,7 +281,6 @@ def get_classification_label(
                 )
                 return str(int(label_value))
         else:
-            # Use numeric value as string
             if np.isclose(label_value, int(label_value)):
                 label_str = str(int(label_value))
             else:

@@ -67,6 +67,7 @@ def features_to_mask(
     label_colors: dict[str, tuple[int, int, int]],
     output_path: Path,
     reference_raster_array: np.ndarray | None = None,
+    normalization_method: str = "sentinel2_rgb",
 ) -> None:
     """Generate a mask image from vector features.
 
@@ -80,6 +81,7 @@ def features_to_mask(
         label_colors: Dictionary mapping label class names to RGB colors
         output_path: Path to save PNG
         reference_raster_array: Optional reference raster array for detection tasks
+        normalization_method: Normalization method for the reference raster array (detection only)
     """
     from collections import Counter
 
@@ -95,7 +97,7 @@ def features_to_mask(
         # First, convert reference array to PNG (in memory)
         # Then overlay points
         _overlay_points_on_array(
-            reference_raster_array, features, bounds, projection, label_colors, output_path
+            reference_raster_array, features, bounds, projection, label_colors, output_path, normalization_method
         )
     else:
         # Segmentation: draw polygons on mask
@@ -291,17 +293,26 @@ def _overlay_points_on_array(
     projection: Projection,
     label_colors: dict[str, tuple[int, int, int]],
     output_path: Path,
+    normalization_method: str = "sentinel2_rgb",
 ) -> None:
-    """Overlay point features on a raster array."""
-    # First convert array to image
+    """Overlay point features on a raster array.
+    
+    Args:
+        array: Raster array to overlay points on
+        features: List of Feature objects (points)
+        bounds: Pixel bounds of the window
+        projection: Projection of the window
+        label_colors: Dictionary mapping label class names to RGB colors
+        output_path: Path to save PNG
+        normalization_method: Normalization method for the array
+    """
     # Handle (bands, height, width) format
     if array.ndim == 3 and array.shape[0] < array.shape[2]:
         array = np.moveaxis(array, 0, -1)
 
-    # Normalize (use sentinel2_rgb as default)
     from .normalization import normalize_array
 
-    normalized = normalize_array(array, "sentinel2_rgb")
+    normalized = normalize_array(array, normalization_method)
     if normalized.shape[-1] >= 3:
         img = Image.fromarray(normalized[:, :, :3], mode="RGB")
     else:
@@ -319,7 +330,6 @@ def _overlay_points_on_array(
     logger.info(f"Processing {len(features)} features for overlay")
     
     for feature in features:
-        # Get label (use "detected" as default if no label property found)
         label = None
         if feature.properties:
             for prop_name in property_names:
@@ -334,9 +344,7 @@ def _overlay_points_on_array(
 
         color = label_colors.get(label, (255, 0, 0))
 
-        # Get geometry in pixel coordinates
-        # The feature geometry is already in the window projection (from read_vector_layer)
-        # So we can use it directly
+        # Get geometry (already in pixel coordinates)
         shp = feature.geometry.shp
 
         # Draw bounding boxes around points
