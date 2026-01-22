@@ -199,7 +199,8 @@ data:
       groups: ["predict"]
       load_all_patches: true
       # We set patch_size=128 here to support the option of using larger windows during
-      # prediction. Note that this controls the sliding window inference crop size.
+      # prediction. Note that this controls the sliding window inference crop size,
+      # and we want that to match the size of our training windows.
       patch_size: 128
       # We use some overlap when we need to apply sliding window inference on large
       # windows to reduce border effects.
@@ -272,7 +273,7 @@ rslearn dataset materialize --root ./dataset --group predict
 Then we apply the model (it will automatically restore the best checkpoint):
 
 ```
-rslearn model predict --config.model.yaml
+rslearn model predict --config model.yaml
 ```
 
 We can then open up one of the input Sentinel-2 images, the model prediction, and the
