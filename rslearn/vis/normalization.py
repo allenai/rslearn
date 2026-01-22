@@ -1,7 +1,7 @@
 """Normalization functions for raster data visualization."""
 
+from collections.abc import Callable
 from enum import StrEnum
-from typing import Callable
 
 import numpy as np
 
@@ -74,14 +74,18 @@ def _normalize_minmax(band: np.ndarray) -> np.ndarray:
     return band
 
 
-_NORMALIZATION_FUNCTIONS: dict[NormalizationMethod, Callable[[np.ndarray], np.ndarray]] = {
+_NORMALIZATION_FUNCTIONS: dict[
+    NormalizationMethod, Callable[[np.ndarray], np.ndarray]
+] = {
     NormalizationMethod.SENTINEL2_RGB: _normalize_sentinel2_rgb,
     NormalizationMethod.PERCENTILE: _normalize_percentile,
     NormalizationMethod.MINMAX: _normalize_minmax,
 }
 
 
-def normalize_band(band: np.ndarray, method: str | NormalizationMethod = "sentinel2_rgb") -> np.ndarray:
+def normalize_band(
+    band: np.ndarray, method: str | NormalizationMethod = "sentinel2_rgb"
+) -> np.ndarray:
     """Normalize band to 0-255 range.
 
     Args:
@@ -99,7 +103,9 @@ def normalize_band(band: np.ndarray, method: str | NormalizationMethod = "sentin
     return normalize_func(band)
 
 
-def normalize_array(array: np.ndarray, method: str | NormalizationMethod = "sentinel2_rgb") -> np.ndarray:
+def normalize_array(
+    array: np.ndarray, method: str | NormalizationMethod = "sentinel2_rgb"
+) -> np.ndarray:
     """Normalize a multi-band array to 0-255 range.
 
     Args:
@@ -110,11 +116,10 @@ def normalize_array(array: np.ndarray, method: str | NormalizationMethod = "sent
         Normalized array as uint8 with shape (height, width, channels)
     """
     if array.ndim == 3:
-        array = np.moveaxis(array, 0, -1) 
-    
+        array = np.moveaxis(array, 0, -1)
+
     normalized = np.zeros_like(array, dtype=np.uint8)
     for i in range(array.shape[-1]):
         normalized[..., i] = normalize_band(array[..., i], method)
-    
-    return normalized
 
+    return normalized

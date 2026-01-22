@@ -1,3 +1,5 @@
+"""Default color palette for visualizations."""
+
 DEFAULT_COLORS = [
     (255, 0, 0),
     (0, 255, 0),

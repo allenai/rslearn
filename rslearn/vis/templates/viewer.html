@@ -128,16 +128,17 @@
             </div>
             {% endif %}
             {% endfor %}
-            {% if window.mask_layer %}
+            {% for mask_layer in window.mask_layers %}
             <div class="image-container">
-                <img src="/images/{{ window.idx }}/{{ window.mask_layer }}" alt="Label Mask">
-                <div class="image-label">Label Mask</div>
+                <img src="/images/{{ window.idx }}/{{ mask_layer }}" alt="Label Mask: {{ mask_layer }}">
+                <div class="image-label">Label Mask: {{ mask_layer }}</div>
             </div>
-            {% elif window.label_text %}
+            {% endfor %}
+            {% for layer_name, label_text in window.label_texts.items() %}
             <div class="image-container">
-                <div style="padding: 20px; font-size: 18px; font-weight: bold;">Label: {{ window.label_text }}</div>
+                <div style="padding: 20px; font-size: 18px; font-weight: bold;">{{ layer_name }}: {{ label_text }}</div>
             </div>
-            {% endif %}
+            {% endfor %}
         </div>
     </div>
     {% endfor %}

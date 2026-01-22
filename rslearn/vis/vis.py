@@ -5,13 +5,12 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
+from rslearn.config import LayerConfig
 from rslearn.log_utils import get_logger
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, Projection
 
 from .normalization import normalize_array
-
-from rslearn.config import LayerConfig
 
 logger = get_logger(__name__)
 
@@ -69,8 +68,6 @@ def features_to_mask(
         reference_raster_array: Optional reference raster array for detection tasks
         normalization_method: Normalization method for the reference raster array (detection only)
     """
-    from collections import Counter
-
     width = bounds[2] - bounds[0]
     height = bounds[3] - bounds[1]
 
@@ -79,10 +76,18 @@ def features_to_mask(
 
     if is_detection and reference_raster_array is not None:
         _overlay_points_on_array(
-            reference_raster_array, features, bounds, projection, label_colors, output_path, normalization_method
+            reference_raster_array,
+            features,
+            bounds,
+            projection,
+            label_colors,
+            output_path,
+            normalization_method,
         )
     else:
-        _draw_mask_from_features(features, width, height, bounds, projection, label_colors, output_path)
+        _draw_mask_from_features(
+            features, width, height, bounds, projection, label_colors, output_path
+        )
 
 
 def raster_label_to_mask(
@@ -105,10 +110,10 @@ def raster_label_to_mask(
         label_values = label_array
 
     height, width = label_values.shape
-    
+
     mask_img = np.zeros((height, width, 3), dtype=np.uint8)
     valid_mask = ~np.isnan(label_values)
-    
+
     if layer_config.class_names:
         label_int = label_values.astype(np.int32)
         for idx in range(len(layer_config.class_names)):
@@ -118,7 +123,7 @@ def raster_label_to_mask(
             mask_img[mask] = color
     else:
         unique_vals = np.unique(label_values[valid_mask])
-        
+
         for val in unique_vals:
             if np.isclose(val, 0):
                 val_str = "no_data"
@@ -129,10 +134,10 @@ def raster_label_to_mask(
             color = label_colors.get(val_str, (0, 0, 0))
             mask = (label_values == val) & valid_mask
             mask_img[mask] = color
-    
+
     mask_pil = Image.fromarray(mask_img, mode="RGB")
     mask_pil = mask_pil.resize(VISUALIZATION_IMAGE_SIZE, Image.Resampling.NEAREST)
-    
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     mask_pil.save(output_path)
@@ -148,8 +153,6 @@ def _draw_mask_from_features(
     output_path: Path,
 ) -> None:
     """Draw a mask from polygon features."""
-    from collections import Counter
-
     background_color = (0, 0, 0)
     mask_img = Image.new("RGB", (width, height), color=background_color)
     draw = ImageDraw.Draw(mask_img)
@@ -173,7 +176,7 @@ def _draw_mask_from_features(
                 break
         if not label_found:
             other_features.append(feat)
-    
+
     def get_label(feat: Feature) -> str:
         if not feat.properties:
             return ""
@@ -182,7 +185,7 @@ def _draw_mask_from_features(
             if label:
                 return str(label)
         return ""
-    
+
     other_features_sorted = sorted(other_features, key=get_label, reverse=True)
     sorted_features = no_data_features + other_features_sorted
 
@@ -207,13 +210,14 @@ def _draw_mask_from_features(
 
         if shp.geom_type == "Polygon":
             coords = list(shp.exterior.coords)
-            pixel_coords = [
-                (int(x - bounds[0]), int(y - bounds[1])) for x, y in coords
-            ]
+            pixel_coords = [(int(x - bounds[0]), int(y - bounds[1])) for x, y in coords]
             if len(pixel_coords) >= 3:
                 draw.polygon(pixel_coords, fill=color, outline=color)
                 for interior in shp.interiors:
-                    hole_coords = [(int(x - bounds[0]), int(y - bounds[1])) for x, y in interior.coords]
+                    hole_coords = [
+                        (int(x - bounds[0]), int(y - bounds[1]))
+                        for x, y in interior.coords
+                    ]
                     if len(hole_coords) >= 3:
                         draw.polygon(hole_coords, fill=(0, 0, 0), outline=color)
         elif shp.geom_type == "MultiPolygon":
@@ -241,7 +245,7 @@ def _overlay_points_on_array(
     normalization_method: str = "sentinel2_rgb",
 ) -> None:
     """Overlay point features on a raster array.
-    
+
     Args:
         array: Raster array to overlay points on
         features: List of Feature objects (points)
@@ -270,10 +274,11 @@ def _overlay_points_on_array(
     points_drawn, points_out_of_bounds = overlay_points_on_image(
         draw, features, bounds, width, height, actual_width, actual_height, label_colors
     )
-    logger.info(f"Overlaid {points_drawn} points on image ({points_out_of_bounds} out of bounds)")
+    logger.info(
+        f"Overlaid {points_drawn} points on image ({points_out_of_bounds} out of bounds)"
+    )
 
     img = img.resize(VISUALIZATION_IMAGE_SIZE, Image.Resampling.LANCZOS)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(output_path)
-

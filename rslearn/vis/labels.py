@@ -1,18 +1,11 @@
 """Functions for reading and processing labels from rslearn datasets."""
 
-from collections import Counter, defaultdict
-from typing import Any
-
-import numpy as np
-
 from rslearn.config import LayerConfig, LayerType
 from rslearn.dataset import Window
 from rslearn.log_utils import get_logger
-from rslearn.utils.feature import Feature
 from rslearn.utils.colors import DEFAULT_COLORS
 
 logger = get_logger(__name__)
-
 
 
 def generate_label_colors(label_classes: set[str]) -> dict[str, tuple[int, int, int]]:
@@ -66,11 +59,14 @@ def get_vector_label_by_property(
             f"Vector labels must use vector layers. "
             f"Layer '{layer_name}' is of type {layer_config.type}."
         )
-    
+
     from rslearn.vis.layers import read_vector_layer
+
     features = read_vector_layer(window, layer_name, layer_config, group_idx=group_idx)
     if not features:
-        logger.warning(f"No features in vector label layer {layer_name} for {window.name}")
+        logger.warning(
+            f"No features in vector label layer {layer_name} for {window.name}"
+        )
         return None
 
     first_feature = features[0]
@@ -92,4 +88,3 @@ def get_vector_label_by_property(
         f"Property '{layer_config.class_property_name}' not found in vector label layer {layer_name} for {window.name}"
     )
     return None
-

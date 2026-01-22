@@ -1,7 +1,5 @@
 """Functions for overlaying point features on raster images."""
 
-from typing import Any
-
 import shapely
 from PIL import ImageDraw
 
@@ -16,11 +14,11 @@ PROPERTY_NAMES = ["label", "category", "class", "type"]
 
 def extract_label_from_feature(feature: Feature, default: str = "detected") -> str:
     """Extract label from a feature's properties.
-    
+
     Args:
         feature: Feature object
         default: Default label to use if none found
-        
+
     Returns:
         Label string
     """
@@ -41,7 +39,7 @@ def point_to_pixel_coords(
     actual_height: int,
 ) -> tuple[int, int]:
     """Convert a point's coordinates to pixel coordinates in the image.
-    
+
     Args:
         point: Shapely Point object
         bounds: Pixel bounds of the window
@@ -49,7 +47,7 @@ def point_to_pixel_coords(
         image_height: Height of the image in pixels
         actual_width: Actual width of the data (bounds[2] - bounds[0])
         actual_height: Actual height of the data (bounds[3] - bounds[1])
-        
+
     Returns:
         Tuple of (pixel_x, pixel_y) coordinates
     """
@@ -69,7 +67,7 @@ def draw_bounding_box_around_point(
     box_size: int = 20,
 ) -> bool:
     """Draw a bounding box around a point on an image.
-    
+
     Args:
         draw: PIL ImageDraw object
         px: Pixel x coordinate
@@ -78,7 +76,7 @@ def draw_bounding_box_around_point(
         height: Image height
         color: RGB color tuple for the bounding box
         box_size: Size of the bounding box in pixels (default 20)
-        
+
     Returns:
         True if the point was drawn (within bounds), False otherwise
     """
@@ -107,7 +105,7 @@ def overlay_points_on_image(
     label_colors: dict[str, tuple[int, int, int]],
 ) -> tuple[int, int]:
     """Overlay point features on an image.
-    
+
     Args:
         draw: PIL ImageDraw object
         features: List of Feature objects (points)
@@ -117,21 +115,23 @@ def overlay_points_on_image(
         actual_width: Actual width of the data (bounds[2] - bounds[0])
         actual_height: Actual height of the data (bounds[3] - bounds[1])
         label_colors: Dictionary mapping label class names to RGB colors
-        
+
     Returns:
         Tuple of (points_drawn, points_out_of_bounds)
     """
     points_drawn = 0
     points_out_of_bounds = 0
-    
+
     for feature in features:
         label = extract_label_from_feature(feature)
         color = label_colors.get(label, (255, 0, 0))
-        
+
         shp = feature.geometry.shp
         flat_shapes = flatten_shape(shp)
         for point in flat_shapes:
-            assert isinstance(point, shapely.Point), f"Expected Point, got {type(point)}"
+            assert isinstance(point, shapely.Point), (
+                f"Expected Point, got {type(point)}"
+            )
             px, py = point_to_pixel_coords(
                 point, bounds, image_width, image_height, actual_width, actual_height
             )
@@ -140,10 +140,11 @@ def overlay_points_on_image(
                 f"bounds: {bounds}, image size: {image_width}x{image_height}, "
                 f"actual_size: {actual_width}x{actual_height}"
             )
-            if draw_bounding_box_around_point(draw, px, py, image_width, image_height, color):
+            if draw_bounding_box_around_point(
+                draw, px, py, image_width, image_height, color
+            ):
                 points_drawn += 1
             else:
                 points_out_of_bounds += 1
-    
-    return points_drawn, points_out_of_bounds
 
+    return points_drawn, points_out_of_bounds

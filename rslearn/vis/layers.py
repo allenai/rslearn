@@ -4,14 +4,13 @@ from typing import Any
 
 import numpy as np
 from rasterio.warp import Resampling
-from upath import UPath
 
 from rslearn.config import DType, LayerConfig, LayerType
 from rslearn.dataset import Window
 from rslearn.log_utils import get_logger
 from rslearn.train.dataset import DataInput, read_raster_layer_for_data_input
-from rslearn.utils.geometry import PixelBounds, Projection, ResolutionFactor
-from rslearn.utils.vector_format import VectorFormat, GeojsonVectorFormat
+from rslearn.utils.geometry import PixelBounds, ResolutionFactor
+from rslearn.utils.vector_format import VectorFormat
 
 logger = get_logger(__name__)
 
@@ -84,11 +83,10 @@ def read_vector_layer(
 
     vector_format: VectorFormat = layer_config.instantiate_vector_format()
     layer_dir = window.get_layer_dir(layer_name, group_idx=group_idx)
-    logger.info(f"Reading vector layer {layer_name} from {layer_dir}, bounds: {window.bounds}, projection: {window.projection}")
-    
-    features = vector_format.decode_vector(
-        layer_dir, window.projection, window.bounds
+    logger.info(
+        f"Reading vector layer {layer_name} from {layer_dir}, bounds: {window.bounds}, projection: {window.projection}"
     )
+
+    features = vector_format.decode_vector(layer_dir, window.projection, window.bounds)
     logger.info(f"Decoded {len(features)} features from vector layer {layer_name}")
     return features
-
