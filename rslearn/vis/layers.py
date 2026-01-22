@@ -46,7 +46,6 @@ def read_raster_layer(
     if bounds is None:
         bounds = window.bounds
 
-    # Create a DataInput object to pass to read_raster_layer_for_data_input
     data_input = DataInput(
         data_type="raster",
         layers=[layer_name],
@@ -56,7 +55,6 @@ def read_raster_layer(
         resampling=Resampling.nearest,
     )
 
-    # Read using the dataset function
     image_tensor = read_raster_layer_for_data_input(
         window, bounds, layer_name, group_idx, layer_config, data_input
     )
@@ -88,7 +86,6 @@ def read_vector_layer(
     layer_dir = window.get_layer_dir(layer_name, group_idx=group_idx)
     logger.info(f"Reading vector layer {layer_name} from {layer_dir}, bounds: {window.bounds}, projection: {window.projection}")
     
-    # Use decode_vector which handles projection and bounds filtering
     features = vector_format.decode_vector(
         layer_dir, window.projection, window.bounds
     )

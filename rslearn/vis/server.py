@@ -6,16 +6,18 @@ This module provides a web server to visualize rslearn datasets using the Datase
 
 import argparse
 import atexit
-import base64
 import http.server
+import importlib.resources
 import random
 import shutil
 import socketserver
 import tempfile
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from jinja2 import Environment, FileSystemLoader
 from upath import UPath
 
 from rslearn.config import LayerConfig, LayerType
@@ -33,6 +35,17 @@ logger = get_logger(__name__)
 class VisualizationServer:
     """Visualization server for rslearn datasets using Dataset/Window APIs."""
 
+    def __init__(self):
+        """Initialize the visualization server."""
+        self.windows: list[Window] = []
+        self.dataset: Dataset | None = None
+        self.layers: list[str] = []
+        self.bands: dict[str, list[str]] = {}
+        self.normalization: dict[str, str] = {}
+        self.task_type: str = ""
+        self.label_colors_dict: dict[str, dict[str, tuple[int, int, int]]] = {}
+        self.group_idx: int = 0
+
     def format_window_info(self, window: Window) -> tuple[str, float | None, float | None]:
         """Format window metadata for display.
 
@@ -46,13 +59,11 @@ class VisualizationServer:
         lat = None
         lon = None
 
-        # Get time range
         if window.time_range:
             start = window.time_range[0].isoformat()[:10]
             end = window.time_range[1].isoformat()[:10]
             parts.append(f"Time: {start} to {end}")
 
-        # Get lat/lon from geometry centroid
         geom_wgs84 = window.get_geometry().to_projection(WGS84_PROJECTION)
         centroid = geom_wgs84.shp.centroid
         lon = float(centroid.x)
@@ -61,254 +72,230 @@ class VisualizationServer:
 
         return "<br>".join(parts) if parts else "Unknown", lat, lon
 
-    def _encode_image_to_base64(self, image_path: Path) -> str:
-        """Encode an image file to base64 data URI.
+    def _generate_image_as_bytes(
+        self,
+        window: Window,
+        layer_name: str,
+        dataset: Dataset,
+        bands: dict[str, list[str]],
+        normalization: dict[str, str],
+        task_type: str,
+        label_colors: dict[str, tuple[int, int, int]] | None,
+        label_colors_dict: dict[str, dict[str, tuple[int, int, int]]] | None = None,
+        group_idx: int = 0,
+    ) -> bytes:
+        """Generate an image for a window/layer combination as PNG bytes.
 
         Args:
-            image_path: Path to the image file (PNG)
+            window: Window object
+            layer_name: Layer name to visualize
+            dataset: Dataset object
+            bands: Dictionary mapping layer_name -> list of band names
+            normalization: Dictionary mapping layer_name -> normalization method
+            task_type: Task type
+            label_colors: Dictionary mapping label class names to RGB colors
+            label_colors_dict: Dictionary mapping layer_name -> label_colors
+            group_idx: Item group index
 
         Returns:
-            Base64 data URI string for use in HTML img src attribute
+            PNG image bytes
         """
-        try:
-            with open(image_path, "rb") as img_file:
-                img_data = img_file.read()
-                encoded = base64.b64encode(img_data).decode("utf-8")
-                return f"data:image/png;base64,{encoded}"
-        except Exception as e:
-            logger.error(f"Failed to encode image {image_path}: {e}")
-            return ""
+        from PIL import Image
 
-    def generate_html(
-        self,
-        window_results: list[dict[str, Any]],
-        layer_names: list[str],
-        output_dir: Path,
-        html_output_path: Path,
-        label_colors: dict[str, tuple[int, int, int]] | None = None,
-        task_type: str | None = None,
-    ) -> None:
-        """Generate HTML gallery for visualization.
+        # Helper to check if a layer is a label layer
+        def is_label_layer(name: str) -> bool:
+            return (
+                name in ("label", "labels", "label_raster") or
+                name.endswith("_label") or
+                name.endswith("_label_raster") or
+                name.startswith("label_")
+            )
 
-        Args:
-            window_results: List of dictionaries with window processing results
-            layer_names: List of layer names to display (in order)
-            output_dir: Directory where PNGs are stored
-            html_output_path: Path to save HTML file
-            label_colors: Dictionary mapping label class names to RGB color tuples
-            task_type: Task type (classification, regression, detection, segmentation)
-        """
-        output_dir = Path(output_dir)
-        html_output_path = Path(html_output_path)
+        if layer_name not in dataset.layers:
+            layer_dir = window.get_layer_dir(layer_name, group_idx=group_idx)
+            layer_dir_path = UPath(layer_dir)
+            data_geojson = layer_dir_path / "data.geojson"
+            if data_geojson.exists():
+                layer_config = LayerConfig(type=LayerType.VECTOR)
+            else:
+                raise ValueError(f"Layer {layer_name} not in config and cannot infer type")
+        else:
+            layer_config = dataset.layers[layer_name]
 
-        html_content = """<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>rslearn Dataset Visualization</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
-        h1 {
-            text-align: center;
-            color: #333;
-            margin-bottom: 40px;
-        }
-        .legend {
-            background: white;
-            padding: 15px;
-            margin-bottom: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            text-align: center;
-        }
-        .legend h3 {
-            margin: 0 0 10px 0;
-            color: #555;
-        }
-        .legend-items {
-            display: flex;
-            justify-content: center;
-            gap: 30px;
-            flex-wrap: wrap;
-        }
-        .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .legend-color {
-            width: 30px;
-            height: 20px;
-            border: 1px solid #999;
-        }
-        .window-section {
-            background: white;
-            margin-bottom: 40px;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .window-header {
-            font-size: 24px;
-            font-weight: bold;
-            color: #2c3e50;
-            margin-bottom: 10px;
-            padding-bottom: 10px;
-            border-bottom: 3px solid #3498db;
-        }
-        .window-info {
-            color: #666;
-            font-size: 14px;
-            margin-bottom: 20px;
-        }
-        .window-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-        }
-        .image-container {
-            border-radius: 4px;
-            overflow: hidden;
-            background: #fff;
-            display: inline-block;
-            width: fit-content;
-        }
-        .image-container img {
-            max-width: 100%;
-            height: auto;
-            display: block;
-            background: #fff;
-        }
-        .image-label {
-            padding: 8px;
-            font-size: 14px;
-            color: #333;
-            text-align: center;
-            background: #f8f9fa;
-            border-top: 1px solid #e0e0e0;
-            font-weight: 600;
-        }
-    </style>
-</head>
-<body>
-    <h1>rslearn Dataset Visualization</h1>
-"""
+        if layer_config.type == LayerType.RASTER and not is_label_layer(layer_name):
+            if layer_name not in bands:
+                raise ValueError(f"Bands not specified for layer {layer_name}")
+            if layer_name not in normalization:
+                raise ValueError(f"Normalization not specified for layer {layer_name}")
+            
+            array = read_raster_layer(window, layer_name, layer_config, bands[layer_name], group_idx=group_idx)
+            from .normalization import normalize_array
+            normalized = normalize_array(array, normalization[layer_name])
+            
+            if normalized.shape[-1] == 1:
+                img = Image.fromarray(normalized[:, :, 0], mode="L")
+            elif normalized.shape[-1] == 3:
+                img = Image.fromarray(normalized, mode="RGB")
+            else:
+                img = Image.fromarray(normalized[:, :, :3], mode="RGB")
+            
+            img = img.resize(VISUALIZATION_IMAGE_SIZE, Image.Resampling.LANCZOS)
+            
+        elif is_label_layer(layer_name):
+            if layer_config.type == LayerType.RASTER:
+                if not layer_config.band_sets:
+                    raise ValueError(f"No band sets in raster label layer {layer_name}")
+                band_set = layer_config.band_sets[0]
+                if not band_set.bands:
+                    raise ValueError(f"No bands in raster label layer {layer_name}")
+                
+                label_array = read_raster_layer(window, layer_name, layer_config, [band_set.bands[0]], group_idx=group_idx)
+                layer_label_colors = label_colors_dict.get(layer_name) if label_colors_dict else label_colors
+                if not layer_label_colors:
+                    raise ValueError(f"No label colors available for layer {layer_name}")
+                
+                if label_array.ndim == 3:
+                    label_values = label_array[0, :, :]
+                else:
+                    label_values = label_array
+                
+                height, width = label_values.shape
+                mask_img = np.zeros((height, width, 3), dtype=np.uint8)
+                valid_mask = ~np.isnan(label_values)
+                
+                if layer_config.class_names:
+                    label_int = label_values.astype(np.int32)
+                    for idx in range(len(layer_config.class_names)):
+                        class_name = layer_config.class_names[idx]
+                        color = layer_label_colors.get(str(class_name), (0, 0, 0))
+                        mask = (label_int == idx) & valid_mask
+                        mask_img[mask] = color
+                else:
+                    unique_vals = np.unique(label_values[valid_mask])
+                    for val in unique_vals:
+                        val_str = "no_data" if np.isclose(val, 0) else str(int(val) if np.isclose(val, int(val)) else float(val))
+                        color = layer_label_colors.get(val_str, (0, 0, 0))
+                        mask = (label_values == val) & valid_mask
+                        mask_img[mask] = color
+                
+                img = Image.fromarray(mask_img, mode="RGB")
+                img = img.resize(VISUALIZATION_IMAGE_SIZE, Image.Resampling.NEAREST)
+                
+            elif layer_config.type == LayerType.VECTOR:
+                if task_type == "classification":
+                    raise ValueError("Classification labels are text, not images")
+                
+                features = read_vector_layer(window, layer_name, layer_config, group_idx=group_idx)
+                if not features:
+                    logger.info(f"No features found in vector label layer {layer_name} for window {window.name}")
+                    raise FileNotFoundError(f"No features in vector label layer {layer_name}")
+                
+                reference_array = None
+                ref_normalization_method = None
+                if task_type == "detection":
+                    raster_layers = [name for name in bands.keys() if not is_label_layer(name)]
+                    if raster_layers:
+                        ref_layer_name = raster_layers[0]
+                        ref_layer_config = dataset.layers[ref_layer_name]
+                        reference_array = read_raster_layer(
+                            window, ref_layer_name, ref_layer_config, bands[ref_layer_name], group_idx=group_idx
+                        )
+                        ref_normalization_method = normalization[ref_layer_name]
+                
+                width = window.bounds[2] - window.bounds[0]
+                height = window.bounds[3] - window.bounds[1]
+                
+                if reference_array is not None:
+                    from .normalization import normalize_array
+                    from .overlay import overlay_points_on_image
+                    from PIL import ImageDraw
+                    
+                    normalized = normalize_array(reference_array, ref_normalization_method)
+                    if normalized.shape[-1] >= 3:
+                        img = Image.fromarray(normalized[:, :, :3], mode="RGB")
+                    else:
+                        img = Image.fromarray(normalized[:, :, 0], mode="L").convert("RGB")
+                    
+                    draw = ImageDraw.Draw(img)
+                    actual_width = width
+                    actual_height = height
+                    overlay_points_on_image(
+                        draw, features, window.bounds, img.size[0], img.size[1], actual_width, actual_height, label_colors
+                    )
+                    img = img.resize(VISUALIZATION_IMAGE_SIZE, Image.Resampling.LANCZOS)
+                else:
+                    from PIL import ImageDraw
+                    mask_img = Image.new("RGB", (width, height), color=(0, 0, 0))
+                    draw = ImageDraw.Draw(mask_img)
+                    property_names = ["label", "category", "class", "type"]
+                    no_data_features = []
+                    other_features = []
+                    for feat in features:
+                        if not feat.properties:
+                            other_features.append(feat)
+                            continue
+                        label_found = False
+                        for prop_name in property_names:
+                            label = feat.properties.get(prop_name, "")
+                            if label:
+                                if str(label) == "no_data":
+                                    no_data_features.append(feat)
+                                else:
+                                    other_features.append(feat)
+                                label_found = True
+                                break
+                        if not label_found:
+                            other_features.append(feat)
+                    
+                    def get_label(feat) -> str:
+                        if not feat.properties:
+                            return ""
+                        for prop_name in property_names:
+                            label = feat.properties.get(prop_name, "")
+                            if label:
+                                return str(label)
+                        return ""
+                    
+                    other_features_sorted = sorted(other_features, key=get_label, reverse=True)
+                    sorted_features = no_data_features + other_features_sorted
+                    
+                    for feature in sorted_features:
+                        if not feature.properties:
+                            continue
+                        label = None
+                        for prop_name in property_names:
+                            label = feature.properties.get(prop_name)
+                            if label:
+                                label = str(label)
+                                break
+                        if not label:
+                            continue
+                        color = label_colors.get(label, (255, 255, 255))
+                        geom_pixel = feature.geometry.to_projection(window.projection)
+                        shp = geom_pixel.shp
+                        if shp.geom_type == "Polygon":
+                            coords = list(shp.exterior.coords)
+                            pixel_coords = [(int(x - window.bounds[0]), int(y - window.bounds[1])) for x, y in coords]
+                            if len(pixel_coords) >= 3:
+                                draw.polygon(pixel_coords, fill=color, outline=color)
+                                for interior in shp.interiors:
+                                    hole_coords = [(int(x - window.bounds[0]), int(y - window.bounds[1])) for x, y in interior.coords]
+                                    if len(hole_coords) >= 3:
+                                        draw.polygon(hole_coords, fill=(0, 0, 0), outline=color)
+                        elif shp.geom_type == "MultiPolygon":
+                            for poly in shp.geoms:
+                                coords = list(poly.exterior.coords)
+                                pixel_coords = [(int(x - window.bounds[0]), int(y - window.bounds[1])) for x, y in coords]
+                                if len(pixel_coords) >= 3:
+                                    draw.polygon(pixel_coords, fill=color, outline=color)
+                    
+                    img = mask_img.resize(VISUALIZATION_IMAGE_SIZE, Image.Resampling.NEAREST)
+        else:
+            raise ValueError(f"Unsupported layer type for {layer_name}")
 
-        # Generate legend dynamically from label colors (skip for classification tasks)
-        if label_colors and task_type != "classification":
-            html_content += """
-    <div class="legend">
-        <h3>Mask Color Legend</h3>
-        <div class="legend-items">
-"""
-            sorted_labels = sorted(label_colors.keys())
-            for label in sorted_labels:
-                color = label_colors[label]
-                color_hex = f"rgb({color[0]}, {color[1]}, {color[2]})"
-                html_content += f"""
-            <div class="legend-item">
-                <div class="legend-color" style="background: {color_hex};"></div>
-                <span>{label}</span>
-            </div>
-"""
-            html_content += """
-        </div>
-    </div>
-"""
-
-        html_content += """
-"""
-
-        # Add each window section
-        for result in window_results:
-            window_name = result["window_name"]
-            window_info, lat, lon = self.format_window_info(result["window"])
-
-            # Add Google Maps link if lat/lon available
-            maps_link_html = ""
-            if lat is not None and lon is not None:
-                maps_url = f"https://www.google.com/maps?q={lat},{lon}"
-                maps_link_html = f' <a href="{maps_url}" target="_blank" style="color: #3498db; text-decoration: none; margin-left: 10px;">🗺️ View on Google Maps</a>'
-
-            html_content += f"""
-    <div class="window-section">
-        <div class="window-header">{window_name}{maps_link_html}</div>
-        <div class="window-info">{window_info}</div>
-        <div class="window-grid">
-"""
-
-            # Add layer images (from layer_names first, then any additional layers in result)
-            displayed_layers = set()
-            for layer_name in layer_names:
-                if layer_name in result["layer_images"]:
-                    displayed_layers.add(layer_name)
-                    img_path = Path(result["layer_images"][layer_name])
-                    if not img_path.is_absolute():
-                        img_path = output_dir / img_path
-                    img_data_uri = self._encode_image_to_base64(img_path)
-                    if img_data_uri:
-                        html_content += f"""
-            <div class="image-container">
-                <img src="{img_data_uri}" alt="{layer_name}">
-                <div class="image-label">{layer_name}</div>
-            </div>
-"""
-            # Also display any additional layers in result["layer_images"] (e.g., auto-detected label layers)
-            for layer_name in result["layer_images"].keys():
-                if layer_name not in displayed_layers:
-                    img_path = Path(result["layer_images"][layer_name])
-                    if not img_path.is_absolute():
-                        img_path = output_dir / img_path
-                    img_data_uri = self._encode_image_to_base64(img_path)
-                    if img_data_uri:
-                        html_content += f"""
-            <div class="image-container">
-                <img src="{img_data_uri}" alt="{layer_name}">
-                <div class="image-label">{layer_name}</div>
-            </div>
-"""
-
-            # Add mask or label text if available (once per window, not per layer)
-            if result.get("mask_path"):
-                mask_path = Path(result["mask_path"])
-                if not mask_path.is_absolute():
-                    mask_path = output_dir / mask_path
-                mask_data_uri = self._encode_image_to_base64(mask_path)
-                if mask_data_uri:
-                    html_content += f"""
-            <div class="image-container">
-                <img src="{mask_data_uri}" alt="Label Mask">
-                <div class="image-label">Label Mask</div>
-            </div>
-"""
-            elif result.get("label_text"):
-                html_content += f"""
-            <div class="image-container">
-                <div style="padding: 20px; font-size: 18px; font-weight: bold;">Label: {result["label_text"]}</div>
-            </div>
-"""
-
-            html_content += """
-        </div>
-    </div>
-"""
-
-        html_content += """
-</body>
-</html>
-"""
-
-        html_output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(html_output_path, "w") as f:
-            f.write(html_content)
-
-        logger.info(f"Generated HTML visualization at {html_output_path}")
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
 
     def process_window(
         self,
@@ -361,33 +348,25 @@ class VisualizationServer:
 
         # Process all layers (both raster image layers and label layers)
         for layer_name in layer_names:
-            # Get layer config, or create a minimal one if not in config.json
             if layer_name not in dataset.layers:
-                # Try to infer layer type from window directory structure
                 layer_dir = window.get_layer_dir(layer_name, group_idx=group_idx)
-                # Check if it's a vector layer (has data.geojson) or raster (has geotiff)
                 layer_dir_path = UPath(layer_dir)
                 data_geojson = layer_dir_path / "data.geojson"
                 
                 if data_geojson.exists():
-                    # It's a vector layer - create minimal LayerConfig
                     layer_config = LayerConfig(type=LayerType.VECTOR)
                     logger.debug(f"Creating minimal vector LayerConfig for {layer_name} (not in config.json)")
                 else:
-                    # Cannot infer raster layer type without config, skip it
                     logger.warning(f"Layer {layer_name} not in config.json and cannot infer type - skipping")
                     continue
             else:
                 layer_config = dataset.layers[layer_name]
             
-            # For visualization, try to read the layer even if not marked as completed
             if not window.is_layer_completed(layer_name, group_idx=group_idx):
                 logger.debug(f"Layer {layer_name} not marked as completed for window {window.name}, attempting to read anyway")
 
-            # Handle raster image layers
             if layer_config.type == LayerType.RASTER and not is_label_layer(layer_name):
                 try:
-                    # Read raster array
                     if layer_name not in bands:
                         raise ValueError(f"Bands not specified for layer {layer_name}. Please provide --bands {layer_name}:band1,band2,band3")
                     band_names = bands[layer_name]
@@ -407,11 +386,9 @@ class VisualizationServer:
                     logger.error(f"Failed to process layer {layer_name} for window {window.name}: {e}")
                     continue
             
-            # Handle label layers (raster or vector)
             elif is_label_layer(layer_name):
                 try:
                     if layer_config.type == LayerType.RASTER:
-                        # Raster label layer: generate mask
                         if not layer_config.band_sets:
                             logger.debug(f"No band sets in raster label layer {layer_name}")
                             continue
@@ -420,15 +397,12 @@ class VisualizationServer:
                             logger.debug(f"No bands in raster label layer {layer_name}")
                             continue
                         
-                        # Read first band
                         band_name = band_set.bands[0]
                         label_array = read_raster_layer(
                             window, layer_name, layer_config, [band_name], group_idx=group_idx
                         )
                         
-                        # Generate mask (for segmentation task type)
                         mask_path = window_dir / f"{layer_name}.png"
-                        # Use label_colors_dict for this specific layer, or fall back to label_colors
                         layer_label_colors = None
                         if label_colors_dict and layer_name in label_colors_dict:
                             layer_label_colors = label_colors_dict[layer_name]
@@ -442,20 +416,16 @@ class VisualizationServer:
                             logger.warning(f"No label colors available for raster label layer {layer_name}")
                         
                     elif layer_config.type == LayerType.VECTOR:
-                        # Vector label layer: generate mask or text label
                         if task_type == "classification":
-                            # For classification, use the first vector label layer for text label
                             if result["label_text"] is None:
                                 label_text = get_vector_label_by_property(window, layer_config, layer_name, group_idx=group_idx)
                                 result["label_text"] = label_text
                         elif task_type in ("segmentation", "detection") and label_colors:
-                            # Generate mask from vector features
                             features = read_vector_layer(window, layer_name, layer_config, group_idx=group_idx)
                             logger.info(f"Window {window.name}: Found {len(features)} label features in {layer_name}")
                             if features:
                                 mask_path = window_dir / f"{layer_name}.png"
 
-                                # For detection, we need a reference raster image
                                 reference_array = None
                                 ref_normalization_method = None
                                 if task_type == "detection" and result["layer_images"]:
@@ -479,7 +449,6 @@ class VisualizationServer:
                                             raise ValueError(f"Normalization not specified for reference layer {ref_layer_name}. Please provide --normalization {ref_layer_name}:method")
                                         ref_normalization_method = normalization[ref_layer_name]
 
-                                # Only pass normalization_method if we have a reference array (detection)
                                 if reference_array is not None:
                                     features_to_mask(
                                         features,
@@ -491,7 +460,6 @@ class VisualizationServer:
                                         normalization_method=ref_normalization_method,
                                     )
                                 else:
-                                    # Segmentation: no reference array, normalization_method won't be used
                                     features_to_mask(
                                         features,
                                         window.bounds,
@@ -506,6 +474,87 @@ class VisualizationServer:
                     continue
 
         return result
+
+    def _render_template(self, sampled_windows: list[Window]) -> str:
+        """Render the HTML template with window data.
+
+        Args:
+            sampled_windows: List of windows to display
+
+        Returns:
+            Rendered HTML as string
+        """
+        template_dir = Path(__file__).parent / "templates"
+        env = Environment(loader=FileSystemLoader(str(template_dir)))
+        template = env.get_template("viewer.html")
+
+        window_data = []
+        for idx, window in enumerate(sampled_windows):
+            info_html, lat, lon = self.format_window_info(window)
+            maps_link = f"https://www.google.com/maps?q={lat},{lon}" if lat is not None and lon is not None else None
+
+            available_layers = set()
+            mask_layer = None
+            label_text = None
+
+            def is_label_layer(name: str) -> bool:
+                return (
+                    name in ("label", "labels", "label_raster") or
+                    name.endswith("_label") or
+                    name.endswith("_label_raster") or
+                    name.startswith("label_")
+                )
+
+            for layer_name in self.layers:
+                if layer_name not in self.dataset.layers:
+                    continue
+                layer_config = self.dataset.layers[layer_name]
+                try:
+                    if layer_config.type == LayerType.RASTER and not is_label_layer(layer_name):
+                        if window.is_layer_completed(layer_name, group_idx=self.group_idx):
+                            available_layers.add(layer_name)
+                    elif is_label_layer(layer_name):
+                        if layer_config.type == LayerType.VECTOR:
+                            if self.task_type == "classification":
+                                if window.is_layer_completed(layer_name, group_idx=self.group_idx):
+                                    label_text = get_vector_label_by_property(window, layer_config, layer_name, group_idx=self.group_idx)
+                            else:
+                                if window.is_layer_completed(layer_name, group_idx=self.group_idx):
+                                    try:
+                                        features = read_vector_layer(window, layer_name, layer_config, group_idx=self.group_idx)
+                                        if features:
+                                            mask_layer = layer_name
+                                    except Exception:
+                                        pass
+                        elif layer_config.type == LayerType.RASTER:
+                            if window.is_layer_completed(layer_name, group_idx=self.group_idx):
+                                mask_layer = layer_name
+                except Exception:
+                    continue
+
+            window_data.append({
+                "idx": idx,
+                "name": window.name,
+                "info_html": info_html,
+                "maps_link": maps_link,
+                "available_layers": available_layers,
+                "mask_layer": mask_layer,
+                "label_text": label_text,
+            })
+
+        label_colors = None
+        if self.label_colors_dict:
+            first_label_layer = list(self.label_colors_dict.keys())[0]
+            label_colors = self.label_colors_dict[first_label_layer]
+
+        # Render template
+        html = template.render(
+            windows=window_data,
+            layer_names=self.layers,
+            label_colors=label_colors,
+            task_type=self.task_type,
+        )
+        return html
 
     def run(
         self,
@@ -584,16 +633,6 @@ class VisualizationServer:
             for label_layer_name in label_layers_in_list:
                 label_config = dataset.layers[label_layer_name]
                 if not label_config.class_names:
-                    raise ValueError(
-                        f"class_names must be specified in the config for label layer '{label_layer_name}'. "
-                        "Auto-detection of class names is not supported."
-                    )
-                label_classes = set(label_config.class_names)
-                if label_classes:
-                    label_colors = generate_label_colors(label_classes)
-                    label_colors_dict[label_layer_name] = label_colors
-                    logger.info(f"Found {len(label_classes)} label classes for {label_layer_name}: {sorted(label_classes)}")
-                else:
                     # For detection tasks, use default 'detected' class if no classes found
                     if task_type == "detection":
                         label_classes = {"detected"}
@@ -601,87 +640,164 @@ class VisualizationServer:
                         label_colors_dict[label_layer_name] = label_colors
                         logger.info(f"No label classes in config for {label_layer_name} (detection task) - using default 'detected' class")
                     else:
-                        logger.warning(f"No label classes in config for {label_layer_name} - masks will not be generated")
+                        raise ValueError(
+                            f"class_names must be specified in the config for label layer '{label_layer_name}'. "
+                            "Auto-detection of class names is not supported."
+                        )
+                else:
+                    label_classes = set(label_config.class_names)
+                    if label_classes:
+                        label_colors = generate_label_colors(label_classes)
+                        label_colors_dict[label_layer_name] = label_colors
+                        logger.info(f"Found {len(label_classes)} label classes for {label_layer_name}: {sorted(label_classes)}")
+                    else:
+                        # For detection tasks, use default 'detected' class if class_names is empty list
+                        if task_type == "detection":
+                            label_classes = {"detected"}
+                            label_colors = generate_label_colors(label_classes)
+                            label_colors_dict[label_layer_name] = label_colors
+                            logger.info(f"Empty class_names for {label_layer_name} (detection task) - using default 'detected' class")
+                        else:
+                            logger.warning(f"No label classes in config for {label_layer_name} - masks will not be generated")
         
-        label_colors = None
-        if label_colors_dict:
-            first_label_layer = list(label_colors_dict.keys())[0]
-            label_colors = label_colors_dict[first_label_layer]
+        # Store state
+        self.dataset = dataset
+        self.layers = layers
+        self.bands = bands
+        self.normalization = normalization
+        self.task_type = task_type
+        self.label_colors_dict = label_colors_dict
+        self.group_idx = group_idx
 
-        # Create temporary output directory
-        output_dir = Path(tempfile.mkdtemp(prefix="rslearn_vis_"))
-        atexit.register(shutil.rmtree, output_dir, ignore_errors=True)
-
-        logger.info(f"Processing up to {max_samples} windows from dataset {dataset_path}")
+        # Load all windows on startup
+        logger.info(f"Loading all windows from dataset {dataset_path}")
+        self.windows = dataset.load_windows()
+        logger.info(f"Loaded {len(self.windows)} windows from dataset")
         logger.info(f"Layers: {layers}")
         logger.info(f"Bands: {bands}")
         logger.info(f"Normalization: {normalization}")
         logger.info(f"Task type: {task_type}")
 
-        # Load and sample windows
-        all_windows = dataset.load_windows()
-        logger.info(f"Loaded {len(all_windows)} windows from dataset")
-        if len(all_windows) > max_samples:
-            sampled_windows = random.sample(all_windows, max_samples)
-        else:
-            sampled_windows = all_windows
+        # Create custom HTTP handler
+        server_instance = self
 
-        window_results = []
-        windows_skipped_no_layers = 0
-        for window in sampled_windows:
-            try:
-                result = self.process_window(
-                    window,
-                    dataset,
-                    layers,
-                    bands,
-                    normalization,
-                    output_dir,
-                    task_type,
-                    label_colors,
-                    label_colors_dict=label_colors_dict,
-                    group_idx=group_idx,
-                )
-                # Only include windows that have at least one layer image
-                if result["layer_images"]:
-                    window_results.append(result)
+        class VisualizationHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                path = self.path.strip("/")
+                
+                # Route: /images/<window_idx>/<layer>
+                if path.startswith("images/"):
+                    parts = path.split("/")
+                    if len(parts) == 3 and parts[0] == "images":
+                        try:
+                            window_idx = int(parts[1])
+                            layer_name = parts[2]
+                            
+                            if window_idx < 0 or window_idx >= len(server_instance.windows):
+                                self.send_response(404)
+                                self.send_header("Content-type", "text/plain")
+                                self.end_headers()
+                                self.wfile.write(b"Window index out of range")
+                                return
+                            
+                            window = server_instance.windows[window_idx]
+                            
+                            # Generate image on-demand
+                            try:
+                                # Get label colors for this layer
+                                layer_label_colors = None
+                                if server_instance.label_colors_dict and layer_name in server_instance.label_colors_dict:
+                                    layer_label_colors = server_instance.label_colors_dict[layer_name]
+                                elif server_instance.label_colors_dict:
+                                    # Use first label layer's colors as fallback
+                                    first_label_layer = list(server_instance.label_colors_dict.keys())[0]
+                                    layer_label_colors = server_instance.label_colors_dict[first_label_layer]
+                                
+                                image_bytes = server_instance._generate_image_as_bytes(
+                                    window,
+                                    layer_name,
+                                    server_instance.dataset,
+                                    server_instance.bands,
+                                    server_instance.normalization,
+                                    server_instance.task_type,
+                                    layer_label_colors,
+                                    server_instance.label_colors_dict,
+                                    server_instance.group_idx,
+                                )
+                                
+                                self.send_response(200)
+                                self.send_header("Content-type", "image/png")
+                                self.send_header("Content-Length", str(len(image_bytes)))
+                                self.end_headers()
+                                self.wfile.write(image_bytes)
+                            except FileNotFoundError:
+                                # No data available (e.g., no features in label layer) - return 404
+                                self.send_response(404)
+                                self.send_header("Content-type", "text/plain")
+                                self.end_headers()
+                                self.wfile.write(b"Image not available")
+                            except Exception as e:
+                                logger.error(f"Failed to generate image for window {window_idx}, layer {layer_name}: {e}")
+                                self.send_response(500)
+                                self.send_header("Content-type", "text/plain")
+                                self.end_headers()
+                                self.wfile.write(f"Error generating image: {e}".encode())
+                        except (ValueError, IndexError) as e:
+                            self.send_response(400)
+                            self.send_header("Content-type", "text/plain")
+                            self.end_headers()
+                            self.wfile.write(b"Invalid image URL format")
+                    else:
+                        self.send_response(404)
+                        self.send_header("Content-type", "text/plain")
+                        self.end_headers()
+                        self.wfile.write(b"Invalid image URL")
+                
+                # Route: / (main page)
                 else:
-                    windows_skipped_no_layers += 1
-            except Exception as e:
-                logger.error(f"Failed to process window {window.name}: {e}")
-                continue
-
-        if windows_skipped_no_layers > 0:
-            logger.warning(
-                f"Skipped {windows_skipped_no_layers} windows with no layer images "
-                f"(layers may not be completed or processing failed silently)"
-            )
-        logger.info(f"Processed {len(window_results)} windows successfully")
-
-        html_path = output_dir / "index.html"
-        self.generate_html(window_results, layers, output_dir, html_path, label_colors, task_type)
-
-        # Save HTML to outputs directory if requested
-        if save_html:
-            from datetime import datetime
-
-            dataset_name = dataset_path.name
-            date_str = datetime.now().strftime("%Y%m%d")
-            outputs_dir = dataset_path.parent / "outputs"
-            outputs_dir.mkdir(exist_ok=True)
-            saved_html_path = outputs_dir / f"{dataset_name}_{date_str}.html"
-            shutil.copy(html_path, saved_html_path)
-            logger.info(f"Saved HTML to {saved_html_path}")
-
-        # Start HTTP server
-        class Handler(http.server.SimpleHTTPRequestHandler):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, directory=str(output_dir), **kwargs)
+                    # Sample windows
+                    if len(server_instance.windows) > max_samples:
+                        sampled_windows = random.sample(server_instance.windows, max_samples)
+                    else:
+                        sampled_windows = server_instance.windows
+                    
+                    # Render template
+                    html = server_instance._render_template(sampled_windows)
+                    
+                    self.send_response(200)
+                    self.send_header("Content-type", "text/html")
+                    self.end_headers()
+                    self.wfile.write(html.encode("utf-8"))
+            
+            def log_message(self, format, *args):
+                # Suppress default logging
+                pass
 
         try:
-            with socketserver.TCPServer((host, port), Handler) as httpd:
+            with socketserver.TCPServer((host, port), VisualizationHandler) as httpd:
                 logger.info(f"Serving on http://{host}:{port}")
                 logger.info(f"Open http://localhost:{port} in your browser")
+                logger.info(f"Loaded {len(self.windows)} windows - refreshing the page will show a different random sample")
+                
+                # Save HTML if requested (render template and save)
+                if save_html:
+                    from datetime import datetime
+                    
+                    if len(self.windows) > max_samples:
+                        sampled_windows = random.sample(self.windows, max_samples)
+                    else:
+                        sampled_windows = self.windows
+                    
+                    html = self._render_template(sampled_windows)
+                    dataset_name = dataset_path.name
+                    date_str = datetime.now().strftime("%Y%m%d")
+                    outputs_dir = dataset_path.parent / "outputs"
+                    outputs_dir.mkdir(exist_ok=True)
+                    saved_html_path = outputs_dir / f"{dataset_name}_{date_str}.html"
+                    with open(saved_html_path, "w", encoding="utf-8") as f:
+                        f.write(html)
+                    logger.info(f"Saved HTML to {saved_html_path}")
+                
                 httpd.serve_forever()
         except OSError as e:
             if e.errno == 48:  # Address already in use

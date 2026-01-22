@@ -94,10 +94,7 @@ def normalize_band(band: np.ndarray, method: str | NormalizationMethod = "sentin
     Returns:
         Normalized band as uint8 array
     """
-    # Convert string to enum if needed
     method_enum = NormalizationMethod(method) if isinstance(method, str) else method
-
-    # Get the normalization function from the mapping
     normalize_func = _NORMALIZATION_FUNCTIONS.get(method_enum)
     return normalize_func(band)
 
@@ -112,7 +109,6 @@ def normalize_array(array: np.ndarray, method: str | NormalizationMethod = "sent
     Returns:
         Normalized array as uint8 with shape (height, width, channels)
     """
-    # Convert from CHW (channels, height, width) to HWC (height, width, channels)
     if array.ndim == 3:
         array = np.moveaxis(array, 0, -1) 
     

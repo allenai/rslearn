@@ -27,7 +27,6 @@ def generate_label_colors(label_classes: set[str]) -> dict[str, tuple[int, int, 
     label_classes = sorted(label_classes)
     label_colors = {}
 
-    # Hardcoded color for "no_data" (always black - rslearn convention)
     NO_DATA_COLOR = (0, 0, 0)
 
     color_idx = 0

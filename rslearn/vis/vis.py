@@ -5,11 +5,9 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-import shapely
-
 from rslearn.log_utils import get_logger
 from rslearn.utils.feature import Feature
-from rslearn.utils.geometry import PixelBounds, Projection, flatten_shape
+from rslearn.utils.geometry import PixelBounds, Projection
 
 from .normalization import normalize_array
 
@@ -33,22 +31,16 @@ def array_to_png(
         output_path: Path to save PNG
         normalization_method: Normalization method to apply
     """
-    # Normalize array (expects CHW, returns HWC)
     normalized = normalize_array(array, normalization_method)
-
-    # Create PIL Image
     if normalized.shape[-1] == 1:
         img = Image.fromarray(normalized[:, :, 0], mode="L")
     elif normalized.shape[-1] == 3:
         img = Image.fromarray(normalized, mode="RGB")
     else:
-        # Take first 3 bands for RGB
         img = Image.fromarray(normalized[:, :, :3], mode="RGB")
 
-    # Resize to fixed visualization size
     img = img.resize(VISUALIZATION_IMAGE_SIZE, Image.Resampling.LANCZOS)
 
-    # Save
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(output_path)
@@ -82,19 +74,14 @@ def features_to_mask(
     width = bounds[2] - bounds[0]
     height = bounds[3] - bounds[1]
 
-    # Determine if this is detection (points) or segmentation (polygons)
     geom_types = [f.geometry.shp.geom_type for f in features if f.geometry]
     is_detection = any(gt in ("Point", "MultiPoint") for gt in geom_types)
 
     if is_detection and reference_raster_array is not None:
-        # Detection: overlay points on reference image
-        # First, convert reference array to PNG (in memory)
-        # Then overlay points
         _overlay_points_on_array(
             reference_raster_array, features, bounds, projection, label_colors, output_path, normalization_method
         )
     else:
-        # Segmentation: draw polygons on mask
         _draw_mask_from_features(features, width, height, bounds, projection, label_colors, output_path)
 
 
@@ -112,7 +99,6 @@ def raster_label_to_mask(
         layer_config: LayerConfig object (to access class_names if available)
         output_path: Path to save PNG mask
     """
-    # Use first band
     if label_array.ndim == 3:
         label_values = label_array[0, :, :]
     else:
@@ -120,33 +106,20 @@ def raster_label_to_mask(
 
     height, width = label_values.shape
     
-    # Create RGB mask image
     mask_img = np.zeros((height, width, 3), dtype=np.uint8)
-    
-    # Create a mask for valid (non-NaN) values
     valid_mask = ~np.isnan(label_values)
     
-    # Map label values to colors
-    # If class_names is available, map numeric indices to class names
-    # Otherwise, use numeric values directly as strings
     if layer_config.class_names:
-        # Map numeric values to class names using vectorized operations
         label_int = label_values.astype(np.int32)
-        
-        # Create mapping array: index -> class name string
         for idx in range(len(layer_config.class_names)):
             class_name = layer_config.class_names[idx]
             color = label_colors.get(str(class_name), (0, 0, 0))
-            # Set all pixels with this index to this color
             mask = (label_int == idx) & valid_mask
             mask_img[mask] = color
     else:
-        # No class_names - use numeric values directly
-        # Get unique values and map them
         unique_vals = np.unique(label_values[valid_mask])
         
         for val in unique_vals:
-            # Map 0 to "no_data", otherwise use numeric value as string
             if np.isclose(val, 0):
                 val_str = "no_data"
             elif np.isclose(val, int(val)):
@@ -154,13 +127,9 @@ def raster_label_to_mask(
             else:
                 val_str = str(float(val))
             color = label_colors.get(val_str, (0, 0, 0))
-            # Set all pixels with this value to this color
             mask = (label_values == val) & valid_mask
             mask_img[mask] = color
     
-    # NaN values are already black (0, 0, 0) from initialization
-    
-    # Convert to PIL Image and resize
     mask_pil = Image.fromarray(mask_img, mode="RGB")
     mask_pil = mask_pil.resize(VISUALIZATION_IMAGE_SIZE, Image.Resampling.NEAREST)
     
@@ -181,21 +150,11 @@ def _draw_mask_from_features(
     """Draw a mask from polygon features."""
     from collections import Counter
 
-    # Initialize mask with black background
-    # "no_data" is always black and represents buffers around other polygons
-    background_color = (0, 0, 0)  # Black background
+    background_color = (0, 0, 0)
     mask_img = Image.new("RGB", (width, height), color=background_color)
     draw = ImageDraw.Draw(mask_img)
 
-    # Sort features for drawing order:
-    # 1. "no_data" first (black buffers)
-    # 2. Other labels in reverse alphabetical order (descending)
-    #    This ensures labels that come later alphabetically (like "no_landslide") 
-    #    are drawn before labels that come earlier (like "landslide"),
-    #    so "landslide" appears on top of "no_landslide"
     property_names = ["label", "category", "class", "type"]
-    
-    # Separate no_data features from others
     no_data_features = []
     other_features = []
     for feat in features:
@@ -215,7 +174,6 @@ def _draw_mask_from_features(
         if not label_found:
             other_features.append(feat)
     
-    # Sort other features in reverse alphabetical order (descending)
     def get_label(feat: Feature) -> str:
         if not feat.properties:
             return ""
@@ -228,7 +186,6 @@ def _draw_mask_from_features(
     other_features_sorted = sorted(other_features, key=get_label, reverse=True)
     sorted_features = no_data_features + other_features_sorted
 
-    # Draw polygons
     for feature in sorted_features:
         if not feature.properties:
             continue
@@ -245,21 +202,16 @@ def _draw_mask_from_features(
             continue
 
         color = label_colors.get(label, (255, 255, 255))
-
-        # Get geometry in pixel coordinates
         geom_pixel = feature.geometry.to_projection(projection)
         shp = geom_pixel.shp
 
-        # Draw polygon
         if shp.geom_type == "Polygon":
             coords = list(shp.exterior.coords)
-            # Convert to pixel coordinates relative to bounds
             pixel_coords = [
                 (int(x - bounds[0]), int(y - bounds[1])) for x, y in coords
             ]
             if len(pixel_coords) >= 3:
                 draw.polygon(pixel_coords, fill=color, outline=color)
-                # Draw holes
                 for interior in shp.interiors:
                     hole_coords = [(int(x - bounds[0]), int(y - bounds[1])) for x, y in interior.coords]
                     if len(hole_coords) >= 3:
@@ -273,7 +225,6 @@ def _draw_mask_from_features(
                 if len(pixel_coords) >= 3:
                     draw.polygon(pixel_coords, fill=color, outline=color)
 
-    # Resize to fixed visualization size
     mask_img = mask_img.resize(VISUALIZATION_IMAGE_SIZE, Image.Resampling.NEAREST)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -302,7 +253,6 @@ def _overlay_points_on_array(
     """
     from .normalization import normalize_array
 
-    # Normalize array (expects CHW, returns HWC)
     normalized = normalize_array(array, normalization_method)
     if normalized.shape[-1] >= 3:
         img = Image.fromarray(normalized[:, :, :3], mode="RGB")
@@ -314,57 +264,14 @@ def _overlay_points_on_array(
     actual_width = bounds[2] - bounds[0]
     actual_height = bounds[3] - bounds[1]
 
-    property_names = ["label", "category", "class", "type"]
+    from .overlay import overlay_points_on_image
 
-    points_drawn = 0
-    points_out_of_bounds = 0
     logger.info(f"Processing {len(features)} features for overlay")
-    
-    for feature in features:
-        label = None
-        if feature.properties:
-            for prop_name in property_names:
-                label = feature.properties.get(prop_name)
-                if label:
-                    label = str(label)
-                    break
-        
-        # If no label found, use "detected" as default (for object detection)
-        if not label:
-            label = "detected"
-
-        color = label_colors.get(label, (255, 0, 0))
-
-        # Get geometry (already in pixel coordinates)
-        shp = feature.geometry.shp
-
-        # Flatten shape to handle both Point and MultiPoint uniformly
-        flat_shapes = flatten_shape(shp)
-        for point in flat_shapes:
-            assert isinstance(point, shapely.Point), f"Expected Point, got {type(point)}"
-            x, y = point.x, point.y
-            px = int((x - bounds[0]) * width / actual_width)
-            py = int((y - bounds[1]) * height / actual_height)
-            logger.info(f"Point at ({x:.2f}, {y:.2f}) -> pixel ({px}, {py}), bounds: {bounds}, image size: {width}x{height}, actual_size: {actual_width}x{actual_height}")
-            if 0 <= px < width and 0 <= py < height:
-                # Draw a bounding box (e.g., 20x20 pixels centered on the point)
-                box_size = 20
-                x1 = max(0, px - box_size // 2)
-                y1 = max(0, py - box_size // 2)
-                x2 = min(width, px + box_size // 2)
-                y2 = min(height, py + box_size // 2)
-                draw.rectangle(
-                    [x1, y1, x2, y2],
-                    outline=color,
-                    width=2,
-                )
-                points_drawn += 1
-            else:
-                points_out_of_bounds += 1
-
+    points_drawn, points_out_of_bounds = overlay_points_on_image(
+        draw, features, bounds, width, height, actual_width, actual_height, label_colors
+    )
     logger.info(f"Overlaid {points_drawn} points on image ({points_out_of_bounds} out of bounds)")
 
-    # Resize to fixed visualization size
     img = img.resize(VISUALIZATION_IMAGE_SIZE, Image.Resampling.LANCZOS)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
