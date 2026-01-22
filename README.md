@@ -216,7 +216,7 @@ We can visualize both the GeoTIFFs together in qgis:
 qgis $DATASET_PATH/windows/default/seattle_54912_-527360/layers/*/*/geotiff.tif
 ```
 
-We can also visualize dataset samples using the visualization module:
+We can also visualize samples using the visualization module:
 ```
 python -m rslearn.vis.server \ 
     $DATASET_PATH \  
