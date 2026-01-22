@@ -5,7 +5,13 @@ import os
 from typing import Any
 
 import lightning as L
+import matplotlib
+
+matplotlib.use("Agg")  # Non-interactive backend for server environments
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
+from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
 from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
 from PIL import Image
 from upath import UPath
@@ -210,15 +216,150 @@ class RslearnLightningModule(L.LightningModule):
             # Fail silently for single-dataset case, which is okay
             pass
 
+    def _get_class_names(self) -> list[str] | None:
+        """Try to get class names from the task.
+
+        Returns:
+            List of class names if available, otherwise None.
+        """
+        # For ClassificationTask
+        if hasattr(self.task, "classes"):
+            return self.task.classes
+        # For SegmentationTask
+        if hasattr(self.task, "num_classes"):
+            return [f"class_{i}" for i in range(self.task.num_classes)]
+        return None
+
+    def _create_confusion_matrix_figure(
+        self,
+        cm: np.ndarray,
+        class_names: list[str],
+    ) -> plt.Figure:
+        """Create a matplotlib figure for the confusion matrix.
+
+        Args:
+            cm: confusion matrix as numpy array (num_classes x num_classes)
+            class_names: list of class names
+
+        Returns:
+            matplotlib Figure object
+        """
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+        # Create heatmap
+        im = ax.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
+        ax.figure.colorbar(im, ax=ax)
+
+        # Set ticks and labels
+        ax.set(
+            xticks=np.arange(cm.shape[1]),
+            yticks=np.arange(cm.shape[0]),
+            xticklabels=class_names,
+            yticklabels=class_names,
+            ylabel="True label",
+            xlabel="Predicted label",
+            title="Confusion Matrix",
+        )
+
+        # Rotate x labels for readability
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+
+        # Add text annotations
+        fmt = ".2f" if cm.max() <= 1.0 else "d"
+        thresh = cm.max() / 2.0
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                ax.text(
+                    j,
+                    i,
+                    format(cm[i, j], fmt),
+                    ha="center",
+                    va="center",
+                    color="white" if cm[i, j] > thresh else "black",
+                    fontsize=8,
+                )
+
+        fig.tight_layout()
+        return fig
+
+    def _log_confusion_matrix(
+        self,
+        name: str,
+        cm: torch.Tensor,
+        class_names: list[str] | None = None,
+    ) -> None:
+        """Log a confusion matrix to the appropriate logger.
+
+        Args:
+            name: the metric name (e.g., "val_confusion_matrix")
+            cm: the confusion matrix tensor (num_classes x num_classes)
+            class_names: optional list of class names for labels
+        """
+        cm_np = cm.detach().cpu().numpy()
+        num_classes = cm_np.shape[0]
+
+        if class_names is None:
+            class_names = [str(i) for i in range(num_classes)]
+
+        # Create matplotlib figure
+        fig = self._create_confusion_matrix_figure(cm_np, class_names)
+
+        # Log to each logger using their native API
+        loggers = self.loggers if hasattr(self, "loggers") and self.loggers else []
+        if not loggers and self.logger is not None:
+            loggers = [self.logger]
+
+        for logger_obj in loggers:
+            if logger_obj is None:
+                continue
+
+            try:
+                if isinstance(logger_obj, WandbLogger):
+                    import wandb
+
+                    # Log as image
+                    logger_obj.experiment.log(
+                        {
+                            name: wandb.Image(fig),
+                        },
+                        step=self.global_step,
+                    )
+
+                elif isinstance(logger_obj, TensorBoardLogger):
+                    logger_obj.experiment.add_figure(
+                        name,
+                        fig,
+                        global_step=self.current_epoch,
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to log confusion matrix to {type(logger_obj)}: {e}"
+                )
+
+        plt.close(fig)
+
     def on_validation_epoch_end(self) -> None:
         """Compute and log validation metrics at epoch end.
 
         We manually compute and log metrics here (instead of passing the MetricCollection
         to log_dict) because MetricCollection.compute() properly flattens dict-returning
         metrics, while log_dict expects each metric to return a scalar tensor.
+
+        Non-scalar metrics (like confusion matrices) are logged separately using
+        logger-specific APIs.
         """
         metrics = self.val_metrics.compute()
-        self.log_dict(metrics)
+
+        # Separate scalar and non-scalar metrics
+        scalar_metrics = {}
+        for k, v in metrics.items():
+            if isinstance(v, torch.Tensor) and v.dim() >= 2:
+                # This is a confusion matrix - log specially
+                self._log_confusion_matrix(k, v, self._get_class_names())
+            else:
+                scalar_metrics[k] = v
+
+        self.log_dict(scalar_metrics)
         self.val_metrics.reset()
 
     def on_test_epoch_end(self) -> None:
@@ -227,14 +368,27 @@ class RslearnLightningModule(L.LightningModule):
         We manually compute and log metrics here (instead of passing the MetricCollection
         to log_dict) because MetricCollection.compute() properly flattens dict-returning
         metrics, while log_dict expects each metric to return a scalar tensor.
+
+        Non-scalar metrics (like confusion matrices) are logged separately using
+        logger-specific APIs.
         """
         metrics = self.test_metrics.compute()
-        self.log_dict(metrics)
+
+        # Separate scalar and non-scalar metrics
+        scalar_metrics = {}
+        for k, v in metrics.items():
+            if isinstance(v, torch.Tensor) and v.dim() >= 2:
+                # This is a confusion matrix - log specially
+                self._log_confusion_matrix(k, v, self._get_class_names())
+            else:
+                scalar_metrics[k] = v
+
+        self.log_dict(scalar_metrics)
         self.test_metrics.reset()
 
         if self.metrics_file:
             with open(self.metrics_file, "w") as f:
-                metrics_dict = {k: v.item() for k, v in metrics.items()}
+                metrics_dict = {k: v.item() for k, v in scalar_metrics.items()}
                 json.dump(metrics_dict, f, indent=4)
                 logger.info(f"Saved metrics to {self.metrics_file}")
 

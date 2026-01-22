@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw
 from torchmetrics import Metric, MetricCollection
 from torchmetrics.classification import (
     MulticlassAccuracy,
+    MulticlassConfusionMatrix,
     MulticlassF1Score,
     MulticlassPrecision,
     MulticlassRecall,
@@ -44,6 +45,8 @@ class ClassificationTask(BasicTask):
         f1_metric_kwargs: dict[str, Any] = {},
         positive_class: str | None = None,
         positive_class_threshold: float = 0.5,
+        enable_confusion_matrix: bool = False,
+        confusion_matrix_normalize: str | None = None,
         **kwargs: Any,
     ):
         """Initialize a new ClassificationTask.
@@ -69,6 +72,10 @@ class ClassificationTask(BasicTask):
             positive_class: positive class name.
             positive_class_threshold: threshold for classifying the positive class in
                 binary classification (default 0.5).
+            enable_confusion_matrix: whether to compute confusion matrix (default false)
+            confusion_matrix_normalize: normalization mode for confusion matrix. One of
+                'true' (normalize by row/true labels), 'pred' (normalize by column/
+                predictions), 'all' (normalize by total), or None (no normalization).
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -84,6 +91,8 @@ class ClassificationTask(BasicTask):
         self.f1_metric_kwargs = f1_metric_kwargs
         self.positive_class = positive_class
         self.positive_class_threshold = positive_class_threshold
+        self.enable_confusion_matrix = enable_confusion_matrix
+        self.confusion_matrix_normalize = confusion_matrix_normalize
 
         if self.positive_class_threshold != 0.5:
             # Must be binary classification
@@ -278,6 +287,12 @@ class ClassificationTask(BasicTask):
                 )
                 metrics["f1"] = ClassificationMetric(MulticlassF1Score(**kwargs))
 
+        if self.enable_confusion_matrix:
+            metrics["confusion_matrix"] = ClassificationConfusionMatrixMetric(
+                num_classes=len(self.classes),
+                normalize=self.confusion_matrix_normalize,
+            )
+
         return MetricCollection(metrics)
 
 
@@ -379,3 +394,54 @@ class ClassificationMetric(Metric):
     def plot(self, *args: list[Any], **kwargs: dict[str, Any]) -> Any:
         """Returns a plot of the metric."""
         return self.metric.plot(*args, **kwargs)
+
+
+class ClassificationConfusionMatrixMetric(Metric):
+    """Confusion matrix metric for classification task."""
+
+    def __init__(self, num_classes: int, normalize: str | None = None):
+        """Initialize a new ClassificationConfusionMatrixMetric.
+
+        Args:
+            num_classes: number of classes
+            normalize: normalization mode ('true', 'pred', 'all', or None)
+        """
+        super().__init__()
+        self.num_classes = num_classes
+        self.normalize = normalize
+        self.confusion_matrix = MulticlassConfusionMatrix(
+            num_classes=num_classes, normalize=normalize
+        )
+
+    def update(
+        self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
+    ) -> None:
+        """Update metric.
+
+        Args:
+            preds: the predictions (softmax probabilities)
+            targets: the targets
+        """
+        if not isinstance(preds, torch.Tensor):
+            preds = torch.stack(preds)
+        labels = torch.stack([target["class"] for target in targets])
+
+        # Sub-select the valid labels.
+        mask = torch.stack([target["valid"] > 0 for target in targets])
+        preds = preds[mask]
+        labels = labels[mask]
+        if len(preds) == 0:
+            return
+
+        # Get predicted classes
+        pred_classes = preds.argmax(dim=-1)
+        self.confusion_matrix.update(pred_classes, labels)
+
+    def compute(self) -> torch.Tensor:
+        """Returns the confusion matrix as a 2D tensor."""
+        return self.confusion_matrix.compute()
+
+    def reset(self) -> None:
+        """Reset metric."""
+        super().reset()
+        self.confusion_matrix.reset()

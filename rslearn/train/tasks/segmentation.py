@@ -8,6 +8,7 @@ import numpy.typing as npt
 import torch
 import torchmetrics.classification
 from torchmetrics import Metric, MetricCollection
+from torchmetrics.classification import MulticlassConfusionMatrix
 
 from rslearn.models.component import FeatureMaps, Predictor
 from rslearn.train.model_context import (
@@ -61,6 +62,8 @@ class SegmentationTask(BasicTask):
         other_metrics: dict[str, Metric] = {},
         output_probs: bool = False,
         output_class_idx: int | None = None,
+        enable_confusion_matrix: bool = False,
+        confusion_matrix_normalize: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize a new SegmentationTask.
@@ -98,6 +101,10 @@ class SegmentationTask(BasicTask):
                 during prediction.
             output_class_idx: if set along with output_probs, only output the probability
                 for this specific class index (single-channel output).
+            enable_confusion_matrix: whether to compute confusion matrix (default false)
+            confusion_matrix_normalize: normalization mode for confusion matrix. One of
+                'true' (normalize by row/true labels), 'pred' (normalize by column/
+                predictions), 'all' (normalize by total), or None (no normalization).
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -124,6 +131,8 @@ class SegmentationTask(BasicTask):
         self.other_metrics = other_metrics
         self.output_probs = output_probs
         self.output_class_idx = output_class_idx
+        self.enable_confusion_matrix = enable_confusion_matrix
+        self.confusion_matrix_normalize = confusion_matrix_normalize
 
     def process_inputs(
         self,
@@ -303,6 +312,12 @@ class SegmentationTask(BasicTask):
         if self.other_metrics:
             metrics.update(self.other_metrics)
 
+        if self.enable_confusion_matrix:
+            metrics["confusion_matrix"] = SegmentationConfusionMatrixMetric(
+                num_classes=self.num_classes,
+                normalize=self.confusion_matrix_normalize,
+            )
+
         return MetricCollection(metrics)
 
 
@@ -472,6 +487,59 @@ class SegmentationMetric(Metric):
     def plot(self, *args: list[Any], **kwargs: dict[str, Any]) -> Any:
         """Returns a plot of the metric."""
         return self.metric.plot(*args, **kwargs)
+
+
+class SegmentationConfusionMatrixMetric(Metric):
+    """Confusion matrix metric for segmentation task."""
+
+    def __init__(self, num_classes: int, normalize: str | None = None):
+        """Initialize a new SegmentationConfusionMatrixMetric.
+
+        Args:
+            num_classes: number of classes
+            normalize: normalization mode ('true', 'pred', 'all', or None)
+        """
+        super().__init__()
+        self.num_classes = num_classes
+        self.normalize = normalize
+        self.confusion_matrix = MulticlassConfusionMatrix(
+            num_classes=num_classes, normalize=normalize
+        )
+
+    def update(
+        self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
+    ) -> None:
+        """Update metric.
+
+        Args:
+            preds: the predictions (BCHW softmax probabilities)
+            targets: the targets
+        """
+        if not isinstance(preds, torch.Tensor):
+            preds = torch.stack(preds)
+        labels = torch.stack([target["classes"] for target in targets])
+
+        # Sub-select the valid labels.
+        # We flatten the prediction and label images at valid pixels.
+        # Prediction is changed from BCHW to BHWC so we can select the valid BHW mask.
+        mask = torch.stack([target["valid"] > 0 for target in targets])
+        preds = preds.permute(0, 2, 3, 1)[mask]  # (N_valid, C)
+        labels = labels[mask]  # (N_valid,)
+        if len(preds) == 0:
+            return
+
+        # Get predicted classes
+        pred_classes = preds.argmax(dim=-1)  # (N_valid,)
+        self.confusion_matrix.update(pred_classes, labels)
+
+    def compute(self) -> torch.Tensor:
+        """Returns the confusion matrix as a 2D tensor."""
+        return self.confusion_matrix.compute()
+
+    def reset(self) -> None:
+        """Reset metric."""
+        super().reset()
+        self.confusion_matrix.reset()
 
 
 class F1Metric(Metric):
