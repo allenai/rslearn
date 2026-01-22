@@ -393,18 +393,6 @@ class RslearnLightningCLI(LightningCLI):
                     wandb_id = f.read().strip()
                     c.trainer.logger.init_args.id = wandb_id
 
-        # Set up test metrics writing if enabled.
-        if subcommand == "test" and c.write_test_metrics:
-            # Use user-provided metrics_file if set, otherwise default to project dir.
-            if not c.model.init_args.metrics_file:
-                metrics_file = project_dir / "test_metrics.json"
-                c.model.init_args.metrics_file = str(metrics_file)
-                logger.info(f"test metrics will be saved to {metrics_file}")
-            else:
-                logger.info(
-                    f"test metrics will be saved to {c.model.init_args.metrics_file}"
-                )
-
     def before_instantiate_classes(self) -> None:
         """Called before Lightning class initialization.
 
@@ -452,6 +440,26 @@ class RslearnLightningCLI(LightningCLI):
                             {"find_unused_parameters": True}
                         ),
                     }
+                )
+
+        # Set up test metrics writing if enabled, deriving path from ckpt_path.
+        if subcommand == "test" and c.write_test_metrics:
+            if not c.model.init_args.metrics_file:
+                # If ckpt_path is set, write metrics to the parent of the checkpoint directory.
+                if c.ckpt_path:
+                    ckpt_dir = os.path.dirname(c.ckpt_path)
+                    project_dir = os.path.dirname(ckpt_dir)
+                    metrics_file = os.path.join(project_dir, "test_metrics.json")
+                    c.model.init_args.metrics_file = metrics_file
+                    logger.info(f"test metrics will be saved to {metrics_file}")
+                else:
+                    logger.warning(
+                        "write_test_metrics is enabled but no ckpt_path provided, "
+                        "metrics will not be saved to file"
+                    )
+            else:
+                logger.info(
+                    f"test metrics will be saved to {c.model.init_args.metrics_file}"
                 )
 
         if c.management_dir:
