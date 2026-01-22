@@ -23,7 +23,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
 from rslearn.log_utils import get_logger
 
-from .labels import detect_label_classes, generate_label_colors, get_classification_label
+from .labels import generate_label_colors, get_vector_label_by_property
 from .layers import read_raster_layer, read_vector_layer
 from .vis import VISUALIZATION_IMAGE_SIZE, array_to_png, features_to_mask, raster_label_to_mask
 
@@ -446,7 +446,7 @@ class VisualizationServer:
                         if task_type == "classification":
                             # For classification, use the first vector label layer for text label
                             if result["label_text"] is None:
-                                label_text = get_classification_label(window, layer_config, layer_name, group_idx=group_idx)
+                                label_text = get_vector_label_by_property(window, layer_config, layer_name, group_idx=group_idx)
                                 result["label_text"] = label_text
                         elif task_type in ("segmentation", "detection") and label_colors:
                             # Generate mask from vector features
@@ -578,26 +578,30 @@ class VisualizationServer:
             raise ValueError("--task_type must be specified. Choose from: classification, regression, detection, segmentation")
 
         # Get label colors for segmentation/detection
-        # Detect classes for each label layer individually
+        # Get classes from config for each label layer individually
         label_colors_dict = {}  # Map layer_name -> label_colors
         if task_type in ("segmentation", "detection"):
-            all_windows = dataset.load_windows()
             for label_layer_name in label_layers_in_list:
                 label_config = dataset.layers[label_layer_name]
-                label_classes = detect_label_classes(all_windows, label_config, label_layer_name)
+                if not label_config.class_names:
+                    raise ValueError(
+                        f"class_names must be specified in the config for label layer '{label_layer_name}'. "
+                        "Auto-detection of class names is not supported."
+                    )
+                label_classes = set(label_config.class_names)
                 if label_classes:
                     label_colors = generate_label_colors(label_classes)
                     label_colors_dict[label_layer_name] = label_colors
-                    logger.info(f"Detected {len(label_classes)} label classes for {label_layer_name}: {sorted(label_classes)}")
+                    logger.info(f"Found {len(label_classes)} label classes for {label_layer_name}: {sorted(label_classes)}")
                 else:
                     # For detection tasks, use default 'detected' class if no classes found
                     if task_type == "detection":
                         label_classes = {"detected"}
                         label_colors = generate_label_colors(label_classes)
                         label_colors_dict[label_layer_name] = label_colors
-                        logger.info(f"No label classes detected for {label_layer_name} (detection task) - using default 'detected' class")
+                        logger.info(f"No label classes in config for {label_layer_name} (detection task) - using default 'detected' class")
                     else:
-                        logger.warning(f"No label classes detected for {label_layer_name} - masks will not be generated")
+                        logger.warning(f"No label classes in config for {label_layer_name} - masks will not be generated")
         
         label_colors = None
         if label_colors_dict:

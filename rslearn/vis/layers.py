@@ -3,13 +3,14 @@
 from typing import Any
 
 import numpy as np
+from rasterio.warp import Resampling
 from upath import UPath
 
-from rslearn.config import LayerConfig, LayerType
+from rslearn.config import DType, LayerConfig, LayerType
 from rslearn.dataset import Window
 from rslearn.log_utils import get_logger
-from rslearn.utils.geometry import PixelBounds, Projection
-from rslearn.utils.raster_format import RasterFormat
+from rslearn.train.dataset import DataInput, read_raster_layer_for_data_input
+from rslearn.utils.geometry import PixelBounds, Projection, ResolutionFactor
 from rslearn.utils.vector_format import VectorFormat, GeojsonVectorFormat
 
 logger = get_logger(__name__)
@@ -26,7 +27,7 @@ def read_raster_layer(
     """Read a raster layer for visualization.
 
     This reads bands from potentially multiple band sets to get the requested bands.
-    Based on read_raster_layer_for_data_input from rslearn.train.dataset.
+    Uses read_raster_layer_for_data_input from rslearn.train.dataset.
 
     Args:
         window: The window to read from
@@ -45,55 +46,22 @@ def read_raster_layer(
     if bounds is None:
         bounds = window.bounds
 
-    needed_band_indexes = {band: i for i, band in enumerate(band_names)}
-    needed_sets_and_indexes = []
-    
-    for band_set in layer_config.band_sets:
-        needed_src_indexes = []
-        needed_dst_indexes = []
-        if band_set.bands is None:
-            continue
-        for i, band in enumerate(band_set.bands):
-            if band not in needed_band_indexes:
-                continue
-            needed_src_indexes.append(i)
-            needed_dst_indexes.append(needed_band_indexes[band])
-            del needed_band_indexes[band]
-        if len(needed_src_indexes) == 0:
-            continue
-        needed_sets_and_indexes.append(
-            (band_set, needed_src_indexes, needed_dst_indexes)
-        )
-    
-    if len(needed_band_indexes) > 0:
-        raise ValueError(
-            f"could not get all the needed bands from "
-            f"window {window.name} layer {layer_name} group {group_idx}. "
-            f"Missing bands: {list(needed_band_indexes.keys())}"
-        )
+    # Create a DataInput object to pass to read_raster_layer_for_data_input
+    data_input = DataInput(
+        data_type="raster",
+        layers=[layer_name],
+        bands=band_names,
+        dtype=DType.FLOAT32,
+        resolution_factor=ResolutionFactor(),  # Default 1/1, no scaling
+        resampling=Resampling.nearest,
+    )
 
-    # Initialize output array
-    height = bounds[3] - bounds[1]
-    width = bounds[2] - bounds[0]
-    image = np.zeros((len(band_names), height, width), dtype=np.float32)
+    # Read using the dataset function
+    image_tensor = read_raster_layer_for_data_input(
+        window, bounds, layer_name, group_idx, layer_config, data_input
+    )
 
-    # Read from each band set
-    for band_set, src_indexes, dst_indexes in needed_sets_and_indexes:
-        if band_set.format is None:
-            raise ValueError(f"No format specified for {layer_name}")
-        raster_format: RasterFormat = band_set.instantiate_raster_format()
-        raster_dir = window.get_raster_dir(
-            layer_name, band_set.bands, group_idx=group_idx
-        )
-
-        from rasterio.enums import Resampling
-
-        src = raster_format.decode_raster(
-            raster_dir, window.projection, bounds, resampling=Resampling.nearest
-        )
-        image[dst_indexes, :, :] = src[src_indexes, :, :].astype(np.float32)
-
-    return image
+    return image_tensor.numpy().astype(np.float32)
 
 
 def read_vector_layer(

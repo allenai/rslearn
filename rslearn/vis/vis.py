@@ -1,21 +1,19 @@
 """Visualization functions for converting arrays and features to PNG images."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import numpy as np
 from PIL import Image, ImageDraw
-from rasterio.crs import CRS
-from rasterio.warp import transform
+
+import shapely
 
 from rslearn.log_utils import get_logger
 from rslearn.utils.feature import Feature
-from rslearn.utils.geometry import PixelBounds, Projection
+from rslearn.utils.geometry import PixelBounds, Projection, flatten_shape
 
 from .normalization import normalize_array
 
-if TYPE_CHECKING:
-    from rslearn.config import LayerConfig
+from rslearn.config import LayerConfig
 
 logger = get_logger(__name__)
 
@@ -28,18 +26,14 @@ def array_to_png(
     output_path: Path,
     normalization_method: str = "sentinel2_rgb",
 ) -> None:
-    """Convert a numpy array to a PNG image.
+    """Convert a numpy array to a PNG image - only intended to be used for images with continuous values like satellite images.
 
     Args:
-        array: Array with shape (bands, height, width) or (height, width, bands)
+        array: Array with shape (channels, height, width) from RasterFormat.decode_raster
         output_path: Path to save PNG
         normalization_method: Normalization method to apply
     """
-    # Handle (bands, height, width) format - convert to (height, width, bands)
-    if array.ndim == 3 and array.shape[0] < array.shape[2]:
-        array = np.moveaxis(array, 0, -1)
-
-    # Normalize array
+    # Normalize array (expects CHW, returns HWC)
     normalized = normalize_array(array, normalization_method)
 
     # Create PIL Image
@@ -306,12 +300,9 @@ def _overlay_points_on_array(
         output_path: Path to save PNG
         normalization_method: Normalization method for the array
     """
-    # Handle (bands, height, width) format
-    if array.ndim == 3 and array.shape[0] < array.shape[2]:
-        array = np.moveaxis(array, 0, -1)
-
     from .normalization import normalize_array
 
+    # Normalize array (expects CHW, returns HWC)
     normalized = normalize_array(array, normalization_method)
     if normalized.shape[-1] >= 3:
         img = Image.fromarray(normalized[:, :, :3], mode="RGB")
@@ -347,9 +338,11 @@ def _overlay_points_on_array(
         # Get geometry (already in pixel coordinates)
         shp = feature.geometry.shp
 
-        # Draw bounding boxes around points
-        if shp.geom_type == "Point":
-            x, y = shp.x, shp.y
+        # Flatten shape to handle both Point and MultiPoint uniformly
+        flat_shapes = flatten_shape(shp)
+        for point in flat_shapes:
+            assert isinstance(point, shapely.Point), f"Expected Point, got {type(point)}"
+            x, y = point.x, point.y
             px = int((x - bounds[0]) * width / actual_width)
             py = int((y - bounds[1]) * height / actual_height)
             logger.info(f"Point at ({x:.2f}, {y:.2f}) -> pixel ({px}, {py}), bounds: {bounds}, image size: {width}x{height}, actual_size: {actual_width}x{actual_height}")
@@ -368,27 +361,6 @@ def _overlay_points_on_array(
                 points_drawn += 1
             else:
                 points_out_of_bounds += 1
-        elif shp.geom_type == "MultiPoint":
-            for point in shp.geoms:
-                x, y = point.x, point.y
-                px = int((x - bounds[0]) * width / actual_width)
-                py = int((y - bounds[1]) * height / actual_height)
-                logger.debug(f"MultiPoint at ({x:.2f}, {y:.2f}) -> pixel ({px}, {py}), bounds: {bounds}, image size: {width}x{height}")
-                if 0 <= px < width and 0 <= py < height:
-                    # Draw a bounding box (e.g., 20x20 pixels centered on the point)
-                    box_size = 20
-                    x1 = max(0, px - box_size // 2)
-                    y1 = max(0, py - box_size // 2)
-                    x2 = min(width, px + box_size // 2)
-                    y2 = min(height, py + box_size // 2)
-                    draw.rectangle(
-                        [x1, y1, x2, y2],
-                        outline=color,
-                        width=2,
-                    )
-                    points_drawn += 1
-                else:
-                    points_out_of_bounds += 1
 
     logger.info(f"Overlaid {points_drawn} points on image ({points_out_of_bounds} out of bounds)")
 
