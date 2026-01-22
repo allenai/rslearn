@@ -108,7 +108,7 @@ def test_geotiff_write_nodata_val(tmp_path: pathlib.Path) -> None:
         assert raster.nodata == nodata_val
 
 
-def test_geotiff_read_nodata_val(tmp_path: pathlib.Path) -> None:
+def test_geotiff_read_nodata_val_out_of_bounds(tmp_path: pathlib.Path) -> None:
     """Test that nodata_val is used to fill pixels outside source bounds when reading."""
     path = UPath(tmp_path)
     projection = Projection(CRS.from_epsg(3857), 1, -1)
@@ -133,3 +133,36 @@ def test_geotiff_read_nodata_val(tmp_path: pathlib.Path) -> None:
     # Pixels outside source bounds should be filled with nodata_val.
     assert np.all(result[:, 2:6, :] == nodata_val)
     assert np.all(result[:, :, 2:6] == nodata_val)
+
+
+def test_geotiff_read_nodata_val_orig_nodata(tmp_path: pathlib.Path) -> None:
+    """Test reading from GeoTIFF that has nodata values, but we set different nodata_val.
+
+    Since we override the nodata value in the read operation, the source pixels that
+    were a different nodata value should still have the original value.
+    """
+    path = UPath(tmp_path)
+    projection = Projection(CRS.from_epsg(3857), 1, -1)
+    original_nodata = -9999.0
+    new_nodata = -1.0
+
+    # Create a raster where some pixels have the nodata value -9999.
+    # Other pixels are valid (1).
+    array = np.ones((1, 4, 4), dtype=np.float32)
+    array[:, 2:4, 2:4] = original_nodata
+    GeotiffRasterFormat().encode_raster(
+        path, projection, (0, 0, 4, 4), array, nodata_val=original_nodata
+    )
+
+    # Decode with a different nodata_val.
+    # The pixels that were originally nodata should be unchanged.
+    result = GeotiffRasterFormat().decode_raster(
+        path, projection, (0, 0, 4, 4), nodata_val=new_nodata
+    )
+
+    assert result.shape == (1, 4, 4)
+    # Valid data pixels should still have value 1.
+    assert np.all(result[:, 0:2, :] == 1)
+    assert np.all(result[:, :, 0:2] == 1)
+    # Original nodata pixels should still be as they were.
+    assert np.all(result[:, 2:4, 2:4] == original_nodata)
