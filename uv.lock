@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14' and platform_machine == 'ARM64' and sys_platform == 'win32'",
@@ -4265,6 +4265,7 @@ dependencies = [
     { name = "boto3" },
     { name = "fiona" },
     { name = "fsspec" },
+    { name = "jinja2" },
     { name = "jsonargparse" },
     { name = "lightning" },
     { name = "pillow" },
@@ -4334,6 +4335,7 @@ requires-dist = [
     { name = "google-cloud-storage", marker = "extra == 'extra'", specifier = ">=2.18" },
     { name = "huggingface-hub", marker = "extra == 'extra'", specifier = ">=0.34.4" },
     { name = "interrogate", marker = "extra == 'dev'", specifier = ">=1.7.0" },
+    { name = "jinja2", specifier = ">=3.1.0" },
     { name = "jsonargparse", specifier = ">=4.35.0" },
     { name = "lightning", specifier = ">=2.5.1.post0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.17.1,<2" },
