@@ -625,7 +625,10 @@ class VisualizationServer:
                     continue
                 layer_config = self.dataset.layers[layer_name]
                 try:
-                    if layer_config.type == LayerType.RASTER and layer_name not in self.label_layers:
+                    if (
+                        layer_config.type == LayerType.RASTER
+                        and layer_name not in self.label_layers
+                    ):
                         if window.is_layer_completed(
                             layer_name, group_idx=self.group_idx
                         ):
@@ -820,7 +823,9 @@ class VisualizationServer:
 
         # Store state
         self.dataset = dataset
-        self.layers = all_layers  # Store all layers (including label layers) for visualization
+        self.layers = (
+            all_layers  # Store all layers (including label layers) for visualization
+        )
         self.bands = bands
         self.normalization = normalization
         self.task_type = task_type
