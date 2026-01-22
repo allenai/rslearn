@@ -228,3 +228,68 @@ class TestProcessOutput:
         assert isinstance(classes, np.ndarray)
         assert classes.shape == (1, 1, 1)
         assert classes[0][0] == 1
+
+    def test_output_probs_multiclass(
+        self, empty_sample_metadata: SampleMetadata
+    ) -> None:
+        """Test output_probs=True with multi-class (3 classes) segmentation."""
+        task = SegmentationTask(num_classes=3, output_probs=True)
+        # Multi-class probabilities: 3 channels, 2x2 spatial
+        out_probs = torch.tensor(
+            [
+                [[0.1, 0.2], [0.3, 0.1]],  # Class 0
+                [[0.3, 0.5], [0.4, 0.6]],  # Class 1
+                [[0.6, 0.3], [0.3, 0.3]],  # Class 2
+            ],
+            dtype=torch.float32,
+        )
+        result = task.process_output(out_probs, empty_sample_metadata)
+
+        assert isinstance(result, np.ndarray)
+        assert result.shape == (3, 2, 2)  # All 3 channels returned
+        np.testing.assert_allclose(result, out_probs.numpy())
+
+    def test_output_probs_with_class_idx_multiclass(
+        self, empty_sample_metadata: SampleMetadata
+    ) -> None:
+        """Test output_probs=True with output_class_idx for multi-class segmentation."""
+        task = SegmentationTask(num_classes=3, output_probs=True, output_class_idx=2)
+        # Multi-class probabilities: 3 channels, 2x2 spatial
+        out_probs = torch.tensor(
+            [
+                [[0.1, 0.2], [0.3, 0.1]],  # Class 0
+                [[0.3, 0.5], [0.4, 0.6]],  # Class 1
+                [[0.6, 0.3], [0.3, 0.3]],  # Class 2
+            ],
+            dtype=torch.float32,
+        )
+        result = task.process_output(out_probs, empty_sample_metadata)
+
+        assert isinstance(result, np.ndarray)
+        assert result.shape == (1, 2, 2)  # Only class 2 returned
+        expected = out_probs[2:3, :, :].numpy()
+        np.testing.assert_allclose(result, expected)
+
+    def test_output_probs_with_prob_scales(
+        self, empty_sample_metadata: SampleMetadata
+    ) -> None:
+        """Test output_probs=True combined with prob_scales."""
+        # prob_scales are applied before returning probabilities
+        task = SegmentationTask(
+            num_classes=3, output_probs=True, prob_scales=[1.0, 2.0, 1.0]
+        )
+        out_probs = torch.tensor(
+            [
+                [[0.3, 0.3]],  # Class 0
+                [[0.4, 0.4]],  # Class 1
+                [[0.3, 0.3]],  # Class 2
+            ],
+            dtype=torch.float32,
+        )
+        result = task.process_output(out_probs, empty_sample_metadata)
+
+        assert isinstance(result, np.ndarray)
+        assert result.shape == (3, 1, 2)
+        # prob_scales should be applied: [0.3, 0.8, 0.3]
+        expected = np.array([[[0.3, 0.3]], [[0.8, 0.8]], [[0.3, 0.3]]])
+        np.testing.assert_allclose(result, expected)
