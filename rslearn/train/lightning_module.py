@@ -253,9 +253,9 @@ class RslearnLightningModule(L.LightningModule):
             all_metrics: dict[str, Any] = {}
             if os.path.exists(self.metrics_file):
                 try:
-                    with open(self.metrics_file, "r") as f:
+                    with open(self.metrics_file) as f:
                         all_metrics = json.load(f)
-                except (json.JSONDecodeError, IOError):
+                except (OSError, json.JSONDecodeError):
                     logger.warning(
                         f"Could not read existing metrics file {self.metrics_file}, starting fresh"
                     )
