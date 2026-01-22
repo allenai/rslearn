@@ -218,14 +218,14 @@ qgis $DATASET_PATH/windows/default/seattle_54912_-527360/layers/*/*/geotiff.tif
 
 We can also visualize samples using the visualization module:
 ```
-python -m rslearn.vis.server \ 
-    $DATASET_PATH \  
+python -m rslearn.vis.server \
+    $DATASET_PATH \
     --layers sentinel2 \  # image modality layers
     --label_layers label_raster \  # layer layers
     --bands 'sentinel2:B04,B03,B02' \  # specify bands wanted for each image modality
     --normalization 'sentinel2:sentinel2_rgb' \  # specify normalization wanted for each image modality
     --task_type segmentation \  # segmentation, detection, or classification
-    --max_samples 100 \  # number of datapoints to randomly sample and visualize 
+    --max_samples 100 \  # number of datapoints to randomly sample and visualize
     --port 8000
 ```
 
