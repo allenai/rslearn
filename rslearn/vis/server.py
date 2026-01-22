@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from upath import UPath
 
 from rslearn.config import LayerConfig, LayerType
@@ -35,7 +35,7 @@ logger = get_logger(__name__)
 class VisualizationServer:
     """Visualization server for rslearn datasets using Dataset/Window APIs."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the visualization server."""
         self.windows: list[Window] = []
         self.dataset: Dataset | None = None
@@ -244,6 +244,8 @@ class VisualizationServer:
                     from .normalization import normalize_array
                     from .overlay import overlay_points_on_image
 
+                    if ref_normalization_method is None:
+                        raise ValueError("Reference normalization method is required")
                     normalized = normalize_array(
                         reference_array, ref_normalization_method
                     )
@@ -257,6 +259,8 @@ class VisualizationServer:
                     draw = ImageDraw.Draw(img)
                     actual_width = width
                     actual_height = height
+                    if label_colors is None:
+                        raise ValueError("Label colors are required for detection task")
                     overlay_points_on_image(
                         draw,
                         features,
@@ -293,7 +297,7 @@ class VisualizationServer:
                         if not label_found:
                             other_features.append(feat)
 
-                    def get_label(feat) -> str:
+                    def get_label(feat: Any) -> str:
                         if not feat.properties:
                             return ""
                         for prop_name in property_names:
@@ -318,7 +322,10 @@ class VisualizationServer:
                                 break
                         if not label:
                             continue
-                        color = label_colors.get(label, (255, 255, 255))
+                        if label_colors is None:
+                            color = (255, 255, 255)
+                        else:
+                            color = label_colors.get(label, (255, 255, 255))
                         geom_pixel = feature.geometry.to_projection(window.projection)
                         shp = geom_pixel.shp
                         if shp.geom_type == "Polygon":
@@ -401,7 +408,7 @@ class VisualizationServer:
         window_dir = output_dir / window.name
         window_dir.mkdir(parents=True, exist_ok=True)
 
-        result = {
+        result: dict[str, Any] = {
             "window_name": window.name,
             "window": window,
             "layer_images": {},
@@ -530,12 +537,15 @@ class VisualizationServer:
 
                                 reference_array = None
                                 ref_normalization_method = None
-                                if task_type == "detection" and result["layer_images"]:
+                                layer_images: dict[str, Any] = result.get(
+                                    "layer_images", {}
+                                )
+                                if task_type == "detection" and layer_images:
                                     raster_layers = [
                                         name
                                         for name in layer_names
                                         if name not in label_layers
-                                        and name in result["layer_images"]
+                                        and name in layer_images
                                     ]
                                     if raster_layers:
                                         ref_layer_name = raster_layers[0]
@@ -567,6 +577,10 @@ class VisualizationServer:
                                         ]
 
                                 if reference_array is not None:
+                                    if ref_normalization_method is None:
+                                        raise ValueError(
+                                            "Reference normalization method is required"
+                                        )
                                     features_to_mask(
                                         features,
                                         window.bounds,
@@ -604,7 +618,10 @@ class VisualizationServer:
             Rendered HTML as string
         """
         template_dir = Path(__file__).parent / "templates"
-        env = Environment(loader=FileSystemLoader(str(template_dir)))
+        env = Environment(
+            loader=FileSystemLoader(str(template_dir)),
+            autoescape=select_autoescape(["html", "xml"]),
+        )
         template = env.get_template("viewer.html")
 
         window_data = []
@@ -621,7 +638,7 @@ class VisualizationServer:
             label_texts = {}  # Dict mapping layer_name -> label_text for classification
 
             for layer_name in self.layers:
-                if layer_name not in self.dataset.layers:
+                if self.dataset is None or layer_name not in self.dataset.layers:
                     continue
                 layer_config = self.dataset.layers[layer_name]
                 try:
@@ -657,26 +674,23 @@ class VisualizationServer:
                                         f"Failed to get label text for {layer_name} in window {window.name}: {e}"
                                     )
                             else:
+                                # For detection/segmentation, add if layer is completed
+                                # The image endpoint will handle empty features by returning 404
                                 if window.is_layer_completed(
                                     layer_name, group_idx=self.group_idx
                                 ):
-                                    try:
-                                        features = read_vector_layer(
-                                            window,
-                                            layer_name,
-                                            layer_config,
-                                            group_idx=self.group_idx,
-                                        )
-                                        if features:
-                                            mask_layers.append(layer_name)
-                                    except Exception:
-                                        pass
+                                    mask_layers.append(layer_name)
                         elif layer_config.type == LayerType.RASTER:
+                            # For raster label layers, we add them if completed
+                            # The image endpoint will handle empty data by returning 404
                             if window.is_layer_completed(
                                 layer_name, group_idx=self.group_idx
                             ):
                                 mask_layers.append(layer_name)
-                except Exception:
+                except Exception as e:
+                    logger.debug(
+                        f"Error processing layer {layer_name} for window {window.name}: {e}"
+                    )
                     continue
 
             window_data.append(
@@ -846,7 +860,7 @@ class VisualizationServer:
         server_instance = self
 
         class VisualizationHandler(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
+            def do_GET(self) -> None:
                 path = self.path.strip("/")
 
                 # Route: /images/<window_idx>/<layer>
@@ -889,6 +903,13 @@ class VisualizationServer:
                                             first_label_layer
                                         ]
                                     )
+
+                                if server_instance.dataset is None:
+                                    self.send_response(500)
+                                    self.send_header("Content-type", "text/plain")
+                                    self.end_headers()
+                                    self.wfile.write(b"Server not initialized")
+                                    return
 
                                 image_bytes = server_instance._generate_image_as_bytes(
                                     window,
@@ -953,7 +974,7 @@ class VisualizationServer:
                     self.end_headers()
                     self.wfile.write(html.encode("utf-8"))
 
-            def log_message(self, format, *args):
+            def log_message(self, format: str, *args: Any) -> None:
                 pass
 
         try:

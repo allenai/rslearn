@@ -129,8 +129,8 @@
             {% endif %}
             {% endfor %}
             {% for mask_layer in window.mask_layers %}
-            <div class="image-container">
-                <img src="/images/{{ window.idx }}/{{ mask_layer }}" alt="Label Mask: {{ mask_layer }}">
+            <div class="image-container" id="mask-{{ window.idx }}-{{ mask_layer }}">
+                <img src="/images/{{ window.idx }}/{{ mask_layer }}" alt="Label Mask: {{ mask_layer }}" onerror="this.closest('.image-container').remove()">
                 <div class="image-label">Label Mask: {{ mask_layer }}</div>
             </div>
             {% endfor %}

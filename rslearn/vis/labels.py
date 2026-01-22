@@ -17,18 +17,11 @@ def generate_label_colors(label_classes: set[str]) -> dict[str, tuple[int, int, 
     Returns:
         Dictionary mapping label class names to RGB color tuples
     """
-    label_classes = sorted(label_classes)
     label_colors = {}
 
-    NO_DATA_COLOR = (0, 0, 0)
-
-    color_idx = 0
-    for label in label_classes:
-        if label == "no_data":
-            label_colors[label] = NO_DATA_COLOR
-        else:
-            label_colors[label] = DEFAULT_COLORS[color_idx % len(DEFAULT_COLORS)]
-            color_idx += 1
+    sorted_labels = sorted(label_classes)
+    for color_idx, label in enumerate(sorted_labels):
+        label_colors[label] = DEFAULT_COLORS[color_idx % len(DEFAULT_COLORS)]
 
     return label_colors
 

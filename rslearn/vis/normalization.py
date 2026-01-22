@@ -100,6 +100,8 @@ def normalize_band(
     """
     method_enum = NormalizationMethod(method) if isinstance(method, str) else method
     normalize_func = _NORMALIZATION_FUNCTIONS.get(method_enum)
+    if normalize_func is None:
+        raise ValueError(f"Unknown normalization method: {method_enum}")
     return normalize_func(band)
 
 
