@@ -53,6 +53,7 @@ class SegmentationTask(BasicTask):
         enable_accuracy_metric: bool = True,
         enable_miou_metric: bool = False,
         enable_f1_metric: bool = False,
+        report_metric_per_class: bool = False,
         f1_metric_thresholds: list[list[float]] = [[0.5]],
         metric_kwargs: dict[str, Any] = {},
         miou_metric_kwargs: dict[str, Any] = {},
@@ -74,6 +75,8 @@ class SegmentationTask(BasicTask):
             enable_accuracy_metric: whether to enable the accuracy metric (default
                 true).
             enable_f1_metric: whether to enable the F1 metric (default false).
+            report_metric_per_class: whether to report chosen metrics for each class, in
+                addition to the average score across classes.
             enable_miou_metric: whether to enable the mean IoU metric (default false).
             f1_metric_thresholds: list of list of thresholds to apply for F1 metric.
                 Each inner list is used to initialize a separate F1 metric where the
@@ -107,6 +110,7 @@ class SegmentationTask(BasicTask):
         self.enable_accuracy_metric = enable_accuracy_metric
         self.enable_f1_metric = enable_f1_metric
         self.enable_miou_metric = enable_miou_metric
+        self.report_metric_per_class = report_metric_per_class
         self.f1_metric_thresholds = f1_metric_thresholds
         self.metric_kwargs = metric_kwargs
         self.miou_metric_kwargs = miou_metric_kwargs
@@ -237,29 +241,41 @@ class SegmentationTask(BasicTask):
                     # Metric name can't contain "." so change to ",".
                     suffix = "_" + str(thresholds[0]).replace(".", ",")
 
+                # Create one metric per type - it returns a dict with "avg" and optionally per-class keys
                 metrics["F1" + suffix] = SegmentationMetric(
-                    F1Metric(num_classes=self.num_classes, score_thresholds=thresholds)
+                    F1Metric(
+                        num_classes=self.num_classes,
+                        score_thresholds=thresholds,
+                        report_per_class=self.report_metric_per_class,
+                    ),
                 )
                 metrics["precision" + suffix] = SegmentationMetric(
                     F1Metric(
                         num_classes=self.num_classes,
                         score_thresholds=thresholds,
                         metric_mode="precision",
-                    )
+                        report_per_class=self.report_metric_per_class,
+                    ),
                 )
                 metrics["recall" + suffix] = SegmentationMetric(
                     F1Metric(
                         num_classes=self.num_classes,
                         score_thresholds=thresholds,
                         metric_mode="recall",
-                    )
+                        report_per_class=self.report_metric_per_class,
+                    ),
                 )
 
         if self.enable_miou_metric:
-            miou_metric_kwargs: dict[str, Any] = dict(num_classes=self.num_classes)
+            miou_metric_kwargs: dict[str, Any] = dict(
+                num_classes=self.num_classes,
+                report_per_class=self.report_metric_per_class,
+            )
             if self.nodata_value is not None:
                 miou_metric_kwargs["nodata_value"] = self.nodata_value
             miou_metric_kwargs.update(self.miou_metric_kwargs)
+
+            # Create one metric - it returns a dict with "avg" and optionally per-class keys
             metrics["mean_iou"] = SegmentationMetric(
                 MeanIoUMetric(**miou_metric_kwargs),
                 pass_probabilities=False,
@@ -273,6 +289,20 @@ class SegmentationTask(BasicTask):
 
 class SegmentationHead(Predictor):
     """Head for segmentation task."""
+
+    def __init__(self, weights: list[float] | None = None, dice_loss: bool = False):
+        """Initialize a new SegmentationTask.
+
+        Args:
+            weights: weights for cross entropy loss (Tensor of size C)
+            dice_loss: weather to add dice loss to cross entropy
+        """
+        super().__init__()
+        if weights is not None:
+            self.register_buffer("weights", torch.Tensor(weights))
+        else:
+            self.weights = None
+        self.dice_loss = dice_loss
 
     def forward(
         self,
@@ -308,7 +338,7 @@ class SegmentationHead(Predictor):
             labels = torch.stack([target["classes"] for target in targets], dim=0)
             mask = torch.stack([target["valid"] for target in targets], dim=0)
             per_pixel_loss = torch.nn.functional.cross_entropy(
-                logits, labels, reduction="none"
+                logits, labels, weight=self.weights, reduction="none"
             )
             mask_sum = torch.sum(mask)
             if mask_sum > 0:
@@ -318,6 +348,9 @@ class SegmentationHead(Predictor):
                 # If there are no valid pixels, we avoid dividing by zero and just let
                 # the summed mask loss be zero.
                 losses["cls"] = torch.sum(per_pixel_loss * mask)
+            if self.dice_loss:
+                dice_loss = DiceLoss()(outputs, labels, mask)
+                losses["dice"] = dice_loss
 
         return ModelOutput(
             outputs=outputs,
@@ -333,6 +366,7 @@ class SegmentationMetric(Metric):
         metric: Metric,
         pass_probabilities: bool = True,
         class_idx: int | None = None,
+        output_key: str | None = None,
     ):
         """Initialize a new SegmentationMetric.
 
@@ -341,12 +375,19 @@ class SegmentationMetric(Metric):
                 classes from the targets and masking out invalid pixels.
             pass_probabilities: whether to pass predicted probabilities to the metric.
                 If False, argmax is applied to pass the predicted classes instead.
-            class_idx: if metric returns value for multiple classes, select this class.
+            class_idx: if set, return only this class index's value. For backward
+                compatibility with configs using standard torchmetrics. Internally
+                converted to output_key="cls_{class_idx}".
+            output_key: if the wrapped metric returns a dict (or a tensor that gets
+                converted to a dict), return only this key's value. For standard
+                torchmetrics with average=None, tensors are converted to dicts with
+                keys "cls_0", "cls_1", etc. If None, the full dict is returned.
         """
         super().__init__()
         self.metric = metric
         self.pass_probablities = pass_probabilities
         self.class_idx = class_idx
+        self.output_key = output_key
 
     def update(
         self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
@@ -376,10 +417,32 @@ class SegmentationMetric(Metric):
         self.metric.update(preds, labels)
 
     def compute(self) -> Any:
-        """Returns the computed metric."""
+        """Returns the computed metric.
+
+        If the wrapped metric returns a multi-element tensor (e.g., standard torchmetrics
+        with average=None), it is converted to a dict with keys like "cls_0", "cls_1", etc.
+        This allows uniform handling via output_key for both standard torchmetrics and
+        custom dict-returning metrics.
+        """
         result = self.metric.compute()
+
+        # Convert multi-element tensors to dict for uniform handling.
+        # This supports standard torchmetrics with average=None which return per-class tensors.
+        if isinstance(result, torch.Tensor) and result.ndim >= 1:
+            result = {f"cls_{i}": result[i] for i in range(len(result))}
+
+        if self.output_key is not None:
+            if not isinstance(result, dict):
+                raise TypeError(
+                    f"output_key is set to '{self.output_key}' but metric returned "
+                    f"{type(result).__name__} instead of dict"
+                )
+            return result[self.output_key]
         if self.class_idx is not None:
-            result = result[self.class_idx]
+            # For backward compatibility: class_idx can index into the converted dict
+            if isinstance(result, dict):
+                return result[f"cls_{self.class_idx}"]
+            return result[self.class_idx]
         return result
 
     def reset(self) -> None:
@@ -404,6 +467,7 @@ class F1Metric(Metric):
         num_classes: int,
         score_thresholds: list[float],
         metric_mode: str = "f1",
+        report_per_class: bool = False,
     ):
         """Create a new F1Metric.
 
@@ -413,11 +477,14 @@ class F1Metric(Metric):
                 metric is the best F1 across score thresholds.
             metric_mode: set to "precision" or "recall" to return that instead of F1
                 (default "f1")
+            report_per_class: whether to include per-class scores in the output dict.
+                If False, only returns the "avg" key.
         """
         super().__init__()
         self.num_classes = num_classes
         self.score_thresholds = score_thresholds
         self.metric_mode = metric_mode
+        self.report_per_class = report_per_class
 
         assert self.metric_mode in ["f1", "precision", "recall"]
 
@@ -462,9 +529,10 @@ class F1Metric(Metric):
         """Compute metric.
 
         Returns:
-            the best F1 score across score thresholds and classes.
+            dict with "avg" key containing mean score across classes.
+            If report_per_class is True, also includes "cls_N" keys for each class N.
         """
-        best_scores = []
+        cls_best_scores = {}
 
         for cls_idx in range(self.num_classes):
             best_score = None
@@ -501,9 +569,12 @@ class F1Metric(Metric):
                 if best_score is None or score > best_score:
                     best_score = score
 
-            best_scores.append(best_score)
+            cls_best_scores[f"cls_{cls_idx}"] = best_score
 
-        return torch.mean(torch.stack(best_scores))
+        report_scores = {"avg": torch.mean(torch.stack(list(cls_best_scores.values())))}
+        if self.report_per_class:
+            report_scores.update(cls_best_scores)
+        return report_scores
 
 
 class MeanIoUMetric(Metric):
@@ -523,7 +594,7 @@ class MeanIoUMetric(Metric):
         num_classes: int,
         nodata_value: int | None = None,
         ignore_missing_classes: bool = False,
-        class_idx: int | None = None,
+        report_per_class: bool = False,
     ):
         """Create a new MeanIoUMetric.
 
@@ -535,15 +606,14 @@ class MeanIoUMetric(Metric):
             ignore_missing_classes: whether to ignore classes that don't appear in
                 either the predictions or the ground truth. If false, the IoU for a
                 missing class will be 0.
-            class_idx: only compute and return the IoU for this class. This option is
-                provided so the user can get per-class IoU results, since Lightning
-                only supports scalar return values from metrics.
+            report_per_class: whether to include per-class IoU scores in the output dict.
+                If False, only returns the "avg" key.
         """
         super().__init__()
         self.num_classes = num_classes
         self.nodata_value = nodata_value
         self.ignore_missing_classes = ignore_missing_classes
-        self.class_idx = class_idx
+        self.report_per_class = report_per_class
 
         self.add_state(
             "intersections", default=torch.zeros(self.num_classes), dist_reduce_fx="sum"
@@ -584,9 +654,11 @@ class MeanIoUMetric(Metric):
         """Compute metric.
 
         Returns:
-            the mean IoU across classes.
+            dict with "avg" containing the mean IoU across classes.
+            If report_per_class is True, also includes "cls_N" keys for each valid class N.
         """
-        per_class_scores = []
+        cls_scores = {}
+        valid_scores = []
 
         for cls_idx in range(self.num_classes):
             # Check if nodata_value is set and is one of the classes
@@ -599,6 +671,56 @@ class MeanIoUMetric(Metric):
             if union == 0 and self.ignore_missing_classes:
                 continue
 
-            per_class_scores.append(intersection / union)
+            score = intersection / union
+            cls_scores[f"cls_{cls_idx}"] = score
+            valid_scores.append(score)
 
-        return torch.mean(torch.stack(per_class_scores))
+        report_scores = {"avg": torch.mean(torch.stack(valid_scores))}
+        if self.report_per_class:
+            report_scores.update(cls_scores)
+        return report_scores
+
+
+class DiceLoss(torch.nn.Module):
+    """Mean Dice Loss for segmentation.
+
+    This is the mean of the per-class dice loss (1 - 2*intersection / union scores).
+    The per-class intersection is the number of pixels across all examples where
+    the predicted label and ground truth label are both that class, and the per-class
+    union is defined similarly.
+    """
+
+    def __init__(self, smooth: float = 1e-7):
+        """Initialize a new DiceLoss."""
+        super().__init__()
+        self.smooth = smooth
+
+    def forward(
+        self, inputs: torch.Tensor, targets: torch.Tensor, mask: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute Dice Loss.
+
+        Returns:
+            the mean Dicen Loss across classes
+        """
+        num_classes = inputs.shape[1]
+        targets_one_hot = (
+            torch.nn.functional.one_hot(targets, num_classes)
+            .permute(0, 3, 1, 2)
+            .float()
+        )
+
+        # Expand mask to [B, C, H, W]
+        mask = mask.unsqueeze(1).expand_as(inputs)
+
+        dice_per_class = []
+        for c in range(num_classes):
+            pred_c = inputs[:, c] * mask[:, c]
+            target_c = targets_one_hot[:, c] * mask[:, c]
+
+            intersection = (pred_c * target_c).sum()
+            union = pred_c.sum() + target_c.sum()
+            dice_c = (2.0 * intersection + self.smooth) / (union + self.smooth)
+            dice_per_class.append(dice_c)
+
+        return 1 - torch.stack(dice_per_class).mean()

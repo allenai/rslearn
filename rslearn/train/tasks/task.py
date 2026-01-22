@@ -108,8 +108,10 @@ class BasicTask(Task):
         Returns:
             a dictionary mapping image name to visualization image
         """
-        image = input_dict["image"].cpu()
-        image = image[self.image_bands, :, :]
+        raster_image = input_dict["image"]
+        assert isinstance(raster_image, RasterImage)
+        # We don't really handle time series here, just use the first timestep.
+        image = raster_image.image.cpu()[self.image_bands, 0, :, :]
         if self.remap_values:
             factor = (self.remap_values[1][1] - self.remap_values[1][0]) / (
                 self.remap_values[0][1] - self.remap_values[0][0]

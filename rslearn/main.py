@@ -2,6 +2,7 @@
 
 import argparse
 import multiprocessing
+import os
 import random
 import sys
 import time
@@ -45,6 +46,7 @@ handler_registry = {}
 ItemType = TypeVar("ItemType", bound="Item")
 
 MULTIPROCESSING_CONTEXT = "forkserver"
+MP_CONTEXT_ENV_VAR = "RSLEARN_MULTIPROCESSING_CONTEXT"
 
 
 def register_handler(category: Any, command: str) -> Callable:
@@ -837,7 +839,8 @@ def model_predict() -> None:
 def main() -> None:
     """CLI entrypoint."""
     try:
-        multiprocessing.set_start_method(MULTIPROCESSING_CONTEXT)
+        mp_context = os.environ.get(MP_CONTEXT_ENV_VAR, MULTIPROCESSING_CONTEXT)
+        multiprocessing.set_start_method(mp_context)
     except RuntimeError as e:
         logger.error(
             f"Multiprocessing context already set to {multiprocessing.get_context()}: "
