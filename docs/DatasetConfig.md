@@ -1150,6 +1150,50 @@ Available bands:
 
 Note that B10 is not present in L2A.
 
+### rslearn.data_sources.planetary_computer.Naip
+
+NAIP imagery on Microsoft Planetary Computer. Direct materialization is supported.
+
+This data source uses the Planetary Computer `naip` collection, and reads the `image`
+asset which contains four bands: `R`, `G`, `B`, `NIR`.
+
+Note: NAIP provides a single 4-band GeoTIFF asset (`image`). Internally, rslearn will
+still ingest/read this full 4-band asset, but you can configure your raster layer band
+set to materialize any subset of `["R", "G", "B", "NIR"]` (for example `["NIR"]`).
+If you need a different asset/band mapping, use
+`rslearn.data_sources.planetary_computer.PlanetaryComputer` directly with a custom
+`asset_bands` mapping.
+
+```jsonc
+{
+  // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
+  "query": null,
+  "sort_by": null,
+  "sort_ascending": true,
+  "timeout_seconds": 10
+}
+```
+
+### rslearn.data_sources.planetary_computer.CopDemGlo30
+
+Copernicus DEM GLO-30 (30m) data on Microsoft Planetary Computer. Direct materialization
+is supported.
+
+This is a "static" dataset (no meaningful temporal coverage), so it ignores window time
+ranges when searching and matching STAC items.
+
+The Copernicus DEM items expose the DEM GeoTIFF as the `data` asset, and this data
+source maps it to a single band.
+
+```jsonc
+{
+  // Optional band name to use if the layer config is missing from context (default "DEM").
+  "band_name": "DEM",
+  // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
+  "timeout_seconds": 10
+}
+```
+
 ### rslearn.data_sources.usda_cdl.CDL
 
 This data source is for the USDA Cropland Data Layer.
