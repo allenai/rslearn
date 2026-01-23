@@ -116,6 +116,27 @@ class Projection:
 WGS84_PROJECTION = Projection(CRS.from_epsg(WGS84_EPSG), 1, 1)
 
 
+def get_global_raster_bounds(projection: Projection) -> PixelBounds:
+    """Get very large pixel bounds for a global raster in the given projection.
+
+    This is useful for data sources that cover the entire world and don't want to
+    compute exact bounds in arbitrary projections (which can fail for projections
+    like UTM that only cover part of the world).
+
+    Args:
+        projection: the projection to get bounds in.
+
+    Returns:
+        Pixel bounds that will intersect with any reasonable window. We assume that the
+        absolute value of CRS coordinates is at most 2^32, and adjust it based on the
+        resolution in the Projection in case very fine-grained resolutions are used.
+    """
+    crs_bound = 2**32
+    pixel_bound_x = int(crs_bound / abs(projection.x_resolution))
+    pixel_bound_y = int(crs_bound / abs(projection.y_resolution))
+    return (-pixel_bound_x, -pixel_bound_y, pixel_bound_x, pixel_bound_y)
+
+
 class ResolutionFactor:
     """Multiplier for the resolution in a Projection.
 
