@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14' and platform_machine == 'ARM64' and sys_platform == 'win32'",
@@ -809,15 +809,15 @@ wheels = [
 
 [[package]]
 name = "earthdaily"
-version = "1.5.1"
+version = "1.8.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "requests" },
     { name = "toml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e8/14/f7bffe417d5107bd32f189e3bb29582b4a99bed704de14a24131b8bc8f11/earthdaily-1.5.1.tar.gz", hash = "sha256:03ddb03c1373a7a99d61ed7c9983a73952e726ae808618919af2fa51562bf495", size = 9612898, upload-time = "2025-12-02T19:38:14.919Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/38/ae/38c3d80080b7c701f27aae8ec08692926e4ab7e62d82c257eb0d561064d3/earthdaily-1.8.0.tar.gz", hash = "sha256:2d725c6a186ee8879309f5a55e3ed9d26b076deee8e9eabda9fae500d91b3509", size = 9054109, upload-time = "2026-01-16T18:05:17.51Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ca/bf/fe293f8ad6f9e2e2170cf5ada4dde2efaa7662edfd2b090ccf815111fdba/earthdaily-1.5.1-py3-none-any.whl", hash = "sha256:a9f1d2002147555ac6eb10e1c4395c8be6e4ba10749cac891ea9d2415977d68c", size = 117342, upload-time = "2025-12-02T19:38:13.179Z" },
+    { url = "https://files.pythonhosted.org/packages/04/f8/0935819814b7ab4a435b4527f460b023f441058e586fb60b92423833fd18/earthdaily-1.8.0-py3-none-any.whl", hash = "sha256:36bc01f67a28953aae3bde9a60d4107543393fd4a0552d56db7af30b0bb9aa84", size = 130305, upload-time = "2026-01-16T18:05:15.877Z" },
 ]
 
 [package.optional-dependencies]
@@ -4324,7 +4324,7 @@ requires-dist = [
     { name = "accelerate", marker = "extra == 'extra'", specifier = ">=1.10" },
     { name = "boto3", specifier = ">=1.39" },
     { name = "cdsapi", marker = "extra == 'extra'", specifier = ">=0.7.6" },
-    { name = "earthdaily", extras = ["platform"], marker = "extra == 'extra'", specifier = ">=1.0.7" },
+    { name = "earthdaily", extras = ["platform"], marker = "extra == 'extra'", specifier = ">=1.8.0" },
     { name = "earthengine-api", marker = "extra == 'extra'", specifier = ">=1.6.3" },
     { name = "einops", marker = "extra == 'extra'", specifier = ">=0.8" },
     { name = "fiona", specifier = ">=1.10" },
