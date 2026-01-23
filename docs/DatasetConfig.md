@@ -809,7 +809,7 @@ HCAT category code and name respectively.
 Sentinel-2 L2A data on EarthDaily platform.
 
 This data source requires the optional `earthdaily[platform]` dependency and EarthDaily
-credentials in the environment (see EarthDaily documentation for supported methods).
+credentials in the environment (see [EarthDaily documentation](https://earthdaily.github.io/earthdaily-python-client/main/) for supported methods).
 
 The additional data source configuration looks like this:
 
