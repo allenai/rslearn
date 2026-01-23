@@ -18,6 +18,7 @@ import json
 import math
 import multiprocessing
 import os
+import re
 import shutil
 import tempfile
 from datetime import timedelta
@@ -32,7 +33,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
-from rslearn.utils.fsspec import open_atomic
+from rslearn.utils.fsspec import join_upath, open_atomic
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.m2m_api import M2MAPIClient
 from rslearn.utils.mp import star_imap_unordered
@@ -59,7 +60,7 @@ class SRTM(DataSource):
     """Data source for SRTM elevation data from the AI2 Hugging Face mirror.
 
     The data is split into 1x1-degree tiles, with filenames like:
-    SRTM1N05W163V2.tif
+    N05/SRTM1N05W163V2.tif
 
     Items from this data source do not come with a time range. The band name will match
     that specified in the band set, which should have a single band (e.g. "dem").
@@ -68,18 +69,20 @@ class SRTM(DataSource):
     BASE_URL = (
         "https://huggingface.co/datasets/allenai/srtm-global-void-filled/resolve/main/"
     )
-    FILENAME_PREFIX = "SRTM1"
+    FILE_LIST_FILENAME = "file_list.json"
     FILENAME_SUFFIX = "V2.tif"
 
     def __init__(
         self,
         timeout: timedelta = timedelta(seconds=10),
+        cache_dir: str | None = None,
         context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new SRTM instance.
 
         Args:
             timeout: timeout for requests.
+            cache_dir: optional directory to cache the file list.
             context: the data source context.
         """
         # Get band name from context if possible, falling back to "dem".
@@ -95,6 +98,102 @@ class SRTM(DataSource):
         self.timeout = timeout
         self.session = requests.session()
 
+        # Set the cache path if a cache_dir is provided.
+        self.file_list_cache_path: UPath | None = None
+        if cache_dir is not None:
+            if context.ds_path is not None:
+                cache_root = join_upath(context.ds_path, cache_dir)
+            else:
+                cache_root = UPath(cache_dir)
+            cache_root.mkdir(parents=True, exist_ok=True)
+            self.file_list_cache_path = join_upath(cache_root, self.FILE_LIST_FILENAME)
+
+        self._basename_to_item, self._tile_to_item = self._load_file_index()
+
+    def _load_file_index(
+        self,
+    ) -> tuple[dict[str, Item], dict[tuple[int, int], Item]]:
+        """Load the file list and build indices for lookups."""
+        file_list = self._load_file_list_json()
+        if not isinstance(file_list, list):
+            raise ValueError("expected file_list.json to be a list of filenames")
+
+        basename_to_item: dict[str, Item] = {}
+        tile_to_item: dict[tuple[int, int], Item] = {}
+
+        for entry in file_list:
+            if not isinstance(entry, str):
+                raise ValueError(
+                    "expected file_list.json to contain only string filenames"
+                )
+            basename = os.path.basename(entry)
+            lat_min, lon_min = self._parse_tile_basename(basename)
+            geometry = STGeometry(
+                WGS84_PROJECTION,
+                shapely.box(lon_min, lat_min, lon_min + 1, lat_min + 1),
+                None,
+            )
+            item = Item(entry, geometry)
+
+            key = (lon_min, lat_min)
+            tile_to_item[key] = item
+
+            if basename not in basename_to_item:
+                basename_to_item[basename] = item
+
+        logger.info(
+            f"Loaded {len(tile_to_item)} SRTM files from Hugging Face file list"
+        )
+        return basename_to_item, tile_to_item
+
+    def _load_file_list_json(self) -> list[Any]:
+        """Load file list JSON, optionally from cache."""
+        if self.file_list_cache_path is not None and self.file_list_cache_path.exists():
+            with self.file_list_cache_path.open() as f:
+                file_list = json.load(f)
+            logger.info(f"Loaded SRTM file list cache from {self.file_list_cache_path}")
+            return file_list
+
+        response = self.session.get(
+            self.BASE_URL + self.FILE_LIST_FILENAME,
+            timeout=self.timeout.total_seconds(),
+        )
+        response.raise_for_status()
+        file_list = response.json()
+        if self.file_list_cache_path is not None:
+            with open_atomic(self.file_list_cache_path, "w") as f:
+                json.dump(file_list, f)
+        return file_list
+
+    def _parse_tile_basename(self, basename: str) -> tuple[int, int]:
+        """Parse a tile basename into (lat_min, lon_min)."""
+        match = re.match(
+            r"^SRTM\d([NS])(\d{2})([EW])(\d{3})V2\.tif$",
+            basename,
+        )
+        if match is None:
+            raise ValueError(f"invalid SRTM tile filename: {basename}")
+
+        lat_sign, lat_str, lon_sign, lon_str = match.groups()
+        lat_degrees = int(lat_str)
+        lon_degrees = int(lon_str)
+
+        if lat_sign == "N":
+            lat_min = lat_degrees
+        elif lat_sign == "S":
+            lat_min = -lat_degrees
+        else:
+            raise ValueError(f"invalid SRTM tile latitude for filename: {basename}")
+
+        if lon_sign == "E":
+            lon_min = lon_degrees
+        elif lon_sign == "W":
+            lon_min = -lon_degrees
+        else:
+            raise ValueError(f"invalid SRTM tile longitude for filename: {basename}")
+
+        return lat_min, lon_min
+
     def get_item_by_name(self, name: str) -> Item:
         """Gets an item by name.
 
@@ -105,72 +204,11 @@ class SRTM(DataSource):
         Returns:
             the Item object
         """
-        if not name.startswith(self.FILENAME_PREFIX) or not name.endswith(
-            self.FILENAME_SUFFIX
-        ):
-            raise ValueError(
-                "expected item name to match "
-                f"{self.FILENAME_PREFIX}{{lat}}{{lon}}{self.FILENAME_SUFFIX}, "
-                f"but got {name}"
-            )
-
-        core = name[len(self.FILENAME_PREFIX) : -len(self.FILENAME_SUFFIX)]
-        if len(core) != 7:
-            raise ValueError(f"invalid item name {name}")
-
-        lat_sign = core[0]
-        lat_degrees = int(core[1:3])
-        lon_sign = core[3]
-        lon_degrees = int(core[4:7])
-
-        if lat_sign == "N":
-            lat_min = lat_degrees
-        elif lat_sign == "S":
-            lat_min = -lat_degrees
-        else:
-            raise ValueError(f"invalid item name {name}")
-
-        if lon_sign == "E":
-            lon_min = lon_degrees
-        elif lon_sign == "W":
-            lon_min = -lon_degrees
-        else:
-            raise ValueError(f"invalid item name {name}")
-
-        geometry = STGeometry(
-            WGS84_PROJECTION,
-            shapely.box(lon_min, lat_min, lon_min + 1, lat_min + 1),
-            None,
-        )
-        return Item(name, geometry)
-
-    def _lon_lat_to_item(self, lon_min: int, lat_min: int) -> Item:
-        """Get an item based on the 1x1 longitude/latitude grid.
-
-        Args:
-            lon_min: the starting longitude integer of the grid cell.
-            lat_min: the starting latitude integer of the grid cell.
-
-        Returns:
-            the Item object.
-        """
-        if lon_min < 0:
-            lon_part = f"W{-lon_min:03d}"
-        else:
-            lon_part = f"E{lon_min:03d}"
-        if lat_min < 0:
-            lat_part = f"S{-lat_min:02d}"
-        else:
-            lat_part = f"N{lat_min:02d}"
-        fname = f"{self.FILENAME_PREFIX}{lat_part}{lon_part}{self.FILENAME_SUFFIX}"
-
-        geometry = STGeometry(
-            WGS84_PROJECTION,
-            shapely.box(lon_min, lat_min, lon_min + 1, lat_min + 1),
-            None,
-        )
-
-        return Item(fname, geometry)
+        basename = os.path.basename(name)
+        item = self._basename_to_item.get(basename)
+        if item is not None:
+            return item
+        raise ValueError(f"unknown SRTM tile name: {name}")
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
@@ -184,6 +222,8 @@ class SRTM(DataSource):
         Returns:
             List of groups of items that should be retrieved for each geometry.
         """
+        # It only makes sense to create mosaic from the SRTM data since it is one
+        # global layer (but spatially split up into items).
         if query_config.space_mode != SpaceMode.MOSAIC or query_config.max_matches != 1:
             raise ValueError(
                 "expected mosaic with max_matches=1 for the query configuration"
@@ -202,7 +242,9 @@ class SRTM(DataSource):
             items = []
             for lon_min in range(cell_bounds[0], cell_bounds[2]):
                 for lat_min in range(cell_bounds[1], cell_bounds[3]):
-                    items.append(self._lon_lat_to_item(lon_min, lat_min))
+                    if (lon_min, lat_min) not in self._tile_to_item:
+                        continue
+                    items.append(self._tile_to_item[(lon_min, lat_min)])
 
             logger.debug(f"Got {len(items)} items (grid cells) for geometry")
             groups.append([items])
@@ -254,6 +296,10 @@ class SRTM(DataSource):
                 tile_store.write_raster_file(
                     item.name, [self.band_name], UPath(local_fname)
                 )
+
+
+# The code below is for creating the mirror by downloading SRTM GeoTIFFs from the USGS
+# EarthExplorer M2M API.
 
 
 @functools.cache
