@@ -60,7 +60,13 @@ class SRTM(DataSource):
     """Data source for SRTM elevation data from the AI2 Hugging Face mirror.
 
     The data is split into 1x1-degree tiles, with filenames like:
-    N05/SRTM1N05W163V2.tif
+    N05/SRTM1N05W163V2.tif (1 arc-second, ~30m resolution)
+    N05/SRTM3N05W163V2.tif (3 arc-second, ~90m resolution)
+
+    SRTM1 (1 arc-second) is available for some regions (primarily US territories),
+    while SRTM3 (3 arc-second) is available globally. By default, SRTM1 is preferred
+    when available for higher resolution. Set always_use_3arcsecond=True to always
+    use the lower resolution SRTM3 data for consistency.
 
     Items from this data source do not come with a time range. The band name will match
     that specified in the band set, which should have a single band (e.g. "dem").
@@ -76,6 +82,7 @@ class SRTM(DataSource):
         self,
         timeout: timedelta = timedelta(seconds=10),
         cache_dir: str | None = None,
+        always_use_3arcsecond: bool = False,
         context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new SRTM instance.
@@ -83,6 +90,9 @@ class SRTM(DataSource):
         Args:
             timeout: timeout for requests.
             cache_dir: optional directory to cache the file list.
+            always_use_3arcsecond: if True, always use 3 arc-second (SRTM3) data even
+                when 1 arc-second (SRTM1) is available. Defaults to False, which
+                prefers SRTM1 for higher resolution when available.
             context: the data source context.
         """
         # Get band name from context if possible, falling back to "dem".
@@ -97,6 +107,7 @@ class SRTM(DataSource):
 
         self.timeout = timeout
         self.session = requests.session()
+        self.always_use_3arcsecond = always_use_3arcsecond
 
         # Set the cache path if a cache_dir is provided.
         self.file_list_cache_path: UPath | None = None
@@ -127,6 +138,14 @@ class SRTM(DataSource):
                     "expected file_list.json to contain only string filenames"
                 )
             basename = os.path.basename(entry)
+
+            # Check if this is SRTM1 or SRTM3 based on filename prefix
+            is_srtm1 = basename.startswith("SRTM1")
+
+            # Skip SRTM1 files if always_use_3arcsecond is enabled
+            if self.always_use_3arcsecond and is_srtm1:
+                continue
+
             lat_min, lon_min = self._parse_tile_basename(basename)
             geometry = STGeometry(
                 WGS84_PROJECTION,
@@ -136,13 +155,29 @@ class SRTM(DataSource):
             item = Item(entry, geometry)
 
             key = (lon_min, lat_min)
-            tile_to_item[key] = item
+
+            # For tile_to_item, prefer SRTM1 over SRTM3 when not using always_use_3arcsecond
+            if key in tile_to_item:
+                existing_is_srtm1 = os.path.basename(tile_to_item[key].name).startswith(
+                    "SRTM1"
+                )
+                # Only replace if current is SRTM1 and existing is not
+                if is_srtm1 and not existing_is_srtm1:
+                    tile_to_item[key] = item
+                # Keep existing if it's SRTM1 and current is not
+                elif existing_is_srtm1 and not is_srtm1:
+                    pass
+                else:
+                    # Same type, keep the existing one
+                    pass
+            else:
+                tile_to_item[key] = item
 
             if basename not in basename_to_item:
                 basename_to_item[basename] = item
 
         logger.info(
-            f"Loaded {len(tile_to_item)} SRTM files from Hugging Face file list"
+            f"Loaded {len(tile_to_item)} SRTM tiles from Hugging Face file list"
         )
         return basename_to_item, tile_to_item
 
