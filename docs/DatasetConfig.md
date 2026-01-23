@@ -600,6 +600,51 @@ Available bands:
 - vv
 - vh
 
+### rslearn.data_sources.aws_sentinel2_element84.Sentinel2
+
+This data source is for Sentinel-2 L2A imagery from the Element 84 Earth Search STAC
+API on AWS. It uses the `s3://sentinel-cogs` S3 bucket which provides Cloud-Optimized
+GeoTIFFs, enabling direct materialization without ingestion.
+
+See https://aws.amazon.com/marketplace/pp/prodview-ykj5gyumkzlme for details.
+
+The bucket is public and free so no credentials are needed.
+
+```jsonc
+{
+  // Optional STAC query filter.
+  // Example: {"eo:cloud_cover": {"lt": 20}}
+  "query": null,
+  // Sort by this STAC property, e.g. "eo:cloud_cover".
+  "sort_by": null,
+  // Whether to sort ascending or descending (default ascending).
+  "sort_ascending": true,
+  // Optional directory to cache discovered items.
+  "cache_dir": null,
+  // Flag (default false) to harmonize pixel values across different processing
+  // baselines (recommended), see
+  // https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
+  "harmonize": false,
+  // Timeout for requests.
+  "timeout": "10s"
+}
+```
+
+Available bands:
+- B01 (uint16, from coastal asset)
+- B02 (uint16, from blue asset)
+- B03 (uint16, from green asset)
+- B04 (uint16, from red asset)
+- B05 (uint16, from rededge1 asset)
+- B06 (uint16, from rededge2 asset)
+- B07 (uint16, from rededge3 asset)
+- B08 (uint16, from nir asset)
+- B09 (uint16, from nir09 asset)
+- B11 (uint16, from swir16 asset)
+- B12 (uint16, from swir22 asset)
+- B8A (uint16, from nir08 asset)
+- R, G, B (uint8, from visual asset)
+
 ### rslearn.data_sources.climate_data_store.ERA5Land
 
 Base class for ingesting ERA5 land data from the Copernicus Climate Data Store.
@@ -764,29 +809,6 @@ The additional data source configuration looks like this:
 }
 ```
 
-### rslearn.data_sources.earthdata_srtm.SRTM
-
-Elevation data from the Shuttle Radar Topography Mission via NASA Earthdata.
-
-A NASA Earthdata account is needed, see https://urs.earthdata.nasa.gov/.
-
-```jsonc
-{
-  // Earthdata account username. It can also be set via the NASA_EARTHDATA_USERNAME
-  // environment variable.
-  "username": null,
-  // Earthdata account password. It can also be set via the NASA_EARTHDATA_PASSWORD
-  // environment variable.
-  "password": null,
-  // Timeout for requests.
-  "timeout_seconds": 10,
-}
-```
-
-The data source should be configured with a single band set containing a single band.
-The band name can be set arbitrarily, but "srtm" or "elevation" is suggested. The data
-type of the band should be set to int16 to match the source data.
-
 ### rslearn.data_sources.eurocrops.EuroCrops
 
 This data source is for EuroCrops vector data (v11).
@@ -860,6 +882,36 @@ Available bands:
 - R (from TCI asset; derived from B04)
 - G (from TCI asset; derived from B03)
 - B (from TCI asset; derived from B02)
+
+### rslearn.data_sources.hf_srtm.SRTM
+
+Elevation data from the Shuttle Radar Topography Mission (SRTM), served from the AI2
+Hugging Face mirror at https://huggingface.co/datasets/allenai/srtm-global-void-filled.
+
+The data is split into 1x1-degree tiles. SRTM1 (1 arc-second, ~30m resolution) is
+available for some regions (primarily US territories), while SRTM3 (3 arc-second, ~90m
+resolution) is available globally. By default, SRTM1 is preferred when available for
+higher resolution.
+
+No credentials are needed.
+
+```jsonc
+{
+  // Timeout for requests.
+  "timeout": "10s",
+  // Optional directory to cache the file list.
+  "cache_dir": null,
+  // If true, always use 3 arc-second (SRTM3) data even when 1 arc-second (SRTM1) is
+  // available. Defaults to false, which prefers SRTM1 for higher resolution.
+  "always_use_3arcsecond": false
+}
+```
+
+The data source should be configured with a single band set containing a single band.
+The band name can be set arbitrarily, but "dem" or "srtm" is suggested. The data type
+should be int16 to match the source data.
+
+Items from this data source do not come with a time range.
 
 ### rslearn.data_sources.google_earth_engine.GEE
 
@@ -1273,6 +1325,39 @@ default those to the window pixel size.
 
 Available bands:
 - B1 (float32 recommended; scale/offset applied; set `nodata_vals` to `-32768`)
+
+### rslearn.data_sources.worldcereal.WorldCereal
+
+This data source is for the ESA WorldCereal 2021 agricultural land cover map.
+
+For details about the land cover map, see https://esa-worldcereal.org/en.
+
+```jsonc
+{
+  // Required local path to extract the WorldCereal GeoTIFF files. For high performance,
+  // this should be a local directory; if the dataset is remote, prefix with a protocol
+  // ("file://") to use a local directory.
+  "worldcereal_dir": "cache/worldcereal"
+}
+```
+
+Available bands (specify one per layer):
+- tc-annual_temporarycrops_confidence
+- tc-annual_temporarycrops_classification
+- tc-maize-main_irrigation_confidence
+- tc-maize-main_irrigation_classification
+- tc-maize-main_maize_confidence
+- tc-maize-main_maize_classification
+- tc-maize-second_irrigation_confidence
+- tc-maize-second_irrigation_classification
+- tc-maize-second_maize_confidence
+- tc-maize-second_maize_classification
+- tc-springcereals_springcereals_confidence
+- tc-springcereals_springcereals_classification
+- tc-wintercereals_irrigation_confidence
+- tc-wintercereals_irrigation_classification
+- tc-wintercereals_wintercereals_confidence
+- tc-wintercereals_wintercereals_classification
 
 ### rslearn.data_sources.worldcover.WorldCover
 
