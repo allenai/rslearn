@@ -804,6 +804,92 @@ There is no data-source-specific configuration.
 The vector features should have `EC_hcat_c` and `EC_hcat_n` properties indicating the
 HCAT category code and name respectively.
 
+### rslearn.data_sources.earthdaily.Sentinel2
+
+Sentinel-2 L2A data on EarthDaily platform.
+
+This data source requires the optional `earthdaily[platform]` dependency and EarthDaily
+credentials in the environment (see EarthDaily documentation for supported methods).
+
+The additional data source configuration looks like this:
+
+```jsonc
+{
+  // Optional: EarthDaily Sentinel-2 asset keys to use (default null). If null and the
+  // layer config is available, assets are inferred from the layer's band sets.
+  // Example: ["red", "green", "blue", "nir", "swir16", "swir22"]
+  "assets": null,
+  // Optional: maximum cloud cover (%) to filter items at search time.
+  "cloud_cover_max": null,
+  // Optional: default cloud cover threshold (%) to apply if cloud_cover_max is not set.
+  "cloud_cover_threshold": null,
+  // Maximum number of STAC items to fetch per window before rslearn grouping/matching.
+  "search_max_items": 500,
+  // Optional ordering of items before grouping (useful with SpaceMode.COMPOSITE +
+  // CompositingMethod.FIRST_VALID): "cloud_cover" (default), "datetime", or null.
+  "sort_items_by": "cloud_cover",
+  // Whether to apply an SCL-based cloud mask during ingest (default false). If true,
+  // cloudy pixels are set to mask_nodata_value before writing to the dataset tile store.
+  // Note: this only applies when ingest is enabled (the default).
+  "apply_cloud_mask": false,
+  // Which asset key to use as the mask band (default "scl").
+  "mask_band": "scl",
+  // SCL values treated as cloudy (default [3, 8, 9, 10]); set to override.
+  "exclude_scl_values": null,
+  // Nodata value to write into cloudy pixels.
+  "mask_nodata_value": 0,
+  // Optional cache directory for cached item metadata.
+  "cache_dir": null
+}
+```
+
+Example:
+
+```jsonc
+{
+  "layers": {
+    "sentinel2": {
+      "type": "raster",
+      "band_sets": [{
+        "dtype": "uint16",
+        "bands": ["B02", "B03", "B04", "B08"]
+      }],
+      "compositing_method": "FIRST_VALID",
+      "data_source": {
+        "class_path": "rslearn.data_sources.earthdaily.Sentinel2",
+        "query_config": {
+          "space_mode": "COMPOSITE",
+          "time_mode": "WITHIN",
+          "max_matches": 1
+        },
+        "init_args": {
+          "cloud_cover_max": 15.0,
+          "sort_items_by": "cloud_cover",
+          "apply_cloud_mask": true,
+          "mask_nodata_value": 0
+        }
+      }
+    }
+  }
+}
+```
+
+Available bands:
+- B01
+- B02
+- B03
+- B04
+- B05
+- B06
+- B07
+- B08
+- B09
+- B11
+- B12
+- B8A
+- R, G, B (from the `visual` asset)
+- scl, aot, wvp
+
 ### rslearn.data_sources.gcp_public_data.Sentinel2
 
 This data source is for Sentinel-2 data on Google Cloud Storage.

@@ -7,6 +7,7 @@ from datetime import timedelta
 from typing import Any, Literal
 
 import affine
+import numpy as np
 import numpy.typing as npt
 import pystac
 import pystac_client
@@ -27,6 +28,7 @@ from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
+from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 logger = get_logger(__name__)
 
@@ -482,3 +484,351 @@ class EarthDaily(DataSource, TileStore):
             layer_cfg,
             item_groups,
         )
+
+
+class Sentinel2(EarthDaily):
+    """Sentinel-2 L2A on EarthDaily platform.
+
+    Uses EarthDaily's `Sentinel2CollectionHelper` for search and (optionally) applies a
+    cloud mask during ingestion using the SCL asset so that rslearn composites can
+    treat cloudy pixels as nodata.
+    """
+
+    COLLECTION_NAME = "sentinel-2-l2a"
+
+    # EarthDaily Sentinel-2 asset keys to rslearn band names.
+    # For spectral bands, we use Sentinel-2 band IDs as rslearn band names.
+    ASSET_BANDS: dict[str, list[str]] = {
+        "coastal": ["B01"],
+        "blue": ["B02"],
+        "green": ["B03"],
+        "red": ["B04"],
+        "rededge1": ["B05"],
+        "rededge2": ["B06"],
+        "rededge3": ["B07"],
+        "nir": ["B08"],
+        "nir08": ["B8A"],
+        "nir09": ["B09"],
+        "swir16": ["B11"],
+        "swir22": ["B12"],
+        # Derived products.
+        "visual": ["R", "G", "B"],
+        "scl": ["scl"],
+        "aot": ["aot"],
+        "wvp": ["wvp"],
+        # Preview.
+        "thumbnail": ["thumbnail"],
+    }
+
+    DEFAULT_EXCLUDE_SCL_VALUES = [3, 8, 9, 10]
+
+    def __init__(
+        self,
+        assets: list[str] | None = None,
+        cloud_cover_threshold: float | None = None,
+        cloud_cover_max: float | None = None,
+        search_max_items: int = 500,
+        sort_items_by: Literal["cloud_cover", "datetime"] | None = "cloud_cover",
+        apply_cloud_mask: bool = False,
+        mask_band: str = "scl",
+        exclude_scl_values: list[int] | None = None,
+        mask_nodata_value: int | float = 0,
+        timeout: timedelta = timedelta(seconds=10),
+        cache_dir: str | None = None,
+        max_retries: int = 3,
+        retry_backoff_factor: float = 5.0,
+        service_name: Literal["platform"] = "platform",
+        context: DataSourceContext = DataSourceContext(),
+        **kwargs: Any,
+    ) -> None:
+        """Initialize an EarthDaily Sentinel-2 data source.
+
+        Args:
+            assets: optional list of EarthDaily Sentinel-2 asset keys (e.g. ["red",
+                "green", "blue", "nir", "swir16"]). If omitted and a LayerConfig is
+                provided via context, assets are inferred from that layer's band sets.
+            cloud_cover_threshold: default max cloud cover (%) used when cloud_cover_max
+                is not provided at query time.
+            cloud_cover_max: max cloud cover (%) applied in searches.
+            search_max_items: max number of STAC items to fetch per window before
+                rslearn's grouping/matching logic runs.
+            sort_items_by: optional ordering applied before grouping; useful when
+                using `SpaceMode.COMPOSITE` with `CompositingMethod.FIRST_VALID`.
+            apply_cloud_mask: whether to apply a cloud mask during ingest using SCL.
+                Cloudy pixels are set to `mask_nodata_value`.
+            mask_band: which asset key to use as the mask (default "scl").
+            exclude_scl_values: SCL values to treat as invalid (defaults to common
+                cloud/cloud-shadow/cirrus values).
+            mask_nodata_value: value to write into cloudy pixels.
+            timeout: timeout for HTTP asset downloads (when ingesting).
+            cache_dir: optional directory to cache item metadata by item id.
+            max_retries: max retries for EarthDaily API client (search/get item).
+            retry_backoff_factor: backoff factor for EarthDaily API client retries.
+            service_name: EarthDaily service name (only "platform" supported).
+            context: rslearn data source context.
+            kwargs: unused extra keyword args (for forward compatibility).
+        """
+        del kwargs
+
+        asset_bands: dict[str, list[str]]
+        if context.layer_config is not None and assets is None:
+            asset_bands = {}
+            wanted_bands: set[str] = set()
+            for band_set in context.layer_config.band_sets:
+                wanted_bands.update(band_set.bands)
+            for asset_key, band_names in self.ASSET_BANDS.items():
+                if wanted_bands.intersection(set(band_names)):
+                    asset_bands[asset_key] = band_names
+            if apply_cloud_mask and mask_band not in asset_bands:
+                # We may need the mask even if it is not explicitly requested.
+                if mask_band in self.ASSET_BANDS:
+                    asset_bands[mask_band] = self.ASSET_BANDS[mask_band]
+        elif assets is not None:
+            asset_bands = {asset_key: self.ASSET_BANDS[asset_key] for asset_key in assets}
+            if apply_cloud_mask and mask_band not in asset_bands:
+                asset_bands[mask_band] = self.ASSET_BANDS[mask_band]
+        else:
+            asset_bands = dict(self.ASSET_BANDS)
+
+        super().__init__(
+            collection_name=self.COLLECTION_NAME,
+            asset_bands=asset_bands,
+            query=None,
+            sort_by=None,
+            sort_ascending=True,
+            timeout=timeout,
+            skip_items_missing_assets=True,
+            cache_dir=cache_dir,
+            max_retries=max_retries,
+            retry_backoff_factor=retry_backoff_factor,
+            service_name=service_name,
+            context=context,
+        )
+
+        self.cloud_cover_threshold = cloud_cover_threshold
+        self.cloud_cover_max = cloud_cover_max
+        self.search_max_items = search_max_items
+        self.sort_items_by = sort_items_by
+        self.apply_cloud_mask = apply_cloud_mask
+        self.mask_band = mask_band
+        self.exclude_scl_values = (
+            exclude_scl_values
+            if exclude_scl_values is not None
+            else list(self.DEFAULT_EXCLUDE_SCL_VALUES)
+        )
+        self.mask_nodata_value = mask_nodata_value
+
+        self._s2_helper: Any | None = None
+
+    def _get_sentinel2_helper(self) -> Any:
+        if self._s2_helper is not None:
+            return self._s2_helper
+
+        eds_client, _, _ = self._load_client()
+        from earthdaily.platform.helpers.collections import Sentinel2CollectionHelper
+
+        self._s2_helper = Sentinel2CollectionHelper(
+            eds_client,
+            assets=list(self.asset_bands.keys()),
+            cloud_cover_threshold=self.cloud_cover_threshold,
+        )
+        return self._s2_helper
+
+    def get_items(
+        self, geometries: list[STGeometry], query_config: QueryConfig
+    ) -> list[list[list[EarthDailyItem]]]:
+        helper = None
+        try:
+            helper = self._get_sentinel2_helper()
+        except Exception as e:
+            logger.warning(
+                "EarthDaily Sentinel-2 failed to initialize Sentinel2CollectionHelper (%s); "
+                "falling back to raw STAC search (no cloud masking in search).",
+                e,
+            )
+            helper = None
+
+        groups = []
+        for geometry in geometries:
+            wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
+            if wgs84_geometry.time_range is None:
+                raise ValueError("EarthDaily Sentinel-2 requires geometry time ranges to be set")
+
+            max_cloud_cover = (
+                self.cloud_cover_max
+                if self.cloud_cover_max is not None
+                else self.cloud_cover_threshold
+            )
+            if helper is not None:
+                from earthdaily.platform.helpers.collections.base import SpatioTemporalGeometry
+
+                st_geometry = SpatioTemporalGeometry(
+                    crs="EPSG:4326",
+                    geometry=wgs84_geometry.shp,
+                    time_range=wgs84_geometry.time_range,
+                )
+                stac_items: list[pystac.Item] = helper.get_items(
+                    geometries=[st_geometry],
+                    cloud_cover_max=max_cloud_cover,
+                    max_items=self.search_max_items,
+                )
+            else:
+                _, client, _ = self._load_client()
+                query: dict[str, Any] | None = None
+                if max_cloud_cover is not None:
+                    query = {"eo:cloud_cover": {"lt": max_cloud_cover}}
+                result = client.search(
+                    collections=[self.collection_name],
+                    intersects=shapely.to_geojson(wgs84_geometry.shp),
+                    datetime=wgs84_geometry.time_range,
+                    query=query,
+                    max_items=self.search_max_items,
+                )
+                stac_items = list(result.item_collection())
+
+            if self.sort_items_by == "cloud_cover":
+                stac_items.sort(
+                    key=lambda item: (
+                        item.properties.get("eo:cloud_cover") is None,
+                        item.properties.get("eo:cloud_cover", 0.0),
+                    )
+                )
+            elif self.sort_items_by == "datetime":
+                stac_items.sort(
+                    key=lambda item: (
+                        item.datetime is None,
+                        item.datetime,
+                    )
+                )
+            elif self.sort_items_by is not None:
+                raise ValueError(f"invalid sort_items_by setting ({self.sort_items_by})")
+
+            candidate_items = [self.get_item_by_name(stac_item.id) for stac_item in stac_items]
+            cur_groups = match_candidate_items_to_window(
+                geometry, candidate_items, query_config
+            )
+            groups.append(cur_groups)
+
+        return groups
+
+    def _download_asset_to_tmp(
+        self, asset_url: str, tmp_dir: str, asset_key: str, item_name: str
+    ) -> str:
+        local_fname = os.path.join(tmp_dir, f"{item_name}_{asset_key}.tif")
+        with requests.get(
+            asset_url, stream=True, timeout=self.timeout.total_seconds()
+        ) as r:
+            r.raise_for_status()
+            with open(local_fname, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+        return local_fname
+
+    def _apply_scl_cloud_mask(
+        self, src: rasterio.DatasetReader, scl_src: rasterio.DatasetReader
+    ) -> tuple[npt.NDArray[Any], Projection, PixelBounds]:
+        # Align the SCL raster to the source raster's grid.
+        with rasterio.vrt.WarpedVRT(
+            scl_src,
+            crs=src.crs,
+            transform=src.transform,
+            width=src.width,
+            height=src.height,
+            resampling=Resampling.nearest,
+        ) as scl_vrt:
+            scl = scl_vrt.read(1)
+
+        cloud_mask = np.isin(scl, np.array(self.exclude_scl_values, dtype=scl.dtype))
+        array = src.read()
+        array[:, cloud_mask] = self.mask_nodata_value
+
+        projection, bounds = get_raster_projection_and_bounds(src)
+        return array, projection, bounds
+
+    def ingest(
+        self,
+        tile_store: TileStoreWithLayer,
+        items: list[EarthDailyItem],
+        geometries: list[list[STGeometry]],
+    ) -> None:
+        if not self.apply_cloud_mask:
+            return super().ingest(tile_store=tile_store, items=items, geometries=geometries)
+
+        for item in items:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                scl_local_fname: str | None = None
+                scl_url = item.asset_urls.get(self.mask_band)
+                if scl_url is not None:
+                    try:
+                        scl_local_fname = self._download_asset_to_tmp(
+                            scl_url, tmp_dir, self.mask_band, item.name
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "EarthDaily Sentinel-2 failed to download mask asset %s for %s: %s",
+                            self.mask_band,
+                            item.name,
+                            e,
+                        )
+
+                scl_src: rasterio.DatasetReader | None = None
+                if scl_local_fname is not None:
+                    try:
+                        scl_src = rasterio.open(scl_local_fname)
+                    except Exception as e:
+                        logger.warning(
+                            "EarthDaily Sentinel-2 failed to open mask asset %s for %s: %s",
+                            self.mask_band,
+                            item.name,
+                            e,
+                        )
+                        scl_src = None
+
+                for asset_key, band_names in self.asset_bands.items():
+                    asset_url = item.asset_urls.get(asset_key)
+                    if asset_url is None:
+                        continue
+                    if tile_store.is_raster_ready(item.name, band_names):
+                        continue
+
+                    try:
+                        local_fname = self._download_asset_to_tmp(
+                            asset_url, tmp_dir, asset_key, item.name
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "EarthDaily Sentinel-2 failed to download %s for %s: %s",
+                            asset_key,
+                            item.name,
+                            e,
+                        )
+                        continue
+
+                    if asset_key == self.mask_band:
+                        # If mask band itself is requested, store it unmodified.
+                        tile_store.write_raster_file(item.name, band_names, UPath(local_fname))
+                        continue
+                    if asset_key == "thumbnail":
+                        # Thumbnails are generally not GeoTIFF rasters; skip ingestion.
+                        continue
+
+                    if scl_src is None:
+                        tile_store.write_raster_file(item.name, band_names, UPath(local_fname))
+                        continue
+
+                    try:
+                        with rasterio.open(local_fname) as src:
+                            array, projection, bounds = self._apply_scl_cloud_mask(src, scl_src)
+                        tile_store.write_raster(item.name, band_names, projection, bounds, array)
+                    except Exception as e:
+                        logger.warning(
+                            "EarthDaily Sentinel-2 failed to mask/write %s for %s: %s",
+                            asset_key,
+                            item.name,
+                            e,
+                        )
+                        # Fallback: write without masking.
+                        tile_store.write_raster_file(item.name, band_names, UPath(local_fname))
+
+                if scl_src is not None:
+                    scl_src.close()
