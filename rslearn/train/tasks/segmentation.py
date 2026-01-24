@@ -394,7 +394,6 @@ class SegmentationMetric(Metric):
         metric: Metric,
         pass_probabilities: bool = True,
         class_idx: int | None = None,
-        output_key: str | None = None,
     ):
         """Initialize a new SegmentationMetric.
 
@@ -404,18 +403,13 @@ class SegmentationMetric(Metric):
             pass_probabilities: whether to pass predicted probabilities to the metric.
                 If False, argmax is applied to pass the predicted classes instead.
             class_idx: if set and the wrapped metric returns a dict, return a filtered
-                dict containing "cls_{class_idx}" and "avg" (if present). This allows
-                reporting both the specific class metric and the average.
-            output_key: if the wrapped metric returns a dict (or a tensor that gets
-                converted to a dict), return only this key's value. For standard
-                torchmetrics with average=None, tensors are converted to dicts with
-                keys "cls_0", "cls_1", etc. If None, the full dict is returned.
+                dict containing "cls_{class_idx}" and "avg". This allows reporting both
+                the specific class metric and the average.
         """
         super().__init__()
         self.metric = metric
         self.pass_probablities = pass_probabilities
         self.class_idx = class_idx
-        self.output_key = output_key
 
     def update(
         self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
@@ -448,12 +442,11 @@ class SegmentationMetric(Metric):
         """Returns the computed metric.
 
         If the wrapped metric returns a multi-element tensor (e.g., standard torchmetrics
-        with average=None), it is converted to a dict with keys like "cls_0", "cls_1", etc.
-        This allows uniform handling via output_key for both standard torchmetrics and
-        custom dict-returning metrics.
+        with average=None), it is converted to a dict with keys like "cls_0", "cls_1", etc,
+        and an "avg" key is computed from the per-class values.
 
-        When class_idx is set and the result is a dict, returns both the "avg" key (if
-        present) and the specific class key, allowing reporting of both values.
+        When class_idx is set and the result is a dict, returns both the "avg" key and
+        the specific class key, allowing reporting of both values.
         """
         result = self.metric.compute()
 
@@ -464,19 +457,12 @@ class SegmentationMetric(Metric):
             result = {f"cls_{i}": result[i] for i in range(len(result))}
             result["avg"] = torch.mean(torch.stack(list(result.values())))
 
-        if self.output_key is not None:
-            if not isinstance(result, dict):
-                raise TypeError(
-                    f"output_key is set to '{self.output_key}' but metric returned "
-                    f"{type(result).__name__} instead of dict"
-                )
-            return result[self.output_key]
         if self.class_idx is not None:
-            # Return both avg (if present) and the specific class
+            # Return both avg and the specific class
             if isinstance(result, dict):
                 cls_key = f"cls_{self.class_idx}"
                 filtered = {cls_key: result[cls_key]}
-                if "avg" in result: # This won't be true for standard torchmetrics!
+                if "avg" in result:
                     filtered["avg"] = result["avg"]
                 return filtered
             return result[self.class_idx]
