@@ -121,22 +121,13 @@ def overlay_points_on_image(
         )
 
     for feature in features:
-        if not feature.properties:
-            continue
         label = feature.properties.get(class_property_name)
-        if label is None:
-            continue
         label = str(label)
         color = label_colors.get(label)
         if color is None:
-            # Fallback: use first color if only one label class, otherwise red
-            if len(label_colors) == 1:
-                color = next(iter(label_colors.values()))
-            else:
-                logger.warning(
-                    f"Label '{label}' not found in label_colors. Available labels: {list(label_colors.keys())}. Using default red."
-                )
-                color = (255, 0, 0)
+            raise ValueError(
+                f"Label '{label}' not found in label_colors. Available labels: {list(label_colors.keys())}"
+            )
 
         shp = feature.geometry.shp
         flat_shapes = flatten_shape(shp)
@@ -339,12 +330,6 @@ def get_vector_label_by_property(
     Returns:
         The label string, or None if not found
     """
-    if layer_config.type != LayerType.VECTOR:
-        raise ValueError(
-            f"Vector labels must use vector layers. "
-            f"Layer '{layer_name}' is of type {layer_config.type}."
-        )
-
     features = read_vector_layer(window, layer_name, layer_config, group_idx=group_idx)
     if not features:
         logger.warning(
@@ -359,18 +344,11 @@ def get_vector_label_by_property(
     if not layer_config.class_property_name:
         raise ValueError(
             f"class_property_name must be specified in the config for vector label layer '{layer_name}'. "
-            "Auto-detection of property name is not supported."
         )
 
     label = first_feature.properties.get(layer_config.class_property_name)
-    if label:
-        logger.info(f"Label for {window.name}: {label}")
-        return str(label)
-
-    logger.warning(
-        f"Property '{layer_config.class_property_name}' not found in vector label layer {layer_name} for {window.name}"
-    )
-    return None
+    logger.info(f"Label for {window.name}: {label}")
+    return str(label)
 
 
 def _get_reference_raster_for_detection(
@@ -395,8 +373,6 @@ def _get_reference_raster_for_detection(
         Tuple of (reference_array, normalization_method) or None if no raster layers available
     """
     raster_layers = [name for name in bands.keys() if name not in label_layers]
-    if not raster_layers:
-        return None
 
     ref_layer_name = raster_layers[0]
     ref_layer_config = dataset.layers[ref_layer_name]
@@ -444,11 +420,6 @@ def render_vector_label_image(
         raise ValueError("Classification labels are text, not images")
 
     features = read_vector_layer(window, layer_name, layer_config, group_idx=group_idx)
-    if not features:
-        logger.info(
-            f"No features found in vector label layer {layer_name} for window {window.name}"
-        )
-        raise FileNotFoundError(f"No features in vector label layer {layer_name}")
 
     if task_type == "detection":
         bands = bands or {}
