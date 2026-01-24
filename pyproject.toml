@@ -11,8 +11,8 @@ requires-python = ">=3.11"
 dependencies = [
     "boto3>=1.39",
     "fiona>=1.10",
+    "flask>=3.0.0",
     "fsspec>=2025.10.0", # this is used both directly and indirectly (via universal_pathlib) in our code
-    "jinja2>=3.1.0",
     "jsonargparse>=4.35.0",
     "lightning>=2.5.1.post0",
     "Pillow>=11.3",
@@ -90,7 +90,6 @@ include = ["rslearn*"]
 rslearn = ["py.typed"]
 "rslearn.models.clay.configs" = ["metadata.yaml"]
 "rslearn.models.panopticon_data.sensors" = ["*.yaml"]
-"rslearn.vis.templates" = ["*.html"]
 
 [tool.ruff]
 fix = true
