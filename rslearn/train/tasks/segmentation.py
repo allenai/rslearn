@@ -116,6 +116,12 @@ class SegmentationTask(BasicTask):
         else:
             self.nodata_value = nodata_value
 
+        if metric_class_idx is not None and not report_metric_per_class:
+            raise ValueError(
+                "metric_class_idx requires report_metric_per_class=True to access "
+                "per-class metric values"
+            )
+
         self.enable_accuracy_metric = enable_accuracy_metric
         self.enable_f1_metric = enable_f1_metric
         self.enable_miou_metric = enable_miou_metric
