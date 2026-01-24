@@ -7,7 +7,7 @@ import argparse
 import json
 import random
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any
 
 from flask import Flask, Response
 from upath import UPath
@@ -22,18 +22,6 @@ from .render_vector_label import get_vector_label_by_property, render_vector_lab
 from .utils import _escape_html, format_window_info, generate_label_colors
 
 logger = get_logger(__name__)
-
-
-class WindowData(TypedDict):
-    """Type definition for window data dictionary."""
-
-    idx: int
-    name: str
-    info_html: str
-    maps_link: str | None
-    available_layers: set[str]
-    mask_layers: list[str]
-    label_texts: dict[str, str]
 
 
 def generate_image_as_bytes(
@@ -147,7 +135,7 @@ def render_template(
     Returns:
         Rendered HTML as string
     """
-    window_data: list[WindowData] = []
+    window_data: list[dict[str, Any]] = []
     for idx, window in enumerate(sampled_windows):
         info_html, lat, lon = format_window_info(window)
         maps_link = (
