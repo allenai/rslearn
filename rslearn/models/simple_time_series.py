@@ -180,7 +180,7 @@ class SimpleTimeSeries(FeatureExtractor):
         # want to pass 2 timesteps to the model.
         # TODO is probably to make this behaviour clearer but lets leave it like
         # this for now to not break things.
-        num_timesteps = images.shape[1] // image_channels
+        num_timesteps = image_channels // images.shape[1]
         batched_timesteps = images.shape[2] // num_timesteps
         images = rearrange(
             images,

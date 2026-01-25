@@ -12,6 +12,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import Item, ItemLookupDataSource
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.log_utils import get_logger
+from rslearn.utils.fsspec import open_atomic
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.stac import StacClient, StacItem
 
@@ -187,7 +188,7 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
 
         # Finally we cache it if cache_dir is set.
         if cache_fname is not None:
-            with cache_fname.open("w") as f:
+            with open_atomic(cache_fname, "w") as f:
                 json.dump(item.serialize(), f)
 
         return item
@@ -259,7 +260,7 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
                     cache_fname = self.cache_dir / f"{item.name}.json"
                     if cache_fname.exists():
                         continue
-                    with cache_fname.open("w") as f:
+                    with open_atomic(cache_fname, "w") as f:
                         json.dump(item.serialize(), f)
 
             cur_groups = match_candidate_items_to_window(
