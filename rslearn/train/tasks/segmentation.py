@@ -41,6 +41,8 @@ class SegmentationTask(BasicTask):
         miou_metric_kwargs: dict[str, Any] = {},
         prob_scales: list[float] | None = None,
         other_metrics: dict[str, Metric] = {},
+        output_probs: bool = False,
+        output_class_idx: int | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize a new SegmentationTask.
@@ -74,6 +76,10 @@ class SegmentationTask(BasicTask):
                 this is only applied during prediction, not when computing val or test
                 metrics.
             other_metrics: additional metrics to configure on this task.
+            output_probs: if True, output raw softmax probabilities instead of class IDs
+                during prediction.
+            output_class_idx: if set along with output_probs, only output the probability
+                for this specific class index (single-channel output).
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -98,6 +104,8 @@ class SegmentationTask(BasicTask):
         self.miou_metric_kwargs = miou_metric_kwargs
         self.prob_scales = prob_scales
         self.other_metrics = other_metrics
+        self.output_probs = output_probs
+        self.output_class_idx = output_class_idx
 
     def process_inputs(
         self,
@@ -153,7 +161,9 @@ class SegmentationTask(BasicTask):
             metadata: metadata about the patch being read
 
         Returns:
-            CHW numpy array with one channel, containing the predicted class IDs.
+            CHW numpy array. If output_probs is False, returns one channel with
+            predicted class IDs. If output_probs is True, returns softmax probabilities
+            (num_classes channels, or 1 channel if output_class_idx is set).
         """
         if not isinstance(raw_output, torch.Tensor) or len(raw_output.shape) != 3:
             raise ValueError("the output for SegmentationTask must be a CHW tensor")
@@ -165,6 +175,15 @@ class SegmentationTask(BasicTask):
                     self.prob_scales, device=raw_output.device, dtype=raw_output.dtype
                 )[:, None, None]
             )
+
+        if self.output_probs:
+            # Return raw softmax probabilities
+            probs = raw_output.cpu().numpy()
+            if self.output_class_idx is not None:
+                # Return only the specified class probability
+                return probs[self.output_class_idx : self.output_class_idx + 1, :, :]
+            return probs
+
         classes = raw_output.argmax(dim=0).cpu().numpy()
         return classes[None, :, :]
 
