@@ -30,9 +30,11 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
         - get_item_by_name(): Get an item by its name
 
     Subclasses may optionally override:
-        - get_raster_bands(): If not all items have all assets
-        - get_read_callback(): For post-processing like harmonization
-        - is_raster_ready(): If readiness depends on something other than always True
+        - get_raster_bands(): By default, we assume that items have all assets. If
+            items may have a subset of assets, override get_raster_bands to return
+            the sets of bands available for that item.
+        - get_read_callback(): Returns a callback to transform the raster array,
+            for post-processing like Sentinel-2 harmonization.
     """
 
     def __init__(self, asset_bands: dict[str, list[str]]):
@@ -40,6 +42,8 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
 
         Args:
             asset_bands: mapping from asset key to the list of band names in that asset.
+                The asset key is used by get_asset_url to look up the URL for that asset
+                in the item (e.g., item.asset_urls[asset_key]).
         """
         self.asset_bands = asset_bands
 
