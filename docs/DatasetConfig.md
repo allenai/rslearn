@@ -1328,9 +1328,13 @@ Available bands:
 
 ### rslearn.data_sources.worldcereal.WorldCereal
 
-This data source is for the ESA WorldCereal 2021 agricultural land cover map.
+This data source is for the ESA WorldCereal 2021 agricultural land cover map. For
+details about the land cover map, see https://esa-worldcereal.org/en.
 
-For details about the land cover map, see https://esa-worldcereal.org/en.
+This data source will download and extract all of the WorldCereal GeoTIFFs to a local
+directory. Since different regions are covered with different bands, the data source is
+designed to only be configured with one band per layer; to materialize multiple bands,
+repeat the data source across multiple layers (with different bands).
 
 ```jsonc
 {
@@ -1341,7 +1345,7 @@ For details about the land cover map, see https://esa-worldcereal.org/en.
 }
 ```
 
-Available bands (specify one per layer):
+Available bands (specify one per layer, with a single-band band set):
 - tc-annual_temporarycrops_confidence
 - tc-annual_temporarycrops_classification
 - tc-maize-main_irrigation_confidence
