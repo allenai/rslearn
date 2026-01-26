@@ -296,7 +296,7 @@ def test_skip_if_output_layer_exists(
     )
 
     # Second window - will NOT have the output layer
-    window2 = add_window_to_basic_classification_dataset(
+    add_window_to_basic_classification_dataset(
         basic_classification_dataset,
         images={
             ("image_layer1", 0): image,

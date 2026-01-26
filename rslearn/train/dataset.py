@@ -585,6 +585,9 @@ def check_window(
     Args:
         inputs: the inputs to the dataset.
         window: the window to check.
+        output_layer: optional name of the output layer to check for existence.
+        skip_if_output_layer_exists: if True and output_layer is set, skip windows
+            where the specified output layer is already completed.
 
     Returns:
         the window if it has all the required inputs and does not need to be skipped
