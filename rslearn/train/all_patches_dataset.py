@@ -127,7 +127,7 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
     """This wraps a ModelDataset to iterate over all patches in that dataset.
 
     This should be used when SplitConfig.load_all_patches is enabled. The ModelDataset
-    is configured with no patch size (load entire windows), and the dataset is wrapped
+    is configured with no crop size (load entire windows), and the dataset is wrapped
     in an AllPatchesDataset.
 
     Similar to DistributedSampler, we add extra samples at each rank to ensure
@@ -137,8 +137,8 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
     def __init__(
         self,
         dataset: ModelDataset,
-        patch_size: tuple[int, int],
-        overlap_ratio: float = 0.0,
+        crop_size: tuple[int, int],
+        overlap_pixels: int = 0,
         rank: int = 0,
         world_size: int = 1,
     ):
@@ -146,20 +146,18 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
 
         Args:
             dataset: the ModelDataset to wrap.
-            patch_size: the size of the patches to extract.
-            overlap_ratio: whether to include overlap between the patches. Note that
-                the right/bottom-most patches may still overlap since we ensure that
-                all patches are contained in the window bounds.
+            crop_size: the size of the crops to extract.
+            overlap_pixels: the number of pixels shared between adjacent crops. Note
+                that the right/bottom-most crops may still overlap with other crops even
+                if overlap_pixels=0 since we ensure that all crops are contained in the
+                window bounds.
             rank: the global rank of this train worker process.
             world_size: the total number of train worker processes.
         """
         super().__init__()
         self.dataset = dataset
-        self.patch_size = patch_size
-        self.overlap_size = (
-            round(self.patch_size[0] * overlap_ratio),
-            round(self.patch_size[1] * overlap_ratio),
-        )
+        self.crop_size = crop_size
+        self.overlap_size = (overlap_pixels, overlap_pixels)
         self.rank = rank
         self.world_size = world_size
         self.windows = self.dataset.get_dataset_examples()
@@ -182,8 +180,8 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
             len(
                 range(
                     bounds[0],
-                    bounds[2] - self.patch_size[0],
-                    self.patch_size[0] - self.overlap_size[0],
+                    bounds[2] - self.crop_size[0],
+                    self.crop_size[0] - self.overlap_size[0],
                 )
             )
             + 1
@@ -192,8 +190,8 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
             len(
                 range(
                     bounds[1],
-                    bounds[3] - self.patch_size[1],
-                    self.patch_size[1] - self.overlap_size[1],
+                    bounds[3] - self.crop_size[1],
+                    self.crop_size[1] - self.overlap_size[1],
                 )
             )
             + 1
@@ -274,18 +272,18 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                 )
                 bounds = metadata.patch_bounds
 
-                # For simplicity, pad tensors by patch size to ensure that any patch bounds
+                # For simplicity, pad tensors by crop size to ensure that any patch bounds
                 # extending outside the window bounds will not have issues when we slice
                 # the tensors later. Padding is scaled per-input based on resolution_factor.
                 pad_slice_protect(
-                    raw_inputs, passthrough_inputs, self.patch_size, self.inputs
+                    raw_inputs, passthrough_inputs, self.crop_size, self.inputs
                 )
 
                 # Now iterate over the patches and extract/yield the crops.
                 # Note that, in case user is leveraging RslearnWriter, it is important that
                 # the patch_idx be increasing (as we iterate) within one window.
                 patches = get_window_patch_options(
-                    self.patch_size, self.overlap_size, bounds
+                    self.crop_size, self.overlap_size, bounds
                 )
                 for patch_idx, patch_bounds in enumerate(patches):
                     cur_geom = STGeometry(
@@ -381,25 +379,22 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         dataset: ModelDataset,
-        patch_size: tuple[int, int],
-        overlap_ratio: float = 0.0,
+        crop_size: tuple[int, int],
+        overlap_pixels: int = 0,
     ):
         """Create a new InMemoryAllPatchesDataset.
 
         Args:
             dataset: the ModelDataset to wrap.
-            patch_size: the size of the patches to extract.
-            overlap_ratio: whether to include overlap between the patches. Note that
-                the right/bottom-most patches may still overlap since we ensure that
-                all patches are contained in the window bounds.
+            crop_size: the size of the crops to extract.
+            overlap_pixels: the number of pixels shared between adjacent crops. Note
+                that the right/bottom-most crops may still overlap since we ensure that
+                all crops are contained in the window bounds.
         """
         super().__init__()
         self.dataset = dataset
-        self.patch_size = patch_size
-        self.overlap_size = (
-            round(self.patch_size[0] * overlap_ratio),
-            round(self.patch_size[1] * overlap_ratio),
-        )
+        self.crop_size = crop_size
+        self.overlap_size = (overlap_pixels, overlap_pixels)
         self.windows = self.dataset.get_dataset_examples()
         self.inputs = dataset.inputs
         self.window_cache: dict[
@@ -410,7 +405,7 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
         self.patches = []
         for window_id, window in enumerate(self.windows):
             patch_bounds = get_window_patch_options(
-                self.patch_size, self.overlap_size, window.bounds
+                self.crop_size, self.overlap_size, window.bounds
             )
             for i, patch_bound in enumerate(patch_bounds):
                 self.patches.append((window_id, patch_bound, (i, len(patch_bounds))))
@@ -420,7 +415,7 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
     ) -> tuple[dict[str, Any], dict[str, Any], SampleMetadata]:
         """Get the raw inputs for a single patch. Retrieve from cache if possible.
 
-        Also crops/pads the tensors by patch size to protect slicing near right/bottom edges.
+        Also crops/pads the tensors by crop size to protect slicing near right/bottom edges.
 
         Args:
             index: the index of the patch.
@@ -432,7 +427,7 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
             return self.window_cache[index]
 
         raw_inputs, passthrough_inputs, metadata = self.dataset.get_raw_inputs(index)
-        pad_slice_protect(raw_inputs, passthrough_inputs, self.patch_size, self.inputs)
+        pad_slice_protect(raw_inputs, passthrough_inputs, self.crop_size, self.inputs)
 
         self.window_cache[index] = (raw_inputs, passthrough_inputs, metadata)
         return self.window_cache[index]

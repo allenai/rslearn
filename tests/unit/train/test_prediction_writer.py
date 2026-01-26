@@ -140,8 +140,8 @@ class TestRasterMerger:
         assert np.all(merged[0, 0:3, 3:4] == 2)
         assert np.all(merged[0, 3, 3] == 3)
 
-    def test_merge_with_padding(self, tmp_path: pathlib.Path) -> None:
-        """Verify merging works with padding."""
+    def test_merge_with_overlap(self, tmp_path: pathlib.Path) -> None:
+        """Verify merging works with overlap_pixels."""
         storage = FileWindowStorage(tmp_path)
         window = Window(
             storage=storage,
@@ -156,7 +156,8 @@ class TestRasterMerger:
         # - (0, 1, 3, 4)
         # - (1, 0, 4, 3)
         # - (1, 1, 4, 4)
-        # There are 2 shared pixels between overlapping patches so we set padding=1.
+        # There are 2 shared pixels between overlapping patches so we set overlap_pixels=2.
+        # This means we remove overlap_pixels//2 = 1 pixel from each side.
         outputs = [
             PendingPatchOutput(
                 bounds=(0, 0, 3, 3),
@@ -175,7 +176,7 @@ class TestRasterMerger:
                 output=3 * np.ones((1, 3, 3), dtype=np.int32),
             ),
         ]
-        merged = RasterMerger(padding=1).merge(
+        merged = RasterMerger(overlap_pixels=2).merge(
             window,
             outputs,
             LayerConfig(

@@ -22,11 +22,11 @@ from rslearn.utils.geometry import PixelBounds, ResolutionFactor
 def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
     # Make sure that, when loading all patches, the border of the raster is included in
     # the generated windows.
-    # The image_to_class_dataset window is 4x4 so 3x3 patch will ensure irregular window
+    # The image_to_class_dataset window is 4x4 so 3x3 crop will ensure irregular window
     # at the border.
-    patch_size = 3
+    crop_size = 3
     split_config = SplitConfig(
-        patch_size=patch_size,
+        crop_size=crop_size,
         load_all_patches=True,
     )
     image_data_input = DataInput("raster", ["image"], bands=["band"], passthrough=True)
@@ -42,7 +42,7 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
             "targets": target_data_input,
         },
     )
-    dataset = IterableAllPatchesDataset(model_dataset, (patch_size, patch_size))
+    dataset = IterableAllPatchesDataset(model_dataset, (crop_size, crop_size))
 
     point_coverage = {}
     for col in range(4):
@@ -67,9 +67,9 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
 
     assert all(point_coverage.values())
 
-    # Test with overlap_ratio=0.5 for 2x2 patches
+    # Test with overlap_pixels=1 for 2x2 crops
     dataset_with_overlap = IterableAllPatchesDataset(
-        model_dataset, (2, 2), overlap_ratio=0.5
+        model_dataset, (2, 2), overlap_pixels=1
     )
 
     point_coverage = {}
@@ -77,7 +77,7 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
         for row in range(4):
             point_coverage[(col, row)] = False
 
-    # With overlap_ratio=0.5, there should be 9 windows given that overlap is 1 pixel.
+    # With overlap_pixels=1, there should be 9 windows given that overlap is 1 pixel.
     assert len(list(dataset_with_overlap)) == 9
 
     for _, _, metadata in dataset:
@@ -127,7 +127,7 @@ class TestIterableAllPatchesDataset:
         window_names = set()
         for rank in range(world_size):
             all_patches_dataset = IterableAllPatchesDataset(
-                model_dataset, (4, 4), rank=rank, world_size=world_size
+                model_dataset, crop_size=(4, 4), rank=rank, world_size=world_size
             )
             samples = list(all_patches_dataset)
             assert len(samples) == 1
@@ -161,7 +161,7 @@ class TestIterableAllPatchesDataset:
         seen_patches: dict[tuple[str, PixelBounds], int] = {}
         for rank in range(world_size):
             all_patches_dataset = IterableAllPatchesDataset(
-                model_dataset, (4, 4), rank=rank, world_size=world_size
+                model_dataset, crop_size=(4, 4), rank=rank, world_size=world_size
             )
             samples = list(all_patches_dataset)
             assert len(samples) == 4
@@ -190,7 +190,7 @@ class TestIterableAllPatchesDataset:
         world_size = 2
         for rank in range(world_size):
             all_patches_dataset = IterableAllPatchesDataset(
-                model_dataset, (4, 4), rank=rank, world_size=world_size
+                model_dataset, crop_size=(4, 4), rank=rank, world_size=world_size
             )
             samples = list(all_patches_dataset)
             assert len(samples) == 0
@@ -200,7 +200,7 @@ class TestIterableAllPatchesDataset:
         basic_classification_dataset: Dataset,
         add_window_to_basic_classification_dataset: Callable,
     ) -> None:
-        """Verify that it works when the window is smaller than the patch size."""
+        """Verify that it works when the window is smaller than the crop size."""
         add_window_to_basic_classification_dataset(
             basic_classification_dataset, name="window", bounds=(0, 0, 2, 2)
         )
@@ -215,7 +215,7 @@ class TestIterableAllPatchesDataset:
         )
         all_patches_dataset = IterableAllPatchesDataset(
             dataset=model_dataset,
-            patch_size=(4, 4),
+            crop_size=(4, 4),
         )
         samples = list(all_patches_dataset)
         assert len(samples) == 1
@@ -255,13 +255,15 @@ class TestIterableAllPatchesDataset:
 
         model_dataset = ModelDataset(
             basic_classification_dataset,
-            split_config=SplitConfig(patch_size=4, load_all_patches=True),
+            split_config=SplitConfig(crop_size=4, load_all_patches=True),
             task=SegmentationTask(num_classes=2),
             workers=1,
             inputs={"image": image_data_input, "targets": target_data_input},
         )
 
-        dataset = IterableAllPatchesDataset(model_dataset, (4, 4), rank=0, world_size=1)
+        dataset = IterableAllPatchesDataset(
+            model_dataset, crop_size=(4, 4), rank=0, world_size=1
+        )
 
         # Verify we actually have samples to test
         sample_count = 0
@@ -301,11 +303,11 @@ class TestInMemoryAllPatchesDataset:
         )
 
         # Construct iterable and regular versions.
-        patch_size = (3, 3)
+        crop_size = (3, 3)
         iterable_ds = IterableAllPatchesDataset(
-            model_dataset, patch_size, rank=0, world_size=1
+            model_dataset, crop_size=crop_size, rank=0, world_size=1
         )
-        regular_ds = InMemoryAllPatchesDataset(model_dataset, patch_size)
+        regular_ds = InMemoryAllPatchesDataset(model_dataset, crop_size=crop_size)
 
         iterable_samples = list(iterable_ds)
         regular_samples = [regular_ds[i] for i in range(len(regular_ds))]
@@ -347,13 +349,13 @@ class TestInMemoryAllPatchesDataset:
 
         model_dataset = ModelDataset(
             basic_classification_dataset,
-            split_config=SplitConfig(patch_size=4, load_all_patches=True),
+            split_config=SplitConfig(crop_size=4, load_all_patches=True),
             task=SegmentationTask(num_classes=2),
             workers=1,
             inputs={"image": image_data_input, "targets": target_data_input},
         )
 
-        dataset = InMemoryAllPatchesDataset(model_dataset, (4, 4))
+        dataset = InMemoryAllPatchesDataset(model_dataset, crop_size=(4, 4))
         assert len(dataset) > 0, "No samples were generated - test is not valid"
 
         for i in range(len(dataset)):

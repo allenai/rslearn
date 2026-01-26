@@ -8,6 +8,7 @@ import random
 import tempfile
 import time
 import uuid
+import warnings
 from datetime import datetime
 from typing import Any
 
@@ -441,10 +442,13 @@ class SplitConfig:
         num_patches: int | None = None,
         transforms: list[torch.nn.Module] | None = None,
         sampler: SamplerFactory | None = None,
-        patch_size: int | tuple[int, int] | None = None,
-        overlap_ratio: float | None = None,
+        crop_size: int | tuple[int, int] | None = None,
+        overlap_pixels: int | None = None,
         load_all_patches: bool | None = None,
         skip_targets: bool | None = None,
+        # Deprecated parameters (for backwards compatibility)
+        patch_size: int | tuple[int, int] | None = None,
+        overlap_ratio: float | None = None,
     ) -> None:
         """Initialize a new SplitConfig.
 
@@ -459,15 +463,52 @@ class SplitConfig:
             num_patches: limit this split to this many patches
             transforms: transforms to apply
             sampler: SamplerFactory for this split
-            patch_size: an optional square size or (width, height) tuple. If set, read
+            crop_size: an optional square size or (width, height) tuple. If set, read
                 crops of this size rather than entire windows.
-            overlap_ratio: an optional float between 0 and 1. If set, read patches with
-                this ratio of overlap.
-            load_all_patches: with patch_size set, rather than sampling a random patch
-                for each window, read all patches as separate sequential items in the
+            overlap_pixels: the number of pixels shared between adjacent crops during
+                sliding window inference.
+            load_all_patches: with crop_size set, rather than sampling a random crop
+                for each window, read all crops as separate sequential items in the
                 dataset.
             skip_targets: whether to skip targets when loading inputs
+            patch_size: deprecated, use crop_size instead
+            overlap_ratio: deprecated, use overlap_pixels instead
         """
+        # Handle deprecated patch_size parameter
+        if patch_size is not None:
+            warnings.warn(
+                "patch_size is deprecated, use crop_size instead",
+                FutureWarning,
+                stacklevel=2,
+            )
+            if crop_size is not None:
+                raise ValueError("Cannot specify both patch_size and crop_size")
+            crop_size = patch_size
+
+        # Normalize crop_size to tuple[int, int] | None
+        self.crop_size: tuple[int, int] | None = None
+        if crop_size is not None:
+            if isinstance(crop_size, int):
+                self.crop_size = (crop_size, crop_size)
+            else:
+                self.crop_size = crop_size
+
+        # Handle deprecated overlap_ratio parameter
+        if overlap_ratio is not None:
+            warnings.warn(
+                "overlap_ratio is deprecated, use overlap_pixels instead",
+                FutureWarning,
+                stacklevel=2,
+            )
+            if overlap_pixels is not None:
+                raise ValueError("Cannot specify both overlap_ratio and overlap_pixels")
+            if self.crop_size is None:
+                raise ValueError("overlap_ratio requires crop_size to be set")
+            overlap_pixels = round(self.crop_size[0] * overlap_ratio)
+
+        if overlap_pixels is not None and overlap_pixels < 0:
+            raise ValueError("overlap_pixels must be non-negative")
+
         self.groups = groups
         self.names = names
         self.tags = tags
@@ -475,16 +516,12 @@ class SplitConfig:
         self.num_patches = num_patches
         self.transforms = transforms
         self.sampler = sampler
-        self.patch_size = patch_size
         self.skip_targets = skip_targets
 
         # Note that load_all_patches are handled by the RslearnDataModule rather than
         # the ModelDataset.
         self.load_all_patches = load_all_patches
-        self.overlap_ratio = overlap_ratio
-
-        if self.overlap_ratio is not None and not (0 < self.overlap_ratio < 1):
-            raise ValueError("overlap_ratio must be between 0 and 1 (exclusive)")
+        self.overlap_pixels = overlap_pixels
 
     def update(self, other: "SplitConfig") -> "SplitConfig":
         """Override settings in this SplitConfig with those in another.
@@ -500,8 +537,8 @@ class SplitConfig:
             num_patches=self.num_patches,
             transforms=self.transforms,
             sampler=self.sampler,
-            patch_size=self.patch_size,
-            overlap_ratio=self.overlap_ratio,
+            crop_size=self.crop_size,
+            overlap_pixels=self.overlap_pixels,
             load_all_patches=self.load_all_patches,
             skip_targets=self.skip_targets,
         )
@@ -519,27 +556,23 @@ class SplitConfig:
             result.transforms = other.transforms
         if other.sampler:
             result.sampler = other.sampler
-        if other.patch_size:
-            result.patch_size = other.patch_size
-        if other.overlap_ratio is not None:
-            result.overlap_ratio = other.overlap_ratio
+        if other.crop_size:
+            result.crop_size = other.crop_size
+        if other.overlap_pixels is not None:
+            result.overlap_pixels = other.overlap_pixels
         if other.load_all_patches is not None:
             result.load_all_patches = other.load_all_patches
         if other.skip_targets is not None:
             result.skip_targets = other.skip_targets
         return result
 
-    def get_patch_size(self) -> tuple[int, int] | None:
-        """Get patch size normalized to int tuple."""
-        if self.patch_size is None:
-            return None
-        if isinstance(self.patch_size, int):
-            return (self.patch_size, self.patch_size)
-        return self.patch_size
+    def get_crop_size(self) -> tuple[int, int] | None:
+        """Get crop size as tuple."""
+        return self.crop_size
 
-    def get_overlap_ratio(self) -> float:
-        """Get the overlap ratio (default 0)."""
-        return self.overlap_ratio if self.overlap_ratio is not None else 0.0
+    def get_overlap_pixels(self) -> int:
+        """Get the overlap pixels (default 0)."""
+        return self.overlap_pixels if self.overlap_pixels is not None else 0
 
     def get_load_all_patches(self) -> bool:
         """Returns whether loading all patches is enabled (default False)."""
@@ -627,13 +660,13 @@ class ModelDataset(torch.utils.data.Dataset):
         else:
             self.transforms = rslearn.train.transforms.transform.Identity()
 
-        # Get normalized patch size from the SplitConfig.
+        # Get normalized crop size from the SplitConfig.
         # But if load all patches is enabled, this is handled by AllPatchesDataset, so
         # here we instead load the entire windows.
         if split_config.get_load_all_patches():
-            self.patch_size = None
+            self.crop_size = None
         else:
-            self.patch_size = split_config.get_patch_size()
+            self.crop_size = split_config.get_crop_size()
 
         windows = self._get_initial_windows(split_config, workers)
 
@@ -804,34 +837,34 @@ class ModelDataset(torch.utils.data.Dataset):
         rng = random.Random(idx if self.fix_patch_pick else None)
 
         # Select bounds to read.
-        if self.patch_size:
+        if self.crop_size:
             window = example
 
-            def get_patch_range(n_patch: int, n_window: int) -> list[int]:
-                if n_patch > n_window:
+            def get_crop_range(n_crop: int, n_window: int) -> list[int]:
+                if n_crop > n_window:
                     # Select arbitrary range containing the entire window.
-                    # Basically arbitrarily padding the window to get to patch size.
-                    start = rng.randint(n_window - n_patch, 0)
-                    return [start, start + n_patch]
+                    # Basically arbitrarily padding the window to get to crop size.
+                    start = rng.randint(n_window - n_crop, 0)
+                    return [start, start + n_crop]
 
                 else:
-                    # Select arbitrary patch within the window.
-                    start = rng.randint(0, n_window - n_patch)
-                    return [start, start + n_patch]
+                    # Select arbitrary crop within the window.
+                    start = rng.randint(0, n_window - n_crop)
+                    return [start, start + n_crop]
 
             window_size = (
                 window.bounds[2] - window.bounds[0],
                 window.bounds[3] - window.bounds[1],
             )
-            patch_ranges = [
-                get_patch_range(self.patch_size[0], window_size[0]),
-                get_patch_range(self.patch_size[1], window_size[1]),
+            crop_ranges = [
+                get_crop_range(self.crop_size[0], window_size[0]),
+                get_crop_range(self.crop_size[1], window_size[1]),
             ]
             bounds = (
-                window.bounds[0] + patch_ranges[0][0],
-                window.bounds[1] + patch_ranges[1][0],
-                window.bounds[0] + patch_ranges[0][1],
-                window.bounds[1] + patch_ranges[1][1],
+                window.bounds[0] + crop_ranges[0][0],
+                window.bounds[1] + crop_ranges[1][0],
+                window.bounds[0] + crop_ranges[0][1],
+                window.bounds[1] + crop_ranges[1][1],
             )
 
         else:

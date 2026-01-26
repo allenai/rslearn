@@ -1,6 +1,7 @@
 """rslearn PredictionWriter implementation."""
 
 import json
+import warnings
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -84,17 +85,38 @@ class VectorMerger(PatchPredictionMerger):
 class RasterMerger(PatchPredictionMerger):
     """Merger for raster data that copies the rasters to the output."""
 
-    def __init__(self, padding: int | None = None, downsample_factor: int = 1):
+    def __init__(
+        self,
+        overlap_pixels: int | None = None,
+        downsample_factor: int = 1,
+        # Deprecated parameter (for backwards compatibility)
+        padding: int | None = None,
+    ):
         """Create a new RasterMerger.
 
         Args:
-            padding: the padding around the individual patch outputs to remove. This is
-                typically used when leveraging overlapping patches. Portions of outputs
-                at the border of the window will still be retained.
+            overlap_pixels: the number of pixels shared between adjacent crops during
+                sliding window inference. Half of this overlap is removed from each
+                crop during merging (except at window boundaries where the full crop
+                is retained).
             downsample_factor: the factor by which the rasters output by the task are
                 lower in resolution relative to the window resolution.
+            padding: deprecated, use overlap_pixels instead. The old padding value
+                equals overlap_pixels // 2.
         """
-        self.padding = padding
+        # Handle deprecated padding parameter
+        if padding is not None:
+            warnings.warn(
+                "padding is deprecated, use overlap_pixels instead. "
+                "Note: overlap_pixels = padding * 2",
+                FutureWarning,
+                stacklevel=2,
+            )
+            if overlap_pixels is not None:
+                raise ValueError("Cannot specify both padding and overlap_pixels")
+            overlap_pixels = padding * 2
+
+        self.overlap_pixels = overlap_pixels
         self.downsample_factor = downsample_factor
 
     def merge(
@@ -114,6 +136,12 @@ class RasterMerger(PatchPredictionMerger):
             dtype=layer_config.band_sets[0].dtype.get_numpy_dtype(),
         )
 
+        # Compute how many pixels to trim from each side.
+        # We remove half of the overlap from each side (not at window boundaries).
+        trim_pixels = (
+            self.overlap_pixels // 2 if self.overlap_pixels is not None else None
+        )
+
         # Ensure the outputs are sorted by height then width.
         # This way when we merge we can be sure that outputs that are lower or further
         # to the right will overwrite earlier outputs.
@@ -123,18 +151,18 @@ class RasterMerger(PatchPredictionMerger):
         for output in sorted_outputs:
             # So now we just need to compute the src_offset to copy.
             # If the output is not on the left or top boundary, then we should apply
-            # the padding (if set).
+            # the trim (if set).
             src = output.output
             src_offset = (
                 output.bounds[0] // self.downsample_factor,
                 output.bounds[1] // self.downsample_factor,
             )
-            if self.padding is not None and output.bounds[0] != window.bounds[0]:
-                src = src[:, :, self.padding :]
-                src_offset = (src_offset[0] + self.padding, src_offset[1])
-            if self.padding is not None and output.bounds[1] != window.bounds[1]:
-                src = src[:, self.padding :, :]
-                src_offset = (src_offset[0], src_offset[1] + self.padding)
+            if trim_pixels is not None and output.bounds[0] != window.bounds[0]:
+                src = src[:, :, trim_pixels:]
+                src_offset = (src_offset[0] + trim_pixels, src_offset[1])
+            if trim_pixels is not None and output.bounds[1] != window.bounds[1]:
+                src = src[:, trim_pixels:, :]
+                src_offset = (src_offset[0], src_offset[1] + trim_pixels)
 
             copy_spatial_array(
                 src=src,

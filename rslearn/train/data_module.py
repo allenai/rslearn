@@ -148,17 +148,17 @@ class RslearnDataModule(L.LightningDataModule):
                 logger.info(
                     f"using AllPatchesDataset (in_memory={use_in_memory_all_patches_dataset})"
                 )
-                patch_size = split_config.get_patch_size()
-                if patch_size is None:
+                crop_size = split_config.get_crop_size()
+                if crop_size is None:
                     raise ValueError(
-                        "patch_size is not set but must be set if load_all_patches is set"
+                        "crop_size is not set but must be set if load_all_patches is set"
                     )
 
                 all_patches_cls = IterableAllPatchesDataset
                 kwargs = dict(
                     dataset=dataset,
-                    patch_size=patch_size,
-                    overlap_ratio=split_config.get_overlap_ratio(),
+                    crop_size=crop_size,
+                    overlap_pixels=split_config.get_overlap_pixels(),
                     rank=self.trainer.global_rank if self.trainer else 0,
                     world_size=self.trainer.world_size if self.trainer else 1,
                 )

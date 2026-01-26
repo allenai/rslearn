@@ -214,8 +214,8 @@ data:
       # We apply sliding window inference (using 64x64 input crops) with overlap.
       load_all_patches: true
       # This is the crop size for inference.
-      patch_size: 64
-      overlap_ratio: 0.5
+      crop_size: 64
+      overlap_pixels: 32
 trainer:
   callbacks:
    # The RslearnWriter will write our embeddings to a layer in the rslearn dataset.
@@ -229,10 +229,11 @@ trainer:
         merger:
           class_path: rslearn.train.prediction_writer.RasterMerger
           init_args:
-            # This removes the border from the overlap_ratio. With patch size 4 and
-            # input crop size 64, the model produces a 16x16 output, so we keep the
-            # middle 8x8 of that by removing 4 pixels of padding from each side.
-            padding: 4
+            # This removes the border from the overlap_pixels. With model patch size 4
+            # and input crop size 64, the model produces a 16x16 output. We have
+            # overlap_pixels=32 at input resolution, which is 8 pixels at output
+            # resolution, so we remove 4 pixels from each side.
+            overlap_pixels: 8
             # Set this equal to patch size, so the merger expects the output from the
             # task to be at 1/(downsample_factor) resolution relative to the window
             # resolution.
