@@ -471,7 +471,9 @@ class SegmentationMetric(Metric):
                 if "avg" in result:
                     filtered["avg"] = result["avg"]
                 return filtered
-            return result[self.class_idx]
+            # Result is not a dict (e.g., scalar from metric with average='macro')
+            # Just return it as-is since there's no per-class breakdown to filter
+            return result
         return result
 
     def reset(self) -> None:
