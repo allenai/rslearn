@@ -259,7 +259,9 @@ class SegmentationTask(BasicTask):
             accuracy_metric_kwargs = dict(num_classes=self.num_classes)
             accuracy_metric_kwargs.update(self.metric_kwargs)
             metrics["accuracy"] = SegmentationMetric(
-                torchmetrics.classification.MulticlassAccuracy(**accuracy_metric_kwargs),
+                torchmetrics.classification.MulticlassAccuracy(
+                    **accuracy_metric_kwargs
+                ),
                 class_idx=self.metric_class_idx,
             )
 
@@ -458,10 +460,17 @@ class SegmentationMetric(Metric):
 
         # Convert multi-element tensors to dict for uniform handling.
         # This supports standard torchmetrics with average=None which return per-class tensors.
-        # We also compute the avg so it's available for class_idx filtering.
+        # We also compute the avg so it's available even with class_idx filtering.
         if isinstance(result, torch.Tensor) and result.ndim >= 1:
             result = {f"cls_{i}": result[i] for i in range(len(result))}
             result["avg"] = torch.mean(torch.stack(list(result.values())))
+
+        # Result is a scalar (ndim == 0, e.g., torch metric with average='macro')
+        # Just return it as-is since there's no per-class breakdown to filter
+        if (
+            isinstance(result, torch.Tensor) and result.ndim == 0
+        ):  # scalar from metric with average='macro'
+            return result
 
         if self.class_idx is not None:
             # Return both avg and the specific class
@@ -471,9 +480,6 @@ class SegmentationMetric(Metric):
                 if "avg" in result:
                     filtered["avg"] = result["avg"]
                 return filtered
-            # Result is not a dict (e.g., scalar from metric with average='macro')
-            # Just return it as-is since there's no per-class breakdown to filter
-            return result
         return result
 
     def reset(self) -> None:
