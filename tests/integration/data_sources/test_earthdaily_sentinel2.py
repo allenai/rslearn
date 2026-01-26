@@ -151,3 +151,50 @@ def test_sentinel2_get_items_passes_query_to_helper() -> None:
         "s2:product_type": {"eq": "S2MSI2A"},
         "eo:cloud_cover": {"lt": 15.0},
     }
+
+
+def test_sentinel2_ingest_raises_on_download_failure(
+    tmp_path,
+    httpserver: HTTPServer,
+) -> None:
+    pytest.importorskip("earthdaily")
+
+    import requests
+
+    from rslearn.const import WGS84_PROJECTION
+    from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2
+    from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
+    from rslearn.utils.geometry import STGeometry
+
+    httpserver.expect_request("/red.tif", method="GET").respond_with_data(
+        b"nope", status=500
+    )
+
+    item_geom = STGeometry(
+        WGS84_PROJECTION,
+        shapely.box(-1, -1, 1, 1),
+        (datetime(2020, 1, 1), datetime(2020, 1, 1)),
+    )
+    item = EarthDailyItem(
+        name="S2_TEST_ITEM",
+        geometry=item_geom,
+        asset_urls={"red": httpserver.url_for("/red.tif")},
+    )
+
+    data_source = Sentinel2(
+        assets=["red"],
+        apply_cloud_mask=True,
+        mask_nodata_value=0,
+    )
+
+    ds_path = UPath(tmp_path / "ds")
+    tile_store = DefaultTileStore(convert_rasters_to_cogs=False)
+    tile_store.set_dataset_path(ds_path)
+    layer_tile_store = TileStoreWithLayer(tile_store, "sentinel2")
+
+    with pytest.raises(requests.exceptions.HTTPError):
+        data_source.ingest(
+            tile_store=layer_tile_store,
+            items=[item],
+            geometries=[[item_geom]],
+        )

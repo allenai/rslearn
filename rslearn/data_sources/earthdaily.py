@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 from datetime import timedelta
+from contextlib import ExitStack
 from typing import Any, Literal
 
 import affine
@@ -785,34 +786,14 @@ class Sentinel2(EarthDaily):
             return super().ingest(tile_store=tile_store, items=items, geometries=geometries)
 
         for item in items:
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                scl_local_fname: str | None = None
+            with tempfile.TemporaryDirectory() as tmp_dir, ExitStack() as stack:
+                scl_src: rasterio.DatasetReader | None = None
                 scl_url = item.asset_urls.get(self.mask_band)
                 if scl_url is not None:
-                    try:
-                        scl_local_fname = self._download_asset_to_tmp(
-                            scl_url, tmp_dir, self.mask_band, item.name
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "EarthDaily Sentinel-2 failed to download mask asset %s for %s: %s",
-                            self.mask_band,
-                            item.name,
-                            e,
-                        )
-
-                scl_src: rasterio.DatasetReader | None = None
-                if scl_local_fname is not None:
-                    try:
-                        scl_src = rasterio.open(scl_local_fname)
-                    except Exception as e:
-                        logger.warning(
-                            "EarthDaily Sentinel-2 failed to open mask asset %s for %s: %s",
-                            self.mask_band,
-                            item.name,
-                            e,
-                        )
-                        scl_src = None
+                    scl_local_fname = self._download_asset_to_tmp(
+                        scl_url, tmp_dir, self.mask_band, item.name
+                    )
+                    scl_src = stack.enter_context(rasterio.open(scl_local_fname))
 
                 for asset_key, band_names in self.asset_bands.items():
                     asset_url = item.asset_urls.get(asset_key)
@@ -820,45 +801,27 @@ class Sentinel2(EarthDaily):
                         continue
                     if tile_store.is_raster_ready(item.name, band_names):
                         continue
-
-                    try:
-                        local_fname = self._download_asset_to_tmp(
-                            asset_url, tmp_dir, asset_key, item.name
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "EarthDaily Sentinel-2 failed to download %s for %s: %s",
-                            asset_key,
-                            item.name,
-                            e,
-                        )
-                        continue
-
-                    if asset_key == self.mask_band:
-                        # If mask band itself is requested, store it unmodified.
-                        tile_store.write_raster_file(item.name, band_names, UPath(local_fname))
-                        continue
                     if asset_key == "thumbnail":
                         # Thumbnails are generally not GeoTIFF rasters; skip ingestion.
                         continue
 
-                    if scl_src is None:
-                        tile_store.write_raster_file(item.name, band_names, UPath(local_fname))
+                    local_fname = self._download_asset_to_tmp(
+                        asset_url, tmp_dir, asset_key, item.name
+                    )
+
+                    if asset_key == self.mask_band:
+                        # If mask band itself is requested, store it unmodified.
+                        tile_store.write_raster_file(
+                            item.name, band_names, UPath(local_fname)
+                        )
                         continue
 
-                    try:
-                        with rasterio.open(local_fname) as src:
-                            array, projection, bounds = self._apply_scl_cloud_mask(src, scl_src)
-                        tile_store.write_raster(item.name, band_names, projection, bounds, array)
-                    except Exception as e:
-                        logger.warning(
-                            "EarthDaily Sentinel-2 failed to mask/write %s for %s: %s",
-                            asset_key,
-                            item.name,
-                            e,
+                    if scl_src is None:
+                        tile_store.write_raster_file(
+                            item.name, band_names, UPath(local_fname)
                         )
-                        # Fallback: write without masking.
-                        tile_store.write_raster_file(item.name, band_names, UPath(local_fname))
+                        continue
 
-                if scl_src is not None:
-                    scl_src.close()
+                    with rasterio.open(local_fname) as src:
+                        array, projection, bounds = self._apply_scl_cloud_mask(src, scl_src)
+                    tile_store.write_raster(item.name, band_names, projection, bounds, array)
