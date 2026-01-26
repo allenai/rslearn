@@ -26,6 +26,7 @@ from rslearn.dataset.handler_summaries import (
     LayerIngestSummary,
     MaterializeDatasetWindowsSummary,
     PrepareDatasetWindowsSummary,
+    ProcessingError,
     UnknownIngestCounts,
 )
 from rslearn.dataset.manage import (
@@ -42,6 +43,92 @@ from rslearn.utils import Projection, STGeometry
 logger = get_logger(__name__)
 
 handler_registry = {}
+
+
+class ProcessingSummaryCollector:
+    """Collects processing summaries from multiple batches and prints a final report."""
+
+    def __init__(self) -> None:
+        """Initialize the collector."""
+        self.errors: list[ProcessingError] = []
+        self.total_processed: int = 0
+        self.total_skipped: int = 0
+        self.total_rejected: int = 0
+        self.total_errored: int = 0
+
+    def add_prepare_summary(self, summary: PrepareDatasetWindowsSummary) -> None:
+        """Add a prepare summary to the collector."""
+        for layer_summary in summary.layer_summaries:
+            self.total_processed += layer_summary.windows_prepared
+            self.total_skipped += layer_summary.windows_skipped
+            self.total_rejected += layer_summary.windows_rejected
+            self.errors.extend(layer_summary.errors)
+            self.total_errored += len(layer_summary.errors)
+        self.errors.extend(summary.errors)
+
+    def add_ingest_summary(
+        self, summary: IngestDatasetJobsSummary | ErrorOutcome
+    ) -> None:
+        """Add an ingest summary to the collector."""
+        if isinstance(summary, ErrorOutcome):
+            self.errors.extend(summary.errors)
+            self.total_errored += len(summary.errors)
+            return
+
+        for layer_summary in summary.layer_summaries:
+            if isinstance(layer_summary.ingest_counts, IngestCounts):
+                self.total_processed += layer_summary.ingest_counts.items_ingested
+            else:
+                self.total_errored += 1
+            self.errors.extend(layer_summary.errors)
+            self.total_errored += len(layer_summary.errors)
+        self.errors.extend(summary.errors)
+
+    def add_materialize_summary(
+        self, summary: MaterializeDatasetWindowsSummary | ErrorOutcome
+    ) -> None:
+        """Add a materialize summary to the collector."""
+        if isinstance(summary, ErrorOutcome):
+            self.errors.extend(summary.errors)
+            self.total_errored += len(summary.errors)
+            return
+
+        for layer_summary in summary.layer_summaries:
+            self.total_processed += layer_summary.num_windows_materialized
+            self.total_skipped += (
+                layer_summary.total_windows_requested
+                - layer_summary.num_windows_materialized
+                - layer_summary.num_windows_errored
+            )
+            self.total_errored += layer_summary.num_windows_errored
+            self.errors.extend(layer_summary.errors)
+        self.errors.extend(summary.errors)
+
+    def print_summary(self, operation_name: str) -> None:
+        """Print the processing summary."""
+        print("\n" + "=" * 60)
+        print(f"PROCESSING SUMMARY: {operation_name}")
+        print("=" * 60)
+        print(f"  Processed: {self.total_processed}")
+        print(f"  Skipped:   {self.total_skipped}")
+        print(f"  Rejected:  {self.total_rejected}")
+        print(f"  Errored:   {self.total_errored}")
+
+        if self.errors:
+            print("\n" + "-" * 60)
+            print("ERRORS:")
+            print("-" * 60)
+            for error in self.errors:
+                layer_info = f" (layer: {error.layer_name})" if error.layer_name else ""
+                print(f"\n  [{error.error_type}]{layer_info}")
+                print(f"  Identifier: {error.identifier}")
+                print(f"  Message: {error.error_message}")
+
+        print("=" * 60 + "\n")
+
+    def has_errors(self) -> bool:
+        """Return True if any errors were recorded."""
+        return len(self.errors) > 0
 
 ItemType = TypeVar("ItemType", bound="Item")
 
@@ -305,7 +392,7 @@ def apply_on_windows(
     batch_size: int = 1,
     jobs_per_process: int | None = None,
     use_initial_job: bool = True,
-) -> None:
+) -> list[Any]:
     """A helper to apply a function on windows in a dataset.
 
     Args:
@@ -327,6 +414,9 @@ def apply_on_windows(
             batch in the main thread before spawning workers. This can handle things
             like building indexes that should not be done in parallel. Set this false
             to disable using the initial job.
+
+    Returns:
+        A list of results from each batch processed.
     """
     if hasattr(f, "set_dataset"):
         f.set_dataset(dataset)
@@ -357,9 +447,12 @@ def apply_on_windows(
 
     random.shuffle(jobs)
 
+    results: list[Any] = []
+
     if use_initial_job and len(jobs) > 0:
         # Apply directly on first window to get any initialization out of the way.
-        f([jobs[0]])
+        result = f([jobs[0]])
+        results.append(result)
         jobs = jobs[1:]
 
     batches = []
@@ -370,20 +463,23 @@ def apply_on_windows(
     if workers == 0:
         # Process batches sequentially but with same error handling as parallel
         for batch in tqdm.tqdm(batches, total=num_batches):
-            f(batch)
+            result = f(batch)
+            results.append(result)
     else:
         # Process batches in parallel
         p = multiprocessing.Pool(processes=workers, maxtasksperchild=jobs_per_process)
         outputs = p.imap_unordered(f, batches)
-        for _ in tqdm.tqdm(outputs, total=num_batches):
-            pass
+        for result in tqdm.tqdm(outputs, total=num_batches):
+            results.append(result)
         p.close()
 
+    return results
 
-def apply_on_windows_args(f: Callable[..., Any], args: argparse.Namespace) -> None:
+
+def apply_on_windows_args(f: Callable[..., Any], args: argparse.Namespace) -> list[Any]:
     """Call apply_on_windows with arguments passed via command-line interface."""
     dataset = Dataset(UPath(args.root), disabled_layers=args.disabled_layers)
-    apply_on_windows(
+    return apply_on_windows(
         f=f,
         dataset=dataset,
         group=args.group,
@@ -404,6 +500,7 @@ class PrepareHandler:
         force: bool,
         retry_max_attempts: int = 0,
         retry_backoff: timedelta = timedelta(minutes=1),
+        stop_on_error: bool = False,
     ) -> None:
         """Initialize a new PrepareHandler.
 
@@ -412,11 +509,14 @@ class PrepareHandler:
             retry_max_attempts: set greater than zero to retry for this many attempts in
                 case of error.
             retry_backoff: how long to wait before retrying (see retry).
+            stop_on_error: if True, raise exceptions immediately on error. If False
+                (default), continue processing and collect errors for summary.
         """
         self.force = force
         self.dataset: Dataset | None = None
         self.retry_max_attempts = retry_max_attempts
         self.retry_backoff = retry_backoff
+        self.stop_on_error = stop_on_error
 
     def set_dataset(self, dataset: Dataset) -> None:
         """Captures the dataset from apply_on_windows_args.
@@ -437,6 +537,7 @@ class PrepareHandler:
             self.force,
             retry_max_attempts=self.retry_max_attempts,
             retry_backoff=self.retry_backoff,
+            stop_on_error=self.stop_on_error,
         )
 
 
@@ -461,6 +562,13 @@ def dataset_prepare() -> None:
         help="List of layers to disable e.g 'layer1,layer2'",
     )
     parser.add_argument(
+        "--stop-on-error",
+        type=bool,
+        default=False,
+        help="Stop immediately on error (default: continue and show summary)",
+        action=argparse.BooleanOptionalAction,
+    )
+    parser.add_argument(
         "--retry-max-attempts",
         type=int,
         default=0,
@@ -479,8 +587,15 @@ def dataset_prepare() -> None:
         args.force,
         retry_max_attempts=args.retry_max_attempts,
         retry_backoff=timedelta(seconds=args.retry_backoff_seconds),
+        stop_on_error=args.stop_on_error,
     )
-    apply_on_windows_args(fn, args)
+    results = apply_on_windows_args(fn, args)
+
+    # Collect and print summary
+    collector = ProcessingSummaryCollector()
+    for result in results:
+        collector.add_prepare_summary(result)
+    collector.print_summary("prepare")
 
 
 def _load_window_layer_datas(
@@ -495,13 +610,20 @@ class IngestHandler:
 
     def __init__(
         self,
-        ignore_errors: bool = False,
+        stop_on_error: bool = False,
         retry_max_attempts: int = 0,
         retry_backoff: timedelta = timedelta(minutes=1),
     ) -> None:
-        """Initialize a new IngestHandler."""
+        """Initialize a new IngestHandler.
+
+        Args:
+            stop_on_error: if True, raise exceptions immediately on error. If False
+                (default), continue processing and collect errors for summary.
+            retry_max_attempts: number of retry attempts before giving up.
+            retry_backoff: time to wait between retries.
+        """
         self.dataset: Dataset | None = None
-        self.ignore_errors = ignore_errors
+        self.stop_on_error = stop_on_error
         self.retry_max_attempts = retry_max_attempts
         self.retry_backoff = retry_backoff
 
@@ -528,6 +650,7 @@ class IngestHandler:
         """
         start_time = time.monotonic()
         layer_summaries: list[LayerIngestSummary] = []
+        all_errors: list[ProcessingError] = []
 
         logger.info(f"Running ingest for {len(jobs)} jobs")
         import gc
@@ -546,14 +669,15 @@ class IngestHandler:
             configs_by_layer[layer_name] = layer_cfg
 
         for layer_name, items_and_geometries in jobs_by_layer.items():
+            layer_cfg = self.dataset.layers[layer_name]
             layer_tile_store = get_tile_store_with_layer(
                 tile_store, layer_name, layer_cfg
             )
-            layer_cfg = self.dataset.layers[layer_name]
             data_source = layer_cfg.instantiate_data_source(self.dataset.path)
 
             attempts_counter = AttemptsCounter()
             ingest_counts: IngestCounts | UnknownIngestCounts
+            layer_errors: list[ProcessingError] = []
             try:
                 retry(
                     lambda: data_source.ingest(
@@ -574,7 +698,7 @@ class IngestHandler:
                     ),
                 )
             except Exception as e:
-                if not self.ignore_errors:
+                if self.stop_on_error:
                     raise
 
                 ingest_counts = UnknownIngestCounts(
@@ -583,9 +707,19 @@ class IngestHandler:
                         len(geometries) for _, geometries in items_and_geometries
                     ),
                 )
-                logger.error(
-                    "warning: got error while ingesting "
-                    + f"{len(items_and_geometries)} items: {e}"
+                item_names = [item.name for item, _ in items_and_geometries]
+                error = ProcessingError(
+                    identifier=f"items: {', '.join(item_names[:5])}"
+                    + (f" (+{len(item_names)-5} more)" if len(item_names) > 5 else ""),
+                    layer_name=layer_name,
+                    error_message=str(e),
+                    error_type=type(e).__name__,
+                )
+                layer_errors.append(error)
+                all_errors.append(error)
+                logger.warning(
+                    f"Error while ingesting {len(items_and_geometries)} items "
+                    f"in layer {layer_name}: {e}"
                 )
 
             layer_summaries.append(
@@ -595,6 +729,7 @@ class IngestHandler:
                     duration_seconds=time.monotonic() - start_time,
                     ingest_counts=ingest_counts,
                     ingest_attempts=attempts_counter.value,
+                    errors=layer_errors,
                 )
             )
 
@@ -604,6 +739,7 @@ class IngestHandler:
             duration_seconds=time.monotonic() - start_time,
             num_jobs=len(jobs),
             layer_summaries=layer_summaries,
+            errors=all_errors,
         )
 
     def _load_layer_data_for_windows(
@@ -684,10 +820,10 @@ def dataset_ingest() -> None:
         help="List of layers to disable e.g 'layer1,layer2'",
     )
     parser.add_argument(
-        "--ignore-errors",
+        "--stop-on-error",
         type=bool,
         default=False,
-        help="Ignore ingestion errors in individual jobs",
+        help="Stop immediately on error (default: continue and show summary)",
         action=argparse.BooleanOptionalAction,
     )
     parser.add_argument(
@@ -706,11 +842,17 @@ def dataset_ingest() -> None:
     args = parser.parse_args(args=sys.argv[3:])
 
     fn = IngestHandler(
-        ignore_errors=args.ignore_errors,
+        stop_on_error=args.stop_on_error,
         retry_max_attempts=args.retry_max_attempts,
         retry_backoff=timedelta(seconds=args.retry_backoff_seconds),
     )
-    apply_on_windows_args(fn, args)
+    results = apply_on_windows_args(fn, args)
+
+    # Collect and print summary
+    collector = ProcessingSummaryCollector()
+    for result in results:
+        collector.add_ingest_summary(result)
+    collector.print_summary("ingest")
 
 
 class MaterializeHandler:
@@ -718,13 +860,20 @@ class MaterializeHandler:
 
     def __init__(
         self,
-        ignore_errors: bool = False,
+        stop_on_error: bool = False,
         retry_max_attempts: int = 0,
         retry_backoff: timedelta = timedelta(minutes=1),
     ) -> None:
-        """Initialize a MaterializeHandler."""
+        """Initialize a MaterializeHandler.
+
+        Args:
+            stop_on_error: if True, raise exceptions immediately on error. If False
+                (default), continue processing and collect errors for summary.
+            retry_max_attempts: number of retry attempts before giving up.
+            retry_backoff: time to wait between retries.
+        """
         self.dataset: Dataset | None = None
-        self.ignore_errors = ignore_errors
+        self.stop_on_error = stop_on_error
         self.retry_max_attempts = retry_max_attempts
         self.retry_backoff = retry_backoff
 
@@ -750,13 +899,27 @@ class MaterializeHandler:
                 windows,
                 retry_max_attempts=self.retry_max_attempts,
                 retry_backoff=self.retry_backoff,
+                stop_on_error=self.stop_on_error,
             )
         except Exception as e:
-            if not self.ignore_errors:
+            if self.stop_on_error:
                 logger.error(f"Error materializing windows: {e}")
                 raise
-            logger.warning(f"Ignoring error while materializing windows: {e}")
-            return ErrorOutcome(duration_seconds=time.monotonic() - start_time)
+            # This shouldn't normally happen since materialize_dataset_windows
+            # handles errors internally, but just in case
+            window_names = [w.name for w in windows]
+            error = ProcessingError(
+                identifier=f"windows: {', '.join(window_names[:5])}"
+                + (f" (+{len(window_names)-5} more)" if len(window_names) > 5 else ""),
+                layer_name=None,
+                error_message=str(e),
+                error_type=type(e).__name__,
+            )
+            logger.warning(f"Error while materializing windows: {e}")
+            return ErrorOutcome(
+                duration_seconds=time.monotonic() - start_time,
+                errors=[error],
+            )
 
 
 @register_handler("dataset", "materialize")
@@ -776,10 +939,10 @@ def dataset_materialize() -> None:
         help="List of layers to disable e.g 'layer1,layer2'",
     )
     parser.add_argument(
-        "--ignore-errors",
+        "--stop-on-error",
         type=bool,
         default=False,
-        help="Ignore errors in individual jobs",
+        help="Stop immediately on error (default: continue and show summary)",
         action=argparse.BooleanOptionalAction,
     )
     parser.add_argument(
@@ -797,11 +960,17 @@ def dataset_materialize() -> None:
     add_apply_on_windows_args(parser)
     args = parser.parse_args(args=sys.argv[3:])
     fn = MaterializeHandler(
-        ignore_errors=args.ignore_errors,
+        stop_on_error=args.stop_on_error,
         retry_max_attempts=args.retry_max_attempts,
         retry_backoff=timedelta(seconds=args.retry_backoff_seconds),
     )
-    apply_on_windows_args(fn, args)
+    results = apply_on_windows_args(fn, args)
+
+    # Collect and print summary
+    collector = ProcessingSummaryCollector()
+    for result in results:
+        collector.add_materialize_summary(result)
+    collector.print_summary("materialize")
 
 
 @register_handler("model", "fit")

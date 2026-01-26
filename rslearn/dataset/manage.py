@@ -17,6 +17,7 @@ from rslearn.dataset.handler_summaries import (
     MaterializeWindowLayersSummary,
     MaterializeWindowLayerSummary,
     PrepareDatasetWindowsSummary,
+    ProcessingError,
 )
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, get_tile_store_with_layer
@@ -83,6 +84,7 @@ def prepare_dataset_windows(
     force: bool = False,
     retry_max_attempts: int = 0,
     retry_backoff: timedelta = timedelta(minutes=1),
+    stop_on_error: bool = False,
 ) -> PrepareDatasetWindowsSummary:
     """Prepare windows in a dataset.
 
@@ -97,12 +99,15 @@ def prepare_dataset_windows(
         retry_max_attempts: set greater than zero to retry for this many attempts in
             case of error.
         retry_backoff: how long to wait before retrying (see retry).
+        stop_on_error: if True, raise exceptions immediately. If False (default),
+            continue processing and collect errors for summary.
 
     Returns:
         a summary of the prepare operation, fit for telemetry purposes
     """
     start_time = time.monotonic()
     layer_summaries: list[LayerPrepareSummary] = []
+    all_errors: list[ProcessingError] = []
 
     # Iterate over retrieved layers, and prepare each one.
     for layer_name, layer_cfg in dataset.layers.items():
@@ -184,29 +189,51 @@ def prepare_dataset_windows(
             geometries.append(geometry)
 
         attempts_counter = AttemptsCounter()
-        results = retry(
-            fn=lambda: data_source.get_items(geometries, data_source_cfg.query_config),
-            retry_max_attempts=retry_max_attempts,
-            retry_backoff=retry_backoff,
-            attempts_counter=attempts_counter,
-        )
-
-        windows_prepared = 0
-        for window, result in zip(needed_windows, results):
-            layer_datas = window.load_layer_datas()
-            layer_datas[layer_name] = WindowLayerData(
-                layer_name=layer_name,
-                serialized_item_groups=[
-                    [item.serialize() for item in group] for group in result
-                ],
+        layer_errors: list[ProcessingError] = []
+        try:
+            results = retry(
+                fn=lambda: data_source.get_items(
+                    geometries, data_source_cfg.query_config
+                ),
+                retry_max_attempts=retry_max_attempts,
+                retry_backoff=retry_backoff,
+                attempts_counter=attempts_counter,
             )
-            window.save_layer_datas(layer_datas)
 
-            # If result is empty and min_matches > 0, window was rejected due to min_matches
-            if len(result) == 0 and min_matches > 0:
-                windows_rejected += 1
-            else:
-                windows_prepared += 1
+            windows_prepared = 0
+            for window, result in zip(needed_windows, results):
+                layer_datas = window.load_layer_datas()
+                layer_datas[layer_name] = WindowLayerData(
+                    layer_name=layer_name,
+                    serialized_item_groups=[
+                        [item.serialize() for item in group] for group in result
+                    ],
+                )
+                window.save_layer_datas(layer_datas)
+
+                # If result is empty and min_matches > 0, window was rejected due to min_matches
+                if len(result) == 0 and min_matches > 0:
+                    windows_rejected += 1
+                else:
+                    windows_prepared += 1
+        except Exception as e:
+            if stop_on_error:
+                raise
+            window_names = [w.name for w in needed_windows]
+            error = ProcessingError(
+                identifier=f"windows: {', '.join(window_names[:5])}"
+                + (f" (+{len(window_names)-5} more)" if len(window_names) > 5 else ""),
+                layer_name=layer_name,
+                error_message=str(e),
+                error_type=type(e).__name__,
+            )
+            layer_errors.append(error)
+            all_errors.append(error)
+            windows_prepared = 0
+            logger.warning(
+                f"Error preparing {len(needed_windows)} windows "
+                f"for layer {layer_name}: {e}"
+            )
 
         layer_summaries.append(
             LayerPrepareSummary(
@@ -217,6 +244,7 @@ def prepare_dataset_windows(
                 windows_skipped=windows_skipped,
                 windows_rejected=windows_rejected,
                 get_items_attempts=attempts_counter.value,
+                errors=layer_errors,
             )
         )
 
@@ -224,6 +252,7 @@ def prepare_dataset_windows(
         duration_seconds=time.monotonic() - start_time,
         total_windows_requested=len(windows),
         layer_summaries=layer_summaries,
+        errors=all_errors,
     )
 
     return summary
@@ -345,6 +374,7 @@ def materialize_window(
     layer_cfg: LayerConfig,
     retry_max_attempts: int = 0,
     retry_backoff: timedelta = timedelta(minutes=1),
+    stop_on_error: bool = False,
 ) -> MaterializeWindowLayerSummary:
     """Materialize a window.
 
@@ -358,6 +388,8 @@ def materialize_window(
         retry_max_attempts: set greater than zero to retry for this many attempts in
             case of error.
         retry_backoff: how long to wait before retrying (see retry).
+        stop_on_error: if True, raise exceptions immediately. If False (default),
+            continue processing and return error in summary.
 
     Returns:
         a summary of the materialize operation, fit for telemetry purposes
@@ -394,61 +426,79 @@ def materialize_window(
         raise ValueError("data_source is required")
 
     attempts_counter = AttemptsCounter()
-    if layer_cfg.data_source.ingest:
-        if not is_window_ingested(dataset, window, check_layer_name=layer_name):
+    try:
+        if layer_cfg.data_source.ingest:
+            if not is_window_ingested(dataset, window, check_layer_name=layer_name):
+                logger.info(
+                    "Not materializing layer %s in window %s because it is not ingested",
+                    layer_name,
+                    window.name,
+                )
+                return MaterializeWindowLayerSummary(
+                    skipped=True,
+                    materialize_attempts=0,
+                )
+
             logger.info(
-                "Not materializing layer %s in window %s because it is not ingested",
-                layer_name,
-                window.name,
-            )
-            return MaterializeWindowLayerSummary(
-                skipped=True,
-                materialize_attempts=0,
+                f"Materializing {len(item_groups)} item groups in layer {layer_name} from tile store"
             )
 
-        logger.info(
-            f"Materializing {len(item_groups)} item groups in layer {layer_name} from tile store"
-        )
+            materializer: Materializer
+            if layer_cfg.type == LayerType.RASTER:
+                materializer = RasterMaterializer()
+            elif layer_cfg.type == LayerType.VECTOR:
+                materializer = VectorMaterializer()
+            else:
+                raise ValueError(f"unknown layer type {layer_cfg.type}")
 
-        materializer: Materializer
-        if layer_cfg.type == LayerType.RASTER:
-            materializer = RasterMaterializer()
-        elif layer_cfg.type == LayerType.VECTOR:
-            materializer = VectorMaterializer()
+            retry(
+                fn=lambda: materializer.materialize(
+                    get_tile_store_with_layer(tile_store, layer_name, layer_cfg),
+                    window,
+                    layer_name,
+                    layer_cfg,
+                    item_groups,
+                ),
+                retry_max_attempts=retry_max_attempts,
+                retry_backoff=retry_backoff,
+                attempts_counter=attempts_counter,
+            )
+
         else:
-            raise ValueError(f"unknown layer type {layer_cfg.type}")
+            # This window is meant to be materialized directly from the data source.
+            logger.info(
+                f"Materializing {len(item_groups)} item groups in layer {layer_name} via data source"
+            )
+            retry(
+                fn=lambda: data_source.materialize(
+                    window, item_groups, layer_name, layer_cfg
+                ),
+                retry_max_attempts=retry_max_attempts,
+                retry_backoff=retry_backoff,
+                attempts_counter=attempts_counter,
+            )
 
-        retry(
-            fn=lambda: materializer.materialize(
-                get_tile_store_with_layer(tile_store, layer_name, layer_cfg),
-                window,
-                layer_name,
-                layer_cfg,
-                item_groups,
-            ),
-            retry_max_attempts=retry_max_attempts,
-            retry_backoff=retry_backoff,
-            attempts_counter=attempts_counter,
+        return MaterializeWindowLayerSummary(
+            skipped=False,
+            materialize_attempts=attempts_counter.value,
         )
-
-    else:
-        # This window is meant to be materialized directly from the data source.
-        logger.info(
-            f"Materializing {len(item_groups)} item groups in layer {layer_name} via data source"
+    except Exception as e:
+        if stop_on_error:
+            raise
+        error = ProcessingError(
+            identifier=f"window: {window.name}",
+            layer_name=layer_name,
+            error_message=str(e),
+            error_type=type(e).__name__,
         )
-        retry(
-            fn=lambda: data_source.materialize(
-                window, item_groups, layer_name, layer_cfg
-            ),
-            retry_max_attempts=retry_max_attempts,
-            retry_backoff=retry_backoff,
-            attempts_counter=attempts_counter,
+        logger.warning(
+            f"Error materializing layer {layer_name} in window {window.name}: {e}"
         )
-
-    return MaterializeWindowLayerSummary(
-        skipped=False,
-        materialize_attempts=attempts_counter.value,
-    )
+        return MaterializeWindowLayerSummary(
+            skipped=False,
+            materialize_attempts=attempts_counter.value,
+            error=error,
+        )
 
 
 def materialize_dataset_windows(
@@ -456,6 +506,7 @@ def materialize_dataset_windows(
     windows: list[Window],
     retry_max_attempts: int = 0,
     retry_backoff: timedelta = timedelta(minutes=1),
+    stop_on_error: bool = False,
 ) -> MaterializeDatasetWindowsSummary:
     """Materialize items for retrieved layers in a dataset.
 
@@ -468,6 +519,8 @@ def materialize_dataset_windows(
         retry_max_attempts: set greater than zero to retry for this many attempts in
             case of error.
         retry_backoff: how long to wait before retrying (see retry).
+        stop_on_error: if True, raise exceptions immediately. If False (default),
+            continue processing and collect errors for summary.
 
     Returns:
         a summary of the materialize operation, fit for telemetry purposes
@@ -475,6 +528,7 @@ def materialize_dataset_windows(
     start_time = time.monotonic()
 
     layer_summaries: list[MaterializeWindowLayersSummary] = []
+    all_errors: list[ProcessingError] = []
 
     tile_store = dataset.get_tile_store()
     for layer_name, layer_cfg in dataset.layers.items():
@@ -482,6 +536,8 @@ def materialize_dataset_windows(
 
         total_materialize_attempts = 0
         total_skipped = 0
+        total_errored = 0
+        layer_errors: list[ProcessingError] = []
         data_source_name = "N/A"
 
         if not layer_cfg.data_source:
@@ -500,10 +556,15 @@ def materialize_dataset_windows(
                     layer_cfg=layer_cfg,
                     retry_max_attempts=retry_max_attempts,
                     retry_backoff=retry_backoff,
+                    stop_on_error=stop_on_error,
                 )
                 total_materialize_attempts += window_summary.materialize_attempts
                 if window_summary.skipped:
                     total_skipped += 1
+                if window_summary.error:
+                    total_errored += 1
+                    layer_errors.append(window_summary.error)
+                    all_errors.append(window_summary.error)
 
         layer_summaries.append(
             MaterializeWindowLayersSummary(
@@ -511,8 +572,10 @@ def materialize_dataset_windows(
                 data_source_name=data_source_name,
                 duration_seconds=time.monotonic() - layer_start_time,
                 total_windows_requested=len(windows),
-                num_windows_materialized=len(windows) - total_skipped,
+                num_windows_materialized=len(windows) - total_skipped - total_errored,
                 materialize_attempts=total_materialize_attempts,
+                num_windows_errored=total_errored,
+                errors=layer_errors,
             )
         )
 
@@ -520,4 +583,5 @@ def materialize_dataset_windows(
         duration_seconds=time.monotonic() - start_time,
         total_windows_requested=len(windows),
         layer_summaries=layer_summaries,
+        errors=all_errors,
     )

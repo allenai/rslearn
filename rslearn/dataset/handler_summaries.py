@@ -3,7 +3,21 @@
 They can be used by callers to emit telemetry / logs, or discarded.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+@dataclass
+class ProcessingError:
+    """Represents an error that occurred during processing."""
+
+    # Identifier for what failed (window name, job description, etc.)
+    identifier: str
+    # The layer name if applicable
+    layer_name: str | None
+    # The error message
+    error_message: str
+    # The error type
+    error_type: str
 
 
 @dataclass
@@ -23,6 +37,9 @@ class LayerPrepareSummary:
     windows_rejected: int
     get_items_attempts: int
 
+    # Errors encountered during processing
+    errors: list[ProcessingError] = field(default_factory=list)
+
 
 @dataclass
 class PrepareDatasetWindowsSummary:
@@ -36,6 +53,9 @@ class PrepareDatasetWindowsSummary:
 
     # Per-layer summaries
     layer_summaries: list[LayerPrepareSummary]
+
+    # Errors encountered during processing
+    errors: list[ProcessingError] = field(default_factory=list)
 
 
 @dataclass
@@ -69,6 +89,9 @@ class LayerIngestSummary:
     ingest_counts: IngestCounts | UnknownIngestCounts
     ingest_attempts: int
 
+    # Errors encountered during processing
+    errors: list[ProcessingError] = field(default_factory=list)
+
 
 @dataclass
 class IngestDatasetJobsSummary:
@@ -83,6 +106,9 @@ class IngestDatasetJobsSummary:
     # Per-layer summaries
     layer_summaries: list[LayerIngestSummary]
 
+    # Errors encountered during processing
+    errors: list[ProcessingError] = field(default_factory=list)
+
 
 @dataclass
 class MaterializeWindowLayerSummary:
@@ -90,6 +116,9 @@ class MaterializeWindowLayerSummary:
 
     skipped: bool
     materialize_attempts: int
+
+    # Error encountered during processing (if any)
+    error: ProcessingError | None = None
 
 
 @dataclass
@@ -108,6 +137,12 @@ class MaterializeWindowLayersSummary:
     num_windows_materialized: int
     materialize_attempts: int
 
+    # Number of windows that had errors
+    num_windows_errored: int = 0
+
+    # Errors encountered during processing
+    errors: list[ProcessingError] = field(default_factory=list)
+
 
 @dataclass
 class MaterializeDatasetWindowsSummary:
@@ -122,10 +157,16 @@ class MaterializeDatasetWindowsSummary:
     # Per-layer summaries
     layer_summaries: list[MaterializeWindowLayersSummary]
 
+    # Errors encountered during processing
+    errors: list[ProcessingError] = field(default_factory=list)
+
 
 @dataclass
 class ErrorOutcome:
-    """TBD what goes in here, if anything."""
+    """Represents an operation that failed with an error."""
 
     # Timing
     duration_seconds: float
+
+    # The error that occurred
+    errors: list[ProcessingError] = field(default_factory=list)

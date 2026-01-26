@@ -130,16 +130,18 @@ class TestIngestion:
     def ingested_fname(self, prepared_dataset: Dataset) -> UPath:
         return prepared_dataset.path / "tiles" / "local_files" / "foo" / "data.geojson"
 
-    def test_normal_ingest_fails(
+    def test_ingest_with_stop_on_error_fails(
         self, prepared_dataset: Dataset, monkeypatch: Any
     ) -> None:
-        # Trying to ingest both layers should fail because Sentinel-2 layer is messed up.
+        # Trying to ingest both layers with --stop-on-error should fail
+        # because Sentinel-2 layer is messed up.
         mock_args = [
             "rslearn",
             "dataset",
             "ingest",
             "--root",
             str(prepared_dataset.path),
+            "--stop-on-error",
         ]
         monkeypatch.setattr(sys, "argv", mock_args)
 
@@ -201,17 +203,17 @@ class TestIngestion:
 
         assert ingested_fname.exists()
 
-    def test_ingest_ignore_errors(
+    def test_ingest_default_ignores_errors(
         self, prepared_dataset: Dataset, ingested_fname: UPath, monkeypatch: Any
     ) -> None:
-        # Should also succeed if we ignore errors.
+        # Default behavior ignores errors and continues processing.
+        # Sentinel-2 layer will fail but local_files should still be ingested.
         mock_args = [
             "rslearn",
             "dataset",
             "ingest",
             "--root",
             str(prepared_dataset.path),
-            "--ignore-errors",
         ]
         monkeypatch.setattr(sys, "argv", mock_args)
 
@@ -410,7 +412,7 @@ class TestMaterialization:
         logger.info("materialized_dataset: %s", ingested_dataset.path)
         assert self.expected_materialized_fname(ingested_dataset.path).exists()
 
-    def test_materialization_errors_on_bad_geojson(
+    def test_materialization_errors_with_stop_on_error(
         self, ingested_dataset: Dataset, monkeypatch: Any, tmp_path: pathlib.Path
     ) -> None:
         # Copy the ingested dataset to a new location.
@@ -425,25 +427,26 @@ class TestMaterialization:
         with data_file.open("w") as f:
             f.write("invalid json{")
 
-        # Try to materialize the dataset.
+        # Try to materialize the dataset with --stop-on-error.
         mock_args = [
             "rslearn",
             "dataset",
             "materialize",
             "--root",
             str(new_path),
+            "--stop-on-error",
         ]
         monkeypatch.setattr(sys, "argv", mock_args)
         with pytest.raises(json.decoder.JSONDecodeError):
             rslearn.main.main()
 
-    def test_ignore_errors(
+    def test_materialize_default_ignores_errors(
         self,
         ingested_dataset: Dataset,
         tmp_path: pathlib.Path,
         monkeypatch: Any,
     ) -> None:
-        print("test_ignore_errors tmp_path", tmp_path)
+        print("test_materialize_default_ignores_errors tmp_path", tmp_path)
         # Copy the ingested dataset to a new location.
         new_path = UPath(tmp_path) / "new_dataset"
         logger.info("copying dataset to %s", new_path)
@@ -453,14 +456,13 @@ class TestMaterialization:
         with data_file.open("w") as f:
             f.write("invalid json{")
 
-        # Try to materialize the dataset.
+        # Default behavior ignores errors, so this should succeed.
         mock_args = [
             "rslearn",
             "dataset",
             "materialize",
             "--root",
             str(new_path),
-            "--ignore-errors",
             "--workers",
             "0",
         ]
