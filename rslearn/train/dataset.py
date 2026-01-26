@@ -294,6 +294,111 @@ def read_raster_layer_for_data_input(
     return image
 
 
+def read_stacked_raster_layer_for_data_input(
+    window: Window,
+    bounds: PixelBounds,
+    layer_name: str,
+    layer_config: LayerConfig,
+    data_input: DataInput,
+) -> list[torch.Tensor]:
+    """Read a stacked raster layer for a DataInput.
+
+    This is used when single_file_materialization is enabled, where all item groups
+    are stored in a single file.
+
+    Args:
+        window: the window to read from.
+        bounds: the bounds to read.
+        layer_name: the layer.
+        layer_config: the layer configuration.
+        data_input: the DataInput that specifies the bands and dtype.
+
+    Returns:
+        A list of tensors, one per item group, each with shape (C, H, W).
+    """
+    # See what different sets of bands we need to read to get all the
+    # configured bands.
+    needed_bands = data_input.bands
+    if needed_bands is None:
+        raise ValueError(f"No bands specified for {layer_name}")
+    needed_band_indexes = {}
+    for i, band in enumerate(needed_bands):
+        needed_band_indexes[band] = i
+    needed_sets_and_indexes = []
+    for band_set in layer_config.band_sets:
+        needed_src_indexes = []
+        needed_dst_indexes = []
+        if band_set.bands is None:
+            continue
+        for i, band in enumerate(band_set.bands):
+            if band not in needed_band_indexes:
+                continue
+            needed_src_indexes.append(i)
+            needed_dst_indexes.append(needed_band_indexes[band])
+            del needed_band_indexes[band]
+        if len(needed_src_indexes) == 0:
+            continue
+        needed_sets_and_indexes.append(
+            (band_set, needed_src_indexes, needed_dst_indexes)
+        )
+    if len(needed_band_indexes) > 0:
+        raise ValueError(
+            f"could not get all the needed bands from window {window.name} layer {layer_name}"
+        )
+
+    # Get the projection and bounds to read under.
+    final_projection = data_input.resolution_factor.multiply_projection(
+        window.projection
+    )
+    final_bounds = data_input.resolution_factor.multiply_bounds(bounds)
+
+    # For stacked data, we read from all band sets and combine them.
+    # We expect all band sets to have been stacked with the same number of groups.
+    all_images: list[torch.Tensor] | None = None
+
+    for band_set, src_indexes, dst_indexes in needed_sets_and_indexes:
+        if band_set.format is None:
+            raise ValueError(f"No format specified for {layer_name}")
+        raster_format = band_set.instantiate_raster_format()
+        # For stacked data, all groups are stored at group_idx=0
+        raster_dir = window.get_raster_dir(layer_name, band_set.bands, group_idx=0)
+
+        stacked_array, num_groups, num_channels = raster_format.decode_stacked(
+            raster_dir, final_projection, final_bounds, resampling=Resampling.nearest
+        )
+
+        # Initialize the output images if not done yet
+        if all_images is None:
+            all_images = [
+                torch.zeros(
+                    (
+                        len(needed_bands),
+                        final_bounds[3] - final_bounds[1],
+                        final_bounds[2] - final_bounds[0],
+                    ),
+                    dtype=get_torch_dtype(data_input.dtype),
+                )
+                for _ in range(num_groups)
+            ]
+
+        # Split the stacked array back into separate groups
+        for group_idx in range(num_groups):
+            start_ch = group_idx * num_channels
+            end_ch = start_ch + num_channels
+            group_array = stacked_array[start_ch:end_ch, :, :]
+
+            all_images[group_idx][dst_indexes, :, :] = torch.as_tensor(
+                group_array[src_indexes, :, :].astype(
+                    data_input.dtype.get_numpy_dtype()
+                )
+            )
+
+    if all_images is None:
+        raise ValueError(f"No band sets found for layer {layer_name}")
+
+    return all_images
+
+
 def read_layer_time_range(
     layer_data: WindowLayerData | None, group_idx: int
 ) -> tuple[datetime, datetime] | None:
@@ -385,26 +490,59 @@ def read_data_input(
         layer_datas = window.load_layer_datas()
         images: list[torch.Tensor] = []
         time_ranges: list[tuple[datetime, datetime] | None] = []
+
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
-            image = read_raster_layer_for_data_input(
-                window,
-                bounds,
-                layer_name,
-                group_idx,
-                layer_config,
-                data_input,
-            )
-            # some layers (e.g. "label_raster") won't have associated layer datas
-            layer_data = layer_datas.get(layer_name)
-            time_range = read_layer_time_range(layer_data, group_idx)
-            if len(time_ranges) > 0:
-                if type(time_ranges[-1]) is not type(time_range):
-                    raise ValueError(
-                        f"All time ranges should be datetime tuples or None. Got {type(time_range)} amd {type(time_ranges[-1])}"
-                    )
-            images.append(image)
-            time_ranges.append(time_range)
+
+            # Check if this layer uses single-file materialization
+            if (
+                layer_config.single_file_materialization
+                and data_input.load_all_item_groups
+            ):
+                # Read all item groups from the stacked file at once
+                stacked_images = read_stacked_raster_layer_for_data_input(
+                    window,
+                    bounds,
+                    layer_name,
+                    layer_config,
+                    data_input,
+                )
+                # Get time ranges for all groups
+                layer_data = layer_datas.get(layer_name)
+                for stacked_group_idx, stacked_image in enumerate(stacked_images):
+                    images.append(stacked_image)
+                    time_range = read_layer_time_range(layer_data, stacked_group_idx)
+                    if len(time_ranges) > 0:
+                        if type(time_ranges[-1]) is not type(time_range):
+                            raise ValueError(
+                                f"All time ranges should be datetime tuples or None. "
+                                f"Got {type(time_range)} and {type(time_ranges[-1])}"
+                            )
+                    time_ranges.append(time_range)
+                # Skip the rest of the layers since we've read all groups from this one
+                break
+            else:
+                # Original behavior: read from specific group
+                image = read_raster_layer_for_data_input(
+                    window,
+                    bounds,
+                    layer_name,
+                    group_idx,
+                    layer_config,
+                    data_input,
+                )
+                # some layers (e.g. "label_raster") won't have associated layer datas
+                layer_data = layer_datas.get(layer_name)
+                time_range = read_layer_time_range(layer_data, group_idx)
+                if len(time_ranges) > 0:
+                    if type(time_ranges[-1]) is not type(time_range):
+                        raise ValueError(
+                            f"All time ranges should be datetime tuples or None. "
+                            f"Got {type(time_range)} and {type(time_ranges[-1])}"
+                        )
+                images.append(image)
+                time_ranges.append(time_range)
+
         return RasterImage(
             torch.stack(images, dim=1),
             time_ranges if time_ranges[0] is not None else None,  # type: ignore

@@ -513,26 +513,58 @@ class RasterMaterializer(Materializer):
 
             raster_format = band_cfg.instantiate_raster_format()
 
-            for group_id, group in enumerate(item_groups):
-                composite = build_composite(
-                    group=group,
-                    compositing_method=layer_cfg.compositing_method,
-                    tile_store=tile_store,
-                    layer_cfg=layer_cfg,
-                    band_cfg=band_cfg,
-                    projection=projection,
-                    bounds=bounds,
-                    remapper=remapper,
-                )
-                raster_format.encode_raster(
-                    window.get_raster_dir(layer_name, band_cfg.bands, group_id),
+            if layer_cfg.single_file_materialization:
+                # Build composites for all item groups and write them together.
+                composites = []
+                for group_id, group in enumerate(item_groups):
+                    composite = build_composite(
+                        group=group,
+                        compositing_method=layer_cfg.compositing_method,
+                        tile_store=tile_store,
+                        layer_cfg=layer_cfg,
+                        band_cfg=band_cfg,
+                        projection=projection,
+                        bounds=bounds,
+                        remapper=remapper,
+                    )
+                    composites.append(composite)
+
+                # Write all composites to a single file using encode_stacked.
+                # We use group_id=0 for the directory since all groups are in one file.
+                raster_format.encode_stacked(
+                    window.get_raster_dir(layer_name, band_cfg.bands, 0),
                     projection,
                     bounds,
-                    composite,
+                    composites,
+                    num_channels=len(band_cfg.bands),
                 )
+            else:
+                # Original behavior: write each item group separately.
+                for group_id, group in enumerate(item_groups):
+                    composite = build_composite(
+                        group=group,
+                        compositing_method=layer_cfg.compositing_method,
+                        tile_store=tile_store,
+                        layer_cfg=layer_cfg,
+                        band_cfg=band_cfg,
+                        projection=projection,
+                        bounds=bounds,
+                        remapper=remapper,
+                    )
+                    raster_format.encode_raster(
+                        window.get_raster_dir(layer_name, band_cfg.bands, group_id),
+                        projection,
+                        bounds,
+                        composite,
+                    )
 
-        for group_id in range(len(item_groups)):
-            window.mark_layer_completed(layer_name, group_id)
+        # For single-file materialization, we only mark group 0 as completed since
+        # all groups are stored in a single file.
+        if layer_cfg.single_file_materialization:
+            window.mark_layer_completed(layer_name, 0)
+        else:
+            for group_id in range(len(item_groups)):
+                window.mark_layer_completed(layer_name, group_id)
 
 
 class VectorMaterializer(Materializer):
