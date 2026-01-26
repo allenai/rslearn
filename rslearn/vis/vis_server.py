@@ -10,16 +10,18 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask, Response
+from flask import render_template as flask_render_template
+from PIL import Image
 from upath import UPath
 
 from rslearn.config import LayerType
 from rslearn.dataset import Dataset, Window
 from rslearn.log_utils import get_logger
 
-from .render_raster_label import read_raster_layer, render_raster_label_as_bytes
-from .render_sensor_image import render_sensor_image_as_bytes
+from .render_raster_label import read_raster_layer, render_raster_label
+from .render_sensor_image import render_sensor_image
 from .render_vector_label import get_vector_label_by_property, render_vector_label_image
-from .utils import _escape_html, format_window_info, generate_label_colors
+from .utils import array_to_bytes, format_window_info, generate_label_colors
 
 logger = get_logger(__name__)
 
@@ -62,7 +64,8 @@ def generate_image_as_bytes(
             array = read_raster_layer(
                 window, layer_name, layer_config, bands[layer_name], group_idx=group_idx
             )
-            return render_sensor_image_as_bytes(array, normalization[layer_name])
+            image_array = render_sensor_image(array, normalization[layer_name])
+            return array_to_bytes(image_array)
         else:
             raise ValueError(
                 f"Bands or normalization not specified for layer {layer_name}"
@@ -86,13 +89,14 @@ def generate_image_as_bytes(
                 [band_set.bands[0]],
                 group_idx=group_idx,
             )
-            return render_raster_label_as_bytes(
+            image_array = render_raster_label(
                 label_array, layer_label_colors, layer_config
             )
+            return array_to_bytes(image_array, resampling=Image.Resampling.NEAREST)
 
         # Render vector label
         elif layer_config.type == LayerType.VECTOR:
-            return render_vector_label_image(
+            image_array = render_vector_label_image(
                 window,
                 layer_name,
                 layer_config,
@@ -104,6 +108,13 @@ def generate_image_as_bytes(
                 bands,
                 normalization,
             )
+            # Use NEAREST for segmentation labels, LANCZOS for detection (which overlays on reference image)
+            resampling = (
+                Image.Resampling.NEAREST
+                if task_type == "segmentation"
+                else Image.Resampling.LANCZOS
+            )
+            return array_to_bytes(image_array, resampling=resampling)
 
     raise ValueError(f"Layer {layer_name} is not a raster sensor image or label layer")
 
@@ -112,7 +123,7 @@ def generate_image_as_bytes(
 _app_state: dict[str, Any] = {}
 
 
-def render_template(
+def prepare_visualization_data(
     sampled_windows: list[Window],
     dataset: Dataset,
     layers: list[str],
@@ -120,8 +131,8 @@ def render_template(
     task_type: str,
     label_colors_dict: dict[str, dict[str, tuple[int, int, int]]],
     group_idx: int,
-) -> str:
-    """Render the HTML template with window data.
+) -> dict[str, Any]:
+    """Prepare data for visualization template.
 
     Args:
         sampled_windows: List of windows to display
@@ -133,11 +144,11 @@ def render_template(
         group_idx: Item group index
 
     Returns:
-        Rendered HTML as string
+        Dictionary with template context data
     """
     window_data: list[dict[str, Any]] = []
     for idx, window in enumerate(sampled_windows):
-        info_html, lat, lon = format_window_info(window)
+        time_range, lat, lon = format_window_info(window)
         maps_link = (
             f"https://www.google.com/maps?q={lat},{lon}"
             if lat is not None and lon is not None
@@ -195,11 +206,22 @@ def render_template(
                 )
                 continue
 
+        # Format time range for template
+        time_range_formatted = None
+        if time_range:
+            time_range_formatted = (
+                time_range[0].isoformat()[:10],
+                time_range[1].isoformat()[:10],
+            )
+
         window_data.append(
             {
                 "idx": idx,
                 "name": window.name,
-                "info_html": info_html,
+                "time_range": time_range,
+                "time_range_formatted": time_range_formatted,
+                "lat": lat,
+                "lon": lon,
                 "maps_link": maps_link,
                 "available_layers": available_layers,
                 "mask_layers": mask_layers,
@@ -208,181 +230,19 @@ def render_template(
         )
 
     label_colors = None
+    sorted_label_keys = None
     if label_colors_dict:
         first_label_layer = list(label_colors_dict.keys())[0]
         label_colors = label_colors_dict[first_label_layer]
+        sorted_label_keys = sorted(label_colors.keys())
 
-    # Build HTML
-    html_parts = [
-        """<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>rslearn Dataset Visualization</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
-        h1 {
-            text-align: center;
-            color: #333;
-            margin-bottom: 40px;
-        }
-        .legend {
-            background: white;
-            padding: 15px;
-            margin-bottom: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            text-align: center;
-        }
-        .legend h3 {
-            margin: 0 0 10px 0;
-            color: #555;
-        }
-        .legend-items {
-            display: flex;
-            justify-content: center;
-            gap: 30px;
-            flex-wrap: wrap;
-        }
-        .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .legend-color {
-            width: 30px;
-            height: 20px;
-            border: 1px solid #999;
-        }
-        .window-section {
-            background: white;
-            margin-bottom: 40px;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .window-header {
-            font-size: 24px;
-            font-weight: bold;
-            color: #2c3e50;
-            margin-bottom: 10px;
-            padding-bottom: 10px;
-            border-bottom: 3px solid #3498db;
-        }
-        .window-info {
-            color: #666;
-            font-size: 14px;
-            margin-bottom: 20px;
-        }
-        .window-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-        }
-        .image-container {
-            border-radius: 4px;
-            overflow: hidden;
-            background: #fff;
-            display: inline-block;
-            width: fit-content;
-        }
-        .image-container img {
-            max-width: 100%;
-            height: auto;
-            display: block;
-            background: #fff;
-        }
-        .image-label {
-            padding: 8px;
-            font-size: 14px;
-            color: #333;
-            text-align: center;
-            background: #f8f9fa;
-            border-top: 1px solid #e0e0e0;
-            font-weight: 600;
-        }
-    </style>
-</head>
-<body>
-    <h1>rslearn Dataset Visualization</h1>
-"""
-    ]
-
-    # Legend
-    if label_colors and task_type != "classification":
-        html_parts.append('    <div class="legend">\n')
-        html_parts.append("        <h3>Mask Color Legend</h3>\n")
-        html_parts.append('        <div class="legend-items">\n')
-        for label in sorted(label_colors.keys()):
-            r, g, b = label_colors[label]
-            html_parts.append(
-                f'            <div class="legend-item">\n'
-                f'                <div class="legend-color" style="background: rgb({r}, {g}, {b});"></div>\n'
-                f"                <span>{_escape_html(label)}</span>\n"
-                f"            </div>\n"
-            )
-        html_parts.append("        </div>\n")
-        html_parts.append("    </div>\n")
-
-    # Windows
-    for window_dict in window_data:
-        html_parts.append('    <div class="window-section">\n')
-        html_parts.append('        <div class="window-header">\n')
-        html_parts.append(f"            {_escape_html(window_dict['name'])}\n")
-        if window_dict["maps_link"]:
-            html_parts.append(
-                f'            <a href="{_escape_html(window_dict["maps_link"])}" target="_blank" style="color: #3498db; text-decoration: none; margin-left: 10px;">🗺️ View on Google Maps</a>\n'
-            )
-        html_parts.append("        </div>\n")
-        html_parts.append(
-            f'        <div class="window-info">{window_dict["info_html"]}</div>\n'
-        )
-        html_parts.append('        <div class="window-grid">\n')
-
-        # Regular layers
-        for layer_name in layers:
-            if layer_name in window_dict["available_layers"]:
-                html_parts.append('            <div class="image-container">\n')
-                html_parts.append(
-                    f'                <img src="/images/{window_dict["idx"]}/{_escape_html(layer_name)}" alt="{_escape_html(layer_name)}">\n'
-                )
-                html_parts.append(
-                    f'                <div class="image-label">{_escape_html(layer_name)}</div>\n'
-                )
-                html_parts.append("            </div>\n")
-
-        # Mask layers
-        for mask_layer in window_dict["mask_layers"]:
-            html_parts.append(
-                f'            <div class="image-container" id="mask-{window_dict["idx"]}-{_escape_html(mask_layer)}">\n'
-            )
-            html_parts.append(
-                f'                <img src="/images/{window_dict["idx"]}/{_escape_html(mask_layer)}" alt="Label Mask: {_escape_html(mask_layer)}" onerror="this.closest(\'.image-container\').remove()">\n'
-            )
-            html_parts.append(
-                f'                <div class="image-label">Label Mask: {_escape_html(mask_layer)}</div>\n'
-            )
-            html_parts.append("            </div>\n")
-
-        # Label texts (classification)
-        for layer_name, label_text in window_dict["label_texts"].items():
-            html_parts.append('            <div class="image-container">\n')
-            html_parts.append(
-                f'                <div style="padding: 20px; font-size: 18px; font-weight: bold;">{_escape_html(layer_name)}: {_escape_html(label_text)}</div>\n'
-            )
-            html_parts.append("            </div>\n")
-
-        html_parts.append("        </div>\n")
-        html_parts.append("    </div>\n")
-
-    html_parts.append("</body>\n</html>")
-    return "".join(html_parts)
+    return {
+        "windows": window_data,
+        "layers": layers,
+        "label_colors": label_colors,
+        "sorted_label_keys": sorted_label_keys,
+        "task_type": task_type,
+    }
 
 
 def create_app(
@@ -414,7 +274,9 @@ def create_app(
     Returns:
         Configured Flask app
     """
-    app = Flask(__name__)
+    # Set template folder explicitly to ensure Flask can find templates
+    template_folder = Path(__file__).parent / "templates"
+    app = Flask(__name__, template_folder=str(template_folder))
 
     @app.route("/")
     def index() -> str:
@@ -424,7 +286,7 @@ def create_app(
         else:
             sampled_windows = windows
 
-        return render_template(
+        template_data = prepare_visualization_data(
             sampled_windows,
             dataset,
             layers,
@@ -433,6 +295,7 @@ def create_app(
             label_colors_dict,
             group_idx,
         )
+        return flask_render_template("visualization.html", **template_data)
 
     @app.route("/images/<int:window_idx>/<layer_name>")
     def get_image(window_idx: int, layer_name: str) -> Response:

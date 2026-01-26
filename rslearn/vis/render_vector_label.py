@@ -1,6 +1,5 @@
 """Functions for rendering vector label masks (detection and segmentation)."""
 
-from io import BytesIO
 from typing import Any
 
 import numpy as np
@@ -16,7 +15,6 @@ from rslearn.utils.vector_format import VectorFormat
 
 from .normalization import normalize_array
 from .render_raster_label import read_raster_layer
-from .utils import VISUALIZATION_IMAGE_SIZE
 
 logger = get_logger(__name__)
 
@@ -153,14 +151,14 @@ def overlay_points_on_image(
     return points_drawn, points_out_of_bounds
 
 
-def render_vector_label_detection_as_bytes(
+def render_vector_label_detection(
     features: list[Feature],
     bounds: PixelBounds,
     label_colors: dict[str, tuple[int, int, int]],
     class_property_name: str | None = None,
     reference_array: np.ndarray | None = None,
     normalization_method: str | None = None,
-) -> bytes:
+) -> np.ndarray:
     """Render vector labels for detection tasks (overlay points on reference image or blank background).
 
     Args:
@@ -172,7 +170,7 @@ def render_vector_label_detection_as_bytes(
         normalization_method: Optional normalization method for the reference array
 
     Returns:
-        PNG image bytes
+        Array with shape (height, width, 3) as uint8
     """
     actual_width = bounds[2] - bounds[0]
     actual_height = bounds[3] - bounds[1]
@@ -199,20 +197,16 @@ def render_vector_label_detection_as_bytes(
         label_colors,
         class_property_name,
     )
-    img = img.resize(VISUALIZATION_IMAGE_SIZE, Image.Resampling.LANCZOS)
-
-    buf = BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
+    return np.array(img)
 
 
-def render_vector_label_segmentation_as_bytes(
+def render_vector_label_segmentation(
     features: list[Feature],
     bounds: PixelBounds,
     projection: Projection,
     label_colors: dict[str, tuple[int, int, int]],
     class_property_name: str | None = None,
-) -> bytes:
+) -> np.ndarray:
     """Render vector labels for segmentation tasks (draw polygons on mask).
 
     Args:
@@ -223,7 +217,7 @@ def render_vector_label_segmentation_as_bytes(
         class_property_name: Property name to use for label extraction (from config)
 
     Returns:
-        PNG image bytes
+        Array with shape (height, width, 3) as uint8
     """
     width = bounds[2] - bounds[0]
     height = bounds[3] - bounds[1]
@@ -271,11 +265,7 @@ def render_vector_label_segmentation_as_bytes(
                 if len(pixel_coords) >= 3:
                     draw.polygon(pixel_coords, fill=color, outline=color)
 
-    img = mask_img.resize(VISUALIZATION_IMAGE_SIZE, Image.Resampling.NEAREST)
-
-    buf = BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
+    return np.array(mask_img)
 
 
 def read_vector_layer(
@@ -398,7 +388,7 @@ def render_vector_label_image(
     group_idx: int,
     bands: dict[str, list[str]] | None = None,
     normalization: dict[str, str] | None = None,
-) -> bytes:
+) -> np.ndarray:
     """Render a vector label image (detection or segmentation).
 
     Args:
@@ -414,7 +404,7 @@ def render_vector_label_image(
         normalization: Optional dictionary mapping layer_name -> normalization method (for detection reference raster)
 
     Returns:
-        PNG image bytes
+        Array with shape (height, width, 3) as uint8
     """
     if task_type == "classification":
         raise ValueError("Classification labels are text, not images")
@@ -431,7 +421,7 @@ def render_vector_label_image(
         ref_normalization_method = None
         if ref_data is not None:
             reference_array, ref_normalization_method = ref_data
-        return render_vector_label_detection_as_bytes(
+        return render_vector_label_detection(
             features,
             window.bounds,
             label_colors,
@@ -440,7 +430,7 @@ def render_vector_label_image(
             ref_normalization_method,
         )
     else:
-        return render_vector_label_segmentation_as_bytes(
+        return render_vector_label_segmentation(
             features,
             window.bounds,
             window.projection,

@@ -1,7 +1,5 @@
 """Functions for rendering raster label masks (e.g., segmentation masks)."""
 
-from io import BytesIO
-
 import numpy as np
 from PIL import Image
 from rasterio.warp import Resampling
@@ -12,17 +10,15 @@ from rslearn.log_utils import get_logger
 from rslearn.train.dataset import DataInput, read_raster_layer_for_data_input
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
 
-from .utils import VISUALIZATION_IMAGE_SIZE
-
 logger = get_logger(__name__)
 
 
-def render_raster_label_as_bytes(
+def render_raster_label(
     label_array: np.ndarray,
     label_colors: dict[str, tuple[int, int, int]],
     layer_config: LayerConfig,
-) -> bytes:
-    """Render a raster label array as a colored mask PNG bytes.
+) -> np.ndarray:
+    """Render a raster label array as a colored mask numpy array.
 
     Args:
         label_array: Raster label array with shape (bands, height, width) - typically single band
@@ -30,7 +26,7 @@ def render_raster_label_as_bytes(
         layer_config: LayerConfig object (to access class_names if available)
 
     Returns:
-        PNG image bytes
+        Array with shape (height, width, 3) as uint8
     """
     if label_array.ndim == 3:
         label_values = label_array[0, :, :]
@@ -54,11 +50,7 @@ def render_raster_label_as_bytes(
         mask_img[mask] = color
 
     img = Image.fromarray(mask_img, mode="RGB")
-    img = img.resize(VISUALIZATION_IMAGE_SIZE, Image.Resampling.NEAREST)
-
-    buf = BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
+    return np.array(img)
 
 
 def read_raster_layer(

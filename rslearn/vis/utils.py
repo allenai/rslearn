@@ -1,5 +1,11 @@
 """Utility functions and constants for visualization."""
 
+from datetime import datetime
+from io import BytesIO
+
+import numpy as np
+from PIL import Image
+
 from rslearn.dataset import Window
 from rslearn.log_utils import get_logger
 from rslearn.utils.colors import DEFAULT_COLORS
@@ -29,31 +35,57 @@ def generate_label_colors(label_classes: set[str]) -> dict[str, tuple[int, int, 
     return label_colors
 
 
-def format_window_info(window: Window) -> tuple[str, float | None, float | None]:
-    """Format window metadata for display.
+def format_window_info(
+    window: Window,
+) -> tuple[tuple[datetime, datetime] | None, float | None, float | None]:
+    """Extract window metadata for display.
 
     Args:
         window: Window object
 
     Returns:
-        Tuple of (formatted info HTML, lat, lon) for Google Maps link
+        Tuple of (time_range, lat, lon) where time_range is a tuple of (start, end) datetime objects
     """
-    parts = []
     lat = None
     lon = None
-
-    if window.time_range:
-        start = window.time_range[0].isoformat()[:10]
-        end = window.time_range[1].isoformat()[:10]
-        parts.append(f"Time: {start} to {end}")
 
     geom_wgs84 = window.get_geometry().to_projection(WGS84_PROJECTION)
     centroid = geom_wgs84.shp.centroid
     lon = float(centroid.x)
     lat = float(centroid.y)
-    parts.insert(0, f"Lat: {lat:.4f}, Lon: {lon:.4f}")
 
-    return "<br>".join(parts) if parts else "Unknown", lat, lon
+    return window.time_range, lat, lon
+
+
+def array_to_bytes(
+    array: np.ndarray, resampling: Image.Resampling = Image.Resampling.LANCZOS
+) -> bytes:
+    """Convert a numpy array to PNG bytes.
+
+    Args:
+        array: Array with shape (height, width, channels) or (height, width) as uint8
+        resampling: PIL Image resampling method (default LANCZOS, use NEAREST for labels)
+
+    Returns:
+        PNG image bytes
+    """
+    if array.ndim == 2:
+        img = Image.fromarray(array, mode="L")
+    elif array.ndim == 3:
+        if array.shape[-1] == 1:
+            img = Image.fromarray(array[:, :, 0], mode="L")
+        elif array.shape[-1] == 3:
+            img = Image.fromarray(array, mode="RGB")
+        else:
+            img = Image.fromarray(array[:, :, :3], mode="RGB")
+    else:
+        raise ValueError(f"Unsupported array shape: {array.shape}")
+
+    img = img.resize(VISUALIZATION_IMAGE_SIZE, resampling)
+
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 def _escape_html(text: str) -> str:
