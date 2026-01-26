@@ -203,7 +203,6 @@ class ClayNormalize(Transform):
                 mean=means,
                 std=stds,
                 selectors=[modality],
-                num_bands=len(means),
             )
         self.normalizers = torch.nn.ModuleDict(normalizers)
 

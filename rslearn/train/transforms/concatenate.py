@@ -54,36 +54,26 @@ class Concatenate(Transform):
             target_dict: the target
 
         Returns:
-            concatenated (input_dicts, target_dicts) tuple. If one of the
-            specified inputs is a RasterImage, a RasterImage will be returned.
-            Otherwise it will be a torch.Tensor.
+            (input_dicts, target_dicts) where the entry corresponding to
+            output_selector contains the concatenated RasterImage.
         """
-        images = []
-        return_raster_image: bool = False
+        tensors: list[torch.Tensor] = []
         timestamps: list[tuple[datetime, datetime]] | None = None
+
         for selector, wanted_bands in self.selections.items():
             image = read_selector(input_dict, target_dict, selector)
-            if isinstance(image, torch.Tensor):
-                if wanted_bands:
-                    image = image[wanted_bands, :, :]
-                images.append(image)
-            elif isinstance(image, RasterImage):
-                return_raster_image = True
-                if wanted_bands:
-                    images.append(image.image[wanted_bands, :, :])
-                else:
-                    images.append(image.image)
-                if timestamps is None:
-                    if image.timestamps is not None:
-                        # assume all concatenated modalities have the same
-                        # number of timestamps
-                        timestamps = image.timestamps
-        if return_raster_image:
-            result = RasterImage(
-                torch.concatenate(images, dim=self.concatenate_dim),
-                timestamps=timestamps,
-            )
-        else:
-            result = torch.concatenate(images, dim=self.concatenate_dim)
+            if wanted_bands:
+                tensors.append(image.image[wanted_bands, :, :])
+            else:
+                tensors.append(image.image)
+            if timestamps is None and image.timestamps is not None:
+                # assume all concatenated modalities have the same
+                # number of timestamps
+                timestamps = image.timestamps
+
+        result = RasterImage(
+            torch.concatenate(tensors, dim=self.concatenate_dim),
+            timestamps=timestamps,
+        )
         write_selector(input_dict, target_dict, self.output_selector, result)
         return input_dict, target_dict

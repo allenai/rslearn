@@ -1,7 +1,5 @@
 """Mask transform."""
 
-import torch
-
 from rslearn.train.model_context import RasterImage
 from rslearn.train.transforms.transform import Transform, read_selector
 
@@ -32,9 +30,7 @@ class Mask(Transform):
         self.mask_selector = mask_selector
         self.mask_value = mask_value
 
-    def apply_image(
-        self, image: torch.Tensor | RasterImage, mask: torch.Tensor | RasterImage
-    ) -> torch.Tensor | RasterImage:
+    def apply_image(self, image: RasterImage, mask: RasterImage) -> RasterImage:
         """Apply the mask on the image.
 
         Args:
@@ -44,21 +40,19 @@ class Mask(Transform):
         Returns:
             masked image
         """
-        # Tile the mask to have same number of bands as the image.
-        if isinstance(mask, RasterImage):
-            mask = mask.image
+        # Extract the mask tensor (CTHW format)
+        mask_tensor = mask.image
 
-        if image.shape[0] != mask.shape[0]:
-            if mask.shape[0] != 1:
+        # Tile the mask to have same number of bands (C dimension) as the image.
+        if image.shape[0] != mask_tensor.shape[0]:
+            if mask_tensor.shape[0] != 1:
                 raise ValueError(
                     "expected mask to either have same bands as image, or one band"
                 )
-            mask = mask.repeat(image.shape[0], 1, 1)
+            # Repeat along C dimension, keep T, H, W the same
+            mask_tensor = mask_tensor.repeat(image.shape[0], 1, 1, 1)
 
-        if isinstance(image, torch.Tensor):
-            image[mask == 0] = self.mask_value
-        else:
-            image.image[mask == 0] = self.mask_value
+        image.image[mask_tensor == 0] = self.mask_value
         return image
 
     def forward(self, input_dict: dict, target_dict: dict) -> tuple[dict, dict]:
