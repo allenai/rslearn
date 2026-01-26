@@ -539,7 +539,6 @@ class Sentinel2(EarthDaily):
         retry_backoff_factor: float = 5.0,
         service_name: Literal["platform"] = "platform",
         context: DataSourceContext = DataSourceContext(),
-        **kwargs: Any,
     ) -> None:
         """Initialize an EarthDaily Sentinel-2 data source.
 
@@ -566,10 +565,7 @@ class Sentinel2(EarthDaily):
             retry_backoff_factor: backoff factor for EarthDaily API client retries.
             service_name: EarthDaily service name (only "platform" supported).
             context: rslearn data source context.
-            kwargs: unused extra keyword args (for forward compatibility).
         """
-        del kwargs
-
         asset_bands: dict[str, list[str]]
         if context.layer_config is not None and assets is None:
             asset_bands = {}

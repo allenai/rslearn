@@ -812,6 +812,7 @@ This data source requires the optional `earthdaily[platform]` dependency and Ear
 credentials in the environment (see [EarthDaily documentation](https://earthdaily.github.io/earthdaily-python-client/main/) for supported methods).
 
 The additional data source configuration looks like this:
+Only the keys documented below are supported in `init_args`; unknown keys will raise an error.
 
 ```jsonc
 {
