@@ -102,3 +102,52 @@ def test_sentinel2_ingest_applies_scl_cloud_mask(
     assert out.shape == red.shape
     assert out[0, 0, 0] == 100
     assert out[0, 1, 1] == 0
+
+
+def test_sentinel2_get_items_passes_query_to_helper() -> None:
+    pytest.importorskip("earthdaily")
+
+    from rslearn.config.dataset import QueryConfig
+    from rslearn.const import WGS84_PROJECTION
+    from rslearn.data_sources.earthdaily import Sentinel2
+    from rslearn.utils.geometry import STGeometry
+
+    captured: dict[str, object] = {}
+
+    class StubHelper:
+        def get_items(
+            self,
+            geometries=None,
+            intersects=None,
+            bbox=None,
+            datetime=None,
+            cloud_cover_max=None,
+            max_items: int = 100,
+            **search_kwargs,
+        ):
+            captured["cloud_cover_max"] = cloud_cover_max
+            captured["max_items"] = max_items
+            captured["query"] = search_kwargs.get("query")
+            return []
+
+    data_source = Sentinel2(
+        assets=["red"],
+        cloud_cover_max=15.0,
+        query={"s2:product_type": {"eq": "S2MSI2A"}},
+    )
+    data_source._get_sentinel2_helper = lambda: StubHelper()  # type: ignore[method-assign]
+
+    geometry = STGeometry(
+        WGS84_PROJECTION,
+        shapely.box(-1, -1, 1, 1),
+        (datetime(2020, 1, 1), datetime(2020, 1, 2)),
+    )
+
+    data_source.get_items([geometry], QueryConfig())
+
+    assert captured["cloud_cover_max"] == 15.0
+    assert captured["max_items"] == 500
+    assert captured["query"] == {
+        "s2:product_type": {"eq": "S2MSI2A"},
+        "eo:cloud_cover": {"lt": 15.0},
+    }

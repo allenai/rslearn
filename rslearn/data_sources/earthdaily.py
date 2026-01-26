@@ -1,5 +1,6 @@
 """Data on EarthDaily."""
 
+import copy
 import json
 import os
 import tempfile
@@ -533,6 +534,9 @@ class Sentinel2(EarthDaily):
         mask_band: str = "scl",
         exclude_scl_values: list[int] | None = None,
         mask_nodata_value: int | float = 0,
+        query: dict[str, Any] | None = None,
+        sort_by: str | None = None,
+        sort_ascending: bool = True,
         timeout: timedelta = timedelta(seconds=10),
         cache_dir: str | None = None,
         max_retries: int = 3,
@@ -548,7 +552,8 @@ class Sentinel2(EarthDaily):
                 provided via context, assets are inferred from that layer's band sets.
             cloud_cover_threshold: default max cloud cover (%) used when cloud_cover_max
                 is not provided at query time.
-            cloud_cover_max: max cloud cover (%) applied in searches.
+            cloud_cover_max: max cloud cover (%) applied in searches. If set, overrides
+                any `eo:cloud_cover` filter in `query`.
             search_max_items: max number of STAC items to fetch per window before
                 rslearn's grouping/matching logic runs.
             sort_items_by: optional ordering applied before grouping; useful when
@@ -559,6 +564,12 @@ class Sentinel2(EarthDaily):
             exclude_scl_values: SCL values to treat as invalid (defaults to common
                 cloud/cloud-shadow/cirrus values).
             mask_nodata_value: value to write into cloudy pixels.
+            query: optional STAC API `query` filter passed to searches. If
+                cloud_cover_max/cloud_cover_threshold is set, the effective query also
+                includes an `eo:cloud_cover` upper bound.
+            sort_by: optional STAC item property to sort by before grouping/matching.
+                If set, it takes precedence over sort_items_by.
+            sort_ascending: whether to sort ascending when sort_by is set.
             timeout: timeout for HTTP asset downloads (when ingesting).
             cache_dir: optional directory to cache item metadata by item id.
             max_retries: max retries for EarthDaily API client (search/get item).
@@ -589,9 +600,9 @@ class Sentinel2(EarthDaily):
         super().__init__(
             collection_name=self.COLLECTION_NAME,
             asset_bands=asset_bands,
-            query=None,
-            sort_by=None,
-            sort_ascending=True,
+            query=query,
+            sort_by=sort_by,
+            sort_ascending=sort_ascending,
             timeout=timeout,
             skip_items_missing_assets=True,
             cache_dir=cache_dir,
@@ -655,6 +666,14 @@ class Sentinel2(EarthDaily):
                 if self.cloud_cover_max is not None
                 else self.cloud_cover_threshold
             )
+            effective_query: dict[str, Any] | None = (
+                copy.deepcopy(self.query) if self.query is not None else None
+            )
+            if max_cloud_cover is not None:
+                if effective_query is None:
+                    effective_query = {}
+                effective_query["eo:cloud_cover"] = {"lt": max_cloud_cover}
+
             if helper is not None:
                 from earthdaily.platform.helpers.collections.base import SpatioTemporalGeometry
 
@@ -667,22 +686,37 @@ class Sentinel2(EarthDaily):
                     geometries=[st_geometry],
                     cloud_cover_max=max_cloud_cover,
                     max_items=self.search_max_items,
+                    query=effective_query,
                 )
             else:
                 _, client, _ = self._load_client()
-                query: dict[str, Any] | None = None
-                if max_cloud_cover is not None:
-                    query = {"eo:cloud_cover": {"lt": max_cloud_cover}}
                 result = client.search(
                     collections=[self.collection_name],
                     intersects=shapely.to_geojson(wgs84_geometry.shp),
                     datetime=wgs84_geometry.time_range,
-                    query=query,
+                    query=effective_query,
                     max_items=self.search_max_items,
                 )
                 stac_items = list(result.item_collection())
 
-            if self.sort_items_by == "cloud_cover":
+            if self.sort_by is not None:
+                if self.sort_by == "datetime":
+                    stac_items.sort(
+                        key=lambda item: (
+                            item.datetime is None,
+                            item.datetime,
+                        ),
+                        reverse=not self.sort_ascending,
+                    )
+                else:
+                    stac_items.sort(
+                        key=lambda item: (
+                            item.properties.get(self.sort_by) is None,
+                            item.properties.get(self.sort_by),
+                        ),
+                        reverse=not self.sort_ascending,
+                    )
+            elif self.sort_items_by == "cloud_cover":
                 stac_items.sort(
                     key=lambda item: (
                         item.properties.get("eo:cloud_cover") is None,

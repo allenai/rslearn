@@ -821,6 +821,7 @@ Only the keys documented below are supported in `init_args`; unknown keys will r
   // Example: ["red", "green", "blue", "nir", "swir16", "swir22"]
   "assets": null,
   // Optional: maximum cloud cover (%) to filter items at search time.
+  // If set, it overrides any `eo:cloud_cover` filter in `query`.
   "cloud_cover_max": null,
   // Optional: default cloud cover threshold (%) to apply if cloud_cover_max is not set.
   "cloud_cover_threshold": null,
@@ -839,6 +840,16 @@ Only the keys documented below are supported in `init_args`; unknown keys will r
   "exclude_scl_values": null,
   // Nodata value to write into cloudy pixels.
   "mask_nodata_value": 0,
+  // Optional: STAC API `query` filter passed to searches.
+  // Example: {"s2:product_type": {"eq": "S2MSI2A"}}
+  // Note: if cloud_cover_max/cloud_cover_threshold is set, the effective query also
+  // includes an `eo:cloud_cover` upper bound.
+  "query": null,
+  // Optional: STAC item property to sort by before grouping/matching (default null).
+  // If set, it takes precedence over sort_items_by.
+  "sort_by": null,
+  // Whether to sort ascending when sort_by is set (default true).
+  "sort_ascending": true,
   // Optional cache directory for cached item metadata.
   "cache_dir": null
 }
