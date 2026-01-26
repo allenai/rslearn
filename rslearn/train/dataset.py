@@ -198,6 +198,56 @@ class DataInput:
         self.resampling = resampling
 
 
+def get_needed_band_sets_and_indexes(
+    layer_config: LayerConfig,
+    needed_bands: list[str],
+    layer_name: str,
+    error_context: str = "",
+) -> list[tuple[Any, list[int], list[int]]]:
+    """Determine which band sets are needed and their index mappings.
+
+    Args:
+        layer_config: the layer configuration containing band_sets.
+        needed_bands: list of band names that are needed.
+        layer_name: the layer name for error messages.
+        error_context: additional context for error messages.
+
+    Returns:
+        A list of tuples (band_set, src_indexes, dst_indexes) where:
+        - band_set: the BandSetConfig
+        - src_indexes: indexes into band_set.bands of the bands that were requested
+        - dst_indexes: corresponding indexes in the needed_bands list
+    """
+    needed_band_indexes = {}
+    for i, band in enumerate(needed_bands):
+        needed_band_indexes[band] = i
+
+    needed_sets_and_indexes = []
+    for band_set in layer_config.band_sets:
+        needed_src_indexes = []
+        needed_dst_indexes = []
+        if band_set.bands is None:
+            continue
+        for i, band in enumerate(band_set.bands):
+            if band not in needed_band_indexes:
+                continue
+            needed_src_indexes.append(i)
+            needed_dst_indexes.append(needed_band_indexes[band])
+            del needed_band_indexes[band]
+        if len(needed_src_indexes) == 0:
+            continue
+        needed_sets_and_indexes.append(
+            (band_set, needed_src_indexes, needed_dst_indexes)
+        )
+
+    if len(needed_band_indexes) > 0:
+        raise ValueError(
+            f"could not get all the needed bands from layer {layer_name}{error_context}"
+        )
+
+    return needed_sets_and_indexes
+
+
 def read_raster_layer_for_data_input(
     window: Window,
     bounds: PixelBounds,
@@ -222,36 +272,16 @@ def read_raster_layer_for_data_input(
     Returns:
         Raster data as a tensor.
     """
-    # See what different sets of bands we need to read to get all the
-    # configured bands.
     needed_bands = data_input.bands
     if needed_bands is None:
         raise ValueError(f"No bands specified for {layer_name}")
-    needed_band_indexes = {}
-    for i, band in enumerate(needed_bands):
-        needed_band_indexes[band] = i
-    needed_sets_and_indexes = []
-    for band_set in layer_config.band_sets:
-        needed_src_indexes = []
-        needed_dst_indexes = []
-        if band_set.bands is None:
-            continue
-        for i, band in enumerate(band_set.bands):
-            if band not in needed_band_indexes:
-                continue
-            needed_src_indexes.append(i)
-            needed_dst_indexes.append(needed_band_indexes[band])
-            del needed_band_indexes[band]
-        if len(needed_src_indexes) == 0:
-            continue
-        needed_sets_and_indexes.append(
-            (band_set, needed_src_indexes, needed_dst_indexes)
-        )
-    if len(needed_band_indexes) > 0:
-        raise ValueError(
-            "could not get all the needed bands from "
-            + f"window {window.name} layer {layer_name} group {group_idx}"
-        )
+
+    needed_sets_and_indexes = get_needed_band_sets_and_indexes(
+        layer_config,
+        needed_bands,
+        layer_name,
+        error_context=f" window {window.name} group {group_idx}",
+    )
 
     # Get the projection and bounds to read under (multiply window resolution # by
     # the specified resolution factor).
@@ -316,35 +346,16 @@ def read_stacked_raster_layer_for_data_input(
     Returns:
         A list of tensors, one per item group, each with shape (C, H, W).
     """
-    # See what different sets of bands we need to read to get all the
-    # configured bands.
     needed_bands = data_input.bands
     if needed_bands is None:
         raise ValueError(f"No bands specified for {layer_name}")
-    needed_band_indexes = {}
-    for i, band in enumerate(needed_bands):
-        needed_band_indexes[band] = i
-    needed_sets_and_indexes = []
-    for band_set in layer_config.band_sets:
-        needed_src_indexes = []
-        needed_dst_indexes = []
-        if band_set.bands is None:
-            continue
-        for i, band in enumerate(band_set.bands):
-            if band not in needed_band_indexes:
-                continue
-            needed_src_indexes.append(i)
-            needed_dst_indexes.append(needed_band_indexes[band])
-            del needed_band_indexes[band]
-        if len(needed_src_indexes) == 0:
-            continue
-        needed_sets_and_indexes.append(
-            (band_set, needed_src_indexes, needed_dst_indexes)
-        )
-    if len(needed_band_indexes) > 0:
-        raise ValueError(
-            f"could not get all the needed bands from window {window.name} layer {layer_name}"
-        )
+
+    needed_sets_and_indexes = get_needed_band_sets_and_indexes(
+        layer_config,
+        needed_bands,
+        layer_name,
+        error_context=f" window {window.name}",
+    )
 
     # Get the projection and bounds to read under.
     final_projection = data_input.resolution_factor.multiply_projection(
@@ -363,9 +374,11 @@ def read_stacked_raster_layer_for_data_input(
         # For stacked data, all groups are stored at group_idx=0
         raster_dir = window.get_raster_dir(layer_name, band_set.bands, group_idx=0)
 
-        stacked_array, num_groups, num_channels = raster_format.decode_stacked(
+        # decode_stacked_raster returns TCHW array
+        stacked_array = raster_format.decode_stacked_raster(
             raster_dir, final_projection, final_bounds, resampling=Resampling.nearest
         )
+        num_groups = stacked_array.shape[0]
 
         # Initialize the output images if not done yet
         if all_images is None:
@@ -381,11 +394,9 @@ def read_stacked_raster_layer_for_data_input(
                 for _ in range(num_groups)
             ]
 
-        # Split the stacked array back into separate groups
+        # Extract each group from the TCHW array
         for group_idx in range(num_groups):
-            start_ch = group_idx * num_channels
-            end_ch = start_ch + num_channels
-            group_array = stacked_array[start_ch:end_ch, :, :]
+            group_array = stacked_array[group_idx, :, :, :]  # shape: (C, H, W)
 
             all_images[group_idx][dst_indexes, :, :] = torch.as_tensor(
                 group_array[src_indexes, :, :].astype(

@@ -103,37 +103,6 @@ class TestLayerConfig:
         with pytest.raises(ValidationError):
             LayerConfig.model_validate({"type": "raster"})
 
-    def test_single_file_materialization_default(self) -> None:
-        """Test that single_file_materialization defaults to False."""
-        layer_config = LayerConfig.model_validate(
-            {
-                "type": "raster",
-                "band_sets": [
-                    {
-                        "dtype": "uint8",
-                        "bands": ["R", "G", "B"],
-                    },
-                ],
-            }
-        )
-        assert layer_config.single_file_materialization is False
-
-    def test_single_file_materialization_enabled(self) -> None:
-        """Test enabling single_file_materialization."""
-        layer_config = LayerConfig.model_validate(
-            {
-                "type": "raster",
-                "band_sets": [
-                    {
-                        "dtype": "uint8",
-                        "bands": ["R", "G", "B"],
-                    },
-                ],
-                "single_file_materialization": True,
-            }
-        )
-        assert layer_config.single_file_materialization is True
-
 
 class TestBackwardsCompatibility:
     """Test backwards compatibility with old dataset config version.

@@ -529,14 +529,14 @@ class RasterMaterializer(Materializer):
                     )
                     composites.append(composite)
 
-                # Write all composites to a single file using encode_stacked.
+                # Stack composites into TCHW array and write to a single file.
                 # We use group_id=0 for the directory since all groups are in one file.
-                raster_format.encode_stacked(
+                stacked_array = np.stack(composites, axis=0)
+                raster_format.encode_stacked_raster(
                     window.get_raster_dir(layer_name, band_cfg.bands, 0),
                     projection,
                     bounds,
-                    composites,
-                    num_channels=len(band_cfg.bands),
+                    stacked_array,
                 )
             else:
                 # Original behavior: write each item group separately.

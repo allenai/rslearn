@@ -182,15 +182,14 @@ class RasterFormat:
         """
         raise NotImplementedError
 
-    def encode_stacked(
+    def encode_stacked_raster(
         self,
         path: UPath,
         projection: Projection,
         bounds: PixelBounds,
-        arrays: list[npt.NDArray[Any]],
-        num_channels: int,
+        array: npt.NDArray[Any],
     ) -> None:
-        """Encodes multiple raster arrays stacked into a single file.
+        """Encodes a stacked raster array into a single file.
 
         This is used for single-file materialization where all item groups in a layer
         are written to one file rather than separate files per item group.
@@ -199,20 +198,20 @@ class RasterFormat:
             path: the directory to write to
             projection: the projection of the raster data
             bounds: the bounds of the raster data in the projection
-            arrays: list of raster arrays, one per item group, each with shape CxHxW
-            num_channels: the number of channels per item group
+            array: the raster data with shape (T, C, H, W) where T is the number of
+                item groups and C is the number of channels per group
         """
         raise NotImplementedError(
-            f"{self.__class__.__name__} does not support stacked encoding"
+            f"{self.__class__.__name__} does not support stacked raster encoding"
         )
 
-    def decode_stacked(
+    def decode_stacked_raster(
         self,
         path: UPath,
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> tuple[npt.NDArray[Any], int, int]:
+    ) -> npt.NDArray[Any]:
         """Decodes stacked raster data.
 
         This is used for single-file materialization where all item groups in a layer
@@ -225,12 +224,11 @@ class RasterFormat:
             resampling: resampling method to use in case resampling is needed.
 
         Returns:
-            a tuple (array, num_groups, num_channels) where array has shape
-            (num_groups*num_channels, H, W), num_groups is the number of item groups,
-            and num_channels is the number of channels per group.
+            the raster data with shape (T, C, H, W) where T is the number of item
+            groups and C is the number of channels per group
         """
         raise NotImplementedError(
-            f"{self.__class__.__name__} does not support stacked decoding"
+            f"{self.__class__.__name__} does not support stacked raster decoding"
         )
 
     @staticmethod
@@ -648,33 +646,32 @@ class GeotiffRasterFormat(RasterFormat):
     stacked_fname = "stacked.tif"
     stacked_metadata_fname = "stacked_metadata.json"
 
-    def encode_stacked(
+    def encode_stacked_raster(
         self,
         path: UPath,
         projection: Projection,
         bounds: PixelBounds,
-        arrays: list[npt.NDArray[Any]],
-        num_channels: int,
+        array: npt.NDArray[Any],
     ) -> None:
-        """Encodes multiple raster arrays stacked into a single GeoTIFF.
+        """Encodes a stacked raster array into a single GeoTIFF.
 
-        The arrays are concatenated along the channel dimension to create a
-        (T*C)xHxW GeoTIFF where T is the number of item groups and C is the number
-        of channels per group. Metadata about the stacking is stored in a separate
-        JSON file.
+        The TCHW array is flattened to (T*C)xHxW for storage in the GeoTIFF.
+        Metadata about the stacking dimensions is stored in a separate JSON file.
 
         Args:
             path: the directory to write to
             projection: the projection of the raster data
             bounds: the bounds of the raster data in the projection
-            arrays: list of raster arrays, one per item group, each with shape CxHxW
-            num_channels: the number of channels per item group
+            array: the raster data with shape (T, C, H, W) where T is the number of
+                item groups and C is the number of channels per group
         """
-        if len(arrays) == 0:
-            raise ValueError("arrays list cannot be empty")
+        if array.ndim != 4:
+            raise ValueError(f"Expected 4D array (T, C, H, W), got shape {array.shape}")
 
-        # Stack all arrays along the channel dimension
-        stacked_array = np.concatenate(arrays, axis=0)
+        num_groups, num_channels, height, width = array.shape
+
+        # Flatten TCHW to (T*C)HW for storage
+        flattened_array = array.reshape(num_groups * num_channels, height, width)
 
         # Write the stacked GeoTIFF
         crs = projection.crs
@@ -689,17 +686,17 @@ class GeotiffRasterFormat(RasterFormat):
         profile = {
             "driver": "GTiff",
             "compress": "lzw",
-            "width": stacked_array.shape[2],
-            "height": stacked_array.shape[1],
-            "count": stacked_array.shape[0],
-            "dtype": stacked_array.dtype.name,
+            "width": width,
+            "height": height,
+            "count": num_groups * num_channels,
+            "dtype": flattened_array.dtype.name,
             "crs": crs,
             "transform": transform,
             "BIGTIFF": "IF_SAFER",
         }
         if (
-            stacked_array.shape[2] > self.block_size
-            or stacked_array.shape[1] > self.block_size
+            width > self.block_size
+            or height > self.block_size
             or self.always_enable_tiling
         ):
             profile["tiled"] = True
@@ -711,23 +708,23 @@ class GeotiffRasterFormat(RasterFormat):
         path.mkdir(parents=True, exist_ok=True)
         logger.debug(f"Writing stacked geotiff to {path / self.stacked_fname}")
         with open_rasterio_upath_writer(path / self.stacked_fname, **profile) as dst:
-            dst.write(stacked_array)
+            dst.write(flattened_array)
 
-        # Write metadata about the stacking
+        # Write metadata about the stacking dimensions
         metadata = {
-            "num_groups": len(arrays),
+            "num_groups": num_groups,
             "num_channels": num_channels,
         }
         with (path / self.stacked_metadata_fname).open("w") as f:
             json.dump(metadata, f)
 
-    def decode_stacked(
+    def decode_stacked_raster(
         self,
         path: UPath,
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> tuple[npt.NDArray[Any], int, int]:
+    ) -> npt.NDArray[Any]:
         """Decodes stacked raster data from a GeoTIFF.
 
         Args:
@@ -737,9 +734,8 @@ class GeotiffRasterFormat(RasterFormat):
             resampling: resampling method to use in case resampling is needed.
 
         Returns:
-            a tuple (array, num_groups, num_channels) where array has shape
-            (num_groups*num_channels, H, W), num_groups is the number of item groups,
-            and num_channels is the number of channels per group.
+            the raster data with shape (T, C, H, W) where T is the number of item
+            groups and C is the number of channels per group
         """
         # Read the metadata
         with (path / self.stacked_metadata_fname).open() as f:
@@ -758,9 +754,12 @@ class GeotiffRasterFormat(RasterFormat):
                 height=bounds[3] - bounds[1],
                 resampling=resampling,
             ) as vrt:
-                array = vrt.read()
+                flattened_array = vrt.read()
 
-        return (array, num_groups, num_channels)
+        # Reshape from (T*C)HW back to TCHW
+        height = flattened_array.shape[1]
+        width = flattened_array.shape[2]
+        return flattened_array.reshape(num_groups, num_channels, height, width)
 
     @staticmethod
     def from_config(name: str, config: dict[str, Any]) -> "GeotiffRasterFormat":

@@ -492,10 +492,7 @@ class LayerConfig(BaseModel):
     # Single-file materialization option.
     single_file_materialization: bool = Field(
         default=False,
-        description="For raster layers, whether to write all item groups to a single file. "
-        "When enabled, item groups are stacked along the channel dimension and written as "
-        "a single (T*C)xHxW GeoTIFF, where T is the number of item groups and C is the "
-        "number of channels per group. Only supported by GeotiffRasterFormat.",
+        description="For raster layers, whether to write all item groups to a single file.",
     )
 
     # Vector layer options.

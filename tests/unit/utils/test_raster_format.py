@@ -169,29 +169,26 @@ def test_geotiff_read_nodata_val_orig_nodata(tmp_path: pathlib.Path) -> None:
     assert np.all(result[:, 2:4, 2:4] == original_nodata)
 
 
-class TestGeotiffStackedEncoding:
-    """Tests for encode_stacked and decode_stacked methods."""
+class TestGeotiffStackedRasterEncoding:
+    """Tests for encode_stacked_raster and decode_stacked_raster methods."""
 
     PROJECTION = Projection(CRS.from_epsg(3857), 1, -1)
     BOUNDS = (0, 0, 8, 8)
 
-    def test_encode_decode_stacked_basic(self, tmp_path: pathlib.Path) -> None:
-        """Test basic encode/decode of stacked rasters."""
+    def test_encode_decode_stacked_raster_basic(self, tmp_path: pathlib.Path) -> None:
+        """Test basic encode/decode of stacked rasters with TCHW arrays."""
         path = UPath(tmp_path)
         raster_format = GeotiffRasterFormat()
 
-        # Create 3 item groups, each with 2 channels
+        # Create TCHW array: 3 item groups, each with 2 channels
         num_groups = 3
         num_channels = 2
-        arrays = [
-            np.full((num_channels, 8, 8), i + 1, dtype=np.uint8)
-            for i in range(num_groups)
-        ]
+        array = np.zeros((num_groups, num_channels, 8, 8), dtype=np.uint8)
+        for i in range(num_groups):
+            array[i, :, :, :] = i + 1
 
-        # Encode the stacked rasters
-        raster_format.encode_stacked(
-            path, self.PROJECTION, self.BOUNDS, arrays, num_channels
-        )
+        # Encode the stacked raster
+        raster_format.encode_stacked_raster(path, self.PROJECTION, self.BOUNDS, array)
 
         # Verify the metadata file was created
         assert (path / "stacked_metadata.json").exists()
@@ -203,23 +200,19 @@ class TestGeotiffStackedEncoding:
         # Verify the GeoTIFF was created
         assert (path / "stacked.tif").exists()
 
-        # Decode and verify
-        decoded, decoded_num_groups, decoded_num_channels = raster_format.decode_stacked(
+        # Decode and verify - returns TCHW array
+        decoded = raster_format.decode_stacked_raster(
             path, self.PROJECTION, self.BOUNDS
         )
 
-        assert decoded_num_groups == num_groups
-        assert decoded_num_channels == num_channels
-        assert decoded.shape == (num_groups * num_channels, 8, 8)
+        assert decoded.shape == (num_groups, num_channels, 8, 8)
 
         # Verify the values for each group
         for i in range(num_groups):
-            start_ch = i * num_channels
-            end_ch = start_ch + num_channels
             expected_val = i + 1
-            assert np.all(decoded[start_ch:end_ch, :, :] == expected_val)
+            assert np.all(decoded[i, :, :, :] == expected_val)
 
-    def test_encode_decode_stacked_partial_bounds(
+    def test_encode_decode_stacked_raster_partial_bounds(
         self, tmp_path: pathlib.Path
     ) -> None:
         """Test decoding with different bounds than encoded."""
@@ -228,35 +221,36 @@ class TestGeotiffStackedEncoding:
 
         num_groups = 2
         num_channels = 3
-        arrays = [
-            np.arange(num_channels * 8 * 8, dtype=np.uint8).reshape(
+        # Create TCHW array
+        array = np.zeros((num_groups, num_channels, 8, 8), dtype=np.uint8)
+        for i in range(num_groups):
+            array[i, :, :, :] = np.arange(num_channels * 8 * 8).reshape(
                 num_channels, 8, 8
-            )
-            + i * 100
-            for i in range(num_groups)
-        ]
+            ) + i * 100
 
-        raster_format.encode_stacked(
-            path, self.PROJECTION, self.BOUNDS, arrays, num_channels
-        )
+        raster_format.encode_stacked_raster(path, self.PROJECTION, self.BOUNDS, array)
 
         # Decode with smaller bounds
         smaller_bounds = (2, 2, 6, 6)
-        decoded, decoded_num_groups, decoded_num_channels = raster_format.decode_stacked(
+        decoded = raster_format.decode_stacked_raster(
             path, self.PROJECTION, smaller_bounds
         )
 
-        assert decoded_num_groups == num_groups
-        assert decoded_num_channels == num_channels
-        assert decoded.shape == (num_groups * num_channels, 4, 4)
+        assert decoded.shape == (num_groups, num_channels, 4, 4)
 
-    def test_encode_stacked_empty_list_raises(self, tmp_path: pathlib.Path) -> None:
-        """Test that encoding an empty list raises an error."""
+    def test_encode_stacked_raster_wrong_dims_raises(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Test that encoding a non-4D array raises an error."""
         path = UPath(tmp_path)
         raster_format = GeotiffRasterFormat()
 
-        with pytest.raises(ValueError, match="arrays list cannot be empty"):
-            raster_format.encode_stacked(path, self.PROJECTION, self.BOUNDS, [], 2)
+        # 3D array instead of 4D
+        array_3d = np.zeros((2, 8, 8), dtype=np.uint8)
+        with pytest.raises(ValueError, match="Expected 4D array"):
+            raster_format.encode_stacked_raster(
+                path, self.PROJECTION, self.BOUNDS, array_3d
+            )
 
     def test_base_raster_format_stacked_not_implemented(self) -> None:
         """Test that the base RasterFormat class raises NotImplementedError."""
@@ -267,10 +261,10 @@ class TestGeotiffStackedEncoding:
         fmt = DummyFormat()
         projection = Projection(CRS.from_epsg(3857), 1, -1)
         bounds = (0, 0, 8, 8)
-        arrays = [np.zeros((2, 8, 8), dtype=np.uint8)]
+        array = np.zeros((2, 3, 8, 8), dtype=np.uint8)
 
         with pytest.raises(NotImplementedError, match="does not support stacked"):
-            fmt.encode_stacked(UPath("/tmp/test"), projection, bounds, arrays, 2)
+            fmt.encode_stacked_raster(UPath("/tmp/test"), projection, bounds, array)
 
         with pytest.raises(NotImplementedError, match="does not support stacked"):
-            fmt.decode_stacked(UPath("/tmp/test"), projection, bounds)
+            fmt.decode_stacked_raster(UPath("/tmp/test"), projection, bounds)

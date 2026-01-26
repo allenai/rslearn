@@ -524,3 +524,119 @@ class TestBuildMedianComposite:
         expected[1, 1, 1] = 6
 
         assert np.array_equal(composite, expected)
+
+
+class TestSingleFileMaterialization:
+    """Unit tests for single_file_materialization option in RasterMaterializer."""
+
+    LAYER_NAME = "layer"
+    BANDS = ["band1", "band2"]
+    BOUNDS = (0, 0, 4, 4)
+    PROJECTION = WGS84_PROJECTION
+
+    @pytest.fixture
+    def tile_store(self, tmp_path: pathlib.Path) -> DefaultTileStore:
+        store = DefaultTileStore()
+        store.set_dataset_path(UPath(tmp_path))
+        return store
+
+    def make_item(self, name: str) -> Item:
+        """Create a simple mock item with a name property."""
+        return Item(
+            name=name,
+            geometry=STGeometry(
+                projection=self.PROJECTION,
+                shp=Polygon([(0, 0), (10, 0), (10, 10), (0, 10)]),
+                time_range=None,
+            ),
+        )
+
+    def test_single_file_materialization(
+        self, tile_store: DefaultTileStore, tmp_path: pathlib.Path
+    ) -> None:
+        """Test that single_file_materialization writes all item groups to one file."""
+        from unittest.mock import MagicMock
+
+        from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType
+        from rslearn.dataset.materialize import RasterMaterializer
+        from rslearn.utils.raster_format import GeotiffRasterFormat
+
+        # Create items and write raster data for each
+        items_group1 = [self.make_item("item1")]
+        items_group2 = [self.make_item("item2")]
+        items_group3 = [self.make_item("item3")]
+
+        # Write different values for each item
+        for i, item in enumerate([items_group1[0], items_group2[0], items_group3[0]]):
+            array = np.full((2, 4, 4), i + 1, dtype=np.uint8)
+            tile_store.write_raster(
+                self.LAYER_NAME,
+                item.name,
+                self.BANDS,
+                self.PROJECTION,
+                self.BOUNDS,
+                array,
+            )
+
+        # Create a mock window
+        window = MagicMock()
+        window.projection = self.PROJECTION
+        window.bounds = self.BOUNDS
+
+        # Track the directories where rasters are written
+        written_dirs: list[UPath] = []
+
+        def get_raster_dir(layer_name: str, bands: list[str], group_idx: int) -> UPath:
+            path = UPath(tmp_path) / "window" / f"{layer_name}_{group_idx}"
+            written_dirs.append(path)
+            return path
+
+        window.get_raster_dir = get_raster_dir
+
+        # Create layer config with single_file_materialization enabled
+        layer_cfg = LayerConfig(
+            type=LayerType.RASTER,
+            band_sets=[
+                BandSetConfig(
+                    dtype=DType.UINT8,
+                    bands=self.BANDS,
+                )
+            ],
+            single_file_materialization=True,
+        )
+
+        # Create item groups (3 groups)
+        item_groups = [items_group1, items_group2, items_group3]
+
+        # Materialize
+        materializer = RasterMaterializer()
+        materializer.materialize(
+            TileStoreWithLayer(tile_store, self.LAYER_NAME),
+            window,
+            self.LAYER_NAME,
+            layer_cfg,
+            item_groups,
+        )
+
+        # Verify: with single_file_materialization, only group_idx=0 should be used
+        assert len(written_dirs) == 1
+        assert "0" in str(written_dirs[0])
+
+        # Verify that the stacked file was created
+        raster_format = GeotiffRasterFormat()
+        assert (written_dirs[0] / raster_format.stacked_fname).exists()
+        assert (written_dirs[0] / raster_format.stacked_metadata_fname).exists()
+
+        # Verify the stacked data can be read and has correct shape
+        decoded = raster_format.decode_stacked_raster(
+            written_dirs[0], self.PROJECTION, self.BOUNDS
+        )
+        assert decoded.shape == (3, 2, 4, 4)  # (num_groups, num_channels, H, W)
+
+        # Verify the values for each group
+        for i in range(3):
+            expected_val = i + 1
+            assert np.all(decoded[i, :, :, :] == expected_val)
+
+        # Verify mark_layer_completed was called only for group 0
+        window.mark_layer_completed.assert_called_once_with(self.LAYER_NAME, 0)
