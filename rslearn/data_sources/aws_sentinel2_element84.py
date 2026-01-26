@@ -6,23 +6,18 @@ from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
 
-import affine
 import numpy as np
 import numpy.typing as npt
 import rasterio
 import requests
-from rasterio.enums import Resampling
 from upath import UPath
 
-from rslearn.config import LayerConfig
 from rslearn.data_sources.stac import SourceItem, StacDataSource
-from rslearn.dataset import Window
-from rslearn.dataset.manage import RasterMaterializer
+from rslearn.data_sources.tile_store_data_source import TileStoreDataSource
 from rslearn.log_utils import get_logger
-from rslearn.tile_stores import TileStore, TileStoreWithLayer
-from rslearn.utils import Projection, STGeometry
+from rslearn.tile_stores import TileStoreWithLayer
+from rslearn.utils import STGeometry
 from rslearn.utils.fsspec import join_upath
-from rslearn.utils.geometry import PixelBounds
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 from .data_source import (
@@ -32,7 +27,7 @@ from .data_source import (
 logger = get_logger(__name__)
 
 
-class Sentinel2(StacDataSource, TileStore):
+class Sentinel2(TileStoreDataSource[SourceItem], StacDataSource):
     """A data source for Sentinel-2 L2A imagery on AWS from s3://sentinel-cogs.
 
     The S3 bucket has COGs so this data source supports direct materialization. It also
@@ -97,37 +92,79 @@ class Sentinel2(StacDataSource, TileStore):
             cache_upath.mkdir(parents=True, exist_ok=True)
 
         # Determine which assets we need based on the bands in the layer config.
-        self.asset_bands: dict[str, list[str]]
+        asset_bands: dict[str, list[str]]
         if context.layer_config is not None:
-            self.asset_bands = {}
+            asset_bands = {}
             for asset_key, band_names in self.ASSET_BANDS.items():
                 # See if the bands provided by this asset intersect with the bands in
                 # at least one configured band set.
                 for band_set in context.layer_config.band_sets:
                     if not set(band_set.bands).intersection(set(band_names)):
                         continue
-                    self.asset_bands[asset_key] = band_names
+                    asset_bands[asset_key] = band_names
                     break
         elif assets is not None:
-            self.asset_bands = {
+            asset_bands = {
                 asset_key: self.ASSET_BANDS[asset_key] for asset_key in assets
             }
         else:
-            self.asset_bands = self.ASSET_BANDS
+            asset_bands = dict(self.ASSET_BANDS)
 
-        super().__init__(
+        # Initialize TileStoreDataSource with asset_bands
+        TileStoreDataSource.__init__(self, asset_bands=asset_bands)
+
+        # Initialize StacDataSource
+        StacDataSource.__init__(
+            self,
             endpoint=self.STAC_ENDPOINT,
             collection_name=self.COLLECTION_NAME,
             query=query,
             sort_by=sort_by,
             sort_ascending=sort_ascending,
-            required_assets=list(self.asset_bands.keys()),
+            required_assets=list(asset_bands.keys()),
             cache_dir=cache_upath,
             properties_to_record=[self.HARMONIZE_PROPERTY_NAME],
         )
 
         self.harmonize = harmonize
         self.timeout = timeout
+
+    # --- TileStoreDataSource implementation ---
+
+    def get_asset_url(self, item_name: str, bands: list[str]) -> str:
+        """Get the URL to read the asset for the given item and bands.
+
+        Args:
+            item_name: the name of the item.
+            bands: the list of bands identifying which asset to get.
+
+        Returns:
+            the URL to read the asset from.
+        """
+        asset_key = self._get_asset_by_band(bands)
+        item = self.get_item_by_name(item_name)
+        return item.asset_urls[asset_key]
+
+    def get_read_callback(
+        self, item_name: str, bands: list[str]
+    ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
+        """Return a callback to harmonize Sentinel-2 data if needed.
+
+        Args:
+            item_name: the name of the item being read.
+            bands: the bands being read.
+
+        Returns:
+            A callback function for harmonization, or None if not needed.
+        """
+        # Visual bands do not need harmonization.
+        if not self.harmonize or bands == self.ASSET_BANDS["visual"]:
+            return None
+
+        item = self.get_item_by_name(item_name)
+        return self._get_harmonize_callback(item)
+
+    # --- Harmonization helpers ---
 
     def _get_harmonize_callback(
         self, item: SourceItem
@@ -223,152 +260,3 @@ class Sentinel2(StacDataSource, TileStore):
                     item.name,
                     asset_key,
                 )
-
-    def is_raster_ready(
-        self, layer_name: str, item_name: str, bands: list[str]
-    ) -> bool:
-        """Checks if this raster has been written to the store.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item.
-            bands: the list of bands identifying which specific raster to read.
-
-        Returns:
-            whether there is a raster in the store matching the source, item, and
-                bands.
-        """
-        # Always ready since we wrap accesses to underlying API.
-        return True
-
-    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
-        """Get the sets of bands that have been stored for the specified item.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item.
-
-        Returns:
-            a list of lists of bands that are in the tile store (with one raster
-                stored corresponding to each inner list). If no rasters are ready for
-                this item, returns empty list.
-        """
-        return list(self.asset_bands.values())
-
-    def _get_asset_by_band(self, bands: list[str]) -> str:
-        """Get the name of the asset based on the band names."""
-        for asset_key, asset_bands in self.asset_bands.items():
-            if bands == asset_bands:
-                return asset_key
-
-        raise ValueError(f"no known asset with bands {bands}")
-
-    def get_raster_bounds(
-        self, layer_name: str, item_name: str, bands: list[str], projection: Projection
-    ) -> PixelBounds:
-        """Get the bounds of the raster in the specified projection.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item to check.
-            bands: the list of bands identifying which specific raster to read. These
-                bands must match the bands of a stored raster.
-            projection: the projection to get the raster's bounds in.
-
-        Returns:
-            the bounds of the raster in the projection.
-        """
-        item = self.get_item_by_name(item_name)
-        geom = item.geometry.to_projection(projection)
-        return (
-            int(geom.shp.bounds[0]),
-            int(geom.shp.bounds[1]),
-            int(geom.shp.bounds[2]),
-            int(geom.shp.bounds[3]),
-        )
-
-    def read_raster(
-        self,
-        layer_name: str,
-        item_name: str,
-        bands: list[str],
-        projection: Projection,
-        bounds: PixelBounds,
-        resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
-        """Read raster data from the store.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item to read.
-            bands: the list of bands identifying which specific raster to read. These
-                bands must match the bands of a stored raster.
-            projection: the projection to read in.
-            bounds: the bounds to read.
-            resampling: the resampling method to use in case reprojection is needed.
-
-        Returns:
-            the raster data
-        """
-        asset_key = self._get_asset_by_band(bands)
-        item = self.get_item_by_name(item_name)
-        asset_url = item.asset_urls[asset_key]
-
-        # Construct the transform to use for the warped dataset.
-        wanted_transform = affine.Affine(
-            projection.x_resolution,
-            0,
-            bounds[0] * projection.x_resolution,
-            0,
-            projection.y_resolution,
-            bounds[1] * projection.y_resolution,
-        )
-
-        # Read from the raster under the specified projection/bounds.
-        with rasterio.open(asset_url) as src:
-            with rasterio.vrt.WarpedVRT(
-                src,
-                crs=projection.crs,
-                transform=wanted_transform,
-                width=bounds[2] - bounds[0],
-                height=bounds[3] - bounds[1],
-                resampling=resampling,
-            ) as vrt:
-                raw_data = vrt.read()
-
-        # We can return the data now if harmonization is not needed.
-        if not self.harmonize or bands == self.ASSET_BANDS["visual"]:
-            return raw_data
-
-        # Otherwise we apply the harmonize_callback.
-        item = self.get_item_by_name(item_name)
-        harmonize_callback = self._get_harmonize_callback(item)
-
-        if harmonize_callback is None:
-            return raw_data
-
-        array = harmonize_callback(raw_data)
-        return array
-
-    def materialize(
-        self,
-        window: Window,
-        item_groups: list[list[SourceItem]],
-        layer_name: str,
-        layer_cfg: LayerConfig,
-    ) -> None:
-        """Materialize data for the window.
-
-        Args:
-            window: the window to materialize
-            item_groups: the items from get_items
-            layer_name: the name of this layer
-            layer_cfg: the config of this layer
-        """
-        RasterMaterializer().materialize(
-            TileStoreWithLayer(self, layer_name),
-            window,
-            layer_name,
-            layer_cfg,
-            item_groups,
-        )
