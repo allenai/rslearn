@@ -570,6 +570,12 @@ Here is a summary of all of the options available in the SplitConfig.
       # layers containing targets are skipped. For training, validation, and testing,
       # targets are needed so it should be false.
       skip_targets: false
+      # Resume partial inference: if set, and skip_if_output_layer_exists is true,
+      # windows that already have this layer completed will be skipped. This helps
+      # rslearn predict resume without reprocessing completed windows.
+      output_layer: null
+      # When true and output_layer is set, skip windows where the output layer exists.
+      skip_if_output_layer_exists: false
 ```
 
 The transforms will adjust the initial input and target dicts that come from reading

@@ -445,6 +445,8 @@ class SplitConfig:
         overlap_ratio: float | None = None,
         load_all_patches: bool | None = None,
         skip_targets: bool | None = None,
+        output_layer: str | None = None,
+        skip_if_output_layer_exists: bool | None = None,
     ) -> None:
         """Initialize a new SplitConfig.
 
@@ -467,6 +469,12 @@ class SplitConfig:
                 for each window, read all patches as separate sequential items in the
                 dataset.
             skip_targets: whether to skip targets when loading inputs
+            output_layer: optional name of the output layer used during prediction.
+                If set along with skip_if_output_layer_exists, windows that already
+                have this layer completed will be skipped (useful for resuming
+                partial inference runs).
+            skip_if_output_layer_exists: if True and output_layer is set, skip
+                windows where the specified output layer is already completed.
         """
         self.groups = groups
         self.names = names
@@ -477,6 +485,8 @@ class SplitConfig:
         self.sampler = sampler
         self.patch_size = patch_size
         self.skip_targets = skip_targets
+        self.output_layer = output_layer
+        self.skip_if_output_layer_exists = skip_if_output_layer_exists
 
         # Note that load_all_patches are handled by the RslearnDataModule rather than
         # the ModelDataset.
@@ -504,6 +514,8 @@ class SplitConfig:
             overlap_ratio=self.overlap_ratio,
             load_all_patches=self.load_all_patches,
             skip_targets=self.skip_targets,
+            output_layer=self.output_layer,
+            skip_if_output_layer_exists=self.skip_if_output_layer_exists,
         )
         if other.groups:
             result.groups = other.groups
@@ -527,6 +539,10 @@ class SplitConfig:
             result.load_all_patches = other.load_all_patches
         if other.skip_targets is not None:
             result.skip_targets = other.skip_targets
+        if other.output_layer is not None:
+            result.output_layer = other.output_layer
+        if other.skip_if_output_layer_exists is not None:
+            result.skip_if_output_layer_exists = other.skip_if_output_layer_exists
         return result
 
     def get_patch_size(self) -> tuple[int, int] | None:
@@ -549,8 +565,21 @@ class SplitConfig:
         """Returns whether skip_targets is enabled (default False)."""
         return True if self.skip_targets is True else False
 
+    def get_output_layer(self) -> str | None:
+        """Returns output layer to use for resume checks (default None)."""
+        return self.output_layer
 
-def check_window(inputs: dict[str, DataInput], window: Window) -> Window | None:
+    def get_skip_if_output_layer_exists(self) -> bool:
+        """Returns whether to skip windows with completed output layer (default False)."""
+        return True if self.skip_if_output_layer_exists is True else False
+
+
+def check_window(
+    inputs: dict[str, DataInput],
+    window: Window,
+    output_layer: str | None = None,
+    skip_if_output_layer_exists: bool = False,
+) -> Window | None:
     """Verify that the window has the required layers based on the specified inputs.
 
     Args:
@@ -558,7 +587,8 @@ def check_window(inputs: dict[str, DataInput], window: Window) -> Window | None:
         window: the window to check.
 
     Returns:
-        the window if it has all the required inputs or None otherwise
+        the window if it has all the required inputs and does not need to be skipped
+        due to an existing output layer; or None otherwise
     """
 
     # Make sure window has all the needed layers.
@@ -585,6 +615,16 @@ def check_window(inputs: dict[str, DataInput], window: Window) -> Window | None:
                 "Skipping window %s since check for layers %s failed",
                 window.name,
                 data_input.layers,
+            )
+            return None
+
+    # Optionally skip windows that already have the specified output layer completed.
+    if skip_if_output_layer_exists and output_layer:
+        if window.is_layer_completed(output_layer):
+            logger.debug(
+                "Skipping window %s since output layer '%s' already exists",
+                window.name,
+                output_layer,
             )
             return None
 
@@ -648,7 +688,15 @@ class ModelDataset(torch.utils.data.Dataset):
         new_windows = []
         if workers == 0:
             for window in windows:
-                if check_window(self.inputs, window) is None:
+                if (
+                    check_window(
+                        self.inputs,
+                        window,
+                        output_layer=self.split_config.get_output_layer(),
+                        skip_if_output_layer_exists=self.split_config.get_skip_if_output_layer_exists(),
+                    )
+                    is None
+                ):
                     continue
                 new_windows.append(window)
         else:
@@ -660,6 +708,8 @@ class ModelDataset(torch.utils.data.Dataset):
                     dict(
                         inputs=self.inputs,
                         window=window,
+                        output_layer=self.split_config.get_output_layer(),
+                        skip_if_output_layer_exists=self.split_config.get_skip_if_output_layer_exists(),
                     )
                     for window in windows
                 ],
