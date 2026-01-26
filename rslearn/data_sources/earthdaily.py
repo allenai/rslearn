@@ -219,17 +219,16 @@ class EarthDaily(TileStoreDataSource[EarthDailyItem]):
 
     # --- TileStoreDataSource implementation ---
 
-    def get_asset_url(self, item_name: str, bands: list[str]) -> str:
-        """Get the URL to read the asset for the given item and bands.
+    def get_asset_url(self, item_name: str, asset_key: str) -> str:
+        """Get the URL to read the asset for the given item and asset key.
 
         Args:
             item_name: the name of the item.
-            bands: the list of bands identifying which asset to get.
+            asset_key: the key identifying which asset to get.
 
         Returns:
             the URL to read the asset from.
         """
-        asset_key = self._get_asset_by_band(bands)
         item = self.get_item_by_name(item_name)
         return item.asset_urls[asset_key]
 

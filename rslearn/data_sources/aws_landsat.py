@@ -342,27 +342,24 @@ class LandsatOliTirs(TileStoreDataSource[LandsatOliTirsItem]):
 
     # --- TileStoreDataSource implementation ---
 
-    def get_asset_url(self, item_name: str, bands: list[str]) -> str:
-        """Get the presigned URL to read the asset for the given item and bands.
+    def get_asset_url(self, item_name: str, asset_key: str) -> str:
+        """Get the presigned URL to read the asset for the given item and asset key.
 
         Args:
             item_name: the name of the item.
-            bands: the list of bands identifying which asset to get.
+            asset_key: the key identifying which asset to get (the band name).
 
         Returns:
             the presigned URL to read the asset from.
         """
-        # Landsat assets have a single band per asset.
-        assert len(bands) == 1
-        band = bands[0]
-
         # Get the item since it has the blob path.
         item = self.get_item_by_name(item_name)
 
         # Create pre-signed URL for rasterio access.
         # We do this because accessing via URL is much faster since rasterio can use
         # the URL directly.
-        blob_key = item.blob_path + f"{band}.TIF"
+        # For Landsat, the asset_key is the band name (e.g., "B1", "B2", etc.).
+        blob_key = item.blob_path + f"{asset_key}.TIF"
         return self.client.generate_presigned_url(
             "get_object",
             Params={

@@ -42,13 +42,11 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
 
         Args:
             asset_bands: mapping from asset key to the list of band names in that asset.
-                The asset key is used by get_asset_url to look up the URL for that asset
-                in the item (e.g., item.asset_urls[asset_key]).
         """
         self.asset_bands = asset_bands
 
-    def _get_asset_by_band(self, bands: list[str]) -> str:
-        """Get the name of the asset based on the band names.
+    def _get_asset_key_by_bands(self, bands: list[str]) -> str:
+        """Get the asset key based on the band names.
 
         Args:
             bands: list of band names to look up.
@@ -67,12 +65,12 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
     # --- Abstract methods that subclasses must implement ---
 
     @abstractmethod
-    def get_asset_url(self, item_name: str, bands: list[str]) -> str:
-        """Get the URL to read the asset for the given item and bands.
+    def get_asset_url(self, item_name: str, asset_key: str) -> str:
+        """Get the URL to read the asset for the given item and asset key.
 
         Args:
             item_name: the name of the item.
-            bands: the list of bands identifying which asset to get.
+            asset_key: the key identifying which asset to get.
 
         Returns:
             the URL to read the asset from (must be readable by rasterio).
@@ -233,8 +231,11 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
         Returns:
             the raster data as a numpy array.
         """
+        # Get the asset key for the requested bands
+        asset_key = self._get_asset_key_by_bands(bands)
+
         # Get the asset URL from the subclass
-        asset_url = self.get_asset_url(item_name, bands)
+        asset_url = self.get_asset_url(item_name, asset_key)
 
         # Read the raster data
         raw_data = self._read_raster_from_url(asset_url, projection, bounds, resampling)
