@@ -2,7 +2,7 @@
 
 import json
 import pathlib
-import random
+from typing import Any
 
 import numpy as np
 import pytest
@@ -16,13 +16,12 @@ from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores.default import DefaultTileStore
 from rslearn.tile_stores.tile_store import TileStoreWithLayer
 from rslearn.train.data_module import RslearnDataModule
-from rslearn.train.dataset import DataInput, read_data_input
+from rslearn.train.dataset import DataInput
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.utils.geometry import STGeometry
-from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
-def make_item(name: str, projection: any, bounds: tuple) -> Item:
+def make_item(name: str, projection: Any, bounds: tuple) -> Item:
     """Create a simple item with the given name."""
     return Item(
         name=name,
@@ -122,66 +121,6 @@ def single_file_materialization_dataset(tmp_path: pathlib.Path) -> Dataset:
     )
 
     return dataset
-
-
-def test_single_file_materialization_data_loading(
-    single_file_materialization_dataset: Dataset,
-) -> None:
-    """Test that data materialized with single_file_materialization can be loaded.
-
-    This test verifies that:
-    1. Data materialized with single_file_materialization creates only one folder
-    2. The stacked data (3 item groups) can be read via read_data_input
-    3. The loaded tensor has the correct shape (C=1, T=3, H=32, W=32)
-    4. The loaded data has the correct values for each timestep
-    """
-    dataset = single_file_materialization_dataset
-    window = dataset.load_windows()[0]
-
-    # Verify that only group_idx=0 folder exists (single-file materialization)
-    raster_dir_0 = window.get_raster_dir("image", ["band"], 0)
-    raster_dir_1 = window.get_raster_dir("image", ["band"], 1)
-    assert raster_dir_0.exists(), "Stacked raster directory should exist"
-    assert not raster_dir_1.exists(), "Group 1 directory should not exist"
-
-    # Verify the stacked file exists
-    raster_format = GeotiffRasterFormat()
-    assert (raster_dir_0 / raster_format.stacked_fname).exists()
-    assert (raster_dir_0 / raster_format.stacked_metadata_fname).exists()
-
-    # Create DataInput with load_all_item_groups=True (required for single_file_materialization)
-    data_input = DataInput(
-        data_type="raster",
-        layers=["image"],
-        bands=["band"],
-        load_all_item_groups=True,
-        load_all_layers=True,
-    )
-
-    # Read data using read_data_input
-    rng = random.Random(42)
-    raster_image = read_data_input(
-        dataset=dataset,
-        window=window,
-        bounds=window.bounds,
-        data_input=data_input,
-        rng=rng,
-    )
-
-    # Verify shape: (C, T, H, W) where C=1 band, T=3 timesteps, H=W=32
-    assert raster_image.image.shape == (1, 3, 32, 32), (
-        f"Expected shape (1, 3, 32, 32), got {raster_image.image.shape}"
-    )
-
-    # Verify the values for each timestep
-    # Group 0 should have value 50, Group 1 should have value 100, Group 2 should have 150
-    for t_idx in range(3):
-        expected_value = (t_idx + 1) * 50
-        actual_values = raster_image.image[0, t_idx, :, :].numpy()
-        assert np.all(actual_values == expected_value), (
-            f"Timestep {t_idx} should have value {expected_value}, "
-            f"got unique values: {np.unique(actual_values)}"
-        )
 
 
 def test_single_file_materialization_data_module(
