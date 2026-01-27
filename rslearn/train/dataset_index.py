@@ -14,6 +14,9 @@ logger = get_logger(__name__)
 # Increment this when the index format changes to force rebuild
 INDEX_VERSION = 1
 
+# Directory name for storing index files
+INDEX_DIR_NAME = ".rslearn_dataset_index"
+
 
 class DatasetIndex:
     """Manages indexed window lists for faster ModelDataset initialization.
@@ -29,7 +32,7 @@ class DatasetIndex:
             dataset_path: Path to the dataset directory.
         """
         self.dataset_path = dataset_path
-        self.index_dir = dataset_path / ".rslearn_dataset_index"
+        self.index_dir = dataset_path / INDEX_DIR_NAME
 
     def get_index_key(
         self,

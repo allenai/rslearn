@@ -5,7 +5,7 @@ from pathlib import Path
 
 from upath import UPath
 
-from rslearn.train.dataset_index import DatasetIndex
+from rslearn.train.dataset_index import INDEX_DIR_NAME, DatasetIndex
 
 
 class MockDataInput:
@@ -185,7 +185,7 @@ class TestDatasetIndex:
         index_key = "test_index_key"
 
         # Create index directory and write invalid JSON
-        index_dir = tmp_path / ".rslearn_dataset_index"
+        index_dir = tmp_path / INDEX_DIR_NAME
         index_dir.mkdir(parents=True, exist_ok=True)
         index_file = index_dir / f"{index_key}.json"
         with index_file.open("w") as f:
@@ -204,8 +204,8 @@ class TestDatasetIndex:
         index.save_windows(index_key, windows)
 
         # Check that final file exists and temp file doesn't
-        index_file = tmp_path / ".rslearn_dataset_index" / f"{index_key}.json"
-        tmp_file = tmp_path / ".rslearn_dataset_index" / f"{index_key}.tmp"
+        index_file = tmp_path / INDEX_DIR_NAME / f"{index_key}.json"
+        tmp_file = tmp_path / INDEX_DIR_NAME / f"{index_key}.tmp"
 
         assert index_file.exists()
         assert not tmp_file.exists()
@@ -226,7 +226,7 @@ class TestDatasetIndex:
         index_key = "test_index_key"
 
         # Create index with wrong version
-        index_dir = tmp_path / ".rslearn_dataset_index"
+        index_dir = tmp_path / INDEX_DIR_NAME
         index_dir.mkdir(parents=True, exist_ok=True)
         index_file = index_dir / f"{index_key}.json"
         with index_file.open("w") as f:

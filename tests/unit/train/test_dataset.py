@@ -22,7 +22,7 @@ from rslearn.train.dataset import (
     SplitConfig,
     read_layer_time_range,
 )
-from rslearn.train.dataset_index import DatasetIndex
+from rslearn.train.dataset_index import INDEX_DIR_NAME, DatasetIndex
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.transforms.concatenate import Concatenate
 from rslearn.utils.geometry import STGeometry
@@ -391,5 +391,5 @@ def test_model_dataset_without_index(
     assert len(dataset) == 1
 
     # Verify no index directory was created
-    index_dir = basic_classification_dataset.path / ".rslearn_dataset_index"
+    index_dir = basic_classification_dataset.path / INDEX_DIR_NAME
     assert not index_dir.exists()

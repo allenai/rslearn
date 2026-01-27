@@ -315,7 +315,6 @@ class MultiDatasetDataModule(L.LightningDataModule):
         per_dataset_patch_limit: int | None = None,
         steps_per_dataset: int | None = None,
         disabled_datasets: list[str] | None = None,
-        index_mode: IndexMode = IndexMode.OFF,
     ) -> None:
         """Initialize a new MultiDatasetDataModule.
 
@@ -333,7 +332,6 @@ class MultiDatasetDataModule(L.LightningDataModule):
             steps_per_dataset: the number of steps to sample from each dataset in a row (requires that
                 sample_mode is "reptile")
             disabled_datasets: list of datasets to disable (default: None = no disabled datasets)
-            index_mode: controls dataset index caching behavior (default: IndexMode.OFF)
         """
         super().__init__()
         self.data_modules = data_modules
@@ -344,7 +342,6 @@ class MultiDatasetDataModule(L.LightningDataModule):
         self.per_dataset_patch_limit = per_dataset_patch_limit
         self.steps_per_dataset = steps_per_dataset
         self.disabled_datasets = disabled_datasets or []
-        self.index_mode = index_mode
 
         for dataset in self.disabled_datasets:
             if dataset in self.data_modules:
@@ -352,10 +349,6 @@ class MultiDatasetDataModule(L.LightningDataModule):
                 logger.info(f"Skipping disabled dataset {dataset}")
             else:
                 logger.info(f"Could not find dataset {dataset} to skip")
-
-        # Pass index mode to child data modules
-        for dm in self.data_modules.values():
-            dm.index_mode = index_mode
 
     def setup(self, stage: str | None = None) -> None:
         """Set up the datasets for the given stage. Also assign dataset-specific names.
