@@ -30,8 +30,8 @@ class ConfusionMatrixOutput(NonScalarMetricOutput):
     """Confusion matrix metric output.
 
     Args:
-        probs: accumulated probability predictions (N, num_classes)
-        labels: accumulated ground truth labels (N,)
+        probs: probability predictions (N, num_classes)
+        labels: ground truth labels (N,)
         class_names: optional list of class names for axis labels
     """
 
@@ -54,7 +54,6 @@ class ConfusionMatrixOutput(NonScalarMetricOutput):
         else:
             class_names = self.class_names
 
-        # Log the interactive confusion matrix with probabilities
         wandb.log(
             {
                 name: wandb.plot.confusion_matrix(

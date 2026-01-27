@@ -434,21 +434,21 @@ class ClassificationConfusionMatrixMetric(Metric):
         if len(preds) == 0:
             return
 
-        # Accumulate probabilities and labels
         self.all_probs.append(preds)
         self.all_labels.append(labels)
 
     def compute(self) -> "ConfusionMatrixOutput":
-        """Returns the accumulated probs/labels wrapped in ConfusionMatrixOutput."""
-        from rslearn.train.metrics import ConfusionMatrixOutput
-
-        if len(self.all_probs) == 0:
-            # Return empty tensors if no data
-            probs = torch.zeros((0, self.num_classes))
-            labels = torch.zeros((0,), dtype=torch.int64)
+        """Returns the probs/labels wrapped in ConfusionMatrixOutput."""
+        if isinstance(self.all_probs, list):
+            if len(self.all_probs) == 0:
+                probs = torch.zeros((0, self.num_classes))
+                labels = torch.zeros((0,), dtype=torch.int64)
+            else:
+                probs = torch.cat(self.all_probs, dim=0)
+                labels = torch.cat(self.all_labels, dim=0)
         else:
-            probs = torch.cat(self.all_probs, dim=0)
-            labels = torch.cat(self.all_labels, dim=0)
+            probs = self.all_probs
+            labels = self.all_labels
 
         return ConfusionMatrixOutput(
             probs=probs,
