@@ -259,10 +259,17 @@ run_name: ${RUN_NAME}
 management_dir: ${MANAGEMENT_DIR}
 ```
 
+Save this as `model.yaml`.
+
+Due to license incompatibility, the `olmoearth_pretrain` package required for this
+example is not included as a dependency and must be installed explicitly:
+
+```bash
+pip install olmoearth_pretrain
+```
+
 See [TasksAndModels](../TasksAndModels.md) for more details about the SimpleTimeSeries
 and OlmoEarth model components.
-
-Save this as `model.yaml`.
 
 ## Implement the ReverseImageOrder Transform
 
