@@ -499,6 +499,9 @@ class RasterMaterializer(Materializer):
             layer_cfg: the configuration of the layer to materialize
             item_groups: the items associated with this window and layer
         """
+        raster_storage = layer_cfg.instantiate_raster_storage()
+        window_root = window.window_root
+
         for band_cfg in layer_cfg.band_sets:
             # band_cfg could specify zoom_offset and maybe other parameters that affect
             # projection/bounds, so use the corrected projection/bounds.
@@ -513,23 +516,33 @@ class RasterMaterializer(Materializer):
 
             raster_format = band_cfg.instantiate_raster_format()
 
+            # Build all rasters (across item groups)
+            raster_list: list[npt.NDArray[Any]] = []
             for group_id, group in enumerate(item_groups):
-                composite = build_composite(
-                    group=group,
-                    compositing_method=layer_cfg.compositing_method,
-                    tile_store=tile_store,
-                    layer_cfg=layer_cfg,
-                    band_cfg=band_cfg,
-                    projection=projection,
-                    bounds=bounds,
-                    remapper=remapper,
+                raster_list.append(
+                    build_composite(
+                        group=group,
+                        compositing_method=layer_cfg.compositing_method,
+                        tile_store=tile_store,
+                        layer_cfg=layer_cfg,
+                        band_cfg=band_cfg,
+                        projection=projection,
+                        bounds=bounds,
+                        remapper=remapper,
+                    )
                 )
-                raster_format.encode_raster(
-                    window.get_raster_dir(layer_name, band_cfg.bands, group_id),
-                    projection,
-                    bounds,
-                    composite,
-                )
+
+            # Stack into TCHW array and write via RasterStorage
+            rasters = np.stack(raster_list, axis=0)
+            raster_storage.write_all_rasters(
+                window_root,
+                layer_name,
+                band_cfg.bands,
+                raster_format,
+                projection,
+                bounds,
+                rasters,
+            )
 
         for group_id in range(len(item_groups)):
             window.mark_layer_completed(layer_name, group_id)
@@ -567,7 +580,7 @@ class VectorMaterializer(Materializer):
                 features.extend(cur_features)
 
             vector_format.encode_vector(
-                window.get_layer_dir(layer_name, group_id), features
+                window.get_vector_layer_dir(layer_name, group_id), features
             )
 
         for group_id in range(len(item_groups)):

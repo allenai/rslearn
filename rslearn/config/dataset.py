@@ -31,6 +31,7 @@ from rslearn.utils.vector_format import VectorFormat
 
 if TYPE_CHECKING:
     from rslearn.data_sources.data_source import DataSource
+    from rslearn.dataset.raster_storage import RasterDataStorage
     from rslearn.dataset.storage.storage import WindowStorageFactory
 
 logger = get_logger("__name__")
@@ -461,6 +462,26 @@ class CompositingMethod(StrEnum):
     """Select per-pixel median value of corresponding items of a window"""
 
 
+class RasterStorageConfig(BaseModel):
+    """Configuration for how raster data is stored.
+
+    This controls whether raster data is stored as one file per item group
+    (PerItemGroupStorage, the default) or all item groups in a single file
+    per layer (PerLayerStorage).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    class_path: str = Field(
+        default="rslearn.dataset.raster_storage.PerItemGroupStorage",
+        description="Class path for the RasterDataStorage implementation.",
+    )
+    init_args: dict[str, Any] = Field(
+        default_factory=lambda: {},
+        description="jsonargparse init args for the RasterDataStorage.",
+    )
+
+
 class LayerConfig(BaseModel):
     """Configuration of a layer in a dataset."""
 
@@ -487,6 +508,10 @@ class LayerConfig(BaseModel):
     compositing_method: CompositingMethod = Field(
         default=CompositingMethod.FIRST_VALID,
         description="For raster layers, how to compute pixel values in the composite of each window's items.",
+    )
+    raster_storage: RasterStorageConfig = Field(
+        default_factory=lambda: RasterStorageConfig(),
+        description="For raster layers, how to store materialized raster data.",
     )
 
     # Vector layer options.
@@ -585,6 +610,29 @@ class LayerConfig(BaseModel):
         cfg = parser.parse_object({"vector_format": self.vector_format})
         vector_format = parser.instantiate_classes(cfg).vector_format
         return vector_format
+
+    def instantiate_raster_storage(self) -> "RasterDataStorage":
+        """Instantiate the raster storage specified by this config.
+
+        Returns:
+            the RasterDataStorage instance.
+        """
+        from rslearn.dataset.raster_storage import RasterDataStorage
+        from rslearn.utils.jsonargparse import init_jsonargparse
+
+        init_jsonargparse()
+        parser = jsonargparse.ArgumentParser()
+        parser.add_argument("--raster_storage", type=RasterDataStorage)
+        cfg = parser.parse_object(
+            {
+                "raster_storage": dict(
+                    class_path=self.raster_storage.class_path,
+                    init_args=self.raster_storage.init_args,
+                )
+            }
+        )
+        raster_storage = parser.instantiate_classes(cfg).raster_storage
+        return raster_storage
 
 
 class StorageConfig(BaseModel):

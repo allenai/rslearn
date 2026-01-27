@@ -393,9 +393,6 @@ class RslearnWriter(BasePredictionWriter):
         merged_output = self.merger.merge(window, pending_output, self.layer_config)
 
         if self.layer_config.type == LayerType.RASTER:
-            raster_dir = window.get_raster_dir(
-                self.output_layer, self.layer_config.band_sets[0].bands
-            )
             assert isinstance(self.format, RasterFormat)
 
             # In case the merged_output is at a different resolution than the window,
@@ -403,10 +400,22 @@ class RslearnWriter(BasePredictionWriter):
             projection, bounds = adjust_projection_and_bounds_for_array(
                 window.projection, window.bounds, merged_output
             )
-            self.format.encode_raster(raster_dir, projection, bounds, merged_output)
+
+            # Write via the configured RasterStorage
+            raster_storage = self.layer_config.instantiate_raster_storage()
+            raster_storage.write_raster(
+                window_root=window.window_root,
+                layer_name=self.output_layer,
+                bands=self.layer_config.band_sets[0].bands,
+                group_idx=0,
+                raster_format=self.format,
+                projection=projection,
+                bounds=bounds,
+                array=merged_output,
+            )
 
         elif self.layer_config.type == LayerType.VECTOR:
-            layer_dir = window.get_layer_dir(self.output_layer)
+            layer_dir = window.get_vector_layer_dir(self.output_layer)
             assert isinstance(self.format, VectorFormat)
             self.format.encode_vector(layer_dir, merged_output)
 

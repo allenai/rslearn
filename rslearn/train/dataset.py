@@ -17,6 +17,7 @@ from rasterio.warp import Resampling
 
 import rslearn.train.transforms.transform
 from rslearn.config import (
+    BandSetConfig,
     DType,
     LayerConfig,
 )
@@ -198,6 +199,48 @@ class DataInput:
         self.resampling = resampling
 
 
+def _compute_needed_band_sets(
+    needed_bands: list[str],
+    layer_config: LayerConfig,
+) -> list[tuple[BandSetConfig, list[int], list[int]]]:
+    """Compute which band sets need to be read for the requested bands.
+
+    Args:
+        needed_bands: list of band names that need to be read.
+        layer_config: configuration for the layer.
+
+    Returns:
+        List of (band_set, src_indexes, dst_indexes) tuples where:
+        - band_set: the BandSetConfig to read from
+        - src_indexes: indexes of bands to read from the band_set
+        - dst_indexes: indexes where those bands should go in the output
+    """
+    needed_band_indexes = {}
+    for i, band in enumerate(needed_bands):
+        needed_band_indexes[band] = i
+    needed_sets_and_indexes = []
+    for band_set in layer_config.band_sets:
+        needed_src_indexes = []
+        needed_dst_indexes = []
+        if band_set.bands is None:
+            continue
+        for i, band in enumerate(band_set.bands):
+            if band not in needed_band_indexes:
+                continue
+            needed_src_indexes.append(i)
+            needed_dst_indexes.append(needed_band_indexes[band])
+            del needed_band_indexes[band]
+        if len(needed_src_indexes) == 0:
+            continue
+        needed_sets_and_indexes.append(
+            (band_set, needed_src_indexes, needed_dst_indexes)
+        )
+    if len(needed_band_indexes) > 0:
+        missing = list(needed_band_indexes.keys())
+        raise ValueError(f"could not find bands {missing} in any band set")
+    return needed_sets_and_indexes
+
+
 def read_raster_layer_for_data_input(
     window: Window,
     bounds: PixelBounds,
@@ -222,36 +265,9 @@ def read_raster_layer_for_data_input(
     Returns:
         Raster data as a tensor.
     """
-    # See what different sets of bands we need to read to get all the
-    # configured bands.
-    needed_bands = data_input.bands
-    if needed_bands is None:
+    if data_input.bands is None:
         raise ValueError(f"No bands specified for {layer_name}")
-    needed_band_indexes = {}
-    for i, band in enumerate(needed_bands):
-        needed_band_indexes[band] = i
-    needed_sets_and_indexes = []
-    for band_set in layer_config.band_sets:
-        needed_src_indexes = []
-        needed_dst_indexes = []
-        if band_set.bands is None:
-            continue
-        for i, band in enumerate(band_set.bands):
-            if band not in needed_band_indexes:
-                continue
-            needed_src_indexes.append(i)
-            needed_dst_indexes.append(needed_band_indexes[band])
-            del needed_band_indexes[band]
-        if len(needed_src_indexes) == 0:
-            continue
-        needed_sets_and_indexes.append(
-            (band_set, needed_src_indexes, needed_dst_indexes)
-        )
-    if len(needed_band_indexes) > 0:
-        raise ValueError(
-            "could not get all the needed bands from "
-            + f"window {window.name} layer {layer_name} group {group_idx}"
-        )
+    needed_sets_and_indexes = _compute_needed_band_sets(data_input.bands, layer_config)
 
     # Get the projection and bounds to read under (multiply window resolution # by
     # the specified resolution factor).
@@ -262,20 +278,21 @@ def read_raster_layer_for_data_input(
 
     image = torch.zeros(
         (
-            len(needed_bands),
+            len(data_input.bands),
             final_bounds[3] - final_bounds[1],
             final_bounds[2] - final_bounds[0],
         ),
         dtype=get_torch_dtype(data_input.dtype),
     )
 
+    # Get raster storage and window root
+    raster_storage = layer_config.instantiate_raster_storage()
+    window_root = window.window_root
+
     for band_set, src_indexes, dst_indexes in needed_sets_and_indexes:
         if band_set.format is None:
             raise ValueError(f"No format specified for {layer_name}")
         raster_format = band_set.instantiate_raster_format()
-        raster_dir = window.get_raster_dir(
-            layer_name, band_set.bands, group_idx=group_idx
-        )
 
         # TODO: previously we try to read based on band_set.zoom_offset when possible,
         # and handle zooming in with torch.repeat (if resampling method is nearest
@@ -284,14 +301,96 @@ def read_raster_layer_for_data_input(
         # resampling. If it really is much faster to handle it via torch, then it may
         # make sense to bring back that functionality.
 
-        src = raster_format.decode_raster(
-            raster_dir, final_projection, final_bounds, resampling=Resampling.nearest
+        src = raster_storage.read_raster(
+            window_root,
+            layer_name,
+            band_set.bands,
+            group_idx,
+            raster_format,
+            final_projection,
+            final_bounds,
+            resampling=Resampling.nearest,
         )
         image[dst_indexes, :, :] = torch.as_tensor(
             src[src_indexes, :, :].astype(data_input.dtype.get_numpy_dtype())
         )
 
     return image
+
+
+def read_all_rasters_for_data_input(
+    window: Window,
+    bounds: PixelBounds,
+    layer_name: str,
+    num_groups: int,
+    layer_config: LayerConfig,
+    data_input: DataInput,
+) -> torch.Tensor:
+    """Read all rasters for a layer using read_all_rasters for efficiency.
+
+    This is more efficient than calling read_raster_layer_for_data_input for each
+    group, especially for PerLayerStorage which stores all groups in one file.
+
+    Args:
+        window: the window to read from.
+        bounds: the bounds to read.
+        layer_name: the layer.
+        num_groups: the number of item groups to read.
+        layer_config: the layer configuration.
+        data_input: the DataInput that specifies the bands and dtype.
+
+    Returns:
+        Raster data as a tensor with shape (num_groups, C, H, W).
+    """
+    if data_input.bands is None:
+        raise ValueError(f"No bands specified for {layer_name}")
+    needed_sets_and_indexes = _compute_needed_band_sets(data_input.bands, layer_config)
+
+    # Get the projection and bounds to read under (multiply window resolution # by
+    # the specified resolution factor).
+    final_projection = data_input.resolution_factor.multiply_projection(
+        window.projection
+    )
+    final_bounds = data_input.resolution_factor.multiply_bounds(bounds)
+
+    # Output shape: (num_groups, num_bands, H, W)
+    images = torch.zeros(
+        (
+            num_groups,
+            len(data_input.bands),
+            final_bounds[3] - final_bounds[1],
+            final_bounds[2] - final_bounds[0],
+        ),
+        dtype=get_torch_dtype(data_input.dtype),
+    )
+
+    # Get raster storage and window root
+    raster_storage = layer_config.instantiate_raster_storage()
+    window_root = window.window_root
+
+    for band_set, src_indexes, dst_indexes in needed_sets_and_indexes:
+        if band_set.format is None:
+            raise ValueError(f"No format specified for {layer_name}")
+        raster_format = band_set.instantiate_raster_format()
+
+        # Read all groups at once using read_all_rasters
+        src = raster_storage.read_all_rasters(
+            window_root,
+            layer_name,
+            band_set.bands,
+            num_groups,
+            raster_format,
+            final_projection,
+            final_bounds,
+            resampling=Resampling.nearest,
+        )
+
+        # src shape: (num_groups, num_bands_in_set, H, W)
+        images[:, dst_indexes, :, :] = torch.as_tensor(
+            src[:, src_indexes, :, :].astype(data_input.dtype.get_numpy_dtype())
+        )
+
+    return images
 
 
 def read_layer_time_range(
@@ -385,26 +484,68 @@ def read_data_input(
         layer_datas = window.load_layer_datas()
         images: list[torch.Tensor] = []
         time_ranges: list[tuple[datetime, datetime] | None] = []
-        for layer_name, group_idx in layers_to_read:
-            layer_config = dataset.layers[layer_name]
-            image = read_raster_layer_for_data_input(
-                window,
-                bounds,
-                layer_name,
-                group_idx,
-                layer_config,
-                data_input,
-            )
-            # some layers (e.g. "label_raster") won't have associated layer datas
-            layer_data = layer_datas.get(layer_name)
-            time_range = read_layer_time_range(layer_data, group_idx)
-            if len(time_ranges) > 0:
-                if type(time_ranges[-1]) is not type(time_range):
-                    raise ValueError(
-                        f"All time ranges should be datetime tuples or None. Got {type(time_range)} amd {type(time_ranges[-1])}"
-                    )
-            images.append(image)
-            time_ranges.append(time_range)
+
+        # Group layers_to_read by layer_name for efficient batch reading
+        if data_input.load_all_item_groups:
+            # When load_all_item_groups is set, use read_all_rasters for efficiency
+            # Group by layer name
+            from collections import defaultdict
+
+            layers_by_name: dict[str, list[int]] = defaultdict(list)
+            for layer_name, group_idx in layers_to_read:
+                layers_by_name[layer_name].append(group_idx)
+
+            for layer_name, group_indices in layers_by_name.items():
+                layer_config = dataset.layers[layer_name]
+                layer_data = layer_datas.get(layer_name)
+
+                # Sort group indices to ensure consistent ordering
+                group_indices = sorted(group_indices)
+                num_groups = len(group_indices)
+
+                # Use read_all_rasters_for_data_input for batch reading
+                all_images = read_all_rasters_for_data_input(
+                    window,
+                    bounds,
+                    layer_name,
+                    num_groups,
+                    layer_config,
+                    data_input,
+                )
+
+                # Add each group's image and time range
+                for i, group_idx in enumerate(group_indices):
+                    images.append(all_images[i])
+                    time_range = read_layer_time_range(layer_data, group_idx)
+                    if len(time_ranges) > 0:
+                        if type(time_ranges[-1]) is not type(time_range):
+                            raise ValueError(
+                                f"All time ranges should be datetime tuples or None. Got {type(time_range)} and {type(time_ranges[-1])}"
+                            )
+                    time_ranges.append(time_range)
+        else:
+            # Read one at a time (original behavior)
+            for layer_name, group_idx in layers_to_read:
+                layer_config = dataset.layers[layer_name]
+                image = read_raster_layer_for_data_input(
+                    window,
+                    bounds,
+                    layer_name,
+                    group_idx,
+                    layer_config,
+                    data_input,
+                )
+                # some layers (e.g. "label_raster") won't have associated layer datas
+                layer_data = layer_datas.get(layer_name)
+                time_range = read_layer_time_range(layer_data, group_idx)
+                if len(time_ranges) > 0:
+                    if type(time_ranges[-1]) is not type(time_range):
+                        raise ValueError(
+                            f"All time ranges should be datetime tuples or None. Got {type(time_range)} and {type(time_ranges[-1])}"
+                        )
+                images.append(image)
+                time_ranges.append(time_range)
+
         return RasterImage(
             torch.stack(images, dim=1),
             time_ranges if time_ranges[0] is not None else None,  # type: ignore
@@ -417,7 +558,7 @@ def read_data_input(
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
             vector_format = layer_config.instantiate_vector_format()
-            layer_dir = window.get_layer_dir(layer_name, group_idx=group_idx)
+            layer_dir = window.get_vector_layer_dir(layer_name, group_idx=group_idx)
             cur_features = vector_format.decode_vector(
                 layer_dir, window.projection, window.bounds
             )
