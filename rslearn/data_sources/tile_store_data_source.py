@@ -11,7 +11,7 @@ import rasterio.vrt
 from rasterio.enums import Resampling
 
 from rslearn.config import LayerConfig
-from rslearn.data_sources.data_source import DataSource, Item, ItemType
+from rslearn.data_sources.data_source import DataSource, ItemType
 from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
@@ -326,9 +326,7 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
             "TileStoreDataSource does not support vector operations"
         )
 
-    def write_vector(
-        self, layer_name: str, item_name: str, features: Any
-    ) -> None:
+    def write_vector(self, layer_name: str, item_name: str, features: Any) -> None:
         """Write vector data to the store.
 
         This is not supported for remote-backed tile stores.

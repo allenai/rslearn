@@ -11,7 +11,6 @@ import numpy.typing as npt
 import planetary_computer
 import rasterio
 import requests
-from rasterio.enums import Resampling
 from typing_extensions import override
 from upath import UPath
 
