@@ -482,7 +482,9 @@ class SplitConfig:
         self.sampler = sampler
         self.patch_size = patch_size
         self.skip_targets = skip_targets
-        self.output_layer_name_skip_inference_if_exists = output_layer_name_skip_inference_if_exists
+        self.output_layer_name_skip_inference_if_exists = (
+            output_layer_name_skip_inference_if_exists
+        )
 
         # Note that load_all_patches are handled by the RslearnDataModule rather than
         # the ModelDataset.
@@ -535,7 +537,9 @@ class SplitConfig:
         if other.skip_targets is not None:
             result.skip_targets = other.skip_targets
         if other.output_layer_name_skip_inference_if_exists is not None:
-            result.output_layer_name_skip_inference_if_exists = other.output_layer_name_skip_inference_if_exists
+            result.output_layer_name_skip_inference_if_exists = (
+                other.output_layer_name_skip_inference_if_exists
+            )
         return result
 
     def get_patch_size(self) -> tuple[int, int] | None:
