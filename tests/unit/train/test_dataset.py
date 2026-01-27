@@ -323,8 +323,9 @@ def test_model_dataset_index_caching(
     assert len(dataset1) == 2
 
     # Verify index was created
-    index = DatasetIndex(basic_classification_dataset.path)
-    index_key = index.get_index_key(
+    index = DatasetIndex(
+        storage=basic_classification_dataset.storage,
+        dataset_path=basic_classification_dataset.path,
         groups=split_config.groups,
         names=split_config.names,
         tags=split_config.tags,
@@ -332,7 +333,7 @@ def test_model_dataset_index_caching(
         skip_targets=split_config.get_skip_targets(),
         inputs=inputs,
     )
-    cached_windows = index.load_windows(index_key)
+    cached_windows = index.load_windows()
     assert cached_windows is not None
     assert len(cached_windows) == 2
 

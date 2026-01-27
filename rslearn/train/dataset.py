@@ -751,12 +751,12 @@ class ModelDataset(torch.utils.data.Dataset):
         """
         # Try to load from index
         index: DatasetIndex | None = None
-        index_key: str | None = None
 
         if index_mode != IndexMode.OFF:
             logger.info(f"Checking index for dataset {self.dataset.path}")
-            index = DatasetIndex(self.dataset.path)
-            index_key = index.get_index_key(
+            index = DatasetIndex(
+                storage=self.dataset.storage,
+                dataset_path=self.dataset.path,
                 groups=split_config.groups,
                 names=split_config.names,
                 tags=split_config.tags,
@@ -764,15 +764,12 @@ class ModelDataset(torch.utils.data.Dataset):
                 skip_targets=split_config.get_skip_targets(),
                 inputs=self.inputs,
             )
-            refresh_index = index_mode == IndexMode.REFRESH
-            indexed_windows = index.load_windows(index_key, refresh_index)
+            refresh = index_mode == IndexMode.REFRESH
+            indexed_windows = index.load_windows(refresh)
 
             if indexed_windows is not None:
                 logger.info(f"Loaded {len(indexed_windows)} windows from index")
-                return [
-                    Window.from_metadata(self.dataset.storage, w)
-                    for w in indexed_windows
-                ]
+                return indexed_windows
 
         # No index available, load and process windows from dataset
         logger.debug("Loading windows from dataset...")
@@ -781,9 +778,8 @@ class ModelDataset(torch.utils.data.Dataset):
         windows = self._sort_and_limit_windows(windows, split_config)
 
         # Save to index if enabled
-        if index is not None and index_key is not None:
-            serialized = [self._serialize_item(w) for w in windows]
-            index.save_windows(index_key, serialized)
+        if index is not None:
+            index.save_windows(windows)
 
         return windows
 
