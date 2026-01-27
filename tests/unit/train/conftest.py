@@ -59,6 +59,7 @@ def add_window(
     group: str = "default",
     images: dict[tuple[str, int], npt.NDArray] = {},
     bounds: PixelBounds = (0, 0, 4, 4),
+    window_name: str | None = None,
 ) -> Window:
     """Add a window to the basic classification dataset.
 
@@ -72,9 +73,12 @@ def add_window(
         images: map from (layer_name, group_idx) to the image content, which should be
             1x4x4 since that is the window size.
     """
+    # Support alias `window_name` used by some tests; prefer explicit `window_name`.
+    _name = window_name if window_name is not None else name
+
     window = Window(
         storage=dataset.storage,
-        name=name,
+        name=_name,
         group=group,
         projection=WGS84_PROJECTION,
         bounds=bounds,
