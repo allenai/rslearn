@@ -65,7 +65,7 @@ class ConfusionMatrixOutput(NonScalarMetricOutput):
         wandb.log(
             {
                 name: wandb.plot.confusion_matrix(
-                    probs=probs,
+                    probs=probs.tolist(),
                     y_true=labels.tolist(),
                     class_names=class_names,
                     title=name,
