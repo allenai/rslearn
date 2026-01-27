@@ -8,6 +8,7 @@ from typing import Any
 from upath import UPath
 
 from rslearn.log_utils import get_logger
+from rslearn.utils.fsspec import open_atomic
 
 logger = get_logger(__name__)
 
@@ -155,9 +156,6 @@ class DatasetIndex:
             "num_windows": len(windows),
             "windows": windows,
         }
-        # Atomic write via temp file + rename
-        tmp_file = index_file.with_suffix(".tmp")
-        with tmp_file.open("w") as f:
+        with open_atomic(index_file, "w") as f:
             json.dump(index_data, f)
-        tmp_file.rename(index_file)
         logger.info(f"Saved {len(windows)} windows to index at {index_file}")
