@@ -104,7 +104,7 @@ class LandsatOliTirs(TileStoreDataSource[LandsatOliTirsItem]):
                 SpaceMode.WITHIN.
             context: the data source context.
         """
-        # Each band is a separate asset with a single band.
+        # Each band is a separate single-band asset.
         asset_bands = {band: [band] for band in self.BANDS}
         super().__init__(asset_bands=asset_bands)
 
@@ -355,9 +355,6 @@ class LandsatOliTirs(TileStoreDataSource[LandsatOliTirsItem]):
         # Get the item since it has the blob path.
         item = self.get_item_by_name(item_name)
 
-        # Create pre-signed URL for rasterio access.
-        # We do this because accessing via URL is much faster since rasterio can use
-        # the URL directly.
         # For Landsat, the asset_key is the band name (e.g., "B1", "B2", etc.).
         blob_key = item.blob_path + f"{asset_key}.TIF"
         return self.client.generate_presigned_url(

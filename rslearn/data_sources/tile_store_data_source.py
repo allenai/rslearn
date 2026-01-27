@@ -92,7 +92,7 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
     # --- Optional hooks for subclasses ---
 
     def get_read_callback(
-        self, item_name: str, bands: list[str]
+        self, item_name: str, asset_key: str
     ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
         """Return a callback to post-process raster data (e.g., harmonization).
 
@@ -101,7 +101,7 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
 
         Args:
             item_name: the name of the item being read.
-            bands: the bands being read.
+            asset_key: the key identifying which asset is being read.
 
         Returns:
             A callback function that takes an array and returns a modified array,
@@ -241,7 +241,7 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
         raw_data = self._read_raster_from_url(asset_url, projection, bounds, resampling)
 
         # Apply any post-processing callback
-        callback = self.get_read_callback(item_name, bands)
+        callback = self.get_read_callback(item_name, asset_key)
         if callback is not None:
             raw_data = callback(raw_data)
 

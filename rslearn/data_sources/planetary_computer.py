@@ -447,19 +447,19 @@ class Sentinel2(PlanetaryComputer):
                 )
 
     def get_read_callback(
-        self, item_name: str, bands: list[str]
+        self, item_name: str, asset_key: str
     ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
         """Return a callback to harmonize Sentinel-2 data if needed.
 
         Args:
             item_name: the name of the item being read.
-            bands: the bands being read.
+            asset_key: the key identifying which asset is being read.
 
         Returns:
             A callback function for harmonization, or None if not needed.
         """
         # TCI (visual) image does not need harmonization.
-        if not self.harmonize or bands == self.BANDS["visual"]:
+        if not self.harmonize or asset_key == "visual":
             return None
 
         item = self.get_item_by_name(item_name)
