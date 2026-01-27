@@ -9,7 +9,6 @@ from PIL import Image, ImageDraw
 from torchmetrics import Metric, MetricCollection
 from torchmetrics.classification import (
     MulticlassAccuracy,
-    MulticlassConfusionMatrix,
     MulticlassF1Score,
     MulticlassPrecision,
     MulticlassRecall,
@@ -392,7 +391,10 @@ class ClassificationMetric(Metric):
 
 
 class ClassificationConfusionMatrixMetric(Metric):
-    """Confusion matrix metric for classification task."""
+    """Confusion matrix metric for classification task.
+
+    Accumulates probabilities and labels for logging to wandb.
+    """
 
     def __init__(
         self,
@@ -408,7 +410,9 @@ class ClassificationConfusionMatrixMetric(Metric):
         super().__init__()
         self.num_classes = num_classes
         self.class_names = class_names
-        self.confusion_matrix = MulticlassConfusionMatrix(num_classes=num_classes)
+        # Accumulate probs and labels as lists
+        self.add_state("all_probs", default=[], dist_reduce_fx="cat")
+        self.add_state("all_labels", default=[], dist_reduce_fx="cat")
 
     def update(
         self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
@@ -430,20 +434,30 @@ class ClassificationConfusionMatrixMetric(Metric):
         if len(preds) == 0:
             return
 
-        # Get predicted classes
-        pred_classes = preds.argmax(dim=-1)
-        self.confusion_matrix.update(pred_classes, labels)
+        # Accumulate probabilities and labels
+        self.all_probs.append(preds)
+        self.all_labels.append(labels)
 
     def compute(self) -> "ConfusionMatrixOutput":
-        """Returns the confusion matrix wrapped in ConfusionMatrixOutput."""
+        """Returns the accumulated probs/labels wrapped in ConfusionMatrixOutput."""
         from rslearn.train.metrics import ConfusionMatrixOutput
 
+        if len(self.all_probs) == 0:
+            # Return empty tensors if no data
+            probs = torch.zeros((0, self.num_classes))
+            labels = torch.zeros((0,), dtype=torch.int64)
+        else:
+            probs = torch.cat(self.all_probs, dim=0)
+            labels = torch.cat(self.all_labels, dim=0)
+
         return ConfusionMatrixOutput(
-            matrix=self.confusion_matrix.compute(),
+            probs=probs,
+            labels=labels,
             class_names=self.class_names,
         )
 
     def reset(self) -> None:
         """Reset metric."""
         super().reset()
-        self.confusion_matrix.reset()
+        self.all_probs = []
+        self.all_labels = []
