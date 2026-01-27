@@ -55,6 +55,7 @@ class ConfusionMatrixOutput(NonScalarMetricOutput):
 
         probs = self.probs.detach().cpu().numpy()
         labels = self.labels.detach().cpu().numpy()
+        logger.info(f"ConfusionMatrixOutput: probs.shape={probs.shape}, labels.shape={labels.shape}")
         num_classes = probs.shape[1]
 
         if self.class_names is None:
@@ -65,8 +66,8 @@ class ConfusionMatrixOutput(NonScalarMetricOutput):
         wandb.log(
             {
                 name: wandb.plot.confusion_matrix(
-                    probs=probs.tolist(),
-                    y_true=labels.tolist(),
+                    probs=probs,
+                    y_true=labels,
                     class_names=class_names,
                     title=name,
                 ),
