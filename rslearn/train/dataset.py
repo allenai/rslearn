@@ -472,7 +472,9 @@ def read_data_input(
 
         # Check if this layer exists in the dataset config
         if layer_name not in dataset.layers:
-            continue
+            raise ValueError(
+                f"Layer '{layer_name}' specified in DataInput is not in the dataset config"
+            )
 
         layer_config = dataset.layers[layer_name]
 
@@ -519,6 +521,11 @@ def read_data_input(
 
             # Check if this layer uses single-file materialization
             if layer_config.single_file_materialization:
+                # With single-file materialization, all groups are stored at group_idx=0
+                assert group_idx == 0, (
+                    f"Expected group_idx=0 for single_file_materialization layer "
+                    f"{layer_name}, got {group_idx}"
+                )
                 # Read all item groups from the stacked file at once
                 stacked_images = read_stacked_raster_layer_for_data_input(
                     window,
