@@ -496,41 +496,33 @@ class SegmentationMetric(Metric):
 class SegmentationConfusionMatrixMetric(Metric):
     """Confusion matrix metric for segmentation task.
 
-    Accumulates probabilities and labels for logging to wandb.
+    Accumulates a confusion matrix for logging to wandb. This is more memory
+    efficient than storing all predictions and labels, as it only requires
+    O(num_classes^2) storage instead of O(num_samples * num_classes).
 
     Args:
         num_classes: number of classes
         class_names: optional list of class names for labeling
-        max_samples: maximum number of samples to accumulate (to prevent memory issues).
-            Defaults to 10000. Set to None for unlimited.
     """
 
     def __init__(
         self,
         num_classes: int,
         class_names: list[str] | None = None,
-        max_samples: int | None = 10000,
     ):
         """Initialize a new SegmentationConfusionMatrixMetric.
 
         Args:
             num_classes: number of classes
             class_names: optional list of class names for labeling
-            max_samples: maximum number of samples to accumulate (default 10000)
         """
         super().__init__()
         self.num_classes = num_classes
         self.class_names = class_names
-        self.max_samples = max_samples
         self.add_state(
-            "all_probs",
-            default=torch.empty(0, num_classes),
-            dist_reduce_fx="cat",
-        )
-        self.add_state(
-            "all_labels",
-            default=torch.empty(0, dtype=torch.long),
-            dist_reduce_fx="cat",
+            "confusion_matrix",
+            default=torch.zeros(num_classes, num_classes, dtype=torch.long),
+            dist_reduce_fx="sum",
         )
 
     def update(
@@ -555,33 +547,19 @@ class SegmentationConfusionMatrixMetric(Metric):
         if len(preds) == 0:
             return
 
-        # Enforce max_samples limit
-        if self.max_samples is not None:
-            current_size = len(self.all_probs)
-            if current_size >= self.max_samples:
-                return
-            remaining = self.max_samples - current_size
-            preds = preds[:remaining]
-            labels = labels[:remaining]
+        # Get predicted classes from probabilities
+        pred_classes = preds.argmax(dim=1)  # (N_valid,)
 
-        # Concatenate to accumulated tensors
-        self.all_probs = torch.cat([self.all_probs, preds], dim=0)
-        self.all_labels = torch.cat([self.all_labels, labels], dim=0)
+        # Update confusion matrix: cm[true_label, pred_label] += count
+        for true_label in range(self.num_classes):
+            for pred_label in range(self.num_classes):
+                count = ((labels == true_label) & (pred_classes == pred_label)).sum()
+                self.confusion_matrix[true_label, pred_label] += count
 
     def compute(self) -> "ConfusionMatrixOutput":
-        """Returns the probs/labels wrapped in ConfusionMatrixOutput."""
-        probs = self.all_probs
-        labels = self.all_labels
-
-        # Handle extra dimension from distributed reduction
-        if probs.dim() > 2:
-            probs = probs.reshape(-1, probs.shape[-1])
-        if labels.dim() > 1:
-            labels = labels.reshape(-1)
-
+        """Returns the confusion matrix wrapped in ConfusionMatrixOutput."""
         return ConfusionMatrixOutput(
-            probs=probs,
-            labels=labels,
+            confusion_matrix=self.confusion_matrix,
             class_names=self.class_names,
         )
 
