@@ -313,7 +313,7 @@ def test_skip_if_output_layer_exists(
     dataset = ModelDataset(
         basic_classification_dataset,
         split_config=SplitConfig(
-            output_layer="predictions",
+            output_layer_name_skip_inference_if_exists="predictions",
         ),
         task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
         workers=1,
@@ -327,7 +327,7 @@ def test_skip_if_output_layer_exists(
     windows = dataset.get_dataset_examples()
     assert windows[0].name == "window_without_output"
 
-    # Test 3: Without setting output_layer, should get both windows even with skip flag
+    # Test 3: Without setting output_layer_name_skip_inference_if_exists, should get both windows 
     dataset = ModelDataset(
         basic_classification_dataset,
         split_config=SplitConfig(),
