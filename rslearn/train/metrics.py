@@ -55,7 +55,6 @@ class ConfusionMatrixOutput(NonScalarMetricOutput):
 
         probs = self.probs.detach().cpu().numpy()
         labels = self.labels.detach().cpu().numpy()
-        logger.info(f"ConfusionMatrixOutput: probs.shape={probs.shape}, labels.shape={labels.shape}")
         num_classes = probs.shape[1]
 
         if self.class_names is None:

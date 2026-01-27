@@ -470,9 +470,18 @@ class ClassificationConfusionMatrixMetric(Metric):
 
     def compute(self) -> "ConfusionMatrixOutput":
         """Returns the probs/labels wrapped in ConfusionMatrixOutput."""
+        probs = self.all_probs
+        labels = self.all_labels
+
+        # Handle extra dimension from distributed reduction
+        if probs.dim() > 2:
+            probs = probs.reshape(-1, probs.shape[-1])
+        if labels.dim() > 1:
+            labels = labels.reshape(-1)
+
         return ConfusionMatrixOutput(
-            probs=self.all_probs,
-            labels=self.all_labels,
+            probs=probs,
+            labels=labels,
             class_names=self.class_names,
         )
 
