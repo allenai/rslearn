@@ -321,7 +321,16 @@ run_name: ${RUN_NAME}
 management_dir: ${MANAGEMENT_DIR}
 ```
 
-Save this as `model.yaml` and execute training with `model fit`:
+Save this as `model.yaml`.
+
+Due to license incompatibility, the `olmoearth_pretrain` package required for this
+example is not included as a dependency and must be installed explicitly:
+
+```bash
+pip install olmoearth_pretrain
+```
+
+Now execute training with `model fit`:
 
 ```
 # These environment variables are only needed if including the WandbLogger in the model

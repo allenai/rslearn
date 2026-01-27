@@ -3,6 +3,17 @@
 This component wraps the [OlmoEarth model](https://github.com/allenai/olmoearth_pretrain)
 for fine-tuning in rslearn.
 
+### Installation
+
+Due to license incompatibility, the `olmoearth_pretrain` package required for this
+component is not included as a dependency and must be installed explicitly:
+
+```bash
+pip install olmoearth_pretrain
+```
+
+### Usage
+
 OlmoEarth inputs time series of any subset of Sentinel-2 L2A, Sentinel-1 IW GRD vv+vh,
 and Landsat 8/9 OLI-TIRS satellite images. It is recommended to use a number of
 timesteps between 1 and 12, and an input size between 1 (single pixel) and 128. The
