@@ -674,7 +674,9 @@ class GeotiffRasterFormat(RasterFormat):
         flattened_array = array.reshape(num_groups * num_channels, height, width)
 
         # Write the stacked GeoTIFF using encode_raster
-        self.encode_raster(path, projection, bounds, flattened_array, fname=self.stacked_fname)
+        self.encode_raster(
+            path, projection, bounds, flattened_array, fname=self.stacked_fname
+        )
 
         # Write metadata about the stacking dimensions
         metadata = {

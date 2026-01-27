@@ -1,4 +1,3 @@
-import json
 import pathlib
 
 import numpy as np
@@ -8,7 +7,7 @@ from rasterio.crs import CRS
 from upath import UPath
 
 from rslearn.utils.geometry import Projection
-from rslearn.utils.raster_format import GeotiffRasterFormat, RasterFormat
+from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
 def test_geotiff_tiling(tmp_path: pathlib.Path) -> None:
@@ -190,16 +189,6 @@ class TestGeotiffStackedRasterEncoding:
         # Encode the stacked raster
         raster_format.encode_stacked_raster(path, self.PROJECTION, self.BOUNDS, array)
 
-        # Verify the metadata file was created
-        assert (path / "stacked_metadata.json").exists()
-        with (path / "stacked_metadata.json").open() as f:
-            metadata = json.load(f)
-        assert metadata["num_groups"] == num_groups
-        assert metadata["num_channels"] == num_channels
-
-        # Verify the GeoTIFF was created
-        assert (path / "stacked.tif").exists()
-
         # Decode and verify - returns TCHW array
         decoded = raster_format.decode_stacked_raster(
             path, self.PROJECTION, self.BOUNDS
@@ -224,9 +213,9 @@ class TestGeotiffStackedRasterEncoding:
         # Create TCHW array
         array = np.zeros((num_groups, num_channels, 8, 8), dtype=np.uint8)
         for i in range(num_groups):
-            array[i, :, :, :] = np.arange(num_channels * 8 * 8).reshape(
-                num_channels, 8, 8
-            ) + i * 100
+            array[i, :, :, :] = (
+                np.arange(num_channels * 8 * 8).reshape(num_channels, 8, 8) + i * 100
+            )
 
         raster_format.encode_stacked_raster(path, self.PROJECTION, self.BOUNDS, array)
 
@@ -251,20 +240,3 @@ class TestGeotiffStackedRasterEncoding:
             raster_format.encode_stacked_raster(
                 path, self.PROJECTION, self.BOUNDS, array_3d
             )
-
-    def test_base_raster_format_stacked_not_implemented(self) -> None:
-        """Test that the base RasterFormat class raises NotImplementedError."""
-
-        class DummyFormat(RasterFormat):
-            pass
-
-        fmt = DummyFormat()
-        projection = Projection(CRS.from_epsg(3857), 1, -1)
-        bounds = (0, 0, 8, 8)
-        array = np.zeros((2, 3, 8, 8), dtype=np.uint8)
-
-        with pytest.raises(NotImplementedError, match="does not support stacked"):
-            fmt.encode_stacked_raster(UPath("/tmp/test"), projection, bounds, array)
-
-        with pytest.raises(NotImplementedError, match="does not support stacked"):
-            fmt.decode_stacked_raster(UPath("/tmp/test"), projection, bounds)

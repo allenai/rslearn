@@ -239,9 +239,7 @@ def get_needed_band_sets_and_indexes(
         )
 
     if len(needed_band_indexes) > 0:
-        raise ValueError(
-            f"could not get all the needed bands from layer {layer_name}"
-        )
+        raise ValueError(f"could not get all the needed bands from layer {layer_name}")
 
     return needed_sets_and_indexes
 
@@ -465,21 +463,39 @@ def read_data_input(
         the raster or vector data.
     """
     # We first enumerate which layers are available.
-    # If load_all_item_groups is set, we need to check each item group within the
-    # layer.
+    # Special handling for single_file_materialization: these layers store all item
+    # groups in one file at group_idx=0, so we add them directly with group_idx=0.
+    # For regular layers with load_all_item_groups, we check each item group.
     layer_options: list[tuple[str, int]] = []
-    if data_input.load_all_item_groups:
-        wanted_layers = set(data_input.layers)
-        for layer_name, group_idx in window.list_completed_layers():
-            if layer_name not in wanted_layers:
-                continue
-            layer_options.append((layer_name, group_idx))
-    else:
-        for option in data_input.layers:
-            layer_name, group_idx = get_layer_and_group_from_dir_name(option)
-            if not window.is_layer_completed(layer_name, group_idx):
-                continue
-            layer_options.append((layer_name, group_idx))
+    for layer_spec in data_input.layers:
+        layer_name, specified_group_idx = get_layer_and_group_from_dir_name(layer_spec)
+
+        # Check if this layer exists in the dataset config
+        if layer_name not in dataset.layers:
+            continue
+
+        layer_config = dataset.layers[layer_name]
+
+        if layer_config.single_file_materialization:
+            # For single-file materialization, all groups are stored at group_idx=0.
+            # Validate that load_all_item_groups is True since we'll read all groups.
+            if not data_input.load_all_item_groups:
+                raise ValueError(
+                    f"Layer {layer_name} has single_file_materialization enabled, "
+                    "but DataInput.load_all_item_groups is False. "
+                    "Set load_all_item_groups=True to read from this layer."
+                )
+            if window.is_layer_completed(layer_name, 0):
+                layer_options.append((layer_name, 0))
+        elif data_input.load_all_item_groups:
+            # For regular layers with load_all_item_groups, enumerate all groups
+            for completed_layer_name, group_idx in window.list_completed_layers():
+                if completed_layer_name == layer_name:
+                    layer_options.append((layer_name, group_idx))
+        else:
+            # Default: use the specified group_idx
+            if window.is_layer_completed(layer_name, specified_group_idx):
+                layer_options.append((layer_name, specified_group_idx))
 
     # Now determine the layers that we should actually read.
     # We randomly pick one, unless load_all_layers is set, in which case we read all of
@@ -503,22 +519,6 @@ def read_data_input(
 
             # Check if this layer uses single-file materialization
             if layer_config.single_file_materialization:
-                # Validate that the DataInput is configured correctly for single-file
-                # materialization. Single-file materialization stores all item groups
-                # in one file, so we must load all item groups.
-                if not data_input.load_all_item_groups:
-                    raise ValueError(
-                        f"Layer {layer_name} has single_file_materialization enabled, "
-                        "but DataInput.load_all_item_groups is False. "
-                        "Set load_all_item_groups=True to read from this layer."
-                    )
-                if not data_input.load_all_layers:
-                    raise ValueError(
-                        f"Layer {layer_name} has single_file_materialization enabled, "
-                        "but DataInput.load_all_layers is False. "
-                        "Set load_all_layers=True to read from this layer."
-                    )
-
                 # Read all item groups from the stacked file at once
                 stacked_images = read_stacked_raster_layer_for_data_input(
                     window,

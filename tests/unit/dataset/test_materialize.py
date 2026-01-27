@@ -1,3 +1,4 @@
+import json
 import pathlib
 from typing import Any
 
@@ -9,7 +10,9 @@ from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import Item
+from rslearn.dataset import Dataset, Window
 from rslearn.dataset.materialize import (
+    RasterMaterializer,
     build_mean_composite,
     build_median_composite,
     read_raster_window_from_tiles,
@@ -17,6 +20,7 @@ from rslearn.dataset.materialize import (
 from rslearn.tile_stores.default import DefaultTileStore
 from rslearn.tile_stores.tile_store import TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
+from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
 class TestReadRasterWindowFromTiles:
@@ -535,9 +539,44 @@ class TestSingleFileMaterialization:
     PROJECTION = WGS84_PROJECTION
 
     @pytest.fixture
+    def dataset_with_window(self, tmp_path: pathlib.Path) -> tuple[Dataset, Window]:
+        """Create a dataset with single_file_materialization enabled and a window."""
+        ds_path = UPath(tmp_path) / "dataset"
+        dataset_config = {
+            "layers": {
+                self.LAYER_NAME: {
+                    "type": "raster",
+                    "band_sets": [
+                        {
+                            "dtype": "uint8",
+                            "bands": self.BANDS,
+                        }
+                    ],
+                    "single_file_materialization": True,
+                },
+            },
+        }
+        ds_path.mkdir(parents=True, exist_ok=True)
+        with (ds_path / "config.json").open("w") as f:
+            json.dump(dataset_config, f)
+        dataset = Dataset(ds_path)
+
+        window = Window(
+            storage=dataset.storage,
+            group="default",
+            name="default",
+            projection=self.PROJECTION,
+            bounds=self.BOUNDS,
+            time_range=None,
+        )
+        window.save()
+
+        return dataset, window
+
+    @pytest.fixture
     def tile_store(self, tmp_path: pathlib.Path) -> DefaultTileStore:
         store = DefaultTileStore()
-        store.set_dataset_path(UPath(tmp_path))
+        store.set_dataset_path(UPath(tmp_path) / "tiles")
         return store
 
     def make_item(self, name: str) -> Item:
@@ -552,14 +591,13 @@ class TestSingleFileMaterialization:
         )
 
     def test_single_file_materialization(
-        self, tile_store: DefaultTileStore, tmp_path: pathlib.Path
+        self,
+        dataset_with_window: tuple[Dataset, Window],
+        tile_store: DefaultTileStore,
     ) -> None:
         """Test that single_file_materialization writes all item groups to one file."""
-        from unittest.mock import MagicMock
-
-        from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType
-        from rslearn.dataset.materialize import RasterMaterializer
-        from rslearn.utils.raster_format import GeotiffRasterFormat
+        dataset, window = dataset_with_window
+        layer_cfg = dataset.layers[self.LAYER_NAME]
 
         # Create items and write raster data for each
         items_group1 = [self.make_item("item1")]
@@ -578,33 +616,6 @@ class TestSingleFileMaterialization:
                 array,
             )
 
-        # Create a mock window
-        window = MagicMock()
-        window.projection = self.PROJECTION
-        window.bounds = self.BOUNDS
-
-        # Track the directories where rasters are written
-        written_dirs: list[UPath] = []
-
-        def get_raster_dir(layer_name: str, bands: list[str], group_idx: int) -> UPath:
-            path = UPath(tmp_path) / "window" / f"{layer_name}_{group_idx}"
-            written_dirs.append(path)
-            return path
-
-        window.get_raster_dir = get_raster_dir
-
-        # Create layer config with single_file_materialization enabled
-        layer_cfg = LayerConfig(
-            type=LayerType.RASTER,
-            band_sets=[
-                BandSetConfig(
-                    dtype=DType.UINT8,
-                    bands=self.BANDS,
-                )
-            ],
-            single_file_materialization=True,
-        )
-
         # Create item groups (3 groups)
         item_groups = [items_group1, items_group2, items_group3]
 
@@ -618,18 +629,16 @@ class TestSingleFileMaterialization:
             item_groups,
         )
 
-        # Verify: with single_file_materialization, only group_idx=0 should be used
-        assert len(written_dirs) == 1
-        assert "0" in str(written_dirs[0])
-
-        # Verify that the stacked file was created
-        raster_format = GeotiffRasterFormat()
-        assert (written_dirs[0] / raster_format.stacked_fname).exists()
-        assert (written_dirs[0] / raster_format.stacked_metadata_fname).exists()
+        # Verify: with single_file_materialization, only group_idx=0 folder should exist
+        raster_dir = window.get_raster_dir(self.LAYER_NAME, self.BANDS, 0)
+        raster_dir_1 = window.get_raster_dir(self.LAYER_NAME, self.BANDS, 1)
+        assert raster_dir.exists()
+        assert not raster_dir_1.exists()
 
         # Verify the stacked data can be read and has correct shape
+        raster_format = GeotiffRasterFormat()
         decoded = raster_format.decode_stacked_raster(
-            written_dirs[0], self.PROJECTION, self.BOUNDS
+            raster_dir, self.PROJECTION, self.BOUNDS
         )
         assert decoded.shape == (3, 2, 4, 4)  # (num_groups, num_channels, H, W)
 
@@ -638,5 +647,6 @@ class TestSingleFileMaterialization:
             expected_val = i + 1
             assert np.all(decoded[i, :, :, :] == expected_val)
 
-        # Verify mark_layer_completed was called only for group 0
-        window.mark_layer_completed.assert_called_once_with(self.LAYER_NAME, 0)
+        # Verify that layer was marked completed only for group 0
+        assert window.is_layer_completed(self.LAYER_NAME, 0)
+        assert not window.is_layer_completed(self.LAYER_NAME, 1)
