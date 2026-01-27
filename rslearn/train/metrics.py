@@ -55,7 +55,7 @@ class ConfusionMatrixOutput(NonScalarMetricOutput):
         Returns:
             matplotlib Figure object
         """
-        fig, ax = plt.subplots(figsize=(8, 8))
+        fig, ax = plt.subplots(figsize=(10, 10), dpi=150)
 
         # Create heatmap
         im = ax.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
