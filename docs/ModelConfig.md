@@ -573,7 +573,7 @@ Here is a summary of all of the options available in the SplitConfig.
       # Resume partial inference: if set, windows that already have this layer
       # completed will be skipped by default, so predict can resume without
       # reprocessing completed windows.
-      output_layer: null
+      output_layer_name_skip_inference_if_exists: null
 ```
 
 The transforms will adjust the initial input and target dicts that come from reading
