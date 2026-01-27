@@ -62,7 +62,7 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
                 return asset_key
         raise ValueError(f"no known asset with bands {bands}")
 
-    # --- Abstract methods that subclasses must implement ---
+    # --- Methods that subclasses must implement ---
 
     @abstractmethod
     def get_asset_url(self, item_name: str, asset_key: str) -> str:
@@ -77,9 +77,11 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
         """
         raise NotImplementedError
 
-    @abstractmethod
     def get_item_by_name(self, name: str) -> ItemType:
         """Get an item by its name.
+
+        Subclasses must implement this method, either directly or by inheriting from
+        a class that provides it (e.g., StacDataSource).
 
         Args:
             name: the name of the item to get.
