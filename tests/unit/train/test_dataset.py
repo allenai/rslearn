@@ -305,14 +305,15 @@ def test_skip_if_output_layer_exists(
     )
 
     # Mark the first window as having the output layer completed
+    # Ensure the output layer directory exists before marking completed.
+    layer_dir = window1.get_layer_dir("predictions")
+    layer_dir.mkdir(parents=True, exist_ok=True)
     window1.mark_layer_completed("predictions")
 
-    # Test 1: With skip_if_output_layer_exists=True, should only get window2
     dataset = ModelDataset(
         basic_classification_dataset,
         split_config=SplitConfig(
             output_layer="predictions",
-            skip_if_output_layer_exists=True,
         ),
         task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
         workers=1,
@@ -326,28 +327,11 @@ def test_skip_if_output_layer_exists(
     windows = dataset.get_dataset_examples()
     assert windows[0].name == "window_without_output"
 
-    # Test 2: With skip_if_output_layer_exists=False, should get both windows
-    dataset = ModelDataset(
-        basic_classification_dataset,
-        split_config=SplitConfig(
-            output_layer="predictions",
-            skip_if_output_layer_exists=False,
-        ),
-        task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
-        workers=1,
-        inputs={
-            "image": DataInput("raster", ["image_layer1"], bands=["band"]),
-            "targets": DataInput("vector", ["vector_layer"]),
-        },
-    )
-
-    assert len(dataset) == 2
-
+   
     # Test 3: Without setting output_layer, should get both windows even with skip flag
     dataset = ModelDataset(
         basic_classification_dataset,
         split_config=SplitConfig(
-            skip_if_output_layer_exists=True,
         ),
         task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
         workers=1,
