@@ -17,6 +17,7 @@ from rslearn.train.model_context import (
     RasterImage,
     SampleMetadata,
 )
+from rslearn.train.metrics import ConfusionMatrixOutput
 from rslearn.utils import Feature
 
 from .task import BasicTask
@@ -63,7 +64,7 @@ class SegmentationTask(BasicTask):
         output_probs: bool = False,
         output_class_idx: int | None = None,
         enable_confusion_matrix: bool = False,
-        confusion_matrix_normalize: str | None = None,
+        class_names: list[str] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize a new SegmentationTask.
@@ -102,9 +103,8 @@ class SegmentationTask(BasicTask):
             output_class_idx: if set along with output_probs, only output the probability
                 for this specific class index (single-channel output).
             enable_confusion_matrix: whether to compute confusion matrix (default false)
-            confusion_matrix_normalize: normalization mode for confusion matrix. One of
-                'true' (normalize by row/true labels), 'pred' (normalize by column/
-                predictions), 'all' (normalize by total), or None (no normalization).
+            class_names: optional list of class names for labeling confusion matrix axes.
+                If not provided, classes will be labeled as "class_0", "class_1", etc.
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -132,7 +132,7 @@ class SegmentationTask(BasicTask):
         self.output_probs = output_probs
         self.output_class_idx = output_class_idx
         self.enable_confusion_matrix = enable_confusion_matrix
-        self.confusion_matrix_normalize = confusion_matrix_normalize
+        self.class_names = class_names
 
     def process_inputs(
         self,
@@ -313,9 +313,13 @@ class SegmentationTask(BasicTask):
             metrics.update(self.other_metrics)
 
         if self.enable_confusion_matrix:
+            # Use provided class_names or generate defaults
+            class_names = self.class_names
+            if class_names is None:
+                class_names = [f"class_{i}" for i in range(self.num_classes)]
             metrics["confusion_matrix"] = SegmentationConfusionMatrixMetric(
                 num_classes=self.num_classes,
-                normalize=self.confusion_matrix_normalize,
+                class_names=class_names,
             )
 
         return MetricCollection(metrics)
@@ -492,19 +496,21 @@ class SegmentationMetric(Metric):
 class SegmentationConfusionMatrixMetric(Metric):
     """Confusion matrix metric for segmentation task."""
 
-    def __init__(self, num_classes: int, normalize: str | None = None):
+    def __init__(
+        self,
+        num_classes: int,
+        class_names: list[str] | None = None,
+    ):
         """Initialize a new SegmentationConfusionMatrixMetric.
 
         Args:
             num_classes: number of classes
-            normalize: normalization mode ('true', 'pred', 'all', or None)
+            class_names: optional list of class names for labeling
         """
         super().__init__()
         self.num_classes = num_classes
-        self.normalize = normalize
-        self.confusion_matrix = MulticlassConfusionMatrix(
-            num_classes=num_classes, normalize=normalize
-        )
+        self.class_names = class_names
+        self.confusion_matrix = MulticlassConfusionMatrix(num_classes=num_classes)
 
     def update(
         self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
@@ -532,9 +538,14 @@ class SegmentationConfusionMatrixMetric(Metric):
         pred_classes = preds.argmax(dim=-1)  # (N_valid,)
         self.confusion_matrix.update(pred_classes, labels)
 
-    def compute(self) -> torch.Tensor:
-        """Returns the confusion matrix as a 2D tensor."""
-        return self.confusion_matrix.compute()
+    def compute(self) -> "ConfusionMatrixOutput":
+        """Returns the confusion matrix wrapped in ConfusionMatrixOutput."""
+        from rslearn.train.metrics import ConfusionMatrixOutput
+
+        return ConfusionMatrixOutput(
+            matrix=self.confusion_matrix.compute(),
+            class_names=self.class_names,
+        )
 
     def reset(self) -> None:
         """Reset metric."""

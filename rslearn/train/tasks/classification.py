@@ -1,7 +1,6 @@
 """Classification task."""
 
 from typing import Any
-
 import numpy as np
 import numpy.typing as npt
 import shapely
@@ -23,6 +22,7 @@ from rslearn.train.model_context import (
     RasterImage,
     SampleMetadata,
 )
+from rslearn.train.metrics import ConfusionMatrixOutput
 from rslearn.utils import Feature, STGeometry
 
 from .task import BasicTask
@@ -46,7 +46,6 @@ class ClassificationTask(BasicTask):
         positive_class: str | None = None,
         positive_class_threshold: float = 0.5,
         enable_confusion_matrix: bool = False,
-        confusion_matrix_normalize: str | None = None,
         **kwargs: Any,
     ):
         """Initialize a new ClassificationTask.
@@ -73,9 +72,6 @@ class ClassificationTask(BasicTask):
             positive_class_threshold: threshold for classifying the positive class in
                 binary classification (default 0.5).
             enable_confusion_matrix: whether to compute confusion matrix (default false)
-            confusion_matrix_normalize: normalization mode for confusion matrix. One of
-                'true' (normalize by row/true labels), 'pred' (normalize by column/
-                predictions), 'all' (normalize by total), or None (no normalization).
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -92,7 +88,6 @@ class ClassificationTask(BasicTask):
         self.positive_class = positive_class
         self.positive_class_threshold = positive_class_threshold
         self.enable_confusion_matrix = enable_confusion_matrix
-        self.confusion_matrix_normalize = confusion_matrix_normalize
 
         if self.positive_class_threshold != 0.5:
             # Must be binary classification
@@ -290,7 +285,7 @@ class ClassificationTask(BasicTask):
         if self.enable_confusion_matrix:
             metrics["confusion_matrix"] = ClassificationConfusionMatrixMetric(
                 num_classes=len(self.classes),
-                normalize=self.confusion_matrix_normalize,
+                class_names=self.classes,
             )
 
         return MetricCollection(metrics)
@@ -399,19 +394,21 @@ class ClassificationMetric(Metric):
 class ClassificationConfusionMatrixMetric(Metric):
     """Confusion matrix metric for classification task."""
 
-    def __init__(self, num_classes: int, normalize: str | None = None):
+    def __init__(
+        self,
+        num_classes: int,
+        class_names: list[str] | None = None,
+    ):
         """Initialize a new ClassificationConfusionMatrixMetric.
 
         Args:
             num_classes: number of classes
-            normalize: normalization mode ('true', 'pred', 'all', or None)
+            class_names: optional list of class names for labeling
         """
         super().__init__()
         self.num_classes = num_classes
-        self.normalize = normalize
-        self.confusion_matrix = MulticlassConfusionMatrix(
-            num_classes=num_classes, normalize=normalize
-        )
+        self.class_names = class_names
+        self.confusion_matrix = MulticlassConfusionMatrix(num_classes=num_classes)
 
     def update(
         self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
@@ -437,9 +434,14 @@ class ClassificationConfusionMatrixMetric(Metric):
         pred_classes = preds.argmax(dim=-1)
         self.confusion_matrix.update(pred_classes, labels)
 
-    def compute(self) -> torch.Tensor:
-        """Returns the confusion matrix as a 2D tensor."""
-        return self.confusion_matrix.compute()
+    def compute(self) -> "ConfusionMatrixOutput":
+        """Returns the confusion matrix wrapped in ConfusionMatrixOutput."""
+        from rslearn.train.metrics import ConfusionMatrixOutput
+
+        return ConfusionMatrixOutput(
+            matrix=self.confusion_matrix.compute(),
+            class_names=self.class_names,
+        )
 
     def reset(self) -> None:
         """Reset metric."""
