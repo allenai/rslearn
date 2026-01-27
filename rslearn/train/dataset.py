@@ -445,6 +445,7 @@ class SplitConfig:
         overlap_ratio: float | None = None,
         load_all_patches: bool | None = None,
         skip_targets: bool | None = None,
+        output_layer_name_skip_inference_if_exists: str | None = None,
     ) -> None:
         """Initialize a new SplitConfig.
 
@@ -467,6 +468,10 @@ class SplitConfig:
                 for each window, read all patches as separate sequential items in the
                 dataset.
             skip_targets: whether to skip targets when loading inputs
+            output_layer_name_skip_inference_if_exists: optional name of the output layer used during prediction.
+                If set, windows that already
+                have this layer completed will be skipped (useful for resuming
+                partial inference runs).
         """
         self.groups = groups
         self.names = names
@@ -477,6 +482,9 @@ class SplitConfig:
         self.sampler = sampler
         self.patch_size = patch_size
         self.skip_targets = skip_targets
+        self.output_layer_name_skip_inference_if_exists = (
+            output_layer_name_skip_inference_if_exists
+        )
 
         # Note that load_all_patches are handled by the RslearnDataModule rather than
         # the ModelDataset.
@@ -504,6 +512,7 @@ class SplitConfig:
             overlap_ratio=self.overlap_ratio,
             load_all_patches=self.load_all_patches,
             skip_targets=self.skip_targets,
+            output_layer_name_skip_inference_if_exists=self.output_layer_name_skip_inference_if_exists,
         )
         if other.groups:
             result.groups = other.groups
@@ -527,6 +536,10 @@ class SplitConfig:
             result.load_all_patches = other.load_all_patches
         if other.skip_targets is not None:
             result.skip_targets = other.skip_targets
+        if other.output_layer_name_skip_inference_if_exists is not None:
+            result.output_layer_name_skip_inference_if_exists = (
+                other.output_layer_name_skip_inference_if_exists
+            )
         return result
 
     def get_patch_size(self) -> tuple[int, int] | None:
@@ -549,16 +562,26 @@ class SplitConfig:
         """Returns whether skip_targets is enabled (default False)."""
         return True if self.skip_targets is True else False
 
+    def get_output_layer_name_skip_inference_if_exists(self) -> str | None:
+        """Returns output layer to use for resume checks (default None)."""
+        return self.output_layer_name_skip_inference_if_exists
 
-def check_window(inputs: dict[str, DataInput], window: Window) -> Window | None:
+
+def check_window(
+    inputs: dict[str, DataInput],
+    window: Window,
+    output_layer_name_skip_inference_if_exists: str | None = None,
+) -> Window | None:
     """Verify that the window has the required layers based on the specified inputs.
 
     Args:
         inputs: the inputs to the dataset.
         window: the window to check.
+        output_layer_name_skip_inference_if_exists: optional name of the output layer to check for existence.
 
     Returns:
-        the window if it has all the required inputs or None otherwise
+        the window if it has all the required inputs and does not need to be skipped
+        due to an existing output layer; or None otherwise
     """
 
     # Make sure window has all the needed layers.
@@ -585,6 +608,16 @@ def check_window(inputs: dict[str, DataInput], window: Window) -> Window | None:
                 "Skipping window %s since check for layers %s failed",
                 window.name,
                 data_input.layers,
+            )
+            return None
+
+    # Optionally skip windows that already have the specified output layer completed.
+    if output_layer_name_skip_inference_if_exists is not None:
+        if window.is_layer_completed(output_layer_name_skip_inference_if_exists):
+            logger.debug(
+                "Skipping window %s since output layer '%s' already exists",
+                window.name,
+                output_layer_name_skip_inference_if_exists,
             )
             return None
 
@@ -648,7 +681,14 @@ class ModelDataset(torch.utils.data.Dataset):
         new_windows = []
         if workers == 0:
             for window in windows:
-                if check_window(self.inputs, window) is None:
+                if (
+                    check_window(
+                        self.inputs,
+                        window,
+                        output_layer_name_skip_inference_if_exists=self.split_config.get_output_layer_name_skip_inference_if_exists(),
+                    )
+                    is None
+                ):
                     continue
                 new_windows.append(window)
         else:
@@ -660,6 +700,7 @@ class ModelDataset(torch.utils.data.Dataset):
                     dict(
                         inputs=self.inputs,
                         window=window,
+                        output_layer_name_skip_inference_if_exists=self.split_config.get_output_layer_name_skip_inference_if_exists(),
                     )
                     for window in windows
                 ],
