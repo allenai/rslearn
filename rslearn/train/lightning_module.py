@@ -218,6 +218,10 @@ class RslearnLightningModule(L.LightningModule):
             name: the metric name (e.g., "val_confusion_matrix")
             value: the non-scalar metric output
         """
+        # Skip during sanity check to match Lightning's behavior for scalar metrics
+        if self.trainer.sanity_checking:
+            return
+
         try:
             value.log_to_wandb(name)
         except Exception as e:
