@@ -579,6 +579,13 @@ def read_data_input(
         features: list[Feature] = []
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
+
+            if layer_config.single_file_materialization:
+                raise ValueError(
+                    f"single_file_materialization is not supported for vector layers "
+                    f"(layer: {layer_name})"
+                )
+
             vector_format = layer_config.instantiate_vector_format()
             layer_dir = window.get_layer_dir(layer_name, group_idx=group_idx)
             cur_features = vector_format.decode_vector(

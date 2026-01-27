@@ -587,6 +587,12 @@ class VectorMaterializer(Materializer):
             layer_cfg: the configuration of the layer to materialize
             item_groups: the items associated with this window and layer
         """
+        if layer_cfg.single_file_materialization:
+            raise ValueError(
+                f"single_file_materialization is not supported for vector layers "
+                f"(layer: {layer_name})"
+            )
+
         vector_format = layer_cfg.instantiate_vector_format()
 
         for group_id, group in enumerate(item_groups):
