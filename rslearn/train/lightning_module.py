@@ -218,7 +218,7 @@ class RslearnLightningModule(L.LightningModule):
             name: the metric name (e.g., "val_confusion_matrix")
             value: the non-scalar metric output
         """
-        # Skip during sanity check to match Lightning's behavior for scalar metrics
+        # Skip during Lightning sanity check
         if self.trainer.sanity_checking:
             return
 
@@ -244,6 +244,11 @@ class RslearnLightningModule(L.LightningModule):
         for k, v in metrics.items():
             if isinstance(v, NonScalarMetricOutput):
                 self._log_non_scalar_metric(k, v)
+            elif isinstance(v, torch.Tensor) and v.dim() >= 1:
+                raise ValueError(
+                    f"Metric '{k}' returned a non-scalar tensor with shape {v.shape}. "
+                    "Wrap it in a NonScalarMetricOutput subclass."
+                )
             else:
                 scalar_metrics[k] = v
 
@@ -257,8 +262,7 @@ class RslearnLightningModule(L.LightningModule):
         to log_dict) because MetricCollection.compute() properly flattens dict-returning
         metrics, while log_dict expects each metric to return a scalar tensor.
 
-        Non-scalar metrics (like confusion matrices) are logged separately using
-        logger-specific APIs.
+        Non-scalar metrics (like confusion matrices) are logged separately.
         """
         metrics = self.test_metrics.compute()
 
@@ -267,6 +271,11 @@ class RslearnLightningModule(L.LightningModule):
         for k, v in metrics.items():
             if isinstance(v, NonScalarMetricOutput):
                 self._log_non_scalar_metric(k, v)
+            elif isinstance(v, torch.Tensor) and v.dim() >= 1:
+                raise ValueError(
+                    f"Metric '{k}' returned a non-scalar tensor with shape {v.shape}. "
+                    "Wrap it in a NonScalarMetricOutput subclass."
+                )
             else:
                 scalar_metrics[k] = v
 
