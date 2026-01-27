@@ -673,42 +673,8 @@ class GeotiffRasterFormat(RasterFormat):
         # Flatten TCHW to (T*C)HW for storage
         flattened_array = array.reshape(num_groups * num_channels, height, width)
 
-        # Write the stacked GeoTIFF
-        crs = projection.crs
-        transform = affine.Affine(
-            projection.x_resolution,
-            0,
-            bounds[0] * projection.x_resolution,
-            0,
-            projection.y_resolution,
-            bounds[1] * projection.y_resolution,
-        )
-        profile = {
-            "driver": "GTiff",
-            "compress": "lzw",
-            "width": width,
-            "height": height,
-            "count": num_groups * num_channels,
-            "dtype": flattened_array.dtype.name,
-            "crs": crs,
-            "transform": transform,
-            "BIGTIFF": "IF_SAFER",
-        }
-        if (
-            width > self.block_size
-            or height > self.block_size
-            or self.always_enable_tiling
-        ):
-            profile["tiled"] = True
-            profile["blockxsize"] = self.block_size
-            profile["blockysize"] = self.block_size
-
-        profile.update(self.geotiff_options)
-
-        path.mkdir(parents=True, exist_ok=True)
-        logger.debug(f"Writing stacked geotiff to {path / self.stacked_fname}")
-        with open_rasterio_upath_writer(path / self.stacked_fname, **profile) as dst:
-            dst.write(flattened_array)
+        # Write the stacked GeoTIFF using encode_raster
+        self.encode_raster(path, projection, bounds, flattened_array, fname=self.stacked_fname)
 
         # Write metadata about the stacking dimensions
         metadata = {

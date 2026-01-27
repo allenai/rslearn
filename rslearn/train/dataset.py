@@ -202,7 +202,6 @@ def get_needed_band_sets_and_indexes(
     layer_config: LayerConfig,
     needed_bands: list[str],
     layer_name: str,
-    error_context: str = "",
 ) -> list[tuple[Any, list[int], list[int]]]:
     """Determine which band sets are needed and their index mappings.
 
@@ -210,7 +209,6 @@ def get_needed_band_sets_and_indexes(
         layer_config: the layer configuration containing band_sets.
         needed_bands: list of band names that are needed.
         layer_name: the layer name for error messages.
-        error_context: additional context for error messages.
 
     Returns:
         A list of tuples (band_set, src_indexes, dst_indexes) where:
@@ -242,7 +240,7 @@ def get_needed_band_sets_and_indexes(
 
     if len(needed_band_indexes) > 0:
         raise ValueError(
-            f"could not get all the needed bands from layer {layer_name}{error_context}"
+            f"could not get all the needed bands from layer {layer_name}"
         )
 
     return needed_sets_and_indexes
@@ -280,7 +278,6 @@ def read_raster_layer_for_data_input(
         layer_config,
         needed_bands,
         layer_name,
-        error_context=f" window {window.name} group {group_idx}",
     )
 
     # Get the projection and bounds to read under (multiply window resolution # by
@@ -354,7 +351,6 @@ def read_stacked_raster_layer_for_data_input(
         layer_config,
         needed_bands,
         layer_name,
-        error_context=f" window {window.name}",
     )
 
     # Get the projection and bounds to read under.
@@ -506,10 +502,23 @@ def read_data_input(
             layer_config = dataset.layers[layer_name]
 
             # Check if this layer uses single-file materialization
-            if (
-                layer_config.single_file_materialization
-                and data_input.load_all_item_groups
-            ):
+            if layer_config.single_file_materialization:
+                # Validate that the DataInput is configured correctly for single-file
+                # materialization. Single-file materialization stores all item groups
+                # in one file, so we must load all item groups.
+                if not data_input.load_all_item_groups:
+                    raise ValueError(
+                        f"Layer {layer_name} has single_file_materialization enabled, "
+                        "but DataInput.load_all_item_groups is False. "
+                        "Set load_all_item_groups=True to read from this layer."
+                    )
+                if not data_input.load_all_layers:
+                    raise ValueError(
+                        f"Layer {layer_name} has single_file_materialization enabled, "
+                        "but DataInput.load_all_layers is False. "
+                        "Set load_all_layers=True to read from this layer."
+                    )
+
                 # Read all item groups from the stacked file at once
                 stacked_images = read_stacked_raster_layer_for_data_input(
                     window,
@@ -530,10 +539,8 @@ def read_data_input(
                                 f"Got {type(time_range)} and {type(time_ranges[-1])}"
                             )
                     time_ranges.append(time_range)
-                # Skip the rest of the layers since we've read all groups from this one
-                break
             else:
-                # Original behavior: read from specific group
+                # Default behavior: read from specific group
                 image = read_raster_layer_for_data_input(
                     window,
                     bounds,

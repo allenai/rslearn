@@ -492,7 +492,10 @@ class LayerConfig(BaseModel):
     # Single-file materialization option.
     single_file_materialization: bool = Field(
         default=False,
-        description="For raster layers, whether to write all item groups to a single file.",
+        description="For raster layers, whether to write all item groups to a single file. "
+        "When enabled, rslearn will write the entire layer to `layers/LAYER_NAME`, "
+        "instead of having one folder per item group like `layers/LAYER_NAME`, "
+        "`layers/LAYER_NAME.1`, and so on.",
     )
 
     # Vector layer options.

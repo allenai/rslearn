@@ -539,7 +539,7 @@ class RasterMaterializer(Materializer):
                     stacked_array,
                 )
             else:
-                # Original behavior: write each item group separately.
+                # Default behavior: write each item group separately.
                 for group_id, group in enumerate(item_groups):
                     composite = build_composite(
                         group=group,
