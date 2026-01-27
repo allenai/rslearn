@@ -9,6 +9,7 @@ import tempfile
 import time
 import uuid
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
 import torch
@@ -40,6 +41,19 @@ from .tasks import Task
 from .transforms import Sequential
 
 logger = get_logger(__name__)
+
+
+class IndexMode(StrEnum):
+    """Controls dataset index caching behavior."""
+
+    OFF = "off"
+    """No caching - always load windows from dataset."""
+
+    USE = "use"
+    """Use cached index if available, create if not."""
+
+    REFRESH = "refresh"
+    """Ignore existing cache and rebuild."""
 
 
 def get_torch_dtype(dtype: DType) -> torch.dtype:
@@ -604,8 +618,7 @@ class ModelDataset(torch.utils.data.Dataset):
         workers: int,
         name: str | None = None,
         fix_patch_pick: bool = False,
-        use_index: bool = False,
-        refresh_index: bool = False,
+        index_mode: IndexMode = IndexMode.OFF,
     ) -> None:
         """Instantiate a new ModelDataset.
 
@@ -618,10 +631,7 @@ class ModelDataset(torch.utils.data.Dataset):
             name: name of the dataset
             fix_patch_pick: if True, fix the patch pick to be the same every time
                 for a given window. Useful for testing (default: False)
-            use_index: if True, use cached index of windows to speed up subsequent
-                runs
-            refresh_index: if True, ignore existing index and rebuild it
-
+            index_mode: controls dataset index caching behavior (default: IndexMode.OFF)
         """
         self.dataset = dataset
         self.split_config = split_config
@@ -649,7 +659,7 @@ class ModelDataset(torch.utils.data.Dataset):
                     del self.inputs[k]
 
         # Load windows (from index if available, otherwise from dataset)
-        windows = self._load_windows(split_config, workers, use_index, refresh_index)
+        windows = self._load_windows(split_config, workers, index_mode)
 
         # Write dataset_examples to a file so that we can load it lazily in the worker
         # processes. Otherwise it takes a long time to transmit it when spawning each
@@ -722,21 +732,19 @@ class ModelDataset(torch.utils.data.Dataset):
         self,
         split_config: SplitConfig,
         workers: int,
-        use_index: bool,
-        refresh_index: bool,
+        index_mode: IndexMode,
     ) -> list[Window]:
         """Load windows, using index if available.
 
         This method handles:
-        1. Loading from index if use_index=True and index exists
+        1. Loading from index if index_mode is USE and index exists
         2. Otherwise, loading from dataset, filtering, sorting, limiting
-        3. Saving to index if use_index=True
+        3. Saving to index if index_mode is USE or REFRESH
 
         Args:
             split_config: the split configuration.
             workers: number of worker processes.
-            use_index: whether to use cached index.
-            refresh_index: whether to force rebuild the index.
+            index_mode: controls caching behavior.
 
         Returns:
             list of processed windows ready for training.
@@ -745,7 +753,7 @@ class ModelDataset(torch.utils.data.Dataset):
         index: DatasetIndex | None = None
         index_key: str | None = None
 
-        if use_index:
+        if index_mode != IndexMode.OFF:
             logger.info(f"Checking index for dataset {self.dataset.path}")
             index = DatasetIndex(self.dataset.path)
             index_key = index.get_index_key(
@@ -755,8 +763,8 @@ class ModelDataset(torch.utils.data.Dataset):
                 num_samples=split_config.num_samples,
                 skip_targets=split_config.get_skip_targets(),
                 inputs=self.inputs,
-                disabled_layers=[],
             )
+            refresh_index = index_mode == IndexMode.REFRESH
             indexed_windows = index.load_windows(index_key, refresh_index)
 
             if indexed_windows is not None:

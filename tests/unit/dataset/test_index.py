@@ -42,7 +42,6 @@ class TestDatasetIndex:
             num_samples=1000,
             skip_targets=False,
             inputs=inputs,
-            disabled_layers=[],
         )
         key2 = index.get_index_key(
             groups=["train"],
@@ -51,7 +50,6 @@ class TestDatasetIndex:
             num_samples=1000,
             skip_targets=False,
             inputs=inputs,
-            disabled_layers=[],
         )
 
         assert key1 == key2
@@ -69,7 +67,6 @@ class TestDatasetIndex:
             num_samples=None,
             skip_targets=False,
             inputs=inputs,
-            disabled_layers=[],
         )
         key2 = index.get_index_key(
             groups=["val"],  # Different group
@@ -78,7 +75,6 @@ class TestDatasetIndex:
             num_samples=None,
             skip_targets=False,
             inputs=inputs,
-            disabled_layers=[],
         )
         key3 = index.get_index_key(
             groups=["train"],
@@ -87,7 +83,6 @@ class TestDatasetIndex:
             num_samples=100,  # Different num_samples
             skip_targets=False,
             inputs=inputs,
-            disabled_layers=[],
         )
 
         assert key1 != key2

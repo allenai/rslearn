@@ -39,7 +39,6 @@ class DatasetIndex:
         num_samples: int | None,
         skip_targets: bool,
         inputs: dict[str, Any],
-        disabled_layers: list[str],
     ) -> str:
         """Generate deterministic index key from configuration.
 
@@ -50,7 +49,6 @@ class DatasetIndex:
             num_samples: limit on number of samples.
             skip_targets: whether targets are skipped.
             inputs: dict mapping input names to DataInput objects.
-            disabled_layers: list of disabled layer names.
 
         Returns:
             A 16-character hex string index key.
@@ -72,7 +70,6 @@ class DatasetIndex:
             "num_samples": num_samples,
             "skip_targets": skip_targets,
             "inputs": inputs_data,
-            "disabled_layers": sorted(disabled_layers),
         }
         return hashlib.sha256(
             json.dumps(key_data, sort_keys=True).encode()

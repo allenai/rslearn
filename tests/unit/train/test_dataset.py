@@ -17,6 +17,7 @@ from rslearn.dataset.index import DatasetIndex
 from rslearn.dataset.window import WindowLayerData
 from rslearn.train.dataset import (
     DataInput,
+    IndexMode,
     ModelDataset,
     RetryDataset,
     SplitConfig,
@@ -286,9 +287,9 @@ def test_model_dataset_index_caching(
     """Test that ModelDataset index caching works correctly.
 
     This test verifies that:
-    1. With use_index=True, the index is created on first run
+    1. With index_mode=USE, the index is created on first run
     2. On second run, the index is loaded (same results)
-    3. With refresh_index=True, the index is rebuilt
+    3. With index_mode=REFRESH, the index is rebuilt
     """
     # Create windows
     image = np.zeros((1, 4, 4), dtype=np.uint8)
@@ -317,7 +318,7 @@ def test_model_dataset_index_caching(
         task=task,
         workers=0,
         inputs=inputs,
-        use_index=True,
+        index_mode=IndexMode.USE,
     )
     assert len(dataset1) == 2
 
@@ -330,7 +331,6 @@ def test_model_dataset_index_caching(
         num_samples=split_config.num_samples,
         skip_targets=split_config.get_skip_targets(),
         inputs=inputs,
-        disabled_layers=[],
     )
     cached_windows = index.load_windows(index_key)
     assert cached_windows is not None
@@ -343,7 +343,7 @@ def test_model_dataset_index_caching(
         task=task,
         workers=0,
         inputs=inputs,
-        use_index=True,
+        index_mode=IndexMode.USE,
     )
     assert len(dataset2) == 2
 
@@ -360,8 +360,7 @@ def test_model_dataset_index_caching(
         task=task,
         workers=0,
         inputs=inputs,
-        use_index=True,
-        refresh_index=True,
+        index_mode=IndexMode.REFRESH,
     )
     assert len(dataset3) == 2
 
@@ -370,14 +369,14 @@ def test_model_dataset_without_index(
     basic_classification_dataset: Dataset,
     add_window_to_basic_classification_dataset: Callable,
 ) -> None:
-    """Test that ModelDataset works correctly with use_index=False (default)."""
+    """Test that ModelDataset works correctly with index_mode=OFF (default)."""
     image = np.zeros((1, 4, 4), dtype=np.uint8)
     add_window_to_basic_classification_dataset(
         basic_classification_dataset,
         images={("image_layer1", 0): image},
     )
 
-    # With use_index=False (default), no index should be created
+    # With index_mode=OFF (default), no index should be created
     dataset = ModelDataset(
         basic_classification_dataset,
         split_config=SplitConfig(),
@@ -387,7 +386,7 @@ def test_model_dataset_without_index(
             "image": DataInput("raster", ["image_layer1"], bands=["band"]),
             "targets": DataInput("vector", ["vector_layer"]),
         },
-        use_index=False,
+        index_mode=IndexMode.OFF,
     )
     assert len(dataset) == 1
 

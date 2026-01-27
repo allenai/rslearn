@@ -21,6 +21,7 @@ from .all_patches_dataset import (
 )
 from .dataset import (
     DataInput,
+    IndexMode,
     ModelDataset,
     MultiDataset,
     RetryDataset,
@@ -69,8 +70,7 @@ class RslearnDataModule(L.LightningDataModule):
         name: str | None = None,
         retries: int = 0,
         use_in_memory_all_patches_dataset: bool = False,
-        use_index: bool = False,
-        refresh_index: bool = False,
+        index_mode: IndexMode = IndexMode.OFF,
     ) -> None:
         """Initialize a new RslearnDataModule.
 
@@ -94,10 +94,7 @@ class RslearnDataModule(L.LightningDataModule):
             retries: number of retries to attempt for getitem calls
             use_in_memory_all_patches_dataset: whether to use InMemoryAllPatchesDataset
                 instead of IterableAllPatchesDataset if load_all_patches is set to true.
-            use_index: if True, use cached index of windows to speed up subsequent
-                runs (default: True)
-            refresh_index: if True, ignore existing index and rebuild it
-                (default: False)
+            index_mode: controls dataset index caching behavior (default: IndexMode.OFF)
         """
         super().__init__()
         self.inputs = inputs
@@ -109,8 +106,7 @@ class RslearnDataModule(L.LightningDataModule):
         self.name = name
         self.retries = retries
         self.use_in_memory_all_patches_dataset = use_in_memory_all_patches_dataset
-        self.use_index = use_index
-        self.refresh_index = refresh_index
+        self.index_mode = index_mode
         self.split_configs = {
             "train": default_config.update(train_config),
             "val": default_config.update(val_config),
@@ -146,8 +142,7 @@ class RslearnDataModule(L.LightningDataModule):
                 workers=self.init_workers,
                 name=self.name,
                 fix_patch_pick=(split != "train"),
-                use_index=self.use_index,
-                refresh_index=self.refresh_index,
+                index_mode=self.index_mode,
             )
             logger.info(f"got {len(dataset)} examples in split {split}")
             if split_config.get_load_all_patches():
@@ -320,8 +315,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
         per_dataset_patch_limit: int | None = None,
         steps_per_dataset: int | None = None,
         disabled_datasets: list[str] | None = None,
-        use_index: bool = False,
-        refresh_index: bool = False,
+        index_mode: IndexMode = IndexMode.OFF,
     ) -> None:
         """Initialize a new MultiDatasetDataModule.
 
@@ -339,10 +333,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
             steps_per_dataset: the number of steps to sample from each dataset in a row (requires that
                 sample_mode is "reptile")
             disabled_datasets: list of datasets to disable (default: None = no disabled datasets)
-            use_index: if True, use cached index of windows to speed up subsequent
-                runs (default: True)
-            refresh_index: if True, ignore existing index and rebuild it
-                (default: False)
+            index_mode: controls dataset index caching behavior (default: IndexMode.OFF)
         """
         super().__init__()
         self.data_modules = data_modules
@@ -353,8 +344,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
         self.per_dataset_patch_limit = per_dataset_patch_limit
         self.steps_per_dataset = steps_per_dataset
         self.disabled_datasets = disabled_datasets or []
-        self.use_index = use_index
-        self.refresh_index = refresh_index
+        self.index_mode = index_mode
 
         for dataset in self.disabled_datasets:
             if dataset in self.data_modules:
@@ -363,10 +353,9 @@ class MultiDatasetDataModule(L.LightningDataModule):
             else:
                 logger.info(f"Could not find dataset {dataset} to skip")
 
-        # Pass index options to child data modules
+        # Pass index mode to child data modules
         for dm in self.data_modules.values():
-            dm.use_index = use_index
-            dm.refresh_index = refresh_index
+            dm.index_mode = index_mode
 
     def setup(self, stage: str | None = None) -> None:
         """Set up the datasets for the given stage. Also assign dataset-specific names.
