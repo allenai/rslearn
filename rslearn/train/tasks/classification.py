@@ -424,7 +424,6 @@ class ClassificationConfusionMatrixMetric(Metric):
         self.num_classes = num_classes
         self.class_names = class_names
         self.max_samples = max_samples
-        # Use tensors for distributed training compatibility
         self.add_state(
             "all_probs",
             default=torch.empty(0, num_classes),
@@ -480,5 +479,3 @@ class ClassificationConfusionMatrixMetric(Metric):
     def reset(self) -> None:
         """Reset metric."""
         super().reset()
-        self.all_probs = torch.empty(0, self.num_classes)
-        self.all_labels = torch.empty(0, dtype=torch.long)
