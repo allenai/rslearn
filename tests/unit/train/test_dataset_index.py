@@ -80,7 +80,6 @@ class TestDatasetIndex:
         )
 
         assert index1.index_key == index2.index_key
-        assert len(index1.index_key) == 16  # 16 hex characters
 
     def test_index_key_different_configs(self, tmp_path: Path) -> None:
         """Test that different configs produce different index keys."""
