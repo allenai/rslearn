@@ -73,7 +73,6 @@ def add_window(
         images: map from (layer_name, group_idx) to the image content, which should be
             1x4x4 since that is the window size.
     """
-    # Support alias `window_name` used by some tests; prefer explicit `window_name`.
     _name = window_name if window_name is not None else name
 
     window = Window(
