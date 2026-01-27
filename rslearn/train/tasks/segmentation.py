@@ -64,7 +64,6 @@ class SegmentationTask(BasicTask):
         output_class_idx: int | None = None,
         enable_confusion_matrix: bool = False,
         class_names: list[str] | None = None,
-        confusion_matrix_max_samples: int | None = 10000,
         **kwargs: Any,
     ) -> None:
         """Initialize a new SegmentationTask.
@@ -105,8 +104,6 @@ class SegmentationTask(BasicTask):
             enable_confusion_matrix: whether to compute confusion matrix (default false)
             class_names: optional list of class names for labeling confusion matrix axes.
                 If not provided, classes will be labeled as "class_0", "class_1", etc.
-            confusion_matrix_max_samples: maximum number of samples to accumulate for
-                confusion matrix (default 10000). Set to None for unlimited.
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -135,7 +132,6 @@ class SegmentationTask(BasicTask):
         self.output_class_idx = output_class_idx
         self.enable_confusion_matrix = enable_confusion_matrix
         self.class_names = class_names
-        self.confusion_matrix_max_samples = confusion_matrix_max_samples
 
     def process_inputs(
         self,
@@ -319,7 +315,6 @@ class SegmentationTask(BasicTask):
             metrics["confusion_matrix"] = SegmentationConfusionMatrixMetric(
                 num_classes=self.num_classes,
                 class_names=self.class_names,
-                max_samples=self.confusion_matrix_max_samples,
             )
 
         return MetricCollection(metrics)

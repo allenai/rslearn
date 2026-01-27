@@ -45,7 +45,6 @@ class ClassificationTask(BasicTask):
         positive_class: str | None = None,
         positive_class_threshold: float = 0.5,
         enable_confusion_matrix: bool = False,
-        confusion_matrix_max_samples: int | None = 10000,
         **kwargs: Any,
     ):
         """Initialize a new ClassificationTask.
@@ -72,8 +71,6 @@ class ClassificationTask(BasicTask):
             positive_class_threshold: threshold for classifying the positive class in
                 binary classification (default 0.5).
             enable_confusion_matrix: whether to compute confusion matrix (default false)
-            confusion_matrix_max_samples: maximum number of samples to accumulate for
-                confusion matrix (default 10000). Set to None for unlimited.
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -90,7 +87,6 @@ class ClassificationTask(BasicTask):
         self.positive_class = positive_class
         self.positive_class_threshold = positive_class_threshold
         self.enable_confusion_matrix = enable_confusion_matrix
-        self.confusion_matrix_max_samples = confusion_matrix_max_samples
 
         if self.positive_class_threshold != 0.5:
             # Must be binary classification
@@ -289,7 +285,6 @@ class ClassificationTask(BasicTask):
             metrics["confusion_matrix"] = ClassificationConfusionMatrixMetric(
                 num_classes=len(self.classes),
                 class_names=self.classes,
-                max_samples=self.confusion_matrix_max_samples,
             )
 
         return MetricCollection(metrics)
