@@ -23,7 +23,6 @@ from rslearn.config import (
 )
 from rslearn.data_sources.data_source import Item
 from rslearn.dataset.dataset import Dataset
-from rslearn.dataset.index import DatasetIndex
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.window import (
     Window,
@@ -31,6 +30,7 @@ from rslearn.dataset.window import (
     get_layer_and_group_from_dir_name,
 )
 from rslearn.log_utils import get_logger
+from rslearn.train.dataset_index import DatasetIndex
 from rslearn.train.model_context import RasterImage
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor

@@ -13,7 +13,6 @@ from upath import UPath
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import Item
 from rslearn.dataset import Dataset, Window
-from rslearn.dataset.index import DatasetIndex
 from rslearn.dataset.window import WindowLayerData
 from rslearn.train.dataset import (
     DataInput,
@@ -23,6 +22,7 @@ from rslearn.train.dataset import (
     SplitConfig,
     read_layer_time_range,
 )
+from rslearn.train.dataset_index import DatasetIndex
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.transforms.concatenate import Concatenate
 from rslearn.utils.geometry import STGeometry
