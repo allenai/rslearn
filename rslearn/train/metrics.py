@@ -62,13 +62,10 @@ class ConfusionMatrixOutput(NonScalarMetricOutput):
         else:
             class_names = self.class_names
 
-        wandb.log(
-            {
-                name: wandb.plot.confusion_matrix(
-                    probs=probs,
-                    y_true=labels,
-                    class_names=class_names,
-                    title=name,
-                ),
-            },
+        # Use summary instead of log to avoid step conflicts with Custom Charts
+        wandb.run.summary[name] = wandb.plot.confusion_matrix(
+            probs=probs,
+            y_true=labels,
+            class_names=class_names,
+            title=name,
         )
