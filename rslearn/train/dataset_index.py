@@ -77,7 +77,7 @@ class DatasetIndex:
         }
         self.index_key = hashlib.sha256(
             json.dumps(key_data, sort_keys=True).encode()
-        ).hexdigest()[:16]
+        ).hexdigest()
 
     def _get_config_hash(self) -> str:
         """Get hash of config.json for quick validation.
