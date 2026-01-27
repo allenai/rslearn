@@ -22,7 +22,7 @@ from rslearn.train.dataset import (
     SplitConfig,
     read_layer_time_range,
 )
-from rslearn.train.dataset_index import INDEX_DIR_NAME, DatasetIndex
+from rslearn.train.dataset_index import INDEX_DIR_NAME
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.transforms.concatenate import Concatenate
 from rslearn.utils.geometry import STGeometry
@@ -280,18 +280,15 @@ def test_read_layer_time_range(tmp_path: UPath) -> None:
     assert time_range[1] == datetime(2024, 1, 20)  # max of item1 and item2 end
 
 
-def test_model_dataset_index_caching(
+def test_model_dataset_index_uses_cache(
     basic_classification_dataset: Dataset,
     add_window_to_basic_classification_dataset: Callable,
 ) -> None:
-    """Test that ModelDataset index caching works correctly.
+    """Test that index_mode=USE actually uses cached results.
 
-    This test verifies that:
-    1. With index_mode=USE, the index is created on first run
-    2. On second run, the index is loaded (same results)
-    3. With index_mode=REFRESH, the index is rebuilt
+    Creates an index, then adds a new window. With USE mode, the cached
+    index should be returned (not including the new window).
     """
-    # Create windows
     image = np.zeros((1, 4, 4), dtype=np.uint8)
     add_window_to_basic_classification_dataset(
         basic_classification_dataset,
@@ -322,22 +319,14 @@ def test_model_dataset_index_caching(
     )
     assert len(dataset1) == 2
 
-    # Verify index was created
-    index = DatasetIndex(
-        storage=basic_classification_dataset.storage,
-        dataset_path=basic_classification_dataset.path,
-        groups=split_config.groups,
-        names=split_config.names,
-        tags=split_config.tags,
-        num_samples=split_config.num_samples,
-        skip_targets=split_config.get_skip_targets(),
-        inputs=inputs,
+    # Add a new window AFTER the index was created
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        name="window3",
+        images={("image_layer1", 0): image},
     )
-    cached_windows = index.load_windows()
-    assert cached_windows is not None
-    assert len(cached_windows) == 2
 
-    # Second run: load from index
+    # Second run: should still return 2 windows (proving cache is used)
     dataset2 = ModelDataset(
         basic_classification_dataset,
         split_config=split_config,
@@ -346,16 +335,57 @@ def test_model_dataset_index_caching(
         inputs=inputs,
         index_mode=IndexMode.USE,
     )
-    assert len(dataset2) == 2
+    assert len(dataset2) == 2  # Still 2, not 3
 
-    # Verify both datasets have the same windows
-    examples1 = dataset1.get_dataset_examples()
-    examples2 = dataset2.get_dataset_examples()
-    assert len(examples1) == len(examples2)
-    assert {w.name for w in examples1} == {w.name for w in examples2}
 
-    # Third run: refresh index
-    dataset3 = ModelDataset(
+def test_model_dataset_index_refresh_rebuilds(
+    basic_classification_dataset: Dataset,
+    add_window_to_basic_classification_dataset: Callable,
+) -> None:
+    """Test that index_mode=REFRESH rebuilds the index.
+
+    Creates an index, adds a new window, then uses REFRESH mode.
+    The refreshed index should include the new window.
+    """
+    image = np.zeros((1, 4, 4), dtype=np.uint8)
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        name="window1",
+        images={("image_layer1", 0): image},
+    )
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        name="window2",
+        images={("image_layer1", 0): image},
+    )
+
+    inputs = {
+        "image": DataInput("raster", ["image_layer1"], bands=["band"]),
+        "targets": DataInput("vector", ["vector_layer"]),
+    }
+    task = ClassificationTask("label", ["cls0", "cls1"], read_class_id=True)
+    split_config = SplitConfig()
+
+    # First run: create index
+    dataset1 = ModelDataset(
+        basic_classification_dataset,
+        split_config=split_config,
+        task=task,
+        workers=0,
+        inputs=inputs,
+        index_mode=IndexMode.USE,
+    )
+    assert len(dataset1) == 2
+
+    # Add a new window AFTER the index was created
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        name="window3",
+        images={("image_layer1", 0): image},
+    )
+
+    # Refresh: should now include window3
+    dataset2 = ModelDataset(
         basic_classification_dataset,
         split_config=split_config,
         task=task,
@@ -363,7 +393,7 @@ def test_model_dataset_index_caching(
         inputs=inputs,
         index_mode=IndexMode.REFRESH,
     )
-    assert len(dataset3) == 2
+    assert len(dataset2) == 3  # Now 3, because we refreshed the index
 
 
 def test_model_dataset_without_index(
