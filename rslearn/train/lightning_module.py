@@ -224,8 +224,8 @@ class RslearnLightningModule(L.LightningModule):
 
         try:
             value.log_to_wandb(name)
-        except Exception as e:
-            logger.warning(f"Failed to log {name}: {e}")
+        except Exception:
+            logger.warning(f"Failed to log {name}", exc_info=True)
 
     def on_validation_epoch_end(self) -> None:
         """Compute and log validation metrics at epoch end.
@@ -244,7 +244,7 @@ class RslearnLightningModule(L.LightningModule):
         for k, v in metrics.items():
             if isinstance(v, NonScalarMetricOutput):
                 self._log_non_scalar_metric(k, v)
-            elif isinstance(v, torch.Tensor) and v.dim() >= 1:
+            elif isinstance(v, torch.Tensor) and v.dim() > 0 and v.numel() > 1:
                 raise ValueError(
                     f"Metric '{k}' returned a non-scalar tensor with shape {v.shape}. "
                     "Wrap it in a NonScalarMetricOutput subclass."
@@ -271,7 +271,7 @@ class RslearnLightningModule(L.LightningModule):
         for k, v in metrics.items():
             if isinstance(v, NonScalarMetricOutput):
                 self._log_non_scalar_metric(k, v)
-            elif isinstance(v, torch.Tensor) and v.dim() >= 1:
+            elif isinstance(v, torch.Tensor) and v.dim() > 0 and v.numel() > 1:
                 raise ValueError(
                     f"Metric '{k}' returned a non-scalar tensor with shape {v.shape}. "
                     "Wrap it in a NonScalarMetricOutput subclass."

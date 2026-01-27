@@ -64,6 +64,7 @@ class SegmentationTask(BasicTask):
         output_class_idx: int | None = None,
         enable_confusion_matrix: bool = False,
         class_names: list[str] | None = None,
+        confusion_matrix_max_samples: int | None = 10000,
         **kwargs: Any,
     ) -> None:
         """Initialize a new SegmentationTask.
@@ -104,6 +105,8 @@ class SegmentationTask(BasicTask):
             enable_confusion_matrix: whether to compute confusion matrix (default false)
             class_names: optional list of class names for labeling confusion matrix axes.
                 If not provided, classes will be labeled as "class_0", "class_1", etc.
+            confusion_matrix_max_samples: maximum number of samples to accumulate for
+                confusion matrix (default 10000). Set to None for unlimited.
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -132,6 +135,7 @@ class SegmentationTask(BasicTask):
         self.output_class_idx = output_class_idx
         self.enable_confusion_matrix = enable_confusion_matrix
         self.class_names = class_names
+        self.confusion_matrix_max_samples = confusion_matrix_max_samples
 
     def process_inputs(
         self,
@@ -312,13 +316,10 @@ class SegmentationTask(BasicTask):
             metrics.update(self.other_metrics)
 
         if self.enable_confusion_matrix:
-            # Use provided class_names or generate defaults
-            class_names = self.class_names
-            if class_names is None:
-                class_names = [f"class_{i}" for i in range(self.num_classes)]
             metrics["confusion_matrix"] = SegmentationConfusionMatrixMetric(
                 num_classes=self.num_classes,
-                class_names=class_names,
+                class_names=self.class_names,
+                max_samples=self.confusion_matrix_max_samples,
             )
 
         return MetricCollection(metrics)
@@ -496,25 +497,42 @@ class SegmentationConfusionMatrixMetric(Metric):
     """Confusion matrix metric for segmentation task.
 
     Accumulates probabilities and labels for logging to wandb.
+
+    Args:
+        num_classes: number of classes
+        class_names: optional list of class names for labeling
+        max_samples: maximum number of samples to accumulate (to prevent memory issues).
+            Defaults to 10000. Set to None for unlimited.
     """
 
     def __init__(
         self,
         num_classes: int,
         class_names: list[str] | None = None,
+        max_samples: int | None = 10000,
     ):
         """Initialize a new SegmentationConfusionMatrixMetric.
 
         Args:
             num_classes: number of classes
             class_names: optional list of class names for labeling
+            max_samples: maximum number of samples to accumulate (default 10000)
         """
         super().__init__()
         self.num_classes = num_classes
         self.class_names = class_names
-        # Accumulate probs and labels as lists
-        self.add_state("all_probs", default=[], dist_reduce_fx="cat")
-        self.add_state("all_labels", default=[], dist_reduce_fx="cat")
+        self.max_samples = max_samples
+        # Use tensors for distributed training compatibility
+        self.add_state(
+            "all_probs",
+            default=torch.empty(0, num_classes),
+            dist_reduce_fx="cat",
+        )
+        self.add_state(
+            "all_labels",
+            default=torch.empty(0, dtype=torch.long),
+            dist_reduce_fx="cat",
+        )
 
     def update(
         self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
@@ -538,33 +556,32 @@ class SegmentationConfusionMatrixMetric(Metric):
         if len(preds) == 0:
             return
 
-        self.all_probs.append(preds)
-        self.all_labels.append(labels)
+        # Enforce max_samples limit
+        if self.max_samples is not None:
+            current_size = len(self.all_probs)
+            if current_size >= self.max_samples:
+                return
+            remaining = self.max_samples - current_size
+            preds = preds[:remaining]
+            labels = labels[:remaining]
+
+        # Concatenate to accumulated tensors
+        self.all_probs = torch.cat([self.all_probs, preds], dim=0)
+        self.all_labels = torch.cat([self.all_labels, labels], dim=0)
 
     def compute(self) -> "ConfusionMatrixOutput":
         """Returns the probs/labels wrapped in ConfusionMatrixOutput."""
-        if isinstance(self.all_probs, list):
-            if len(self.all_probs) == 0:
-                probs = torch.zeros((0, self.num_classes))
-                labels = torch.zeros((0,), dtype=torch.int64)
-            else:
-                probs = torch.cat(self.all_probs, dim=0)
-                labels = torch.cat(self.all_labels, dim=0)
-        else:
-            probs = self.all_probs
-            labels = self.all_labels
-
         return ConfusionMatrixOutput(
-            probs=probs,
-            labels=labels,
+            probs=self.all_probs,
+            labels=self.all_labels,
             class_names=self.class_names,
         )
 
     def reset(self) -> None:
         """Reset metric."""
         super().reset()
-        self.all_probs = []
-        self.all_labels = []
+        self.all_probs = torch.empty(0, self.num_classes)
+        self.all_labels = torch.empty(0, dtype=torch.long)
 
 
 class F1Metric(Metric):

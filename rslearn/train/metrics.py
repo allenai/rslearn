@@ -6,6 +6,10 @@ from dataclasses import dataclass
 import torch
 import wandb
 
+from rslearn.log_utils import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class NonScalarMetricOutput(ABC):
@@ -45,6 +49,10 @@ class ConfusionMatrixOutput(NonScalarMetricOutput):
         Args:
             name: the metric name (e.g., "val_confusion_matrix")
         """
+        if not wandb.run:
+            logger.warning(f"wandb is not initialized, skipping {name}")
+            return
+
         probs = self.probs.detach().cpu().numpy()
         labels = self.labels.detach().cpu().numpy()
         num_classes = probs.shape[1]
