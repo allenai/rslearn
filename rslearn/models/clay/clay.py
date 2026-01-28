@@ -123,7 +123,8 @@ class Clay(FeatureExtractor):
         device = param.device
 
         chips = torch.stack(
-            [inp[self.modality].image for inp in context.inputs], dim=0
+            [inp[self.modality].single_ts_to_chw_tensor() for inp in context.inputs],
+            dim=0,
         )  # (B, C, H, W)
         if self.do_resizing:
             chips = self._resize_image(chips, chips.shape[2])
