@@ -16,6 +16,7 @@ from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, Projection
 
+from .raster_storage import RasterIterator
 from .remap import Remapper, load_remapper
 from .window import Window
 
@@ -516,11 +517,11 @@ class RasterMaterializer(Materializer):
 
             raster_format = band_cfg.instantiate_raster_format()
 
-            # Build all rasters (across item groups)
-            raster_list: list[npt.NDArray[Any]] = []
-            for group_id, group in enumerate(item_groups):
-                raster_list.append(
-                    build_composite(
+            # Define iterator that yields rasters one at a time, for passing to
+            # RasterStorage.write_all_rasters.
+            def raster_iterator() -> RasterIterator:
+                for group in item_groups:
+                    raster = build_composite(
                         group=group,
                         compositing_method=layer_cfg.compositing_method,
                         tile_store=tile_store,
@@ -530,10 +531,9 @@ class RasterMaterializer(Materializer):
                         bounds=bounds,
                         remapper=remapper,
                     )
-                )
+                    yield raster
 
-            # Stack into TCHW array and write via RasterStorage
-            rasters = np.stack(raster_list, axis=0)
+            # Write via RasterStorage.
             raster_storage.write_all_rasters(
                 window_root,
                 layer_name,
@@ -541,7 +541,7 @@ class RasterMaterializer(Materializer):
                 raster_format,
                 projection,
                 bounds,
-                rasters,
+                raster_iterator(),
             )
 
         for group_id in range(len(item_groups)):

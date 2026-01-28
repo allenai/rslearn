@@ -2,11 +2,13 @@
 
 import json
 from abc import ABC, abstractmethod
-from typing import Any, override
+from collections.abc import Iterator
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
 from rasterio.enums import Resampling
+from typing_extensions import override
 from upath import UPath
 
 from rslearn.utils import Projection
@@ -14,6 +16,9 @@ from rslearn.utils.geometry import PixelBounds
 from rslearn.utils.raster_format import RasterFormat, get_bandset_dirname
 
 from .window import LAYERS_DIRECTORY_NAME, get_window_layer_dir
+
+# Type alias for iterator yielding CHW arrays in order of item groups
+RasterIterator = Iterator[npt.NDArray[Any]]
 
 
 class RasterDataStorage(ABC):
@@ -61,7 +66,7 @@ class RasterDataStorage(ABC):
         raster_format: RasterFormat,
         projection: Projection,
         bounds: PixelBounds,
-        rasters: npt.NDArray[Any],
+        raster_iterator: RasterIterator,
     ) -> None:
         """Write rasters for all item groups.
 
@@ -75,9 +80,9 @@ class RasterDataStorage(ABC):
             raster_format: RasterFormat to use for encoding.
             projection: Projection of the raster data.
             bounds: Bounds in the projection.
-            rasters: TCHW numpy array where T is the number of item groups.
+            raster_iterator: Iterator yielding CHW arrays in order of item groups.
         """
-        for group_idx in range(rasters.shape[0]):
+        for group_idx, array in enumerate(raster_iterator):
             self.write_raster(
                 window_root,
                 layer_name,
@@ -86,7 +91,7 @@ class RasterDataStorage(ABC):
                 raster_format,
                 projection,
                 bounds,
-                rasters[group_idx],
+                array,
             )
 
     @abstractmethod
@@ -271,16 +276,23 @@ class PerLayerStorage(RasterDataStorage):
         raster_format: RasterFormat,
         projection: Projection,
         bounds: PixelBounds,
-        rasters: npt.NDArray[Any],
+        raster_iterator: RasterIterator,
     ) -> None:
         """Write all item groups to a single file.
 
-        Flattens TCHW to (T*C, H, W) for storage. Writes metadata to reconstruct
-        the original shape.
+        Collects all rasters from the iterator, then flattens TCHW to (T*C, H, W)
+        for storage. Writes metadata to reconstruct the original shape.
         """
-        if rasters.size == 0:
-            return
+        # Collect all rasters from iterator
+        raster_list: list[npt.NDArray[Any]] = []
+        for array in raster_iterator:
+            raster_list.append(array)
 
+        if len(raster_list) == 0:
+            raise ValueError("expected at least one raster to write but got 0")
+
+        # Stack into TCHW array
+        rasters = np.stack(raster_list, axis=0)
         num_groups = rasters.shape[0]
         num_channels = rasters.shape[1]
 

@@ -9,6 +9,7 @@ from upath import UPath
 from rslearn.dataset.raster_storage import (
     PerItemGroupStorage,
     PerLayerStorage,
+    RasterIterator,
 )
 from rslearn.utils import Projection
 from rslearn.utils.raster_format import GeotiffRasterFormat
@@ -92,7 +93,11 @@ class TestPerItemGroupStorage:
             # Create TCHW array for all groups
             rasters = np.random.randint(0, 255, size=(3, 3, 32, 32), dtype=np.uint8)
 
-            # Write all rasters
+            # Write all rasters via iterator
+            def raster_iterator() -> RasterIterator:
+                for group_idx in range(rasters.shape[0]):
+                    yield rasters[group_idx]
+
             storage.write_all_rasters(
                 window_root,
                 "test_layer",
@@ -100,7 +105,7 @@ class TestPerItemGroupStorage:
                 raster_format,
                 projection,
                 bounds,
-                rasters,
+                raster_iterator(),
             )
 
             # Read all rasters
@@ -181,7 +186,11 @@ class TestPerLayerStorage:
             # Create TCHW array for all groups
             rasters = np.random.randint(0, 255, size=(3, 3, 32, 32), dtype=np.uint8)
 
-            # Write all rasters
+            # Write all rasters via iterator
+            def raster_iterator() -> RasterIterator:
+                for group_idx in range(rasters.shape[0]):
+                    yield rasters[group_idx]
+
             storage.write_all_rasters(
                 window_root,
                 "test_layer",
@@ -189,7 +198,7 @@ class TestPerLayerStorage:
                 raster_format,
                 projection,
                 bounds,
-                rasters,
+                raster_iterator(),
             )
 
             # Read all rasters efficiently
@@ -222,7 +231,11 @@ class TestPerLayerStorage:
             # Create TCHW array for all groups
             rasters = np.random.randint(0, 255, size=(3, 3, 32, 32), dtype=np.uint8)
 
-            # Write all rasters
+            # Write all rasters via iterator
+            def raster_iterator() -> RasterIterator:
+                for group_idx in range(rasters.shape[0]):
+                    yield rasters[group_idx]
+
             storage.write_all_rasters(
                 window_root,
                 "test_layer",
@@ -230,7 +243,7 @@ class TestPerLayerStorage:
                 raster_format,
                 projection,
                 bounds,
-                rasters,
+                raster_iterator(),
             )
 
             # Read single raster (should work but is slow)
