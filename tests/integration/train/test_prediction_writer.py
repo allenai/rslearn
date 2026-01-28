@@ -117,7 +117,7 @@ def test_predict_with_all_patches(image_to_class_dataset: Dataset) -> None:
         },
         task=task,
         predict_config=SplitConfig(
-            patch_size=1,
+            crop_size=1,
             load_all_crops=True,
         ),
         num_workers=4,

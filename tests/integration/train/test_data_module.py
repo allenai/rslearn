@@ -34,7 +34,7 @@ class TestPredictLoader:
     )
     SPLIT_CONFIG = SplitConfig(
         load_all_crops=True,
-        patch_size=2,
+        crop_size=2,
         skip_targets=True,
     )
 
