@@ -17,6 +17,7 @@ from .data_source import (
     ItemLookupDataSource,
     RetrieveItemDataSource,
 )
+from .tile_store_data_source import TileStoreDataSource
 
 __all__ = (
     "DataSource",
@@ -24,5 +25,6 @@ __all__ = (
     "Item",
     "ItemLookupDataSource",
     "RetrieveItemDataSource",
+    "TileStoreDataSource",
     "data_source_from_config",
 )
