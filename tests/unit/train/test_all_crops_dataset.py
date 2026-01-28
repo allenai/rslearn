@@ -1,13 +1,13 @@
-"""Tests for rslearn.train.all_patches_dataset."""
+"""Tests for rslearn.train.all_crops_dataset."""
 
 from collections.abc import Callable
 
 import numpy as np
 
 from rslearn.dataset import Dataset
-from rslearn.train.all_patches_dataset import (
-    InMemoryAllPatchesDataset,
-    IterableAllPatchesDataset,
+from rslearn.train.all_crops_dataset import (
+    InMemoryAllCropsDataset,
+    IterableAllCropsDataset,
 )
 from rslearn.train.dataset import (
     DataInput,
@@ -27,7 +27,7 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
     crop_size = 3
     split_config = SplitConfig(
         crop_size=crop_size,
-        load_all_patches=True,
+        load_all_crops=True,
     )
     image_data_input = DataInput("raster", ["image"], bands=["band"], passthrough=True)
     target_data_input = DataInput("vector", ["label"])
@@ -42,7 +42,7 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
             "targets": target_data_input,
         },
     )
-    dataset = IterableAllPatchesDataset(model_dataset, (crop_size, crop_size))
+    dataset = IterableAllCropsDataset(model_dataset, (crop_size, crop_size))
 
     point_coverage = {}
     for col in range(4):
@@ -57,7 +57,7 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
     assert len(list(dataset)) == 4
 
     for _, _, metadata in dataset:
-        bounds = metadata.patch_bounds
+        bounds = metadata.crop_bounds
         for col, row in list(point_coverage.keys()):
             if col < bounds[0] or col >= bounds[2]:
                 continue
@@ -68,7 +68,7 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
     assert all(point_coverage.values())
 
     # Test with overlap_pixels=1 for 2x2 crops
-    dataset_with_overlap = IterableAllPatchesDataset(
+    dataset_with_overlap = IterableAllCropsDataset(
         model_dataset, (2, 2), overlap_pixels=1
     )
 
@@ -81,7 +81,7 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
     assert len(list(dataset_with_overlap)) == 9
 
     for _, _, metadata in dataset:
-        bounds = metadata.patch_bounds
+        bounds = metadata.crop_bounds
 
         for col, row in list(point_coverage.keys()):
             if col < bounds[0] or col >= bounds[2]:
@@ -93,8 +93,8 @@ def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
     assert all(point_coverage.values())
 
 
-class TestIterableAllPatchesDataset:
-    """Tests for IterableAllPatchesDataset."""
+class TestIterableAllCropsDataset:
+    """Tests for IterableAllCropsDataset."""
 
     def test_one_window_per_worker(
         self,
@@ -126,10 +126,10 @@ class TestIterableAllPatchesDataset:
         world_size = 4
         window_names = set()
         for rank in range(world_size):
-            all_patches_dataset = IterableAllPatchesDataset(
+            all_crops_dataset = IterableAllCropsDataset(
                 model_dataset, crop_size=(4, 4), rank=rank, world_size=world_size
             )
-            samples = list(all_patches_dataset)
+            samples = list(all_crops_dataset)
             assert len(samples) == 1
             window_names.add(samples[0][2].window_name)
         assert len(window_names) == 4
@@ -160,13 +160,13 @@ class TestIterableAllPatchesDataset:
         world_size = 2
         seen_patches: dict[tuple[str, PixelBounds], int] = {}
         for rank in range(world_size):
-            all_patches_dataset = IterableAllPatchesDataset(
+            all_crops_dataset = IterableAllCropsDataset(
                 model_dataset, crop_size=(4, 4), rank=rank, world_size=world_size
             )
-            samples = list(all_patches_dataset)
+            samples = list(all_crops_dataset)
             assert len(samples) == 4
             for sample in samples:
-                patch_id = (sample[2].window_name, sample[2].patch_bounds)
+                patch_id = (sample[2].window_name, sample[2].crop_bounds)
                 seen_patches[patch_id] = seen_patches.get(patch_id, 0) + 1
 
         assert len(seen_patches) == 5
@@ -177,7 +177,7 @@ class TestIterableAllPatchesDataset:
         assert seen_patches[("window1", (4, 4, 8, 8))] == 1
 
     def test_empty_dataset(self, basic_classification_dataset: Dataset) -> None:
-        """Verify that IterableAllPatchesDataset works with no windows."""
+        """Verify that IterableAllCropsDataset works with no windows."""
         model_dataset = ModelDataset(
             basic_classification_dataset,
             split_config=SplitConfig(),
@@ -189,10 +189,10 @@ class TestIterableAllPatchesDataset:
         )
         world_size = 2
         for rank in range(world_size):
-            all_patches_dataset = IterableAllPatchesDataset(
+            all_crops_dataset = IterableAllCropsDataset(
                 model_dataset, crop_size=(4, 4), rank=rank, world_size=world_size
             )
-            samples = list(all_patches_dataset)
+            samples = list(all_crops_dataset)
             assert len(samples) == 0
 
     def test_small_window(
@@ -213,15 +213,15 @@ class TestIterableAllPatchesDataset:
                 "targets": DataInput("vector", ["vector_layer"]),
             },
         )
-        all_patches_dataset = IterableAllPatchesDataset(
+        all_crops_dataset = IterableAllCropsDataset(
             dataset=model_dataset,
             crop_size=(4, 4),
         )
-        samples = list(all_patches_dataset)
+        samples = list(all_crops_dataset)
         assert len(samples) == 1
         _, _, metadata = samples[0]
         assert metadata.window_bounds == (0, 0, 2, 2)
-        assert metadata.patch_bounds == (0, 0, 4, 4)
+        assert metadata.crop_bounds == (0, 0, 4, 4)
 
     def test_resolution_factor_cropping(
         self,
@@ -255,13 +255,13 @@ class TestIterableAllPatchesDataset:
 
         model_dataset = ModelDataset(
             basic_classification_dataset,
-            split_config=SplitConfig(crop_size=4, load_all_patches=True),
+            split_config=SplitConfig(crop_size=4, load_all_crops=True),
             task=SegmentationTask(num_classes=2),
             workers=1,
             inputs={"image": image_data_input, "targets": target_data_input},
         )
 
-        dataset = IterableAllPatchesDataset(
+        dataset = IterableAllCropsDataset(
             model_dataset, crop_size=(4, 4), rank=0, world_size=1
         )
 
@@ -274,15 +274,15 @@ class TestIterableAllPatchesDataset:
         assert sample_count > 0, "No samples were generated - test is not valid"
 
 
-class TestInMemoryAllPatchesDataset:
-    """Tests for InMemoryAllPatchesDataset."""
+class TestInMemoryAllCropsDataset:
+    """Tests for InMemoryAllCropsDataset."""
 
     def test_iterable_equal(
         self,
         basic_classification_dataset: Dataset,
         add_window_to_basic_classification_dataset: Callable,
     ) -> None:
-        """Verify that InMemoryAllPatchesDataset and IterableAllPatchesDataset are equivalent."""
+        """Verify that InMemoryAllCropsDataset and IterableAllCropsDataset are equivalent."""
         # Create a couple of windows with different sizes to exercise patching.
         add_window_to_basic_classification_dataset(
             basic_classification_dataset, name="w0", bounds=(0, 0, 4, 4)
@@ -304,10 +304,10 @@ class TestInMemoryAllPatchesDataset:
 
         # Construct iterable and regular versions.
         crop_size = (3, 3)
-        iterable_ds = IterableAllPatchesDataset(
+        iterable_ds = IterableAllCropsDataset(
             model_dataset, crop_size=crop_size, rank=0, world_size=1
         )
-        regular_ds = InMemoryAllPatchesDataset(model_dataset, crop_size=crop_size)
+        regular_ds = InMemoryAllCropsDataset(model_dataset, crop_size=crop_size)
 
         iterable_samples = list(iterable_ds)
         regular_samples = [regular_ds[i] for i in range(len(regular_ds))]
@@ -349,13 +349,13 @@ class TestInMemoryAllPatchesDataset:
 
         model_dataset = ModelDataset(
             basic_classification_dataset,
-            split_config=SplitConfig(crop_size=4, load_all_patches=True),
+            split_config=SplitConfig(crop_size=4, load_all_crops=True),
             task=SegmentationTask(num_classes=2),
             workers=1,
             inputs={"image": image_data_input, "targets": target_data_input},
         )
 
-        dataset = InMemoryAllPatchesDataset(model_dataset, crop_size=(4, 4))
+        dataset = InMemoryAllCropsDataset(model_dataset, crop_size=(4, 4))
         assert len(dataset) > 0, "No samples were generated - test is not valid"
 
         for i in range(len(dataset)):

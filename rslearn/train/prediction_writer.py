@@ -40,20 +40,20 @@ logger = get_logger(__name__)
 
 
 @dataclass
-class PendingPatchOutput:
-    """A patch output that hasn't been merged yet."""
+class PendingCropOutput:
+    """A crop output that hasn't been merged yet."""
 
     bounds: PixelBounds
     output: Any
 
 
-class PatchPredictionMerger:
-    """Base class for merging predictions from multiple patches."""
+class CropPredictionMerger:
+    """Base class for merging predictions from multiple crops."""
 
     def merge(
         self,
         window: Window,
-        outputs: Sequence[PendingPatchOutput],
+        outputs: Sequence[PendingCropOutput],
         layer_config: LayerConfig,
     ) -> Any:
         """Merge the outputs.
@@ -69,20 +69,20 @@ class PatchPredictionMerger:
         raise NotImplementedError
 
 
-class VectorMerger(PatchPredictionMerger):
+class VectorMerger(CropPredictionMerger):
     """Merger for vector data that simply concatenates the features."""
 
     def merge(
         self,
         window: Window,
-        outputs: Sequence[PendingPatchOutput],
+        outputs: Sequence[PendingCropOutput],
         layer_config: LayerConfig,
     ) -> list[Feature]:
         """Concatenate the vector features."""
         return [feat for output in outputs for feat in output.output]
 
 
-class RasterMerger(PatchPredictionMerger):
+class RasterMerger(CropPredictionMerger):
     """Merger for raster data that copies the rasters to the output."""
 
     def __init__(
@@ -122,7 +122,7 @@ class RasterMerger(PatchPredictionMerger):
     def merge(
         self,
         window: Window,
-        outputs: Sequence[PendingPatchOutput],
+        outputs: Sequence[PendingCropOutput],
         layer_config: LayerConfig,
     ) -> npt.NDArray:
         """Merge the raster outputs."""
@@ -190,7 +190,7 @@ class RslearnWriter(BasePredictionWriter):
         output_layer: str,
         path_options: dict[str, Any] | None = None,
         selector: list[str] | None = None,
-        merger: PatchPredictionMerger | None = None,
+        merger: CropPredictionMerger | None = None,
         output_path: str | Path | None = None,
         layer_config: LayerConfig | None = None,
         storage_config: StorageConfig | None = None,
@@ -203,7 +203,7 @@ class RslearnWriter(BasePredictionWriter):
             path_options: additional options for path to pass to fsspec
             selector: keys to access the desired output in the output dict if needed.
                 e.g ["key1", "key2"] gets output["key1"]["key2"]
-            merger: merger to use to merge outputs from overlapped patches.
+            merger: merger to use to merge outputs from overlapped crops.
             output_path: optional custom path for writing predictions. If provided,
                 predictions will be written to this path instead of deriving from dataset path.
             layer_config: optional layer configuration. If provided, this config will be
@@ -245,9 +245,9 @@ class RslearnWriter(BasePredictionWriter):
             self.merger = VectorMerger()
 
         # Map from window name to pending data to write.
-        # This is used when windows are split up into patches, so the data from all the
-        # patches of each window need to be reconstituted.
-        self.pending_outputs: dict[str, list[PendingPatchOutput]] = {}
+        # This is used when windows are split up into crops, so the data from all the
+        # crops of each window need to be reconstituted.
+        self.pending_outputs: dict[str, list[PendingCropOutput]] = {}
 
     def _get_layer_config_and_dataset_storage(
         self,
@@ -355,7 +355,7 @@ class RslearnWriter(BasePredictionWriter):
                 will be processed by the task to obtain a vector (list[Feature]) or
                 raster (npt.NDArray) output.
             metadatas: corresponding list of metadatas from the batch describing the
-                patches that were processed.
+                crops that were processed.
         """
         # Process the predictions into outputs that can be written.
         outputs: list = [
@@ -377,17 +377,17 @@ class RslearnWriter(BasePredictionWriter):
             )
             self.process_output(
                 window,
-                metadata.patch_idx,
-                metadata.num_patches_in_window,
-                metadata.patch_bounds,
+                metadata.crop_idx,
+                metadata.num_crops_in_window,
+                metadata.crop_bounds,
                 output,
             )
 
     def process_output(
         self,
         window: Window,
-        patch_idx: int,
-        num_patches: int,
+        crop_idx: int,
+        num_crops: int,
         cur_bounds: PixelBounds,
         output: npt.NDArray | list[Feature],
     ) -> None:
@@ -395,28 +395,28 @@ class RslearnWriter(BasePredictionWriter):
 
         Args:
             window: the window that the output pertains to.
-            patch_idx: the index of this patch for the window.
-            num_patches: the total number of patches to be processed for the window.
-            cur_bounds: the bounds of the current patch.
+            crop_idx: the index of this crop for the window.
+            num_crops: the total number of crops to be processed for the window.
+            cur_bounds: the bounds of the current crop.
             output: the output data.
         """
-        # Incorporate the output into our list of pending patch outputs.
+        # Incorporate the output into our list of pending crop outputs.
         if window.name not in self.pending_outputs:
             self.pending_outputs[window.name] = []
-        self.pending_outputs[window.name].append(PendingPatchOutput(cur_bounds, output))
+        self.pending_outputs[window.name].append(PendingCropOutput(cur_bounds, output))
         logger.debug(
-            f"Stored PendingPatchOutput for patch #{patch_idx}/{num_patches} at window {window.name}"
+            f"Stored PendingCropOutput for crop #{crop_idx}/{num_crops} at window {window.name}"
         )
 
-        if patch_idx < num_patches - 1:
+        if crop_idx < num_crops - 1:
             return
 
-        # This is the last patch so it's time to write it.
+        # This is the last crop so it's time to write it.
         # First get the pending output and clear it.
         pending_output = self.pending_outputs[window.name]
         del self.pending_outputs[window.name]
 
-        # Merge outputs from overlapped patches if merger is set.
+        # Merge outputs from overlapped crops if merger is set.
         logger.debug(f"Merging and writing for window {window.name}")
         merged_output = self.merger.merge(window, pending_output, self.layer_config)
 

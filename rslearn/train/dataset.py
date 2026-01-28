@@ -459,12 +459,13 @@ class SplitConfig:
         sampler: SamplerFactory | None = None,
         crop_size: int | tuple[int, int] | None = None,
         overlap_pixels: int | None = None,
-        load_all_patches: bool | None = None,
+        load_all_crops: bool | None = None,
         skip_targets: bool | None = None,
         output_layer_name_skip_inference_if_exists: str | None = None,
         # Deprecated parameters (for backwards compatibility)
         patch_size: int | tuple[int, int] | None = None,
         overlap_ratio: float | None = None,
+        load_all_patches: bool | None = None,
     ) -> None:
         """Initialize a new SplitConfig.
 
@@ -483,7 +484,7 @@ class SplitConfig:
                 crops of this size rather than entire windows.
             overlap_pixels: the number of pixels shared between adjacent crops during
                 sliding window inference.
-            load_all_patches: with crop_size set, rather than sampling a random crop
+            load_all_crops: with crop_size set, rather than sampling a random crop
                 for each window, read all crops as separate sequential items in the
                 dataset.
             skip_targets: whether to skip targets when loading inputs
@@ -493,7 +494,20 @@ class SplitConfig:
                 partial inference runs).
             patch_size: deprecated, use crop_size instead
             overlap_ratio: deprecated, use overlap_pixels instead
+            load_all_patches: deprecated, use load_all_crops instead
         """
+        # Handle deprecated load_all_patches parameter
+        if load_all_patches is not None:
+            warnings.warn(
+                "load_all_patches is deprecated, use load_all_crops instead",
+                FutureWarning,
+                stacklevel=2,
+            )
+            if load_all_crops is not None:
+                raise ValueError(
+                    "Cannot specify both load_all_patches and load_all_crops"
+                )
+            load_all_crops = load_all_patches
         # Handle deprecated patch_size parameter
         if patch_size is not None:
             warnings.warn(
@@ -541,9 +555,9 @@ class SplitConfig:
             output_layer_name_skip_inference_if_exists
         )
 
-        # Note that load_all_patches are handled by the RslearnDataModule rather than
-        # the ModelDataset.
-        self.load_all_patches = load_all_patches
+        # Note that load_all_crops is handled by the RslearnDataModule rather than the
+        # ModelDataset.
+        self.load_all_crops = load_all_crops
         self.overlap_pixels = overlap_pixels
 
     def update(self, other: "SplitConfig") -> "SplitConfig":
@@ -562,7 +576,7 @@ class SplitConfig:
             sampler=self.sampler,
             crop_size=self.crop_size,
             overlap_pixels=self.overlap_pixels,
-            load_all_patches=self.load_all_patches,
+            load_all_crops=self.load_all_crops,
             skip_targets=self.skip_targets,
             output_layer_name_skip_inference_if_exists=self.output_layer_name_skip_inference_if_exists,
         )
@@ -584,8 +598,8 @@ class SplitConfig:
             result.crop_size = other.crop_size
         if other.overlap_pixels is not None:
             result.overlap_pixels = other.overlap_pixels
-        if other.load_all_patches is not None:
-            result.load_all_patches = other.load_all_patches
+        if other.load_all_crops is not None:
+            result.load_all_crops = other.load_all_crops
         if other.skip_targets is not None:
             result.skip_targets = other.skip_targets
         if other.output_layer_name_skip_inference_if_exists is not None:
@@ -602,9 +616,9 @@ class SplitConfig:
         """Get the overlap pixels (default 0)."""
         return self.overlap_pixels if self.overlap_pixels is not None else 0
 
-    def get_load_all_patches(self) -> bool:
+    def get_load_all_crops(self) -> bool:
         """Returns whether loading all patches is enabled (default False)."""
-        return True if self.load_all_patches is True else False
+        return True if self.load_all_crops is True else False
 
     def get_skip_targets(self) -> bool:
         """Returns whether skip_targets is enabled (default False)."""
@@ -711,9 +725,9 @@ class ModelDataset(torch.utils.data.Dataset):
             self.transforms = rslearn.train.transforms.transform.Identity()
 
         # Get normalized crop size from the SplitConfig.
-        # But if load all patches is enabled, this is handled by AllPatchesDataset, so
+        # But if load all patches is enabled, this is handled by AllCropsDataset, so
         # here we instead load the entire windows.
-        if split_config.get_load_all_patches():
+        if split_config.get_load_all_crops():
             self.crop_size = None
         else:
             self.crop_size = split_config.get_crop_size()
@@ -937,8 +951,8 @@ class ModelDataset(torch.utils.data.Dataset):
     def get_dataset_examples(self) -> list[Window]:
         """Get a list of examples in the dataset.
 
-        If load_all_patches is False, this is a list of Windows. Otherwise, this is a
-        list of (window, patch_bounds, (patch_idx, # patches)) tuples.
+        If load_all_crops is False, this is a list of Windows. Otherwise, this is a
+        list of (window, crop_bounds, (crop_idx, # patches)) tuples.
         """
         if self.dataset_examples is None:
             logger.debug(
@@ -1023,9 +1037,9 @@ class ModelDataset(torch.utils.data.Dataset):
             window_group=window.group,
             window_name=window.name,
             window_bounds=window.bounds,
-            patch_bounds=bounds,
-            patch_idx=0,
-            num_patches_in_window=1,
+            crop_bounds=bounds,
+            crop_idx=0,
+            num_crops_in_window=1,
             time_range=window.time_range,
             projection=window.projection,
             dataset_source=self.name,

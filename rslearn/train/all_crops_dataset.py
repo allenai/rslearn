@@ -1,4 +1,4 @@
-"""Wrapper around ModelDataset to load all patches (crops) in a window."""
+"""Wrapper around ModelDataset to load all crops in a window."""
 
 import itertools
 from collections.abc import Iterable, Iterator
@@ -14,70 +14,70 @@ from rslearn.train.model_context import RasterImage, SampleMetadata
 from rslearn.utils.geometry import PixelBounds, STGeometry
 
 
-def get_window_patch_options(
-    patch_size: tuple[int, int],
+def get_window_crop_options(
+    crop_size: tuple[int, int],
     overlap_size: tuple[int, int],
     bounds: PixelBounds,
 ) -> list[PixelBounds]:
-    """Get the bounds of each input patch within the window bounds.
+    """Get the bounds of each input crop within the window bounds.
 
-    This is used when running inference on all patches (crops) of a large window, to
-    compute the position of each patch.
+    This is used when running inference on all crops of a large window, to
+    compute the position of each crop.
 
     Args:
-        patch_size: the size of the patches to extract.
-        overlap_size: the size of the overlap between patches.
-        bounds: the window bounds to divide up into smaller patches.
+        crop_size: the size of the crops to extract.
+        overlap_size: the size of the overlap between crops.
+        bounds: the window bounds to divide up into smaller crops.
 
     Returns:
-        a list of patch bounds within the overall bounds. The rightmost and
-            bottommost patches may extend beyond the provided bounds.
+        a list of crop bounds within the overall bounds. The rightmost and
+            bottommost crops may extend beyond the provided bounds.
     """
-    # We stride the patches by patch_size - overlap_size until the last patch.
-    # We handle the first patch with a special case to ensure it is always used.
-    # We handle the last patch with a special case to ensure it does not exceed the
-    # window bounds. Instead, it may overlap the previous patch.
+    # We stride the crops by crop_size - overlap_size until the last crop.
+    # We handle the first crop with a special case to ensure it is always used.
+    # We handle the last crop with a special case to ensure it does not exceed the
+    # window bounds. Instead, it may overlap the previous crop.
     cols = [bounds[0]] + list(
         range(
-            bounds[0] + patch_size[0],
-            bounds[2] - patch_size[0],
-            patch_size[0] - overlap_size[0],
+            bounds[0] + crop_size[0],
+            bounds[2] - crop_size[0],
+            crop_size[0] - overlap_size[0],
         )
     )
     rows = [bounds[1]] + list(
         range(
-            bounds[1] + patch_size[1],
-            bounds[3] - patch_size[1],
-            patch_size[1] - overlap_size[1],
+            bounds[1] + crop_size[1],
+            bounds[3] - crop_size[1],
+            crop_size[1] - overlap_size[1],
         )
     )
-    # Add last patches only if the input is larger than one patch.
-    if bounds[2] - patch_size[0] > bounds[0]:
-        cols.append(bounds[2] - patch_size[0])
-    if bounds[3] - patch_size[1] > bounds[1]:
-        rows.append(bounds[3] - patch_size[1])
+    # Add last crops only if the input is larger than one crop.
+    if bounds[2] - crop_size[0] > bounds[0]:
+        cols.append(bounds[2] - crop_size[0])
+    if bounds[3] - crop_size[1] > bounds[1]:
+        rows.append(bounds[3] - crop_size[1])
 
-    patch_bounds: list[PixelBounds] = []
+    crop_bounds: list[PixelBounds] = []
     for col in cols:
         for row in rows:
-            patch_bounds.append((col, row, col + patch_size[0], row + patch_size[1]))
-    return patch_bounds
+            crop_bounds.append((col, row, col + crop_size[0], row + crop_size[1]))
+    return crop_bounds
 
 
 def pad_slice_protect(
     raw_inputs: dict[str, Any],
     passthrough_inputs: dict[str, Any],
-    patch_size: tuple[int, int],
+    crop_size: tuple[int, int],
     inputs: dict[str, DataInput],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Pad tensors in-place by patch size to protect slicing near right/bottom edges.
+    """Pad tensors in-place by crop size to protect slicing near right/bottom edges.
 
     The padding is scaled based on each input's resolution_factor.
 
     Args:
         raw_inputs: the raw inputs to pad.
         passthrough_inputs: the passthrough inputs to pad.
-        patch_size: the size of the patches to extract (at window resolution).
+        crop_size: the size of the crops to extract (at window resolution).
         inputs: the DataInput definitions, used to get resolution_factor per input.
 
     Returns:
@@ -91,8 +91,8 @@ def pad_slice_protect(
             rf = inputs[input_name].resolution_factor
             scale = rf.numerator / rf.denominator
             # Scale the padding amount
-            scaled_pad_x = int(patch_size[0] * scale)
-            scaled_pad_y = int(patch_size[1] * scale)
+            scaled_pad_x = int(crop_size[0] * scale)
+            scaled_pad_y = int(crop_size[1] * scale)
             d[input_name] = torch.nn.functional.pad(
                 value, pad=(0, scaled_pad_x, 0, scaled_pad_y)
             )
@@ -123,12 +123,12 @@ def crop_tensor_or_rasterimage(
         )
 
 
-class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
-    """This wraps a ModelDataset to iterate over all patches in that dataset.
+class IterableAllCropsDataset(torch.utils.data.IterableDataset):
+    """This wraps a ModelDataset to iterate over all crops in that dataset.
 
-    This should be used when SplitConfig.load_all_patches is enabled. The ModelDataset
+    This should be used when SplitConfig.load_all_crops is enabled. The ModelDataset
     is configured with no crop size (load entire windows), and the dataset is wrapped
-    in an AllPatchesDataset.
+    in an AllCropsDataset.
 
     Similar to DistributedSampler, we add extra samples at each rank to ensure
     consistent number of batches across all ranks.
@@ -142,7 +142,7 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
         rank: int = 0,
         world_size: int = 1,
     ):
-        """Create a new IterableAllPatchesDataset.
+        """Create a new IterableAllCropsDataset.
 
         Args:
             dataset: the ModelDataset to wrap.
@@ -171,10 +171,10 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
         """
         self.dataset.set_name(name)
 
-    def get_window_num_patches(self, bounds: PixelBounds) -> int:
-        """Get the number of patches for these bounds.
+    def get_window_num_crops(self, bounds: PixelBounds) -> int:
+        """Get the number of crops for these bounds.
 
-        This corresponds to the length of the list returned by get_patch_options.
+        This corresponds to the length of the list returned by get_window_crop_options.
         """
         num_cols = (
             len(
@@ -233,14 +233,14 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
         ]
 
         # Now compute the maximum number of samples across workers.
-        max_num_patches = 0
+        max_num_crops = 0
         for worker_windows in windows_by_worker:
-            worker_num_patches = 0
+            worker_num_crops = 0
             for window_id in worker_windows:
-                worker_num_patches += self.get_window_num_patches(
+                worker_num_crops += self.get_window_num_crops(
                     self.windows[window_id].bounds
                 )
-            max_num_patches = max(max_num_patches, worker_num_patches)
+            max_num_crops = max(max_num_crops, worker_num_crops)
 
         # Each worker needs at least one window, otherwise it won't be able to pad.
         # Unless there are zero windows total, which is fine.
@@ -250,17 +250,17 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
         # window in the end.
         # So now we raise an error instead, and require the number of workers to be
         # less than the number of windows.
-        if len(windows_by_worker[global_worker_id]) == 0 and max_num_patches > 0:
+        if len(windows_by_worker[global_worker_id]) == 0 and max_num_crops > 0:
             raise ValueError(
                 f"the number of workers {global_num_workers} must be <= the number of windows {len(self.windows)}"
             )
 
-        return (windows_by_worker[global_worker_id], max_num_patches)
+        return (windows_by_worker[global_worker_id], max_num_crops)
 
     def __iter__(
         self,
     ) -> Iterator[tuple[dict[str, Any], dict[str, Any], SampleMetadata]]:
-        """Iterate over all patches in each element of the underlying ModelDataset."""
+        """Iterate over all crops in each element of the underlying ModelDataset."""
         # Iterate over the window IDs until we have returned enough samples.
         window_ids, num_samples_needed = self._get_worker_iteration_data()
         num_samples_returned = 0
@@ -270,32 +270,32 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                 raw_inputs, passthrough_inputs, metadata = self.dataset.get_raw_inputs(
                     window_id
                 )
-                bounds = metadata.patch_bounds
+                bounds = metadata.crop_bounds
 
-                # For simplicity, pad tensors by crop size to ensure that any patch bounds
+                # For simplicity, pad tensors by crop size to ensure that any crop bounds
                 # extending outside the window bounds will not have issues when we slice
                 # the tensors later. Padding is scaled per-input based on resolution_factor.
                 pad_slice_protect(
                     raw_inputs, passthrough_inputs, self.crop_size, self.inputs
                 )
 
-                # Now iterate over the patches and extract/yield the crops.
+                # Now iterate over the crops and extract/yield them.
                 # Note that, in case user is leveraging RslearnWriter, it is important that
-                # the patch_idx be increasing (as we iterate) within one window.
-                patches = get_window_patch_options(
+                # the crop_idx be increasing (as we iterate) within one window.
+                crops = get_window_crop_options(
                     self.crop_size, self.overlap_size, bounds
                 )
-                for patch_idx, patch_bounds in enumerate(patches):
+                for crop_idx, crop_bounds in enumerate(crops):
                     cur_geom = STGeometry(
-                        metadata.projection, shapely.box(*patch_bounds), None
+                        metadata.projection, shapely.box(*crop_bounds), None
                     )
                     start_offset = (
-                        patch_bounds[0] - bounds[0],
-                        patch_bounds[1] - bounds[1],
+                        crop_bounds[0] - bounds[0],
+                        crop_bounds[1] - bounds[1],
                     )
                     end_offset = (
-                        patch_bounds[2] - bounds[0],
-                        patch_bounds[3] - bounds[1],
+                        crop_bounds[2] - bounds[0],
+                        crop_bounds[3] - bounds[1],
                     )
 
                     # Define a helper function to handle each input dict.
@@ -337,9 +337,9 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
                     # Adjust the metadata as well.
                     cur_metadata = replace(
                         metadata,
-                        patch_bounds=patch_bounds,
-                        patch_idx=patch_idx,
-                        num_patches_in_window=len(patches),
+                        crop_bounds=crop_bounds,
+                        crop_idx=crop_idx,
+                        num_crops_in_window=len(crops),
                     )
 
                     # Now we can compute input and target dicts via the task.
@@ -367,12 +367,12 @@ class IterableAllPatchesDataset(torch.utils.data.IterableDataset):
         return self.dataset.get_dataset_examples()
 
 
-class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
-    """This wraps a ModelDataset to iterate over all patches in that dataset.
+class InMemoryAllCropsDataset(torch.utils.data.Dataset):
+    """This wraps a ModelDataset to iterate over all crops in that dataset.
 
-    This should be used when SplitConfig.load_all_patches is enabled.
+    This should be used when SplitConfig.load_all_crops is enabled.
 
-    This is a simpler version of IterableAllPatchesDataset that caches all windows in memory.
+    This is a simpler version of IterableAllCropsDataset that caches all windows in memory.
     This is useful for small datasets that fit in memory.
     """
 
@@ -382,7 +382,7 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
         crop_size: tuple[int, int],
         overlap_pixels: int = 0,
     ):
-        """Create a new InMemoryAllPatchesDataset.
+        """Create a new InMemoryAllCropsDataset.
 
         Args:
             dataset: the ModelDataset to wrap.
@@ -402,23 +402,23 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
         ] = {}
 
         # Precompute the batch boundaries for each window
-        self.patches = []
+        self.crops = []
         for window_id, window in enumerate(self.windows):
-            patch_bounds = get_window_patch_options(
+            window_crop_bounds = get_window_crop_options(
                 self.crop_size, self.overlap_size, window.bounds
             )
-            for i, patch_bound in enumerate(patch_bounds):
-                self.patches.append((window_id, patch_bound, (i, len(patch_bounds))))
+            for i, crop_bound in enumerate(window_crop_bounds):
+                self.crops.append((window_id, crop_bound, (i, len(window_crop_bounds))))
 
     def get_raw_inputs(
         self, index: int
     ) -> tuple[dict[str, Any], dict[str, Any], SampleMetadata]:
-        """Get the raw inputs for a single patch. Retrieve from cache if possible.
+        """Get the raw inputs for a single crop. Retrieve from cache if possible.
 
         Also crops/pads the tensors by crop size to protect slicing near right/bottom edges.
 
         Args:
-            index: the index of the patch.
+            index: the index of the crop.
 
         Returns:
             a tuple of (raw_inputs, passthrough_inputs, metadata).
@@ -471,20 +471,20 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
         return cropped
 
     def __len__(self) -> int:
-        """Return the total number of patches in the dataset."""
-        return len(self.patches)
+        """Return the total number of crops in the dataset."""
+        return len(self.crops)
 
     def __getitem__(
         self, index: int
     ) -> tuple[dict[str, Any], dict[str, Any], SampleMetadata]:
-        """Return (input_dict, target_dict, metadata) for a single flattened patch."""
-        (window_id, patch_bounds, (patch_idx, num_patches)) = self.patches[index]
+        """Return (input_dict, target_dict, metadata) for a single flattened crop."""
+        (window_id, crop_bounds, (crop_idx, num_crops)) = self.crops[index]
         raw_inputs, passthrough_inputs, metadata = self.get_raw_inputs(window_id)
-        bounds = metadata.patch_bounds
+        bounds = metadata.crop_bounds
 
-        cur_geom = STGeometry(metadata.projection, shapely.box(*patch_bounds), None)
-        start_offset = (patch_bounds[0] - bounds[0], patch_bounds[1] - bounds[1])
-        end_offset = (patch_bounds[2] - bounds[0], patch_bounds[3] - bounds[1])
+        cur_geom = STGeometry(metadata.projection, shapely.box(*crop_bounds), None)
+        start_offset = (crop_bounds[0] - bounds[0], crop_bounds[1] - bounds[1])
+        end_offset = (crop_bounds[2] - bounds[0], crop_bounds[3] - bounds[1])
 
         cur_raw_inputs = self._crop_input_dict(
             raw_inputs, start_offset, end_offset, cur_geom
@@ -496,9 +496,9 @@ class InMemoryAllPatchesDataset(torch.utils.data.Dataset):
         # Adjust the metadata as well.
         cur_metadata = replace(
             metadata,
-            patch_bounds=patch_bounds,
-            patch_idx=patch_idx,
-            num_patches_in_window=num_patches,
+            crop_bounds=crop_bounds,
+            crop_idx=crop_idx,
+            num_crops_in_window=num_crops,
         )
 
         # Now we can compute input and target dicts via the task.

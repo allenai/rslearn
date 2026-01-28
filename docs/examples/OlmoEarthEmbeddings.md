@@ -212,7 +212,7 @@ data:
               sentinel2_l2a: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
               sentinel1: ["vv", "vh"]
       # We apply sliding window inference (using 64x64 input crops) with overlap.
-      load_all_patches: true
+      load_all_crops: true
       # This is the crop size for inference.
       crop_size: 64
       overlap_pixels: 32

@@ -94,9 +94,9 @@ def test_predict_multi_task(image_to_class_dataset: Dataset) -> None:
 
 
 def test_predict_with_all_patches(image_to_class_dataset: Dataset) -> None:
-    """Ensure prediction works with IterableAllPatchesDataset and multiple workers.
+    """Ensure prediction works with IterableAllCropsDataset and multiple workers.
 
-    If __len__ is defined on IterableAllPatchesDataset, and gives different lengths based on
+    If __len__ is defined on IterableAllCropsDataset, and gives different lengths based on
     the number of workers active, then this can cause problems because Lightning will
     call it before spawning workers, and get a length, but more padding may be needed
     afterward but Lightning will cut off the prediction.
@@ -108,7 +108,7 @@ def test_predict_with_all_patches(image_to_class_dataset: Dataset) -> None:
     # There should be 16 1x1 patches in the 4x4 window in the dataset.
     # So with 1 worker it would say length is 8 (with bs=2), but with 4 workers the
     # length is still 8 since we split windows across workers but there is only one
-    # window. This can cause problems if IterableAllPatchesDataset.__len__ is defined.
+    # window. This can cause problems if IterableAllCropsDataset.__len__ is defined.
     data_module = RslearnDataModule(
         path=image_to_class_dataset.path,
         inputs={
@@ -118,7 +118,7 @@ def test_predict_with_all_patches(image_to_class_dataset: Dataset) -> None:
         task=task,
         predict_config=SplitConfig(
             patch_size=1,
-            load_all_patches=True,
+            load_all_crops=True,
         ),
         num_workers=4,
         batch_size=2,

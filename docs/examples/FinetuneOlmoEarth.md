@@ -204,7 +204,7 @@ data:
         split: "val"
     predict_config:
       groups: ["predict"]
-      load_all_patches: true
+      load_all_crops: true
       # We set crop_size=128 here to support the option of using larger windows during
       # prediction. Note that this controls the sliding window inference crop size,
       # and we want that to match the size of our training windows.
