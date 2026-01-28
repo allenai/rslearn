@@ -16,6 +16,7 @@ from rslearn.train.model_context import (
     RasterImage,
     SampleMetadata,
 )
+from rslearn.train.metrics import ConfusionMatrixOutput
 from rslearn.utils import Feature
 from rslearn.utils.colors import DEFAULT_COLORS
 
@@ -43,6 +44,8 @@ class SegmentationTask(BasicTask):
         other_metrics: dict[str, Metric] = {},
         output_probs: bool = False,
         output_class_idx: int | None = None,
+        enable_confusion_matrix: bool = False,
+        class_names: list[str] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize a new SegmentationTask.
@@ -80,6 +83,9 @@ class SegmentationTask(BasicTask):
                 during prediction.
             output_class_idx: if set along with output_probs, only output the probability
                 for this specific class index (single-channel output).
+            enable_confusion_matrix: whether to compute confusion matrix (default false)
+            class_names: optional list of class names for labeling confusion matrix axes.
+                If not provided, classes will be labeled as "class_0", "class_1", etc.
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -106,6 +112,8 @@ class SegmentationTask(BasicTask):
         self.other_metrics = other_metrics
         self.output_probs = output_probs
         self.output_class_idx = output_class_idx
+        self.enable_confusion_matrix = enable_confusion_matrix
+        self.class_names = class_names
 
     def process_inputs(
         self,
@@ -285,6 +293,12 @@ class SegmentationTask(BasicTask):
         if self.other_metrics:
             metrics.update(self.other_metrics)
 
+        if self.enable_confusion_matrix:
+            metrics["confusion_matrix"] = SegmentationConfusionMatrixMetric(
+                num_classes=self.num_classes,
+                class_names=self.class_names,
+            )
+
         return MetricCollection(metrics)
 
 
@@ -454,6 +468,81 @@ class SegmentationMetric(Metric):
     def plot(self, *args: list[Any], **kwargs: dict[str, Any]) -> Any:
         """Returns a plot of the metric."""
         return self.metric.plot(*args, **kwargs)
+
+
+class SegmentationConfusionMatrixMetric(Metric):
+    """Confusion matrix metric for segmentation task.
+
+    Accumulates a confusion matrix for logging to wandb. This is more memory
+    efficient than storing all predictions and labels, as it only requires
+    O(num_classes^2) storage instead of O(num_samples * num_classes).
+
+    Args:
+        num_classes: number of classes
+        class_names: optional list of class names for labeling
+    """
+
+    def __init__(
+        self,
+        num_classes: int,
+        class_names: list[str] | None = None,
+    ):
+        """Initialize a new SegmentationConfusionMatrixMetric.
+
+        Args:
+            num_classes: number of classes
+            class_names: optional list of class names for labeling
+        """
+        super().__init__()
+        self.num_classes = num_classes
+        self.class_names = class_names
+        self.add_state(
+            "confusion_matrix",
+            default=torch.zeros(num_classes, num_classes, dtype=torch.long),
+            dist_reduce_fx="sum",
+        )
+
+    def update(
+        self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
+    ) -> None:
+        """Update metric.
+
+        Args:
+            preds: the predictions (BCHW softmax probabilities)
+            targets: the targets
+        """
+        if not isinstance(preds, torch.Tensor):
+            preds = torch.stack(preds)
+        labels = torch.stack([target["classes"] for target in targets])
+
+        # Sub-select the valid labels.
+        # We flatten the prediction and label images at valid pixels.
+        # Prediction is changed from BCHW to BHWC so we can select the valid BHW mask.
+        mask = torch.stack([target["valid"] > 0 for target in targets])
+        preds = preds.permute(0, 2, 3, 1)[mask]  # (N_valid, C)
+        labels = labels[mask]  # (N_valid,)
+        if len(preds) == 0:
+            return
+
+        # Get predicted classes from probabilities
+        pred_classes = preds.argmax(dim=1)  # (N_valid,)
+
+        # Update confusion matrix: cm[true_label, pred_label] += count
+        for true_label in range(self.num_classes):
+            for pred_label in range(self.num_classes):
+                count = ((labels == true_label) & (pred_classes == pred_label)).sum()
+                self.confusion_matrix[true_label, pred_label] += count
+
+    def compute(self) -> "ConfusionMatrixOutput":
+        """Returns the confusion matrix wrapped in ConfusionMatrixOutput."""
+        return ConfusionMatrixOutput(
+            confusion_matrix=self.confusion_matrix,
+            class_names=self.class_names,
+        )
+
+    def reset(self) -> None:
+        """Reset metric."""
+        super().reset()
 
 
 class F1Metric(Metric):
