@@ -320,7 +320,7 @@ data:
       groups: ["default"]
     predict_config:
       groups: ["predict"]
-      load_all_patches: true
+      load_all_crops: true
       skip_targets: true
       patch_size: 512
 trainer:
@@ -483,7 +483,7 @@ test_config:
     split: val
 predict_config:
   groups: ["predict"]
-  load_all_patches: true
+  load_all_crops: true
   skip_targets: true
   patch_size: 512
 ```
