@@ -424,3 +424,67 @@ def test_model_dataset_without_index(
     # Verify no index directory was created
     index_dir = basic_classification_dataset.path / INDEX_DIR_NAME
     assert not index_dir.exists()
+
+
+def test_skip_if_output_layer_exists(
+    basic_classification_dataset: Dataset,
+    add_window_to_basic_classification_dataset: Callable,
+) -> None:
+    """Test that windows with existing output layers are skipped when configured."""
+    # Create two windows with images
+    image = np.zeros((1, 4, 4), dtype=np.uint8)
+
+    # First window - will have the output layer already completed
+    window1 = add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        images={
+            ("image_layer1", 0): image,
+        },
+        window_name="window_with_output",
+    )
+
+    # Second window - will NOT have the output layer
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        images={
+            ("image_layer1", 0): image,
+        },
+        window_name="window_without_output",
+    )
+
+    # Mark the first window as having the output layer completed
+    # Ensure the output layer directory exists before marking completed.
+    layer_dir = window1.get_layer_dir("predictions")
+    layer_dir.mkdir(parents=True, exist_ok=True)
+    window1.mark_layer_completed("predictions")
+
+    dataset = ModelDataset(
+        basic_classification_dataset,
+        split_config=SplitConfig(
+            output_layer_name_skip_inference_if_exists="predictions",
+        ),
+        task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+        workers=1,
+        inputs={
+            "image": DataInput("raster", ["image_layer1"], bands=["band"]),
+            "targets": DataInput("vector", ["vector_layer"]),
+        },
+    )
+
+    assert len(dataset) == 1
+    windows = dataset.get_dataset_examples()
+    assert windows[0].name == "window_without_output"
+
+    # Test 3: Without setting output_layer_name_skip_inference_if_exists, should get both windows
+    dataset = ModelDataset(
+        basic_classification_dataset,
+        split_config=SplitConfig(),
+        task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+        workers=1,
+        inputs={
+            "image": DataInput("raster", ["image_layer1"], bands=["band"]),
+            "targets": DataInput("vector", ["vector_layer"]),
+        },
+    )
+
+    assert len(dataset) == 2
