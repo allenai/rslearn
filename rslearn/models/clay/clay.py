@@ -105,7 +105,7 @@ class Clay(FeatureExtractor):
 
     def _resize_image(self, image: torch.Tensor, original_hw: int) -> torch.Tensor:
         """Resize the image to the input resolution."""
-        new_hw = self.patch_size if original_hw == 1 else DEFAULT_IMAGE_RESOLUTION
+        new_hw = PATCH_SIZE if original_hw == 1 else DEFAULT_IMAGE_RESOLUTION
         return F.interpolate(
             image, size=(new_hw, new_hw), mode="bilinear", align_corners=False
         )
