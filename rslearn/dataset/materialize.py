@@ -236,7 +236,11 @@ def read_and_stack_raster_windows(
     band_dtype: npt.DTypeLike,
     resampling_method: Resampling = Resampling.bilinear,
 ) -> npt.NDArray[np.generic]:
-    """Create a stack of extent aligned raster windows.
+    """Create a stack of raster images, with one per item in the group.
+
+    We read the portion of each raster item corresponding to the window extent, and
+    stack the resulting images. This is used for the MEAN and MEDIAN compositing
+    methods to it can compute aggregate statistics across the stack.
 
     Args:
         group: Iterable of items (e.g., scene metadata objects) to read data from.
