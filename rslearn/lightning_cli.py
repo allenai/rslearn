@@ -385,6 +385,7 @@ class RslearnLightningCLI(LightningCLI):
                 with (project_dir / WANDB_ID_FNAME).open("r") as f:
                     wandb_id = f.read().strip()
                     c.trainer.logger.init_args.id = wandb_id
+                    c.trainer.logger.init_args.resume = "must"
 
     def before_instantiate_classes(self) -> None:
         """Called before Lightning class initialization.
