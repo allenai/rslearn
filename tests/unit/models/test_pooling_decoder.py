@@ -4,7 +4,7 @@ import torch
 
 from rslearn.models.component import FeatureMaps
 from rslearn.models.pooling_decoder import SegmentationPoolingDecoder
-from rslearn.train.model_context import ModelContext
+from rslearn.train.model_context import ModelContext, RasterImage
 
 
 def test_segmentation_pooling_decoder() -> None:
@@ -24,8 +24,8 @@ def test_segmentation_pooling_decoder() -> None:
         ]
     )
     input_dict = {
-        "sentinel2": torch.zeros(
-            (image_bands, image_size, image_size), dtype=torch.float32
+        "sentinel2": RasterImage(
+            torch.zeros((image_bands, image_size, image_size), dtype=torch.float32)
         ),
     }
     decoder = SegmentationPoolingDecoder(
