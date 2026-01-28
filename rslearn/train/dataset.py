@@ -10,6 +10,7 @@ import time
 import uuid
 import warnings
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
 import torch
@@ -30,6 +31,7 @@ from rslearn.dataset.window import (
     get_layer_and_group_from_dir_name,
 )
 from rslearn.log_utils import get_logger
+from rslearn.train.dataset_index import DatasetIndex
 from rslearn.train.model_context import RasterImage
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
@@ -40,6 +42,19 @@ from .tasks import Task
 from .transforms import Sequential
 
 logger = get_logger(__name__)
+
+
+class IndexMode(StrEnum):
+    """Controls dataset index caching behavior."""
+
+    OFF = "off"
+    """No caching - always load windows from dataset."""
+
+    USE = "use"
+    """Use cached index if available, create if not."""
+
+    REFRESH = "refresh"
+    """Ignore existing cache and rebuild."""
 
 
 def get_torch_dtype(dtype: DType) -> torch.dtype:
@@ -446,6 +461,7 @@ class SplitConfig:
         overlap_pixels: int | None = None,
         load_all_patches: bool | None = None,
         skip_targets: bool | None = None,
+        output_layer_name_skip_inference_if_exists: str | None = None,
         # Deprecated parameters (for backwards compatibility)
         patch_size: int | tuple[int, int] | None = None,
         overlap_ratio: float | None = None,
@@ -471,6 +487,10 @@ class SplitConfig:
                 for each window, read all crops as separate sequential items in the
                 dataset.
             skip_targets: whether to skip targets when loading inputs
+            output_layer_name_skip_inference_if_exists: optional name of the output layer used during prediction.
+                If set, windows that already
+                have this layer completed will be skipped (useful for resuming
+                partial inference runs).
             patch_size: deprecated, use crop_size instead
             overlap_ratio: deprecated, use overlap_pixels instead
         """
@@ -517,6 +537,9 @@ class SplitConfig:
         self.transforms = transforms
         self.sampler = sampler
         self.skip_targets = skip_targets
+        self.output_layer_name_skip_inference_if_exists = (
+            output_layer_name_skip_inference_if_exists
+        )
 
         # Note that load_all_patches are handled by the RslearnDataModule rather than
         # the ModelDataset.
@@ -541,6 +564,7 @@ class SplitConfig:
             overlap_pixels=self.overlap_pixels,
             load_all_patches=self.load_all_patches,
             skip_targets=self.skip_targets,
+            output_layer_name_skip_inference_if_exists=self.output_layer_name_skip_inference_if_exists,
         )
         if other.groups:
             result.groups = other.groups
@@ -564,6 +588,10 @@ class SplitConfig:
             result.load_all_patches = other.load_all_patches
         if other.skip_targets is not None:
             result.skip_targets = other.skip_targets
+        if other.output_layer_name_skip_inference_if_exists is not None:
+            result.output_layer_name_skip_inference_if_exists = (
+                other.output_layer_name_skip_inference_if_exists
+            )
         return result
 
     def get_crop_size(self) -> tuple[int, int] | None:
@@ -582,16 +610,26 @@ class SplitConfig:
         """Returns whether skip_targets is enabled (default False)."""
         return True if self.skip_targets is True else False
 
+    def get_output_layer_name_skip_inference_if_exists(self) -> str | None:
+        """Returns output layer to use for resume checks (default None)."""
+        return self.output_layer_name_skip_inference_if_exists
 
-def check_window(inputs: dict[str, DataInput], window: Window) -> Window | None:
+
+def check_window(
+    inputs: dict[str, DataInput],
+    window: Window,
+    output_layer_name_skip_inference_if_exists: str | None = None,
+) -> Window | None:
     """Verify that the window has the required layers based on the specified inputs.
 
     Args:
         inputs: the inputs to the dataset.
         window: the window to check.
+        output_layer_name_skip_inference_if_exists: optional name of the output layer to check for existence.
 
     Returns:
-        the window if it has all the required inputs or None otherwise
+        the window if it has all the required inputs and does not need to be skipped
+        due to an existing output layer; or None otherwise
     """
 
     # Make sure window has all the needed layers.
@@ -621,6 +659,16 @@ def check_window(inputs: dict[str, DataInput], window: Window) -> Window | None:
             )
             return None
 
+    # Optionally skip windows that already have the specified output layer completed.
+    if output_layer_name_skip_inference_if_exists is not None:
+        if window.is_layer_completed(output_layer_name_skip_inference_if_exists):
+            logger.debug(
+                "Skipping window %s since output layer '%s' already exists",
+                window.name,
+                output_layer_name_skip_inference_if_exists,
+            )
+            return None
+
     return window
 
 
@@ -636,6 +684,7 @@ class ModelDataset(torch.utils.data.Dataset):
         workers: int,
         name: str | None = None,
         fix_patch_pick: bool = False,
+        index_mode: IndexMode = IndexMode.OFF,
     ) -> None:
         """Instantiate a new ModelDataset.
 
@@ -645,9 +694,10 @@ class ModelDataset(torch.utils.data.Dataset):
             inputs: data to read from the dataset for training
             task: the task to train on
             workers: number of workers to use for initializing the dataset
-            name: name of the dataset (default: None)
+            name: name of the dataset
             fix_patch_pick: if True, fix the patch pick to be the same every time
                 for a given window. Useful for testing (default: False)
+            index_mode: controls dataset index caching behavior (default: IndexMode.OFF)
         """
         self.dataset = dataset
         self.split_config = split_config
@@ -668,58 +718,14 @@ class ModelDataset(torch.utils.data.Dataset):
         else:
             self.crop_size = split_config.get_crop_size()
 
-        windows = self._get_initial_windows(split_config, workers)
-
         # If targets are not needed, remove them from the inputs.
         if split_config.get_skip_targets():
             for k in list(self.inputs.keys()):
                 if self.inputs[k].is_target:
                     del self.inputs[k]
 
-        # Eliminate windows that are missing either a requisite input layer, or missing
-        # all target layers.
-        new_windows = []
-        if workers == 0:
-            for window in windows:
-                if check_window(self.inputs, window) is None:
-                    continue
-                new_windows.append(window)
-        else:
-            p = multiprocessing.Pool(workers)
-            outputs = star_imap_unordered(
-                p,
-                check_window,
-                [
-                    dict(
-                        inputs=self.inputs,
-                        window=window,
-                    )
-                    for window in windows
-                ],
-            )
-            for window in tqdm.tqdm(
-                outputs, total=len(windows), desc="Checking available layers in windows"
-            ):
-                if window is None:
-                    continue
-                new_windows.append(window)
-            p.close()
-        windows = new_windows
-
-        # Sort the windows to ensure that the dataset is consistent across GPUs.
-        # Inconsistent ordering can lead to a subset of windows being processed during
-        # "model test" / "model predict" when using multiple GPUs.
-        # We use a hash so that functionality like num_samples limit gets a random
-        # subset of windows (with respect to the hash function choice).
-        windows.sort(
-            key=lambda window: hashlib.sha256(window.name.encode()).hexdigest()
-        )
-
-        # Limit windows to num_samples if requested.
-        if split_config.num_samples:
-            # The windows are sorted by hash of window name so this distribution should
-            # be representative of the population.
-            windows = windows[0 : split_config.num_samples]
+        # Load windows (from index if available, otherwise from dataset)
+        windows = self._load_windows(split_config, workers, index_mode)
 
         # Write dataset_examples to a file so that we can load it lazily in the worker
         # processes. Otherwise it takes a long time to transmit it when spawning each
@@ -785,6 +791,137 @@ class ModelDataset(torch.utils.data.Dataset):
             for k, v in num_removed.items():
                 logger.info(f"Removed {v} windows due to tag {k}")
             windows = new_windows
+
+        return windows
+
+    def _load_windows(
+        self,
+        split_config: SplitConfig,
+        workers: int,
+        index_mode: IndexMode,
+    ) -> list[Window]:
+        """Load windows, using index if available.
+
+        This method handles:
+        1. Loading from index if index_mode is USE and index exists
+        2. Otherwise, loading from dataset, filtering, sorting, limiting
+        3. Saving to index if index_mode is USE or REFRESH
+
+        Args:
+            split_config: the split configuration.
+            workers: number of worker processes.
+            index_mode: controls caching behavior.
+
+        Returns:
+            list of processed windows ready for training.
+        """
+        # Try to load from index
+        index: DatasetIndex | None = None
+
+        if index_mode != IndexMode.OFF:
+            logger.info(f"Checking index for dataset {self.dataset.path}")
+            index = DatasetIndex(
+                storage=self.dataset.storage,
+                dataset_path=self.dataset.path,
+                groups=split_config.groups,
+                names=split_config.names,
+                tags=split_config.tags,
+                num_samples=split_config.num_samples,
+                skip_targets=split_config.get_skip_targets(),
+                inputs=self.inputs,
+            )
+            refresh = index_mode == IndexMode.REFRESH
+            indexed_windows = index.load_windows(refresh)
+
+            if indexed_windows is not None:
+                logger.info(f"Loaded {len(indexed_windows)} windows from index")
+                return indexed_windows
+
+        # No index available, load and process windows from dataset
+        logger.debug("Loading windows from dataset...")
+        windows = self._get_initial_windows(split_config, workers)
+        windows = self._filter_windows_by_layers(windows, workers)
+        windows = self._sort_and_limit_windows(windows, split_config)
+
+        # Save to index if enabled
+        if index is not None:
+            index.save_windows(windows)
+
+        return windows
+
+    def _filter_windows_by_layers(
+        self, windows: list[Window], workers: int
+    ) -> list[Window]:
+        """Filter windows to only include those with required layers.
+
+        Args:
+            windows: list of windows to filter.
+            workers: number of worker processes for parallel filtering.
+
+        Returns:
+            list of windows that have all required input layers.
+        """
+        output_layer_skip = (
+            self.split_config.get_output_layer_name_skip_inference_if_exists()
+        )
+
+        if workers == 0:
+            return [
+                w
+                for w in windows
+                if check_window(
+                    self.inputs,
+                    w,
+                    output_layer_name_skip_inference_if_exists=output_layer_skip,
+                )
+                is not None
+            ]
+
+        p = multiprocessing.Pool(workers)
+        outputs = star_imap_unordered(
+            p,
+            check_window,
+            [
+                dict(
+                    inputs=self.inputs,
+                    window=window,
+                    output_layer_name_skip_inference_if_exists=output_layer_skip,
+                )
+                for window in windows
+            ],
+        )
+        filtered = []
+        for window in tqdm.tqdm(
+            outputs,
+            total=len(windows),
+            desc="Checking available layers in windows",
+        ):
+            if window is not None:
+                filtered.append(window)
+        p.close()
+        return filtered
+
+    def _sort_and_limit_windows(
+        self, windows: list[Window], split_config: SplitConfig
+    ) -> list[Window]:
+        """Sort windows by hash and apply num_samples limit.
+
+        Sorting ensures consistent ordering across GPUs. Using hash gives a
+        pseudo-random but deterministic order for sampling.
+
+        Args:
+            windows: list of windows to sort and limit.
+            split_config: the split configuration with num_samples.
+
+        Returns:
+            sorted and optionally limited list of windows.
+        """
+        windows.sort(
+            key=lambda window: hashlib.sha256(window.name.encode()).hexdigest()
+        )
+
+        if split_config.num_samples:
+            windows = windows[: split_config.num_samples]
 
         return windows
 

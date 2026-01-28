@@ -21,6 +21,7 @@ from .all_patches_dataset import (
 )
 from .dataset import (
     DataInput,
+    IndexMode,
     ModelDataset,
     MultiDataset,
     RetryDataset,
@@ -69,6 +70,7 @@ class RslearnDataModule(L.LightningDataModule):
         name: str | None = None,
         retries: int = 0,
         use_in_memory_all_patches_dataset: bool = False,
+        index_mode: IndexMode = IndexMode.OFF,
     ) -> None:
         """Initialize a new RslearnDataModule.
 
@@ -92,6 +94,7 @@ class RslearnDataModule(L.LightningDataModule):
             retries: number of retries to attempt for getitem calls
             use_in_memory_all_patches_dataset: whether to use InMemoryAllPatchesDataset
                 instead of IterableAllPatchesDataset if load_all_patches is set to true.
+            index_mode: controls dataset index caching behavior (default: IndexMode.OFF)
         """
         super().__init__()
         self.inputs = inputs
@@ -103,6 +106,7 @@ class RslearnDataModule(L.LightningDataModule):
         self.name = name
         self.retries = retries
         self.use_in_memory_all_patches_dataset = use_in_memory_all_patches_dataset
+        self.index_mode = index_mode
         self.split_configs = {
             "train": default_config.update(train_config),
             "val": default_config.update(val_config),
@@ -138,6 +142,7 @@ class RslearnDataModule(L.LightningDataModule):
                 workers=self.init_workers,
                 name=self.name,
                 fix_patch_pick=(split != "train"),
+                index_mode=self.index_mode,
             )
             logger.info(f"got {len(dataset)} examples in split {split}")
             if split_config.get_load_all_patches():
