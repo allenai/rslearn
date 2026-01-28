@@ -291,12 +291,19 @@ class SegmentationTask(BasicTask):
 class SegmentationHead(Predictor):
     """Head for segmentation task."""
 
-    def __init__(self, weights: list[float] | None = None, dice_loss: bool = False):
+    def __init__(
+        self,
+        weights: list[float] | None = None,
+        dice_loss: bool = False,
+        temperature: float = 1.0,
+    ):
         """Initialize a new SegmentationTask.
 
         Args:
             weights: weights for cross entropy loss (Tensor of size C)
             dice_loss: weather to add dice loss to cross entropy
+            temperature: temperature scaling for softmax, does not affect the loss,
+                only the predictor outputs
         """
         super().__init__()
         if weights is not None:
@@ -304,6 +311,7 @@ class SegmentationHead(Predictor):
         else:
             self.weights = None
         self.dice_loss = dice_loss
+        self.temperature = temperature
 
     def forward(
         self,
@@ -332,7 +340,7 @@ class SegmentationHead(Predictor):
             )
 
         logits = intermediates.feature_maps[0]
-        outputs = torch.nn.functional.softmax(logits, dim=1)
+        outputs = torch.nn.functional.softmax(logits / self.temperature, dim=1)
 
         losses = {}
         if targets:
@@ -354,7 +362,8 @@ class SegmentationHead(Predictor):
                 # the summed mask loss be zero.
                 losses["cls"] = torch.sum(per_pixel_loss * mask)
             if self.dice_loss:
-                dice_loss = DiceLoss()(outputs, labels, mask)
+                softmax_woT = torch.nn.functional.softmax(logits, dim=1)
+                dice_loss = DiceLoss()(softmax_woT, labels, mask)
                 losses["dice"] = dice_loss
 
         return ModelOutput(
