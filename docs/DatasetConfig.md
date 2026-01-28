@@ -651,6 +651,38 @@ data to avoid very slow global downloads.
 
 Valid bands: See the [CDS dataset page](https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land?tab=download).
 
+### rslearn.data_sources.earthdatahub.ERA5LandDailyUTCv1
+
+ERA5-Land daily UTC (v1) hosted on EarthDataHub.
+
+See https://earthdatahub.destine.eu/collections/era5/datasets/era5-land-daily for details.
+
+Authentication requires configuring the netrc file (`~/.netrc` on Linux and MacOS) as follows:
+
+```
+machine data.earthdatahub.destine.eu
+  password <write your personal access token here>
+```
+
+Supported bands:
+- `t2m`: 2m temperature (units: K)
+- `tp`: total precipitation (units: m)
+
+The additional data source configuration looks like this:
+
+```jsonc
+{
+  // Optional: URL/path to the EarthDataHub Zarr store.
+  "zarr_url": "https://data.earthdatahub.destine.eu/era5/era5-land-daily-utc-v1.zarr",
+  // Optional bounding box as [min_lon, min_lat, max_lon, max_lat] (WGS84).
+  // Recommended for performance.
+  "bounds": null,
+  // Whether to allow the underlying HTTP client to read environment configuration
+  // (including netrc) for auth/proxies (default true).
+  "trust_env": true
+}
+```
+
 ### rslearn.data_sources.copernicus.Copernicus
 
 This data source is for images from the ESA Copernicus OData API. See

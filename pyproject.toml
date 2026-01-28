@@ -34,6 +34,7 @@ dependencies = [
 extra = [
     "accelerate>=1.10",
     "cdsapi>=0.7.6",
+    "dask>=2024.1",
     "earthdaily[platform]>=1.0.7",
     "earthengine-api>=1.6.3",
     "einops>=0.8",
@@ -52,6 +53,9 @@ extra = [
     "rtree>=1.4",
     # Needed by DINOv3.
     "termcolor>=3.0",
+    "xarray>=2024.1",
+    "zarr>=3.0",
+    "numcodecs>=0.16",
     "satlaspretrain_models>=0.3",
     "scipy>=1.16",
     "terratorch>=1.0.2",
