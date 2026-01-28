@@ -33,8 +33,8 @@ class TestPredictLoader:
         classes=["negative", "positive"],
     )
     SPLIT_CONFIG = SplitConfig(
-        load_all_patches=True,
-        patch_size=2,
+        load_all_crops=True,
+        crop_size=2,
         skip_targets=True,
     )
 
@@ -62,7 +62,7 @@ class TestPredictLoader:
     def test_predict_dataloader_no_windows(self, empty_image_dataset: Dataset) -> None:
         """Verify that the dataloader works with no windows.
 
-        We use load_all_patches for prediction. Previously there were some bugs with
+        We use load_all_crops for prediction. Previously there were some bugs with
         this use case.
         """
         data_module = RslearnDataModule(

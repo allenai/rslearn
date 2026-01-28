@@ -67,9 +67,9 @@ class SampleMetadata:
     window_group: str
     window_name: str
     window_bounds: PixelBounds
-    patch_bounds: PixelBounds
-    patch_idx: int
-    num_patches_in_window: int
+    crop_bounds: PixelBounds
+    crop_idx: int
+    num_crops_in_window: int
     time_range: tuple[datetime, datetime] | None
     projection: Projection
 

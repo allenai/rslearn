@@ -128,7 +128,7 @@ class DetectionTask(BasicTask):
         if not load_targets:
             return {}, {}
 
-        bounds = metadata.patch_bounds
+        bounds = metadata.crop_bounds
 
         boxes = []
         class_labels = []
@@ -244,10 +244,10 @@ class DetectionTask(BasicTask):
         features = []
         for box, class_id, score in zip(boxes, class_ids, scores):
             shp = shapely.box(
-                metadata.patch_bounds[0] + float(box[0]),
-                metadata.patch_bounds[1] + float(box[1]),
-                metadata.patch_bounds[0] + float(box[2]),
-                metadata.patch_bounds[1] + float(box[3]),
+                metadata.crop_bounds[0] + float(box[0]),
+                metadata.crop_bounds[1] + float(box[1]),
+                metadata.crop_bounds[0] + float(box[2]),
+                metadata.crop_bounds[1] + float(box[3]),
             )
             geom = STGeometry(metadata.projection, shp, None)
             properties: dict[str, Any] = {
