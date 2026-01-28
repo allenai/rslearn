@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 from datetime import UTC, datetime, timedelta
+import math
 from typing import Any, Literal
 
 import numpy as np
@@ -52,6 +53,37 @@ def _bounds_to_lon_ranges_0_360(
 
     # Bounds cross 0 degrees (e.g. [-5, 5]) which wraps in the 0..360 convention.
     return [(min_lon + 360.0, 360.0), (0.0, max_lon)]
+
+
+def _snap_bounds_outward(
+    bounds: tuple[float, float, float, float],
+    step_degrees: float,
+) -> tuple[float, float, float, float]:
+    """Snap lon/lat bounds outward to a fixed grid.
+
+    ERA5(-Land) datasets are provided on a regular 0.1° lat/lon grid. When a window is
+    much smaller than the grid spacing, its geographic bounds may not contain any grid
+    *centers*, which leads to empty `xarray.sel(..., slice(...))` selections.
+
+    Snapping outward ensures at least one grid cell is selected when there is any
+    overlap.
+    """
+    min_lon, min_lat, max_lon, max_lat = bounds
+    if min_lon > max_lon or min_lat > max_lat:
+        raise ValueError(f"invalid bounds: {bounds}")
+
+    min_lon = math.floor(min_lon / step_degrees) * step_degrees
+    min_lat = math.floor(min_lat / step_degrees) * step_degrees
+    max_lon = math.ceil(max_lon / step_degrees) * step_degrees
+    max_lat = math.ceil(max_lat / step_degrees) * step_degrees
+
+    # Ensure non-empty after snapping.
+    if max_lon == min_lon:
+        max_lon = min_lon + step_degrees
+    if max_lat == min_lat:
+        max_lat = min_lat + step_degrees
+
+    return (min_lon, min_lat, max_lon, max_lat)
 
 
 class ERA5LandDailyUTCv1(DataSource[Item]):
@@ -270,7 +302,10 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
             day_start = _floor_to_utc_day(item.geometry.time_range[0])
             day_str = f"{day_start.year:04d}-{day_start.month:02d}-{day_start.day:02d}"
 
-            bounds = self._get_effective_bounds(item_geoms)
+            bounds = _snap_bounds_outward(
+                self._get_effective_bounds(item_geoms),
+                step_degrees=self.PIXEL_SIZE_DEGREES,
+            )
             lon_ranges_0_360 = _bounds_to_lon_ranges_0_360(bounds)
             min_lat = bounds[1]
             max_lat = bounds[3]
