@@ -2,9 +2,76 @@
 
 import torch
 
-from rslearn.models.component import FeatureMaps
-from rslearn.models.pooling_decoder import SegmentationPoolingDecoder
+from rslearn.models.component import FeatureMaps, FeatureVector
+from rslearn.models.pooling_decoder import PoolingDecoder, SegmentationPoolingDecoder
 from rslearn.train.model_context import ModelContext, RasterImage
+
+
+def test_pooling_decoder_with_conv_and_fc_layers() -> None:
+    """Test PoolingDecoder with conv and fc layers."""
+    batch_size = 2
+    embedding_size = 8
+    out_channels = 3
+    feature_h = 4
+    feature_w = 4
+
+    feature_maps = FeatureMaps(
+        [
+            # BCHW - with multiple feature maps, only last one should be used
+            torch.randn(
+                (batch_size, embedding_size, feature_h, feature_w), dtype=torch.float32
+            ),
+            torch.randn(
+                (batch_size, embedding_size * 2, feature_h // 2, feature_w // 2),
+                dtype=torch.float32,
+            ),
+        ]
+    )
+
+    decoder = PoolingDecoder(
+        in_channels=embedding_size * 2,
+        out_channels=out_channels,
+        num_conv_layers=1,
+        num_fc_layers=1,
+        conv_channels=16,
+        fc_channels=32,
+    )
+
+    result = decoder(feature_maps, ModelContext(inputs=[{}], metadatas=[]))
+
+    # Should return FeatureVector
+    assert isinstance(result, FeatureVector)
+    # Shape should be (batch_size, out_channels)
+    assert result.feature_vector.shape == (batch_size, out_channels)
+
+
+def test_pooling_decoder_no_layers() -> None:
+    """Test PoolingDecoder with no conv or fc layers."""
+    batch_size = 2
+    embedding_size = 8
+    out_channels = 3
+    feature_h = 4
+    feature_w = 4
+
+    feature_maps = FeatureMaps(
+        [
+            torch.randn(
+                (batch_size, embedding_size, feature_h, feature_w), dtype=torch.float32
+            ),
+        ]
+    )
+
+    decoder = PoolingDecoder(
+        in_channels=embedding_size,
+        out_channels=out_channels,
+        num_conv_layers=0,
+        num_fc_layers=0,
+    )
+
+    result = decoder(feature_maps, ModelContext(inputs=[{}], metadatas=[]))
+
+    assert isinstance(result, FeatureVector)
+    assert result.feature_vector.shape == (batch_size, out_channels)
 
 
 def test_segmentation_pooling_decoder() -> None:
