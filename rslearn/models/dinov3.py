@@ -159,7 +159,6 @@ class DinoV3Normalize(Transform):
         self.normalize = Normalize(
             [value * 255 for value in mean],
             [value * 255 for value in std],
-            num_bands=3,
         )
 
     def forward(
