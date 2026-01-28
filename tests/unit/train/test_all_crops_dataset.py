@@ -19,84 +19,116 @@ from rslearn.train.tasks.segmentation import SegmentationTask
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
 
 
-def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
-    # Make sure that, when loading all patches, the border of the raster is included in
-    # the generated windows.
-    # The image_to_class_dataset window is 4x4 so 3x3 crop will ensure irregular window
-    # at the border.
-    crop_size = 3
-    split_config = SplitConfig(
-        crop_size=crop_size,
-        load_all_crops=True,
-    )
-    image_data_input = DataInput("raster", ["image"], bands=["band"], passthrough=True)
-    target_data_input = DataInput("vector", ["label"])
-    task = ClassificationTask("label", ["cls0", "cls1"], read_class_id=True)
-    model_dataset = ModelDataset(
-        image_to_class_dataset,
-        split_config=split_config,
-        task=task,
-        workers=1,
-        inputs={
-            "image": image_data_input,
-            "targets": target_data_input,
-        },
-    )
-    dataset = IterableAllCropsDataset(model_dataset, (crop_size, crop_size))
-
-    point_coverage = {}
-    for col in range(4):
-        for row in range(4):
-            point_coverage[(col, row)] = False
-
-    # There should be 4 windows with top-left at:
-    # - (0, 0)
-    # - (0, 1)
-    # - (1, 0)
-    # - (1, 1)
-    assert len(list(dataset)) == 4
-
-    for _, _, metadata in dataset:
-        bounds = metadata.crop_bounds
-        for col, row in list(point_coverage.keys()):
-            if col < bounds[0] or col >= bounds[2]:
-                continue
-            if row < bounds[1] or row >= bounds[3]:
-                continue
-            point_coverage[(col, row)] = True
-
-    assert all(point_coverage.values())
-
-    # Test with overlap_pixels=1 for 2x2 crops
-    dataset_with_overlap = IterableAllCropsDataset(
-        model_dataset, (2, 2), overlap_pixels=1
-    )
-
-    point_coverage = {}
-    for col in range(4):
-        for row in range(4):
-            point_coverage[(col, row)] = False
-
-    # With overlap_pixels=1, there should be 9 windows given that overlap is 1 pixel.
-    assert len(list(dataset_with_overlap)) == 9
-
-    for _, _, metadata in dataset:
-        bounds = metadata.crop_bounds
-
-        for col, row in list(point_coverage.keys()):
-            if col < bounds[0] or col >= bounds[2]:
-                continue
-            if row < bounds[1] or row >= bounds[3]:
-                continue
-            point_coverage[(col, row)] = True
-
-    assert all(point_coverage.values())
-
-
 class TestIterableAllCropsDataset:
     """Tests for IterableAllCropsDataset."""
 
-    def test_one_window_per_worker(
+    def test_crop_positions_first_and_last_only(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
+        """Test crop positions when window only needs first/last crops (no intermediate crops).
+
+        With a 6x6 window, crop_size=4, overlap_pixels=2:
+        - First crop on each dimension covers [0, 4)
+        - Last crop on each dimension covers [2, 6)
+
+        So we get 2x2 = 4 crops starting at positions [0, 2] x [0, 2].
+        """
+        window_size = 6
+        crop_size = 4
+        overlap_pixels = 2
+
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset,
+            name="window0",
+            bounds=(0, 0, window_size, window_size),
+        )
+        model_dataset = ModelDataset(
+            basic_classification_dataset,
+            split_config=SplitConfig(),
+            task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+            workers=1,
+            inputs={
+                "targets": DataInput("vector", ["vector_layer"]),
+            },
+        )
+        all_crops_dataset = IterableAllCropsDataset(
+            model_dataset,
+            crop_size=(crop_size, crop_size),
+            overlap_pixels=overlap_pixels,
+        )
+        samples = list(all_crops_dataset)
+
+        # Should have 2x2 = 4 crops (only first and last, no middle)
+        assert len(samples) == 4
+
+        # Verify exact crop bounds
+        crop_bounds = set(sample[2].crop_bounds for sample in samples)
+        expected_bounds = {
+            (0, 0, 4, 4),
+            (0, 2, 4, 6),
+            (2, 0, 6, 4),
+            (2, 2, 6, 6),
+        }
+        assert crop_bounds == expected_bounds, (
+            f"Expected {expected_bounds}, got {crop_bounds}"
+        )
+
+    def test_crop_positions_with_middle_crops(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
+        """Test crop positions when window needs middle crops between first/last.
+
+        With a 15x15 window, crop_size=8, overlap_pixels=2:
+        - First crop at 0
+        - Middle crops at range(6, 7, 6) = [6] (one middle crop)
+        - Last crop at 15 - 8 = 7
+
+        So we get 3x3 = 9 crops at positions [0, 6, 7] x [0, 6, 7].
+        """
+        window_size = 15
+        crop_size = 8
+        overlap_pixels = 2
+
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset,
+            name="window0",
+            bounds=(0, 0, window_size, window_size),
+        )
+        model_dataset = ModelDataset(
+            basic_classification_dataset,
+            split_config=SplitConfig(),
+            task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+            workers=1,
+            inputs={
+                "targets": DataInput("vector", ["vector_layer"]),
+            },
+        )
+        all_crops_dataset = IterableAllCropsDataset(
+            model_dataset,
+            crop_size=(crop_size, crop_size),
+            overlap_pixels=overlap_pixels,
+        )
+        samples = list(all_crops_dataset)
+
+        # Should have 3x3 = 9 crops (first, middle, and last)
+        assert len(samples) == 9
+
+        # Verify exact crop bounds
+        crop_bounds = set(sample[2].crop_bounds for sample in samples)
+        expected_bounds = {
+            (col, row, col + crop_size, row + crop_size)
+            for col in [0, 6, 7]
+            for row in [0, 6, 7]
+        }
+        assert crop_bounds == expected_bounds, (
+            f"Expected {expected_bounds}, got {crop_bounds}"
+        )
+
+    def test_distributed_one_window_per_worker(
         self,
         basic_classification_dataset: Dataset,
         add_window_to_basic_classification_dataset: Callable,
@@ -134,7 +166,7 @@ class TestIterableAllCropsDataset:
             window_names.add(samples[0][2].window_name)
         assert len(window_names) == 4
 
-    def test_different_window_sizes(
+    def test_distributed_different_window_sizes(
         self,
         basic_classification_dataset: Dataset,
         add_window_to_basic_classification_dataset: Callable,

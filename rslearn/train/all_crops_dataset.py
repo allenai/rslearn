@@ -33,20 +33,28 @@ def get_window_crop_options(
         a list of crop bounds within the overall bounds. The rightmost and
             bottommost crops may extend beyond the provided bounds.
     """
-    # We stride the crops by crop_size - overlap_size until the last crop.
-    # We handle the first crop with a special case to ensure it is always used.
+    # We stride the crops by (crop_size - overlap_size) until the last crop.
+    # The first crop always starts at bounds[0]/bounds[1]. It's okay if it extends
+    # beyond the window bounds since pad_slice_protect pads the tensors.
     # We handle the last crop with a special case to ensure it does not exceed the
     # window bounds. Instead, it may overlap the previous crop.
+    # Here is a simple 1D example:
+    # - Suppose bounds is [0, 15] with crop_size=8, overlap_size=2
+    # - Then the first crop should be [0, 8] (from first crop special case)
+    # - There will only be one crop in the middle, [6, 14]
+    # - And the last crop will be at [7, 15]
+    # - Note that, if the bounds was [0, 14], we will only have the first/last crop
+    #   special cases with no crops in the middle from the range(...).
     cols = [bounds[0]] + list(
         range(
-            bounds[0] + crop_size[0],
+            bounds[0] + crop_size[0] - overlap_size[0],
             bounds[2] - crop_size[0],
             crop_size[0] - overlap_size[0],
         )
     )
     rows = [bounds[1]] + list(
         range(
-            bounds[1] + crop_size[1],
+            bounds[1] + crop_size[1] - overlap_size[1],
             bounds[3] - crop_size[1],
             crop_size[1] - overlap_size[1],
         )
