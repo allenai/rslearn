@@ -302,8 +302,8 @@ class SegmentationHead(Predictor):
         Args:
             weights: weights for cross entropy loss (Tensor of size C)
             dice_loss: weather to add dice loss to cross entropy
-            temperature: temperature scaling for softmax, affects the loss (if T != 1),
-                lower values make the model more confident.
+            temperature: temperature scaling for softmax, does not affect the loss,
+                only the predictor outputs
         """
         super().__init__()
         if weights is not None:
@@ -358,7 +358,8 @@ class SegmentationHead(Predictor):
                 # the summed mask loss be zero.
                 losses["cls"] = torch.sum(per_pixel_loss * mask)
             if self.dice_loss:
-                dice_loss = DiceLoss()(outputs, labels, mask)
+                softmax_woT = torch.nn.functional.softmax(logits, dim=1)
+                dice_loss = DiceLoss()(softmax_woT, labels, mask)
                 losses["dice"] = dice_loss
 
         return ModelOutput(

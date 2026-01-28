@@ -2,8 +2,9 @@ import numpy as np
 import pytest
 import torch
 
-from rslearn.train.model_context import RasterImage, SampleMetadata
-from rslearn.train.tasks.segmentation import SegmentationTask
+from rslearn.models.component import FeatureMaps
+from rslearn.train.model_context import ModelContext, RasterImage, SampleMetadata
+from rslearn.train.tasks.segmentation import SegmentationHead, SegmentationTask
 
 
 class TestProcessInputs:
@@ -293,3 +294,27 @@ class TestProcessOutput:
         # prob_scales should be applied: [0.3, 0.8, 0.3]
         expected = np.array([[[0.3, 0.3]], [[0.8, 0.8]], [[0.3, 0.3]]])
         np.testing.assert_allclose(result, expected)
+
+
+def test_segmentation_head_temperature_confidence() -> None:
+    """Verify temperature scaling affects output confidence."""
+    logits = torch.tensor([[[[0.0]], [[1.0]], [[2.0]]]], dtype=torch.float32)  # BxCxHxW
+    feature_maps = FeatureMaps([logits])
+    context = ModelContext(inputs=[], metadatas=[])
+
+    cold_head = SegmentationHead(temperature=0.5)
+    hot_head = SegmentationHead(temperature=2.0)
+
+    cold_output = cold_head(
+        intermediates=feature_maps, context=context, targets=None
+    ).outputs
+    hot_output = hot_head(
+        intermediates=feature_maps, context=context, targets=None
+    ).outputs
+
+    assert cold_output.shape == hot_output.shape == torch.Size([1, 3, 1, 1])
+    assert cold_output.argmax(dim=1).equal(hot_output.argmax(dim=1))
+
+    max_prob_cold = cold_output.max().item()
+    max_prob_hot = hot_output.max().item()
+    assert max_prob_cold > max_prob_hot
