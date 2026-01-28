@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import rasterio
@@ -81,6 +81,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         band_names: list[str] | None = None,
         zarr_url: str = DEFAULT_ZARR_URL,
         bounds: list[float] | None = None,
+        temperature_unit: Literal["celsius", "kelvin"] = "kelvin",
         trust_env: bool = True,
         context: DataSourceContext = DataSourceContext(),
     ) -> None:
@@ -93,12 +94,14 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
             bounds: optional bounding box as [min_lon, min_lat, max_lon, max_lat]
                 in degrees (WGS84). For best performance, set bounds to your area of
                 interest.
+            temperature_unit: units to return for `t2m` ("celsius" or "kelvin").
             trust_env: if True (default), allow the underlying HTTP client to read
                 environment configuration (including netrc) for auth/proxies.
             context: rslearn data source context.
         """
         self.zarr_url = zarr_url
         self.bounds = bounds
+        self.temperature_unit = temperature_unit
         self.trust_env = trust_env
 
         self.band_names: list[str]
@@ -294,6 +297,9 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                         for (lo, hi) in lon_ranges_0_360
                     ]
                     da = xr.concat(parts, dim="longitude")
+
+                if band == "t2m" and self.temperature_unit == "celsius":
+                    da = da - 273.15
 
                 da = da.load()
                 if lat is None:

@@ -4507,7 +4507,7 @@ requires-dist = [
     { name = "universal-pathlib", specifier = ">=0.2.6" },
     { name = "wandb", marker = "extra == 'extra'", specifier = ">=0.21" },
     { name = "xarray", marker = "extra == 'extra'", specifier = ">=2024.1" },
-    { name = "zarr", marker = "extra == 'extra'", specifier = ">=3.0" },
+    { name = "zarr", marker = "extra == 'extra'", specifier = ">=3.1.2" },
 ]
 provides-extras = ["extra", "dev"]
 

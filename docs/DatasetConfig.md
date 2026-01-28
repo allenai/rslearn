@@ -665,7 +665,7 @@ machine data.earthdatahub.destine.eu
 ```
 
 Supported bands:
-- `t2m`: 2m temperature (units: K)
+- `t2m`: 2m temperature (units: K or °C; see `temperature_unit`)
 - `tp`: total precipitation (units: m)
 
 The additional data source configuration looks like this:
@@ -677,6 +677,8 @@ The additional data source configuration looks like this:
   // Optional bounding box as [min_lon, min_lat, max_lon, max_lat] (WGS84).
   // Recommended for performance.
   "bounds": null,
+  // Units to return for `t2m` (default "kelvin"): "celsius" or "kelvin".
+  "temperature_unit": "kelvin",
   // Whether to allow the underlying HTTP client to read environment configuration
   // (including netrc) for auth/proxies (default true).
   "trust_env": true
