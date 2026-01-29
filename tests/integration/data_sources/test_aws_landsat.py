@@ -13,7 +13,8 @@ from rslearn.config import (
     SpaceMode,
 )
 from rslearn.data_sources.aws_landsat import LandsatOliTirs
-from rslearn.dataset import Dataset, Window
+from rslearn.dataset import Window
+from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils import STGeometry
 
@@ -74,7 +75,7 @@ class TestLandsatOliTirs:
             int(seattle2020.shp.bounds[3]),
         )
         window = Window(
-            storage=Dataset(ds_path).storage,
+            storage=FileWindowStorage(ds_path),
             group=group,
             name=window_name,
             projection=seattle2020.projection,
