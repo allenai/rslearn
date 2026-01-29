@@ -92,28 +92,6 @@ class M2MAPIClient:
             return response_dict
         return None
 
-    def close(self) -> None:
-        """Logout from the API."""
-        self.request("logout")
-
-    def __enter__(self) -> "M2MAPIClient":
-        """Enter function to provide with semantics."""
-        return self
-
-    def __exit__(
-        self, exc_type: type | None, exc_val: Exception | None, exc_tb: Any
-    ) -> None:
-        """Exit function to provide with semantics.
-
-        Args:
-            exc_type: exception type if an exception was raised
-            exc_val: exception value if an exception was raised
-            exc_tb: exception traceback if an exception was raised
-
-        Logs out the API.
-        """
-        self.close()
-
     def get_filters(self, dataset_name: str) -> list[dict[str, Any]]:
         """Returns filters available for the given dataset.
 

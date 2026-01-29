@@ -506,9 +506,8 @@ def bulk_download_srtm(
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    session = create_retry_session()
-    with M2MAPIClient(timeout=timeout, session=session) as client:
-        scenes = _fetch_all_scenes(client, output_dir)
+    client = _get_cached_m2m_client(timeout)
+    scenes = _fetch_all_scenes(client, output_dir)
 
     # Filter out scenes that are already downloaded
     download_tasks = []
