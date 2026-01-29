@@ -16,6 +16,7 @@ from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, Projection
 
+from .raster_storage import RasterIterator
 from .remap import Remapper, load_remapper
 from .window import Window
 
@@ -503,6 +504,9 @@ class RasterMaterializer(Materializer):
             layer_cfg: the configuration of the layer to materialize
             item_groups: the items associated with this window and layer
         """
+        raster_storage = layer_cfg.instantiate_raster_storage()
+        window_root = window.window_root
+
         for band_cfg in layer_cfg.band_sets:
             # band_cfg could specify zoom_offset and maybe other parameters that affect
             # projection/bounds, so use the corrected projection/bounds.
@@ -517,23 +521,32 @@ class RasterMaterializer(Materializer):
 
             raster_format = band_cfg.instantiate_raster_format()
 
-            for group_id, group in enumerate(item_groups):
-                composite = build_composite(
-                    group=group,
-                    compositing_method=layer_cfg.compositing_method,
-                    tile_store=tile_store,
-                    layer_cfg=layer_cfg,
-                    band_cfg=band_cfg,
-                    projection=projection,
-                    bounds=bounds,
-                    remapper=remapper,
-                )
-                raster_format.encode_raster(
-                    window.get_raster_dir(layer_name, band_cfg.bands, group_id),
-                    projection,
-                    bounds,
-                    composite,
-                )
+            # Define iterator that yields rasters one at a time, for passing to
+            # RasterStorage.write_all_rasters.
+            def raster_iterator() -> RasterIterator:
+                for group in item_groups:
+                    raster = build_composite(
+                        group=group,
+                        compositing_method=layer_cfg.compositing_method,
+                        tile_store=tile_store,
+                        layer_cfg=layer_cfg,
+                        band_cfg=band_cfg,
+                        projection=projection,
+                        bounds=bounds,
+                        remapper=remapper,
+                    )
+                    yield raster
+
+            # Write via RasterStorage.
+            raster_storage.write_all_rasters(
+                window_root,
+                layer_name,
+                band_cfg.bands,
+                raster_format,
+                projection,
+                bounds,
+                raster_iterator(),
+            )
 
         for group_id in range(len(item_groups)):
             window.mark_layer_completed(layer_name, group_id)
@@ -571,7 +584,7 @@ class VectorMaterializer(Materializer):
                 features.extend(cur_features)
 
             vector_format.encode_vector(
-                window.get_layer_dir(layer_name, group_id), features
+                window.get_vector_layer_dir(layer_name, group_id), features
             )
 
         for group_id in range(len(item_groups)):

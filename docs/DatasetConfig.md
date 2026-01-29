@@ -150,7 +150,11 @@ Raster layers have additional configuration:
   "resampling_method": "bilinear",
   // Method how to select pixel values when multiple items in a group cover the same
   // pixel. One of "FIRST_VALID", "MEAN", "MEDIAN". Defaults to "FIRST_VALID".
-  "compositing_method": "FIRST_VALID"
+  "compositing_method": "FIRST_VALID",
+  // Optional raster storage configuration. This controls how materialized raster data
+  // is stored on disk. The default is PerItemGroupStorage which writes one file per
+  // item group. See Raster Storage section below.
+  "raster_storage": null
 }
 ```
 
@@ -241,6 +245,47 @@ LinearRemapper configuration:
   "dst": [128, 256]
 }
 ```
+
+### Raster Storage
+
+The raster storage configuration controls how raster data is organized on disk. By
+default, each item group is stored in a separate file.
+
+The available storage implementations are:
+
+- "PerItemGroupStorage": stores each item group in a separate file (default).
+- "PerLayerStorage": stores all item groups for a layer in a single file.
+
+PerItemGroupStorage configuration:
+
+```jsonc
+{
+  "class_path": "rslearn.dataset.raster_storage.PerItemGroupStorage",
+  "init_args": {}
+}
+```
+
+This is the default and stores rasters in a directory structure like:
+`layers/{layer_name}.{group_idx}/{band_set_dir}/raster.tif`.
+
+PerLayerStorage configuration:
+
+```jsonc
+{
+  "class_path": "rslearn.dataset.raster_storage.PerLayerStorage",
+  "init_args": {}
+}
+```
+
+This stores all item groups for a layer in a single file with the time dimension
+flattened into the channel dimension. The file is stored at
+`layers/{layer_name}/{band_set_dir}/raster.tif` with shape `(T*C, H, W)` where T is the
+number of item groups and C is the number of channels.
+
+Note that with PerLayerStorage, reading a single item group is inefficient since the
+entire file must be read. It generally should only be used along with
+`load_all_item_groups: true` in the training configuration, which causes the data
+loading to read all item groups together.
 
 
 Vector Layers

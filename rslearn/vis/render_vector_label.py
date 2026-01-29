@@ -289,7 +289,7 @@ def read_vector_layer(
         raise ValueError(f"Layer {layer_name} is not a vector layer")
 
     vector_format: VectorFormat = layer_config.instantiate_vector_format()
-    layer_dir = window.get_layer_dir(layer_name, group_idx=group_idx)
+    layer_dir = window.get_vector_layer_dir(layer_name, group_idx=group_idx)
     logger.info(
         f"Reading vector layer {layer_name} from {layer_dir}, bounds: {window.bounds}, projection: {window.projection}"
     )
