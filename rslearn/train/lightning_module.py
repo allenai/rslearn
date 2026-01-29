@@ -227,16 +227,23 @@ class RslearnLightningModule(L.LightningModule):
         We manually compute and log metrics here (instead of passing the MetricCollection
         to log_dict) because MetricCollection.compute() properly flattens dict-returning
         metrics, while log_dict expects each metric to return a scalar tensor.
+
+        If metrics_file is set, the metrics are saved to a JSON file.
         """
         metrics = self.test_metrics.compute()
         self.log_dict(metrics)
         self.test_metrics.reset()
 
         if self.metrics_file:
+            metrics_dict = {k: v.item() for k, v in metrics.items()}
+
+            # Record the checkpoint path if available (from --ckpt_path CLI argument)
+            if self.trainer.ckpt_path:
+                metrics_dict["_checkpoint_path"] = self.trainer.ckpt_path
+
             with open(self.metrics_file, "w") as f:
-                metrics_dict = {k: v.item() for k, v in metrics.items()}
                 json.dump(metrics_dict, f, indent=4)
-                logger.info(f"Saved metrics to {self.metrics_file}")
+            logger.info(f"Saved metrics to {self.metrics_file}")
 
     def training_step(
         self, batch: Any, batch_idx: int, dataloader_idx: int = 0
