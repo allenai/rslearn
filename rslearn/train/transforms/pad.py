@@ -50,9 +50,7 @@ class Pad(Transform):
         """
         return {"size": torch.randint(low=self.size[0], high=self.size[1], size=())}
 
-    def apply_image(
-        self, image: RasterImage | torch.Tensor, state: dict[str, bool]
-    ) -> RasterImage | torch.Tensor:
+    def apply_image(self, image: RasterImage, state: dict[str, bool]) -> RasterImage:
         """Apply the sampled state on the specified image.
 
         Args:
@@ -105,16 +103,12 @@ class Pad(Transform):
             horizontal_pad = (horizontal_half, horizontal_extra - horizontal_half)
             vertical_pad = (vertical_half, vertical_extra - vertical_half)
 
-        if isinstance(image, RasterImage):
-            image.image = apply_padding(
-                image.image, True, horizontal_pad[0], horizontal_pad[1]
-            )
-            image.image = apply_padding(
-                image.image, False, vertical_pad[0], vertical_pad[1]
-            )
-        else:
-            image = apply_padding(image, True, horizontal_pad[0], horizontal_pad[1])
-            image = apply_padding(image, False, vertical_pad[0], vertical_pad[1])
+        image.image = apply_padding(
+            image.image, True, horizontal_pad[0], horizontal_pad[1]
+        )
+        image.image = apply_padding(
+            image.image, False, vertical_pad[0], vertical_pad[1]
+        )
         return image
 
     def apply_boxes(self, boxes: Any, state: dict[str, bool]) -> torch.Tensor:

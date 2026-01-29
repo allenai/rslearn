@@ -14,26 +14,9 @@ from torchmetrics import Metric, MetricCollection
 
 from rslearn.train.model_context import RasterImage, SampleMetadata
 from rslearn.utils import Feature, STGeometry
+from rslearn.utils.colors import DEFAULT_COLORS
 
 from .task import BasicTask
-
-DEFAULT_COLORS = [
-    (255, 0, 0),
-    (0, 255, 0),
-    (0, 0, 255),
-    (255, 255, 0),
-    (0, 255, 255),
-    (255, 0, 255),
-    (0, 128, 0),
-    (255, 160, 122),
-    (139, 69, 19),
-    (128, 128, 128),
-    (255, 255, 255),
-    (143, 188, 143),
-    (95, 158, 160),
-    (255, 200, 0),
-    (128, 0, 0),
-]
 
 
 class DetectionTask(BasicTask):

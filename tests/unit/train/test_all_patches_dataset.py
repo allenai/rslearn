@@ -268,7 +268,7 @@ class TestIterableAllPatchesDataset:
         for inputs, targets, metadata in dataset:
             sample_count += 1
             assert inputs["image"].shape[-2:] == (4, 4)
-            assert targets["classes"].shape == (2, 2)
+            assert targets["classes"].get_hw_tensor().shape == (2, 2)
         assert sample_count > 0, "No samples were generated - test is not valid"
 
 
@@ -360,4 +360,4 @@ class TestInMemoryAllPatchesDataset:
             inputs, targets, metadata = dataset[i]
             # Target patch should have half the resolution of the input patch
             assert inputs["image"].shape[-2:] == (4, 4)
-            assert targets["classes"].shape == (2, 2)
+            assert targets["classes"].get_hw_tensor().shape == (2, 2)
