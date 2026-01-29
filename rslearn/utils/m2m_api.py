@@ -9,6 +9,10 @@ from typing import Any
 
 import requests
 
+from rslearn.log_utils import get_logger
+
+logger = get_logger(__name__)
+
 
 class APIException(Exception):
     """Exception raised for M2M API errors."""
@@ -228,6 +232,9 @@ class M2MAPIClient:
 
         # Otherwise poll download-retrieve until the URL is ready
         while True:
+            # We sleep first because we have observed that if we immediately call
+            # download-retrieve it sometimes has a response that includes neither
+            # available nor requested list.
             time.sleep(10)
             response_dict = self.request("download-retrieve", {"label": label})
             if response_dict is None:
@@ -236,7 +243,9 @@ class M2MAPIClient:
             if len(response["available"]) > 0:
                 return response["available"][0]["url"]
             if len(response["requested"]) == 0:
-                print(response)
+                logger.debug(
+                    f"Response to download-retrieve did not include our requested download under label {label}: {response}"
+                )
                 raise APIException("Did not get download URL")
             if response["requested"][0].get("url"):
                 return response["requested"][0]["url"]
