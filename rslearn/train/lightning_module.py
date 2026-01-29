@@ -228,8 +228,7 @@ class RslearnLightningModule(L.LightningModule):
         to log_dict) because MetricCollection.compute() properly flattens dict-returning
         metrics, while log_dict expects each metric to return a scalar tensor.
 
-        If metrics_file is set, the metrics are saved to a JSON file. The file is
-        organized by test groups, allowing multiple test runs on different splits.
+        If metrics_file is set, the metrics are saved to a JSON file.
         """
         metrics = self.test_metrics.compute()
         self.log_dict(metrics)
@@ -238,40 +237,13 @@ class RslearnLightningModule(L.LightningModule):
         if self.metrics_file:
             metrics_dict = {k: v.item() for k, v in metrics.items()}
 
-            # Get the groups key from the datamodule's test_config
-            groups_key = "default"
-            if (
-                hasattr(self.trainer, "datamodule")
-                and self.trainer.datamodule is not None
-                and hasattr(self.trainer.datamodule, "split_configs")
-            ):
-                test_config = self.trainer.datamodule.split_configs.get("test")
-                if test_config and test_config.groups:
-                    groups_key = "_".join(test_config.groups)
-
-            # Load existing metrics file if it exists, otherwise start fresh
-            all_metrics: dict[str, Any] = {}
-            if os.path.exists(self.metrics_file):
-                try:
-                    with open(self.metrics_file) as f:
-                        all_metrics = json.load(f)
-                except (OSError, json.JSONDecodeError):
-                    logger.warning(
-                        f"Could not read existing metrics file {self.metrics_file}, starting fresh"
-                    )
-
-            # Add/update metrics under the groups key
-            all_metrics[groups_key] = metrics_dict
-
             # Record the checkpoint path if available (from --ckpt_path CLI argument)
             if self.trainer.ckpt_path:
-                all_metrics["_checkpoint_path"] = self.trainer.ckpt_path
+                metrics_dict["_checkpoint_path"] = self.trainer.ckpt_path
 
             with open(self.metrics_file, "w") as f:
-                json.dump(all_metrics, f, indent=4)
-                logger.info(
-                    f"Saved metrics for groups '{groups_key}' to {self.metrics_file}"
-                )
+                json.dump(metrics_dict, f, indent=4)
+            logger.info(f"Saved metrics to {self.metrics_file}")
 
     def training_step(
         self, batch: Any, batch_idx: int, dataloader_idx: int = 0
