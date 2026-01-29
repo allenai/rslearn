@@ -124,6 +124,6 @@ class SegmentationPoolingDecoder(PoolingDecoder):
         """
         output_probs = super().forward(intermediates, context)
         # BC -> BCHW
-        h, w = context.inputs[0][self.image_key].shape[1:3]
+        h, w = context.inputs[0][self.image_key].image.shape[1:3]
         feat_map = output_probs.feature_vector[:, :, None, None].repeat([1, 1, h, w])
         return FeatureMaps([feat_map])
