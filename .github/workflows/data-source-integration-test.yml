@@ -75,17 +75,13 @@ jobs:
             username: ${{ github.actor }}
             password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Authenticate into gcp
-        uses: "google-github-actions/auth@v2"
-        with:
-          credentials_json: ${{secrets.GOOGLE_CREDENTIALS }}
-
       - name: Run Data Sources Integration Tests
         run: |
+          printenv GOOGLE_CREDENTIALS > /tmp/gcp-credentials.json
           docker run --rm \
             -e TEST_BUCKET="earthsystem-dev-c3po-rslearn-test-bucket" \
             -e TEST_PREFIX="rslearn_gha_data_source_tests/" \
-            -v ${{env.GOOGLE_GHA_CREDS_PATH}}:/tmp/gcp-credentials.json:ro \
+            -v /tmp/gcp-credentials.json:/tmp/gcp-credentials.json:ro \
             -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-credentials.json \
             -e GCSFS_DEFAULT_PROJECT="${GCSFS_DEFAULT_PROJECT}" \
             -e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
@@ -108,8 +104,9 @@ jobs:
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
-            pytest tests/integration/data_sources/test_gcp_public_data.py -k test_gcs
+            pytest tests/integration/data_sources/
         env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
@@ -131,4 +128,5 @@ jobs:
       - name: Clean up
         if: always()
         run: |
+          rm -f /tmp/gcp-credentials.json
           docker image prune -f
