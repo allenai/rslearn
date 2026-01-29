@@ -95,6 +95,7 @@ class TestSentinel2:
         bucket_name = os.environ["TEST_BUCKET"]
         prefix = os.environ["TEST_PREFIX"] + f"test_{test_id}/"
         test_path = UPath(f"gcs://{bucket_name}/{prefix}")
+        print("can we not access", test_path, "???????")
         tile_store_dir = test_path / "tiles"
         index_cache_dir = test_path / "cache"
         self.run_simple_test(

@@ -108,7 +108,7 @@ jobs:
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
-            pytest tests/integration/data_sources/
+            pytest tests/integration/data_sources/test_gcp_public_data.py -k test_gcs
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
