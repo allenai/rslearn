@@ -21,7 +21,7 @@ from rslearn.utils.vector_format import GeojsonVectorFormat
 def basic_classification_dataset(tmp_path: pathlib.Path) -> Dataset:
     """Create an empty dataset setup for image classification.
 
-    This is used in test_dataset.py and test_all_patches_dataset.py.
+    This is used in test_dataset.py and test_all_crops_dataset.py.
     """
     ds_path = UPath(tmp_path)
     dataset_config = {
