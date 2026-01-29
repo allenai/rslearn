@@ -1,7 +1,6 @@
 """Classification task."""
 
 from typing import Any
-
 import numpy as np
 import numpy.typing as npt
 import shapely
@@ -22,6 +21,7 @@ from rslearn.train.model_context import (
     RasterImage,
     SampleMetadata,
 )
+from rslearn.train.metrics import ConfusionMatrixOutput
 from rslearn.utils import Feature, STGeometry
 
 from .task import BasicTask
@@ -44,6 +44,7 @@ class ClassificationTask(BasicTask):
         f1_metric_kwargs: dict[str, Any] = {},
         positive_class: str | None = None,
         positive_class_threshold: float = 0.5,
+        enable_confusion_matrix: bool = False,
         **kwargs: Any,
     ):
         """Initialize a new ClassificationTask.
@@ -69,6 +70,7 @@ class ClassificationTask(BasicTask):
             positive_class: positive class name.
             positive_class_threshold: threshold for classifying the positive class in
                 binary classification (default 0.5).
+            enable_confusion_matrix: whether to compute confusion matrix (default false)
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -84,6 +86,7 @@ class ClassificationTask(BasicTask):
         self.f1_metric_kwargs = f1_metric_kwargs
         self.positive_class = positive_class
         self.positive_class_threshold = positive_class_threshold
+        self.enable_confusion_matrix = enable_confusion_matrix
 
         if self.positive_class_threshold != 0.5:
             # Must be binary classification
@@ -278,6 +281,12 @@ class ClassificationTask(BasicTask):
                 )
                 metrics["f1"] = ClassificationMetric(MulticlassF1Score(**kwargs))
 
+        if self.enable_confusion_matrix:
+            metrics["confusion_matrix"] = ClassificationConfusionMatrixMetric(
+                num_classes=len(self.classes),
+                class_names=self.classes,
+            )
+
         return MetricCollection(metrics)
 
 
@@ -379,3 +388,76 @@ class ClassificationMetric(Metric):
     def plot(self, *args: list[Any], **kwargs: dict[str, Any]) -> Any:
         """Returns a plot of the metric."""
         return self.metric.plot(*args, **kwargs)
+
+
+class ClassificationConfusionMatrixMetric(Metric):
+    """Confusion matrix metric for classification task.
+
+    Accumulates a confusion matrix for logging to wandb. This is more memory
+    efficient than storing all predictions and labels, as it only requires
+    O(num_classes^2) storage instead of O(num_samples * num_classes).
+
+    Args:
+        num_classes: number of classes
+        class_names: optional list of class names for labeling
+    """
+
+    def __init__(
+        self,
+        num_classes: int,
+        class_names: list[str] | None = None,
+    ):
+        """Initialize a new ClassificationConfusionMatrixMetric.
+
+        Args:
+            num_classes: number of classes
+            class_names: optional list of class names for labeling
+        """
+        super().__init__()
+        self.num_classes = num_classes
+        self.class_names = class_names
+        self.add_state(
+            "confusion_matrix",
+            default=torch.zeros(num_classes, num_classes, dtype=torch.long),
+            dist_reduce_fx="sum",
+        )
+
+    def update(
+        self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
+    ) -> None:
+        """Update metric.
+
+        Args:
+            preds: the predictions (softmax probabilities)
+            targets: the targets
+        """
+        if not isinstance(preds, torch.Tensor):
+            preds = torch.stack(preds)
+        labels = torch.stack([target["class"] for target in targets])
+
+        # Sub-select the valid labels.
+        mask = torch.stack([target["valid"] > 0 for target in targets])
+        preds = preds[mask]
+        labels = labels[mask]
+        if len(preds) == 0:
+            return
+
+        # Get predicted classes from probabilities
+        pred_classes = preds.argmax(dim=1)  # (N,)
+
+        # Update confusion matrix: cm[true_label, pred_label] += count
+        for true_label in range(self.num_classes):
+            for pred_label in range(self.num_classes):
+                count = ((labels == true_label) & (pred_classes == pred_label)).sum()
+                self.confusion_matrix[true_label, pred_label] += count
+
+    def compute(self) -> "ConfusionMatrixOutput":
+        """Returns the confusion matrix wrapped in ConfusionMatrixOutput."""
+        return ConfusionMatrixOutput(
+            confusion_matrix=self.confusion_matrix,
+            class_names=self.class_names,
+        )
+
+    def reset(self) -> None:
+        """Reset metric."""
+        super().reset()
