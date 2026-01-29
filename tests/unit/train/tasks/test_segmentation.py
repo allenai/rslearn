@@ -2,8 +2,9 @@ import numpy as np
 import pytest
 import torch
 
-from rslearn.train.model_context import RasterImage, SampleMetadata
-from rslearn.train.tasks.segmentation import SegmentationTask
+from rslearn.models.component import FeatureMaps
+from rslearn.train.model_context import ModelContext, RasterImage, SampleMetadata
+from rslearn.train.tasks.segmentation import SegmentationHead, SegmentationTask
 
 
 class TestProcessInputs:
@@ -26,13 +27,13 @@ class TestProcessInputs:
         expected_classes = torch.tensor(
             [[0, 1, 2], [0, 1, 0], [2, 1, 0]], dtype=torch.long
         )
-        assert torch.equal(target_dict["classes"], expected_classes)
+        assert torch.equal(target_dict["classes"].get_hw_tensor(), expected_classes)
 
         # Check valid mask (0s should be invalid, others valid)
         expected_valid = torch.tensor(
             [[0.0, 1.0, 1.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0]], dtype=torch.float32
         )
-        assert torch.equal(target_dict["valid"], expected_valid)
+        assert torch.equal(target_dict["valid"].get_hw_tensor(), expected_valid)
 
     def test_zero_is_invalid_false(self, empty_sample_metadata: SampleMetadata) -> None:
         """Test process_inputs with zero_is_invalid=False."""
@@ -51,11 +52,11 @@ class TestProcessInputs:
         expected_classes = torch.tensor(
             [[0, 1, 2], [0, 1, 0], [2, 1, 0]], dtype=torch.long
         )
-        assert torch.equal(target_dict["classes"], expected_classes)
+        assert torch.equal(target_dict["classes"].get_hw_tensor(), expected_classes)
 
         # Check valid mask (all should be valid)
         expected_valid = torch.ones((3, 3), dtype=torch.float32)
-        assert torch.equal(target_dict["valid"], expected_valid)
+        assert torch.equal(target_dict["valid"].get_hw_tensor(), expected_valid)
 
     def test_nodata_value_none(self, empty_sample_metadata: SampleMetadata) -> None:
         """Test process_inputs with nodata_value=None."""
@@ -74,11 +75,11 @@ class TestProcessInputs:
         expected_classes = torch.tensor(
             [[0, 1, 2], [0, 1, 0], [2, 1, 0]], dtype=torch.long
         )
-        assert torch.equal(target_dict["classes"], expected_classes)
+        assert torch.equal(target_dict["classes"].get_hw_tensor(), expected_classes)
 
         # Check valid mask (all should be valid)
         expected_valid = torch.ones((3, 3), dtype=torch.float32)
-        assert torch.equal(target_dict["valid"], expected_valid)
+        assert torch.equal(target_dict["valid"].get_hw_tensor(), expected_valid)
 
     def test_nodata_value_less_than_num_classes(
         self, empty_sample_metadata: SampleMetadata
@@ -99,13 +100,13 @@ class TestProcessInputs:
         expected_classes = torch.tensor(
             [[0, 1, 2], [1, 1, 0], [2, 1, 0]], dtype=torch.long
         )
-        assert torch.equal(target_dict["classes"], expected_classes)
+        assert torch.equal(target_dict["classes"].get_hw_tensor(), expected_classes)
 
         # Check valid mask (1s should be invalid, others valid)
         expected_valid = torch.tensor(
             [[1.0, 0.0, 1.0], [0.0, 0.0, 1.0], [1.0, 0.0, 1.0]], dtype=torch.float32
         )
-        assert torch.equal(target_dict["valid"], expected_valid)
+        assert torch.equal(target_dict["valid"].get_hw_tensor(), expected_valid)
 
     def test_nodata_value_greater_than_or_equal_num_classes(
         self, empty_sample_metadata: SampleMetadata
@@ -126,13 +127,13 @@ class TestProcessInputs:
         expected_classes = torch.tensor(
             [[0, 1, 2], [0, 0, 0], [2, 0, 0]], dtype=torch.long
         )
-        assert torch.equal(target_dict["classes"], expected_classes)
+        assert torch.equal(target_dict["classes"].get_hw_tensor(), expected_classes)
 
         # Check valid mask (5s should be invalid, others valid)
         expected_valid = torch.tensor(
             [[1.0, 1.0, 1.0], [0.0, 0.0, 1.0], [1.0, 0.0, 1.0]], dtype=torch.float32
         )
-        assert torch.equal(target_dict["valid"], expected_valid)
+        assert torch.equal(target_dict["valid"].get_hw_tensor(), expected_valid)
 
     def test_nodata_value_equals_num_classes(
         self, empty_sample_metadata: SampleMetadata
@@ -153,13 +154,13 @@ class TestProcessInputs:
         expected_classes = torch.tensor(
             [[0, 1, 2], [0, 0, 0], [2, 0, 0]], dtype=torch.long
         )
-        assert torch.equal(target_dict["classes"], expected_classes)
+        assert torch.equal(target_dict["classes"].get_hw_tensor(), expected_classes)
 
         # Check valid mask (3s should be invalid, others valid)
         expected_valid = torch.tensor(
             [[1.0, 1.0, 1.0], [0.0, 0.0, 1.0], [1.0, 0.0, 1.0]], dtype=torch.float32
         )
-        assert torch.equal(target_dict["valid"], expected_valid)
+        assert torch.equal(target_dict["valid"].get_hw_tensor(), expected_valid)
 
     def test_mutual_exclusivity_error(self) -> None:
         """Test that zero_is_invalid and nodata_value cannot both be set."""
@@ -189,7 +190,7 @@ class TestProcessInputs:
     def test_single_channel_assertion(
         self, empty_sample_metadata: SampleMetadata
     ) -> None:
-        """Test that process_inputs asserts single channel input."""
+        """Test that process_inputs validates single channel/timestep input."""
         task = SegmentationTask(num_classes=3)
 
         # Create multi-channel input (should fail)
@@ -202,7 +203,7 @@ class TestProcessInputs:
             )
         }
 
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             task.process_inputs(raw_inputs, empty_sample_metadata)
 
 
@@ -293,3 +294,27 @@ class TestProcessOutput:
         # prob_scales should be applied: [0.3, 0.8, 0.3]
         expected = np.array([[[0.3, 0.3]], [[0.8, 0.8]], [[0.3, 0.3]]])
         np.testing.assert_allclose(result, expected)
+
+
+def test_segmentation_head_temperature_confidence() -> None:
+    """Verify temperature scaling affects output confidence."""
+    logits = torch.tensor([[[[0.0]], [[1.0]], [[2.0]]]], dtype=torch.float32)  # BxCxHxW
+    feature_maps = FeatureMaps([logits])
+    context = ModelContext(inputs=[], metadatas=[])
+
+    cold_head = SegmentationHead(temperature=0.5)
+    hot_head = SegmentationHead(temperature=2.0)
+
+    cold_output = cold_head(
+        intermediates=feature_maps, context=context, targets=None
+    ).outputs
+    hot_output = hot_head(
+        intermediates=feature_maps, context=context, targets=None
+    ).outputs
+
+    assert cold_output.shape == hot_output.shape == torch.Size([1, 3, 1, 1])
+    assert cold_output.argmax(dim=1).equal(hot_output.argmax(dim=1))
+
+    max_prob_cold = cold_output.max().item()
+    max_prob_hot = hot_output.max().item()
+    assert max_prob_cold > max_prob_hot

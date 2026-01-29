@@ -66,20 +66,18 @@ class PerPixelRegressionTask(BasicTask):
             return {}, {}
 
         assert isinstance(raw_inputs["targets"], RasterImage)
-        assert raw_inputs["targets"].image.shape[0] == 1
-        assert raw_inputs["targets"].image.shape[1] == 1
-        labels = raw_inputs["targets"].image[0, 0, :, :].float() * self.scale_factor
+        labels = raw_inputs["targets"].get_hw_tensor().float() * self.scale_factor
 
         if self.nodata_value is not None:
-            valid = (
-                raw_inputs["targets"].image[0, 0, :, :] != self.nodata_value
-            ).float()
+            valid = (raw_inputs["targets"].get_hw_tensor() != self.nodata_value).float()
         else:
             valid = torch.ones(labels.shape, dtype=torch.float32)
 
+        # Wrap in RasterImage with CTHW format (C=1, T=1) so values and valid can be
+        # used in image transforms.
         return {}, {
-            "values": labels,
-            "valid": valid,
+            "values": RasterImage(labels[None, None, :, :], timestamps=None),
+            "valid": RasterImage(valid[None, None, :, :], timestamps=None),
         }
 
     def process_output(
@@ -121,7 +119,7 @@ class PerPixelRegressionTask(BasicTask):
         image = super().visualize(input_dict, target_dict, output)["image"]
         if target_dict is None:
             raise ValueError("target_dict is required for visualization")
-        gt_values = target_dict["classes"].cpu().numpy()
+        gt_values = target_dict["values"].get_hw_tensor().cpu().numpy()
         pred_values = output.cpu().numpy()[0, :, :]
         gt_vis = np.clip(gt_values * 255, 0, 255).astype(np.uint8)
         pred_vis = np.clip(pred_values * 255, 0, 255).astype(np.uint8)
@@ -210,8 +208,10 @@ class PerPixelRegressionHead(Predictor):
 
         losses = {}
         if targets:
-            labels = torch.stack([target["values"] for target in targets])
-            mask = torch.stack([target["valid"] for target in targets])
+            labels = torch.stack(
+                [target["values"].get_hw_tensor() for target in targets]
+            )
+            mask = torch.stack([target["valid"].get_hw_tensor() for target in targets])
 
             if self.loss_mode == "mse":
                 scores = torch.square(outputs - labels)
@@ -262,14 +262,14 @@ class PerPixelRegressionMetricWrapper(Metric):
         """
         if not isinstance(preds, torch.Tensor):
             preds = torch.stack(preds)
-        labels = torch.stack([target["values"] for target in targets])
+        labels = torch.stack([target["values"].get_hw_tensor() for target in targets])
 
         # Sub-select the valid labels.
         # We flatten the prediction and label images at valid pixels.
         if len(preds.shape) == 4:
             assert preds.shape[1] == 1
             preds = preds[:, 0, :, :]
-        mask = torch.stack([target["valid"] > 0 for target in targets])
+        mask = torch.stack([target["valid"].get_hw_tensor() > 0 for target in targets])
         preds = preds[mask]
         labels = labels[mask]
         if len(preds) == 0:

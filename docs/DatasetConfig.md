@@ -305,12 +305,21 @@ The data source specification looks like this:
   // The query configuration specifies how items should be matched to windows. It is
   // optional, and the values below are defaults.
   "query_config": {
-    // The space mode must be "MOSAIC" (default), "CONTAINS", "INTERSECTS", or "COMPOSITE".
+    // The space mode must be "MOSAIC" (default), "CONTAINS", "INTERSECTS", or "PER_PERIOD_MOSAIC".
     "space_mode": "MOSAIC",
     // The time mode must be "WITHIN" (default), "BEFORE", or "AFTER".
     "time_mode": "WITHIN",
     // The max matches defaults to 1.
-    "max_matches": 1
+    "max_matches": 1,
+    // For MOSAIC and PER_PERIOD_MOSAIC modes, the number of overlapping items wanted
+    // within each item group covering the window (default 1). Set higher for compositing.
+    "mosaic_compositing_overlaps": 1,
+    // For PER_PERIOD_MOSAIC mode, the duration of each sub-period (default "30d").
+    "period_duration": "30d",
+    // For PER_PERIOD_MOSAIC mode, whether to return item groups in reverse temporal
+    // order (most recent first). Should always be set to false when using
+    // PER_PERIOD_MOSAIC. The defaults is true for backwards compatibility (deprecated).
+    "per_period_mosaic_reverse_time_order": false
   },
   // The time offset is optional. It defaults to 0.
   "time_offset": "0d",
@@ -344,21 +353,22 @@ The space mode defines the spatial matching.
   case, each item group consists of exactly one item.
 - INTERSECTS means that items that intersect the window bounds can be used. In this
   case, each item group consists of exactly one item.
-- COMPOSITE means that one composite-mosaic covering the window should be created.
-  In this case, only a single group containing all intersecting items exists. During
-  materialization these are reduced, such that the complete window is covered. If there
-  are multiple items covering a pixel, the value is computed based on `composite_method`
-  in the layer config. Ignores `max_matches`.
+- PER_PERIOD_MOSAIC means to create one mosaic per sub-period of the time range. The
+  duration of the sub-periods is controlled by `period_duration`. When using this mode,
+  always set `per_period_mosaic_reverse_time_order` to false.
 
 For raster data, with MOSAIC, multiple items may be combined together to materialize a
 raster aligned with the window, while CONTAINS and INTERSECTS means that each
 materialized raster should correspond to one item (possibly after cropping and
 re-projection).
 
-**Composite vs. Mosaic**
+**Compositing with mosaic_compositing_overlaps.**
 A mosaic stitches adjacent images into one seamless picture, using one pixel value where
-images overlap. A composite combines overlapping images over time (temporal aggregation)
-with a specified method such as the mean or median and also produces a seamless mosaic.
+images overlap. To enable compositing (combining overlapping images with mean or median),
+set `mosaic_compositing_overlaps` to a value greater than 1. This controls how many
+overlapping items should be included in each item group (mosaic). Then set
+`compositing_method` in the layer config to "MEAN" or "MEDIAN" to compute the per-pixel
+mean or median across the overlapping items.
 
 The time mode defines the temporal matching.
 
@@ -374,15 +384,10 @@ The time mode defines the temporal matching.
 Finally, max matches is the maximum number of item groups that should be created. The
 default is 1. For MOSAIC, this means to attempt to create one mosaic covering the
 window; zero item groups will be returned only if there are zero items intersecting the
-window. For CONTAINS and INTERSECTS, this means to select the first matching item. For
-COMPOSITE this is currently not used.
+window. For CONTAINS and INTERSECTS, this means to select the first matching item.
 
 If max matches is greater than one, then for MOSAIC, it will attempt to create multiple
-mosaics up to that quantity of mosaics. However, it will only start the next mosaic
-after the current mosaic fully covers the window. This means that, if there is no item
-covering some corner of the window, then even if there are many items redundantly
-covering the rest of the window, only one moasaic will be returned.
-
+mosaics up to that quantity of mosaics.
 For CONTAINS and INTERSECTS, it will simply choose up to that many matching items.
 
 Under WITHIN time mode, the order of the items is based on the ordering provided by the
