@@ -468,7 +468,10 @@ class Detr(Predictor):
 
         # Get image sizes.
         image_sizes = torch.tensor(
-            [[inp["image"].shape[2], inp["image"].shape[1]] for inp in context.inputs],
+            [
+                [inp["image"].image.shape[2], inp["image"].image.shape[1]]
+                for inp in context.inputs
+            ],
             dtype=torch.int32,
             device=features.device,
         )
