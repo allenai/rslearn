@@ -294,19 +294,23 @@ class SpaceMode(StrEnum):
 
 
 class TimeMode(StrEnum):
-    """Temporal  matching mode when looking up items corresponding to a window."""
+    """Temporal matching mode when looking up items corresponding to a window.
+
+    Note: setting this is deprecated. It should always be set to TimeMode.WITHIN, and
+    TimeMode will be removed in a future release.
+    """
 
     WITHIN = "WITHIN"
     """Items must be within the window time range."""
 
     NEAREST = "NEAREST"
-    """Select items closest to the window time range, up to max_matches."""
+    """Deprecated: Select items closest to the window time range, up to max_matches."""
 
     BEFORE = "BEFORE"
-    """Select items before the end of the window time range, up to max_matches."""
+    """Deprecated: Select items before the end of the window time range, up to max_matches."""
 
     AFTER = "AFTER"
-    """Select items after the start of the window time range, up to max_matches."""
+    """Deprecated: Select items after the start of the window time range, up to max_matches."""
 
 
 class QueryConfig(BaseModel):
@@ -320,8 +324,20 @@ class QueryConfig(BaseModel):
     )
     time_mode: TimeMode = Field(
         default=TimeMode.WITHIN,
-        description="Specifies how items should be matched with windows temporally.",
+        description="Deprecated: This option will be removed. Only WITHIN is supported.",
+        exclude=True,
     )
+
+    @model_validator(mode="after")
+    def _warn_deprecated_time_mode(self) -> "QueryConfig":
+        if "time_mode" in self.model_fields_set:
+            warnings.warn(
+                "time_mode is deprecated and will be removed in a future version. "
+                "Remove it from your config (WITHIN is the only supported behavior).",
+                FutureWarning,
+                stacklevel=6,
+            )
+        return self
 
     # Minimum number of item groups. If there are fewer than this many matches, then no
     # matches will be returned. This can be used to prevent unnecessary data ingestion

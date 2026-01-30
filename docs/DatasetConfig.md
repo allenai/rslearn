@@ -307,8 +307,6 @@ The data source specification looks like this:
   "query_config": {
     // The space mode must be "MOSAIC" (default), "CONTAINS", "INTERSECTS", or "PER_PERIOD_MOSAIC".
     "space_mode": "MOSAIC",
-    // The time mode must be "WITHIN" (default), "BEFORE", or "AFTER".
-    "time_mode": "WITHIN",
     // The max matches defaults to 1.
     "max_matches": 1,
     // For MOSAIC and PER_PERIOD_MOSAIC modes, the number of overlapping items wanted
@@ -340,83 +338,104 @@ The data source specification looks like this:
 
 The query configuration specifies how items should be matched to windows.
 
-For each window, the matching process yields a `list[list[Item]]`. This is a list of
-item groups, where each item group corresponds to the items that will be used to create
-one materialized piece of raster or vector data.
+For each window, the matching process starts with a list of items provided by the data
+source that intersect the window's spatial extent and time range. The output from
+matching is a `list[list[Item]]`. This is a list of item groups, where each item group
+corresponds to the items that will be used to create one composite of raster or vector
+data.
 
-The space mode defines the spatial matching.
+**Space mode.**
+The space mode defines the matching strategy. It interacts with `max_matches`, which
+specifies the maximum number of item groups to produce.
 
-- MOSAIC means that one or more mosaics should be created, combining multiple items
-  from the data source as needed to cover the entire window. In this case, each item
-  group may include multiple items.
-- CONTAINS means that only items that contain the window bounds should be used. In this
-  case, each item group consists of exactly one item.
-- INTERSECTS means that items that intersect the window bounds can be used. In this
-  case, each item group consists of exactly one item.
-- PER_PERIOD_MOSAIC means to create one mosaic per sub-period of the time range. The
-  duration of the sub-periods is controlled by `period_duration`. When using this mode,
-  always set `per_period_mosaic_reverse_time_order` to false.
+- CONTAINS: use items that fully contain the window bounds. The resulting item groups
+  will each consist of exactly one item. This strategy iterates over the items in the
+  order they are provided by the data source (some data sources provide sorting
+  options, e.g. sort by cloud cover), filtering ones that do not contain the window,
+  and creating single-item item groups for the rest, continuing until there are no more
+  items or `max_matches` item groups have been created.
+- INTERSECTS: use items that intersect the window bounds. As with CONTAINS, the
+  resulting item groups will each consist of exactly one item.
+- MOSAIC: create mosaics, where each item group combines multiple items from the data
+  source as needed to cover the entire window. In this case, each item group may
+  include multiple items. This strategy initializes a buffer of `max_matches` empty
+  item groups. It then iterates over the items, adding each item to the first group
+  that the item provides additional coverage for (skipping groups that already cover
+  all the portions of the window that the new item covers). Finally, the non-empty
+  groups are returned.
+- PER_PERIOD_MOSAIC: create one mosaic per sub-period of the time range. When using
+  MOSAIC, each resulting item group could arbitrarily combine items from across the
+  window's time range. PER_PERIOD_MOSAIC is useful if you want each mosaic to
+  correspond to a sub-period, e.g. getting a mosaic for each month of the year. The
+  duration of the sub-periods is controlled by `period_duration`. This strategy starts
+  from the most recent sub-period, and finds all items temporally intersecting that
+  sub-period. If no items are found, the sub-period is skipped; otherwise, it iterates
+  over the items similar to MOSAIC, incorporating each item that covers new portions of
+  the window. It continues until either there are no more sub-periods (it reaches the
+  beginning of the window's time range) or it has created `max_matches` item groups.
 
-For raster data, with MOSAIC, multiple items may be combined together to materialize a
-raster aligned with the window, while CONTAINS and INTERSECTS means that each
-materialized raster should correspond to one item (possibly after cropping and
-re-projection).
+**Example.**
+Consider a window covering a 10km x 10km region with a time range of January 1 to April
+1. The data source returns four items in order:
 
-**Compositing with mosaic_compositing_overlaps.**
-A mosaic stitches adjacent images into one seamless picture, using one pixel value where
-images overlap. To enable compositing (combining overlapping images with mean or median),
-set `mosaic_compositing_overlaps` to a value greater than 1. This controls how many
-overlapping items should be included in each item group (mosaic). Then set
-`compositing_method` in the layer config to "MEAN" or "MEDIAN" to compute the per-pixel
-mean or median across the overlapping items.
+- Item A: covers the full window (10km x 10km), from January 15
+- Item B: covers the left half of the window (5km x 10km), from January 20
+- Item C: covers the right half of the window (5km x 10km), from March 10
+- Item D: covers the full window (10km x 10km), from March 20
 
-The time mode defines the temporal matching.
+With `max_matches=2`:
 
-- WITHIN means to use items with time ranges that are contained within the time range
-  of the window, but to process them in the order provided by the data source. Note
-  that, for most data sources, the item time range is a single point in time.
-- BEFORE and AFTER still use items with time ranges that are contained within the time
-  range of the window, but they affect the ordering of the items. BEFORE matches items
-  in reverse temporal order, starting with items just before the window end time. AFTER
-  matches items in temporal order, starting with items just after the window start
-  time.
+- CONTAINS returns `[[A], [D]]`. Both A and D fully contain the window. B and C are
+  skipped because they only partially cover the window.
+- **INTERSECTS** returns `[[A], [B]]`. All four items intersect the window, but we stop
+  at 2 due to max_matches. Each item becomes its own single-item group.
+- **MOSAIC** returns `[[A], [B, C]]`. Item A covers the full window, completing the
+  first mosaic. Item B doesn't add coverage to the first mosaic (A already covers it),
+  so B starts the second mosaic. Item C adds the right half to the second mosaic. Item D
+  doesn't add new coverage to either mosaic.
+- **PER_PERIOD_MOSAIC** with `period_duration="29d"` returns `[[A], [C, D]]`. The time
+  range is split into January, February, and March sub-periods. For March, items C and
+  D are combined into one mosaic. February is skipped since there are no matching
+  items. For January, item A covers the full window.
 
-Finally, max matches is the maximum number of item groups that should be created. The
-default is 1. For MOSAIC, this means to attempt to create one mosaic covering the
-window; zero item groups will be returned only if there are zero items intersecting the
-window. For CONTAINS and INTERSECTS, this means to select the first matching item.
+**Compositing.**
+For vector data, non-singleton item groups are handled by concatenating the vector
+features across items in the group.
 
-If max matches is greater than one, then for MOSAIC, it will attempt to create multiple
-mosaics up to that quantity of mosaics.
-For CONTAINS and INTERSECTS, it will simply choose up to that many matching items.
+Compositing raster data is more complex, and a `compositing_method` option is provided
+to control the behavior. By default, `compositing_method = FIRST_VALID`; for each
+pixel and band, the value is set based on the first item that is not NODATA at that
+pixel and band. The `compositing_method` can instead be set to MEAN or MEDIAN to
+compute the mean or median across all items in the group that are not NODATA at that
+pixel and band.
 
-Under WITHIN time mode, the order of the items is based on the ordering provided by the
-data source. Some data sources provide options to, say, sort items by cloud cover.
-Under BEFORE or AFTER time mode, the ordering from the data source is overwritten.
+**Compositing overlaps.**
+For MOSAIC and PER_PERIOD_MOSAIC, the default behavior is to create item groups that
+cover the window's spatial extent once. `mosaic_compositing_overlaps` can be set
+greater than 1 to have each item group cover the window multiple times. This is useful
+when computing mean or median composites for each item group.
 
-### Time Offset
+### Time Offset and Duration
 
-By default, the time range used for matching is the time range of the window. The time
-offset specifies a positive or negative time delta to apply to the window's time range
-before matching.
+By default, the time range used for requesting items from the data source and applying
+the matching strategy is the time range of the window. The time range can be adjusted
+by setting `time_offset` and/or `duration`.
 
-It is parsed by [pytimeparse](https://github.com/wroberts/pytimeparse). For example:
+`time_offset` specifies a positive or negative time delta. If set, the time delta is
+added to the time range. It is parsed by [pytimeparse](https://github.com/wroberts/pytimeparse).
+For example:
 
-- "30d" means to adjust the window time range 30 days into the future.
-- "-30d" means to adjust the window time range 30 days into the past.
+- "30d" means to adjust the time range 30 days into the future.
+- "-30d" means to adjust the time range 30 days into the past.
 
-The duration of the window time range is not affected.
+`duration` specifies a positive time delta. If set, the end time of the time range is
+set to the start time plus `duration`.
 
-Then, the data source will look for items based on new time range.
+Suppose the window time range is [2024-01-01, 2024-02-01].
 
-### Duration
-
-The optional duration overrides the duration of the window's time range. The new time
-range will have the same start time as the window's start time, but the end time will
-be computed by adding the specified duration to that start time.
-
-It is also parsed by pytimeparse. For example, "30d" means to set the duration of the
-time range to 30 days.
+- With time_offset=30d, the matching time range is [2024-01-31, 2024-03-02].
+- With duration=180d, the matching time range is [2024-01-01, 2024-06-29].
+- With time_offset=30d AND duration=180d, the matching time range is [2024-01-31, 2024-07-29].
 
 ### Ingest Flag
 
