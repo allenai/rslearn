@@ -36,15 +36,11 @@ def _floor_to_utc_day(t: datetime) -> datetime:
 def _bounds_to_lon_ranges_0_360(
     bounds: tuple[float, float, float, float],
 ) -> list[tuple[float, float]]:
-    """Convert lon bounds to one or two non-wrapping ranges in [0, 360]."""
-    min_lon, _, max_lon, _ = bounds
+    """Convert lon bounds to one or two non-wrapping ranges in [0, 360].
 
-    # Dateline-crossing bounds in [-180, 180] would have min_lon > max_lon.
-    if min_lon > max_lon:
-        raise ValueError(
-            "ERA5LandDailyUTCv1 does not yet support longitude ranges that cross the dateline "
-            f"(got bounds min_lon={min_lon}, max_lon={max_lon})."
-        )
+    Expects non-wrapping bounds where min_lon <= max_lon.
+    """
+    min_lon, _, max_lon, _ = bounds
 
     if min_lon >= 0 and max_lon >= 0:
         return [(min_lon, max_lon)]
@@ -132,6 +128,23 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
             context: rslearn data source context.
         """
         self.zarr_url = zarr_url
+        if bounds is not None:
+            if len(bounds) != 4:
+                raise ValueError(
+                    "ERA5LandDailyUTCv1 bounds must be [min_lon, min_lat, max_lon, max_lat] "
+                    f"(got {bounds!r})."
+                )
+            min_lon, min_lat, max_lon, max_lat = bounds
+            if min_lon > max_lon:
+                raise ValueError(
+                    "ERA5LandDailyUTCv1 does not yet support longitude ranges that cross the dateline "
+                    f"(got bounds min_lon={min_lon}, max_lon={max_lon})."
+                )
+            if min_lat > max_lat:
+                raise ValueError(
+                    "ERA5LandDailyUTCv1 bounds must have min_lat <= max_lat "
+                    f"(got bounds min_lat={min_lat}, max_lat={max_lat})."
+                )
         self.bounds = bounds
         self.temperature_unit = temperature_unit
         self.trust_env = trust_env

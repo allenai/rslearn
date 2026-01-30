@@ -183,3 +183,15 @@ def test_era5land_dailyutc_v1_ingest_negative_longitude_bounds(tmp_path) -> None
         assert out.shape == (2, 2, 2)
         assert np.allclose(out[0], t2m[idx])
         assert np.allclose(out[1], tp[idx])
+
+
+def test_era5land_dailyutc_v1_bounds_cross_dateline_error_message(tmp_path) -> None:
+    from rslearn.data_sources.earthdatahub import ERA5LandDailyUTCv1
+
+    with pytest.raises(ValueError, match=r"does not yet support .* cross the dateline"):
+        ERA5LandDailyUTCv1(
+            band_names=["t2m"],
+            zarr_url=str(tmp_path / "unused.zarr"),
+            bounds=[170.0, 0.0, -170.0, 1.0],
+            trust_env=False,
+        )
