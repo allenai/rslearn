@@ -26,6 +26,11 @@ logger = get_logger(__name__)
 
 
 def _floor_to_utc_day(t: datetime) -> datetime:
+    """Return the UTC day boundary (00:00) for a datetime.
+
+    If `t` is naive, it is treated as UTC. If `t` is timezone-aware, it is converted
+    to UTC before flooring.
+    """
     if t.tzinfo is None:
         t = t.replace(tzinfo=UTC)
     else:
@@ -171,6 +176,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         self._ds: Any | None = None
 
     def _get_dataset(self):
+        """Open (and memoize) the backing ERA5-Land Zarr dataset."""
         if self._ds is not None:
             return self._ds
 
@@ -223,12 +229,18 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         return all_groups
 
     def deserialize_item(self, serialized_item: Any) -> Item:
+        """Deserialize an `Item` previously produced by this data source."""
         assert isinstance(serialized_item, dict)
         return Item.deserialize(serialized_item)
 
     def _get_effective_bounds(
         self, geometries: list[STGeometry]
     ) -> tuple[float, float, float, float]:
+        """Compute an effective WGS84 bounding box for ingestion.
+
+        If `self.bounds` is set, it is used as-is; otherwise, the bounds are derived
+        from the union of the provided geometries (after projecting each to WGS84).
+        """
         if self.bounds is not None:
             min_lon, min_lat, max_lon, max_lat = self.bounds
             return (min_lon, min_lat, max_lon, max_lat)
@@ -253,6 +265,14 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         lon: np.ndarray,
         band_arrays: list[np.ndarray],
     ) -> None:
+        """Write a GeoTIFF with WGS84 georeferencing from ERA5(-Land) arrays.
+
+        Args:
+            tif_path: destination GeoTIFF path.
+            lat: 1D latitude coordinate (expected descending, north-to-south).
+            lon: 1D longitude coordinate (0..360 in the source dataset).
+            band_arrays: band arrays with shape (lat, lon), one per output band.
+        """
         if lat.ndim != 1 or lon.ndim != 1:
             raise ValueError("expected 1D latitude/longitude coordinates")
         if len(band_arrays) == 0:
@@ -303,6 +323,12 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         items: list[Item],
         geometries: list[list[STGeometry]],
     ) -> None:
+        """Ingest daily ERA5-Land rasters for the requested items/geometries.
+
+        For each item (one UTC day), this reads the corresponding slice from the
+        EarthDataHub Zarr store (subsetting by lat/lon for performance), then writes
+        a GeoTIFF into the dataset tile store.
+        """
         ds = self._get_dataset()
 
         for item, item_geoms in zip(items, geometries):
