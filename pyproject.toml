@@ -34,7 +34,6 @@ dependencies = [
 extra = [
     "accelerate>=1.10",
     "cdsapi>=0.7.6",
-    "dask>=2024.1",
     "earthdaily[platform]>=1.0.7",
     "earthengine-api>=1.6.3",
     "einops>=0.8",
