@@ -69,8 +69,14 @@ def test_test_step_produces_visualization(tmp_path: pathlib.Path) -> None:
     ]
     targets = [
         {
-            "classes": torch.randint(0, num_classes, (image_size, image_size)).long(),
-            "valid": torch.ones((image_size, image_size), dtype=torch.float32),
+            "classes": RasterImage(
+                torch.randint(0, num_classes, (1, 1, image_size, image_size)).long(),
+                timestamps=None,
+            ),
+            "valid": RasterImage(
+                torch.ones((1, 1, image_size, image_size), dtype=torch.float32),
+                timestamps=None,
+            ),
         }
     ]
 

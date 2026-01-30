@@ -105,7 +105,7 @@ class Clay(FeatureExtractor):
 
     def _resize_image(self, image: torch.Tensor, original_hw: int) -> torch.Tensor:
         """Resize the image to the input resolution."""
-        new_hw = self.patch_size if original_hw == 1 else DEFAULT_IMAGE_RESOLUTION
+        new_hw = PATCH_SIZE if original_hw == 1 else DEFAULT_IMAGE_RESOLUTION
         return F.interpolate(
             image, size=(new_hw, new_hw), mode="bilinear", align_corners=False
         )
@@ -123,7 +123,8 @@ class Clay(FeatureExtractor):
         device = param.device
 
         chips = torch.stack(
-            [inp[self.modality] for inp in context.inputs], dim=0
+            [inp[self.modality].single_ts_to_chw_tensor() for inp in context.inputs],
+            dim=0,
         )  # (B, C, H, W)
         if self.do_resizing:
             chips = self._resize_image(chips, chips.shape[2])
@@ -203,7 +204,6 @@ class ClayNormalize(Transform):
                 mean=means,
                 std=stds,
                 selectors=[modality],
-                num_bands=len(means),
             )
         self.normalizers = torch.nn.ModuleDict(normalizers)
 

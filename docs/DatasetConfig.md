@@ -305,12 +305,21 @@ The data source specification looks like this:
   // The query configuration specifies how items should be matched to windows. It is
   // optional, and the values below are defaults.
   "query_config": {
-    // The space mode must be "MOSAIC" (default), "CONTAINS", "INTERSECTS", or "COMPOSITE".
+    // The space mode must be "MOSAIC" (default), "CONTAINS", "INTERSECTS", or "PER_PERIOD_MOSAIC".
     "space_mode": "MOSAIC",
     // The time mode must be "WITHIN" (default), "BEFORE", or "AFTER".
     "time_mode": "WITHIN",
     // The max matches defaults to 1.
-    "max_matches": 1
+    "max_matches": 1,
+    // For MOSAIC and PER_PERIOD_MOSAIC modes, the number of overlapping items wanted
+    // within each item group covering the window (default 1). Set higher for compositing.
+    "mosaic_compositing_overlaps": 1,
+    // For PER_PERIOD_MOSAIC mode, the duration of each sub-period (default "30d").
+    "period_duration": "30d",
+    // For PER_PERIOD_MOSAIC mode, whether to return item groups in reverse temporal
+    // order (most recent first). Should always be set to false when using
+    // PER_PERIOD_MOSAIC. The defaults is true for backwards compatibility (deprecated).
+    "per_period_mosaic_reverse_time_order": false
   },
   // The time offset is optional. It defaults to 0.
   "time_offset": "0d",
@@ -344,21 +353,22 @@ The space mode defines the spatial matching.
   case, each item group consists of exactly one item.
 - INTERSECTS means that items that intersect the window bounds can be used. In this
   case, each item group consists of exactly one item.
-- COMPOSITE means that one composite-mosaic covering the window should be created.
-  In this case, only a single group containing all intersecting items exists. During
-  materialization these are reduced, such that the complete window is covered. If there
-  are multiple items covering a pixel, the value is computed based on `composite_method`
-  in the layer config. Ignores `max_matches`.
+- PER_PERIOD_MOSAIC means to create one mosaic per sub-period of the time range. The
+  duration of the sub-periods is controlled by `period_duration`. When using this mode,
+  always set `per_period_mosaic_reverse_time_order` to false.
 
 For raster data, with MOSAIC, multiple items may be combined together to materialize a
 raster aligned with the window, while CONTAINS and INTERSECTS means that each
 materialized raster should correspond to one item (possibly after cropping and
 re-projection).
 
-**Composite vs. Mosaic**
+**Compositing with mosaic_compositing_overlaps.**
 A mosaic stitches adjacent images into one seamless picture, using one pixel value where
-images overlap. A composite combines overlapping images over time (temporal aggregation)
-with a specified method such as the mean or median and also produces a seamless mosaic.
+images overlap. To enable compositing (combining overlapping images with mean or median),
+set `mosaic_compositing_overlaps` to a value greater than 1. This controls how many
+overlapping items should be included in each item group (mosaic). Then set
+`compositing_method` in the layer config to "MEAN" or "MEDIAN" to compute the per-pixel
+mean or median across the overlapping items.
 
 The time mode defines the temporal matching.
 
@@ -374,15 +384,10 @@ The time mode defines the temporal matching.
 Finally, max matches is the maximum number of item groups that should be created. The
 default is 1. For MOSAIC, this means to attempt to create one mosaic covering the
 window; zero item groups will be returned only if there are zero items intersecting the
-window. For CONTAINS and INTERSECTS, this means to select the first matching item. For
-COMPOSITE this is currently not used.
+window. For CONTAINS and INTERSECTS, this means to select the first matching item.
 
 If max matches is greater than one, then for MOSAIC, it will attempt to create multiple
-mosaics up to that quantity of mosaics. However, it will only start the next mosaic
-after the current mosaic fully covers the window. This means that, if there is no item
-covering some corner of the window, then even if there are many items redundantly
-covering the rest of the window, only one moasaic will be returned.
-
+mosaics up to that quantity of mosaics.
 For CONTAINS and INTERSECTS, it will simply choose up to that many matching items.
 
 Under WITHIN time mode, the order of the items is based on the ordering provided by the
@@ -600,6 +605,51 @@ Available bands:
 - vv
 - vh
 
+### rslearn.data_sources.aws_sentinel2_element84.Sentinel2
+
+This data source is for Sentinel-2 L2A imagery from the Element 84 Earth Search STAC
+API on AWS. It uses the `s3://sentinel-cogs` S3 bucket which provides Cloud-Optimized
+GeoTIFFs, enabling direct materialization without ingestion.
+
+See https://aws.amazon.com/marketplace/pp/prodview-ykj5gyumkzlme for details.
+
+The bucket is public and free so no credentials are needed.
+
+```jsonc
+{
+  // Optional STAC query filter.
+  // Example: {"eo:cloud_cover": {"lt": 20}}
+  "query": null,
+  // Sort by this STAC property, e.g. "eo:cloud_cover".
+  "sort_by": null,
+  // Whether to sort ascending or descending (default ascending).
+  "sort_ascending": true,
+  // Optional directory to cache discovered items.
+  "cache_dir": null,
+  // Flag (default false) to harmonize pixel values across different processing
+  // baselines (recommended), see
+  // https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
+  "harmonize": false,
+  // Timeout for requests.
+  "timeout": "10s"
+}
+```
+
+Available bands:
+- B01 (uint16, from coastal asset)
+- B02 (uint16, from blue asset)
+- B03 (uint16, from green asset)
+- B04 (uint16, from red asset)
+- B05 (uint16, from rededge1 asset)
+- B06 (uint16, from rededge2 asset)
+- B07 (uint16, from rededge3 asset)
+- B08 (uint16, from nir asset)
+- B09 (uint16, from nir09 asset)
+- B11 (uint16, from swir16 asset)
+- B12 (uint16, from swir22 asset)
+- B8A (uint16, from nir08 asset)
+- R, G, B (uint8, from visual asset)
+
 ### rslearn.data_sources.climate_data_store.ERA5Land
 
 Base class for ingesting ERA5 land data from the Copernicus Climate Data Store.
@@ -811,29 +861,6 @@ The additional data source configuration looks like this:
 }
 ```
 
-### rslearn.data_sources.earthdata_srtm.SRTM
-
-Elevation data from the Shuttle Radar Topography Mission via NASA Earthdata.
-
-A NASA Earthdata account is needed, see https://urs.earthdata.nasa.gov/.
-
-```jsonc
-{
-  // Earthdata account username. It can also be set via the NASA_EARTHDATA_USERNAME
-  // environment variable.
-  "username": null,
-  // Earthdata account password. It can also be set via the NASA_EARTHDATA_PASSWORD
-  // environment variable.
-  "password": null,
-  // Timeout for requests.
-  "timeout_seconds": 10,
-}
-```
-
-The data source should be configured with a single band set containing a single band.
-The band name can be set arbitrarily, but "srtm" or "elevation" is suggested. The data
-type of the band should be set to int16 to match the source data.
-
 ### rslearn.data_sources.eurocrops.EuroCrops
 
 This data source is for EuroCrops vector data (v11).
@@ -907,6 +934,36 @@ Available bands:
 - R (from TCI asset; derived from B04)
 - G (from TCI asset; derived from B03)
 - B (from TCI asset; derived from B02)
+
+### rslearn.data_sources.hf_srtm.SRTM
+
+Elevation data from the Shuttle Radar Topography Mission (SRTM), served from the AI2
+Hugging Face mirror at https://huggingface.co/datasets/allenai/srtm-global-void-filled.
+
+The data is split into 1x1-degree tiles. SRTM1 (1 arc-second, ~30m resolution) is
+available for some regions (primarily US territories), while SRTM3 (3 arc-second, ~90m
+resolution) is available globally. By default, SRTM1 is preferred when available for
+higher resolution.
+
+No credentials are needed.
+
+```jsonc
+{
+  // Timeout for requests.
+  "timeout": "10s",
+  // Optional directory to cache the file list.
+  "cache_dir": null,
+  // If true, always use 3 arc-second (SRTM3) data even when 1 arc-second (SRTM1) is
+  // available. Defaults to false, which prefers SRTM1 for higher resolution.
+  "always_use_3arcsecond": false
+}
+```
+
+The data source should be configured with a single band set containing a single band.
+The band name can be set arbitrarily, but "dem" or "srtm" is suggested. The data type
+should be int16 to match the source data.
+
+Items from this data source do not come with a time range.
 
 ### rslearn.data_sources.google_earth_engine.GEE
 
@@ -1320,6 +1377,43 @@ default those to the window pixel size.
 
 Available bands:
 - B1 (float32 recommended; scale/offset applied; set `nodata_vals` to `-32768`)
+
+### rslearn.data_sources.worldcereal.WorldCereal
+
+This data source is for the ESA WorldCereal 2021 agricultural land cover map. For
+details about the land cover map, see https://esa-worldcereal.org/en.
+
+This data source will download and extract all of the WorldCereal GeoTIFFs to a local
+directory. Since different regions are covered with different bands, the data source is
+designed to only be configured with one band per layer; to materialize multiple bands,
+repeat the data source across multiple layers (with different bands).
+
+```jsonc
+{
+  // Required local path to extract the WorldCereal GeoTIFF files. For high performance,
+  // this should be a local directory; if the dataset is remote, prefix with a protocol
+  // ("file://") to use a local directory.
+  "worldcereal_dir": "cache/worldcereal"
+}
+```
+
+Available bands (specify one per layer, with a single-band band set):
+- tc-annual_temporarycrops_confidence
+- tc-annual_temporarycrops_classification
+- tc-maize-main_irrigation_confidence
+- tc-maize-main_irrigation_classification
+- tc-maize-main_maize_confidence
+- tc-maize-main_maize_classification
+- tc-maize-second_irrigation_confidence
+- tc-maize-second_irrigation_classification
+- tc-maize-second_maize_confidence
+- tc-maize-second_maize_classification
+- tc-springcereals_springcereals_confidence
+- tc-springcereals_springcereals_classification
+- tc-wintercereals_irrigation_confidence
+- tc-wintercereals_irrigation_classification
+- tc-wintercereals_wintercereals_confidence
+- tc-wintercereals_wintercereals_classification
 
 ### rslearn.data_sources.worldcover.WorldCover
 
