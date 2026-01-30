@@ -187,7 +187,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         self._ds = xr.open_dataset(
             self.zarr_url,
             engine="zarr",
-            chunks={},
+            chunks=None,  # No dask
             storage_options=storage_options,
         )
         return self._ds
