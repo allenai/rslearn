@@ -2,7 +2,6 @@
 
 import os
 import tempfile
-import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
@@ -24,7 +23,7 @@ from rslearn.utils.geometry import STGeometry
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 from rslearn.utils.stac import StacClient, StacItem
 
-from .copernicus import get_harmonize_callback
+from .copernicus import get_harmonize_callback_from_scene_id
 
 logger = get_logger(__name__)
 
@@ -367,12 +366,6 @@ class Sentinel2(PlanetaryComputer):
             **kwargs,
         )
 
-    def _get_product_xml(self, item: SourceItem) -> ET.Element:
-        asset_url = planetary_computer.sign(item.asset_urls["product-metadata"])
-        response = requests.get(asset_url, timeout=self.timeout.total_seconds())
-        response.raise_for_status()
-        return ET.fromstring(response.content)
-
     def ingest(
         self,
         tile_store: TileStoreWithLayer,
@@ -419,8 +412,8 @@ class Sentinel2(PlanetaryComputer):
                     # TCI does not need harmonization.
                     harmonize_callback = None
                     if self.harmonize and asset_key != "visual":
-                        harmonize_callback = get_harmonize_callback(
-                            self._get_product_xml(item)
+                        harmonize_callback = get_harmonize_callback_from_scene_id(
+                            item.name
                         )
 
                     if harmonize_callback is not None:
@@ -461,8 +454,7 @@ class Sentinel2(PlanetaryComputer):
         if not self.harmonize or asset_key == "visual":
             return None
 
-        item = self.get_item_by_name(item_name)
-        return get_harmonize_callback(self._get_product_xml(item))
+        return get_harmonize_callback_from_scene_id(item_name)
 
 
 class Sentinel1(PlanetaryComputer):

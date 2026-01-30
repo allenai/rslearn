@@ -4,7 +4,6 @@ import io
 import json
 import os
 import tempfile
-import xml.etree.ElementTree as ET
 from collections.abc import Callable, Generator
 from datetime import UTC, datetime
 from enum import Enum
@@ -30,7 +29,7 @@ from rslearn.utils import GridIndex, Projection, STGeometry, daterange
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
-from .copernicus import get_harmonize_callback, get_sentinel2_tiles
+from .copernicus import get_harmonize_callback_from_scene_id, get_sentinel2_tiles
 from .data_source import (
     DataSource,
     DataSourceContext,
@@ -667,21 +666,7 @@ class Sentinel2(
         """
         if not self.harmonize:
             return None
-        # Search metadata XML for the RADIO_ADD_OFFSET tag.
-        # This contains the per-band offset, but we assume all bands have the same offset.
-        if item.geometry.time_range is None:
-            raise ValueError("Sentinel2 on AWS requires geometry time ranges to be set")
-        ts = item.geometry.time_range[0]
-        metadata_fname = (
-            f"products/{ts.year}/{ts.month}/{ts.day}/{item.name}/metadata.xml"
-        )
-        buf = io.BytesIO()
-        self.bucket.download_fileobj(metadata_fname, buf)
-        buf.seek(0)
-        tree: ET.ElementTree[ET.Element[str]] = ET.ElementTree(
-            ET.fromstring(buf.getvalue())
-        )
-        return get_harmonize_callback(tree)
+        return get_harmonize_callback_from_scene_id(item.name)
 
     def ingest(
         self,

@@ -6,7 +6,6 @@ from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
 
-import numpy as np
 import numpy.typing as npt
 import rasterio
 import requests
@@ -20,6 +19,7 @@ from rslearn.utils import STGeometry
 from rslearn.utils.fsspec import join_upath
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
+from .copernicus import get_harmonize_callback_from_scene_id
 from .data_source import (
     DataSourceContext,
 )
@@ -53,8 +53,8 @@ class Sentinel2(TileStoreDataSource[SourceItem], StacDataSource):
         "nir08": ["B8A"],
         "visual": ["R", "G", "B"],
     }
-    HARMONIZE_OFFSET = -1000
-    HARMONIZE_PROPERTY_NAME = "earthsearch:boa_offset_applied"
+    # STAC property containing the full Sentinel-2 product URI (scene ID).
+    PRODUCT_URI_PROPERTY = "s2:product_uri"
 
     def __init__(
         self,
@@ -123,7 +123,7 @@ class Sentinel2(TileStoreDataSource[SourceItem], StacDataSource):
             sort_ascending=sort_ascending,
             required_assets=list(asset_bands.keys()),
             cache_dir=cache_upath,
-            properties_to_record=[self.HARMONIZE_PROPERTY_NAME],
+            properties_to_record=[self.PRODUCT_URI_PROPERTY],
         )
 
         self.harmonize = harmonize
@@ -161,32 +161,9 @@ class Sentinel2(TileStoreDataSource[SourceItem], StacDataSource):
             return None
 
         item = self.get_item_by_name(item_name)
-        return self._get_harmonize_callback(item)
-
-    # --- Harmonization helpers ---
-
-    def _get_harmonize_callback(
-        self, item: SourceItem
-    ) -> Callable[[npt.NDArray], npt.NDArray] | None:
-        """Get the harmonization callback to remove offset for newly processed scenes.
-
-        We do not use copernicus.get_harmonize_callback here because the S3 bucket does
-        not seem to provide the product metadata XML file. So instead we check the
-        earthsearch:boa_offset_applied property on the item.
-        """
-        if not item.properties[self.HARMONIZE_PROPERTY_NAME]:
-            # This means no offset was applied so we don't need to subtract it.
-            return None
-
-        def harmonize_callback(array: npt.NDArray) -> npt.NDArray:
-            # We assume the offset is -1000 since that is the standard.
-            # To work with uint16 array, we clip to 1000+ and then subtract 1000.
-            assert array.shape[0] == 1 and array.dtype == np.uint16
-            return np.clip(array, -self.HARMONIZE_OFFSET, None) - (
-                -self.HARMONIZE_OFFSET
-            )
-
-        return harmonize_callback
+        return get_harmonize_callback_from_scene_id(
+            item.properties[self.PRODUCT_URI_PROPERTY]
+        )
 
     def ingest(
         self,
@@ -236,7 +213,9 @@ class Sentinel2(TileStoreDataSource[SourceItem], StacDataSource):
                     # TCI does not need harmonization.
                     harmonize_callback = None
                     if self.harmonize and asset_key != "visual":
-                        harmonize_callback = self._get_harmonize_callback(item)
+                        harmonize_callback = get_harmonize_callback_from_scene_id(
+                            item.properties[self.PRODUCT_URI_PROPERTY]
+                        )
 
                     if harmonize_callback is not None:
                         # In this case we need to read the array, convert the pixel

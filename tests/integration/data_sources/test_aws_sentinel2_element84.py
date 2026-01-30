@@ -72,10 +72,12 @@ def test_harmonize_applied() -> None:
     """Make sure harmonize is applied for scenes that need it."""
     harmonized_data_source = Sentinel2(harmonize=True)
     unharmonized_data_source = Sentinel2()
-    # This is a scene that is processed using baseline and needs harmonization.
+    # This is a scene that is processed using baseline >= 04.00 and needs harmonization.
     stac_id = "S2B_56MPC_20180101_1_L2A"
     item = harmonized_data_source.get_item_by_name(stac_id)
-    assert item.properties["earthsearch:boa_offset_applied"]
+    # The product_uri should contain N05xx (baseline 05.xx) which needs harmonization.
+    assert "s2:product_uri" in item.properties
+    assert "_N05" in item.properties["s2:product_uri"]
 
     # Get bounds of the raster in WebMercator and read a subset of it.
     projection = Projection(CRS.from_epsg(3857), 10, -10)
@@ -102,10 +104,12 @@ def test_harmonize_not_applied() -> None:
     """Make sure harmonize is not applied if the scene is processed using old baseline."""
     harmonized_data_source = Sentinel2(harmonize=True)
     unharmonized_data_source = Sentinel2()
-    # This scene is processed using old baseline so its values should not be changed.
+    # This scene is processed using old baseline (< 04.00) so its values should not be changed.
     stac_id = "S2B_56KKE_20180101_0_L2A"
     item = harmonized_data_source.get_item_by_name(stac_id)
-    assert not item.properties["earthsearch:boa_offset_applied"]
+    # The product_uri should contain N00xx (baseline 00.xx) which doesn't need harmonization.
+    assert "s2:product_uri" in item.properties
+    assert "_N00" in item.properties["s2:product_uri"]
 
     # Get bounds of the raster in WebMercator and read a subset of it.
     projection = Projection(CRS.from_epsg(3857), 10, -10)

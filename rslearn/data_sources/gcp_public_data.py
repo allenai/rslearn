@@ -28,7 +28,7 @@ from rslearn.utils.fsspec import join_upath, open_atomic
 from rslearn.utils.geometry import STGeometry, flatten_shape, split_at_antimeridian
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
-from .copernicus import get_harmonize_callback, get_sentinel2_tiles
+from .copernicus import get_harmonize_callback_from_scene_id, get_sentinel2_tiles
 
 logger = get_logger(__name__)
 
@@ -875,8 +875,8 @@ class Sentinel2(DataSource):
                     # TCI does not need harmonization.
                     harmonize_callback = None
                     if self.harmonize and suffix != "TCI.jp2":
-                        harmonize_callback = get_harmonize_callback(
-                            self._get_xml_by_name(item.name)
+                        harmonize_callback = get_harmonize_callback_from_scene_id(
+                            item.name
                         )
 
                     if harmonize_callback is not None:
