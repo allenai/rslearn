@@ -5,11 +5,13 @@ import io
 import json
 import os
 import pathlib
+import re
 import shutil
 import tempfile
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -43,6 +45,118 @@ SENTINEL2_TILE_URL = "https://sentiwiki.copernicus.eu/__attachments/1692737/S2A_
 SENTINEL2_KML_NAMESPACE = "{http://www.opengis.net/kml/2.2}"
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class Sentinel2IdComponents:
+    """Components parsed from a Sentinel-2 scene ID.
+
+    See Sentinel-2 naming convention:
+    https://sentiwiki.copernicus.eu/web/s2-products
+    """
+
+    platform: str  # e.g., "S2A", "S2B"
+    product_level: str  # e.g., "MSIL2A"
+    start_date: str  # e.g., "20230101T120000"
+    processing_baseline: str  # e.g., "N0510" (raw) -> "05.10" (formatted)
+    relative_orbit_number: str  # e.g., "R001"
+    tile_id: str  # e.g., "T10SDG"
+    product_discriminator: str  # e.g., "20230101T140000"
+
+    @property
+    def processing_baseline_version(self) -> str:
+        """Return processing baseline as 'MM.mm' (e.g., 'N0510' -> '05.10')."""
+        baseline = self.processing_baseline
+        if not baseline.startswith("N") or len(baseline) != 5:
+            raise ValueError(f"Bad processing baseline {baseline}")
+        digits = baseline[1:]
+        return f"{digits[:2]}.{digits[2:]}"
+
+    @property
+    def mgrs_tile(self) -> str:
+        """Return the MGRS tile identifier (e.g., 'T10SDG' -> '10SDG')."""
+        if not self.tile_id.startswith("T"):
+            raise ValueError(f"Bad tile id {self.tile_id}")
+        return self.tile_id[1:]
+
+
+_SENTINEL2_ID_PATTERN = re.compile(
+    r"^"
+    r"(?P<platform>S2[ABC])"
+    r"_"
+    r"(?P<product_level>MSI[A-Z0-9]{3})"
+    r"_"
+    r"(?P<start_date>\d{8}T\d{6})"
+    r"_"
+    r"(?P<processing_baseline>N\d{4})"
+    r"_"
+    r"(?P<relative_orbit_number>R\d{3})"
+    r"_"
+    r"(?P<tile_id>T\w{5})"
+    r"_"
+    r"(?P<product_discriminator>\d{8}T\d{6})"
+    r"(?:\.SAFE)?"
+    r"$",
+)
+
+
+def parse_sentinel2_id(scene_id: str) -> Sentinel2IdComponents:
+    """Parse a Sentinel-2 scene ID into its components.
+
+    Args:
+        scene_id: the Sentinel-2 scene ID (e.g.,
+            "S2A_MSIL2A_20230101T120000_N0510_R001_T10SDG_20230101T140000")
+
+    Returns:
+        Sentinel2IdComponents with parsed fields.
+
+    Raises:
+        ValueError: if the scene ID doesn't match expected format.
+    """
+    match = _SENTINEL2_ID_PATTERN.match(scene_id)
+    if not match:
+        raise ValueError(f"Unable to parse Sentinel-2 scene ID: {scene_id}")
+    return Sentinel2IdComponents(**match.groupdict())
+
+
+def get_harmonize_callback_from_scene_id(
+    scene_id: str,
+) -> Callable[[npt.NDArray], npt.NDArray] | None:
+    """Gets the harmonization callback by parsing the Sentinel-2 scene ID.
+
+    Processing baseline 04.00 and later have a +1000 offset that needs to be
+    subtracted for consistency with older data.
+
+    Args:
+        scene_id: the Sentinel-2 scene ID (e.g.,
+            "S2A_MSIL2A_20230101T120000_N0510_R001_T10SDG_20230101T140000")
+
+    Returns:
+        None if no callback is needed or scene ID can't be parsed, or the callback
+        to subtract the offset.
+    """
+    try:
+        parsed = parse_sentinel2_id(scene_id)
+        baseline_version = parsed.processing_baseline_version
+    except ValueError:
+        return None
+
+    # Parse the baseline version (format like "05.11" or "02.12").
+    try:
+        major = int(baseline_version.split(".")[0])
+    except (ValueError, IndexError):
+        return None
+
+    # Baseline 04.00 and later need harmonization.
+    if major < 4:
+        return None
+
+    def callback(array: npt.NDArray) -> npt.NDArray:
+        # Subtract 1000 offset introduced in baseline 04.00+.
+        assert array.shape[0] == 1 and array.dtype == np.uint16
+        return np.clip(array, 1000, None) - 1000  # type: ignore
+
+    return callback
 
 
 def get_harmonize_callback(
