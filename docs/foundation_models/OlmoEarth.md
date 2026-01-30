@@ -170,6 +170,9 @@ data:
   class_path: rslearn.train.data_module.RslearnDataModule
   init_args:
     inputs:
+      # The keys here (corresponding to keys in the input dict) must exactly match with
+      # those expected by the pre-trained model ("sentinel1", "sentinel2_l2a", and
+      # "landsat").
       sentinel1:
         data_type: "raster"
         layers: ["sentinel1", "sentinel1.1", "sentinel1.2", "sentinel1.3", "sentinel1.4", "sentinel1.5", "sentinel1.6", "sentinel1.7", "sentinel1.8", "sentinel1.9", "sentinel1.10", "sentinel1.11"]
@@ -204,7 +207,9 @@ data:
           init_args:
             band_names:
               # Only include the modalities that you are using here, otherwise it will
-              # raise an error.
+              # raise an error. The input dict keys and band names must match exactly
+              # with those in the normalization config dict in olmoearth_pretrain:
+              # https://github.com/allenai/olmoearth_pretrain/blob/main/olmoearth_pretrain/data/norm_configs/computed.json
               sentinel1: ["vv", "vh"]
               sentinel2_l2a: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
               landsat: ["B8", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B9", "B10", "B11"]
