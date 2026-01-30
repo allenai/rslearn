@@ -7,159 +7,81 @@ from rslearn.train.model_context import RasterImage
 from rslearn.train.transforms.normalize import Normalize
 
 
-def test_normalize_time_series() -> None:
-    """Verify that the normalization is repeated on all images in the time series."""
-    # We only apply normalization on band 0, not band 1.
-    # So on each timestep the normalization should be applied to band 0.
+def test_normalize_specific_bands() -> None:
+    """Verify normalization applies only to specified band indices."""
+    # Normalize only band 0, leave band 1 unchanged.
     normalize = Normalize(
         mean=0,
         std=2,
         bands=[0],
-        num_bands=2,
     )
-    input_dict = {
-        "image": torch.ones((4, 3, 3), dtype=torch.float32),
-    }
-    input_dict, _ = normalize(input_dict, None)
-    eps = 1e-6
-    assert torch.all(torch.abs(input_dict["image"][(0, 2), :, :] - 0.5) < eps)
-    assert torch.all(torch.abs(input_dict["image"][(1, 3), :, :] - 1.0) < eps)
-
-
-def test_normalize_time_series_rasterimage() -> None:
-    """Verify that the normalization is repeated on all images in the time series."""
-    # We only apply normalization on band 0, not band 1.
-    # So on each timestep the normalization should be applied to band 0.
-    normalize = Normalize(
-        mean=0,
-        std=2,
-        bands=[0],
-        num_bands=2,
-    )
+    # CTHW: 2 channels, 2 timesteps, 3x3 spatial
     input_dict = {
         "image": RasterImage(torch.ones((2, 2, 3, 3), dtype=torch.float32)),
     }
     input_dict, _ = normalize(input_dict, None)
     eps = 1e-6
+    # Band 0 should be normalized: (1-0)/2 = 0.5
     assert torch.all(torch.abs(input_dict["image"].image[0, :, :, :] - 0.5) < eps)
+    # Band 1 should be unchanged
     assert torch.all(torch.abs(input_dict["image"].image[1, :, :, :] - 1.0) < eps)
 
 
-def test_scalar_mean_and_std_on_time_series() -> None:
-    """Make sure scalar mean and std work on time series."""
+def test_scalar_mean_and_std() -> None:
+    """Make sure scalar mean and std broadcast over all dimensions."""
     normalize = Normalize(
         mean=0,
         std=2,
-        num_bands=2,
     )
-    input_dict = {
-        "image": torch.ones((4, 1, 1), dtype=torch.float32),
-    }
-    input_dict, _ = normalize(input_dict, None)
-    result = input_dict["image"]
-    assert result[0, 0, 0] == pytest.approx(0.5)
-    assert result[1, 0, 0] == pytest.approx(0.5)
-    assert result[2, 0, 0] == pytest.approx(0.5)
-    assert result[3, 0, 0] == pytest.approx(0.5)
-
-
-def test_scalar_mean_and_std_on_time_series_rasterimage() -> None:
-    """Make sure scalar mean and std work on time series."""
-    normalize = Normalize(
-        mean=0,
-        std=2,
-        num_bands=2,
-    )
+    # CTHW: 2 channels, 2 timesteps
     input_dict = {
         "image": RasterImage(torch.ones((2, 2, 1, 1), dtype=torch.float32)),
     }
     input_dict, _ = normalize(input_dict, None)
     result = input_dict["image"].image
+    # All values should be (1-0)/2 = 0.5
     assert result[0, 0, 0, 0] == pytest.approx(0.5)
     assert result[0, 1, 0, 0] == pytest.approx(0.5)
     assert result[1, 0, 0, 0] == pytest.approx(0.5)
     assert result[1, 1, 0, 0] == pytest.approx(0.5)
 
 
-def test_list_mean_and_std_on_time_series() -> None:
-    """Make sure list of means and stds works on time series."""
+def test_per_channel_mean_and_std() -> None:
+    """Make sure per-channel mean/std broadcasts over T, H, W."""
+    # Different normalization per channel
     normalize = Normalize(
         mean=[0, 1],
         std=[2, 1],
-        num_bands=2,
     )
-    input_dict = {
-        "image": torch.ones((4, 1, 1), dtype=torch.float32),
-    }
-    input_dict, _ = normalize(input_dict, None)
-    result = input_dict["image"]
-    # First band in each image should be (1-0)/2 = 0.5.
-    assert result[0, 0, 0] == pytest.approx(0.5)
-    assert result[2, 0, 0] == pytest.approx(0.5)
-    # Second band should be (1-1)/1 = 0.0.
-    assert result[1, 0, 0] == pytest.approx(0.0)
-    assert result[3, 0, 0] == pytest.approx(0.0)
-
-
-def test_list_mean_and_std_on_time_series_rasterimage() -> None:
-    """Make sure list of means and stds works on time series."""
-    normalize = Normalize(
-        mean=[0, 1],
-        std=[2, 1],
-        num_bands=2,
-    )
+    # CTHW: 2 channels, 3 timesteps
     input_dict = {
         "image": RasterImage(torch.ones((2, 3, 1, 1), dtype=torch.float32)),
     }
     input_dict, _ = normalize(input_dict, None)
     result = input_dict["image"].image
-    print(result[0].shape)
-    # First band in each image should be (1-0)/2 = 0.5.
+    # Channel 0: (1-0)/2 = 0.5 for all timesteps
     assert result[0, :, 0, 0] == pytest.approx(0.5)
-    # Second band should be (1-1)/1 = 0.0.
+    # Channel 1: (1-1)/1 = 0.0 for all timesteps
     assert result[1, :, 0, 0] == pytest.approx(0.0)
 
 
-def test_list_mean_and_std_with_band_indices() -> None:
-    """Make sure list of means and stds works when passing band index list."""
+def test_per_channel_with_band_indices() -> None:
+    """Make sure per-channel mean/std works with specific band indices."""
+    # Normalize bands 0 and 2 with different params
     normalize = Normalize(
         mean=[0, 1],
         std=[2, 1],
         bands=[0, 2],
-        num_bands=3,
     )
-    input_dict = {
-        "image": torch.ones((6, 1, 1), dtype=torch.float32),
-    }
-    input_dict, _ = normalize(input_dict, None)
-    result = input_dict["image"]
-    # First band should be (1-0)/2 = 0.5.
-    assert result[0, 0, 0] == pytest.approx(0.5)
-    assert result[3, 0, 0] == pytest.approx(0.5)
-    # Second band should be unchanged.
-    assert result[1, 0, 0] == pytest.approx(1.0)
-    assert result[4, 0, 0] == pytest.approx(1.0)
-    # Third band should be (1-1)/1 = 0.0.
-    assert result[2, 0, 0] == pytest.approx(0.0)
-    assert result[5, 0, 0] == pytest.approx(0.0)
-
-
-def test_list_mean_and_std_with_band_indices_rasterimage() -> None:
-    """Make sure list of means and stds works when passing band index list."""
-    normalize = Normalize(
-        mean=[0, 1],
-        std=[2, 1],
-        bands=[0, 2],
-        num_bands=3,
-    )
+    # CTHW: 3 channels, 2 timesteps
     input_dict = {
         "image": RasterImage(torch.ones((3, 2, 1, 1), dtype=torch.float32)),
     }
     input_dict, _ = normalize(input_dict, None)
     result = input_dict["image"].image
-    # First band should be (1-0)/2 = 0.5.
+    # Band 0: (1-0)/2 = 0.5
     assert result[0, :, 0, 0] == pytest.approx(0.5)
-    # Second band should be unchanged.
+    # Band 1: unchanged
     assert result[1, :, 0, 0] == pytest.approx(1.0)
-    # Third band should be (1-1)/1 = 0.0.
+    # Band 2: (1-1)/1 = 0.0
     assert result[2, :, 0, 0] == pytest.approx(0.0)

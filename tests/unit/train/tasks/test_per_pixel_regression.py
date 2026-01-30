@@ -23,11 +23,13 @@ def test_process_inputs(empty_sample_metadata: SampleMetadata) -> None:
         },
         metadata=empty_sample_metadata,
     )
-    assert target_dict["values"].shape == (2, 2)
-    assert target_dict["values"][0, 0] == pytest.approx(0.1)
-    assert target_dict["values"][0, 1] == pytest.approx(0.2)
-    assert target_dict["values"][1, 1] == pytest.approx(0.3)
-    assert torch.all(target_dict["valid"] == torch.tensor([[1, 1], [0, 1]]))
+    values = target_dict["values"].get_hw_tensor()
+    valid = target_dict["valid"].get_hw_tensor()
+    assert values.shape == (2, 2)
+    assert values[0, 0] == pytest.approx(0.1)
+    assert values[0, 1] == pytest.approx(0.2)
+    assert values[1, 1] == pytest.approx(0.3)
+    assert torch.all(valid == torch.tensor([[1, 1], [0, 1]]))
 
 
 def test_process_output(empty_sample_metadata: SampleMetadata) -> None:
@@ -50,8 +52,12 @@ def test_head(empty_sample_metadata: SampleMetadata) -> None:
     head = PerPixelRegressionHead(loss_mode="mse")
     logits = torch.tensor([[1, 1], [1, 1]], dtype=torch.float32)[None, None, :, :]
     target_dict = {
-        "values": torch.tensor([[2, 2], [2, 4]], dtype=torch.float32),
-        "valid": torch.tensor([[1, 1], [1, 0]], dtype=torch.long),
+        "values": RasterImage(
+            torch.tensor([[[[2, 2], [2, 4]]]], dtype=torch.float32), timestamps=None
+        ),
+        "valid": RasterImage(
+            torch.tensor([[[[1, 1], [1, 0]]]], dtype=torch.float32), timestamps=None
+        ),
     }
     output = head(
         intermediates=FeatureMaps([logits]),

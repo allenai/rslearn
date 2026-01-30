@@ -71,9 +71,7 @@ class Crop(Transform):
             "remove_from_top": remove_from_top,
         }
 
-    def apply_image(
-        self, image: RasterImage | torch.Tensor, state: dict[str, Any]
-    ) -> RasterImage | torch.Tensor:
+    def apply_image(self, image: RasterImage, state: dict[str, Any]) -> RasterImage:
         """Apply the sampled state on the specified image.
 
         Args:
@@ -84,22 +82,13 @@ class Crop(Transform):
         crop_size = state["crop_size"] * image.shape[-1] // image_shape[1]
         remove_from_left = state["remove_from_left"] * image.shape[-1] // image_shape[1]
         remove_from_top = state["remove_from_top"] * image.shape[-2] // image_shape[0]
-        if isinstance(image, RasterImage):
-            image.image = torchvision.transforms.functional.crop(
-                image.image,
-                top=remove_from_top,
-                left=remove_from_left,
-                height=crop_size,
-                width=crop_size,
-            )
-        else:
-            image = torchvision.transforms.functional.crop(
-                image,
-                top=remove_from_top,
-                left=remove_from_left,
-                height=crop_size,
-                width=crop_size,
-            )
+        image.image = torchvision.transforms.functional.crop(
+            image.image,
+            top=remove_from_top,
+            left=remove_from_left,
+            height=crop_size,
+            width=crop_size,
+        )
         return image
 
     def apply_boxes(self, boxes: Any, state: dict[str, bool]) -> torch.Tensor:

@@ -19,7 +19,7 @@ from rslearn.config import LayerConfig, QueryConfig
 from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
-from rslearn.utils import PixelBounds, Projection, STGeometry
+from rslearn.utils import PixelBounds, Projection, STGeometry, get_global_raster_bounds
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.raster_format import get_transform_from_projection_and_bounds
 
@@ -278,13 +278,9 @@ class XyzTiles(DataSource, TileStore):
         Returns:
             the bounds of the raster in the projection.
         """
-        geom = STGeometry(self.projection, self.shp, None).to_projection(projection)
-        return (
-            int(geom.shp.bounds[0]),
-            int(geom.shp.bounds[1]),
-            int(geom.shp.bounds[2]),
-            int(geom.shp.bounds[3]),
-        )
+        # XyzTiles is a global data source, so we return global raster bounds based on
+        # the projection.
+        return get_global_raster_bounds(projection)
 
     def read_raster(
         self,
