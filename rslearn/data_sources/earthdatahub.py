@@ -94,8 +94,20 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
     into the dataset tile store.
 
     Supported bands:
+    - d2m: 2m dewpoint temperature (units: K)
+    - e: evaporation (units: m of water equivalent)
+    - pev: potential evaporation (units: m)
+    - ro: runoff (units: m)
+    - sp: surface pressure (units: Pa)
+    - ssr: surface net short-wave (solar) radiation (units: J m-2)
+    - ssrd: surface short-wave (solar) radiation downwards (units: J m-2)
+    - str: surface net long-wave (thermal) radiation (units: J m-2)
+    - swvl1: volumetric soil water layer 1 (units: m3 m-3)
+    - swvl2: volumetric soil water layer 2 (units: m3 m-3)
     - t2m: 2m temperature (units: K)
     - tp: total precipitation (units: m)
+    - u10: 10m U wind component (units: m s-1)
+    - v10: 10m V wind component (units: m s-1)
 
     Authentication:
         EarthDataHub uses token-based auth. Configure your netrc file so HTTP clients
@@ -106,7 +118,22 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
     DEFAULT_ZARR_URL = (
         "https://data.earthdatahub.destine.eu/era5/era5-land-daily-utc-v1.zarr"
     )
-    ALLOWED_BANDS = {"t2m", "tp"}
+    ALLOWED_BANDS = {
+        "d2m",
+        "e",
+        "pev",
+        "ro",
+        "sp",
+        "ssr",
+        "ssrd",
+        "str",
+        "swvl1",
+        "swvl2",
+        "t2m",
+        "tp",
+        "u10",
+        "v10",
+    }
     PIXEL_SIZE_DEGREES = 0.1
 
     def __init__(
