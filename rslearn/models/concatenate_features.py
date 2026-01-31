@@ -80,7 +80,7 @@ class ConcatenateFeatures(IntermediateComponent):
 
         add_data = torch.stack(
             [
-                input_data[self.key].single_ts_to_chw_tensor()
+                input_data[self.key].image
                 for input_data in context.inputs
             ],
             dim=0,
