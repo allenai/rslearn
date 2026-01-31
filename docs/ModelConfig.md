@@ -565,7 +565,7 @@ Here is a summary of all of the options available in the SplitConfig.
       # For validation, testing, and prediction, patch_size can be combined with
       # load_all_crops to perform sliding window inference. For training, it should
       # usually be left false so that each training epoch sees a different crop.
-      load_all_patches: false
+      load_all_crops: false
       # This should typically be enabled for predict_config, so that windows without
       # layers containing targets are skipped. For training, validation, and testing,
       # targets are needed so it should be false.

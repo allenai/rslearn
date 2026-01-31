@@ -18,7 +18,7 @@ from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.train.model_context import ModelOutput, RasterImage, SampleMetadata
 from rslearn.train.prediction_writer import (
-    PendingPatchOutput,
+    PendingCropOutput,
     RasterMerger,
     RslearnWriter,
 )
@@ -106,19 +106,19 @@ class TestRasterMerger:
             time_range=None,
         )
         outputs = [
-            PendingPatchOutput(
+            PendingCropOutput(
                 bounds=(0, 0, 3, 3),
                 output=0 * np.ones((1, 3, 3), dtype=np.uint8),
             ),
-            PendingPatchOutput(
+            PendingCropOutput(
                 bounds=(0, 3, 3, 6),
                 output=1 * np.ones((1, 3, 3), dtype=np.uint8),
             ),
-            PendingPatchOutput(
+            PendingCropOutput(
                 bounds=(3, 0, 6, 3),
                 output=2 * np.ones((1, 3, 3), dtype=np.uint8),
             ),
-            PendingPatchOutput(
+            PendingCropOutput(
                 bounds=(3, 3, 6, 6),
                 output=3 * np.ones((1, 3, 3), dtype=np.uint8),
             ),
@@ -140,8 +140,8 @@ class TestRasterMerger:
         assert np.all(merged[0, 0:3, 3:4] == 2)
         assert np.all(merged[0, 3, 3] == 3)
 
-    def test_merge_with_padding(self, tmp_path: pathlib.Path) -> None:
-        """Verify merging works with padding."""
+    def test_merge_with_overlap(self, tmp_path: pathlib.Path) -> None:
+        """Verify merging works with overlap_pixels."""
         storage = FileWindowStorage(tmp_path)
         window = Window(
             storage=storage,
@@ -156,26 +156,27 @@ class TestRasterMerger:
         # - (0, 1, 3, 4)
         # - (1, 0, 4, 3)
         # - (1, 1, 4, 4)
-        # There are 2 shared pixels between overlapping patches so we set padding=1.
+        # There are 2 shared pixels between overlapping patches so we set overlap_pixels=2.
+        # This means we remove overlap_pixels//2 = 1 pixel from each side.
         outputs = [
-            PendingPatchOutput(
+            PendingCropOutput(
                 bounds=(0, 0, 3, 3),
                 output=0 * np.ones((1, 3, 3), dtype=np.int32),
             ),
-            PendingPatchOutput(
+            PendingCropOutput(
                 bounds=(0, 1, 3, 4),
                 output=1 * np.ones((1, 3, 3), dtype=np.int32),
             ),
-            PendingPatchOutput(
+            PendingCropOutput(
                 bounds=(1, 0, 4, 3),
                 output=2 * np.ones((1, 3, 3), dtype=np.int32),
             ),
-            PendingPatchOutput(
+            PendingCropOutput(
                 bounds=(1, 1, 4, 4),
                 output=3 * np.ones((1, 3, 3), dtype=np.int32),
             ),
         ]
-        merged = RasterMerger(padding=1).merge(
+        merged = RasterMerger(overlap_pixels=2).merge(
             window,
             outputs,
             LayerConfig(
@@ -205,7 +206,7 @@ class TestRasterMerger:
             time_range=None,
         )
         outputs = [
-            PendingPatchOutput(
+            PendingCropOutput(
                 bounds=(0, 0, 4, 4),
                 output=0 * np.ones((1, 4, 4), dtype=np.uint8),
             ),
@@ -274,9 +275,9 @@ def test_write_raster(tmp_path: pathlib.Path) -> None:
         window_group=window.group,
         window_name=window.name,
         window_bounds=window.bounds,
-        patch_bounds=window.bounds,
-        patch_idx=0,
-        num_patches_in_window=1,
+        crop_bounds=window.bounds,
+        crop_idx=0,
+        num_crops_in_window=1,
         time_range=window.time_range,
         projection=window.projection,
         dataset_source=None,
@@ -368,9 +369,9 @@ def test_write_raster_with_custom_output_path(tmp_path: pathlib.Path) -> None:
         window_group=window.group,
         window_name=window.name,
         window_bounds=window.bounds,
-        patch_bounds=window.bounds,
-        patch_idx=0,
-        num_patches_in_window=1,
+        crop_bounds=window.bounds,
+        crop_idx=0,
+        num_crops_in_window=1,
         time_range=window.time_range,
         projection=window.projection,
         dataset_source=None,
@@ -461,9 +462,9 @@ def test_write_raster_with_layer_config(tmp_path: pathlib.Path) -> None:
         window_group=window_group,
         window_name=window_name,
         window_bounds=(0, 0, 1, 1),
-        patch_bounds=(0, 0, 1, 1),
-        patch_idx=0,
-        num_patches_in_window=1,
+        crop_bounds=(0, 0, 1, 1),
+        crop_idx=0,
+        num_crops_in_window=1,
         time_range=None,
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         dataset_source=None,
@@ -552,9 +553,9 @@ def test_selector_with_dictionary_output(tmp_path: pathlib.Path) -> None:
         window_group=window_group,
         window_name=window_name,
         window_bounds=(0, 0, 5, 5),
-        patch_bounds=(0, 0, 5, 5),
-        patch_idx=0,
-        num_patches_in_window=1,
+        crop_bounds=(0, 0, 5, 5),
+        crop_idx=0,
+        num_crops_in_window=1,
         time_range=None,
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         dataset_source=None,
@@ -679,9 +680,9 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
         window_group="test_group",
         window_name="nested_test",
         window_bounds=(0, 0, 3, 3),
-        patch_bounds=(0, 0, 3, 3),
-        patch_idx=0,
-        num_patches_in_window=1,
+        crop_bounds=(0, 0, 3, 3),
+        crop_idx=0,
+        num_crops_in_window=1,
         time_range=None,
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         dataset_source=None,
