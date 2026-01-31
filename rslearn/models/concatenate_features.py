@@ -79,7 +79,11 @@ class ConcatenateFeatures(IntermediateComponent):
             )
 
         add_data = torch.stack(
-            [input_data[self.key] for input_data in context.inputs], dim=0
+            [
+                input_data[self.key].single_ts_to_chw_tensor()
+                for input_data in context.inputs
+            ],
+            dim=0,
         )
         add_features = self.conv_layers(add_data)
 
