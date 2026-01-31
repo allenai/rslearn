@@ -80,7 +80,7 @@ class ConcatenateFeatures(IntermediateComponent):
 
         add_data = torch.stack(
             [
-                input_data[self.key].image
+                input_data[self.key].image.flatten(0, 1)
                 for input_data in context.inputs
             ],
             dim=0,
