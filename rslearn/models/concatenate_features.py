@@ -79,8 +79,9 @@ class ConcatenateFeatures(IntermediateComponent):
             )
 
         add_data = torch.stack(
-            [
-                input_data[self.key].image.flatten(0, 1)
+            [   
+                # Fill nan with 0
+                torch.nan_to_num(input_data[self.key].image.flatten(0, 1), nan=0.0)
                 for input_data in context.inputs
             ],
             dim=0,
