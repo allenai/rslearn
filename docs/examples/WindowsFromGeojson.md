@@ -310,12 +310,12 @@ data:
     val_config:
       patch_size: 256
       # Instead of random cropping, we load all crops for validation and testing.
-      load_all_patches: true
+      load_all_crops: true
       tags:
         split: val
     test_config:
       patch_size: 256
-      load_all_patches: true
+      load_all_crops: true
       tags:
         split: val
 trainer:
