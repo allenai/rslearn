@@ -7,6 +7,7 @@ from .geometry import (
     PixelBounds,
     Projection,
     STGeometry,
+    get_global_raster_bounds,
     is_same_resolution,
     shp_intersects,
 )
@@ -23,6 +24,7 @@ __all__ = (
     "Projection",
     "STGeometry",
     "daterange",
+    "get_global_raster_bounds",
     "get_utm_ups_crs",
     "is_same_resolution",
     "logger",
