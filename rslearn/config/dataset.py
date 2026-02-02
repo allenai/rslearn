@@ -166,7 +166,7 @@ class BandSetConfig(BaseModel):
 
     remap: dict[str, Any] | None = Field(
         default=None,
-        description="Optional jsonargparse configuration for a Remapper to remap pixel values.",
+        description="Optional configuration for a Remapper to remap pixel values.",
     )
 
     # Optional list of names for the different possible values of each band. The length
