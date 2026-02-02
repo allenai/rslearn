@@ -173,6 +173,7 @@ data:
       # The keys here (corresponding to keys in the input dict) must exactly match with
       # those expected by the pre-trained model ("sentinel1", "sentinel2_l2a", and
       # "landsat").
+      # See "class Modality" in https://github.com/allenai/olmoearth_pretrain/blob/main/olmoearth_pretrain/data/constants.py
       sentinel1:
         data_type: "raster"
         layers: ["sentinel1", "sentinel1.1", "sentinel1.2", "sentinel1.3", "sentinel1.4", "sentinel1.5", "sentinel1.6", "sentinel1.7", "sentinel1.8", "sentinel1.9", "sentinel1.10", "sentinel1.11"]
