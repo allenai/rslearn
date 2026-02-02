@@ -36,17 +36,18 @@ This data source supports direct materialization: if the "ingest" flag is set fa
 then ingestion will be skipped and windows will be directly populated from windowed
 reads of the underlying cloud-optimized GeoTIFFs on S3.
 
-The additional data source configuration looks like this:
-
 ```jsonc
 {
-  // Required cache directory to cache product metadata files. Unless prefixed by a
-  // protocol (like "file://..."), it is joined with the dataset path (i.e., specifies
-  // a sub-directory within the dataset folder.
-  "metadata_cache_dir": "cache/landsat",
-  // Sort by this attribute, either null (default, meaning arbitrary ordering) or
-  // "cloud_cover".
-  "sort_by": null
+  "class_path": "rslearn.data_sources.aws_landsat.LandsatOliTirs",
+  "init_args": {
+    // Required cache directory to cache product metadata files. Unless prefixed by a
+    // protocol (like "file://..."), it is joined with the dataset path (i.e., specifies
+    // a sub-directory within the dataset folder.
+    "metadata_cache_dir": "cache/landsat",
+    // Sort by this attribute, either null (default, meaning arbitrary ordering) or
+    // "cloud_cover".
+    "sort_by": null
+  }
 }
 ```
 
@@ -69,25 +70,26 @@ This data source is for NAIP imagery on AWS. It uses the naip-source requester p
 bucket maintained by Esri. See https://registry.opendata.aws/naip/ for more
 information. AWS credentials must be configured for use with boto3.
 
-The additional data source configuration looks like this:
-
 ```jsonc
 {
-  // Required cache directory to cache index shapefiles. Unless prefixed by a protocol
-  // (like "file://..."), it is joined with the dataset path.
-  "index_cache_dir": "cache/naip",
-  // Whether to build an rtree index to accelerate prepare lookups, default false. It
-  // is recommended to set this true when processing more than a few windows.
-  "use_rtree_index": false,
-  // Limit the search to these states (list of their two-letter codes). This can
-  // substantially accelerate lookups when the rtree index is disabled, since by
-  // default (null) it has to scan through all of the states.
-  // Example: ["wa", "or"]
-  "states": null,
-  // Limit the search to these years. Like with states, this can speed up lookups when
-  // the rtree index is disabled.
-  // Example: [2023, 2024]
-  "years": null
+  "class_path": "rslearn.data_sources.aws_open_data.Naip",
+  "init_args": {
+    // Required cache directory to cache index shapefiles. Unless prefixed by a protocol
+    // (like "file://..."), it is joined with the dataset path.
+    "index_cache_dir": "cache/naip",
+    // Whether to build an rtree index to accelerate prepare lookups, default false. It
+    // is recommended to set this true when processing more than a few windows.
+    "use_rtree_index": false,
+    // Limit the search to these states (list of their two-letter codes). This can
+    // substantially accelerate lookups when the rtree index is disabled, since by
+    // default (null) it has to scan through all of the states.
+    // Example: ["wa", "or"]
+    "states": null,
+    // Limit the search to these years. Like with states, this can speed up lookups when
+    // the rtree index is disabled.
+    // Example: [2023, 2024]
+    "years": null
+  }
 }
 ```
 
@@ -107,21 +109,22 @@ Copernicus OpenHub".
 See https://aws.amazon.com/marketplace/pp/prodview-2ostsvrguftb2 for details about the
 buckets. AWS credentials must be configured for use with boto3.
 
-The additional data source configuration looks like this:
-
 ```jsonc
 {
-  // Required modality, either "L1C" or "L2A".
-  "modality": "L1C",
-  // Required cache directory to cache product metadata files.
-  "metadata_cache_dir": "cache/sentinel2",
-  // Sort by this attribute, either null (default, meaning arbitrary ordering) or
-  // "cloud_cover".
-  "sort_by": null,
-  // Flag (default false) to harmonize pixel values across different processing
-  // baselines (recommended), see
-  // https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
-  "harmonize": false
+  "class_path": "rslearn.data_sources.aws_open_data.Sentinel2",
+  "init_args": {
+    // Required modality, either "L1C" or "L2A".
+    "modality": "L1C",
+    // Required cache directory to cache product metadata files.
+    "metadata_cache_dir": "cache/sentinel2",
+    // Sort by this attribute, either null (default, meaning arbitrary ordering) or
+    // "cloud_cover".
+    "sort_by": null,
+    // Flag (default false) to harmonize pixel values across different processing
+    // baselines (recommended), see
+    // https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
+    "harmonize": false
+  }
 }
 ```
 
@@ -154,13 +157,14 @@ Although other Sentinel-1 scenes are available, the data source currently only s
 the GRD IW DV scenes (vv+vh bands). It uses the Copernicus API for metadata search
 (prepare step).
 
-The additional data source configuration looks like this:
-
 ```jsonc
 {
-  // Optional orbit direction to filter by, either "ASCENDING" or "DESCENDING". The
-  // default is to not filter (so both types of scenes are included/mixed).
-  "orbit_direction": null
+  "class_path": "rslearn.data_sources.aws_sentinel1.Sentinel1",
+  "init_args": {
+    // Optional orbit direction to filter by, either "ASCENDING" or "DESCENDING". The
+    // default is to not filter (so both types of scenes are included/mixed).
+    "orbit_direction": null
+  }
 }
 ```
 
@@ -180,21 +184,24 @@ The bucket is public and free so no credentials are needed.
 
 ```jsonc
 {
-  // Optional STAC query filter.
-  // Example: {"eo:cloud_cover": {"lt": 20}}
-  "query": null,
-  // Sort by this STAC property, e.g. "eo:cloud_cover".
-  "sort_by": null,
-  // Whether to sort ascending or descending (default ascending).
-  "sort_ascending": true,
-  // Optional directory to cache discovered items.
-  "cache_dir": null,
-  // Flag (default false) to harmonize pixel values across different processing
-  // baselines (recommended), see
-  // https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
-  "harmonize": false,
-  // Timeout for requests.
-  "timeout": "10s"
+  "class_path": "rslearn.data_sources.aws_sentinel2_element84.Sentinel2",
+  "init_args": {
+    // Optional STAC query filter.
+    // Example: {"eo:cloud_cover": {"lt": 20}}
+    "query": null,
+    // Sort by this STAC property, e.g. "eo:cloud_cover".
+    "sort_by": null,
+    // Whether to sort ascending or descending (default ascending).
+    "sort_ascending": true,
+    // Optional directory to cache discovered items.
+    "cache_dir": null,
+    // Flag (default false) to harmonize pixel values across different processing
+    // baselines (recommended), see
+    // https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
+    "harmonize": false,
+    // Timeout for requests.
+    "timeout": "10s"
+  }
 }
 ```
 
@@ -229,17 +236,18 @@ names, e.g. `total_precipitation` becomes `total-precipitation`.
 retrieval is highly recommended, especially for hourly data, as downloading global data can
 be very slow and resource-intensive.
 
-The additional data source configuration looks like this:
-
 ```jsonc
 {
-  // Optional API key. If not provided in the data source configuration, it must be set
-  // via the CDSAPI_KEY environment variable.
-  "api_key": null,
-  // Optional bounding box as [min_lon, min_lat, max_lon, max_lat]. Recommended to speed
-  // up ingestion, especially for hourly data.
-  // Example: [-122.4, 47.6, -122.3, 47.7]
-  "bounds": null
+  "class_path": "rslearn.data_sources.climate_data_store.ERA5Land",
+  "init_args": {
+    // Optional API key. If not provided in the data source configuration, it must be set
+    // via the CDSAPI_KEY environment variable.
+    "api_key": null,
+    // Optional bounding box as [min_lon, min_lat, max_lon, max_lat]. Recommended to speed
+    // up ingestion, especially for hourly data.
+    // Example: [-122.4, 47.6, -122.3, 47.7]
+    "bounds": null
+  }
 }
 ```
 
@@ -270,40 +278,41 @@ This data source is for images from the ESA Copernicus OData API. See
 https://documentation.dataspace.copernicus.eu/APIs/OData.html for details about the API
 and how to get an access token.
 
-The additional data source configuration looks like this:
-
 ```jsonc
 {
-  // Required dictionary mapping from a filename or glob string of an asset inside the
-  // product zip file, to the list of bands that the asset contains. An example for
-  // Sentinel-2 images is shown.
-  "glob_to_bands": {
-    "*/GRANULE/*/IMG_DATA/*_B01.jp2": ["B01"],
-    "*/GRANULE/*/IMG_DATA/*_TCI.jp2": ["R", "G", "B"]
-  },
-  // Optional API access token. See https://documentation.dataspace.copernicus.eu/APIs/OData.html
-  // for how to get a token. If not set, it is read from the environment variable
-  // COPERNICUS_ACCESS_TOKEN. If that environment variable doesn't exist, then we
-  // attempt to read the username/password from COPERNICUS_USERNAME and
-  // COPERNICUS_PASSWORD (this is useful since access tokens are only valid for an hour).
-  "access_token": null,
-  // Optional query filter string to include when searching for items. This will be
-  // appended to other name, geographic, and sensing time filters where applicable. For
-  // example, "Collection/Name eq 'SENTINEL-2'". See the API documentation for more
-  // examples.
-  "query_filter": null,
-  // Optional order by string to include when searching for items. For example,
-  // "ContentDate/Start asc". See the API documentation for more examples.
-  "order_by": null,
-  // Optional product attribute name to sort returned products by that attribute. If
-  // set, attributes will be expanded when listing products. Note that while order_by
-  // uses the API to order products, the API provides limited options, and sort_by
-  // instead is done after the API call.
-  "sort_by": null,
-  // If sort_by is set, sort in descending order instead of ascending order.
-  "sort_desc": false,
-  // Timeout for requests in seconds.
-  "timeout": 10
+  "class_path": "rslearn.data_sources.copernicus.Copernicus",
+  "init_args": {
+    // Required dictionary mapping from a filename or glob string of an asset inside the
+    // product zip file, to the list of bands that the asset contains. An example for
+    // Sentinel-2 images is shown.
+    "glob_to_bands": {
+      "*/GRANULE/*/IMG_DATA/*_B01.jp2": ["B01"],
+      "*/GRANULE/*/IMG_DATA/*_TCI.jp2": ["R", "G", "B"]
+    },
+    // Optional API access token. See https://documentation.dataspace.copernicus.eu/APIs/OData.html
+    // for how to get a token. If not set, it is read from the environment variable
+    // COPERNICUS_ACCESS_TOKEN. If that environment variable doesn't exist, then we
+    // attempt to read the username/password from COPERNICUS_USERNAME and
+    // COPERNICUS_PASSWORD (this is useful since access tokens are only valid for an hour).
+    "access_token": null,
+    // Optional query filter string to include when searching for items. This will be
+    // appended to other name, geographic, and sensing time filters where applicable. For
+    // example, "Collection/Name eq 'SENTINEL-2'". See the API documentation for more
+    // examples.
+    "query_filter": null,
+    // Optional order by string to include when searching for items. For example,
+    // "ContentDate/Start asc". See the API documentation for more examples.
+    "order_by": null,
+    // Optional product attribute name to sort returned products by that attribute. If
+    // set, attributes will be expanded when listing products. Note that while order_by
+    // uses the API to order products, the API provides limited options, and sort_by
+    // instead is done after the API call.
+    "sort_by": null,
+    // If sort_by is set, sort in descending order instead of ascending order.
+    "sort_desc": false,
+    // Timeout for requests in seconds.
+    "timeout": 10
+  }
 }
 ```
 
@@ -311,23 +320,24 @@ The additional data source configuration looks like this:
 
 This data source is for Sentinel-2 images from the ESA Copernicus OData API.
 
-The additional data source configuration looks like this:
-
 ```jsonc
 {
-  // Required product type, either "L1C" or "L2A".
-  "product_type": "L1C",
-  // Flag (default false) to harmonize pixel values across different processing
-  // baselines (recommended), see
-  // https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
-  "harmonize": false,
-  // See rslearn.data_sources.copernicus.Copernicus for details about the configuration
-  // options below.
-  "access_token": null,
-  "order_by": null,
-  "sort_by": null,
-  "sort_desc": false,
-  "timeout": 10
+  "class_path": "rslearn.data_sources.copernicus.Sentinel2",
+  "init_args": {
+    // Required product type, either "L1C" or "L2A".
+    "product_type": "L1C",
+    // Flag (default false) to harmonize pixel values across different processing
+    // baselines (recommended), see
+    // https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
+    "harmonize": false,
+    // See rslearn.data_sources.copernicus.Copernicus for details about the configuration
+    // options below.
+    "access_token": null,
+    "order_by": null,
+    "sort_by": null,
+    "sort_desc": false,
+    "timeout": 10
+  }
 }
 ```
 
@@ -356,24 +366,25 @@ This data source is for Sentinel-1 images from the ESA Copernicus OData API. Cur
 only IW GRDH VV+VH products are supported, even though all Sentinel-1 scenes are
 available in the data source.
 
-The additional data source configuration looks like this:
-
 ```jsonc
 {
-  // Required product type, must be "IW_GRDH".
-  "product_type": "IW_GRDH",
-  // Required polarisation, must be "VV_VH".
-  "polarisation": "VV_VH",
-  // Optional orbit direction to filter by, either "ASCENDING" or "DESCENDING". The
-  // default is to not filter (so both types of scenes are included/mixed).
-  "orbit_direction": null,
-  // See rslearn.data_sources.copernicus.Copernicus for details about the configuration
-  // options below.
-  "access_token": null,
-  "order_by": null,
-  "sort_by": null,
-  "sort_desc": false,
-  "timeout": 10
+  "class_path": "rslearn.data_sources.copernicus.Sentinel1",
+  "init_args": {
+    // Required product type, must be "IW_GRDH".
+    "product_type": "IW_GRDH",
+    // Required polarisation, must be "VV_VH".
+    "polarisation": "VV_VH",
+    // Optional orbit direction to filter by, either "ASCENDING" or "DESCENDING". The
+    // default is to not filter (so both types of scenes are included/mixed).
+    "orbit_direction": null,
+    // See rslearn.data_sources.copernicus.Copernicus for details about the configuration
+    // options below.
+    "access_token": null,
+    "order_by": null,
+    "sort_by": null,
+    "sort_desc": false,
+    "timeout": 10
+  }
 }
 ```
 
@@ -408,28 +419,31 @@ The bucket is public and free so no credentials are needed.
 
 ```jsonc
 {
-  // Required cache directory to cache product metadata files and the optional rtree
-  // index.
-  "index_cache_dir": "cache/sentinel2",
-  // Sort by this attribute, either null (default, meaning arbitrary ordering) or
-  // "cloud_cover".
-  "sort_by": null,
-  // Flag (default true) to build an rtree index to speed up product lookups. This can
-  // be set false to avoid lengthy (multiple hours) rtree creation time if you are only
-  // using a few windows.
-  "use_rtree_index": true,
-  // Flag (default false) to harmonize pixel values across different processing
-  // baselines (recommended), see
-  // https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
-  "harmonize": false,
-  // When using rtree index, only create it for products within this time range. It
-  // defaults to null, meaning to create rtree index for entire time range.
-  // Example: ["2024-01-01T00:00:00+00:00", "2025-01-01T00:00:00+00:00"]
-  "rtree_time_range": null,
-  // By default, if use_rtree_index is true, the rtree index is stored in the
-  // index_cache_dir. Set this to override the path for the rtree index and only use
-  // index_cache_dir for the product metadata files.
-  "rtree_cache_dir": null
+  "class_path": "rslearn.data_sources.gcp_public_data.Sentinel2",
+  "init_args": {
+    // Required cache directory to cache product metadata files and the optional rtree
+    // index.
+    "index_cache_dir": "cache/sentinel2",
+    // Sort by this attribute, either null (default, meaning arbitrary ordering) or
+    // "cloud_cover".
+    "sort_by": null,
+    // Flag (default true) to build an rtree index to speed up product lookups. This can
+    // be set false to avoid lengthy (multiple hours) rtree creation time if you are only
+    // using a few windows.
+    "use_rtree_index": true,
+    // Flag (default false) to harmonize pixel values across different processing
+    // baselines (recommended), see
+    // https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
+    "harmonize": false,
+    // When using rtree index, only create it for products within this time range. It
+    // defaults to null, meaning to create rtree index for entire time range.
+    // Example: ["2024-01-01T00:00:00+00:00", "2025-01-01T00:00:00+00:00"]
+    "rtree_time_range": null,
+    // By default, if use_rtree_index is true, the rtree index is stored in the
+    // index_cache_dir. Set this to override the path for the rtree index and only use
+    // index_cache_dir for the product metadata files.
+    "rtree_cache_dir": null
+  }
 }
 ```
 
@@ -465,13 +479,16 @@ No credentials are needed.
 
 ```jsonc
 {
-  // Timeout for requests.
-  "timeout": "10s",
-  // Optional directory to cache the file list.
-  "cache_dir": null,
-  // If true, always use 3 arc-second (SRTM3) data even when 1 arc-second (SRTM1) is
-  // available. Defaults to false, which prefers SRTM1 for higher resolution.
-  "always_use_3arcsecond": false
+  "class_path": "rslearn.data_sources.hf_srtm.SRTM",
+  "init_args": {
+    // Timeout for requests.
+    "timeout": "10s",
+    // Optional directory to cache the file list.
+    "cache_dir": null,
+    // If true, always use 3 arc-second (SRTM3) data even when 1 arc-second (SRTM1) is
+    // available. Defaults to false, which prefers SRTM1 for higher resolution.
+    "always_use_3arcsecond": false
+  }
 }
 ```
 
@@ -506,21 +523,24 @@ only a few seconds.
 
 ```jsonc
 {
-  // Required name of the ee.ImageCollection, e.g. "COPERNICUS/S1_GRD".
-  "collection_name": "COPERNICUS/S1_GRD",
-  // Required name of the GCS bucket to use to store intermediate outputs from export
-  // jobs. You could set up lifecycle rules on this bucket to delete outputs after 1
-  // day.
-  "gcs_bucket_name": "...",
-  // Required service account name.
-  "service_account_name": "...",
-  // Required path to a local file containing the service account credentials.
-  "service_account_credentials": "/etc/credentials/gee_credentials.json",
-  // Required directory to store rtree index over the exported ee.Image metadata.
-  "index_cache_dir": "cache/gee",
-  // Optional filters to aply on the ee.ImageCollection. See Sentinel-1 example below.
-  // Currently only equality filters are supported.
-  "filters": null
+  "class_path": "rslearn.data_sources.google_earth_engine.GEE",
+  "init_args": {
+    // Required name of the ee.ImageCollection, e.g. "COPERNICUS/S1_GRD".
+    "collection_name": "COPERNICUS/S1_GRD",
+    // Required name of the GCS bucket to use to store intermediate outputs from export
+    // jobs. You could set up lifecycle rules on this bucket to delete outputs after 1
+    // day.
+    "gcs_bucket_name": "...",
+    // Required service account name.
+    "service_account_name": "...",
+    // Required path to a local file containing the service account credentials.
+    "service_account_credentials": "/etc/credentials/gee_credentials.json",
+    // Required directory to store rtree index over the exported ee.Image metadata.
+    "index_cache_dir": "cache/gee",
+    // Optional filters to aply on the ee.ImageCollection. See Sentinel-1 example below.
+    // Currently only equality filters are supported.
+    "filters": null
+  }
 }
 ```
 
@@ -583,12 +603,15 @@ adding 8192.
 
 ```jsonc
 {
-  // See rslearn.data_sources.google_earth_engine.GEE for details about these
-  // required configuration options.
-  "gcs_bucket_name": "...",
-  "service_account_name": "...",
-  "service_account_credentials": "/etc/credentials/gee_credentials.json",
-  "index_cache_dir": "cache/gee"
+  "class_path": "rslearn.data_sources.google_earth_engine.GoogleSatelliteEmbeddings",
+  "init_args": {
+    // See rslearn.data_sources.google_earth_engine.GEE for details about these
+    // required configuration options.
+    "gcs_bucket_name": "...",
+    "service_account_name": "...",
+    "service_account_credentials": "/etc/credentials/gee_credentials.json",
+    "index_cache_dir": "cache/gee"
+  }
 }
 ```
 
@@ -604,10 +627,13 @@ contain the full range of bands, and different files should cover different loca
 
 ```jsonc
 {
-  // Required source directory containing the flat structure of raster or vector files.
-  // It is relative to the dataset root, so include a protocol if it is outside.
-  // Example: "file:///path/to/files/".
-  "src_dir": null
+  "class_path": "rslearn.data_sources.local_files.LocalFiles",
+  "init_args": {
+    // Required source directory containing the flat structure of raster or vector files.
+    // It is relative to the dataset root, so include a protocol if it is outside.
+    // Example: "file:///path/to/files/".
+    "src_dir": null
+  }
 }
 ```
 
@@ -633,45 +659,48 @@ will need to be completely re-computed.
 
 ```jsonc
 {
-  // Required list of PBF filenames to read from.
-  // If a single filename is provided and it doesn't exist, the latest planet PBF will
-  // be downloaded there.
-  "pbf_fnames": ["planet-latest.osm.pbf"],
-  // Required file to cache the bounds of the different PBF files.
-  "bounds_fname": "bounds.json",
-  // Required map of categories to extract from the OSM data.
-  // Each category specifies a set of restrictions that extract only a certain type of
-  // OSM feature, and convert it to a GeoJSON feature.
-  "categories": {
-    // The key will be added as a "category" property in the resulting GeoJSON
-    // features.
-    "aerialway_pylon": {
-      // Optional limit on the types of features to match. If set, valid list values
-      // are "node", "way", "relation".
-      // Example: ["node"] to only match nodes.
-      "feature_types": null,
-      // Optional tag conditions. For each entry (tag_name, values list), only match
-      // OSM features with that tag, and if values list is not empty, only match if the
-      // tag value matches one element of the values list.
-      // The default is null. The example below will only match OSM features with the
-      // "aerialway" tag set to "pylon".
-      "tag_conditions": {
-        "aerialway": [
-          "pylon"
-        ]
-      },
-      // Optional tag properties. This is used to save properties of the OSM feature in
-      // the resulting GeoJSON feature. It is a list of [tag name, prop name]. If tag
-      // tag name exists on the OSM feature, then it will be populated into the prop
-      // name property on the GeoJSON feature.
-      // Example: [["aerialway:heating", "aerialway:heating"]]
-      "tag_properties": null,
-      // Optionally convert the OpenStreetMap feature to the specified geometry type
-      // (one of "Point", "LineString", "Polygon"). Otherwise, matching nodes result in
-      // Points, matching ways result in LineStrings, and matching relations result in
-      // Polygons. Note that nodes cannot be converted to LineString/Polygon.
-      "to_geometry": "Point"
-    },
+  "class_path": "rslearn.data_sources.openstreetmap.OpenStreetMap",
+  "init_args": {
+    // Required list of PBF filenames to read from.
+    // If a single filename is provided and it doesn't exist, the latest planet PBF will
+    // be downloaded there.
+    "pbf_fnames": ["planet-latest.osm.pbf"],
+    // Required file to cache the bounds of the different PBF files.
+    "bounds_fname": "bounds.json",
+    // Required map of categories to extract from the OSM data.
+    // Each category specifies a set of restrictions that extract only a certain type of
+    // OSM feature, and convert it to a GeoJSON feature.
+    "categories": {
+      // The key will be added as a "category" property in the resulting GeoJSON
+      // features.
+      "aerialway_pylon": {
+        // Optional limit on the types of features to match. If set, valid list values
+        // are "node", "way", "relation".
+        // Example: ["node"] to only match nodes.
+        "feature_types": null,
+        // Optional tag conditions. For each entry (tag_name, values list), only match
+        // OSM features with that tag, and if values list is not empty, only match if the
+        // tag value matches one element of the values list.
+        // The default is null. The example below will only match OSM features with the
+        // "aerialway" tag set to "pylon".
+        "tag_conditions": {
+          "aerialway": [
+            "pylon"
+          ]
+        },
+        // Optional tag properties. This is used to save properties of the OSM feature in
+        // the resulting GeoJSON feature. It is a list of [tag name, prop name]. If tag
+        // tag name exists on the OSM feature, then it will be populated into the prop
+        // name property on the GeoJSON feature.
+        // Example: [["aerialway:heating", "aerialway:heating"]]
+        "tag_properties": null,
+        // Optionally convert the OpenStreetMap feature to the specified geometry type
+        // (one of "Point", "LineString", "Polygon"). Otherwise, matching nodes result in
+        // Points, matching ways result in LineStrings, and matching relations result in
+        // Polygons. Note that nodes cannot be converted to LineString/Polygon.
+        "to_geometry": "Point"
+      }
+    }
   }
 }
 ```
@@ -695,22 +724,25 @@ reads of the underlying cloud-optimized GeoTIFFs on Azure Blob Storage.
 
 ```jsonc
 {
-  // Required collection name, e.g. "landsat-c2-l2" or "modis-17A2HGF-061".
-  "collection_name": null,
-  // Required map from asset name to list of bands in the asset to download.
-  // You may need to perform a STAC search to see what the asset names are.
-  // Example: {"B8A": ["B8A"], "visual": ["R", "G", "B"]}
-  "asset_bands": null,
-  // Include this query argument for STAC searches.
-  // Example: {"sar:instrument_mode": {"eq": "IW"}}
-  "query": null,
-  // Sort by this property in the STAC items.
-  // Example: "eo:cloud_cover"
-  "sort_by": null,
-  // Whether to sort ascending or descending (default ascending).
-  "sort_ascending": true,
-  // Timeout for requests.
-  "timeout_seconds": 10,
+  "class_path": "rslearn.data_sources.planetary_computer.PlanetaryComputer",
+  "init_args": {
+    // Required collection name, e.g. "landsat-c2-l2" or "modis-17A2HGF-061".
+    "collection_name": null,
+    // Required map from asset name to list of bands in the asset to download.
+    // You may need to perform a STAC search to see what the asset names are.
+    // Example: {"B8A": ["B8A"], "visual": ["R", "G", "B"]}
+    "asset_bands": null,
+    // Include this query argument for STAC searches.
+    // Example: {"sar:instrument_mode": {"eq": "IW"}}
+    "query": null,
+    // Sort by this property in the STAC items.
+    // Example: "eo:cloud_cover"
+    "sort_by": null,
+    // Whether to sort ascending or descending (default ascending).
+    "sort_ascending": true,
+    // Timeout for requests.
+    "timeout_seconds": 10
+  }
 }
 ```
 
@@ -724,11 +756,14 @@ are optional. The band names are "hh", "hv", "vv", and "vh" depending on the sce
 
 ```jsonc
 {
-  // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
-  "query": null,
-  "sort_by": null,
-  "sort_ascending": true,
-  "timeout_seconds": 10,
+  "class_path": "rslearn.data_sources.planetary_computer.Sentinel1",
+  "init_args": {
+    // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
+    "query": null,
+    "sort_by": null,
+    "sort_ascending": true,
+    "timeout_seconds": 10
+  }
 }
 ```
 
@@ -741,15 +776,18 @@ The bands to download are determined from the band sets.
 
 ```jsonc
 {
-  // Flag (default false) to harmonize pixel values across different processing
-  // baselines (recommended), see
-  // https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
-  "harmonize": false
-  // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
-  "query": null,
-  "sort_by": null,
-  "sort_ascending": true,
-  "timeout_seconds": 10,
+  "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+  "init_args": {
+    // Flag (default false) to harmonize pixel values across different processing
+    // baselines (recommended), see
+    // https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
+    "harmonize": false,
+    // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
+    "query": null,
+    "sort_by": null,
+    "sort_ascending": true,
+    "timeout_seconds": 10
+  }
 }
 ```
 
@@ -786,11 +824,14 @@ If you need a different asset/band mapping, use
 
 ```jsonc
 {
-  // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
-  "query": null,
-  "sort_by": null,
-  "sort_ascending": true,
-  "timeout_seconds": 10
+  "class_path": "rslearn.data_sources.planetary_computer.Naip",
+  "init_args": {
+    // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
+    "query": null,
+    "sort_by": null,
+    "sort_ascending": true,
+    "timeout_seconds": 10
+  }
 }
 ```
 
@@ -807,10 +848,13 @@ source maps it to a single band.
 
 ```jsonc
 {
-  // Optional band name to use if the layer config is missing from context (default "DEM").
-  "band_name": "DEM",
-  // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
-  "timeout_seconds": 10
+  "class_path": "rslearn.data_sources.planetary_computer.CopDemGlo30",
+  "init_args": {
+    // Optional band name to use if the layer config is missing from context (default "DEM").
+    "band_name": "DEM",
+    // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
+    "timeout_seconds": 10
+  }
 }
 ```
 
@@ -827,8 +871,11 @@ US, and has a single band.
 
 ```jsonc
 {
-  // Optional timeout for HTTP requests.
-  "timeout_seconds": 10
+  "class_path": "rslearn.data_sources.usda_cdl.CDL",
+  "init_args": {
+    // Optional timeout for HTTP requests.
+    "timeout_seconds": 10
+  }
 }
 ```
 
@@ -843,13 +890,16 @@ You can request access at https://m2m.cr.usgs.gov/.
 
 ```jsonc
 {
-  // Required M2M API username.
-  "username": null,
-  // Required M2M API authentication token.
-  "token": null,
-  // Sort by this attribute, either null (default, meaning arbitrary ordering) or
-  // "cloud_cover".
-  "sort_by": null,
+  "class_path": "rslearn.data_sources.usgs_landsat.LandsatOliTirs",
+  "init_args": {
+    // Required M2M API username.
+    "username": null,
+    // Required M2M API authentication token.
+    "token": null,
+    // Sort by this attribute, either null (default, meaning arbitrary ordering) or
+    // "cloud_cover".
+    "sort_by": null
+  }
 }
 ```
 
@@ -878,11 +928,14 @@ Example (clay, user-provided WCS subset parameters):
 
 ```jsonc
 {
-  "service_id": "clay",
-  "coverage_id": "clay_0-5cm_mean",
-  // Optional request CRS, defaults to EPSG:3857. You can specify either "EPSG:3857"
-  // or the URN form "urn:ogc:def:crs:EPSG::3857".
-  // "crs": "EPSG:3857"
+  "class_path": "rslearn.data_sources.soilgrids.SoilGrids",
+  "init_args": {
+    "service_id": "clay",
+    "coverage_id": "clay_0-5cm_mean"
+    // Optional request CRS, defaults to EPSG:3857. You can specify either "EPSG:3857"
+    // or the URN form "urn:ogc:def:crs:EPSG::3857".
+    // "crs": "EPSG:3857"
+  }
 }
 ```
 
@@ -906,10 +959,13 @@ repeat the data source across multiple layers (with different bands).
 
 ```jsonc
 {
-  // Required local path to extract the WorldCereal GeoTIFF files. For high performance,
-  // this should be a local directory; if the dataset is remote, prefix with a protocol
-  // ("file://") to use a local directory.
-  "worldcereal_dir": "cache/worldcereal"
+  "class_path": "rslearn.data_sources.worldcereal.WorldCereal",
+  "init_args": {
+    // Required local path to extract the WorldCereal GeoTIFF files. For high performance,
+    // this should be a local directory; if the dataset is remote, prefix with a protocol
+    // ("file://") to use a local directory.
+    "worldcereal_dir": "cache/worldcereal"
+  }
 }
 ```
 
@@ -943,8 +999,11 @@ extracted, yielding 2,651 GeoTIFF files. These are then used with
 
 ```jsonc
 {
-  // Required local path to store the downloaded zip files and extracted GeoTIFFs.
-  "worldcover_dir": "cache/worldcover"
+  "class_path": "rslearn.data_sources.worldcover.WorldCover",
+  "init_args": {
+    // Required local path to store the downloaded zip files and extracted GeoTIFFs.
+    "worldcover_dir": "cache/worldcover"
+  }
 }
 ```
 
@@ -963,8 +1022,11 @@ but it means that all of the data must be downloaded first.
 
 ```jsonc
 {
-  // Required local path to store the downoladed WorldPop data.
-  "worldpop_dir": "cache/worldpop"
+  "class_path": "rslearn.data_sources.worldpop.WorldPop",
+  "init_args": {
+    // Required local path to store the downoladed WorldPop data.
+    "worldpop_dir": "cache/worldpop"
+  }
 }
 ```
 
@@ -976,34 +1038,37 @@ These tiles are usually in WebMercator projection, but different CRS can be conf
 
 ```jsonc
 {
-  // Required list of URL templates. The templates must include placeholders for {x}
-  // (column), {y} (row), and {z} (zoom level).
-  // Example: ["https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}.jpg"]
-  "url_templates": null,
-  // Required list of time ranges. It should match the list of URL templates. This is
-  // primarily useful with multiple URL templates, to distinguish which one should be
-  // used depending on the window time range. If time is not important, then you can
-  // set it arbitrarily.
-  // Example: [["2024-01-01T00:00:00+00:00", "2025-01-01T00:00:00+00:00"]]
-  "time_ranges": null,
-  // Required zoom level. Currently, a single zoom level must be specified, and tiles
-  // will always be read at that zoom level, rather than varying depending on the
-  // window resolution.
-  // Example: 17 to use zoom level 17.
-  "zoom": null,
-  // The CRS of the xyz image tiles. Defaults to WebMercator.
-  "crs": "EPSG:3857",
-  // The total projection units along each axis. Defaults to 40075016.6856 which
-  // corresponds to WebMercator. This is used to compute the pixel resolution, i.e. the
-  // tiles split the world into 2^zoom tiles along each axis so the resolution is
-  // (total_units / 2^zoom / tile_size) units/pixel.
-  "total_units": 40075016.6856,
-  // Apply an offset to the projection units when converting tile positions. Without an
-  // offset, the WebMercator tile columns and rows would range from -2^(zoom-1) to
-  // 2^(zoom-1). The default offset is half the default total units so that it
-  // corresponds to the standard range from 0 to 2^zoom.
-  "offset": 20037508.3428,
-  // The size of tiles. The default is 256x256 which is typical.
-  "tile_size": 256
+  "class_path": "rslearn.data_sources.xyz_tiles.XyzTiles",
+  "init_args": {
+    // Required list of URL templates. The templates must include placeholders for {x}
+    // (column), {y} (row), and {z} (zoom level).
+    // Example: ["https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}.jpg"]
+    "url_templates": null,
+    // Required list of time ranges. It should match the list of URL templates. This is
+    // primarily useful with multiple URL templates, to distinguish which one should be
+    // used depending on the window time range. If time is not important, then you can
+    // set it arbitrarily.
+    // Example: [["2024-01-01T00:00:00+00:00", "2025-01-01T00:00:00+00:00"]]
+    "time_ranges": null,
+    // Required zoom level. Currently, a single zoom level must be specified, and tiles
+    // will always be read at that zoom level, rather than varying depending on the
+    // window resolution.
+    // Example: 17 to use zoom level 17.
+    "zoom": null,
+    // The CRS of the xyz image tiles. Defaults to WebMercator.
+    "crs": "EPSG:3857",
+    // The total projection units along each axis. Defaults to 40075016.6856 which
+    // corresponds to WebMercator. This is used to compute the pixel resolution, i.e. the
+    // tiles split the world into 2^zoom tiles along each axis so the resolution is
+    // (total_units / 2^zoom / tile_size) units/pixel.
+    "total_units": 40075016.6856,
+    // Apply an offset to the projection units when converting tile positions. Without an
+    // offset, the WebMercator tile columns and rows would range from -2^(zoom-1) to
+    // 2^(zoom-1). The default offset is half the default total units so that it
+    // corresponds to the standard range from 0 to 2^zoom.
+    "offset": 20037508.3428,
+    // The size of tiles. The default is 256x256 which is typical.
+    "tile_size": 256
+  }
 }
 ```
