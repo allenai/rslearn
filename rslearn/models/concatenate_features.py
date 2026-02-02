@@ -78,6 +78,7 @@ class ConcatenateFeatures(IntermediateComponent):
                 "Expected input to be FeatureMaps with at least one feature map"
             )
 
+        # image is a 4D CTHW tensor
         add_data = torch.stack(
             [input_data[self.key].image.flatten(0, 1) for input_data in context.inputs],
             dim=0,
