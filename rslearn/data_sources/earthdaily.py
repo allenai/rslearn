@@ -6,27 +6,24 @@ import tempfile
 from datetime import timedelta
 from typing import Any, Literal
 
-import affine
-import numpy.typing as npt
 import pystac
 import pystac_client
-import rasterio
 import requests
 import shapely
 from earthdaily import EDSClient, EDSConfig
-from rasterio.enums import Resampling
 from upath import UPath
 
-from rslearn.config import LayerConfig, QueryConfig
+from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources import DataSource, DataSourceContext, Item
+from rslearn.data_sources import DataSourceContext, Item
+from rslearn.data_sources.direct_materialize_data_source import (
+    DirectMaterializeDataSource,
+)
 from rslearn.data_sources.utils import match_candidate_items_to_window
-from rslearn.dataset import Window
-from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.log_utils import get_logger
-from rslearn.tile_stores import TileStore, TileStoreWithLayer
+from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath
-from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
+from rslearn.utils.geometry import STGeometry
 
 logger = get_logger(__name__)
 
@@ -62,7 +59,7 @@ class EarthDailyItem(Item):
         )
 
 
-class EarthDaily(DataSource, TileStore):
+class EarthDaily(DirectMaterializeDataSource[EarthDailyItem]):
     """A data source for EarthDaily data.
 
     This requires the following environment variables to be set:
@@ -111,8 +108,9 @@ class EarthDaily(DataSource, TileStore):
                 services "legacy" and "internal" are not supported.
             context: the data source context.
         """
+        super().__init__(asset_bands=asset_bands)
+
         self.collection_name = collection_name
-        self.asset_bands = asset_bands
         self.query = query
         self.sort_by = sort_by
         self.sort_ascending = sort_ascending
@@ -220,6 +218,47 @@ class EarthDaily(DataSource, TileStore):
                 json.dump(item.serialize(), f)
 
         return item
+
+    # --- DirectMaterializeDataSource implementation ---
+
+    def get_asset_url(self, item_name: str, asset_key: str) -> str:
+        """Get the URL to read the asset for the given item and asset key.
+
+        Args:
+            item_name: the name of the item.
+            asset_key: the key identifying which asset to get.
+
+        Returns:
+            the URL to read the asset from.
+        """
+        item = self.get_item_by_name(item_name)
+        return item.asset_urls[asset_key]
+
+    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
+        """Get the sets of bands that have been stored for the specified item.
+
+        Args:
+            layer_name: the layer name or alias.
+            item_name: the item.
+
+        Returns:
+            a list of lists of bands available for this item.
+        """
+        if self.skip_items_missing_assets:
+            # In this case we can assume that the item has all of the assets.
+            return list(self.asset_bands.values())
+
+        # Otherwise we have to lookup the STAC item to see which assets it has.
+        # Here we use get_item_by_name since it handles caching.
+        item = self.get_item_by_name(item_name)
+        all_bands = []
+        for asset_key, band_names in self.asset_bands.items():
+            if asset_key not in item.asset_urls:
+                continue
+            all_bands.append(band_names)
+        return all_bands
+
+    # --- DataSource implementation ---
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
@@ -341,144 +380,3 @@ class EarthDaily(DataSource, TileStore):
                     item.name,
                     asset_key,
                 )
-
-    def is_raster_ready(
-        self, layer_name: str, item_name: str, bands: list[str]
-    ) -> bool:
-        """Checks if this raster has been written to the store.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item.
-            bands: the list of bands identifying which specific raster to read.
-
-        Returns:
-            whether there is a raster in the store matching the source, item, and
-                bands.
-        """
-        # Always ready since we wrap accesses to EarthDaily.
-        return True
-
-    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
-        """Get the sets of bands that have been stored for the specified item.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item.
-        """
-        if self.skip_items_missing_assets:
-            # In this case we can assume that the item has all of the assets.
-            return list(self.asset_bands.values())
-
-        # Otherwise we have to lookup the STAC item to see which assets it has.
-        # Here we use get_item_by_name since it handles caching.
-        item = self.get_item_by_name(item_name)
-        all_bands = []
-        for asset_key, band_names in self.asset_bands.items():
-            if asset_key not in item.asset_urls:
-                continue
-            all_bands.append(band_names)
-        return all_bands
-
-    def _get_asset_by_band(self, bands: list[str]) -> str:
-        """Get the name of the asset based on the band names."""
-        for asset_key, asset_bands in self.asset_bands.items():
-            if bands == asset_bands:
-                return asset_key
-
-        raise ValueError(f"no raster with bands {bands}")
-
-    def get_raster_bounds(
-        self, layer_name: str, item_name: str, bands: list[str], projection: Projection
-    ) -> PixelBounds:
-        """Get the bounds of the raster in the specified projection.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item to check.
-            bands: the list of bands identifying which specific raster to read. These
-                bands must match the bands of a stored raster.
-            projection: the projection to get the raster's bounds in.
-
-        Returns:
-            the bounds of the raster in the projection.
-        """
-        item = self.get_item_by_name(item_name)
-        geom = item.geometry.to_projection(projection)
-        return (
-            int(geom.shp.bounds[0]),
-            int(geom.shp.bounds[1]),
-            int(geom.shp.bounds[2]),
-            int(geom.shp.bounds[3]),
-        )
-
-    def read_raster(
-        self,
-        layer_name: str,
-        item_name: str,
-        bands: list[str],
-        projection: Projection,
-        bounds: PixelBounds,
-        resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
-        """Read raster data from the store.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item to read.
-            bands: the list of bands identifying which specific raster to read. These
-                bands must match the bands of a stored raster.
-            projection: the projection to read in.
-            bounds: the bounds to read.
-            resampling: the resampling method to use in case reprojection is needed.
-
-        Returns:
-            the raster data
-        """
-        asset_key = self._get_asset_by_band(bands)
-        item = self.get_item_by_name(item_name)
-        asset_url = item.asset_urls[asset_key]
-
-        # Construct the transform to use for the warped dataset.
-        wanted_transform = affine.Affine(
-            projection.x_resolution,
-            0,
-            bounds[0] * projection.x_resolution,
-            0,
-            projection.y_resolution,
-            bounds[1] * projection.y_resolution,
-        )
-
-        with rasterio.open(asset_url) as src:
-            with rasterio.vrt.WarpedVRT(
-                src,
-                crs=projection.crs,
-                transform=wanted_transform,
-                width=bounds[2] - bounds[0],
-                height=bounds[3] - bounds[1],
-                resampling=resampling,
-            ) as vrt:
-                return vrt.read()
-
-    def materialize(
-        self,
-        window: Window,
-        item_groups: list[list[Item]],
-        layer_name: str,
-        layer_cfg: LayerConfig,
-    ) -> None:
-        """Materialize data for the window.
-
-        Args:
-            window: the window to materialize
-            item_groups: the items from get_items
-            layer_name: the name of this layer
-            layer_cfg: the config of this layer
-        """
-        RasterMaterializer().materialize(
-            TileStoreWithLayer(self, layer_name),
-            window,
-            layer_name,
-            layer_cfg,
-            item_groups,
-        )
