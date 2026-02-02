@@ -3,6 +3,7 @@
 from typing import Any
 
 import torch
+from einops import rearrange
 
 from rslearn.train.model_context import ModelContext
 
@@ -78,9 +79,11 @@ class ConcatenateFeatures(IntermediateComponent):
                 "Expected input to be FeatureMaps with at least one feature map"
             )
 
-        # image is a 4D CTHW tensor
         add_data = torch.stack(
-            [input_data[self.key].image.flatten(0, 1) for input_data in context.inputs],
+            [
+                rearrange(input_data[self.key].image, "c t h w -> (c t) h w")
+                for input_data in context.inputs
+            ],
             dim=0,
         )
         add_features = self.conv_layers(add_data)
