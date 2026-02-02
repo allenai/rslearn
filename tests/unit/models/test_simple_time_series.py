@@ -44,7 +44,7 @@ def test_simple_time_series() -> None:
     extractor = IdentityFeatureExtractor(expected_timesteps=1)
     model = SimpleTimeSeries(
         encoder=extractor,
-        image_channels=1,
+        num_timesteps_per_forward_pass=1,
         op="mean",
         backbone_channels=[(1, 1)],
     )
@@ -82,11 +82,11 @@ def test_simple_time_series_multi_timestep_batching() -> None:
     """Test batching multiple timesteps together.
 
     This tests the case where we want to pass multiple timesteps to the model at once.
-    For example, if we have a CTHW tensor with C=3, T=4 and we set image_channels=6,
-    then we want the model to receive 2 timesteps at a time (6 / 3 = 2).
+    For example, if we have a CTHW tensor with C=3, T=4 and we set
+    num_timesteps_per_forward_pass=2, then the model receives 2 timesteps at a time.
     """
     # Input: C=3, T=4, H=8, W=8
-    # With image_channels=6, this should be split into 2 batches of 2 timesteps each.
+    # With num_timesteps_per_forward_pass=2, this is split into 2 batches of 2 timesteps.
     # Create 4 timesteps with values 1, 2, 3, 4 so we can verify the mean.
     timesteps = []
     for i in range(4):
@@ -107,7 +107,7 @@ def test_simple_time_series_multi_timestep_batching() -> None:
     extractor = IdentityFeatureExtractor(expected_timesteps=2)
     model = SimpleTimeSeries(
         encoder=extractor,
-        image_channels=6,
+        num_timesteps_per_forward_pass=2,
         op="max",
         backbone_channels=[(1, 3)],
     )
@@ -125,13 +125,14 @@ def test_simple_time_series_multi_timestep_batching() -> None:
 
 
 def test_simple_time_series_with_image_keys() -> None:
-    """Just make sure SimpleTimeSeries performs mean temporal pooling properly."""
+    """Test SimpleTimeSeries with image_keys as a list."""
     extractor = IdentityFeatureExtractor(expected_timesteps=1)
     model = SimpleTimeSeries(
         encoder=extractor,
+        num_timesteps_per_forward_pass=1,
         op="mean",
         backbone_channels=[(1, 1)],
-        image_keys={"image": 1},
+        image_keys=["image"],
     )
     # Try with input with two timesteps, one is 5s and one is 6s.
     input_dict = {

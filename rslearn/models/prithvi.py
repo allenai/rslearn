@@ -230,7 +230,6 @@ class PrithviNormalize(Transform):
         self.normalizer = Normalize(
             mean=config["mean"],
             std=config["std"],
-            num_bands=len(config["mean"]),
             selectors=[PrithviV2.INPUT_KEY],
         )
 

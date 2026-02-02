@@ -7,7 +7,7 @@ import huggingface_hub.constants
 import torch
 
 from rslearn.models.clay.clay import Clay, ClayNormalize, ClaySize
-from rslearn.train.model_context import ModelContext
+from rslearn.train.model_context import ModelContext, RasterImage
 
 
 def test_clay(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
@@ -20,7 +20,9 @@ def test_clay(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
     # One input sample, Sentinel-2 L2A modality, 10 bands x 32 x 32
     inputs = [
         {
-            "sentinel-2-l2a": torch.zeros((10, 32, 32), dtype=torch.float32),
+            "sentinel-2-l2a": RasterImage(
+                torch.zeros((10, 1, 32, 32), dtype=torch.float32)
+            ),
         }
     ]
 
