@@ -18,7 +18,7 @@ from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils.geometry import PixelBounds, Projection
 
 
-class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
+class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
     """Base class for data sources that support direct materialization via TileStore.
 
     This class provides common TileStore functionality for data sources that can read
@@ -38,7 +38,7 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
     """
 
     def __init__(self, asset_bands: dict[str, list[str]]):
-        """Initialize the TileStoreDataSource.
+        """Initialize the DirectMaterializeDataSource.
 
         Args:
             asset_bands: mapping from asset key to the list of band names in that asset.
@@ -288,7 +288,7 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
         This is not supported for remote-backed tile stores.
         """
         raise NotImplementedError(
-            "TileStoreDataSource does not support writing raster data"
+            "DirectMaterializeDataSource does not support writing raster data"
         )
 
     def write_raster_file(
@@ -299,7 +299,7 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
         This is not supported for remote-backed tile stores.
         """
         raise NotImplementedError(
-            "TileStoreDataSource does not support writing raster files"
+            "DirectMaterializeDataSource does not support writing raster files"
         )
 
     def is_vector_ready(self, layer_name: str, item_name: str) -> bool:
@@ -308,7 +308,7 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
         This is not supported for remote-backed tile stores.
         """
         raise NotImplementedError(
-            "TileStoreDataSource does not support vector operations"
+            "DirectMaterializeDataSource does not support vector operations"
         )
 
     def read_vector(
@@ -323,7 +323,7 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
         This is not supported for remote-backed tile stores.
         """
         raise NotImplementedError(
-            "TileStoreDataSource does not support vector operations"
+            "DirectMaterializeDataSource does not support vector operations"
         )
 
     def write_vector(self, layer_name: str, item_name: str, features: Any) -> None:
@@ -332,5 +332,5 @@ class TileStoreDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
         This is not supported for remote-backed tile stores.
         """
         raise NotImplementedError(
-            "TileStoreDataSource does not support vector operations"
+            "DirectMaterializeDataSource does not support vector operations"
         )

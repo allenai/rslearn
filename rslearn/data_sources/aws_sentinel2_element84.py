@@ -12,8 +12,10 @@ import rasterio
 import requests
 from upath import UPath
 
+from rslearn.data_sources.direct_materialize_data_source import (
+    DirectMaterializeDataSource,
+)
 from rslearn.data_sources.stac import SourceItem, StacDataSource
-from rslearn.data_sources.tile_store_data_source import TileStoreDataSource
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
@@ -27,7 +29,7 @@ from .data_source import (
 logger = get_logger(__name__)
 
 
-class Sentinel2(TileStoreDataSource[SourceItem], StacDataSource):
+class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
     """A data source for Sentinel-2 L2A imagery on AWS from s3://sentinel-cogs.
 
     The S3 bucket has COGs so this data source supports direct materialization. It also
@@ -110,8 +112,8 @@ class Sentinel2(TileStoreDataSource[SourceItem], StacDataSource):
         else:
             asset_bands = dict(self.ASSET_BANDS)
 
-        # Initialize TileStoreDataSource with asset_bands
-        TileStoreDataSource.__init__(self, asset_bands=asset_bands)
+        # Initialize DirectMaterializeDataSource with asset_bands
+        DirectMaterializeDataSource.__init__(self, asset_bands=asset_bands)
 
         # Initialize StacDataSource
         StacDataSource.__init__(
@@ -129,7 +131,7 @@ class Sentinel2(TileStoreDataSource[SourceItem], StacDataSource):
         self.harmonize = harmonize
         self.timeout = timeout
 
-    # --- TileStoreDataSource implementation ---
+    # --- DirectMaterializeDataSource implementation ---
 
     def get_asset_url(self, item_name: str, asset_key: str) -> str:
         """Get the URL to read the asset for the given item and asset key.

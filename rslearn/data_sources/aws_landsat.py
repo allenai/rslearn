@@ -22,7 +22,9 @@ from upath import UPath
 
 import rslearn.data_sources.utils
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_PROJECTION
-from rslearn.data_sources.tile_store_data_source import TileStoreDataSource
+from rslearn.data_sources.direct_materialize_data_source import (
+    DirectMaterializeDataSource,
+)
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 from rslearn.utils.geometry import STGeometry
@@ -73,7 +75,7 @@ class LandsatOliTirsItem(Item):
         )
 
 
-class LandsatOliTirs(TileStoreDataSource[LandsatOliTirsItem]):
+class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
     """A data source for Landsat 8/9 OLI-TIRS imagery on AWS.
 
     Specifically, uses the usgs-landsat S3 bucket maintained by USGS. The data includes
@@ -340,7 +342,7 @@ class LandsatOliTirs(TileStoreDataSource[LandsatOliTirsItem]):
                 return item
         raise ValueError(f"item {name} not found")
 
-    # --- TileStoreDataSource implementation ---
+    # --- DirectMaterializeDataSource implementation ---
 
     def get_asset_url(self, item_name: str, asset_key: str) -> str:
         """Get the presigned URL to read the asset for the given item and asset key.

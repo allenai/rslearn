@@ -15,8 +15,10 @@ from typing_extensions import override
 from upath import UPath
 
 from rslearn.data_sources import DataSourceContext
+from rslearn.data_sources.direct_materialize_data_source import (
+    DirectMaterializeDataSource,
+)
 from rslearn.data_sources.stac import SourceItem, StacDataSource
-from rslearn.data_sources.tile_store_data_source import TileStoreDataSource
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath
@@ -121,7 +123,7 @@ class PlanetaryComputerStacClient(StacClient):
         return all_items
 
 
-class PlanetaryComputer(TileStoreDataSource[SourceItem], StacDataSource):
+class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource):
     """Modality-agnostic data source for data on Microsoft Planetary Computer.
 
     If there is a subclass available for a modality, it is recommended to use the
@@ -167,8 +169,8 @@ class PlanetaryComputer(TileStoreDataSource[SourceItem], StacDataSource):
                 needed each time.
             context: the data source context.
         """
-        # Initialize the TileStoreDataSource with asset_bands
-        TileStoreDataSource.__init__(self, asset_bands=asset_bands)
+        # Initialize the DirectMaterializeDataSource with asset_bands
+        DirectMaterializeDataSource.__init__(self, asset_bands=asset_bands)
 
         # Determine the cache_dir to use.
         cache_upath: UPath | None = None
@@ -202,7 +204,7 @@ class PlanetaryComputer(TileStoreDataSource[SourceItem], StacDataSource):
         self.timeout = timeout
         self.skip_items_missing_assets = skip_items_missing_assets
 
-    # --- TileStoreDataSource implementation ---
+    # --- DirectMaterializeDataSource implementation ---
 
     def get_asset_url(self, item_name: str, asset_key: str) -> str:
         """Get the signed URL to read the asset for the given item and asset key.

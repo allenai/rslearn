@@ -16,7 +16,9 @@ from upath import UPath
 from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSourceContext, Item
-from rslearn.data_sources.tile_store_data_source import TileStoreDataSource
+from rslearn.data_sources.direct_materialize_data_source import (
+    DirectMaterializeDataSource,
+)
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
@@ -57,7 +59,7 @@ class EarthDailyItem(Item):
         )
 
 
-class EarthDaily(TileStoreDataSource[EarthDailyItem]):
+class EarthDaily(DirectMaterializeDataSource[EarthDailyItem]):
     """A data source for EarthDaily data.
 
     This requires the following environment variables to be set:
@@ -217,7 +219,7 @@ class EarthDaily(TileStoreDataSource[EarthDailyItem]):
 
         return item
 
-    # --- TileStoreDataSource implementation ---
+    # --- DirectMaterializeDataSource implementation ---
 
     def get_asset_url(self, item_name: str, asset_key: str) -> str:
         """Get the URL to read the asset for the given item and asset key.
