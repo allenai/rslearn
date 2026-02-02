@@ -661,6 +661,7 @@ class LandsatC2L2(PlanetaryComputer):
     def __init__(
         self,
         band_names: list[str] | None = None,
+        query: dict[str, Any] | None = None,
         context: DataSourceContext = DataSourceContext(),
         **kwargs: Any,
     ):
@@ -670,6 +671,9 @@ class LandsatC2L2(PlanetaryComputer):
             band_names: optional list of band names to expose. Values can be either
                 STAC common names (preferred) or STAC `eo:bands[].name` aliases.
                 If not provided, defaults to the reflectance bands listed in BANDS.
+            query: optional STAC query filter to use. By default, a filter is applied
+                to include only Landsat 8/9 items; you can override this by setting
+                the `platform` query field explicitly.
             context: the data source context.
             kwargs: additional arguments to pass to PlanetaryComputer.
         """
@@ -689,7 +693,6 @@ class LandsatC2L2(PlanetaryComputer):
         asset_bands = {self.BAND_TO_ASSET_COMMON_NAME[band]: [band] for band in band_names}
 
         # Ensure we filter to Landsat 8/9 by default (allow override by passing query).
-        query = kwargs.pop("query", None)
         combined_query: dict[str, Any] = dict(query) if query else {}
         combined_query.setdefault("platform", dict(self.DEFAULT_PLATFORM_QUERY["platform"]))
 
