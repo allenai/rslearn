@@ -590,6 +590,120 @@ class Sentinel2(PlanetaryComputer):
         return array
 
 
+class LandsatC2L2(PlanetaryComputer):
+    """A data source for Landsat Collection 2 Level-2 data on Planetary Computer.
+
+    This data source targets Landsat 8/9 items in the `landsat-c2-l2` collection.
+    Band names exposed by this data source are Landsat-style band identifiers
+    (e.g. "B4", "B5", "B10") for maximum compatibility with
+    `rslearn.data_sources.aws_landsat.LandsatOliTirs`.
+
+    For convenience, configuration also accepts STAC `common_name` values (e.g. "red",
+    "nir08") and STAC `eo:bands[].name` aliases (e.g. "OLI_B4", "TIRS_B10"), which are
+    normalized to the Landsat-style band identifiers above.
+
+    Note: this is Level-2 data, not Level-1. If you need Level-1-specific bands
+    (e.g. panchromatic/cirrus or thermal band 11), use
+    `rslearn.data_sources.aws_landsat.LandsatOliTirs`.
+    """
+
+    COLLECTION_NAME = "landsat-c2-l2"
+
+    # Map STAC asset keys (common_name) to the Landsat band identifiers we expose.
+    # Planetary Computer assets for `landsat-c2-l2` are keyed by common_name.
+    ASSET_COMMON_NAME_TO_BAND = {
+        "coastal": "B1",
+        "blue": "B2",
+        "green": "B3",
+        "red": "B4",
+        "nir08": "B5",
+        "swir16": "B6",
+        "swir22": "B7",
+        "lwir11": "B10",
+    }
+
+    BAND_TO_ASSET_COMMON_NAME = {v: k for k, v in ASSET_COMMON_NAME_TO_BAND.items()}
+
+    # STAC eo:bands name -> Landsat-style band identifiers.
+    STAC_BAND_NAME_ALIASES = {
+        "OLI_B1": "B1",
+        "OLI_B2": "B2",
+        "OLI_B3": "B3",
+        "OLI_B4": "B4",
+        "OLI_B5": "B5",
+        "OLI_B6": "B6",
+        "OLI_B7": "B7",
+        "TIRS_B10": "B10",
+    }
+
+    DEFAULT_PLATFORM_QUERY = {"platform": {"in": ["landsat-8", "landsat-9"]}}
+
+    @classmethod
+    def _normalize_band_name(cls, band: str) -> str:
+        if band in cls.BAND_TO_ASSET_COMMON_NAME:
+            return band
+        if band in cls.ASSET_COMMON_NAME_TO_BAND:
+            return cls.ASSET_COMMON_NAME_TO_BAND[band]
+        if band in cls.STAC_BAND_NAME_ALIASES:
+            return cls.STAC_BAND_NAME_ALIASES[band]
+        if band in {"B8", "B9", "B11"}:
+            raise ValueError(
+                f"LandsatC2L2 does not provide {band} in the Planetary Computer "
+                "landsat-c2-l2 collection. Use rslearn.data_sources.aws_landsat.LandsatOliTirs "
+                "for Level-1 bands like panchromatic (B8), cirrus (B9), or thermal band 11 (B11)."
+            )
+        raise ValueError(
+            f"unknown Landsat band '{band}'. Use one of {sorted(cls.BAND_TO_ASSET_COMMON_NAME.keys())} "
+            f"(Landsat band names), {sorted(cls.ASSET_COMMON_NAME_TO_BAND.keys())} (STAC common names), "
+            f"or {sorted(cls.STAC_BAND_NAME_ALIASES.keys())} (STAC band names)."
+        )
+
+    def __init__(
+        self,
+        band_names: list[str] | None = None,
+        context: DataSourceContext = DataSourceContext(),
+        **kwargs: Any,
+    ):
+        """Initialize a new LandsatC2L2 instance.
+
+        Args:
+            band_names: optional list of band names to expose. Values can be either
+                STAC common names (preferred) or STAC `eo:bands[].name` aliases.
+                If not provided, defaults to the reflectance bands listed in BANDS.
+            context: the data source context.
+            kwargs: additional arguments to pass to PlanetaryComputer.
+        """
+        # Prefer determining bands from the configured layer config (if present).
+        if context.layer_config is not None:
+            requested_bands = {
+                band for band_set in context.layer_config.band_sets for band in band_set.bands
+            }
+            band_names = [self._normalize_band_name(band) for band in requested_bands]
+        elif band_names is not None:
+            band_names = [self._normalize_band_name(band) for band in band_names]
+        else:
+            band_names = list(self.BAND_TO_ASSET_COMMON_NAME.keys())
+
+        # Landsat C2 L2 assets are keyed by common name; each asset is a single band.
+        # We expose Landsat-style band identifiers (B1, B2, ...).
+        asset_bands = {self.BAND_TO_ASSET_COMMON_NAME[band]: [band] for band in band_names}
+
+        # Ensure we filter to Landsat 8/9 by default (allow override by passing query).
+        query = kwargs.pop("query", None)
+        combined_query: dict[str, Any] = dict(query) if query else {}
+        combined_query.setdefault("platform", dict(self.DEFAULT_PLATFORM_QUERY["platform"]))
+
+        super().__init__(
+            collection_name=self.COLLECTION_NAME,
+            asset_bands=asset_bands,
+            query=combined_query if combined_query else None,
+            # Skip per-item asset checks; required assets are derived from asset_bands.
+            skip_items_missing_assets=True,
+            context=context,
+            **kwargs,
+        )
+
+
 class Sentinel1(PlanetaryComputer):
     """A data source for Sentinel-1 data on Microsoft Planetary Computer.
 
