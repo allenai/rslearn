@@ -57,16 +57,10 @@ class Flip(Transform):
             image: the image to transform.
             state: the sampled state.
         """
-        if isinstance(image, RasterImage):
-            if state["horizontal"]:
-                image.image = torch.flip(image.image, dims=[-1])
-            if state["vertical"]:
-                image.image = torch.flip(image.image, dims=[-2])
-        elif isinstance(image, torch.Tensor):
-            if state["horizontal"]:
-                image = torch.flip(image, dims=[-1])
-            if state["vertical"]:
-                image = torch.flip(image, dims=[-2])
+        if state["horizontal"]:
+            image.image = torch.flip(image.image, dims=[-1])
+        if state["vertical"]:
+            image.image = torch.flip(image.image, dims=[-2])
         return image
 
     def apply_boxes(

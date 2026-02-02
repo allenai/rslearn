@@ -22,7 +22,7 @@ from rslearn.config import LayerConfig, QueryConfig
 from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
-from rslearn.utils import PixelBounds, Projection, STGeometry
+from rslearn.utils import PixelBounds, Projection, STGeometry, get_global_raster_bounds
 from rslearn.utils.geometry import get_global_geometry
 from rslearn.utils.raster_format import get_transform_from_projection_and_bounds
 
@@ -170,7 +170,7 @@ class SoilGrids(DataSource, TileStore):
         """Return (approximate) bounds for this raster in the requested projection."""
         # We don't know bounds without an extra metadata request; treat as "very large"
         # so materialization always attempts reads for windows.
-        return (-(10**9), -(10**9), 10**9, 10**9)
+        return get_global_raster_bounds(projection)
 
     def _download_geotiff(
         self,

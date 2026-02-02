@@ -2,7 +2,6 @@
 
 from typing import Any
 
-import torch
 import torchvision
 from torchvision.transforms import InterpolationMode
 
@@ -40,32 +39,16 @@ class Resize(Transform):
         self.selectors = selectors
         self.interpolation = INTERPOLATION_MODES[interpolation]
 
-    def apply_resize(
-        self, image: torch.Tensor | RasterImage
-    ) -> torch.Tensor | RasterImage:
+    def apply_resize(self, image: RasterImage) -> RasterImage:
         """Apply resizing on the specified image.
-
-        If the image is 2D, it is unsqueezed to 3D and then squeezed
-        back after resizing.
 
         Args:
             image: the image to transform.
         """
-        if isinstance(image, torch.Tensor):
-            if image.dim() == 2:
-                image = image.unsqueeze(0)  # (H, W) -> (1, H, W)
-                result = torchvision.transforms.functional.resize(
-                    image, self.target_size, self.interpolation
-                )
-                return result.squeeze(0)  # (1, H, W) -> (H, W)
-            return torchvision.transforms.functional.resize(
-                image, self.target_size, self.interpolation
-            )
-        else:
-            image.image = torchvision.transforms.functional.resize(
-                image.image, self.target_size, self.interpolation
-            )
-            return image
+        image.image = torchvision.transforms.functional.resize(
+            image.image, self.target_size, self.interpolation
+        )
+        return image
 
     def forward(
         self, input_dict: dict[str, Any], target_dict: dict[str, Any]

@@ -21,7 +21,7 @@ from rslearn.utils.vector_format import GeojsonVectorFormat
 def basic_classification_dataset(tmp_path: pathlib.Path) -> Dataset:
     """Create an empty dataset setup for image classification.
 
-    This is used in test_dataset.py and test_all_patches_dataset.py.
+    This is used in test_dataset.py and test_all_crops_dataset.py.
     """
     ds_path = UPath(tmp_path)
     dataset_config = {
@@ -59,6 +59,7 @@ def add_window(
     group: str = "default",
     images: dict[tuple[str, int], npt.NDArray] = {},
     bounds: PixelBounds = (0, 0, 4, 4),
+    window_name: str | None = None,
 ) -> Window:
     """Add a window to the basic classification dataset.
 
@@ -72,9 +73,11 @@ def add_window(
         images: map from (layer_name, group_idx) to the image content, which should be
             1x4x4 since that is the window size.
     """
+    _name = window_name if window_name is not None else name
+
     window = Window(
         storage=dataset.storage,
-        name=name,
+        name=_name,
         group=group,
         projection=WGS84_PROJECTION,
         bounds=bounds,
