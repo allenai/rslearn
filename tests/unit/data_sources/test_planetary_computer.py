@@ -97,3 +97,9 @@ def test_landsat_c2_l2_allows_overriding_platform_query() -> None:
     data_source = LandsatC2L2(query={"platform": {"in": ["landsat-8"]}})
     assert data_source.query is not None
     assert data_source.query["platform"]["in"] == ["landsat-8"]
+
+
+def test_landsat_c2_l2_uses_user_query_unmodified() -> None:
+    query = {"eo:cloud_cover": {"lt": 5}}
+    data_source = LandsatC2L2(query=query)
+    assert data_source.query == query

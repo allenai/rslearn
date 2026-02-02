@@ -1245,8 +1245,11 @@ like B8 (panchromatic), B9 (cirrus / OLI_B9), and B11 (thermal / TIRS_B11). If y
   // ("B1", "B2", ..., "B10") or the STAC common names / STAC `eo:bands[].name`
   // aliases listed above (e.g. "red" or "OLI_B4").
   "band_names": null,
-  // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
+  // Optional STAC query filter. If not set, this defaults to:
+  // {"platform": {"in": ["landsat-8", "landsat-9"]}}
+  // If set, it is passed through as-is (no implicit platform filtering is added).
   "query": null,
+  // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
   "sort_by": null,
   "sort_ascending": true,
   "timeout_seconds": 10
