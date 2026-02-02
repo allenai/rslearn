@@ -211,7 +211,7 @@ data:
             band_names:
               sentinel2_l2a: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
               sentinel1: ["vv", "vh"]
-      # We apply sliding window inference (using 64x64 input crops) with overlap.
+      # We apply sliding-window inference (using 64x64 input crops) with overlap.
       load_all_crops: true
       # This is the crop size for inference.
       crop_size: 64
@@ -227,6 +227,8 @@ trainer:
         # file to store the embeddings.
         output_layer: embeddings
         merger:
+          # The RasterMerge will merge the outputs across the different sliding-window
+          # crops that pertain to the same rslearn windows.
           class_path: rslearn.train.prediction_writer.RasterMerger
           init_args:
             # This removes the border from the overlap_pixels. With model patch size 4
@@ -234,9 +236,11 @@ trainer:
             # overlap_pixels=32 at input resolution, which is 8 pixels at output
             # resolution, so we remove 4 pixels from each side.
             overlap_pixels: 8
-            # Set this equal to patch size, so the merger expects the output from the
-            # task to be at 1/(downsample_factor) resolution relative to the window
-            # resolution.
+            # This lets the merger know what output resolution to expect relative to
+            # the window's resolution. Here, our output will be 1/patch_size relative
+            # to the window resolution (input resolution), since we compute one
+            # embedding per patch in the input, so we set the downsample_factor to
+            # patch_size.
             downsample_factor: 4
 ```
 
