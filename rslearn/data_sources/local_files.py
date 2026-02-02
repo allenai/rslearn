@@ -490,7 +490,7 @@ class LocalFiles(DataSource):
             groups.append(cur_groups)
         return groups
 
-    def deserialize_item(self, serialized_item: Any) -> RasterItem | VectorItem:
+    def deserialize_item(self, serialized_item: dict) -> RasterItem | VectorItem:
         """Deserializes an item from JSON-decoded data."""
         if self.layer_type == LayerType.RASTER:
             return RasterItem.deserialize(serialized_item)
