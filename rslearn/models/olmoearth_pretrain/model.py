@@ -94,8 +94,8 @@ class OlmoEarth(FeatureExtractor):
                 from 0 (instead of the actual timestamps of the input). The option to do this is preserved
                 for backwards compatability with finetuned models which were trained against this implementation.
             compile_backbone: whether to compile the backbone model with torch.compile
-                for potential speedup. Uses mode="max-autotune", dynamic=False,
-                fullgraph=True. Default is False.
+                for potential speedup. Uses mode="max-autotune-no-cudagraphs",
+                dynamic=False, fullgraph=False. Default is False.
         """
         if use_legacy_timestamps:
             warnings.warn(
@@ -159,13 +159,13 @@ class OlmoEarth(FeatureExtractor):
         # Compile the backbone if requested
         if compile_backbone:
             logger.info(
-                "Compiling OlmoEarth backbone with torch.compile (max-autotune)"
+                "Compiling OlmoEarth backbone with torch.compile (max-autotune-no-cudagraphs)"
             )
             self.model = torch.compile(
                 self.model,
-                mode="max-autotune",
+                mode="max-autotune-no-cudagraphs",
                 dynamic=False,
-                fullgraph=True,
+                fullgraph=False,
             )
 
     def _load_model_from_checkpoint(
