@@ -6,6 +6,7 @@ from typing import Any
 
 import lightning as L
 import torch
+import wandb
 from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
 from PIL import Image
 from upath import UPath
@@ -223,10 +224,14 @@ class RslearnLightningModule(L.LightningModule):
         if self.trainer.sanity_checking:
             return
 
-        try:
-            value.log_to_wandb(name)
-        except Exception:
-            logger.warning(f"Failed to log {name}", exc_info=True)
+        # Wandb is required for logging non-scalar metrics.
+        if not wandb.run:
+            logger.warning(
+                f"Weights & Biases is not initialized, skipping logging of {name}"
+            )
+            return
+
+        value.log_to_wandb(name)
 
     def on_validation_epoch_end(self) -> None:
         """Compute and log validation metrics at epoch end.

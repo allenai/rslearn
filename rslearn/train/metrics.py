@@ -15,24 +15,13 @@ logger = get_logger(__name__)
 class NonScalarMetricOutput(ABC):
     """Base class for non-scalar metric outputs that need special logging.
 
-    Subclasses should implement the _do_log_to_wandb method to define how the metric
+    Subclasses should implement the log_to_wandb method to define how the metric
     should be logged (only supports logging to Weights & Biases).
     """
 
+    @abstractmethod
     def log_to_wandb(self, name: str) -> None:
         """Log this metric to wandb.
-
-        Args:
-            name: the metric name
-        """
-        if not wandb.run:
-            logger.warning(f"wandb is not initialized, skipping {name}")
-            return
-        self._do_log_to_wandb(name)
-
-    @abstractmethod
-    def _do_log_to_wandb(self, name: str) -> None:
-        """Subclass hook to perform the actual wandb logging.
 
         Args:
             name: the metric name
@@ -81,7 +70,7 @@ class ConfusionMatrixOutput(NonScalarMetricOutput):
 
         return preds, labels
 
-    def _do_log_to_wandb(self, name: str) -> None:
+    def log_to_wandb(self, name: str) -> None:
         """Log confusion matrix to wandb.
 
         Args:
