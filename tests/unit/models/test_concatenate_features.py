@@ -4,7 +4,7 @@ import torch
 
 from rslearn.models.component import FeatureMaps
 from rslearn.models.concatenate_features import ConcatenateFeatures
-from rslearn.train.model_context import ModelContext
+from rslearn.train.model_context import ModelContext, RasterImage
 
 
 def test_concatenate_features_with_conv_layer() -> None:
@@ -18,8 +18,8 @@ def test_concatenate_features_with_conv_layer() -> None:
         ]
     )
     inputs = [
-        {"input_key": torch.randn(2, 32, 32)},
-        {"input_key": torch.randn(2, 32, 32)},
+        {"input_key": RasterImage(torch.randn(2, 1, 32, 32))},
+        {"input_key": RasterImage(torch.randn(2, 1, 32, 32))},
     ]
     concatenate_features = ConcatenateFeatures(
         key="input_key",
@@ -50,8 +50,8 @@ def test_concatenate_features_without_conv_layer() -> None:
         ]
     )
     inputs = [
-        {"input_key": torch.randn(2, 32, 32)},
-        {"input_key": torch.randn(2, 32, 32)},
+        {"input_key": RasterImage(torch.randn(2, 1, 32, 32))},
+        {"input_key": RasterImage(torch.randn(2, 1, 32, 32))},
     ]
     concatenate_features = ConcatenateFeatures(
         key="input_key",
