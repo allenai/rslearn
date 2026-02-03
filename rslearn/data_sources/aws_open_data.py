@@ -318,9 +318,8 @@ class Naip(DataSource):
             groups.append(cur_groups)
         return groups
 
-    def deserialize_item(self, serialized_item: Any) -> NaipItem:
+    def deserialize_item(self, serialized_item: dict) -> NaipItem:
         """Deserializes an item from JSON-decoded data."""
-        assert isinstance(serialized_item, dict)
         return NaipItem.deserialize(serialized_item)
 
     def ingest(
@@ -639,9 +638,8 @@ class Sentinel2(
                 return item
         raise ValueError(f"item {name} not found")
 
-    def deserialize_item(self, serialized_item: Any) -> Sentinel2Item:
+    def deserialize_item(self, serialized_item: dict) -> Sentinel2Item:
         """Deserializes an item from JSON-decoded data."""
-        assert isinstance(serialized_item, dict)
         return Sentinel2Item.deserialize(serialized_item)
 
     def retrieve_item(

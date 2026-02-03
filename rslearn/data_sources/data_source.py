@@ -76,7 +76,7 @@ class DataSource(Generic[ItemType]):
         """
         raise NotImplementedError
 
-    def deserialize_item(self, serialized_item: Any) -> ItemType:
+    def deserialize_item(self, serialized_item: dict) -> ItemType:
         """Deserializes an item from JSON-decoded data."""
         raise NotImplementedError
 
