@@ -270,7 +270,6 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
 
         return groups
 
-    def deserialize_item(self, serialized_item: Any) -> SourceItem:
+    def deserialize_item(self, serialized_item: dict) -> SourceItem:
         """Deserializes an item from JSON-decoded data."""
-        assert isinstance(serialized_item, dict)
         return SourceItem.deserialize(serialized_item)
