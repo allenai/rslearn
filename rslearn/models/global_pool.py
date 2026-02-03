@@ -51,7 +51,7 @@ class GlobalPool(IntermediateComponent):
             # feat is BCHW
             if self.mode == "mean":
                 pooled = feat.mean(dim=(2, 3), keepdim=True)
-            else:  # max
+            else:
                 pooled = torch.amax(feat, dim=(2, 3), keepdim=True)
             pooled_features.append(pooled)
 
