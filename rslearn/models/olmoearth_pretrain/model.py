@@ -63,6 +63,7 @@ class OlmoEarth(FeatureExtractor):
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
         use_legacy_timestamps: bool = True,
+        compile_backbone: bool = False,
     ):
         """Create a new OlmoEarth model.
 
@@ -92,6 +93,9 @@ class OlmoEarth(FeatureExtractor):
             use_legacy_timestamps: In our original implementation of OlmoEarth, we applied timestamps starting
                 from 0 (instead of the actual timestamps of the input). The option to do this is preserved
                 for backwards compatability with finetuned models which were trained against this implementation.
+            compile_backbone: whether to compile the backbone model with torch.compile
+                for potential speedup. Uses mode="max-autotune", dynamic=False,
+                fullgraph=True. Default is False.
         """
         if use_legacy_timestamps:
             warnings.warn(
@@ -151,6 +155,18 @@ class OlmoEarth(FeatureExtractor):
         self.model = model
         self.token_pooling = token_pooling
         self.use_legacy_timestamps = use_legacy_timestamps
+
+        # Compile the backbone if requested
+        if compile_backbone:
+            logger.info(
+                "Compiling OlmoEarth backbone with torch.compile (max-autotune)"
+            )
+            self.model = torch.compile(
+                self.model,
+                mode="max-autotune",
+                dynamic=False,
+                fullgraph=True,
+            )
 
     def _load_model_from_checkpoint(
         self, checkpoint_upath: UPath, random_initialization: bool
