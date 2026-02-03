@@ -218,7 +218,8 @@ class RslearnLightningModule(L.LightningModule):
             name: the metric name (e.g., "val_confusion_matrix")
             value: the non-scalar metric output
         """
-        # Skip during Lightning sanity check
+        # The non-scalar metrics are logging directly without Lightning
+        # So we need to skip logging during sanity check.
         if self.trainer.sanity_checking:
             return
 
