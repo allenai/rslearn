@@ -324,9 +324,8 @@ class EarthDaily(DirectMaterializeDataSource[EarthDailyItem]):
 
         return groups
 
-    def deserialize_item(self, serialized_item: Any) -> EarthDailyItem:
+    def deserialize_item(self, serialized_item: dict) -> EarthDailyItem:
         """Deserializes an item from JSON-decoded data."""
-        assert isinstance(serialized_item, dict)
         return EarthDailyItem.deserialize(serialized_item)
 
     def ingest(

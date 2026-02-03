@@ -183,9 +183,8 @@ class LandsatOliTirs(DataSource):
         )
         return self._scene_metadata_to_item(scene_metadata)
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: dict) -> Item:
         """Deserializes an item from JSON-decoded data."""
-        assert isinstance(serialized_item, dict)
         return LandsatOliTirsItem.deserialize(serialized_item)
 
     def _get_download_urls(self, item: Item) -> dict[str, tuple[str, str]]:

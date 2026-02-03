@@ -9,7 +9,7 @@ import urllib.request
 import zipfile
 from collections.abc import Generator
 from datetime import datetime
-from typing import Any, BinaryIO
+from typing import BinaryIO
 
 import boto3
 import dateutil.parser
@@ -370,9 +370,8 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
 
     # --- DataSource implementation ---
 
-    def deserialize_item(self, serialized_item: Any) -> LandsatOliTirsItem:
+    def deserialize_item(self, serialized_item: dict) -> LandsatOliTirsItem:
         """Deserializes an item from JSON-decoded data."""
-        assert isinstance(serialized_item, dict)
         return LandsatOliTirsItem.deserialize(serialized_item)
 
     def retrieve_item(
