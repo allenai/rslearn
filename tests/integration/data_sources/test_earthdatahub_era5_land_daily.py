@@ -1,19 +1,21 @@
+from datetime import UTC, datetime
+from pathlib import Path
+
 import numpy as np
 import pytest
 import rasterio
 import shapely
-from datetime import UTC, datetime
 
 
-def test_era5land_dailyutc_v1_ingest_from_local_zarr(tmp_path) -> None:
+def test_era5land_dailyutc_v1_ingest_from_local_zarr(tmp_path: Path) -> None:
     import xarray as xr
     import zarr  # noqa: F401
+    from upath import UPath
 
     from rslearn.const import WGS84_PROJECTION
     from rslearn.data_sources.earthdatahub import ERA5LandDailyUTCv1
     from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
     from rslearn.utils.geometry import STGeometry
-    from upath import UPath
 
     valid_time = np.array(["2020-01-01", "2020-01-02"], dtype="datetime64[ns]")
     latitude = np.array([1.0, 0.9], dtype=np.float64)  # descending, 0.1 deg spacing
@@ -93,20 +95,22 @@ def test_era5land_dailyutc_v1_ingest_from_local_zarr(tmp_path) -> None:
         assert np.allclose(out[1], tp[idx])
 
 
-def test_era5land_dailyutc_v1_ingest_negative_longitude_bounds(tmp_path) -> None:
+def test_era5land_dailyutc_v1_ingest_negative_longitude_bounds(tmp_path: Path) -> None:
     import xarray as xr
     import zarr  # noqa: F401
+    from upath import UPath
 
+    from rslearn.config import QueryConfig
+    from rslearn.const import WGS84_PROJECTION
     from rslearn.data_sources.earthdatahub import ERA5LandDailyUTCv1
     from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
     from rslearn.utils.geometry import STGeometry
-    from rslearn.config import QueryConfig
-    from rslearn.const import WGS84_PROJECTION
-    from upath import UPath
 
     valid_time = np.array(["2024-06-01", "2024-06-02"], dtype="datetime64[ns]")
     latitude = np.array([51.6, 51.5], dtype=np.float64)  # descending, 0.1 deg spacing
-    longitude = np.array([359.8, 359.9], dtype=np.float64)  # 0..360 convention near Greenwich
+    longitude = np.array(
+        [359.8, 359.9], dtype=np.float64
+    )  # 0..360 convention near Greenwich
 
     t2m = np.array(
         [
@@ -185,7 +189,9 @@ def test_era5land_dailyutc_v1_ingest_negative_longitude_bounds(tmp_path) -> None
         assert np.allclose(out[1], tp[idx])
 
 
-def test_era5land_dailyutc_v1_bounds_cross_dateline_error_message(tmp_path) -> None:
+def test_era5land_dailyutc_v1_bounds_cross_dateline_error_message(
+    tmp_path: Path,
+) -> None:
     from rslearn.data_sources.earthdatahub import ERA5LandDailyUTCv1
 
     with pytest.raises(ValueError, match=r"does not yet support .* cross the dateline"):

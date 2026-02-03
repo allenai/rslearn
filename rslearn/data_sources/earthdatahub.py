@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import math
 import os
 import tempfile
 from datetime import UTC, datetime, timedelta
-import math
 from typing import Any, Literal
 
 import numpy as np
@@ -191,7 +191,9 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         elif band_names is not None:
             self.band_names = band_names
         else:
-            raise ValueError("band_names must be set if layer_config is not in the context")
+            raise ValueError(
+                "band_names must be set if layer_config is not in the context"
+            )
 
         invalid_bands = [b for b in self.band_names if b not in self.ALLOWED_BANDS]
         if invalid_bands:
@@ -202,7 +204,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
 
         self._ds: Any | None = None
 
-    def _get_dataset(self):
+    def _get_dataset(self) -> xr.Dataset:
         """Open (and memoize) the backing ERA5-Land Zarr dataset."""
         if self._ds is not None:
             return self._ds
