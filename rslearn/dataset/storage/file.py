@@ -78,6 +78,8 @@ class FileWindowStorage(WindowStorage):
         if not groups:
             groups = []
             for p in (self.path / "windows").iterdir():
+                if not p.is_dir():
+                    continue
                 groups.append(p.name)
         for group in groups:
             group_dir = self.path / "windows" / group
@@ -86,15 +88,24 @@ class FileWindowStorage(WindowStorage):
                     f"Skipping group directory {group_dir} since it does not exist"
                 )
                 continue
+            if not group_dir.is_dir():
+                logger.warning(
+                    f"Skipping group path {group_dir} since it is not a directory"
+                )
+                continue
             if names:
                 cur_names = names
             else:
                 cur_names = []
                 for p in group_dir.iterdir():
+                    if not p.is_dir():
+                        continue
                     cur_names.append(p.name)
 
             for window_name in cur_names:
                 window_dir = group_dir / window_name
+                if not window_dir.is_dir():
+                    continue
                 window_dirs.append(window_dir)
 
         if workers == 0:
@@ -163,7 +174,13 @@ class FileWindowStorage(WindowStorage):
 
         completed_layers = []
         for layer_dir in layers_directory.iterdir():
-            layer_name, group_idx = get_layer_and_group_from_dir_name(layer_dir.name)
+            if not layer_dir.is_dir():
+                continue
+            try:
+                layer_name, group_idx = get_layer_and_group_from_dir_name(layer_dir.name)
+            except ValueError:
+                logger.debug(f"Skipping unrecognized layer directory {layer_dir}")
+                continue
             if not self.is_layer_completed(group, name, layer_name, group_idx):
                 continue
             completed_layers.append((layer_name, group_idx))
