@@ -16,7 +16,7 @@ from torchmetrics.classification import (
 )
 
 from rslearn.models.component import FeatureVector, Predictor
-from rslearn.train.metrics import ConfusionMatrixOutput
+from rslearn.train.metrics import ConfusionMatrixMetric
 from rslearn.train.model_context import (
     ModelContext,
     ModelOutput,
@@ -284,9 +284,11 @@ class ClassificationTask(BasicTask):
                 metrics["f1"] = ClassificationMetric(MulticlassF1Score(**kwargs))
 
         if self.enable_confusion_matrix:
-            metrics["confusion_matrix"] = ClassificationConfusionMatrixMetric(
-                num_classes=len(self.classes),
-                class_names=self.classes,
+            metrics["confusion_matrix"] = ClassificationMetric(
+                ConfusionMatrixMetric(
+                    num_classes=len(self.classes),
+                    class_names=self.classes,
+                ),
             )
 
         return MetricCollection(metrics)
@@ -390,76 +392,3 @@ class ClassificationMetric(Metric):
     def plot(self, *args: list[Any], **kwargs: dict[str, Any]) -> Any:
         """Returns a plot of the metric."""
         return self.metric.plot(*args, **kwargs)
-
-
-class ClassificationConfusionMatrixMetric(Metric):
-    """Confusion matrix metric for classification task.
-
-    Accumulates a confusion matrix for logging to wandb. This is more memory
-    efficient than storing all predictions and labels, as it only requires
-    O(num_classes^2) storage instead of O(num_samples * num_classes).
-
-    Args:
-        num_classes: number of classes
-        class_names: optional list of class names for labeling
-    """
-
-    def __init__(
-        self,
-        num_classes: int,
-        class_names: list[str] | None = None,
-    ):
-        """Initialize a new ClassificationConfusionMatrixMetric.
-
-        Args:
-            num_classes: number of classes
-            class_names: optional list of class names for labeling
-        """
-        super().__init__()
-        self.num_classes = num_classes
-        self.class_names = class_names
-        self.add_state(
-            "confusion_matrix",
-            default=torch.zeros(num_classes, num_classes, dtype=torch.long),
-            dist_reduce_fx="sum",
-        )
-
-    def update(
-        self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
-    ) -> None:
-        """Update metric.
-
-        Args:
-            preds: the predictions (softmax probabilities)
-            targets: the targets
-        """
-        if not isinstance(preds, torch.Tensor):
-            preds = torch.stack(preds)
-        labels = torch.stack([target["class"] for target in targets])
-
-        # Sub-select the valid labels.
-        mask = torch.stack([target["valid"] > 0 for target in targets])
-        preds = preds[mask]
-        labels = labels[mask]
-        if len(preds) == 0:
-            return
-
-        # Get predicted classes from probabilities
-        pred_classes = preds.argmax(dim=1)  # (N,)
-
-        # Update confusion matrix: cm[true_label, pred_label] += count
-        for true_label in range(self.num_classes):
-            for pred_label in range(self.num_classes):
-                count = ((labels == true_label) & (pred_classes == pred_label)).sum()
-                self.confusion_matrix[true_label, pred_label] += count
-
-    def compute(self) -> "ConfusionMatrixOutput":
-        """Returns the confusion matrix wrapped in ConfusionMatrixOutput."""
-        return ConfusionMatrixOutput(
-            confusion_matrix=self.confusion_matrix,
-            class_names=self.class_names,
-        )
-
-    def reset(self) -> None:
-        """Reset metric."""
-        super().reset()

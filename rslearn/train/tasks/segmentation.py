@@ -10,7 +10,7 @@ import torchmetrics.classification
 from torchmetrics import Metric, MetricCollection
 
 from rslearn.models.component import FeatureMaps, Predictor
-from rslearn.train.metrics import ConfusionMatrixOutput
+from rslearn.train.metrics import ConfusionMatrixMetric
 from rslearn.train.model_context import (
     ModelContext,
     ModelOutput,
@@ -313,9 +313,11 @@ class SegmentationTask(BasicTask):
             metrics.update(self.other_metrics)
 
         if self.enable_confusion_matrix:
-            metrics["confusion_matrix"] = SegmentationConfusionMatrixMetric(
-                num_classes=self.num_classes,
-                class_names=self.class_names,
+            metrics["confusion_matrix"] = SegmentationMetric(
+                ConfusionMatrixMetric(
+                    num_classes=self.num_classes,
+                    class_names=self.class_names,
+                ),
             )
 
         return MetricCollection(metrics)
@@ -487,81 +489,6 @@ class SegmentationMetric(Metric):
     def plot(self, *args: list[Any], **kwargs: dict[str, Any]) -> Any:
         """Returns a plot of the metric."""
         return self.metric.plot(*args, **kwargs)
-
-
-class SegmentationConfusionMatrixMetric(Metric):
-    """Confusion matrix metric for segmentation task.
-
-    Accumulates a confusion matrix for logging to wandb. This is more memory
-    efficient than storing all predictions and labels, as it only requires
-    O(num_classes^2) storage instead of O(num_samples * num_classes).
-
-    Args:
-        num_classes: number of classes
-        class_names: optional list of class names for labeling
-    """
-
-    def __init__(
-        self,
-        num_classes: int,
-        class_names: list[str] | None = None,
-    ):
-        """Initialize a new SegmentationConfusionMatrixMetric.
-
-        Args:
-            num_classes: number of classes
-            class_names: optional list of class names for labeling
-        """
-        super().__init__()
-        self.num_classes = num_classes
-        self.class_names = class_names
-        self.add_state(
-            "confusion_matrix",
-            default=torch.zeros(num_classes, num_classes, dtype=torch.long),
-            dist_reduce_fx="sum",
-        )
-
-    def update(
-        self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
-    ) -> None:
-        """Update metric.
-
-        Args:
-            preds: the predictions (BCHW softmax probabilities)
-            targets: the targets
-        """
-        if not isinstance(preds, torch.Tensor):
-            preds = torch.stack(preds)
-        labels = torch.stack([target["classes"] for target in targets])
-
-        # Sub-select the valid labels.
-        # We flatten the prediction and label images at valid pixels.
-        # Prediction is changed from BCHW to BHWC so we can select the valid BHW mask.
-        mask = torch.stack([target["valid"] > 0 for target in targets])
-        preds = preds.permute(0, 2, 3, 1)[mask]  # (N_valid, C)
-        labels = labels[mask]  # (N_valid,)
-        if len(preds) == 0:
-            return
-
-        # Get predicted classes from probabilities
-        pred_classes = preds.argmax(dim=1)  # (N_valid,)
-
-        # Update confusion matrix: cm[true_label, pred_label] += count
-        for true_label in range(self.num_classes):
-            for pred_label in range(self.num_classes):
-                count = ((labels == true_label) & (pred_classes == pred_label)).sum()
-                self.confusion_matrix[true_label, pred_label] += count
-
-    def compute(self) -> "ConfusionMatrixOutput":
-        """Returns the confusion matrix wrapped in ConfusionMatrixOutput."""
-        return ConfusionMatrixOutput(
-            confusion_matrix=self.confusion_matrix,
-            class_names=self.class_names,
-        )
-
-    def reset(self) -> None:
-        """Reset metric."""
-        super().reset()
 
 
 class F1Metric(Metric):
