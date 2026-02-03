@@ -3,6 +3,7 @@
 from typing import Any
 
 import torch
+from einops import rearrange
 
 from rslearn.train.model_context import ModelContext
 
@@ -79,7 +80,11 @@ class ConcatenateFeatures(IntermediateComponent):
             )
 
         add_data = torch.stack(
-            [input_data[self.key] for input_data in context.inputs], dim=0
+            [
+                rearrange(input_data[self.key].image, "c t h w -> (c t) h w")
+                for input_data in context.inputs
+            ],
+            dim=0,
         )
         add_features = self.conv_layers(add_data)
 
