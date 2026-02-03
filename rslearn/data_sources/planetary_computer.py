@@ -557,7 +557,9 @@ class LandsatC2L2(PlanetaryComputer):
         # Prefer determining bands from the configured layer config (if present).
         if context.layer_config is not None:
             requested_bands = {
-                band for band_set in context.layer_config.band_sets for band in band_set.bands
+                band
+                for band_set in context.layer_config.band_sets
+                for band in band_set.bands
             }
             band_names = [self._normalize_band_name(band) for band in requested_bands]
         elif band_names is not None:
@@ -567,7 +569,9 @@ class LandsatC2L2(PlanetaryComputer):
 
         # Landsat C2 L2 assets are keyed by common name; each asset is a single band.
         # We expose Landsat-style band identifiers (B1, B2, ...).
-        asset_bands = {self.BAND_TO_ASSET_COMMON_NAME[band]: [band] for band in band_names}
+        asset_bands = {
+            self.BAND_TO_ASSET_COMMON_NAME[band]: [band] for band in band_names
+        }
 
         if query is None:
             query = self.DEFAULT_PLATFORM_QUERY
