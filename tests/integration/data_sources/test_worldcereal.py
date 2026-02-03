@@ -11,6 +11,7 @@ from rslearn.config import (
     SpaceMode,
 )
 from rslearn.const import WGS84_PROJECTION
+from rslearn.data_sources.data_source import DataSourceContext
 from rslearn.data_sources.worldcereal import WorldCereal
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
@@ -27,7 +28,7 @@ SIZE = 16
 SEATTLE_POINT = shapely.Point(-122.33, 47.61)
 
 
-def make_test_zips(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
+def _make_test_zips(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
     """Make a sample zip file similar to the ESA WorldCereal 2021 ones.
 
     This is a little bit circular since it uses the class to define where the
@@ -84,29 +85,32 @@ def make_test_zips(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
     return return_dict
 
 
-def test_with_worldcereal_dir(
-    tmp_path: pathlib.Path,
-    seattle2020: STGeometry,
-    httpserver: HTTPServer,
+def _setup_worldcereal_httpserver(
+    worldcereal_dir: UPath, httpserver: HTTPServer
 ) -> None:
-    """Tests ingesting the example data corresponding to seattle2020.
+    """Create test zips and configure httpserver to serve them.
 
     Args:
-        worldcereal_dir: the directory to store WorldCereal GeoTIFFs.
-        tmp_path: temporary path for making zip file and for tile store.
-        seattle2020: the geometry to use for prepare.
-        httpserver: server for serving the example data.
+        worldcereal_dir: directory to create test zips in.
+        httpserver: the pytest httpserver to configure.
     """
-    worldcereal_dir = UPath(tmp_path) / "worldcereal"
-    # The WorldCover data is large so we use test data instead. We need to start a test
-    # server that serves the data.
-    zip_name_paths = make_test_zips(worldcereal_dir)
+    zip_name_paths = _make_test_zips(worldcereal_dir)
     for zip_file, zip_fname in zip_name_paths.items():
         with zip_fname.open("rb") as f:
             zip_data = f.read()
         httpserver.expect_request(f"/{zip_file}", method="GET").respond_with_data(
             zip_data, content_type="application/zip"
         )
+
+
+def test_with_worldcereal_dir(
+    tmp_path: pathlib.Path,
+    seattle2020: STGeometry,
+    httpserver: HTTPServer,
+) -> None:
+    """Tests ingesting the example data corresponding to seattle2020."""
+    worldcereal_dir = UPath(tmp_path) / "worldcereal"
+    _setup_worldcereal_httpserver(worldcereal_dir, httpserver)
 
     bands = [WorldCereal.band_from_zipfilename(f) for f in WorldCereal.ZIP_FILENAMES]
     for band in bands:
@@ -145,3 +149,56 @@ def test_with_worldcereal_dir(
         )
         assert raster_data.max() == 1
         print(f"Succeeded for {band}")
+
+
+def test_with_context_ds_path(
+    tmp_path: pathlib.Path,
+    seattle2020: STGeometry,
+    httpserver: HTTPServer,
+) -> None:
+    """Tests WorldCereal when context.ds_path is set.
+
+    Previously there was a bug where WorldCereal would pass a UPath to
+    LocalFiles.__init__, which would have error when calling join_upath since it
+    expects src_dir to be a string. This test prevents regression by making sure the
+    code path works when including a DataSourceContext when initializing worldCereal.
+    """
+    ds_path = UPath(tmp_path) / "dataset"
+    ds_path.mkdir(parents=True, exist_ok=True)
+
+    # Use a relative worldcereal_dir path (relative to ds_path)
+    worldcereal_dir = "worldcereal_data"
+    worldcereal_abs_path = ds_path / worldcereal_dir
+
+    _setup_worldcereal_httpserver(worldcereal_abs_path, httpserver)
+
+    # Test with just the first band to keep the test fast
+    band = WorldCereal.band_from_zipfilename(WorldCereal.ZIP_FILENAMES[0])
+
+    # Create context with ds_path set - this triggers join_upath code path
+    context = DataSourceContext(ds_path=ds_path)
+    query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
+    data_source = WorldCereal(
+        band=band,
+        worldcereal_dir=worldcereal_dir,  # relative path
+        context=context,
+    )
+
+    # Verify we can get items (this exercises list_items -> join_upath)
+    item_groups = data_source.get_items([seattle2020], query_config)
+    assert len(item_groups) == 1
+    assert len(item_groups[0]) > 0
+    item = item_groups[0][0][0]
+
+    # Verify ingest works
+    tile_store_dir = ds_path / "tile_store"
+    tile_store = DefaultTileStore(str(tile_store_dir))
+    tile_store.set_dataset_path(tile_store_dir)
+
+    layer_name = "layer"
+    data_source.ingest(
+        TileStoreWithLayer(tile_store, layer_name),
+        item_groups[0][0],
+        [[seattle2020]],
+    )
+    assert tile_store.is_raster_ready(layer_name, item.name, [band])
