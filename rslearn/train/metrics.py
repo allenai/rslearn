@@ -16,7 +16,7 @@ class NonScalarMetricOutput(ABC):
     """Base class for non-scalar metric outputs that need special logging.
 
     Subclasses should implement the _do_log_to_wandb method to define how the metric
-    should be logged to Weights & Biases.
+    should be logged (only supports logging to Weights & Biases).
     """
 
     def log_to_wandb(self, name: str) -> None:

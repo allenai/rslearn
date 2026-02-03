@@ -1,6 +1,7 @@
 """Classification task."""
 
 from typing import Any
+
 import numpy as np
 import numpy.typing as npt
 import shapely
@@ -15,13 +16,13 @@ from torchmetrics.classification import (
 )
 
 from rslearn.models.component import FeatureVector, Predictor
+from rslearn.train.metrics import ConfusionMatrixOutput
 from rslearn.train.model_context import (
     ModelContext,
     ModelOutput,
     RasterImage,
     SampleMetadata,
 )
-from rslearn.train.metrics import ConfusionMatrixOutput
 from rslearn.utils import Feature, STGeometry
 
 from .task import BasicTask
@@ -70,7 +71,8 @@ class ClassificationTask(BasicTask):
             positive_class: positive class name.
             positive_class_threshold: threshold for classifying the positive class in
                 binary classification (default 0.5).
-            enable_confusion_matrix: whether to compute confusion matrix (default false)
+            enable_confusion_matrix: whether to compute confusion matrix (default false).
+                If true, it requires wandb to be initialized for logging.
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
