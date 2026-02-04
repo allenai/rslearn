@@ -4,8 +4,8 @@ import copy
 import json
 import os
 import tempfile
-from datetime import timedelta
 from contextlib import ExitStack
+from datetime import timedelta
 from typing import Any, Literal
 
 import affine
@@ -38,21 +38,32 @@ logger = get_logger(__name__)
 class EarthDailyItem(Item):
     """An item in the EarthDaily data source."""
 
-    def __init__(self, name: str, geometry: STGeometry, asset_urls: dict[str, str]):
+    def __init__(
+        self,
+        name: str,
+        geometry: STGeometry,
+        asset_urls: dict[str, str],
+        asset_scale_offsets: dict[str, list[dict[str, float]]] | None = None,
+    ):
         """Creates a new EarthDailyItem.
 
         Args:
             name: unique name of the item
             geometry: the spatial and temporal extent of the item
             asset_urls: map from asset key to the asset URL.
+            asset_scale_offsets: optional per-asset scale/offset metadata. Each asset key
+                maps to a list of dictionaries (one per raster band) with keys
+                "scale" and "offset".
         """
         super().__init__(name, geometry)
         self.asset_urls = asset_urls
+        self.asset_scale_offsets = asset_scale_offsets or {}
 
     def serialize(self) -> dict[str, Any]:
         """Serializes the item to a JSON-encodable dictionary."""
         d = super().serialize()
         d["asset_urls"] = self.asset_urls
+        d["asset_scale_offsets"] = self.asset_scale_offsets
         return d
 
     @staticmethod
@@ -63,6 +74,7 @@ class EarthDailyItem(Item):
             name=item.name,
             geometry=item.geometry,
             asset_urls=d["asset_urls"],
+            asset_scale_offsets=d.get("asset_scale_offsets") or {},
         )
 
 
@@ -186,14 +198,41 @@ class EarthDaily(DataSource, TileStore):
             )
 
         geom = STGeometry(WGS84_PROJECTION, shp, time_range)
-        asset_urls = {
-            asset_key: asset_obj.extra_fields["alternate"]["download"]["href"]
-            for asset_key, asset_obj in stac_item.assets.items()
-            if "alternate" in asset_obj.extra_fields
-            and "download" in asset_obj.extra_fields["alternate"]
-            and "href" in asset_obj.extra_fields["alternate"]["download"]
-        }
-        return EarthDailyItem(stac_item.id, geom, asset_urls)
+        asset_urls: dict[str, str] = {}
+        asset_scale_offsets: dict[str, list[dict[str, float]]] = {}
+        for asset_key, asset_obj in stac_item.assets.items():
+            if (
+                "alternate" not in asset_obj.extra_fields
+                or "download" not in asset_obj.extra_fields["alternate"]
+                or "href" not in asset_obj.extra_fields["alternate"]["download"]
+            ):
+                continue
+            asset_urls[asset_key] = asset_obj.extra_fields["alternate"]["download"]["href"]
+
+            raster_bands = asset_obj.extra_fields.get("raster:bands", [])
+            if not isinstance(raster_bands, list) or not raster_bands:
+                continue
+            scale_offsets: list[dict[str, float]] = []
+            for band_meta in raster_bands:
+                if not isinstance(band_meta, dict):
+                    continue
+                raw_scale = band_meta.get("scale")
+                raw_offset = band_meta.get("offset")
+                try:
+                    scale = float(raw_scale) if raw_scale is not None else 1.0
+                except (TypeError, ValueError):
+                    scale = 1.0
+                try:
+                    offset = float(raw_offset) if raw_offset is not None else 0.0
+                except (TypeError, ValueError):
+                    offset = 0.0
+                scale_offsets.append({"scale": scale, "offset": offset})
+            if scale_offsets:
+                asset_scale_offsets[asset_key] = scale_offsets
+
+        return EarthDailyItem(
+            stac_item.id, geom, asset_urls, asset_scale_offsets=asset_scale_offsets
+        )
 
     def get_item_by_name(self, name: str) -> EarthDailyItem:
         """Gets an item by name.
@@ -211,7 +250,13 @@ class EarthDaily(DataSource, TileStore):
             cache_fname = self.cache_dir / f"{name}.json"
         if cache_fname is not None and cache_fname.exists():
             with cache_fname.open() as f:
-                return EarthDailyItem.deserialize(json.load(f))
+                cached = json.load(f)
+            if isinstance(cached, dict) and "asset_scale_offsets" in cached:
+                return EarthDailyItem.deserialize(cached)
+            logger.debug(
+                "EarthDaily cache entry at %s is missing scale/offset metadata; refreshing",
+                cache_fname,
+            )
 
         # No cache or not in cache, so we need to make the STAC request.
         _, _, collection = self._load_client()
@@ -392,6 +437,62 @@ class EarthDaily(DataSource, TileStore):
 
         raise ValueError(f"no raster with bands {bands}")
 
+    def _apply_scale_offsets(
+        self,
+        array: npt.NDArray[Any],
+        *,
+        scale_offsets: list[dict[str, float]] | None,
+        item_name: str,
+        asset_key: str,
+    ) -> npt.NDArray[Any]:
+        if not scale_offsets:
+            return array
+
+        def _to_float(value: Any, default: float) -> float:
+            try:
+                return float(value) if value is not None else default
+            except (TypeError, ValueError):
+                return default
+
+        num_bands = array.shape[0]
+        if len(scale_offsets) == 1:
+            scale = _to_float(scale_offsets[0].get("scale"), 1.0)
+            offset = _to_float(scale_offsets[0].get("offset"), 0.0)
+            scales = np.full(
+                (num_bands, 1, 1), scale, dtype=np.float32
+            )
+            offsets = np.full(
+                (num_bands, 1, 1), offset, dtype=np.float32
+            )
+        elif len(scale_offsets) == num_bands:
+            scales = np.array(
+                [_to_float(so.get("scale"), 1.0) for so in scale_offsets], dtype=np.float32
+            ).reshape(num_bands, 1, 1)
+            offsets = np.array(
+                [_to_float(so.get("offset"), 0.0) for so in scale_offsets], dtype=np.float32
+            ).reshape(num_bands, 1, 1)
+        else:
+            logger.debug(
+                "EarthDaily scale/offset band count mismatch for item %s asset %s: "
+                "%d metadata bands vs %d raster bands; using first entry for all bands",
+                item_name,
+                asset_key,
+                len(scale_offsets),
+                num_bands,
+            )
+            scale = _to_float(scale_offsets[0].get("scale"), 1.0)
+            offset = _to_float(scale_offsets[0].get("offset"), 0.0)
+            scales = np.full((num_bands, 1, 1), scale, dtype=np.float32)
+            offsets = np.full(
+                (num_bands, 1, 1), offset, dtype=np.float32
+            )
+
+        if np.all(scales == 1.0) and np.all(offsets == 0.0):
+            return array
+
+        array = array.astype(np.float32, copy=False)
+        return array * scales + offsets
+
     def get_raster_bounds(
         self, layer_name: str, item_name: str, bands: list[str], projection: Projection
     ) -> PixelBounds:
@@ -491,12 +592,13 @@ class EarthDaily(DataSource, TileStore):
 class Sentinel2(EarthDaily):
     """Sentinel-2 L2A on EarthDaily platform.
 
-    Uses EarthDaily's `Sentinel2CollectionHelper` for search and (optionally) applies a
-    cloud mask during ingestion using the SCL asset so that rslearn composites can
-    treat cloudy pixels as nodata.
+    Uses the `sentinel-2-c1-l2a` collection and applies per-asset scale/offset metadata
+    from STAC `raster:bands` when present. Optionally applies a cloud mask during
+    ingestion using the SCL asset so that rslearn composites can treat cloudy pixels
+    as nodata.
     """
 
-    COLLECTION_NAME = "sentinel-2-l2a"
+    COLLECTION_NAME = "sentinel-2-c1-l2a"
 
     # EarthDaily Sentinel-2 asset keys to rslearn band names.
     # For spectral bands, we use Sentinel-2 band IDs as rslearn band names.
@@ -544,6 +646,7 @@ class Sentinel2(EarthDaily):
         retry_backoff_factor: float = 5.0,
         service_name: Literal["platform"] = "platform",
         context: DataSourceContext = DataSourceContext(),
+        harmonize: bool = True,
     ) -> None:
         """Initialize an EarthDaily Sentinel-2 data source.
 
@@ -577,6 +680,8 @@ class Sentinel2(EarthDaily):
             retry_backoff_factor: backoff factor for EarthDaily API client retries.
             service_name: EarthDaily service name (only "platform" supported).
             context: rslearn data source context.
+            harmonize: apply per-asset scale/offset metadata from STAC `raster:bands`
+                (defaults to True). Set to False to use raw values.
         """
         asset_bands: dict[str, list[str]]
         if context.layer_config is not None and assets is None:
@@ -617,6 +722,7 @@ class Sentinel2(EarthDaily):
         self.cloud_cover_max = cloud_cover_max
         self.search_max_items = search_max_items
         self.sort_items_by = sort_items_by
+        self.harmonize = harmonize
         self.apply_cloud_mask = apply_cloud_mask
         self.mask_band = mask_band
         self.exclude_scl_values = (
@@ -626,35 +732,43 @@ class Sentinel2(EarthDaily):
         )
         self.mask_nodata_value = mask_nodata_value
 
-        self._s2_helper: Any | None = None
+    def read_raster(
+        self,
+        layer_name: str,
+        item_name: str,
+        bands: list[str],
+        projection: Projection,
+        bounds: PixelBounds,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> npt.NDArray[Any]:
+        """Read raster data from the store.
 
-    def _get_sentinel2_helper(self) -> Any:
-        if self._s2_helper is not None:
-            return self._s2_helper
-
-        eds_client, _, _ = self._load_client()
-        from earthdaily.platform.helpers.collections import Sentinel2CollectionHelper
-
-        self._s2_helper = Sentinel2CollectionHelper(
-            eds_client,
-            assets=list(self.asset_bands.keys()),
-            cloud_cover_threshold=self.cloud_cover_threshold,
+        Applies per-asset scale/offset metadata when harmonize=True.
+        """
+        raw_data = super().read_raster(
+            layer_name, item_name, bands, projection, bounds, resampling=resampling
         )
-        return self._s2_helper
+        if not self.harmonize:
+            return raw_data
+
+        asset_key = self._get_asset_by_band(bands)
+        item = self.get_item_by_name(item_name)
+        return self._apply_scale_offsets(
+            raw_data,
+            scale_offsets=item.asset_scale_offsets.get(asset_key),
+            item_name=item_name,
+            asset_key=asset_key,
+        )
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
     ) -> list[list[list[EarthDailyItem]]]:
-        helper = None
-        try:
-            helper = self._get_sentinel2_helper()
-        except Exception as e:
-            logger.warning(
-                "EarthDaily Sentinel-2 failed to initialize Sentinel2CollectionHelper (%s); "
-                "falling back to raw STAC search (no cloud masking in search).",
-                e,
-            )
-            helper = None
+        """Get Sentinel-2 items intersecting the given geometries.
+
+        Uses raw STAC search (not Sentinel2CollectionHelper) so that collection
+        configuration is controlled by `collection_name`.
+        """
+        _, client, _ = self._load_client()
 
         groups = []
         for geometry in geometries:
@@ -675,30 +789,14 @@ class Sentinel2(EarthDaily):
                     effective_query = {}
                 effective_query["eo:cloud_cover"] = {"lt": max_cloud_cover}
 
-            if helper is not None:
-                from earthdaily.platform.helpers.collections.base import SpatioTemporalGeometry
-
-                st_geometry = SpatioTemporalGeometry(
-                    crs="EPSG:4326",
-                    geometry=wgs84_geometry.shp,
-                    time_range=wgs84_geometry.time_range,
-                )
-                stac_items: list[pystac.Item] = helper.get_items(
-                    geometries=[st_geometry],
-                    cloud_cover_max=max_cloud_cover,
-                    max_items=self.search_max_items,
-                    query=effective_query,
-                )
-            else:
-                _, client, _ = self._load_client()
-                result = client.search(
-                    collections=[self.collection_name],
-                    intersects=shapely.to_geojson(wgs84_geometry.shp),
-                    datetime=wgs84_geometry.time_range,
-                    query=effective_query,
-                    max_items=self.search_max_items,
-                )
-                stac_items = list(result.item_collection())
+            result = client.search(
+                collections=[self.collection_name],
+                intersects=shapely.to_geojson(wgs84_geometry.shp),
+                datetime=wgs84_geometry.time_range,
+                query=effective_query,
+                max_items=self.search_max_items,
+            )
+            stac_items = list(result.item_collection())
 
             if self.sort_by is not None:
                 if self.sort_by == "datetime":
@@ -756,7 +854,12 @@ class Sentinel2(EarthDaily):
         return local_fname
 
     def _apply_scl_cloud_mask(
-        self, src: rasterio.DatasetReader, scl_src: rasterio.DatasetReader
+        self,
+        src: rasterio.DatasetReader,
+        scl_src: rasterio.DatasetReader,
+        *,
+        item: EarthDailyItem,
+        asset_key: str,
     ) -> tuple[npt.NDArray[Any], Projection, PixelBounds]:
         # Align the SCL raster to the source raster's grid.
         with rasterio.vrt.WarpedVRT(
@@ -771,6 +874,13 @@ class Sentinel2(EarthDaily):
 
         cloud_mask = np.isin(scl, np.array(self.exclude_scl_values, dtype=scl.dtype))
         array = src.read()
+        if self.harmonize:
+            array = self._apply_scale_offsets(
+                array,
+                scale_offsets=item.asset_scale_offsets.get(asset_key),
+                item_name=item.name,
+                asset_key=asset_key,
+            )
         array[:, cloud_mask] = self.mask_nodata_value
 
         projection, bounds = get_raster_projection_and_bounds(src)
@@ -782,18 +892,21 @@ class Sentinel2(EarthDaily):
         items: list[EarthDailyItem],
         geometries: list[list[STGeometry]],
     ) -> None:
-        if not self.apply_cloud_mask:
-            return super().ingest(tile_store=tile_store, items=items, geometries=geometries)
+        """Ingest Sentinel-2 items into the provided tile store.
 
+        Applies per-asset scale/offset metadata (when present) and optionally applies
+        an SCL-derived cloud mask during ingest.
+        """
         for item in items:
             with tempfile.TemporaryDirectory() as tmp_dir, ExitStack() as stack:
                 scl_src: rasterio.DatasetReader | None = None
-                scl_url = item.asset_urls.get(self.mask_band)
-                if scl_url is not None:
-                    scl_local_fname = self._download_asset_to_tmp(
-                        scl_url, tmp_dir, self.mask_band, item.name
-                    )
-                    scl_src = stack.enter_context(rasterio.open(scl_local_fname))
+                if self.apply_cloud_mask:
+                    scl_url = item.asset_urls.get(self.mask_band)
+                    if scl_url is not None:
+                        scl_local_fname = self._download_asset_to_tmp(
+                            scl_url, tmp_dir, self.mask_band, item.name
+                        )
+                        scl_src = stack.enter_context(rasterio.open(scl_local_fname))
 
                 for asset_key, band_names in self.asset_bands.items():
                     asset_url = item.asset_urls.get(asset_key)
@@ -809,19 +922,32 @@ class Sentinel2(EarthDaily):
                         asset_url, tmp_dir, asset_key, item.name
                     )
 
-                    if asset_key == self.mask_band:
+                    if self.apply_cloud_mask and asset_key == self.mask_band:
                         # If mask band itself is requested, store it unmodified.
                         tile_store.write_raster_file(
                             item.name, band_names, UPath(local_fname)
                         )
                         continue
 
-                    if scl_src is None:
+                    if not self.harmonize and (not self.apply_cloud_mask or scl_src is None):
                         tile_store.write_raster_file(
                             item.name, band_names, UPath(local_fname)
                         )
                         continue
 
                     with rasterio.open(local_fname) as src:
-                        array, projection, bounds = self._apply_scl_cloud_mask(src, scl_src)
+                        if self.apply_cloud_mask and scl_src is not None:
+                            array, projection, bounds = self._apply_scl_cloud_mask(
+                                src, scl_src, item=item, asset_key=asset_key
+                            )
+                        else:
+                            array = src.read()
+                            array = self._apply_scale_offsets(
+                                array,
+                                scale_offsets=item.asset_scale_offsets.get(asset_key),
+                                item_name=item.name,
+                                asset_key=asset_key,
+                            )
+
+                            projection, bounds = get_raster_projection_and_bounds(src)
                     tile_store.write_raster(item.name, band_names, projection, bounds, array)
