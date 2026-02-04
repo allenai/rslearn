@@ -15,7 +15,7 @@ from rslearn.dataset.window import (
     get_window_layer_dir,
 )
 from rslearn.log_utils import get_logger
-from rslearn.utils.fsspec import open_atomic
+from rslearn.utils.fsspec import iter_nonhidden_subdirs, open_atomic
 from rslearn.utils.mp import star_imap_unordered
 
 from .storage import WindowStorage, WindowStorageFactory
@@ -77,8 +77,8 @@ class FileWindowStorage(WindowStorage):
         window_dirs = []
         if not groups:
             groups = []
-            for p in (self.path / "windows").iterdir():
-                groups.append(p.name)
+            for group_dir in iter_nonhidden_subdirs(self.path / "windows"):
+                groups.append(group_dir.name)
         for group in groups:
             group_dir = self.path / "windows" / group
             if not group_dir.exists():
@@ -86,16 +86,20 @@ class FileWindowStorage(WindowStorage):
                     f"Skipping group directory {group_dir} since it does not exist"
                 )
                 continue
+            if not group_dir.is_dir():
+                logger.warning(
+                    f"Skipping group path {group_dir} since it is not a directory"
+                )
+                continue
             if names:
-                cur_names = names
+                for window_name in names:
+                    window_dir = group_dir / window_name
+                    if not window_dir.is_dir():
+                        continue
+                    window_dirs.append(window_dir)
             else:
-                cur_names = []
-                for p in group_dir.iterdir():
-                    cur_names.append(p.name)
-
-            for window_name in cur_names:
-                window_dir = group_dir / window_name
-                window_dirs.append(window_dir)
+                for window_dir in iter_nonhidden_subdirs(group_dir):
+                    window_dirs.append(window_dir)
 
         if workers == 0:
             windows = [load_window(self, window_dir) for window_dir in window_dirs]
@@ -162,7 +166,7 @@ class FileWindowStorage(WindowStorage):
             return []
 
         completed_layers = []
-        for layer_dir in layers_directory.iterdir():
+        for layer_dir in iter_nonhidden_subdirs(layers_directory):
             layer_name, group_idx = get_layer_and_group_from_dir_name(layer_dir.name)
             if not self.is_layer_completed(group, name, layer_name, group_idx):
                 continue
