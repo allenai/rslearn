@@ -833,16 +833,22 @@ HCAT category code and name respectively.
 
 ### rslearn.data_sources.earthdaily.Sentinel2
 
-Sentinel-2 L2A data on EarthDaily platform.
+Sentinel-2 L2A data on EarthDaily platform (collection: `sentinel-2-c1-l2a`).
 
 This data source requires the optional `earthdaily[platform]` dependency and EarthDaily
 credentials in the environment (see [EarthDaily documentation](https://earthdaily.github.io/earthdaily-python-client/main/) for supported methods).
+
+By default, this data source applies per-asset scale/offset values from STAC
+`raster:bands` metadata (`harmonize: true`). Set `harmonize: false` to keep raw values.
 
 The additional data source configuration looks like this:
 Only the keys documented below are supported in `init_args`; unknown keys will raise an error.
 
 ```jsonc
 {
+  // Whether to apply STAC `raster:bands` scale/offset (default true). Set to false to
+  // keep raw values.
+  "harmonize": true,
   // Optional: EarthDaily Sentinel-2 asset keys to use (default null). If null and the
   // layer config is available, assets are inferred from the layer's band sets.
   // Example: ["red", "green", "blue", "nir", "swir16", "swir22"]
@@ -878,7 +884,14 @@ Only the keys documented below are supported in `init_args`; unknown keys will r
   // Whether to sort ascending when sort_by is set (default true).
   "sort_ascending": true,
   // Optional cache directory for cached item metadata.
-  "cache_dir": null
+  "cache_dir": null,
+  // Timeout for HTTP asset downloads.
+  "timeout": "10s",
+  // Retry settings for EarthDaily API client requests (search/get item).
+  "max_retries": 3,
+  "retry_backoff_factor": 5.0,
+  // EarthDaily service name (only "platform" is supported).
+  "service_name": "platform"
 }
 ```
 
@@ -890,7 +903,9 @@ Example:
     "sentinel2": {
       "type": "raster",
       "band_sets": [{
-        "dtype": "uint16",
+        // When harmonize=true (default), reflectance bands are typically scaled to float.
+        // Use float32 (recommended) or set harmonize=false to keep raw integer values.
+        "dtype": "float32",
         "bands": ["B02", "B03", "B04", "B08"]
       }],
       "compositing_method": "FIRST_VALID",

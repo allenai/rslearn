@@ -628,6 +628,7 @@ class Sentinel2(EarthDaily):
 
     def __init__(
         self,
+        harmonize: bool = True,
         assets: list[str] | None = None,
         cloud_cover_threshold: float | None = None,
         cloud_cover_max: float | None = None,
@@ -646,7 +647,6 @@ class Sentinel2(EarthDaily):
         retry_backoff_factor: float = 5.0,
         service_name: Literal["platform"] = "platform",
         context: DataSourceContext = DataSourceContext(),
-        harmonize: bool = True,
     ) -> None:
         """Initialize an EarthDaily Sentinel-2 data source.
 
