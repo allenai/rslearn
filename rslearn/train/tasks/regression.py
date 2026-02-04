@@ -196,18 +196,24 @@ class RegressionHead(Predictor):
     """Head for regression task."""
 
     def __init__(
-        self, loss_mode: Literal["mse", "l1"] = "mse", use_sigmoid: bool = False
+        self,
+        loss_mode: Literal["mse", "l1", "huber"] = "mse",
+        use_sigmoid: bool = False,
+        huber_delta: float = 1.0,
     ):
         """Initialize a new RegressionHead.
 
         Args:
-            loss_mode: the loss function to use, either "mse" (default) or "l1".
+            loss_mode: the loss function to use: "mse" (default), "l1", or "huber".
             use_sigmoid: whether to apply a sigmoid activation on the output. This
                 requires targets to be between 0-1.
+            huber_delta: delta parameter for Huber loss (only used when
+                loss_mode="huber").
         """
         super().__init__()
         self.loss_mode = loss_mode
         self.use_sigmoid = use_sigmoid
+        self.huber_delta = huber_delta
 
     def forward(
         self,
@@ -251,6 +257,16 @@ class RegressionHead(Predictor):
                 losses["regress"] = torch.mean(torch.square(outputs - labels) * mask)
             elif self.loss_mode == "l1":
                 losses["regress"] = torch.mean(torch.abs(outputs - labels) * mask)
+            elif self.loss_mode == "huber":
+                losses["regress"] = torch.mean(
+                    torch.nn.functional.huber_loss(
+                        outputs,
+                        labels,
+                        reduction="none",
+                        delta=self.huber_delta,
+                    )
+                    * mask
+                )
             else:
                 raise ValueError(f"unknown loss mode {self.loss_mode}")
 

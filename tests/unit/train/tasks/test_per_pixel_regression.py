@@ -68,6 +68,35 @@ def test_head(empty_sample_metadata: SampleMetadata) -> None:
     assert output.loss_dict["regress"] == 1
 
 
+@pytest.mark.parametrize(
+    ("loss_mode", "expected"),
+    [
+        ("mse", 1.0),
+        ("l1", 1.0),
+        ("huber", 0.5),
+    ],
+)
+def test_head_loss_modes(
+    empty_sample_metadata: SampleMetadata, loss_mode: str, expected: float
+) -> None:
+    head = PerPixelRegressionHead(loss_mode=loss_mode)
+    logits = torch.tensor([[1, 1], [1, 1]], dtype=torch.float32)[None, None, :, :]
+    target_dict = {
+        "values": RasterImage(
+            torch.tensor([[[[2, 2], [2, 4]]]], dtype=torch.float32), timestamps=None
+        ),
+        "valid": RasterImage(
+            torch.tensor([[[[1, 1], [1, 0]]]], dtype=torch.float32), timestamps=None
+        ),
+    }
+    output = head(
+        intermediates=FeatureMaps([logits]),
+        context=ModelContext(inputs=[], metadatas=[]),
+        targets=[target_dict],
+    )
+    assert output.loss_dict["regress"] == pytest.approx(expected)
+
+
 def test_mse_metric(empty_sample_metadata: SampleMetadata) -> None:
     """Verify mean squared error metric works with customized scale_factor."""
     task = PerPixelRegressionTask(

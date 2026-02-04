@@ -318,8 +318,10 @@ model:
               out_channels: 1
           - class_path: rslearn.train.tasks.per_pixel_regression.PerPixelRegressionHead
             init_args:
-              # The loss function to use, either "mse" (default) or "l1".
+              # The loss function to use: "mse" (default), "l1", or "huber".
               loss_mode: "mse"
+              # Optional: delta for Huber loss (only used when loss_mode="huber").
+              huber_delta: 1.0
 data:
   class_path: rslearn.train.data_module.RslearnDataModule
   init_args:
@@ -907,16 +909,18 @@ cross entropy loss.
 
 ### PerPixelRegressionHead
 
-PerPixelRegressionHead computes mean squared error or L1 loss. It is configured like
-this:
+PerPixelRegressionHead computes a per-pixel regression loss (MSE, L1, or Huber). It is
+configured like this:
 
 ```yaml
         decoder:
           # ...
           - class_path: rslearn.train.tasks.per_pixel_regression.PerPixelRegressionHead
             init_args:
-              # The loss function to use, either "mse" (default) or "l1".
+              # The loss function to use: "mse" (default), "l1", or "huber".
               loss_mode: "mse"
+              # Optional: delta for Huber loss (only used when loss_mode="huber").
+              huber_delta: 1.0
               # Whether to apply a sigmoid activation on the output. This requires the
               # targets to be between 0-1. Otherwise, the previous output is
               # unmodified.
@@ -928,19 +932,22 @@ predicted values at each pixel. If `use_sigmoid` is false, those should correspo
 the scaled values (actual value multiplied by the scale factor configured in the task).
 
 It outputs the scaled values as a BHW tensor. It also produces a loss dict with one
-key, "regress", containing the mean squared error or L1 loss.
+key, "regress", containing the configured regression loss.
 
 ### RegressionHead
 
-RegressionHead computes mean squared error or L1 loss. It is configured like this:
+RegressionHead computes a regression loss (MSE, L1, or Huber). It is configured like
+this:
 
 ```yaml
         decoder:
           # ...
           - class_path: rslearn.train.tasks.regression.RegressionHead
             init_args:
-              # The loss function to use, either "mse" (default) or "l1".
+              # The loss function to use: "mse" (default), "l1", or "huber".
               loss_mode: "mse"
+              # Optional: delta for Huber loss (only used when loss_mode="huber").
+              huber_delta: 1.0
               # Whether to apply a sigmoid activation on the output. This requires the
               # targets to be between 0-1. Otherwise, the previous output is
               # unmodified.
@@ -952,7 +959,7 @@ batch. If `use_sigmoid` is false, those should correspond to the scaled values (
 value multiplied by the scale factor configured in the task).
 
 It outputs the scaled values as a single-dimension tensor. It also produces a loss dict
-with one key, "regress", containing the mean squared error or L1 loss.
+with one key, "regress", containing the configured regression loss.
 
 ### SegmentationHead
 
