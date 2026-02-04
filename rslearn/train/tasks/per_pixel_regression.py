@@ -149,22 +149,28 @@ class PerPixelRegressionHead(Predictor):
     """Head for per-pixel regression task."""
 
     def __init__(
-        self, loss_mode: Literal["mse", "l1"] = "mse", use_sigmoid: bool = False
+        self,
+        loss_mode: Literal["mse", "l1", "huber"] = "mse",
+        use_sigmoid: bool = False,
+        huber_delta: float = 1.0,
     ):
-        """Initialize a new RegressionHead.
+        """Initialize a new PerPixelRegressionHead.
 
         Args:
-            loss_mode: the loss function to use, either "mse" (default) or "l1".
+            loss_mode: the loss function to use: "mse" (default), "l1", or "huber".
             use_sigmoid: whether to apply a sigmoid activation on the output. This
                 requires targets to be between 0-1.
+            huber_delta: delta parameter for Huber loss (only used when
+                loss_mode="huber").
         """
         super().__init__()
 
-        if loss_mode not in ["mse", "l1"]:
-            raise ValueError("invalid loss mode")
+        if loss_mode not in ["mse", "l1", "huber"]:
+            raise ValueError(f"invalid loss mode {loss_mode}")
 
         self.loss_mode = loss_mode
         self.use_sigmoid = use_sigmoid
+        self.huber_delta = huber_delta
 
     def forward(
         self,
@@ -217,8 +223,15 @@ class PerPixelRegressionHead(Predictor):
                 scores = torch.square(outputs - labels)
             elif self.loss_mode == "l1":
                 scores = torch.abs(outputs - labels)
+            elif self.loss_mode == "huber":
+                scores = torch.nn.functional.huber_loss(
+                    outputs,
+                    labels,
+                    reduction="none",
+                    delta=self.huber_delta,
+                )
             else:
-                assert False
+                raise ValueError(f"unknown loss mode {self.loss_mode}")
 
             # Compute average but only over valid pixels.
             mask_total = mask.sum()
