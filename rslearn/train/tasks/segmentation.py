@@ -10,6 +10,7 @@ import torchmetrics.classification
 from torchmetrics import Metric, MetricCollection
 
 from rslearn.models.component import FeatureMaps, Predictor
+from rslearn.train.metrics import ConfusionMatrixMetric
 from rslearn.train.model_context import (
     ModelContext,
     ModelOutput,
@@ -43,6 +44,8 @@ class SegmentationTask(BasicTask):
         other_metrics: dict[str, Metric] = {},
         output_probs: bool = False,
         output_class_idx: int | None = None,
+        enable_confusion_matrix: bool = False,
+        class_names: list[str] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize a new SegmentationTask.
@@ -80,6 +83,10 @@ class SegmentationTask(BasicTask):
                 during prediction.
             output_class_idx: if set along with output_probs, only output the probability
                 for this specific class index (single-channel output).
+            enable_confusion_matrix: whether to compute confusion matrix (default false).
+                If true, it requires wandb to be initialized for logging.
+            class_names: optional list of class names for labeling confusion matrix axes.
+                If not provided, classes will be labeled as "class_0", "class_1", etc.
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -106,6 +113,8 @@ class SegmentationTask(BasicTask):
         self.other_metrics = other_metrics
         self.output_probs = output_probs
         self.output_class_idx = output_class_idx
+        self.enable_confusion_matrix = enable_confusion_matrix
+        self.class_names = class_names
 
     def process_inputs(
         self,
@@ -284,6 +293,14 @@ class SegmentationTask(BasicTask):
 
         if self.other_metrics:
             metrics.update(self.other_metrics)
+
+        if self.enable_confusion_matrix:
+            metrics["confusion_matrix"] = SegmentationMetric(
+                ConfusionMatrixMetric(
+                    num_classes=self.num_classes,
+                    class_names=self.class_names,
+                ),
+            )
 
         return MetricCollection(metrics)
 
