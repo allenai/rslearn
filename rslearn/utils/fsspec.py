@@ -48,11 +48,8 @@ def iter_nonhidden_subdirs(path: UPath) -> Iterator[UPath]:
         non-hidden subdirectories in the directory.
     """
     for p in iter_nonhidden(path):
-        try:
-            if p.is_dir():
-                yield p
-        except OSError:
-            continue
+        if p.is_dir():
+            yield p
 
 
 def iter_nonhidden_files(path: UPath) -> Iterator[UPath]:
@@ -65,11 +62,8 @@ def iter_nonhidden_files(path: UPath) -> Iterator[UPath]:
         non-hidden files in the directory.
     """
     for p in iter_nonhidden(path):
-        try:
-            if p.is_file():
-                yield p
-        except OSError:
-            continue
+        if p.is_file():
+            yield p
 
 
 @contextmanager
