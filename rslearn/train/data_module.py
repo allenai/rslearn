@@ -108,10 +108,10 @@ class RslearnDataModule(L.LightningDataModule):
         self.use_in_memory_all_crops_dataset = use_in_memory_all_crops_dataset
         self.index_mode = index_mode
         self.split_configs = {
-            "train": default_config.update(train_config),
-            "val": default_config.update(val_config),
-            "test": default_config.update(test_config),
-            "predict": default_config.update(predict_config),
+            "train": SplitConfig.merge_and_validate([default_config, train_config]),
+            "val": SplitConfig.merge_and_validate([default_config, val_config]),
+            "test": SplitConfig.merge_and_validate([default_config, test_config]),
+            "predict": SplitConfig.merge_and_validate([default_config, predict_config]),
         }
 
     def setup(
@@ -141,7 +141,7 @@ class RslearnDataModule(L.LightningDataModule):
                 task=self.task,
                 workers=self.init_workers,
                 name=self.name,
-                fix_patch_pick=(split != "train"),
+                fix_crop_pick=(split != "train"),
                 index_mode=self.index_mode,
             )
             logger.info(f"got {len(dataset)} examples in split {split}")
@@ -203,13 +203,16 @@ class RslearnDataModule(L.LightningDataModule):
         # Enable persistent workers unless we are using main process.
         persistent_workers = self.num_workers > 0
 
-        # If using all patches, limit number of workers to the number of windows.
+        # If using all crops, limit number of workers to the number of windows.
         # Otherwise it has to distribute the same window to different workers which can
         # cause issues for RslearnWriter.
         # If the number of windows is 0, then we can set positive number of workers
         # since they won't yield anything anyway.
         num_workers = self.num_workers
-        if split_config.load_all_crops and len(dataset.get_dataset_examples()) > 0:
+        if (
+            split_config.get_load_all_crops()
+            and len(dataset.get_dataset_examples()) > 0
+        ):
             num_workers = min(num_workers, len(dataset.get_dataset_examples()))
 
         kwargs: dict[str, Any] = dict(
