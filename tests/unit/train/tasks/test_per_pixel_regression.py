@@ -1,3 +1,5 @@
+from typing import Literal
+
 import numpy as np
 import pytest
 import torch
@@ -77,7 +79,9 @@ def test_head(empty_sample_metadata: SampleMetadata) -> None:
     ],
 )
 def test_head_loss_modes(
-    empty_sample_metadata: SampleMetadata, loss_mode: str, expected: float
+    empty_sample_metadata: SampleMetadata,
+    loss_mode: Literal["mse", "l1", "huber"],
+    expected: float,
 ) -> None:
     head = PerPixelRegressionHead(loss_mode=loss_mode)
     logits = torch.tensor([[1, 1], [1, 1]], dtype=torch.float32)[None, None, :, :]

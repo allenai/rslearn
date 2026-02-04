@@ -1,3 +1,5 @@
+from typing import Literal
+
 import pytest
 import torch
 
@@ -97,7 +99,9 @@ def test_accuracy_metric() -> None:
         ("huber", 0.5),
     ],
 )
-def test_regression_head_loss_modes(loss_mode: str, expected: float) -> None:
+def test_regression_head_loss_modes(
+    loss_mode: Literal["mse", "l1", "huber"], expected: float
+) -> None:
     head = RegressionHead(loss_mode=loss_mode)
     logits = torch.tensor([[1.0], [1.0]], dtype=torch.float32)
     intermediates = FeatureVector(feature_vector=logits)
