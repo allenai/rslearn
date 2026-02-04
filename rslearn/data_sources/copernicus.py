@@ -353,9 +353,8 @@ class Copernicus(DataSource):
                 self.username = os.environ["COPERNICUS_USERNAME"]
                 self.password = os.environ["COPERNICUS_PASSWORD"]
 
-    def deserialize_item(self, serialized_item: Any) -> CopernicusItem:
+    def deserialize_item(self, serialized_item: dict) -> CopernicusItem:
         """Deserializes an item from JSON-decoded data."""
-        assert isinstance(serialized_item, dict)
         return CopernicusItem.deserialize(serialized_item)
 
     def _get(self, path: str) -> dict[str, Any]:

@@ -206,7 +206,7 @@ class ClassificationTask(BasicTask):
         feature = Feature(
             STGeometry(
                 metadata.projection,
-                shapely.Point(metadata.patch_bounds[0], metadata.patch_bounds[1]),
+                shapely.Point(metadata.crop_bounds[0], metadata.crop_bounds[1]),
                 None,
             ),
             {

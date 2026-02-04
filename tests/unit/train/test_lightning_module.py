@@ -69,8 +69,14 @@ def test_test_step_produces_visualization(tmp_path: pathlib.Path) -> None:
     ]
     targets = [
         {
-            "classes": torch.randint(0, num_classes, (image_size, image_size)).long(),
-            "valid": torch.ones((image_size, image_size), dtype=torch.float32),
+            "classes": RasterImage(
+                torch.randint(0, num_classes, (1, 1, image_size, image_size)).long(),
+                timestamps=None,
+            ),
+            "valid": RasterImage(
+                torch.ones((1, 1, image_size, image_size), dtype=torch.float32),
+                timestamps=None,
+            ),
         }
     ]
 
@@ -80,9 +86,9 @@ def test_test_step_produces_visualization(tmp_path: pathlib.Path) -> None:
             window_group="test_group",
             window_name="test_window",
             window_bounds=(0, 0, image_size, image_size),
-            patch_bounds=(0, 0, image_size, image_size),
-            patch_idx=0,
-            num_patches_in_window=1,
+            crop_bounds=(0, 0, image_size, image_size),
+            crop_idx=0,
+            num_crops_in_window=1,
             time_range=None,
             projection=WGS84_PROJECTION,
             dataset_source=None,

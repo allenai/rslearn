@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>rslearn Dataset Visualization</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 40px;
+        }
+        .legend {
+            background: white;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .legend h3 {
+            margin: 0 0 10px 0;
+            color: #555;
+        }
+        .legend-items {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .legend-color {
+            width: 30px;
+            height: 20px;
+            border: 1px solid #999;
+        }
+        .window-section {
+            background: white;
+            margin-bottom: 40px;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .window-header {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #3498db;
+        }
+        .window-info {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        .window-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .image-container {
+            border-radius: 4px;
+            overflow: hidden;
+            background: #fff;
+            display: inline-block;
+            width: fit-content;
+        }
+        .image-container img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            background: #fff;
+        }
+        .image-label {
+            padding: 8px;
+            font-size: 14px;
+            color: #333;
+            text-align: center;
+            background: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <h1>rslearn Dataset Visualization</h1>
+
+    {% if label_colors and task_type != "classification" %}
+    <div class="legend">
+        <h3>Mask Color Legend</h3>
+        <div class="legend-items">
+            {% for label in sorted_label_keys %}
+            <div class="legend-item">
+                <div class="legend-color" style="background: rgb({{ label_colors[label][0] }}, {{ label_colors[label][1] }}, {{ label_colors[label][2] }});"></div>
+                <span>{{ label | e }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% for window in windows %}
+    <div class="window-section">
+        <div class="window-header">
+            {{ window.name | e }}
+            {% if window.maps_link %}
+            <a href="{{ window.maps_link | e }}" target="_blank" style="color: #3498db; text-decoration: none; margin-left: 10px;">🗺️ View on Google Maps</a>
+            {% endif %}
+        </div>
+        <div class="window-info">
+            {% if window.time_range_formatted %}
+            <p>Time: {{ window.time_range_formatted[0] }} to {{ window.time_range_formatted[1] }}</p>
+            {% endif %}
+            {% if window.lat is not none and window.lon is not none %}
+            <p>Lat: {{ "%.4f"|format(window.lat) }}, Lon: {{ "%.4f"|format(window.lon) }}</p>
+            {% endif %}
+        </div>
+        <div class="window-grid">
+            {% for layer_name in layers %}
+                {% if layer_name in window.available_layers %}
+                <div class="image-container">
+                    <img src="/images/{{ window.idx }}/{{ layer_name | e }}" alt="{{ layer_name | e }}">
+                    <div class="image-label">{{ layer_name | e }}</div>
+                </div>
+                {% endif %}
+            {% endfor %}
+
+            {% for mask_layer in window.mask_layers %}
+            <div class="image-container" id="mask-{{ window.idx }}-{{ mask_layer | e }}">
+                <img src="/images/{{ window.idx }}/{{ mask_layer | e }}" alt="Label Mask: {{ mask_layer | e }}" onerror="this.closest('.image-container').remove()">
+                <div class="image-label">Label Mask: {{ mask_layer | e }}</div>
+            </div>
+            {% endfor %}
+
+            {% for layer_name, label_text in window.label_texts.items() %}
+            <div class="image-container">
+                <div style="padding: 20px; font-size: 18px; font-weight: bold;">{{ layer_name | e }}: {{ label_text | e }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</body>
+</html>

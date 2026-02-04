@@ -3,7 +3,6 @@
 import os
 import tempfile
 from datetime import UTC, datetime
-from typing import Any
 
 import cdsapi
 import netCDF4
@@ -160,9 +159,8 @@ class ERA5Land(DataSource):
 
         return all_groups
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: dict) -> Item:
         """Deserializes an item from JSON-decoded data."""
-        assert isinstance(serialized_item, dict)
         return Item.deserialize(serialized_item)
 
     def _convert_nc_to_tif(self, nc_path: UPath, tif_path: UPath) -> None:

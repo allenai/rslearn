@@ -14,26 +14,9 @@ from torchmetrics import Metric, MetricCollection
 
 from rslearn.train.model_context import RasterImage, SampleMetadata
 from rslearn.utils import Feature, STGeometry
+from rslearn.utils.colors import DEFAULT_COLORS
 
 from .task import BasicTask
-
-DEFAULT_COLORS = [
-    (255, 0, 0),
-    (0, 255, 0),
-    (0, 0, 255),
-    (255, 255, 0),
-    (0, 255, 255),
-    (255, 0, 255),
-    (0, 128, 0),
-    (255, 160, 122),
-    (139, 69, 19),
-    (128, 128, 128),
-    (255, 255, 255),
-    (143, 188, 143),
-    (95, 158, 160),
-    (255, 200, 0),
-    (128, 0, 0),
-]
 
 
 class DetectionTask(BasicTask):
@@ -145,7 +128,7 @@ class DetectionTask(BasicTask):
         if not load_targets:
             return {}, {}
 
-        bounds = metadata.patch_bounds
+        bounds = metadata.crop_bounds
 
         boxes = []
         class_labels = []
@@ -261,10 +244,10 @@ class DetectionTask(BasicTask):
         features = []
         for box, class_id, score in zip(boxes, class_ids, scores):
             shp = shapely.box(
-                metadata.patch_bounds[0] + float(box[0]),
-                metadata.patch_bounds[1] + float(box[1]),
-                metadata.patch_bounds[0] + float(box[2]),
-                metadata.patch_bounds[1] + float(box[3]),
+                metadata.crop_bounds[0] + float(box[0]),
+                metadata.crop_bounds[1] + float(box[1]),
+                metadata.crop_bounds[0] + float(box[2]),
+                metadata.crop_bounds[1] + float(box[3]),
             )
             geom = STGeometry(metadata.projection, shp, None)
             properties: dict[str, Any] = {

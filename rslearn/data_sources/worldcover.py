@@ -75,7 +75,7 @@ class WorldCover(LocalFiles):
         tif_dir = self.download_worldcover_data(worldcover_upath)
 
         super().__init__(
-            src_dir=tif_dir,
+            src_dir=tif_dir.absolute().as_uri(),
             layer_type=LayerType.RASTER,
             context=context,
         )

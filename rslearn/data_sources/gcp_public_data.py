@@ -820,9 +820,8 @@ class Sentinel2(DataSource):
             groups.append(cur_groups)
         return groups
 
-    def deserialize_item(self, serialized_item: Any) -> Sentinel2Item:
+    def deserialize_item(self, serialized_item: dict) -> Sentinel2Item:
         """Deserializes an item from JSON-decoded data."""
-        assert isinstance(serialized_item, dict)
         return Sentinel2Item.deserialize(serialized_item)
 
     def retrieve_item(

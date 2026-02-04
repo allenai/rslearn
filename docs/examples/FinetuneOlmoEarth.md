@@ -7,6 +7,13 @@ Cropland Data Layer. For the inputs, we use four Sentinel-2 images (one per mont
 If you are new to rslearn, you may want to read [the main README](../../README.md) or
 [CoreConcepts](../CoreConcepts.md) first.
 
+Due to license incompatibility, the `olmoearth_pretrain` package required for this
+example is not included as a dependency and must be installed explicitly:
+
+```bash
+pip install olmoearth_pretrain
+```
+
 ## Create the Dataset
 
 Create a folder like `./dataset` to store the rslearn dataset, and save this dataset
@@ -197,14 +204,14 @@ data:
         split: "val"
     predict_config:
       groups: ["predict"]
-      load_all_patches: true
-      # We set patch_size=128 here to support the option of using larger windows during
+      load_all_crops: true
+      # We set crop_size=128 here to support the option of using larger windows during
       # prediction. Note that this controls the sliding window inference crop size,
       # and we want that to match the size of our training windows.
-      patch_size: 128
+      crop_size: 128
       # We use some overlap when we need to apply sliding window inference on large
       # windows to reduce border effects.
-      overlap_ratio: 0.1
+      overlap_pixels: 12
       skip_targets: true
 trainer:
   max_epochs: 100
@@ -233,10 +240,10 @@ trainer:
         merger:
           class_path: rslearn.train.prediction_writer.RasterMerger
           init_args:
-            # This removes some the boundary that is redundant because of the
-            # overlap_ratio. So we keep the center 116x116 of each 128x128 output,
-            # since there are 12 pixels of overlap between adjacent inference crops.
-            padding: 6
+            # This removes the boundary that is redundant because of the overlap_pixels.
+            # So we keep the center 116x116 of each 128x128 output, since there are
+            # 12 pixels of overlap between adjacent inference crops.
+            overlap_pixels: 12
 # Here we enable automatic checkpoint management and logging to W&B.
 # Set WANDB_MODE=offline to disable online logging.
 project_name: ${PROJECT_NAME}

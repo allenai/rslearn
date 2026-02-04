@@ -2,7 +2,6 @@
 
 import os
 import tempfile
-from typing import Any
 
 import boto3
 from upath import UPath
@@ -78,9 +77,8 @@ class Sentinel1(DataSource, TileStore):
         """Gets an item by name."""
         return self.sentinel1.get_item_by_name(name)
 
-    def deserialize_item(self, serialized_item: Any) -> CopernicusItem:
+    def deserialize_item(self, serialized_item: dict) -> CopernicusItem:
         """Deserializes an item from JSON-decoded data."""
-        assert isinstance(serialized_item, dict)
         return CopernicusItem.deserialize(serialized_item)
 
     def ingest(

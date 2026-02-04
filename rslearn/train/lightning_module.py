@@ -421,7 +421,7 @@ class RslearnLightningModule(L.LightningModule):
                 for image_suffix, image in images.items():
                     out_fname = os.path.join(
                         self.visualize_dir,
-                        f"{metadata.window_name}_{metadata.patch_bounds[0]}_{metadata.patch_bounds[1]}_{image_suffix}.png",
+                        f"{metadata.window_name}_{metadata.crop_bounds[0]}_{metadata.crop_bounds[1]}_{image_suffix}.png",
                     )
                     Image.fromarray(image).save(out_fname)
 

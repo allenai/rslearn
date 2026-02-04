@@ -18,27 +18,9 @@ from rslearn.train.model_context import (
     SampleMetadata,
 )
 from rslearn.utils import Feature
+from rslearn.utils.colors import DEFAULT_COLORS
 
 from .task import BasicTask
-
-# TODO: This is duplicated code fix it
-DEFAULT_COLORS = [
-    (255, 0, 0),
-    (0, 255, 0),
-    (0, 0, 255),
-    (255, 255, 0),
-    (0, 255, 255),
-    (255, 0, 255),
-    (0, 128, 0),
-    (255, 160, 122),
-    (139, 69, 19),
-    (128, 128, 128),
-    (255, 255, 255),
-    (143, 188, 143),
-    (95, 158, 160),
-    (255, 200, 0),
-    (128, 0, 0),
-]
 
 
 class SegmentationTask(BasicTask):
@@ -155,9 +137,7 @@ class SegmentationTask(BasicTask):
             return {}, {}
 
         assert isinstance(raw_inputs["targets"], RasterImage)
-        assert raw_inputs["targets"].image.shape[0] == 1
-        assert raw_inputs["targets"].image.shape[1] == 1
-        labels = raw_inputs["targets"].image[0, 0, :, :].long()
+        labels = raw_inputs["targets"].get_hw_tensor().long()
 
         if self.class_id_mapping is not None:
             new_labels = labels.clone()
@@ -173,9 +153,11 @@ class SegmentationTask(BasicTask):
         else:
             valid = torch.ones(labels.shape, dtype=torch.float32)
 
+        # Wrap in RasterImage with CTHW format (C=1, T=1) so classes and valid can be
+        # used in image transforms.
         return {}, {
-            "classes": labels,
-            "valid": valid,
+            "classes": RasterImage(labels[None, None, :, :], timestamps=None),
+            "valid": RasterImage(valid[None, None, :, :], timestamps=None),
         }
 
     def process_output(
@@ -233,7 +215,7 @@ class SegmentationTask(BasicTask):
         image = super().visualize(input_dict, target_dict, output)["image"]
         if target_dict is None:
             raise ValueError("target_dict is required for visualization")
-        gt_classes = target_dict["classes"].cpu().numpy()
+        gt_classes = target_dict["classes"].get_hw_tensor().cpu().numpy()
         pred_classes = output.cpu().numpy().argmax(axis=0)
         gt_vis = np.zeros((gt_classes.shape[0], gt_classes.shape[1], 3), dtype=np.uint8)
         pred_vis = np.zeros(
@@ -326,12 +308,19 @@ class SegmentationTask(BasicTask):
 class SegmentationHead(Predictor):
     """Head for segmentation task."""
 
-    def __init__(self, weights: list[float] | None = None, dice_loss: bool = False):
+    def __init__(
+        self,
+        weights: list[float] | None = None,
+        dice_loss: bool = False,
+        temperature: float = 1.0,
+    ):
         """Initialize a new SegmentationTask.
 
         Args:
             weights: weights for cross entropy loss (Tensor of size C)
             dice_loss: weather to add dice loss to cross entropy
+            temperature: temperature scaling for softmax, does not affect the loss,
+                only the predictor outputs
         """
         super().__init__()
         if weights is not None:
@@ -339,6 +328,7 @@ class SegmentationHead(Predictor):
         else:
             self.weights = None
         self.dice_loss = dice_loss
+        self.temperature = temperature
 
     def forward(
         self,
@@ -367,12 +357,16 @@ class SegmentationHead(Predictor):
             )
 
         logits = intermediates.feature_maps[0]
-        outputs = torch.nn.functional.softmax(logits, dim=1)
+        outputs = torch.nn.functional.softmax(logits / self.temperature, dim=1)
 
         losses = {}
         if targets:
-            labels = torch.stack([target["classes"] for target in targets], dim=0)
-            mask = torch.stack([target["valid"] for target in targets], dim=0)
+            labels = torch.stack(
+                [target["classes"].get_hw_tensor() for target in targets], dim=0
+            )
+            mask = torch.stack(
+                [target["valid"].get_hw_tensor() for target in targets], dim=0
+            )
             per_pixel_loss = torch.nn.functional.cross_entropy(
                 logits, labels, weight=self.weights, reduction="none"
             )
@@ -385,7 +379,8 @@ class SegmentationHead(Predictor):
                 # the summed mask loss be zero.
                 losses["cls"] = torch.sum(per_pixel_loss * mask)
             if self.dice_loss:
-                dice_loss = DiceLoss()(outputs, labels, mask)
+                softmax_woT = torch.nn.functional.softmax(logits, dim=1)
+                dice_loss = DiceLoss()(softmax_woT, labels, mask)
                 losses["dice"] = dice_loss
 
         return ModelOutput(
@@ -436,12 +431,12 @@ class SegmentationMetric(Metric):
         """
         if not isinstance(preds, torch.Tensor):
             preds = torch.stack(preds)
-        labels = torch.stack([target["classes"] for target in targets])
+        labels = torch.stack([target["classes"].get_hw_tensor() for target in targets])
 
         # Sub-select the valid labels.
         # We flatten the prediction and label images at valid pixels.
         # Prediction is changed from BCHW to BHWC so we can select the valid BHW mask.
-        mask = torch.stack([target["valid"] > 0 for target in targets])
+        mask = torch.stack([target["valid"].get_hw_tensor() > 0 for target in targets])
         preds = preds.permute(0, 2, 3, 1)[mask]
         labels = labels[mask]
         if len(preds) == 0:

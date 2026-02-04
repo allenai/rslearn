@@ -5,7 +5,6 @@ import os
 import tempfile
 import zipfile
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import fiona
 import requests
@@ -153,7 +152,7 @@ class EuroCrops(DataSource[EuroCropsItem]):
             groups.append(cur_groups)
         return groups
 
-    def deserialize_item(self, serialized_item: Any) -> EuroCropsItem:
+    def deserialize_item(self, serialized_item: dict) -> EuroCropsItem:
         """Deserializes an item from JSON-decoded data."""
         return EuroCropsItem.deserialize(serialized_item)
 

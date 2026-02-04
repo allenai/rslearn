@@ -565,11 +565,15 @@ Here is a summary of all of the options available in the SplitConfig.
       # For validation, testing, and prediction, patch_size can be combined with
       # load_all_crops to perform sliding window inference. For training, it should
       # usually be left false so that each training epoch sees a different crop.
-      load_all_patches: false
+      load_all_crops: false
       # This should typically be enabled for predict_config, so that windows without
       # layers containing targets are skipped. For training, validation, and testing,
       # targets are needed so it should be false.
       skip_targets: false
+      # Resume partial inference: if set, windows that already have this layer
+      # completed will be skipped by default, so predict can resume without
+      # reprocessing completed windows.
+      output_layer_name_skip_inference_if_exists: null
 ```
 
 The transforms will adjust the initial input and target dicts that come from reading
@@ -587,6 +591,10 @@ also copy it to the "image" key so that it can be accessed when creating visuali
 the size of the original input images. We also show a flipping augmentation, which
 needs to flip the boxes and not just the images.
 
+Note: Using OlmoEarth requires installing the `olmoearth_pretrain` package separately
+(`pip install olmoearth_pretrain`). See [the OlmoEarth reference](foundation_models/OlmoEarth.md)
+for details.
+
 ```yaml
 model:
   class_path: rslearn.train.lightning_module.RslearnLightningModule
@@ -595,7 +603,7 @@ model:
       class_path: rslearn.models.singletask.SingleTaskModel
       init_args:
         encoder:
-          - class_path: rslp.olmoearth_pretrain.model.OlmoEarth
+          - class_path: rslearn.models.olmoearth_pretrain.model.OlmoEarth
             init_args:
               forward_kwargs:
                 patch_size: 4

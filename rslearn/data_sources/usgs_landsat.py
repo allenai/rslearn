@@ -4,12 +4,9 @@
 """
 
 import io
-import json
 import os
 import shutil
 import tempfile
-import time
-import uuid
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from typing import Any, BinaryIO
@@ -24,246 +21,7 @@ from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
-
-
-class APIException(Exception):
-    """Exception raised for M2M API errors."""
-
-    pass
-
-
-class M2MAPIClient:
-    """An API client for interacting with the USGS M2M API."""
-
-    api_url = "https://m2m.cr.usgs.gov/api/api/json/stable/"
-    pagination_size = 1000
-
-    def __init__(
-        self,
-        username: str,
-        password: str | None = None,
-        token: str | None = None,
-        timeout: timedelta = timedelta(seconds=120),
-    ) -> None:
-        """Initialize a new M2MAPIClient.
-
-        Args:
-            username: the EROS username
-            password: the EROS password
-            token: the application token. One of password or token must be specified.
-            timeout: timeout for requests.
-        """
-        self.username = username
-        self.timeout = timeout
-
-        if password is not None and token is not None:
-            raise ValueError("only one of password or token can be specified")
-
-        if password is not None:
-            json_data = json.dumps({"username": self.username, "password": password})
-            response = requests.post(
-                self.api_url + "login",
-                data=json_data,
-                timeout=self.timeout.total_seconds(),
-            )
-
-        elif token is not None:
-            json_data = json.dumps({"username": username, "token": token})
-            response = requests.post(
-                self.api_url + "login-token",
-                data=json_data,
-                timeout=self.timeout.total_seconds(),
-            )
-
-        else:
-            raise ValueError("one of password or token must be specified")
-
-        response.raise_for_status()
-        self.auth_token = response.json()["data"]
-
-    def request(
-        self, endpoint: str, data: dict[str, Any] | None = None
-    ) -> dict[str, Any] | None:
-        """Make a request to the API.
-
-        Args:
-            endpoint: the endpoint to call
-            data: POST data to pass
-
-        Returns:
-            JSON response data if any
-        """
-        response = requests.post(
-            self.api_url + endpoint,
-            headers={"X-Auth-Token": self.auth_token},
-            data=json.dumps(data),
-            timeout=self.timeout.total_seconds(),
-        )
-        response.raise_for_status()
-        if response.text:
-            response_dict = response.json()
-
-            if response_dict["errorMessage"]:
-                raise APIException(response_dict["errorMessage"])
-            return response_dict
-        return None
-
-    def close(self) -> None:
-        """Logout from the API."""
-        self.request("logout")
-
-    def __enter__(self) -> "M2MAPIClient":
-        """Enter function to provide with semantics."""
-        return self
-
-    def __exit__(self) -> None:
-        """Exit function to provide with semantics.
-
-        Logs out the API.
-        """
-        self.close()
-
-    def get_filters(self, dataset_name: str) -> list[dict[str, Any]]:
-        """Returns filters available for the given dataset.
-
-        Args:
-            dataset_name: the dataset name e.g. landsat_ot_c2_l1
-
-        Returns:
-            list of filter objects
-        """
-        response_dict = self.request("dataset-filters", {"datasetName": dataset_name})
-        if response_dict is None:
-            raise APIException("No response from API")
-        return response_dict["data"]
-
-    def scene_search(
-        self,
-        dataset_name: str,
-        acquisition_time_range: tuple[datetime, datetime] | None = None,
-        cloud_cover_range: tuple[int, int] | None = None,
-        bbox: tuple[float, float, float, float] | None = None,
-        metadata_filter: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]:
-        """Search for scenes matching the arguments.
-
-        Args:
-            dataset_name: the dataset name e.g. landsat_ot_c2_l1
-            acquisition_time_range: optional filter on the acquisition time
-            cloud_cover_range: optional filter on the cloud cover
-            bbox: optional spatial filter
-            metadata_filter: optional metadata filter dict
-        """
-        base_data: dict[str, Any] = {"datasetName": dataset_name, "sceneFilter": {}}
-        if acquisition_time_range:
-            base_data["sceneFilter"]["acquisitionFilter"] = {
-                "start": acquisition_time_range[0].isoformat(),
-                "end": acquisition_time_range[1].isoformat(),
-            }
-        if cloud_cover_range:
-            base_data["sceneFilter"]["cloudCoverFilter"] = {
-                "min": cloud_cover_range[0],
-                "max": cloud_cover_range[1],
-                "includeUnknown": False,
-            }
-        if bbox:
-            base_data["sceneFilter"]["spatialFilter"] = {
-                "filterType": "mbr",
-                "lowerLeft": {"longitude": bbox[0], "latitude": bbox[1]},
-                "upperRight": {"longitude": bbox[2], "latitude": bbox[3]},
-            }
-        if metadata_filter:
-            base_data["sceneFilter"]["metadataFilter"] = metadata_filter
-
-        starting_number = 1
-        results = []
-        while True:
-            cur_data = base_data.copy()
-            cur_data["startingNumber"] = starting_number
-            cur_data["maxResults"] = self.pagination_size
-            response_dict = self.request("scene-search", cur_data)
-            if response_dict is None:
-                raise APIException("No response from API")
-            data = response_dict["data"]
-            results.extend(data["results"])
-            if data["recordsReturned"] < self.pagination_size:
-                break
-            starting_number += self.pagination_size
-
-        return results
-
-    def get_scene_metadata(self, dataset_name: str, entity_id: str) -> dict[str, Any]:
-        """Get detailed metadata for a scene.
-
-        Args:
-            dataset_name: the dataset name in which to search
-            entity_id: the entity ID of the scene
-
-        Returns:
-            full scene metadata
-        """
-        response_dict = self.request(
-            "scene-metadata",
-            {
-                "datasetName": dataset_name,
-                "entityId": entity_id,
-                "metadataType": "full",
-            },
-        )
-        if response_dict is None:
-            raise APIException("No response from API")
-        return response_dict["data"]
-
-    def get_downloadable_products(
-        self, dataset_name: str, entity_id: str
-    ) -> list[dict[str, Any]]:
-        """Get the downloadable products for a given scene.
-
-        Args:
-            dataset_name: the dataset name
-            entity_id: the entity ID of the scene
-
-        Returns:
-            list of downloadable products
-        """
-        data = {"datasetName": dataset_name, "entityIds": [entity_id]}
-        response_dict = self.request("download-options", data)
-        if response_dict is None:
-            raise APIException("No response from API")
-        return response_dict["data"]
-
-    def get_download_url(self, entity_id: str, product_id: str) -> str:
-        """Get the download URL for a given product.
-
-        Args:
-            entity_id: the entity ID of the product
-            product_id: the product ID of the product
-
-        Returns:
-            the download URL
-        """
-        label = str(uuid.uuid4())
-        data = {
-            "downloads": [
-                {"label": label, "entityId": entity_id, "productId": product_id}
-            ]
-        }
-        response_dict = self.request("download-request", data)
-        if response_dict is None:
-            raise APIException("No response from API")
-        response = response_dict["data"]
-        while True:
-            response_dict = self.request("download-retrieve", {"label": label})
-            if response_dict is None:
-                raise APIException("No response from API")
-            response = response_dict["data"]
-            if len(response["available"]) > 0:
-                return response["available"][0]["url"]
-            if len(response["requested"]) == 0:
-                raise Exception("Did not get download URL")
-            if response["requested"][0].get("url"):
-                return response["requested"][0]["url"]
-            time.sleep(10)
+from rslearn.utils.m2m_api import APIException, M2MAPIClient
 
 
 class LandsatOliTirsItem(Item):
@@ -314,30 +72,26 @@ class LandsatOliTirs(DataSource):
 
     def __init__(
         self,
-        username: str,
-        sort_by: str | None = None,
-        password: str | None = None,
+        username: str | None = None,
         token: str | None = None,
+        sort_by: str | None = None,
         timeout: timedelta = timedelta(seconds=10),
         context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new LandsatOliTirs instance.
 
         Args:
-            username: EROS username
+            username: EROS username (see M2MAPIClient).
+            token: EROS application token (see M2MAPIClient).
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
-            password: EROS password (see M2MAPIClient).
-            token: EROS application token (see M2MAPIClient).
             timeout: timeout for requests.
             context: the data source context.
         """
         self.sort_by = sort_by
         self.timeout = timeout
 
-        self.client = M2MAPIClient(
-            username, password=password, token=token, timeout=timeout
-        )
+        self.client = M2MAPIClient(username=username, token=token, timeout=timeout)
 
     def _scene_metadata_to_item(self, result: dict[str, Any]) -> LandsatOliTirsItem:
         """Convert scene metadata from the API to a LandsatOliTirsItem."""
@@ -429,9 +183,8 @@ class LandsatOliTirs(DataSource):
         )
         return self._scene_metadata_to_item(scene_metadata)
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: dict) -> Item:
         """Deserializes an item from JSON-decoded data."""
-        assert isinstance(serialized_item, dict)
         return LandsatOliTirsItem.deserialize(serialized_item)
 
     def _get_download_urls(self, item: Item) -> dict[str, tuple[str, str]]:

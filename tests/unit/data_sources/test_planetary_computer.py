@@ -2,7 +2,7 @@ import pytest
 
 from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType
 from rslearn.data_sources import DataSourceContext
-from rslearn.data_sources.planetary_computer import CopDemGlo30
+from rslearn.data_sources.planetary_computer import CopDemGlo30, LandsatC2L2
 
 
 def test_cop_dem_glo_30_uses_context_layer_config_band_name() -> None:
@@ -41,3 +41,65 @@ def test_cop_dem_glo_30_rejects_multiple_bands_in_context_band_set() -> None:
 
     with pytest.raises(ValueError, match="expected band set to have a single band"):
         CopDemGlo30(context=context)
+
+
+def test_landsat_c2_l2_defaults_to_reflectance_common_names() -> None:
+    data_source = LandsatC2L2()
+    assert set(data_source.asset_bands.keys()) == {
+        "coastal",
+        "blue",
+        "green",
+        "red",
+        "nir08",
+        "swir16",
+        "swir22",
+        "lwir11",
+    }
+    assert data_source.asset_bands["coastal"] == ["B1"]
+    assert data_source.asset_bands["red"] == ["B4"]
+    assert data_source.asset_bands["nir08"] == ["B5"]
+    assert data_source.asset_bands["lwir11"] == ["B10"]
+    assert data_source.query is not None
+    assert data_source.query["platform"]["in"] == ["landsat-8", "landsat-9"]
+
+
+def test_landsat_c2_l2_normalizes_stac_band_name_aliases_from_context() -> None:
+    layer_cfg = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[
+            BandSetConfig(dtype=DType.UINT16, bands=["OLI_B4", "OLI_B5", "TIRS_B10"])
+        ],
+    )
+    context = DataSourceContext(layer_config=layer_cfg)
+
+    data_source = LandsatC2L2(context=context)
+    assert set(data_source.asset_bands.keys()) == {"red", "nir08", "lwir11"}
+    assert data_source.asset_bands["red"] == ["B4"]
+    assert data_source.asset_bands["nir08"] == ["B5"]
+    assert data_source.asset_bands["lwir11"] == ["B10"]
+
+
+def test_landsat_c2_l2_accepts_landsat_band_names_from_context() -> None:
+    layer_cfg = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT16, bands=["B2", "B3", "B4"])],
+    )
+    context = DataSourceContext(layer_config=layer_cfg)
+
+    data_source = LandsatC2L2(context=context)
+    assert set(data_source.asset_bands.keys()) == {"blue", "green", "red"}
+    assert data_source.asset_bands["blue"] == ["B2"]
+    assert data_source.asset_bands["green"] == ["B3"]
+    assert data_source.asset_bands["red"] == ["B4"]
+
+
+def test_landsat_c2_l2_allows_overriding_platform_query() -> None:
+    data_source = LandsatC2L2(query={"platform": {"in": ["landsat-8"]}})
+    assert data_source.query is not None
+    assert data_source.query["platform"]["in"] == ["landsat-8"]
+
+
+def test_landsat_c2_l2_uses_user_query_unmodified() -> None:
+    query = {"eo:cloud_cover": {"lt": 5}}
+    data_source = LandsatC2L2(query=query)
+    assert data_source.query == query
