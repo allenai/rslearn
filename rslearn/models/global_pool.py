@@ -58,6 +58,7 @@ class GlobalPool(IntermediateComponent):
 
         pooled_features = []
         for feat in intermediates.feature_maps:
+            # feat is BCHW
             if self.mode == "mean":
                 pooled = feat.mean(dim=(2, 3), keepdim=self.keep_spatial_dims)
             else:
