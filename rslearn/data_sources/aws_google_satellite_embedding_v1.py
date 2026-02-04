@@ -112,7 +112,8 @@ class GoogleSatelliteEmbeddingV1(
                 int8 values to float32. The raw data is quantized int8; the
                 de-quantization maps values to [-1, 1] using the formula:
                 ((values / 127.5) ** 2) * sign(values). The raw data has nodata value
-                -128 while with dequantization the nodata value is 0.0.
+                -128 while with dequantization the nodata value is -1.0. See
+                https://source.coop/tge-labs/aef for details.
             context: the data source context.
         """
         # We have a single asset containing all 64 bands. Here "image" is an arbitrary
@@ -299,8 +300,10 @@ class GoogleSatelliteEmbeddingV1(
             # Handle nodata (-128)
             nodata_mask = data == -128
             float_data = data.astype(np.float32)
+            # This is the dequantization formula recommended at https://source.coop/tge-labs/aef.
             result = ((float_data / 127.5) ** 2) * np.sign(float_data)
-            result[nodata_mask] = 0.0
+            # We make sure that NODATA is exactly -1.0 so user can handle it appropriately.
+            result[nodata_mask] = -1.0
             return result
 
         return dequantize
