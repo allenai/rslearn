@@ -1,6 +1,7 @@
 """Tests for FileWindowStorage directory scanning behavior."""
 
 import json
+from pathlib import Path
 
 from upath import UPath
 
@@ -23,7 +24,7 @@ def _write_window_metadata(dataset_path: UPath, group: str, name: str) -> None:
         json.dump(metadata, f)
 
 
-def test_get_windows_ignores_ds_store_files(tmp_path) -> None:
+def test_get_windows_ignores_ds_store_files(tmp_path: Path) -> None:
     dataset_path = UPath(str(tmp_path / "dataset"))
     (dataset_path / "windows").mkdir(parents=True, exist_ok=True)
     with (dataset_path / "windows" / ".DS_Store").open("w") as f:
@@ -40,7 +41,7 @@ def test_get_windows_ignores_ds_store_files(tmp_path) -> None:
     assert [(w.group, w.name) for w in windows] == [("group1", "w1")]
 
 
-def test_get_windows_skips_non_directory_group(tmp_path) -> None:
+def test_get_windows_skips_non_directory_group(tmp_path: Path) -> None:
     dataset_path = UPath(str(tmp_path / "dataset"))
     (dataset_path / "windows").mkdir(parents=True, exist_ok=True)
     with (dataset_path / "windows" / ".DS_Store").open("w") as f:
@@ -52,7 +53,7 @@ def test_get_windows_skips_non_directory_group(tmp_path) -> None:
     assert windows == []
 
 
-def test_list_completed_layers_ignores_non_directories(tmp_path) -> None:
+def test_list_completed_layers_ignores_non_directories(tmp_path: Path) -> None:
     dataset_path = UPath(str(tmp_path / "dataset"))
     _write_window_metadata(dataset_path, group="group1", name="w1")
 
