@@ -8,11 +8,13 @@ from upath import UPath
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import Item
 from rslearn.dataset.storage.file import FileWindowStorageFactory
+from rslearn.dataset.storage.sqlite import SQLiteWindowStorageFactory
 from rslearn.dataset.storage.storage import WindowStorageFactory
 from rslearn.dataset.window import Window, WindowLayerData
 
 STORAGE_FACTORIES: list[WindowStorageFactory] = [
     FileWindowStorageFactory(),
+    SQLiteWindowStorageFactory(),
 ]
 
 
