@@ -11,14 +11,14 @@ import rasterio.vrt
 from rasterio.enums import Resampling
 
 from rslearn.config import LayerConfig
-from rslearn.data_sources.data_source import DataSource, ItemType
+from rslearn.data_sources.data_source import ItemLookupDataSource, ItemType
 from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils.geometry import PixelBounds, Projection
 
 
-class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
+class DirectMaterializeDataSource(ItemLookupDataSource[ItemType], TileStore, Generic[ItemType]):
     """Base class for data sources that support direct materialization via TileStore.
 
     This class provides common TileStore functionality for data sources that can read
@@ -27,9 +27,10 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
 
     Subclasses must implement:
         - get_asset_url(): Get the URL for an asset given item name and bands
-        - get_item_by_name(): Get an item by its name
 
     Subclasses may optionally override:
+        - get_item_by_name(): Inherited from ItemLookupDataSource. If also inheriting
+            from a class that provides it (e.g., StacDataSource), no override needed.
         - get_raster_bands(): By default, we assume that items have all assets. If
             items may have a subset of assets, override get_raster_bands to return
             the sets of bands available for that item.
@@ -74,20 +75,6 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
 
         Returns:
             the URL to read the asset from (must be readable by rasterio).
-        """
-        raise NotImplementedError
-
-    def get_item_by_name(self, name: str) -> ItemType:
-        """Get an item by its name.
-
-        Subclasses must override this method. If also inheriting from a class that
-        provides an implementation (e.g., StacDataSource), explicitly delegate to it.
-
-        Args:
-            name: the name of the item to get.
-
-        Returns:
-            the item object.
         """
         raise NotImplementedError
 

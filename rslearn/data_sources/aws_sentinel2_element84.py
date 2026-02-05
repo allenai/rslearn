@@ -133,17 +133,6 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
 
     # --- DirectMaterializeDataSource implementation ---
 
-    def get_item_by_name(self, name: str) -> SourceItem:
-        """Get an item by its name.
-
-        Args:
-            name: the name of the item to get.
-
-        Returns:
-            the item object.
-        """
-        return StacDataSource.get_item_by_name(self, name)
-
     def get_asset_url(self, item_name: str, asset_key: str) -> str:
         """Get the URL to read the asset for the given item and asset key.
 
