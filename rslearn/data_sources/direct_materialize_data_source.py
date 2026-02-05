@@ -80,8 +80,8 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
     def get_item_by_name(self, name: str) -> ItemType:
         """Get an item by its name.
 
-        Subclasses must implement this method, either directly or by inheriting from
-        a class that provides it (e.g., StacDataSource).
+        Subclasses must override this method. If also inheriting from a class that
+        provides an implementation (e.g., StacDataSource), explicitly delegate to it.
 
         Args:
             name: the name of the item to get.
