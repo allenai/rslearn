@@ -26,7 +26,8 @@ class PerPixelRegressionTask(BasicTask):
     def __init__(
         self,
         scale_factor: float = 1,
-        metric_mode: Literal["mse", "l1"] = "mse",
+        metric_mode: Literal["mse", "l1", "r2"]
+        | list[Literal["mse", "l1", "r2"]] = "mse",
         nodata_value: float | None = None,
         **kwargs: Any,
     ) -> None:
@@ -35,14 +36,25 @@ class PerPixelRegressionTask(BasicTask):
         Args:
             scale_factor: multiply ground truth values by this factor before using it for
                 training.
-            metric_mode: what metric to use, either "mse" (default) or "l1"
+            metric_mode: metric(s) to compute. Either a single metric name or a list of
+                metric names. Supported values: "mse", "l1", "r2".
             nodata_value: optional value to treat as invalid. The loss will be masked
                 at pixels where the ground truth value is equal to nodata_value.
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
         self.scale_factor = scale_factor
-        self.metric_mode = metric_mode
+        if isinstance(metric_mode, str):
+            metric_modes = [metric_mode]
+        else:
+            metric_modes = list(metric_mode)
+        if len(metric_modes) == 0:
+            raise ValueError("metric_mode must contain at least one metric")
+        allowed = {"mse", "l1", "r2"}
+        invalid = [m for m in metric_modes if m not in allowed]
+        if invalid:
+            raise ValueError(f"invalid metric_mode entries: {invalid}")
+        self.metric_modes = metric_modes
         self.nodata_value = nodata_value
 
     def process_inputs(
@@ -133,14 +145,24 @@ class PerPixelRegressionTask(BasicTask):
         """Get the metrics for this task."""
         metric_dict: dict[str, Metric] = {}
 
-        if self.metric_mode == "mse":
-            metric_dict["mse"] = PerPixelRegressionMetricWrapper(
-                metric=torchmetrics.MeanSquaredError(), scale_factor=self.scale_factor
-            )
-        elif self.metric_mode == "l1":
-            metric_dict["l1"] = PerPixelRegressionMetricWrapper(
-                metric=torchmetrics.MeanAbsoluteError(), scale_factor=self.scale_factor
-            )
+        for mode in self.metric_modes:
+            if mode == "mse":
+                metric_dict["mse"] = PerPixelRegressionMetricWrapper(
+                    metric=torchmetrics.MeanSquaredError(),
+                    scale_factor=self.scale_factor,
+                )
+            elif mode == "l1":
+                metric_dict["l1"] = PerPixelRegressionMetricWrapper(
+                    metric=torchmetrics.MeanAbsoluteError(),
+                    scale_factor=self.scale_factor,
+                )
+            elif mode == "r2":
+                metric_dict["r2"] = PerPixelRegressionMetricWrapper(
+                    metric=torchmetrics.R2Score(),
+                    scale_factor=self.scale_factor,
+                )
+            else:
+                raise ValueError(f"unknown metric mode {mode}")
 
         return MetricCollection(metric_dict)
 

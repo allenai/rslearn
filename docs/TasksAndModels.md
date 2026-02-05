@@ -271,16 +271,17 @@ The configuration snippet below summarizes the most common options. See
 `rslearn.train.tasks.per_pixel_regression` for all of the options.
 
 ```yaml
-    task:
-      class_path: rslearn.train.tasks.per_pixel_regression.PerPixelRegression
-      init_args:
-        # Multiply ground truth values by this factor before using it for training.
-        scale_factor: 0.1
-        # What metric to use, either "mse" (default) or "l1".
-        metric_mode: "mse"
-        # Optional value to treat as invalid. The loss will be masked at pixels where
-        # the ground truth value is equal to nodata_value.
-        nodata_value: -1
+	    task:
+	      class_path: rslearn.train.tasks.per_pixel_regression.PerPixelRegressionTask
+	      init_args:
+	        # Multiply ground truth values by this factor before using it for training.
+	        scale_factor: 0.1
+	        # Metric(s) to compute. Either a string or a list.
+	        # Supported: "mse", "l1", "r2".
+	        metric_mode: ["mse", "r2"]
+	        # Optional value to treat as invalid. The loss will be masked at pixels where
+	        # the ground truth value is equal to nodata_value.
+	        nodata_value: -1
 ```
 
 In `process_inputs`, PerPixelRegressionTask computes a target dict containing the

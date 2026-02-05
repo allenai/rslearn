@@ -123,3 +123,28 @@ def test_mse_metric(empty_sample_metadata: SampleMetadata) -> None:
     metrics.update(preds, [target_dict])
     results = metrics.compute()
     assert results["mse"] == pytest.approx(0.05 / 3)
+
+
+def test_r2_metric_list(empty_sample_metadata: SampleMetadata) -> None:
+    task = PerPixelRegressionTask(
+        scale_factor=0.1,
+        metric_mode=["mse", "r2"],
+        nodata_value=-1,
+    )
+    metrics = task.get_metrics()
+
+    _, target_dict = task.process_inputs(
+        raw_inputs={
+            "targets": RasterImage(torch.tensor([[[[1, 2], [-1, 3]]]])),
+        },
+        metadata=empty_sample_metadata,
+    )
+    preds = torch.tensor([[0.1, 0.1], [0.1, 0.1]])[None, None, :, :]
+
+    metrics.update(preds, [target_dict])
+    results = metrics.compute()
+
+    assert results["mse"] == pytest.approx(0.05 / 3)
+    # Labels are [0.1, 0.2, 0.3], preds are [0.1, 0.1, 0.1] over valid pixels.
+    # SSE = 0.05, SST = 0.02 => R2 = 1 - 0.05/0.02 = -1.5
+    assert results["r2"] == pytest.approx(-1.5)
