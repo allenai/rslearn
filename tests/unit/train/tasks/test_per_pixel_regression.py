@@ -10,7 +10,6 @@ from rslearn.train.tasks.per_pixel_regression import (
     PerPixelRegressionHead,
     PerPixelRegressionTask,
 )
-from rslearn.utils.feature import Feature
 
 
 def _make_metadata(
@@ -189,9 +188,7 @@ def test_process_inputs_masks_out_of_window_padding(
     decoded = torch.zeros((20, 20), dtype=torch.float32)
     decoded[5:15, 5:15] = 5.0
 
-    raw_inputs: dict[str, RasterImage | list[Feature]] = {
-        "targets": RasterImage(decoded[None, None, :, :], timestamps=None),
-    }
+    raw_inputs = {"targets": RasterImage(decoded[None, None, :, :], timestamps=None)}
     metadata = _make_metadata(
         empty_sample_metadata,
         height=20,
