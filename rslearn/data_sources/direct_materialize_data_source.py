@@ -18,7 +18,9 @@ from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils.geometry import PixelBounds, Projection
 
 
-class DirectMaterializeDataSource(ItemLookupDataSource[ItemType], TileStore, Generic[ItemType]):
+class DirectMaterializeDataSource(
+    ItemLookupDataSource[ItemType], TileStore, Generic[ItemType]
+):
     """Base class for data sources that support direct materialization via TileStore.
 
     This class provides common TileStore functionality for data sources that can read
