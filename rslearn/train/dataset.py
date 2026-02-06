@@ -21,6 +21,7 @@ import rslearn.train.transforms.transform
 from rslearn.config import (
     DType,
     LayerConfig,
+    SpaceMode,
 )
 from rslearn.data_sources.data_source import Item
 from rslearn.dataset.dataset import Dataset
@@ -65,6 +66,76 @@ def get_torch_dtype(dtype: DType) -> torch.dtype:
         return torch.float32
     else:
         raise ValueError(f"unable to handle {dtype} as a torch dtype")
+
+
+def compute_expected_timestamps(
+    window: Window,
+    layer_config: LayerConfig,
+) -> list[tuple[datetime, datetime]] | None:
+    """Compute expected timestamps from window time_range and layer config.
+
+    This function derives the theoretical timestamps expected for a layer based on
+    the window's time range and the layer's query configuration. This allows models
+    to identify which timesteps are present vs missing and insert missing timesteps
+    at the correct temporal positions.
+
+    Args:
+        window: the window containing the time range.
+        layer_config: the layer configuration with data source and query config.
+
+    Returns:
+        A list of (start, end) datetime tuples representing expected timestamps,
+        sorted in chronological order (oldest first). Returns None if expected
+        timestamps cannot be computed (e.g., no time range or data source config).
+    """
+    if window.time_range is None:
+        return None
+
+    if layer_config.data_source is None:
+        return None
+
+    data_source_cfg = layer_config.data_source
+    query_config = data_source_cfg.query_config
+
+    # Apply temporal modifiers from data source config
+    time_range_start = window.time_range[0]
+    time_range_end = window.time_range[1]
+
+    if data_source_cfg.time_offset:
+        time_range_start = time_range_start + data_source_cfg.time_offset
+        time_range_end = time_range_end + data_source_cfg.time_offset
+
+    if data_source_cfg.duration:
+        time_range_end = time_range_start + data_source_cfg.duration
+
+    # For PER_PERIOD_MOSAIC mode, compute periods aligned from the end backwards
+    if query_config.space_mode == SpaceMode.PER_PERIOD_MOSAIC:
+        period_duration = query_config.period_duration
+        max_matches = query_config.max_matches
+
+        # Compute periods aligned from end backwards (matching data_sources/utils.py logic)
+        expected_timestamps: list[tuple[datetime, datetime]] = []
+        period_start = time_range_end - period_duration
+        while (
+            period_start >= time_range_start and len(expected_timestamps) < max_matches
+        ):
+            period_time_range = (period_start, period_start + period_duration)
+            expected_timestamps.append(period_time_range)
+            period_start = period_start - period_duration
+
+        # Reverse to get chronological order (oldest first)
+        expected_timestamps.reverse()
+        return expected_timestamps
+
+    # For non-PER_PERIOD_MOSAIC modes with max_matches > 1, we can't easily determine
+    # expected timestamps without knowing the actual items. In this case, return None
+    # and let the model handle alignment based on actual timestamps.
+    if query_config.max_matches > 1:
+        return None
+
+    # For single-timestep modes (max_matches=1), the expected timestamp is the window's
+    # time range (after applying modifiers).
+    return [(time_range_start, time_range_end)]
 
 
 class SamplerFactory:
@@ -410,6 +481,8 @@ def read_data_input(
         layer_datas = window.load_layer_datas()
         images: list[torch.Tensor] = []
         time_ranges: list[tuple[datetime, datetime] | None] = []
+        expected_timestamps: list[tuple[datetime, datetime]] | None = None
+
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
             image = read_raster_layer_for_data_input(
@@ -430,9 +503,27 @@ def read_data_input(
                     )
             images.append(image)
             time_ranges.append(time_range)
+
+            # Compute expected_timestamps from the first layer's config
+            # (assuming all layers in the same DataInput have same temporal config)
+            if expected_timestamps is None:
+                expected_timestamps = compute_expected_timestamps(window, layer_config)
+
+        # Sort images and time_ranges chronologically by actual timestamp
+        # This ensures the T dimension is temporally ordered (oldest first)
+        if time_ranges[0] is not None:
+            # Create list of (time_range, image) tuples and sort by time_range start
+            sorted_pairs = sorted(
+                zip(time_ranges, images),
+                key=lambda x: x[0][0] if x[0] is not None else datetime.min,
+            )
+            time_ranges = [pair[0] for pair in sorted_pairs]
+            images = [pair[1] for pair in sorted_pairs]
+
         return RasterImage(
             torch.stack(images, dim=1),
             time_ranges if time_ranges[0] is not None else None,  # type: ignore
+            expected_timestamps=expected_timestamps,
         )
 
     elif data_input.data_type == "vector":
