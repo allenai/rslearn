@@ -488,3 +488,77 @@ def test_skip_if_output_layer_exists(
     )
 
     assert len(dataset) == 2
+
+
+def test_non_required_layer_missing(
+    basic_classification_dataset: Dataset,
+    add_window_to_basic_classification_dataset: Callable,
+) -> None:
+    """Test that windows with missing non-required layers are still loaded.
+
+    When a DataInput has required=False, windows where that layer is missing
+    should still be included in the dataset, and reading from those windows
+    should skip the missing input without raising an error.
+    """
+    image = np.zeros((1, 4, 4), dtype=np.uint8)
+
+    # Window 1: has both image_layer1 and image_layer2
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        name="window_with_both",
+        images={
+            ("image_layer1", 0): image,
+            ("image_layer2", 0): image,
+        },
+    )
+
+    # Window 2: has only image_layer1 (image_layer2 is missing)
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        name="window_with_only_layer1",
+        images={
+            ("image_layer1", 0): image,
+            # image_layer2 is intentionally missing
+        },
+    )
+
+    # Create dataset with image_layer2 as non-required
+    dataset = ModelDataset(
+        basic_classification_dataset,
+        split_config=SplitConfig(),
+        task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+        workers=1,
+        inputs={
+            "image1": DataInput(
+                "raster",
+                ["image_layer1"],
+                bands=["band"],
+                passthrough=True,
+                required=True,
+            ),
+            "image2": DataInput(
+                "raster",
+                ["image_layer2"],
+                bands=["band"],
+                passthrough=True,
+                required=False,  # This layer is optional
+            ),
+            "targets": DataInput("vector", ["vector_layer"]),
+        },
+    )
+
+    # Both windows should be included (non-required layer doesn't filter)
+    assert len(dataset) == 2
+
+    # Reading from both windows should work
+    for idx in range(2):
+        inputs, _, metadata = dataset[idx]
+        # image1 should always be present
+        assert "image1" in inputs
+
+        # image2 may or may not be present depending on the window
+        if metadata.window_name == "window_with_both":
+            assert "image2" in inputs
+        else:
+            # For window_with_only_layer1, image2 should be skipped
+            assert "image2" not in inputs
