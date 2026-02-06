@@ -1,5 +1,7 @@
 """Per-pixel regression task."""
 
+import warnings
+from collections.abc import Sequence
 from typing import Any, Literal
 
 import numpy as np
@@ -26,8 +28,11 @@ class PerPixelRegressionTask(BasicTask):
     def __init__(
         self,
         scale_factor: float = 1,
-        metric_mode: Literal["mse", "l1"] = "mse",
+        metric_mode: (
+            Literal["mse", "l1", "r2"] | Sequence[Literal["mse", "l1", "r2"]] | None
+        ) = None,
         nodata_value: float | None = None,
+        metrics: Sequence[str] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize a new PerPixelRegressionTask.
@@ -35,14 +40,46 @@ class PerPixelRegressionTask(BasicTask):
         Args:
             scale_factor: multiply ground truth values by this factor before using it for
                 training.
-            metric_mode: what metric to use, either "mse" (default) or "l1"
+            metric_mode: deprecated; use metrics instead. Will be removed after
+                2026-06-01.
             nodata_value: optional value to treat as invalid. The loss will be masked
                 at pixels where the ground truth value is equal to nodata_value.
+            metrics: metric(s) to compute. Supported values: "mse", "l1", "r2".
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
         self.scale_factor = scale_factor
-        self.metric_mode = metric_mode
+
+        if metrics is not None:
+            metric_names = list(metrics)
+            if metric_mode is not None:
+                warnings.warn(
+                    "PerPixelRegressionTask.metric_mode is deprecated and ignored when "
+                    "`metrics` is set. It will be removed after 2026-06-01.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+        elif metric_mode is not None:
+            warnings.warn(
+                "PerPixelRegressionTask.metric_mode is deprecated; use `metrics` "
+                "instead. It will be removed after 2026-06-01.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            if isinstance(metric_mode, str):
+                metric_names = [metric_mode]
+            else:
+                metric_names = list(metric_mode)
+        else:
+            metric_names = ["mse"]
+
+        if len(metric_names) == 0:
+            raise ValueError("metrics must contain at least one metric")
+        allowed = {"mse", "l1", "r2"}
+        invalid = [m for m in metric_names if m not in allowed]
+        if invalid:
+            raise ValueError(f"invalid metrics entries: {invalid}")
+        self.metrics = metric_names
         self.nodata_value = nodata_value
 
     def process_inputs(
@@ -66,12 +103,14 @@ class PerPixelRegressionTask(BasicTask):
             return {}, {}
 
         assert isinstance(raw_inputs["targets"], RasterImage)
-        labels = raw_inputs["targets"].get_hw_tensor().float() * self.scale_factor
+        raw_labels = raw_inputs["targets"].get_hw_tensor()
+        labels = raw_labels.float() * self.scale_factor
 
+        window_valid = self._get_window_valid_mask(labels, metadata)
         if self.nodata_value is not None:
-            valid = (raw_inputs["targets"].get_hw_tensor() != self.nodata_value).float()
+            valid = (raw_labels != self.nodata_value).float() * window_valid
         else:
-            valid = torch.ones(labels.shape, dtype=torch.float32)
+            valid = window_valid
 
         # Wrap in RasterImage with CTHW format (C=1, T=1) so values and valid can be
         # used in image transforms.
@@ -133,14 +172,24 @@ class PerPixelRegressionTask(BasicTask):
         """Get the metrics for this task."""
         metric_dict: dict[str, Metric] = {}
 
-        if self.metric_mode == "mse":
-            metric_dict["mse"] = PerPixelRegressionMetricWrapper(
-                metric=torchmetrics.MeanSquaredError(), scale_factor=self.scale_factor
-            )
-        elif self.metric_mode == "l1":
-            metric_dict["l1"] = PerPixelRegressionMetricWrapper(
-                metric=torchmetrics.MeanAbsoluteError(), scale_factor=self.scale_factor
-            )
+        for metric_name in self.metrics:
+            if metric_name == "mse":
+                metric_dict["mse"] = PerPixelRegressionMetricWrapper(
+                    metric=torchmetrics.MeanSquaredError(),
+                    scale_factor=self.scale_factor,
+                )
+            elif metric_name == "l1":
+                metric_dict["l1"] = PerPixelRegressionMetricWrapper(
+                    metric=torchmetrics.MeanAbsoluteError(),
+                    scale_factor=self.scale_factor,
+                )
+            elif metric_name == "r2":
+                metric_dict["r2"] = PerPixelRegressionMetricWrapper(
+                    metric=torchmetrics.R2Score(),
+                    scale_factor=self.scale_factor,
+                )
+            else:
+                raise ValueError(f"unknown metric {metric_name}")
 
         return MetricCollection(metric_dict)
 

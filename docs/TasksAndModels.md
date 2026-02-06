@@ -271,17 +271,21 @@ The configuration snippet below summarizes the most common options. See
 `rslearn.train.tasks.per_pixel_regression` for all of the options.
 
 ```yaml
-    task:
-      class_path: rslearn.train.tasks.per_pixel_regression.PerPixelRegression
-      init_args:
-        # Multiply ground truth values by this factor before using it for training.
-        scale_factor: 0.1
-        # What metric to use, either "mse" (default) or "l1".
-        metric_mode: "mse"
-        # Optional value to treat as invalid. The loss will be masked at pixels where
-        # the ground truth value is equal to nodata_value.
-        nodata_value: -1
+	    task:
+	      class_path: rslearn.train.tasks.per_pixel_regression.PerPixelRegressionTask
+	      init_args:
+	        # Multiply ground truth values by this factor before using it for training.
+	        scale_factor: 0.1
+	        # Metric(s) to compute.
+	        # Supported: "mse", "l1", "r2".
+	        metrics: ["mse", "r2"]
+	        # Optional value to treat as invalid. The loss will be masked at pixels where
+	        # the ground truth value is equal to nodata_value.
+	        nodata_value: -1
 ```
+
+Note: `metric_mode` is deprecated; use `metrics` instead. Support will be removed
+after 2026-06-01.
 
 In `process_inputs`, PerPixelRegressionTask computes a target dict containing the
 "values" (scaled ground truth values) and "valid" (mask indicating which pixels are
@@ -363,9 +367,12 @@ The configuration snippet below summarizes the most common options. See
         property_name: "length"
         # Multiply the label value by this factor for training.
         scale_factor: 0.01
-        # What metric to use, either "mse" (default) or "l1".
-        metric_mode: "mse"
+        # Metric(s) to compute. Supported: "mse", "l1".
+        metrics: ["mse"]
 ```
+
+Note: `metric_mode` is deprecated; use `metrics` instead. Support will be removed
+after 2026-06-01.
 
 In `process_inputs`, RegressionTask computes a target dict containing the "value"
 (ground truth regression value) and "valid" (flag indicating whether the sample is
