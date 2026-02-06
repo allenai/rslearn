@@ -14,16 +14,12 @@ from rslearn.train.tasks.per_pixel_regression import (
 
 def _make_metadata(
     empty_sample_metadata: SampleMetadata,
-    height: int,
-    width: int,
+    window_bounds: tuple[int, int, int, int],
+    crop_bounds: tuple[int, int, int, int],
     *,
-    window_bounds: tuple[int, int, int, int] | None = None,
-    crop_bounds: tuple[int, int, int, int] | None = None,
     window_group: str = "",
     window_name: str = "",
 ) -> SampleMetadata:
-    window_bounds = window_bounds or (0, 0, width, height)
-    crop_bounds = crop_bounds or window_bounds
     return SampleMetadata(
         window_group=window_group,
         window_name=window_name,
@@ -43,7 +39,9 @@ def test_process_inputs(empty_sample_metadata: SampleMetadata) -> None:
         scale_factor=0.1,
         nodata_value=-1,
     )
-    metadata = _make_metadata(empty_sample_metadata, height=2, width=2)
+    metadata = _make_metadata(
+        empty_sample_metadata, window_bounds=(0, 0, 2, 2), crop_bounds=(0, 0, 2, 2)
+    )
     # We use 1x1x2x2 input with one invalid pixel and three different values.
     _, target_dict = task.process_inputs(
         raw_inputs={
@@ -136,8 +134,11 @@ def test_mse_metric(empty_sample_metadata: SampleMetadata) -> None:
     )
     metrics = task.get_metrics()
 
+    metadata = _make_metadata(
+        empty_sample_metadata, window_bounds=(0, 0, 2, 2), crop_bounds=(0, 0, 2, 2)
+    )
+
     # Prepare example.
-    metadata = _make_metadata(empty_sample_metadata, height=2, width=2)
     _, target_dict = task.process_inputs(
         raw_inputs={
             "targets": RasterImage(torch.tensor([[[[1, 2], [-1, 3]]]])),
@@ -160,7 +161,9 @@ def test_r2_metric_list(empty_sample_metadata: SampleMetadata) -> None:
     )
     metrics = task.get_metrics()
 
-    metadata = _make_metadata(empty_sample_metadata, height=2, width=2)
+    metadata = _make_metadata(
+        empty_sample_metadata, window_bounds=(0, 0, 2, 2), crop_bounds=(0, 0, 2, 2)
+    )
     _, target_dict = task.process_inputs(
         raw_inputs={
             "targets": RasterImage(torch.tensor([[[[1, 2], [-1, 3]]]])),
@@ -191,8 +194,6 @@ def test_process_inputs_masks_out_of_window_padding(
     raw_inputs = {"targets": RasterImage(decoded[None, None, :, :], timestamps=None)}
     metadata = _make_metadata(
         empty_sample_metadata,
-        height=20,
-        width=20,
         window_bounds=window_bounds,
         crop_bounds=crop_bounds,
         window_group="g",
