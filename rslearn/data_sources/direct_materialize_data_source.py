@@ -1,6 +1,6 @@
 """Base class for data sources that support direct materialization via TileStore."""
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from collections.abc import Callable
 from typing import Any, Generic
 
@@ -19,7 +19,7 @@ from rslearn.utils.geometry import PixelBounds, Projection
 
 
 class DirectMaterializeDataSource(
-    ItemLookupDataSource[ItemType], TileStore, Generic[ItemType], ABC
+    ItemLookupDataSource[ItemType], TileStore, Generic[ItemType]
 ):
     """Base class for data sources that support direct materialization via TileStore.
 
