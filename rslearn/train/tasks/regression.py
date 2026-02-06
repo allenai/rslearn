@@ -34,7 +34,9 @@ class RegressionTask(BasicTask):
         filters: list[tuple[str, str]] | None = None,
         allow_invalid: bool = False,
         scale_factor: float = 1,
-        metric_mode: Literal["mse", "l1"] | Sequence[Literal["mse", "l1"]] | None = None,
+        metric_mode: Literal["mse", "l1"]
+        | Sequence[Literal["mse", "l1"]]
+        | None = None,
         use_accuracy_metric: bool = False,
         within_factor: float = 0.1,
         metrics: Sequence[str] | None = None,
