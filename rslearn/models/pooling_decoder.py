@@ -123,7 +123,8 @@ class SegmentationPoolingDecoder(PoolingDecoder):
         This only works when all of the pixels have the same segmentation target.
         """
         output_probs = super().forward(intermediates, context)
+        # get HW from CTHW image
+        h, w = context.inputs[0][self.image_key].image.shape[2:4]
         # BC -> BCHW
-        h, w = context.inputs[0][self.image_key].image.shape[1:3]
         feat_map = output_probs.feature_vector[:, :, None, None].repeat([1, 1, h, w])
         return FeatureMaps([feat_map])
