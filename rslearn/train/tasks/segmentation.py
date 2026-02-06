@@ -145,13 +145,14 @@ class SegmentationTask(BasicTask):
                 new_labels[labels == old_id] = new_id
             labels = new_labels
 
+        window_valid = self._get_window_valid_mask(labels, metadata)
         if self.nodata_value is not None:
-            valid = (labels != self.nodata_value).float()
+            valid = (labels != self.nodata_value).float() * window_valid
             # Labels, even masked ones, must be in the range 0 to num_classes-1
             if self.nodata_value >= self.num_classes:
                 labels[labels == self.nodata_value] = 0
         else:
-            valid = torch.ones(labels.shape, dtype=torch.float32)
+            valid = window_valid
 
         # Wrap in RasterImage with CTHW format (C=1, T=1) so classes and valid can be
         # used in image transforms.

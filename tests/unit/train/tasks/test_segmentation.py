@@ -10,6 +10,29 @@ from rslearn.train.tasks.segmentation import SegmentationHead, SegmentationTask
 class TestProcessInputs:
     """Unit tests relating to SegmentationTask.process_inputs."""
 
+    @staticmethod
+    def _make_metadata(
+        empty_sample_metadata: SampleMetadata,
+        height: int,
+        width: int,
+        *,
+        window_bounds: tuple[int, int, int, int] | None = None,
+        crop_bounds: tuple[int, int, int, int] | None = None,
+    ) -> SampleMetadata:
+        window_bounds = window_bounds or (0, 0, width, height)
+        crop_bounds = crop_bounds or window_bounds
+        return SampleMetadata(
+            window_group="",
+            window_name="",
+            window_bounds=window_bounds,
+            crop_bounds=crop_bounds,
+            crop_idx=0,
+            num_crops_in_window=1,
+            time_range=None,
+            projection=empty_sample_metadata.projection,
+            dataset_source=None,
+        )
+
     def test_zero_is_invalid_true(self, empty_sample_metadata: SampleMetadata) -> None:
         """Test process_inputs with zero_is_invalid=True."""
         task = SegmentationTask(num_classes=3, zero_is_invalid=True)
@@ -21,7 +44,8 @@ class TestProcessInputs:
             )
         }
 
-        _, target_dict = task.process_inputs(raw_inputs, empty_sample_metadata)
+        metadata = self._make_metadata(empty_sample_metadata, height=3, width=3)
+        _, target_dict = task.process_inputs(raw_inputs, metadata)
 
         # Check classes tensor (should be unchanged)
         expected_classes = torch.tensor(
@@ -46,7 +70,8 @@ class TestProcessInputs:
             )
         }
 
-        _, target_dict = task.process_inputs(raw_inputs, empty_sample_metadata)
+        metadata = self._make_metadata(empty_sample_metadata, height=3, width=3)
+        _, target_dict = task.process_inputs(raw_inputs, metadata)
 
         # Check classes tensor (should be unchanged)
         expected_classes = torch.tensor(
@@ -69,7 +94,8 @@ class TestProcessInputs:
             )
         }
 
-        _, target_dict = task.process_inputs(raw_inputs, empty_sample_metadata)
+        metadata = self._make_metadata(empty_sample_metadata, height=3, width=3)
+        _, target_dict = task.process_inputs(raw_inputs, metadata)
 
         # Check classes tensor (should be unchanged)
         expected_classes = torch.tensor(
@@ -94,7 +120,8 @@ class TestProcessInputs:
             )
         }
 
-        _, target_dict = task.process_inputs(raw_inputs, empty_sample_metadata)
+        metadata = self._make_metadata(empty_sample_metadata, height=3, width=3)
+        _, target_dict = task.process_inputs(raw_inputs, metadata)
 
         # Check classes tensor (should be unchanged)
         expected_classes = torch.tensor(
@@ -121,7 +148,8 @@ class TestProcessInputs:
             )
         }
 
-        _, target_dict = task.process_inputs(raw_inputs, empty_sample_metadata)
+        metadata = self._make_metadata(empty_sample_metadata, height=3, width=3)
+        _, target_dict = task.process_inputs(raw_inputs, metadata)
 
         # Check classes tensor (5s should be transformed to 0)
         expected_classes = torch.tensor(
@@ -148,7 +176,8 @@ class TestProcessInputs:
             )
         }
 
-        _, target_dict = task.process_inputs(raw_inputs, empty_sample_metadata)
+        metadata = self._make_metadata(empty_sample_metadata, height=3, width=3)
+        _, target_dict = task.process_inputs(raw_inputs, metadata)
 
         # Check classes tensor (3s should be transformed to 0)
         expected_classes = torch.tensor(
@@ -205,6 +234,37 @@ class TestProcessInputs:
 
         with pytest.raises(ValueError):
             task.process_inputs(raw_inputs, empty_sample_metadata)
+
+    def test_process_inputs_masks_out_of_window_padding(
+        self, empty_sample_metadata: SampleMetadata
+    ) -> None:
+        """Ensure padded (out-of-window) pixels are marked invalid."""
+        window_bounds = (0, 0, 10, 10)
+        crop_bounds = (-5, -5, 15, 15)
+
+        decoded = torch.zeros((20, 20), dtype=torch.int16)
+        decoded[5:15, 5:15] = 2
+
+        raw_inputs = {
+            "targets": RasterImage(decoded[None, None, :, :], timestamps=None),
+        }
+        metadata = self._make_metadata(
+            empty_sample_metadata,
+            height=20,
+            width=20,
+            window_bounds=window_bounds,
+            crop_bounds=crop_bounds,
+        )
+
+        task = SegmentationTask(num_classes=3, nodata_value=-1)
+        _, target_dict = task.process_inputs(
+            raw_inputs, metadata=metadata, load_targets=True
+        )
+
+        valid = target_dict["valid"].get_hw_tensor()
+        assert int(valid.sum().item()) == 10 * 10
+        assert valid[0, 0] == 0
+        assert valid[5, 5] == 1
 
 
 class TestProcessOutput:

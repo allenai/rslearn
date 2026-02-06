@@ -276,13 +276,16 @@ The configuration snippet below summarizes the most common options. See
 	      init_args:
 	        # Multiply ground truth values by this factor before using it for training.
 	        scale_factor: 0.1
-	        # Metric(s) to compute. Either a string or a list.
+	        # Metric(s) to compute.
 	        # Supported: "mse", "l1", "r2".
-	        metric_mode: ["mse", "r2"]
+	        metrics: ["mse", "r2"]
 	        # Optional value to treat as invalid. The loss will be masked at pixels where
 	        # the ground truth value is equal to nodata_value.
 	        nodata_value: -1
 ```
+
+Note: `metric_mode` is deprecated; use `metrics` instead. Support will be removed
+after 2026-06-01.
 
 In `process_inputs`, PerPixelRegressionTask computes a target dict containing the
 "values" (scaled ground truth values) and "valid" (mask indicating which pixels are
