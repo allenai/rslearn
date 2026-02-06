@@ -1,5 +1,6 @@
 """Unit tests for rslearn.train.dataset."""
 
+import warnings
 from collections.abc import Callable
 from datetime import datetime
 
@@ -562,3 +563,49 @@ def test_non_required_layer_missing(
         else:
             # For window_with_only_layer1, image2 should be skipped
             assert "image2" not in inputs
+            
+class TestSplitConfig:
+    """Tests for SplitConfig."""
+
+    def test_overlap_ratio_with_patch_size_in_separate_configs(self) -> None:
+        """Test that overlap_ratio works when patch_size is set in a different config.
+
+        This test simulates the user setting patch_size in the default config, and
+        overlap_ratio in the predict config (which is merged via merge_and_validate).
+        """
+        default_config = SplitConfig(patch_size=128, load_all_crops=True)
+        predict_config = SplitConfig(overlap_ratio=0.5)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            merged = SplitConfig.merge_and_validate([default_config, predict_config])
+
+        # get_overlap_pixels should compute correctly: 128 * 0.5 = 64
+        assert merged.get_overlap_pixels() == 64
+
+    def test_overlap_ratio_without_crop_size_raises_on_get(self) -> None:
+        """Test that overlap_ratio without crop_size raises error in get_overlap_pixels."""
+        config = SplitConfig(overlap_ratio=0.5)
+
+        # Should raise when trying to get overlap_pixels
+        with pytest.raises(ValueError, match="overlap_ratio requires crop_size"):
+            config.get_overlap_pixels()
+
+    def test_crop_size_and_patch_size_in_separate_configs_raises(self) -> None:
+        """Test that setting crop_size and patch_size in different configs raises error."""
+        config1 = SplitConfig(crop_size=128)
+        config2 = SplitConfig(patch_size=256)
+
+        with pytest.raises(
+            ValueError, match="Cannot specify both crop_size and patch_size"
+        ):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                SplitConfig.merge_and_validate([config1, config2])
+
+    def test_negative_overlap_pixels_raises(self) -> None:
+        """Test that negative overlap_pixels raises error."""
+        config = SplitConfig(crop_size=128, load_all_crops=True, overlap_pixels=-1)
+
+        with pytest.raises(ValueError, match="overlap_pixels must be non-negative"):
+            SplitConfig.merge_and_validate([config])

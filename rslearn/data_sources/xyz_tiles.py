@@ -184,7 +184,7 @@ class XyzTiles(DataSource, TileStore):
             groups.append(cur_groups)
         return groups
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: dict) -> Item:
         """Deserializes an item from JSON-decoded data."""
         return Item.deserialize(serialized_item)
 

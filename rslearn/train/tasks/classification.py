@@ -16,6 +16,7 @@ from torchmetrics.classification import (
 )
 
 from rslearn.models.component import FeatureVector, Predictor
+from rslearn.train.metrics import ConfusionMatrixMetric
 from rslearn.train.model_context import (
     ModelContext,
     ModelOutput,
@@ -44,6 +45,7 @@ class ClassificationTask(BasicTask):
         f1_metric_kwargs: dict[str, Any] = {},
         positive_class: str | None = None,
         positive_class_threshold: float = 0.5,
+        enable_confusion_matrix: bool = False,
         **kwargs: Any,
     ):
         """Initialize a new ClassificationTask.
@@ -69,6 +71,8 @@ class ClassificationTask(BasicTask):
             positive_class: positive class name.
             positive_class_threshold: threshold for classifying the positive class in
                 binary classification (default 0.5).
+            enable_confusion_matrix: whether to compute confusion matrix (default false).
+                If true, it requires wandb to be initialized for logging.
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -84,6 +88,7 @@ class ClassificationTask(BasicTask):
         self.f1_metric_kwargs = f1_metric_kwargs
         self.positive_class = positive_class
         self.positive_class_threshold = positive_class_threshold
+        self.enable_confusion_matrix = enable_confusion_matrix
 
         if self.positive_class_threshold != 0.5:
             # Must be binary classification
@@ -201,7 +206,7 @@ class ClassificationTask(BasicTask):
         feature = Feature(
             STGeometry(
                 metadata.projection,
-                shapely.Point(metadata.patch_bounds[0], metadata.patch_bounds[1]),
+                shapely.Point(metadata.crop_bounds[0], metadata.crop_bounds[1]),
                 None,
             ),
             {
@@ -277,6 +282,14 @@ class ClassificationTask(BasicTask):
                     MulticlassPrecision(**kwargs)
                 )
                 metrics["f1"] = ClassificationMetric(MulticlassF1Score(**kwargs))
+
+        if self.enable_confusion_matrix:
+            metrics["confusion_matrix"] = ClassificationMetric(
+                ConfusionMatrixMetric(
+                    num_classes=len(self.classes),
+                    class_names=self.classes,
+                ),
+            )
 
         return MetricCollection(metrics)
 
