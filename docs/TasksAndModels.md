@@ -367,9 +367,12 @@ The configuration snippet below summarizes the most common options. See
         property_name: "length"
         # Multiply the label value by this factor for training.
         scale_factor: 0.01
-        # What metric to use, either "mse" (default) or "l1".
-        metric_mode: "mse"
+        # Metric(s) to compute. Supported: "mse", "l1".
+        metrics: ["mse"]
 ```
+
+Note: `metric_mode` is deprecated; use `metrics` instead. Support will be removed
+after 2026-06-01.
 
 In `process_inputs`, RegressionTask computes a target dict containing the "value"
 (ground truth regression value) and "valid" (flag indicating whether the sample is
