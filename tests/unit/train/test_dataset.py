@@ -563,7 +563,8 @@ def test_non_required_layer_missing(
         else:
             # For window_with_only_layer1, image2 should be skipped
             assert "image2" not in inputs
-            
+
+
 class TestSplitConfig:
     """Tests for SplitConfig."""
 
