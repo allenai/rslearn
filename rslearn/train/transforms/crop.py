@@ -7,7 +7,7 @@ import torchvision
 
 from rslearn.train.model_context import RasterImage
 
-from .transform import Transform, read_selector
+from .transform import Transform, read_selector, selector_exists
 
 
 class Crop(Transform):
@@ -18,6 +18,7 @@ class Crop(Transform):
         crop_size: int | tuple[int, int],
         image_selectors: list[str] = ["image"],
         box_selectors: list[str] = [],
+        skip_missing: bool = False,
     ):
         """Initialize a new Crop.
 
@@ -27,6 +28,8 @@ class Crop(Transform):
             crop_size: the size to crop to, or a min/max range of crop sizes
             image_selectors: image items to transform.
             box_selectors: boxes items to transform.
+            skip_missing: if True, skip selectors that don't exist in the input/target
+                dicts. Useful when working with optional inputs.
         """
         super().__init__()
         if isinstance(crop_size, int):
@@ -36,6 +39,7 @@ class Crop(Transform):
 
         self.image_selectors = image_selectors
         self.box_selectors = box_selectors
+        self.skip_missing = skip_missing
 
     def sample_state(self, image_shape: tuple[int, int]) -> dict[str, Any]:
         """Randomly decide how to transform the input.
@@ -114,6 +118,10 @@ class Crop(Transform):
         """
         smallest_image_shape = None
         for selector in self.image_selectors:
+            if self.skip_missing and not selector_exists(
+                input_dict, target_dict, selector
+            ):
+                continue
             image = read_selector(input_dict, target_dict, selector)
             if (
                 smallest_image_shape is None
@@ -122,6 +130,9 @@ class Crop(Transform):
                 smallest_image_shape = image.shape[-2:]
 
         if smallest_image_shape is None:
+            if self.skip_missing:
+                # All selectors were missing, nothing to crop
+                return input_dict, target_dict
             raise ValueError("No image found to crop")
         state = self.sample_state(smallest_image_shape)
 

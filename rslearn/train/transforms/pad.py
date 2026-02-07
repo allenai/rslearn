@@ -19,6 +19,7 @@ class Pad(Transform):
         mode: str = "topleft",
         image_selectors: list[str] = ["image"],
         box_selectors: list[str] = [],
+        skip_missing: bool = False,
     ):
         """Initialize a new Crop.
 
@@ -31,6 +32,8 @@ class Pad(Transform):
                 sides, or "center" to apply padding equally on all sides.
             image_selectors: image items to transform.
             box_selectors: boxes items to transform.
+            skip_missing: if True, skip selectors that don't exist in the input/target
+                dicts. Useful when working with optional inputs.
         """
         super().__init__()
         if isinstance(size, int):
@@ -41,6 +44,7 @@ class Pad(Transform):
         self.mode = mode
         self.image_selectors = image_selectors
         self.box_selectors = box_selectors
+        self.skip_missing = skip_missing
 
     def sample_state(self) -> dict[str, Any]:
         """Randomly decide how to transform the input.
