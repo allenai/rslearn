@@ -396,6 +396,15 @@ def read_data_input(
     else:
         layers_to_read = [rng.choice(layer_options)]
 
+    if not layers_to_read:
+        raise ValueError(
+            f"No completed layers found for data input with layers={data_input.layers}. "
+            f"Available layer options: {layer_options}. "
+            f"load_all_layers={data_input.load_all_layers}, "
+            f"load_all_item_groups={data_input.load_all_item_groups}. "
+            f"Check that the specified layers exist and are completed in the window."
+        )
+
     if data_input.data_type == "raster":
         # load it once here
         layer_datas = window.load_layer_datas()
@@ -673,6 +682,33 @@ class SplitConfig:
         return self.output_layer_name_skip_inference_if_exists
 
 
+def is_data_input_available(data_input: DataInput, window: Window) -> bool:
+    """Check if a data input's layers are available in a window.
+
+    Args:
+        data_input: the data input to check.
+        window: the window to check against.
+
+    Returns:
+        True if the layers are available based on the data input's configuration.
+    """
+    # If load_all_layers is enabled, we should check that all the layers are
+    # present. Otherwise, we just need one layer.
+    is_any_layer_available = False
+    are_all_layers_available = True
+
+    for layer_name in data_input.layers:
+        if window.is_layer_completed(layer_name):
+            is_any_layer_available = True
+        else:
+            are_all_layers_available = False
+
+    if data_input.load_all_layers:
+        return are_all_layers_available
+    else:
+        return is_any_layer_available
+
+
 def check_window(
     inputs: dict[str, DataInput],
     window: Window,
@@ -689,27 +725,10 @@ def check_window(
         the window if it has all the required inputs and does not need to be skipped
         due to an existing output layer; or None otherwise
     """
-
-    # Make sure window has all the needed layers.
-    def is_available(data_input: DataInput) -> bool:
-        # If load_all_layers is enabled, we should check that all the layers are
-        # present. Otherwise, we just need one layer.
-        is_any_layer_available = False
-        are_all_layers_available = True
-        for layer_name in data_input.layers:
-            if window.is_layer_completed(layer_name):
-                is_any_layer_available = True
-            else:
-                are_all_layers_available = False
-        if data_input.load_all_layers:
-            return are_all_layers_available
-        else:
-            return is_any_layer_available
-
     for data_input in inputs.values():
         if not data_input.required:
             continue
-        if not is_available(data_input):
+        if not is_data_input_available(data_input, window):
             logger.debug(
                 "Skipping window %s since check for layers %s failed",
                 window.name,
@@ -1071,6 +1090,17 @@ class ModelDataset(torch.utils.data.Dataset):
         raw_inputs = {}
         passthrough_inputs = {}
         for name, data_input in self.inputs.items():
+            # Skip non-required inputs if their layers are not available
+            if not data_input.required and not is_data_input_available(
+                data_input, window
+            ):
+                logger.debug(
+                    "Skipping non-required input '%s' for window %s (layers not available)",
+                    name,
+                    window.name,
+                )
+                continue
+
             raw_inputs[name] = read_data_input(
                 self.dataset, window, bounds, data_input, rng
             )

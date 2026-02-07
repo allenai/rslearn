@@ -23,6 +23,7 @@ class Normalize(Transform):
         selectors: list[str] = ["image"],
         bands: list[int] | None = None,
         num_bands: int | None = None,
+        skip_missing: bool = False,
     ) -> None:
         """Initialize a new Normalize.
 
@@ -37,6 +38,8 @@ class Normalize(Transform):
                 mean and std must either be one value, or have length equal to the
                 number of band indices passed here.
             num_bands: deprecated, no longer used. Will be removed after 2026-04-01.
+            skip_missing: if True, skip selectors that don't exist in the input/target
+                dicts. Useful when working with optional inputs.
         """
         super().__init__()
 
@@ -59,6 +62,7 @@ class Normalize(Transform):
 
         self.selectors = selectors
         self.bands = torch.tensor(bands) if bands is not None else None
+        self.skip_missing = skip_missing
 
     def apply_image(self, image: RasterImage) -> RasterImage:
         """Normalize the specified image.

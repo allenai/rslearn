@@ -6,7 +6,7 @@ from typing import Any
 from olmoearth_pretrain.data.normalize import load_computed_config
 
 from rslearn.log_utils import get_logger
-from rslearn.train.transforms.transform import Transform
+from rslearn.train.transforms.transform import Transform, selector_exists
 
 logger = get_logger(__file__)
 
@@ -23,6 +23,7 @@ class OlmoEarthNormalize(Transform):
         band_names: dict[str, list[str]],
         std_multiplier: float | None = 2,
         config_fname: str | None = None,
+        skip_missing: bool = False,
     ) -> None:
         """Initialize a new OlmoEarthNormalize.
 
@@ -34,10 +35,13 @@ class OlmoEarthNormalize(Transform):
                 training in OlmoEarth.
             config_fname: load the normalization configuration from this file, instead
                 of getting it from OlmoEarth.
+            skip_missing: if True, skip modalities that don't exist in the input dict.
+                Useful when working with optional inputs.
         """
         super().__init__()
         self.band_names = band_names
         self.std_multiplier = std_multiplier
+        self.skip_missing = skip_missing
 
         if config_fname is None:
             self.norm_config = load_computed_config()
@@ -61,6 +65,12 @@ class OlmoEarthNormalize(Transform):
             normalized (input_dicts, target_dicts) tuple
         """
         for modality_name, cur_band_names in self.band_names.items():
+            # Skip missing modalities if skip_missing is enabled
+            if self.skip_missing and not selector_exists(
+                input_dict, target_dict, modality_name
+            ):
+                continue
+
             band_norms = self.norm_config[modality_name]
             image = input_dict[modality_name]
             # Keep a set of indices to make sure that we normalize all of them.

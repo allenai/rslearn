@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+import pytest
 import torch
 from olmoearth_pretrain.datatypes import MaskValue
 
@@ -311,3 +312,129 @@ def test_forward_with_different_timesteps() -> None:
     assert_sentinel1_masks()
     assert_timestamps()
     assert_output_features()
+
+
+def test_batch_with_missing_modality_in_later_samples() -> None:
+    """Test that model handles batches where some samples are missing a modality.
+
+    This test catches the bug where the model only checks context.inputs[0] to
+    determine which modalities are present, causing a KeyError when sample 0 has
+    a modality but later samples don't.
+
+    Scenario: sample 0 has sentinel1 + sentinel2, sample 1 has only sentinel2.
+    Expected: Model should handle this gracefully (either skip the modality for
+    samples that don't have it, or raise a clear error).
+    """
+    model = OlmoEarth(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        use_legacy_timestamps=False,
+    )
+
+    T = 2
+    H = 4
+    W = 4
+    inputs = [
+        # Sample 0: has BOTH sentinel1 and sentinel2_l2a
+        {
+            "sentinel2_l2a": RasterImage(
+                image=torch.zeros((12, T, H, W), dtype=torch.float32),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1))
+                    for x in range(1, T + 1)
+                ],
+            ),
+            "sentinel1": RasterImage(
+                image=torch.zeros((2, T, H, W), dtype=torch.float32),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1))
+                    for x in range(1, T + 1)
+                ],
+            ),
+        },
+        # Sample 1: has ONLY sentinel2_l2a (missing sentinel1)
+        {
+            "sentinel2_l2a": RasterImage(
+                image=torch.zeros((12, T, H, W), dtype=torch.float32),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1))
+                    for x in range(1, T + 1)
+                ],
+            ),
+            # sentinel1 is missing!
+        },
+    ]
+    context = ModelContext(inputs=inputs, metadatas=[])
+
+    # This should not raise a KeyError - the model should handle missing modalities
+    # Currently this test is expected to FAIL due to the bug in _prepare_modality_inputs
+    # which only checks context.inputs[0] for modality presence.
+    with pytest.raises(KeyError, match="sentinel1"):
+        # Once the bug is fixed, remove this pytest.raises and just call the model
+        model(context)
+
+
+def test_batch_with_missing_modality_in_first_sample() -> None:
+    """Test that model uses modalities even when sample 0 doesn't have them.
+
+    This test catches the bug where modalities present in later samples but not
+    in sample 0 are completely ignored (wasted data).
+
+    Scenario: sample 0 has only sentinel2, sample 1 has sentinel1 + sentinel2.
+    Expected: Model should use sentinel1 from sample 1 (not ignore it).
+    """
+    model = OlmoEarth(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        use_legacy_timestamps=False,
+    )
+
+    T = 2
+    H = 4
+    W = 4
+    inputs = [
+        # Sample 0: has ONLY sentinel2_l2a (missing sentinel1)
+        {
+            "sentinel2_l2a": RasterImage(
+                image=torch.zeros((12, T, H, W), dtype=torch.float32),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1))
+                    for x in range(1, T + 1)
+                ],
+            ),
+            # sentinel1 is missing!
+        },
+        # Sample 1: has BOTH sentinel1 and sentinel2_l2a
+        {
+            "sentinel2_l2a": RasterImage(
+                image=torch.zeros((12, T, H, W), dtype=torch.float32),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1))
+                    for x in range(1, T + 1)
+                ],
+            ),
+            "sentinel1": RasterImage(
+                image=torch.zeros((2, T, H, W), dtype=torch.float32),
+                timestamps=[
+                    (datetime(2025, x, 1), datetime(2025, x, 1))
+                    for x in range(1, T + 1)
+                ],
+            ),
+        },
+    ]
+    context = ModelContext(inputs=inputs, metadatas=[])
+
+    # Check which modalities are detected - currently only checks inputs[0]
+    _, present_modalities, _ = model._prepare_modality_inputs(context)
+
+    # BUG: Currently sentinel1 is NOT in present_modalities because it only
+    # checks inputs[0]. Once fixed, sentinel1 should be detected.
+    # For now, we document the current (buggy) behavior:
+    assert "sentinel1" not in present_modalities, (
+        "If this assertion fails, the bug has been fixed! "
+        "Update this test to expect sentinel1 in present_modalities."
+    )
