@@ -32,6 +32,7 @@ from rslearn.data_sources.direct_materialize_data_source import (
 from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.grid_index import GridIndex
+from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 # Band names for the 64 embedding channels
 BANDS = [f"A{idx:02d}" for idx in range(64)]
@@ -275,7 +276,15 @@ class GoogleSatelliteEmbeddingV1(
             with tempfile.TemporaryDirectory() as tmp_dir:
                 local_path = os.path.join(tmp_dir, f"{item.name}.tiff")
                 self.s3_client.download_file(BUCKET_NAME, key, local_path)
-                tile_store.write_raster_file(item.name, BANDS, UPath(local_path))
+
+                if self.apply_dequantization:
+                    with rasterio.open(local_path) as src:
+                        array = src.read()
+                        projection, bounds = get_raster_projection_and_bounds(src)
+                    array = self._dequantize(array)
+                    tile_store.write_raster(item.name, BANDS, projection, bounds, array)
+                else:
+                    tile_store.write_raster_file(item.name, BANDS, UPath(local_path))
 
     # --- DirectMaterializeDataSource implementation ---
 
@@ -289,24 +298,32 @@ class GoogleSatelliteEmbeddingV1(
         key = item.s3_path.replace(f"s3://{BUCKET_NAME}/", "")
         return f"/vsicurl/{HTTP_URL_BASE}/{key}"
 
+    def _dequantize(self, data: npt.NDArray[Any]) -> npt.NDArray[np.float32]:
+        """Apply de-quantization to convert int8 values to float32.
+
+        The raw data is quantized int8; this maps values to [-1, 1] using the
+        formula: ((values / 127.5) ** 2) * sign(values). NODATA (-128) is mapped
+        to -1.0. See https://source.coop/tge-labs/aef for details.
+
+        Args:
+            data: the raw int8 raster array.
+
+        Returns:
+            the de-quantized float32 array.
+        """
+        nodata_mask = data == -128
+        float_data = data.astype(np.float32)
+        result = ((float_data / 127.5) ** 2) * np.sign(float_data)
+        result[nodata_mask] = -1.0
+        return result
+
     def get_read_callback(
         self, item_name: str, asset_key: str
     ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
         """Return a callback to apply de-quantization if enabled."""
         if not self.apply_dequantization:
             return None
-
-        def dequantize(data: npt.NDArray[Any]) -> npt.NDArray[np.float32]:
-            # Handle nodata (-128)
-            nodata_mask = data == -128
-            float_data = data.astype(np.float32)
-            # This is the dequantization formula recommended at https://source.coop/tge-labs/aef.
-            result = ((float_data / 127.5) ** 2) * np.sign(float_data)
-            # We make sure that NODATA is exactly -1.0 so user can handle it appropriately.
-            result[nodata_mask] = -1.0
-            return result
-
-        return dequantize
+        return self._dequantize
 
     def read_raster(
         self,

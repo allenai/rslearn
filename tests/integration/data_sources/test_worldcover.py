@@ -1,6 +1,4 @@
-import os
 import pathlib
-import random
 import zipfile
 
 import numpy as np
@@ -159,17 +157,14 @@ def test_local_worldcover_dir(
     )
 
 
-def test_gcs_worldcover_dir(
+def test_memory_worldcover_dir(
     tmp_path: pathlib.Path,
     seattle2020: STGeometry,
     httpserver: HTTPServer,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Run the WorldCover test with directory on GCS."""
-    test_id = random.randint(10000, 99999)
-    bucket_name = os.environ["TEST_BUCKET"]
-    prefix = os.environ["TEST_PREFIX"] + f"test_{test_id}/"
-    worldcover_dir = UPath(f"gcs://{bucket_name}/{prefix}")
+    """Run the WorldCover test with a remote-like directory using fsspec memory://."""
+    worldcover_dir = UPath("memory://test_worldcover/")
     run_test_with_worldcover_dir(
         worldcover_dir=worldcover_dir,
         tmp_path=tmp_path,
