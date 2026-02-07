@@ -252,7 +252,8 @@ class SegmentationTask(BasicTask):
                     # Metric name can't contain "." so change to ",".
                     suffix = "_" + str(thresholds[0]).replace(".", ",")
 
-                # Create one metric per type - it returns a dict with "avg" and optionally per-class keys
+                # Create one metric per type -- it returns either a scalar average or
+                # a dict with per-class keys.
                 metrics["F1" + suffix] = SegmentationMetric(
                     F1Metric(
                         num_classes=self.num_classes,
@@ -285,8 +286,6 @@ class SegmentationTask(BasicTask):
             if self.nodata_value is not None:
                 miou_metric_kwargs["nodata_value"] = self.nodata_value
             miou_metric_kwargs.update(self.miou_metric_kwargs)
-
-            # Create one metric - it returns a dict with "avg" and optionally per-class keys
             metrics["mean_iou"] = SegmentationMetric(
                 MeanIoUMetric(**miou_metric_kwargs),
                 pass_probabilities=False,
@@ -475,6 +474,7 @@ class SegmentationMetric(Metric):
             if isinstance(result, dict):
                 return result[f"cls_{self.class_idx}"]
             return result[self.class_idx]
+
         return result
 
     def reset(self) -> None:
@@ -509,8 +509,8 @@ class F1Metric(Metric):
                 metric is the best F1 across score thresholds.
             metric_mode: set to "precision" or "recall" to return that instead of F1
                 (default "f1")
-            report_per_class: whether to include per-class scores in the output dict.
-                If False, only returns the "avg" key.
+            report_per_class: whether to return a dict with per-class scores and "avg"
+                score instead of just returning the scalar average score.
         """
         super().__init__()
         self.num_classes = num_classes
@@ -561,8 +561,8 @@ class F1Metric(Metric):
         """Compute metric.
 
         Returns:
-            dict with "avg" key containing mean score across classes.
-            If report_per_class is True, also includes "cls_N" keys for each class N.
+            the average F1 score, or, if report_per_class is True, a dict with "f1/avg"
+                key containing the average score and "f1/cls_N" keys for each class N.
         """
         cls_best_scores = {}
 
@@ -601,12 +601,16 @@ class F1Metric(Metric):
                 if best_score is None or score > best_score:
                     best_score = score
 
-            cls_best_scores[f"cls_{cls_idx}"] = best_score
+            cls_best_scores[f"f1/cls_{cls_idx}"] = best_score
 
-        report_scores = {"avg": torch.mean(torch.stack(list(cls_best_scores.values())))}
+        average_score = torch.mean(torch.stack(list(cls_best_scores.values())))
+
         if self.report_per_class:
+            report_scores = {"f1/avg": average_score}
             report_scores.update(cls_best_scores)
-        return report_scores
+            return report_scores
+        else:
+            return average_score
 
 
 class MeanIoUMetric(Metric):
@@ -638,8 +642,9 @@ class MeanIoUMetric(Metric):
             ignore_missing_classes: whether to ignore classes that don't appear in
                 either the predictions or the ground truth. If false, the IoU for a
                 missing class will be 0.
-            report_per_class: whether to include per-class IoU scores in the output dict.
-                If False, only returns the "avg" key.
+            report_per_class: whether to return a dict with per-class mean IoU scores
+                and "avg" average across classes instead of returning the scalar
+                average only.
         """
         super().__init__()
         self.num_classes = num_classes
@@ -686,8 +691,9 @@ class MeanIoUMetric(Metric):
         """Compute metric.
 
         Returns:
-            dict with "avg" containing the mean IoU across classes.
-            If report_per_class is True, also includes "cls_N" keys for each valid class N.
+            the mean IoU score, or, if report_per_class is true, a dict with
+            "mean_iou/avg" key containing the mean IoU across classes and
+            "mean_iou/cls_N" keys containing the mean IoU for each class N.
         """
         cls_scores = {}
         valid_scores = []
@@ -704,13 +710,17 @@ class MeanIoUMetric(Metric):
                 continue
 
             score = intersection / union
-            cls_scores[f"cls_{cls_idx}"] = score
+            cls_scores[f"mean_iou/cls_{cls_idx}"] = score
             valid_scores.append(score)
 
-        report_scores = {"avg": torch.mean(torch.stack(valid_scores))}
+        mean_iou = torch.mean(torch.stack(valid_scores))
+
         if self.report_per_class:
+            report_scores = {"mean_iou/avg": mean_iou}
             report_scores.update(cls_scores)
-        return report_scores
+            return report_scores
+        else:
+            return mean_iou
 
 
 class DiceLoss(torch.nn.Module):
