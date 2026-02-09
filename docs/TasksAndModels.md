@@ -277,7 +277,7 @@ The configuration snippet below summarizes the most common options. See
 	        # Multiply ground truth values by this factor before using it for training.
 	        scale_factor: 0.1
 	        # Metric(s) to compute.
-	        # Supported: "mse", "l1", "r2".
+	        # Supported: "mse", "rmse", "l1", "r2", "mape".
 	        metrics: ["mse", "r2"]
 	        # Optional value to treat as invalid. The loss will be masked at pixels where
 	        # the ground truth value is equal to nodata_value.
@@ -367,7 +367,7 @@ The configuration snippet below summarizes the most common options. See
         property_name: "length"
         # Multiply the label value by this factor for training.
         scale_factor: 0.01
-        # Metric(s) to compute. Supported: "mse", "l1".
+        # Metric(s) to compute. Supported: "mse", "rmse", "l1", "mape".
         metrics: ["mse"]
 ```
 

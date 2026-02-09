@@ -153,6 +153,54 @@ def test_mse_metric(empty_sample_metadata: SampleMetadata) -> None:
     assert results["mse"] == pytest.approx(0.05 / 3)
 
 
+def test_rmse_metric(empty_sample_metadata: SampleMetadata) -> None:
+    """Verify root mean squared error metric works with customized scale_factor."""
+    task = PerPixelRegressionTask(
+        scale_factor=0.1,
+        metrics=("rmse",),
+        nodata_value=-1,
+    )
+    metrics = task.get_metrics()
+
+    metadata = _make_metadata(empty_sample_metadata, height=2, width=2)
+    _, target_dict = task.process_inputs(
+        raw_inputs={
+            "targets": RasterImage(torch.tensor([[[[1, 2], [-1, 3]]]])),
+        },
+        metadata=metadata,
+    )
+    preds = torch.tensor([[0.1, 0.1], [0.1, 0.1]])[None, None, :, :]
+
+    metrics.update(preds, [target_dict])
+    results = metrics.compute()
+    assert results["rmse"] == pytest.approx(np.sqrt(0.05 / 3))
+
+
+def test_mape_metric(empty_sample_metadata: SampleMetadata) -> None:
+    """Verify mean absolute percentage error metric works."""
+    task = PerPixelRegressionTask(
+        scale_factor=0.1,
+        metrics=("mape",),
+        nodata_value=-1,
+    )
+    metrics = task.get_metrics()
+
+    metadata = _make_metadata(empty_sample_metadata, height=2, width=2)
+    _, target_dict = task.process_inputs(
+        raw_inputs={
+            "targets": RasterImage(torch.tensor([[[[1, 2], [-1, 3]]]])),
+        },
+        metadata=metadata,
+    )
+    preds = torch.tensor([[0.1, 0.1], [0.1, 0.1]])[None, None, :, :]
+
+    metrics.update(preds, [target_dict])
+    results = metrics.compute()
+    # Labels are [0.1, 0.2, 0.3], preds are [0.1, 0.1, 0.1] over valid pixels.
+    # MAPE = mean(abs(pred-label)/abs(label)) = (0 + 0.5 + 2/3) / 3 = 7/18.
+    assert results["mape"] == pytest.approx(7 / 18)
+
+
 def test_r2_metric_list(empty_sample_metadata: SampleMetadata) -> None:
     task = PerPixelRegressionTask(
         scale_factor=0.1,
