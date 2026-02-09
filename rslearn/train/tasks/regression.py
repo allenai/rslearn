@@ -34,9 +34,11 @@ class RegressionTask(BasicTask):
         filters: list[tuple[str, str]] | None = None,
         allow_invalid: bool = False,
         scale_factor: float = 1,
-        metric_mode: Literal["mse", "l1"]
-        | Sequence[Literal["mse", "l1"]]
-        | None = None,
+        metric_mode: (
+            Literal["mse", "rmse", "l1", "mape"]
+            | Sequence[Literal["mse", "rmse", "l1", "mape"]]
+            | None
+        ) = None,
         use_accuracy_metric: bool = False,
         within_factor: float = 0.1,
         metrics: Sequence[str] | None = None,
@@ -58,7 +60,8 @@ class RegressionTask(BasicTask):
                 examples where output is within a factor of the ground truth.
             within_factor: the factor for accuracy metric. If it's 0.2, and ground
                 truth is 5.0, then values from 5.0*0.8 to 5.0*1.2 are accepted.
-            metrics: metric(s) to compute. Supported values: "mse", "l1".
+            metrics: metric(s) to compute. Supported values: "mse", "rmse", "l1",
+                "mape".
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -92,7 +95,7 @@ class RegressionTask(BasicTask):
 
         if len(metric_names) == 0:
             raise ValueError("metrics must contain at least one metric")
-        allowed = {"mse", "l1"}
+        allowed = {"mse", "rmse", "l1", "mape"}
         invalid = [m for m in metric_names if m not in allowed]
         if invalid:
             raise ValueError(f"invalid metrics entries: {invalid}")
@@ -218,9 +221,19 @@ class RegressionTask(BasicTask):
                     metric=torchmetrics.MeanSquaredError(),
                     scale_factor=self.scale_factor,
                 )
+            elif metric_name == "rmse":
+                metric_dict["rmse"] = RegressionMetricWrapper(
+                    metric=torchmetrics.MeanSquaredError(squared=False),
+                    scale_factor=self.scale_factor,
+                )
             elif metric_name == "l1":
                 metric_dict["l1"] = RegressionMetricWrapper(
                     metric=torchmetrics.MeanAbsoluteError(),
+                    scale_factor=self.scale_factor,
+                )
+            elif metric_name == "mape":
+                metric_dict["mape"] = RegressionMetricWrapper(
+                    metric=torchmetrics.MeanAbsolutePercentageError(),
                     scale_factor=self.scale_factor,
                 )
             else:
