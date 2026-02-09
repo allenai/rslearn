@@ -1,5 +1,7 @@
 """Regression task."""
 
+import warnings
+from collections.abc import Sequence
 from typing import Any, Literal
 
 import numpy as np
@@ -32,9 +34,14 @@ class RegressionTask(BasicTask):
         filters: list[tuple[str, str]] | None = None,
         allow_invalid: bool = False,
         scale_factor: float = 1,
-        metric_mode: Literal["mse", "l1"] = "mse",
+        metric_mode: (
+            Literal["mse", "rmse", "l1", "mape"]
+            | Sequence[Literal["mse", "rmse", "l1", "mape"]]
+            | None
+        ) = None,
         use_accuracy_metric: bool = False,
         within_factor: float = 0.1,
+        metrics: Sequence[str] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize a new RegressionTask.
@@ -47,11 +54,14 @@ class RegressionTask(BasicTask):
             allow_invalid: instead of throwing error when no regression label is found
                 at a window, simply mark the example invalid for this task
             scale_factor: multiply the label value by this factor for training
-            metric_mode: what metric to use, either "mse" (default) or "l1"
+            metric_mode: deprecated; use metrics instead. Will be removed after
+                2026-06-01.
             use_accuracy_metric: include metric that reports percentage of
                 examples where output is within a factor of the ground truth.
             within_factor: the factor for accuracy metric. If it's 0.2, and ground
                 truth is 5.0, then values from 5.0*0.8 to 5.0*1.2 are accepted.
+            metrics: metric(s) to compute. Supported values: "mse", "rmse", "l1",
+                "mape".
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -59,7 +69,38 @@ class RegressionTask(BasicTask):
         self.filters = filters
         self.allow_invalid = allow_invalid
         self.scale_factor = scale_factor
-        self.metric_mode = metric_mode
+
+        if metrics is not None:
+            metric_names = list(metrics)
+            if metric_mode is not None:
+                warnings.warn(
+                    "RegressionTask.metric_mode is deprecated and ignored when "
+                    "`metrics` is set. It will be removed after 2026-06-01.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+        elif metric_mode is not None:
+            warnings.warn(
+                "RegressionTask.metric_mode is deprecated; use `metrics` instead. "
+                "It will be removed after 2026-06-01.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            if isinstance(metric_mode, str):
+                metric_names = [metric_mode]
+            else:
+                metric_names = list(metric_mode)
+        else:
+            metric_names = ["mse"]
+
+        if len(metric_names) == 0:
+            raise ValueError("metrics must contain at least one metric")
+        allowed = {"mse", "rmse", "l1", "mape"}
+        invalid = [m for m in metric_names if m not in allowed]
+        if invalid:
+            raise ValueError(f"invalid metrics entries: {invalid}")
+        self.metrics = metric_names
+
         self.use_accuracy_metric = use_accuracy_metric
         self.within_factor = within_factor
 
@@ -174,14 +215,29 @@ class RegressionTask(BasicTask):
         """Get the metrics for this task."""
         metric_dict: dict[str, Metric] = {}
 
-        if self.metric_mode == "mse":
-            metric_dict["mse"] = RegressionMetricWrapper(
-                metric=torchmetrics.MeanSquaredError(), scale_factor=self.scale_factor
-            )
-        elif self.metric_mode == "l1":
-            metric_dict["l1"] = RegressionMetricWrapper(
-                metric=torchmetrics.MeanAbsoluteError(), scale_factor=self.scale_factor
-            )
+        for metric_name in self.metrics:
+            if metric_name == "mse":
+                metric_dict["mse"] = RegressionMetricWrapper(
+                    metric=torchmetrics.MeanSquaredError(),
+                    scale_factor=self.scale_factor,
+                )
+            elif metric_name == "rmse":
+                metric_dict["rmse"] = RegressionMetricWrapper(
+                    metric=torchmetrics.MeanSquaredError(squared=False),
+                    scale_factor=self.scale_factor,
+                )
+            elif metric_name == "l1":
+                metric_dict["l1"] = RegressionMetricWrapper(
+                    metric=torchmetrics.MeanAbsoluteError(),
+                    scale_factor=self.scale_factor,
+                )
+            elif metric_name == "mape":
+                metric_dict["mape"] = RegressionMetricWrapper(
+                    metric=torchmetrics.MeanAbsolutePercentageError(),
+                    scale_factor=self.scale_factor,
+                )
+            else:
+                raise ValueError(f"unknown metric {metric_name}")
 
         if self.use_accuracy_metric:
             metric_dict["accuracy"] = RegressionMetricWrapper(
