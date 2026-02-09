@@ -29,7 +29,9 @@ class PerPixelRegressionTask(BasicTask):
         self,
         scale_factor: float = 1,
         metric_mode: (
-            Literal["mse", "l1", "r2"] | Sequence[Literal["mse", "l1", "r2"]] | None
+            Literal["mse", "rmse", "l1", "r2", "mape"]
+            | Sequence[Literal["mse", "rmse", "l1", "r2", "mape"]]
+            | None
         ) = None,
         nodata_value: float | None = None,
         metrics: Sequence[str] | None = None,
@@ -44,7 +46,8 @@ class PerPixelRegressionTask(BasicTask):
                 2026-06-01.
             nodata_value: optional value to treat as invalid. The loss will be masked
                 at pixels where the ground truth value is equal to nodata_value.
-            metrics: metric(s) to compute. Supported values: "mse", "l1", "r2".
+            metrics: metric(s) to compute. Supported values: "mse", "rmse", "l1",
+                "r2", "mape".
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -75,7 +78,7 @@ class PerPixelRegressionTask(BasicTask):
 
         if len(metric_names) == 0:
             raise ValueError("metrics must contain at least one metric")
-        allowed = {"mse", "l1", "r2"}
+        allowed = {"mse", "rmse", "l1", "r2", "mape"}
         invalid = [m for m in metric_names if m not in allowed]
         if invalid:
             raise ValueError(f"invalid metrics entries: {invalid}")
@@ -178,6 +181,11 @@ class PerPixelRegressionTask(BasicTask):
                     metric=torchmetrics.MeanSquaredError(),
                     scale_factor=self.scale_factor,
                 )
+            elif metric_name == "rmse":
+                metric_dict["rmse"] = PerPixelRegressionMetricWrapper(
+                    metric=torchmetrics.MeanSquaredError(squared=False),
+                    scale_factor=self.scale_factor,
+                )
             elif metric_name == "l1":
                 metric_dict["l1"] = PerPixelRegressionMetricWrapper(
                     metric=torchmetrics.MeanAbsoluteError(),
@@ -186,6 +194,11 @@ class PerPixelRegressionTask(BasicTask):
             elif metric_name == "r2":
                 metric_dict["r2"] = PerPixelRegressionMetricWrapper(
                     metric=torchmetrics.R2Score(),
+                    scale_factor=self.scale_factor,
+                )
+            elif metric_name == "mape":
+                metric_dict["mape"] = PerPixelRegressionMetricWrapper(
+                    metric=torchmetrics.MeanAbsolutePercentageError(),
                     scale_factor=self.scale_factor,
                 )
             else:
