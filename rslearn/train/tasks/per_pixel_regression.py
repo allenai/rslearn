@@ -155,18 +155,51 @@ class PerPixelRegressionTask(BasicTask):
         Returns:
             a dictionary mapping image name to visualization image
         """
-        image = super().visualize(input_dict, target_dict, output)["image"]
         if target_dict is None:
             raise ValueError("target_dict is required for visualization")
+
+        images: dict[str, npt.NDArray[Any]] = {}
+        raster_image = None
+        if "image" in input_dict and isinstance(input_dict["image"], RasterImage):
+            raster_image = input_dict["image"]
+        else:
+            # Some pipelines name inputs by modality (e.g. "sentinel2_l2a") and/or this
+            # task may be used in contexts where inputs are empty. Use the first
+            # available RasterImage if present, otherwise skip the background image.
+            for k in sorted(input_dict.keys()):
+                if isinstance(input_dict[k], RasterImage):
+                    raster_image = input_dict[k]
+                    break
+
+        if raster_image is not None:
+            try:
+                images.update(
+                    super().visualize({"image": raster_image}, target_dict, output)
+                )
+            except Exception:
+                # Visualization should be best-effort; if the raster can't be rendered
+                # (e.g., insufficient bands), still emit gt/pred below.
+                pass
+
         gt_values = target_dict["values"].get_hw_tensor().cpu().numpy()
-        pred_values = output.cpu().numpy()[0, :, :]
+        if not isinstance(output, torch.Tensor):
+            raise ValueError("output for PerPixelRegressionTask visualization must be a tensor")
+        if output.ndim == 4 and output.shape[0] == 1 and output.shape[1] == 1:
+            pred_values = output[0, 0, :, :].cpu().numpy()
+        elif output.ndim == 3 and output.shape[0] == 1:
+            pred_values = output[0, :, :].cpu().numpy()
+        elif output.ndim == 2:
+            pred_values = output.cpu().numpy()
+        else:
+            raise ValueError(
+                "output for PerPixelRegressionTask visualization must be an HW, 1HW, or 11HW tensor, "
+                f"but got shape {tuple(output.shape)}"
+            )
         gt_vis = np.clip(gt_values * 255, 0, 255).astype(np.uint8)
         pred_vis = np.clip(pred_values * 255, 0, 255).astype(np.uint8)
-        return {
-            "image": np.array(image),
-            "gt": gt_vis,
-            "pred": pred_vis,
-        }
+        images["gt"] = gt_vis
+        images["pred"] = pred_vis
+        return images
 
     def get_metrics(self) -> MetricCollection:
         """Get the metrics for this task."""
