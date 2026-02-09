@@ -89,37 +89,15 @@ jobs:
         run: |
           docker pull ${{ needs.build.outputs.ghcr_docker_image }}
 
-      - name: Run Unit Tests
+      - name: Run Unit and Integration Tests
         run: |
           docker run --rm \
             -e CI="true" \
             ${{ needs.build.outputs.ghcr_docker_image }} \
-            pytest -n auto tests/ -vv \
-            --ignore tests/integration/ \
+            pytest -n auto tests/unit/ tests/integration/ -vv \
             --ignore tests/unit/models/test_molmo.py \
             --ignore tests/unit/models/olmoearth_pretrain/
 
-      - name: Authenticate into gcp
-        uses: "google-github-actions/auth@v2"
-        with:
-          credentials_json: ${{secrets.GOOGLE_CREDENTIALS }}
-
-      - name: Run All other Integration Tests
-        run: |
-          docker run --rm \
-            -e TEST_BUCKET="${{ env.TEST_BUCKET }}" \
-            -v ${{env.GOOGLE_GHA_CREDS_PATH}}:/tmp/gcp-credentials.json:ro \
-            -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-credentials.json \
-            -e TEST_BUCKET=test-bucket-rslearn \
-            -e TEST_PREFIX=tests/ \
-            -e CI="true" \
-            --network host \
-            ${{ needs.build.outputs.ghcr_docker_image }} \
-            pytest tests/integration/ \
-            --ignore tests/integration/data_sources/ \
-            -vv
-
-      # Add Job to clean up test bucket
       - name: Clean up
         if: always()
         run: |
