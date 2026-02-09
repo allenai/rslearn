@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import math
 import os
 import tempfile
@@ -110,9 +111,11 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
     - v10: 10m V wind component (units: m s-1)
 
     Authentication:
-        EarthDataHub uses token-based auth. Configure your netrc file so HTTP clients
-        can attach the token automatically. On Linux and MacOS the netrc path is
-        `~/.netrc`.
+        EarthDataHub uses token-based auth. There are two ways to authenticate:
+
+        1. Set the ``EARTHDATAHUB_TOKEN`` environment variable.
+        2. Configure your netrc file so HTTP clients
+        can attach the token automatically and keep ``trust_env=True``.
     """
 
     DEFAULT_ZARR_URL = (
@@ -204,6 +207,14 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
 
         self._ds: Any | None = None
 
+    def _resolve_token(self) -> str | None:
+        """Resolve the EarthDataHub token from the environment.
+
+        Returns:
+            The token string, or None if ``EARTHDATAHUB_TOKEN`` is not set.
+        """
+        return os.environ.get("EARTHDATAHUB_TOKEN")
+
     def _get_dataset(self) -> xr.Dataset:
         """Open (and memoize) the backing ERA5-Land Zarr dataset."""
         if self._ds is not None:
@@ -212,6 +223,15 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         storage_options: dict[str, Any] | None = None
         if self.zarr_url.startswith("http://") or self.zarr_url.startswith("https://"):
             storage_options = {"client_kwargs": {"trust_env": self.trust_env}}
+
+            # If an explicit token is available, inject a Basic auth header so
+            # authentication works without a netrc file (e.g. on clusters).
+            token = self._resolve_token()
+            if token:
+                credentials = base64.b64encode(f"edh:{token}".encode()).decode()
+                storage_options["headers"] = {
+                    "Authorization": f"Basic {credentials}",
+                }
 
         self._ds = xr.open_dataset(
             self.zarr_url,

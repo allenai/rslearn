@@ -707,12 +707,14 @@ ERA5-Land daily UTC (v1) hosted on EarthDataHub.
 
 See https://earthdatahub.destine.eu/collections/era5/datasets/era5-land-daily for details.
 
-Authentication requires configuring the netrc file (`~/.netrc` on Linux and MacOS) as follows:
+Authentication is required. There are two options (checked in this order):
 
-```
-machine data.earthdatahub.destine.eu
-  password <write your personal access token here>
-```
+1. Set the `EARTHDATAHUB_TOKEN` environment variable.
+2. Configure the netrc file (`~/.netrc` on Linux and MacOS) so HTTP clients
+   can attach the token automatically, and keep `trust_env` set to `true`.
+
+You can obtain a personal access token at
+https://earthdatahub.destine.eu/account-settings#my-personal-access-tokens.
 
 Supported bands:
 - `d2m`: 2m dewpoint temperature (units: K)
