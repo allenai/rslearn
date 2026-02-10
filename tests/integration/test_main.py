@@ -478,7 +478,7 @@ class TestMaterialization:
         tmp_path: pathlib.Path,
         monkeypatch: Any,
     ) -> None:
-        """--ignore-errors continues after a SoilGrids WCS failure."""
+        """--ignore-errors continues even after a data source error during materialization."""
         # Copy the ingested dataset to a new location.
         new_path = UPath(tmp_path) / "new_dataset"
         shutil.copytree(ingested_dataset.path, new_path)
