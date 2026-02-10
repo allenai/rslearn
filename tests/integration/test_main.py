@@ -1,6 +1,5 @@
 import json
 import pathlib
-import shutil
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -415,17 +414,12 @@ class TestMaterialization:
         assert self.expected_materialized_fname(ingested_dataset.path).exists()
 
     def test_materialization_errors_on_bad_geojson(
-        self, ingested_dataset: Dataset, monkeypatch: Any, tmp_path: pathlib.Path
+        self, ingested_dataset: Dataset, monkeypatch: Any
     ) -> None:
-        # Copy the ingested dataset to a new location.
-        new_path = UPath(tmp_path) / "new_dataset"
-        logger.info("copying dataset to %s", new_path)
-        shutil.copytree(ingested_dataset.path, new_path)
+        ds_path = ingested_dataset.path
 
-        # Modify the dataset configuration to use a bad data source.
-        logger.info("modify dataset configuration")
         # Corrupt the data.geojson file by writing invalid JSON
-        data_file = new_path / "tiles" / "local_files" / "foo" / "data.geojson"
+        data_file = ds_path / "tiles" / "local_files" / "foo" / "data.geojson"
         with data_file.open("w") as f:
             f.write("invalid json{")
 
@@ -435,7 +429,7 @@ class TestMaterialization:
             "dataset",
             "materialize",
             "--root",
-            str(new_path),
+            str(ds_path),
         ]
         monkeypatch.setattr(sys, "argv", mock_args)
         with pytest.raises(json.decoder.JSONDecodeError):
@@ -444,16 +438,11 @@ class TestMaterialization:
     def test_ignore_errors(
         self,
         ingested_dataset: Dataset,
-        tmp_path: pathlib.Path,
         monkeypatch: Any,
     ) -> None:
-        print("test_ignore_errors tmp_path", tmp_path)
-        # Copy the ingested dataset to a new location.
-        new_path = UPath(tmp_path) / "new_dataset"
-        logger.info("copying dataset to %s", new_path)
-        shutil.copytree(ingested_dataset.path, new_path)
+        ds_path = ingested_dataset.path
         # Corrupt the data.geojson file by writing invalid JSON
-        data_file = new_path / "tiles" / "local_files" / "bar" / "data.geojson"
+        data_file = ds_path / "tiles" / "local_files" / "bar" / "data.geojson"
         with data_file.open("w") as f:
             f.write("invalid json{")
 
@@ -463,28 +452,25 @@ class TestMaterialization:
             "dataset",
             "materialize",
             "--root",
-            str(new_path),
+            str(ds_path),
             "--ignore-errors",
             "--workers",
             "0",
         ]
         monkeypatch.setattr(sys, "argv", mock_args)
         rslearn.main.main()
-        assert self.expected_materialized_fname(new_path).exists()
+        assert self.expected_materialized_fname(ds_path).exists()
 
     def test_ignore_errors_soilgrids_wcs_error(
         self,
         ingested_dataset: Dataset,
-        tmp_path: pathlib.Path,
         monkeypatch: Any,
     ) -> None:
         """--ignore-errors continues even after a data source error during materialization."""
-        # Copy the ingested dataset to a new location.
-        new_path = UPath(tmp_path) / "new_dataset"
-        shutil.copytree(ingested_dataset.path, new_path)
+        ds_path = ingested_dataset.path
 
         # Add a direct-materialization SoilGrids layer.
-        cfg_path = new_path / "config.json"
+        cfg_path = ds_path / "config.json"
         with cfg_path.open("r") as f:
             cfg = json.load(f)
         cfg["layers"]["soilgrids"] = {
@@ -504,7 +490,7 @@ class TestMaterialization:
             json.dump(cfg, f)
 
         # Add prepared items for the SoilGrids layer to each window.
-        dataset = Dataset(new_path)
+        dataset = Dataset(ds_path)
 
         for window in dataset.load_windows():
             layer_datas = window.load_layer_datas()
@@ -547,7 +533,7 @@ class TestMaterialization:
             "dataset",
             "materialize",
             "--root",
-            str(new_path),
+            str(ds_path),
             "--ignore-errors",
             "--workers",
             "0",
@@ -557,7 +543,7 @@ class TestMaterialization:
 
         # The second window should have materialized both layers.
         assert (
-            new_path
+            ds_path
             / "windows"
             / "default"
             / "window2"
@@ -566,7 +552,7 @@ class TestMaterialization:
             / "data.geojson"
         ).exists()
         assert (
-            new_path
+            ds_path
             / "windows"
             / "default"
             / "window2"
