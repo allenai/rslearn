@@ -25,6 +25,7 @@ class Resize(Transform):
         target_size: tuple[int, int],
         selectors: list[str] = [],
         interpolation: str = "nearest",
+        skip_missing: bool = False,
     ):
         """Initialize a resize transform.
 
@@ -33,11 +34,14 @@ class Resize(Transform):
             selectors: items to transform.
             interpolation: the interpolation mode to use for resizing.
                 Must be one of "nearest", "nearest_exact", "bilinear", or "bicubic".
+            skip_missing: if True, skip selectors that don't exist in the input/target
+                dicts. Useful when working with optional inputs.
         """
         super().__init__()
         self.target_size = target_size
         self.selectors = selectors
         self.interpolation = INTERPOLATION_MODES[interpolation]
+        self.skip_missing = skip_missing
 
     def apply_resize(self, image: RasterImage) -> RasterImage:
         """Apply resizing on the specified image.
