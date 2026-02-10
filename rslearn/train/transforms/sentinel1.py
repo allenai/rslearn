@@ -17,6 +17,7 @@ class Sentinel1ToDecibels(Transform):
         selectors: list[str] = ["image"],
         from_decibels: bool = False,
         epsilon: float = 1e-6,
+        skip_missing: bool = False,
     ):
         """Initialize a new Sentinel1ToDecibels.
 
@@ -27,11 +28,14 @@ class Sentinel1ToDecibels(Transform):
             epsilon: when converting to decibels, clip the intensities to this minimum
                 value to avoid log issues. This is mostly to avoid pixels that have no
                 data with no data value being 0.
+            skip_missing: if True, skip selectors that don't exist in the input/target
+                dicts. Useful when working with optional inputs.
         """
         super().__init__()
         self.selectors = selectors
         self.from_decibels = from_decibels
         self.epsilon = epsilon
+        self.skip_missing = skip_missing
 
     def apply_image(self, image: RasterImage) -> RasterImage:
         """Normalize the specified image.
