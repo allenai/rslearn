@@ -10,12 +10,15 @@ import google.api_core.exceptions
 import numpy as np
 import pytest
 import shapely
+from soilgrids import SoilGridsWcsError
 from upath import UPath
 
 import rslearn.main
 from rslearn.const import WGS84_PROJECTION
+from rslearn.data_sources.data_source import Item
 from rslearn.data_sources.gcp_public_data import Sentinel2Item
 from rslearn.data_sources.local_files import VectorItem
+from rslearn.data_sources.soilgrids import SoilGrids
 from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.log_utils import get_logger
 from rslearn.utils.geometry import STGeometry
@@ -502,7 +505,6 @@ class TestMaterialization:
 
         # Add prepared items for the SoilGrids layer to each window.
         dataset = Dataset(new_path)
-        from rslearn.data_sources.data_source import Item
 
         for window in dataset.load_windows():
             layer_datas = window.load_layer_datas()
@@ -522,10 +524,6 @@ class TestMaterialization:
         monkeypatch.setattr(rslearn.main.random, "shuffle", deterministic_shuffle)
 
         # Patch SoilGrids to fail for the first window only.
-        from soilgrids import SoilGridsWcsError
-
-        from rslearn.data_sources.soilgrids import SoilGrids
-
         def fake_read_raster(
             self: Any,
             layer_name: str,
