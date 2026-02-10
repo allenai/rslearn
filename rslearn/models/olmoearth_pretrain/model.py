@@ -95,7 +95,8 @@ class OlmoEarth(FeatureExtractor):
         """
         if use_legacy_timestamps:
             warnings.warn(
-                "For new projects, don't use legacy timesteps.",
+                "For new projects, don't use legacy timesteps."
+                "Support will be removed after 2026-04-01.",
                 FutureWarning,
             )
 
@@ -365,22 +366,17 @@ class OlmoEarth(FeatureExtractor):
             expected_timestamps_per_sample.append(sample_expected_ts)
 
         # Determine max_timesteps:
-        # - If any sample has expected_timestamps, use max of expected_timestamps lengths
-        # - Otherwise, fall back to max actual timesteps
+        # - From expected_timestamps lengths (for samples that have them)
+        # - From actual timestep counts (for samples without expected_timestamps)
         has_any_expected = any(ts is not None for ts in expected_timestamps_per_sample)
-        if has_any_expected:
-            max_timesteps = max(
-                len(ts) if ts is not None else 0
-                for ts in expected_timestamps_per_sample
-            )
-            # Ensure at least 1 timestep
-            if max_timesteps == 0:
-                max_timesteps = 1
-        else:
-            # Fallback to original behavior: find max actual timesteps
-            max_timesteps = 1
-            for modality in present_modalities:
-                for inp in context.inputs:
+        max_timesteps = 1
+        for sample_idx, inp in enumerate(context.inputs):
+            sample_expected_ts = expected_timestamps_per_sample[sample_idx]
+            if sample_expected_ts is not None:
+                max_timesteps = max(max_timesteps, len(sample_expected_ts))
+            else:
+                # Use actual timestep count for samples without expected_timestamps
+                for modality in present_modalities:
                     if modality in inp:
                         raster_img = inp[modality]
                         if isinstance(raster_img, RasterImage):
@@ -389,14 +385,14 @@ class OlmoEarth(FeatureExtractor):
                             )
 
         # Track timestamps per instance (aka sample) for position encoding
-        # Using expected_timestamps when available, otherwise actual timestamps
+        # Using expected_timestamps when available, falling back to actual timestamps
         timestamps_per_instance: list[list[tuple[datetime, datetime]]] = []
-        if has_any_expected:
-            # All samples have expected_timestamps (batch-level invariant)
-            timestamps_per_instance = expected_timestamps_per_sample  # type: ignore[assignment]
-        else:
-            # No samples have expected_timestamps - use actual timestamps
-            for inp in context.inputs:
+        for sample_idx, inp in enumerate(context.inputs):
+            sample_expected_ts = expected_timestamps_per_sample[sample_idx]
+            if sample_expected_ts is not None:
+                timestamps_per_instance.append(sample_expected_ts)
+            else:
+                # Fall back to actual timestamps for this sample
                 best_ts: list[tuple[datetime, datetime]] = []
                 for modality in present_modalities:
                     if modality in inp:

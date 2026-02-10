@@ -823,3 +823,74 @@ def test_compute_expected_timestamps_single_timestep() -> None:
     assert expected_ts is not None
     assert len(expected_ts) == 1
     assert expected_ts[0] == (datetime(2025, 1, 1), datetime(2025, 2, 1))
+
+
+def test_compute_expected_timestamps_excess_periods_returns_none() -> None:
+    """Test compute_expected_timestamps returns None when total periods exceed max_matches.
+
+    When the window time range covers more periods than max_matches, the actual
+    periods selected depend on data availability (excess periods serve as fallback).
+    In this case, expected timestamps cannot be reliably predicted, so None is returned.
+    """
+    mock_storage = MagicMock()
+    # Window covers 4 months (120 days) with 30-day periods = 4 periods
+    window = Window(
+        storage=mock_storage,
+        group="test",
+        name="test_window",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 100, 100),
+        time_range=(datetime(2025, 1, 1), datetime(2025, 5, 1)),
+    )
+
+    # max_matches=2 but window has 4 periods -> excess periods as fallback
+    layer_config = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT8, bands=["band"])],
+        data_source=DataSourceConfig(
+            class_path="rslearn.data_sources.sentinel2.Sentinel2",
+            query_config=QueryConfig(
+                space_mode=SpaceMode.PER_PERIOD_MOSAIC,
+                period_duration=timedelta(days=30),
+                max_matches=2,
+            ),
+        ),
+    )
+
+    expected_ts = compute_expected_timestamps(window, layer_config)
+    assert expected_ts is None
+
+
+def test_compute_expected_timestamps_exact_periods_returns_timestamps() -> None:
+    """Test compute_expected_timestamps returns timestamps when periods == max_matches.
+
+    When total periods exactly equals max_matches, there are no fallback periods,
+    so expected timestamps can be reliably computed.
+    """
+    mock_storage = MagicMock()
+    # Window covers exactly 2 periods (60 days with 30-day periods)
+    window = Window(
+        storage=mock_storage,
+        group="test",
+        name="test_window",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 100, 100),
+        time_range=(datetime(2025, 1, 1), datetime(2025, 3, 2)),
+    )
+
+    layer_config = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT8, bands=["band"])],
+        data_source=DataSourceConfig(
+            class_path="rslearn.data_sources.sentinel2.Sentinel2",
+            query_config=QueryConfig(
+                space_mode=SpaceMode.PER_PERIOD_MOSAIC,
+                period_duration=timedelta(days=30),
+                max_matches=2,
+            ),
+        ),
+    )
+
+    expected_ts = compute_expected_timestamps(window, layer_config)
+    assert expected_ts is not None
+    assert len(expected_ts) == 2

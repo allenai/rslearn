@@ -113,6 +113,12 @@ def compute_expected_timestamps(
         period_duration = query_config.period_duration
         max_matches = query_config.max_matches
 
+        # If the window has more periods than max_matches, the actual periods
+        # selected depend on data availability, so return None
+        total_periods = (time_range_end - time_range_start) // period_duration
+        if total_periods > max_matches:
+            return None
+
         # Compute periods aligned from end backwards (matching data_sources/utils.py logic)
         expected_timestamps: list[tuple[datetime, datetime]] = []
         period_start = time_range_end - period_duration

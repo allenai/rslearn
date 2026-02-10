@@ -589,6 +589,98 @@ def test_missing_modality_handling() -> None:
     assert (s2_s1_mask == MaskValue.MISSING.value).all()
 
 
+def test_mixed_batch_expected_timestamps() -> None:
+    """Test that model handles batches where some samples have expected_timestamps and some don't.
+
+    This can happen when windows have different time ranges: some may have
+    total_periods == max_matches (expected timestamps computed), while others
+    have total_periods > max_matches (expected timestamps is None, used as fallback).
+    """
+    model = OlmoEarth(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        use_legacy_timestamps=False,
+    )
+
+    H = 4
+    W = 4
+
+    # Expected timestamps for sample 0: Jan, Feb, Mar (3 months)
+    expected_ts = [(datetime(2025, m, 1), datetime(2025, m, 28)) for m in range(1, 4)]
+
+    # Sample 0: Has expected_timestamps, with data for Jan and Mar (missing Feb)
+    sample0_tensor = torch.ones((12, 2, H, W), dtype=torch.float32)
+    sample0_tensor[:, 0, :, :] = 1.0  # Jan
+    sample0_tensor[:, 1, :, :] = 3.0  # Mar
+    sample0_timestamps = [
+        (datetime(2025, 1, 1), datetime(2025, 1, 28)),  # Jan
+        (datetime(2025, 3, 1), datetime(2025, 3, 28)),  # Mar
+    ]
+
+    # Sample 1: No expected_timestamps (e.g., window with excess periods),
+    # has 2 actual timesteps
+    sample1_tensor = torch.ones((12, 2, H, W), dtype=torch.float32)
+    sample1_tensor[:, 0, :, :] = 5.0
+    sample1_tensor[:, 1, :, :] = 6.0
+    sample1_timestamps = [
+        (datetime(2025, 4, 1), datetime(2025, 4, 28)),
+        (datetime(2025, 5, 1), datetime(2025, 5, 28)),
+    ]
+
+    inputs = [
+        {
+            "sentinel2_l2a": RasterImage(
+                image=sample0_tensor,
+                timestamps=sample0_timestamps,
+                expected_timestamps=expected_ts,
+            )
+        },
+        {
+            "sentinel2_l2a": RasterImage(
+                image=sample1_tensor,
+                timestamps=sample1_timestamps,
+                expected_timestamps=None,  # No expected timestamps
+            )
+        },
+    ]
+
+    context = ModelContext(inputs=inputs, metadatas=[])
+    sample, present_modalities, _ = model._prepare_modality_inputs(context)
+
+    # max_timesteps should be max(3 from expected_ts, 2 from actual) = 3
+    assert sample.sentinel2_l2a.shape == (2, H, W, 3, 12)
+
+    # Sample 0: Aligned to expected timestamps
+    # Jan at pos 0, Feb (missing) at pos 1, Mar at pos 2
+    s0_data = sample.sentinel2_l2a[0]  # H, W, T, C
+    assert torch.allclose(s0_data[0, 0, 0, :], torch.ones(12) * 1.0)  # Jan
+    assert torch.allclose(s0_data[0, 0, 1, :], torch.zeros(12))  # Feb missing
+    assert torch.allclose(s0_data[0, 0, 2, :], torch.ones(12) * 3.0)  # Mar
+
+    # Sample 0 mask: positions 0 and 2 valid, position 1 missing
+    s0_mask = sample.sentinel2_l2a_mask[0]
+    assert (s0_mask[:, :, 0, :] == MaskValue.ONLINE_ENCODER.value).all()
+    assert (s0_mask[:, :, 1, :] == MaskValue.MISSING.value).all()
+    assert (s0_mask[:, :, 2, :] == MaskValue.ONLINE_ENCODER.value).all()
+
+    # Sample 1: Padded at end (no alignment, original behavior)
+    s1_data = sample.sentinel2_l2a[1]  # H, W, T, C
+    assert torch.allclose(s1_data[0, 0, 0, :], torch.ones(12) * 5.0)
+    assert torch.allclose(s1_data[0, 0, 1, :], torch.ones(12) * 6.0)
+    assert torch.allclose(s1_data[0, 0, 2, :], torch.zeros(12))  # Padding
+
+    # Sample 1 mask: positions 0 and 1 valid, position 2 missing (padding)
+    s1_mask = sample.sentinel2_l2a_mask[1]
+    assert (s1_mask[:, :, 0, :] == MaskValue.ONLINE_ENCODER.value).all()
+    assert (s1_mask[:, :, 1, :] == MaskValue.ONLINE_ENCODER.value).all()
+    assert (s1_mask[:, :, 2, :] == MaskValue.MISSING.value).all()
+
+    # Timestamps should work: sample 0 uses expected_ts, sample 1 uses actual
+    assert sample.timestamps.shape == (2, 3, 3)
+
+
 def test_chronological_sorting_in_alignment() -> None:
     """Test that data is sorted chronologically during alignment.
 
