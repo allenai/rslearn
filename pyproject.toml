@@ -98,7 +98,7 @@ rslearn = ["py.typed"]
 fix = true
 
 [tool.ruff.lint]
-extend-select = ["D", "I", "UP", "PLC0415"]
+extend-select = ["D", "I", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D"]
