@@ -701,6 +701,53 @@ data to avoid very slow global downloads.
 
 Valid bands: See the [CDS dataset page](https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land?tab=download).
 
+### rslearn.data_sources.earthdatahub.ERA5LandDailyUTCv1
+
+ERA5-Land daily UTC (v1) hosted on EarthDataHub.
+
+See https://earthdatahub.destine.eu/collections/era5/datasets/era5-land-daily for details.
+
+Authentication requires configuring the netrc file (`~/.netrc` on Linux and MacOS) as follows:
+
+```
+machine data.earthdatahub.destine.eu
+  password <write your personal access token here>
+```
+
+Supported bands:
+- `d2m`: 2m dewpoint temperature (units: K)
+- `e`: evaporation (units: m of water equivalent)
+- `pev`: potential evaporation (units: m)
+- `ro`: runoff (units: m)
+- `sp`: surface pressure (units: Pa)
+- `ssr`: surface net short-wave (solar) radiation (units: J m-2)
+- `ssrd`: surface short-wave (solar) radiation downwards (units: J m-2)
+- `str`: surface net long-wave (thermal) radiation (units: J m-2)
+- `swvl1`: volumetric soil water layer 1 (units: m3 m-3)
+- `swvl2`: volumetric soil water layer 2 (units: m3 m-3)
+- `t2m`: 2m temperature (units: K or °C; see `temperature_unit`)
+- `tp`: total precipitation (units: m)
+- `u10`: 10m U wind component (units: m s-1)
+- `v10`: 10m V wind component (units: m s-1)
+
+The additional data source configuration looks like this:
+
+```jsonc
+{
+  // Optional: URL/path to the EarthDataHub Zarr store.
+  "zarr_url": "https://data.earthdatahub.destine.eu/era5/era5-land-daily-utc-v1.zarr",
+  // Optional bounding box as [min_lon, min_lat, max_lon, max_lat] (WGS84).
+  // Recommended for performance. Dateline-crossing bounds (min_lon > max_lon) are not
+  // supported.
+  "bounds": null,
+  // Units to return for `t2m` (default "kelvin"): "celsius" or "kelvin".
+  "temperature_unit": "kelvin",
+  // Whether to allow the underlying HTTP client to read environment configuration
+  // (including netrc) for auth/proxies (default true).
+  "trust_env": true
+}
+```
+
 ### rslearn.data_sources.copernicus.Copernicus
 
 This data source is for images from the ESA Copernicus OData API. See
@@ -1319,6 +1366,54 @@ Available bands:
 - visual
 
 Note that B10 is not present in L2A.
+
+### rslearn.data_sources.planetary_computer.LandsatC2L2
+
+Landsat 8/9 Collection 2 Level-2 data on Microsoft Planetary Computer. Direct
+materialization is supported.
+
+See the dataset page: https://planetarycomputer.microsoft.com/dataset/landsat-c2-l2
+
+This data source uses Landsat-style band identifiers (for compatibility with
+`rslearn.data_sources.aws_landsat.LandsatOliTirs`). It defaults to:
+- B1
+- B2
+- B3
+- B4
+- B5
+- B6
+- B7
+- B10
+
+Band mapping (rslearn band → STAC `common_name` / STAC `eo:bands[].name`):
+- B1 → coastal / OLI_B1
+- B2 → blue / OLI_B2
+- B3 → green / OLI_B3
+- B4 → red / OLI_B4
+- B5 → nir08 / OLI_B5
+- B6 → swir16 / OLI_B6
+- B7 → swir22 / OLI_B7
+- B10 → lwir11 / TIRS_B10
+
+Note: this is Level-2 data rather than Level-1, so it does not provide Level-1 bands
+like B8 (panchromatic), B9 (cirrus / OLI_B9), and B11 (thermal / TIRS_B11). If you need those, use the slower
+`rslearn.data_sources.aws_landsat.LandsatOliTirs` data source.
+
+```jsonc
+{
+  // Optional list of bands to expose. Values can be Landsat band identifiers
+  // ("B1", "B2", ..., "B10") or the STAC common names / STAC `eo:bands[].name`
+  // aliases listed above (e.g. "red" or "OLI_B4").
+  "band_names": null,
+  // The optional STAC query filter to use. Defaults to selecting Landsat 8 and 9. For example, set
+  // to {"platform": ["landsat-8"]} to use Landsat 8 only.
+  "query": {"platform": ["landsat-8", "landsat-9"]},
+  // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
+  "sort_by": null,
+  "sort_ascending": true,
+  "timeout_seconds": 10
+}
+```
 
 ### rslearn.data_sources.planetary_computer.Naip
 

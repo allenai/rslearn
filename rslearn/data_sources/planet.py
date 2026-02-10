@@ -173,9 +173,8 @@ class Planet(DataSource):
         planet_item = asyncio.run(self._get_item_by_name(name))
         return self._wrap_planet_item(planet_item)
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: dict) -> Item:
         """Deserializes an item from JSON-decoded data."""
-        assert isinstance(serialized_item, dict)
         return Item.deserialize(serialized_item)
 
     async def _download_asset(self, item: Item, tmp_dir: pathlib.Path) -> UPath:
