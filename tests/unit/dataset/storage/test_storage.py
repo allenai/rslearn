@@ -8,6 +8,7 @@ from upath import UPath
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import Item
 from rslearn.dataset.storage.file import FileWindowStorageFactory
+from rslearn.dataset.storage.migrate import migrate_window_storage
 from rslearn.dataset.storage.sqlite import SQLiteWindowStorageFactory
 from rslearn.dataset.storage.storage import WindowStorageFactory
 from rslearn.dataset.window import Window, WindowLayerData
@@ -15,6 +16,10 @@ from rslearn.dataset.window import Window, WindowLayerData
 STORAGE_FACTORIES: list[WindowStorageFactory] = [
     FileWindowStorageFactory(),
     SQLiteWindowStorageFactory(),
+]
+MIGRATION_FACTORY_PAIRS: list[tuple[WindowStorageFactory, WindowStorageFactory]] = [
+    (FileWindowStorageFactory(), SQLiteWindowStorageFactory()),
+    (SQLiteWindowStorageFactory(), FileWindowStorageFactory()),
 ]
 
 
@@ -152,3 +157,103 @@ def test_save_layer_datas(
         layer_datas["layer_name"].serialized_item_groups[0][0]
     )
     assert deserialized_item.name == "item"
+
+
+@pytest.mark.parametrize(
+    "source_factory,target_factory",
+    MIGRATION_FACTORY_PAIRS,
+)
+def test_migrate_window_storage(
+    source_factory: WindowStorageFactory,
+    target_factory: WindowStorageFactory,
+    tmp_path: pathlib.Path,
+) -> None:
+    """Migrate window metadata between storage backends."""
+    source_path = UPath(tmp_path / "source")
+    target_path = UPath(tmp_path / "target")
+    source_path.mkdir(parents=True, exist_ok=True)
+    target_path.mkdir(parents=True, exist_ok=True)
+    source_storage = source_factory.get_storage(source_path)
+    target_storage = target_factory.get_storage(target_path)
+
+    window = Window(
+        storage=source_storage,
+        group="group1",
+        name="window1",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 4, 4),
+        time_range=None,
+    )
+    source_storage.create_or_update_window(window)
+    item = Item(f"item-{window.name}", window.get_geometry())
+    source_storage.save_layer_datas(
+        window.group,
+        window.name,
+        {
+            "layer_name": WindowLayerData(
+                "layer_name", serialized_item_groups=[[item.serialize()]]
+            )
+        },
+    )
+    window.get_layer_dir("layer_name", group_idx=0).mkdir(parents=True, exist_ok=True)
+    source_storage.mark_layer_completed(
+        window.group, window.name, "layer_name", group_idx=0
+    )
+
+    migrated = migrate_window_storage(source_storage, target_storage)
+    assert migrated == 1
+
+    target_windows = target_storage.get_windows()
+    assert len(target_windows) == 1
+    target_window = target_windows[0]
+    assert target_window.group == "group1"
+    assert target_window.name == "window1"
+    assert target_window.bounds == (0, 0, 4, 4)
+
+    target_layer_datas = target_storage.get_layer_datas("group1", "window1")
+    assert set(target_layer_datas.keys()) == {"layer_name"}
+    assert target_storage.is_layer_completed(
+        "group1", "window1", "layer_name", group_idx=0
+    )
+
+
+@pytest.mark.parametrize(
+    "source_factory,target_factory",
+    MIGRATION_FACTORY_PAIRS,
+)
+def test_migrate_window_storage_requires_empty_target(
+    source_factory: WindowStorageFactory,
+    target_factory: WindowStorageFactory,
+    tmp_path: pathlib.Path,
+) -> None:
+    """Fail migration when target storage already contains windows."""
+    source_path = UPath(tmp_path / "source")
+    target_path = UPath(tmp_path / "target")
+    source_path.mkdir(parents=True, exist_ok=True)
+    target_path.mkdir(parents=True, exist_ok=True)
+    source_storage = source_factory.get_storage(source_path)
+    target_storage = target_factory.get_storage(target_path)
+
+    source_storage.create_or_update_window(
+        Window(
+            storage=source_storage,
+            group="group",
+            name="source_window",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 4, 4),
+            time_range=None,
+        )
+    )
+    target_storage.create_or_update_window(
+        Window(
+            storage=target_storage,
+            group="group",
+            name="target_window",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 4, 4),
+            time_range=None,
+        )
+    )
+
+    with pytest.raises(ValueError, match="not empty"):
+        migrate_window_storage(source_storage, target_storage)

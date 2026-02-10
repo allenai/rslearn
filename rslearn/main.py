@@ -1,6 +1,7 @@
 """Entrypoint for the rslearn command-line interface."""
 
 import argparse
+import json
 import multiprocessing
 import os
 import random
@@ -14,7 +15,7 @@ import tqdm
 from rasterio.crs import CRS
 from upath import UPath
 
-from rslearn.config import LayerConfig
+from rslearn.config import LayerConfig, StorageConfig
 from rslearn.const import WGS84_EPSG
 from rslearn.data_sources import Item
 from rslearn.dataset import Dataset, Window, WindowLayerData
@@ -35,6 +36,7 @@ from rslearn.dataset.manage import (
     retry,
 )
 from rslearn.dataset.storage.file import FileWindowStorage
+from rslearn.dataset.storage.migrate import migrate_window_storage
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import get_tile_store_with_layer
 from rslearn.utils import Projection, STGeometry
@@ -242,6 +244,59 @@ def add_windows() -> None:
         raise Exception("one of box or fname must be specified")
 
     logger.info(f"created {len(windows)} windows")
+
+
+@register_handler("dataset", "migrate")
+def dataset_migrate() -> None:
+    """Handler for the rslearn dataset migrate command."""
+    parser = argparse.ArgumentParser(
+        prog="rslearn dataset migrate",
+        description=(
+            "rslearn dataset migrate: migrate window metadata to another storage backend"
+        ),
+    )
+    parser.add_argument(
+        "--root", type=str, required=True, help="Dataset root directory"
+    )
+    parser.add_argument(
+        "--storage-config",
+        type=str,
+        required=True,
+        help=(
+            "JSON StorageConfig for the target WindowStorageFactory, e.g. "
+            '\'{"class_path":"rslearn.dataset.storage.sqlite.SQLiteWindowStorageFactory","init_args":{}}\''
+        ),
+    )
+    parser.add_argument(
+        "--source-get-windows-kwargs",
+        type=str,
+        default="{}",
+        help=(
+            "Optional JSON kwargs passed to source storage get_windows(), e.g. "
+            '\'{"workers":8,"show_progress":true}\''
+        ),
+    )
+    args = parser.parse_args(args=sys.argv[3:])
+
+    storage_config_obj = json.loads(args.storage_config)
+    target_storage_config = StorageConfig.model_validate(storage_config_obj)
+    source_get_windows_kwargs = json.loads(args.source_get_windows_kwargs)
+    if not isinstance(source_get_windows_kwargs, dict):
+        raise ValueError("--source-get-windows-kwargs must decode to a JSON object")
+
+    dataset = Dataset(UPath(args.root))
+    target_storage = (
+        target_storage_config.instantiate_window_storage_factory().get_storage(
+            dataset.path
+        )
+    )
+
+    num_windows = migrate_window_storage(
+        dataset.storage,
+        target_storage,
+        source_get_windows_kwargs=source_get_windows_kwargs,
+    )
+    logger.info(f"Migrated {num_windows} windows successfully")
 
 
 def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
