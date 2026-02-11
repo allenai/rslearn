@@ -32,7 +32,9 @@ def migrate_window_storage(
         number of migrated windows.
     """
     if fail_if_target_nonempty and len(target.get_windows()) > 0:
-        raise ValueError("target window storage is not empty")
+        raise ValueError(
+            "target window storage is not empty; rerun with --no-fail-if-target-nonempty to bypass this check"
+        )
 
     if source_get_windows_kwargs is None:
         source_get_windows_kwargs = {}

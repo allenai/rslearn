@@ -276,6 +276,16 @@ def dataset_migrate() -> None:
             '\'{"workers":8,"show_progress":true}\''
         ),
     )
+    parser.add_argument(
+        "--fail-if-target-nonempty",
+        type=bool,
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help=(
+            "Fail if target storage already has windows. "
+            "Use --no-fail-if-target-nonempty to bypass this check."
+        ),
+    )
     args = parser.parse_args(args=sys.argv[3:])
 
     storage_config_obj = json.loads(args.storage_config)
@@ -294,6 +304,7 @@ def dataset_migrate() -> None:
     num_windows = migrate_window_storage(
         dataset.storage,
         target_storage,
+        fail_if_target_nonempty=args.fail_if_target_nonempty,
         source_get_windows_kwargs=source_get_windows_kwargs,
     )
     logger.info(f"Migrated {num_windows} windows successfully")
