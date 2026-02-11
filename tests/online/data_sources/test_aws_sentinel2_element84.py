@@ -1,6 +1,7 @@
 import pathlib
 
 import numpy as np
+import pytest
 from upath import UPath
 
 from rslearn.config import (
@@ -70,16 +71,31 @@ def test_materialize_all_bands(tmp_path: pathlib.Path, seattle2020: STGeometry) 
         )
 
 
-def test_harmonization_preapplied(seattle2020: STGeometry) -> None:
+@pytest.mark.parametrize(
+    ("aws_item_name", "pc_item_name"),
+    [
+        (
+            "S2B_10TET_20260124_0_L2A",
+            "S2B_MSIL2A_20260124T191559_R056_T10TET_20260124T211343",
+        ),
+        (
+            "S2A_10TET_20210624_0_L2A",
+            "S2A_MSIL2A_20210624T190921_R056_T10TET_20210625T214830",
+        ),
+    ],
+    ids=["jan_2026_baseline_05_11", "jun_2021_baseline_03_00"],
+)
+def test_harmonization_preapplied(
+    seattle2020: STGeometry,
+    aws_item_name: str,
+    pc_item_name: str,
+) -> None:
     """Verify AWS COGs are already harmonized.
 
-    To do so, we use a known scene present in both AWS and Planetary Computer with the
-    same processing baseline, and make sure that when we materialize it
+    To do so, we use known scenes present in both AWS and Planetary Computer under the
+    same processing baseline, and make sure that when we materialize it we get the same
+    pixel values.
     """
-    # Item names for the known scene. The item name is unique to each data source since
-    # neither source uses the standard Sentinel-2 scene ID.
-    aws_item_name = "S2B_10TET_20260124_0_L2A"
-    pc_item_name = "S2B_MSIL2A_20260124T191559_R056_T10TET_20260124T211343"
     aws_data_source = Sentinel2(assets=["red"])
     pc_source = PlanetaryComputerSentinel2(harmonize=True, assets=["B04"])
 
@@ -96,6 +112,17 @@ def test_harmonization_preapplied(seattle2020: STGeometry) -> None:
     pc_array = pc_source.read_raster(
         "unused", pc_item_name, ["B04"], projection, bounds
     )
-    # There could be slight difference due to rounding during resampling but it should
-    # almost be exact.
-    assert np.all(np.abs(aws_array - pc_array) <= 1)
+    # The 2026 scenes are very similar (all pixels are at most 1 off). But the 2021
+    # scenes seem to have differences despite being from the same processing baseline.
+    # I checked the raw GeoTIFFs from each source and they do differ, so it probably
+    # relates to how one of them used to process the original JP2 files into COGs.
+    # They are still mostly the same though, so here we check that at most 10% of
+    # pixels are more than 200 off from each other (much tighter than the 1000 that
+    # would come from harmonization).
+    assert (
+        np.count_nonzero(
+            np.abs(aws_array.astype(np.int32) - pc_array.astype(np.int32)) > 200
+        )
+        / aws_array.size
+        < 0.1
+    )
