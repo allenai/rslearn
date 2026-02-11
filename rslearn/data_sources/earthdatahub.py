@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import math
 import os
 import tempfile
@@ -336,7 +337,8 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
             raise ValueError("expected mosaic space mode in the query configuration")
 
         # If bounds were not explicitly configured, compute them once from
-        # the union of all window geometries
+        # the union of all window geometries and persist to ds_path so that
+        # ingest() (which runs on a separate instance) can read them back.
         if self.bounds is None:
             min_lon = 180.0
             min_lat = 90.0
@@ -350,6 +352,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                 max_lon = max(max_lon, b[2])
                 max_lat = max(max_lat, b[3])
             self.bounds = [min_lon, min_lat, max_lon, max_lat]
+            self._persist_bounds()
 
         min_lon, min_lat, max_lon, max_lat = self.bounds
         item_shp = shapely.box(min_lon, min_lat, max_lon, max_lat)
@@ -377,6 +380,34 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         """Deserialize an `Item` previously produced by this data source."""
         assert isinstance(serialized_item, dict)
         return Item.deserialize(serialized_item)
+
+    # ------------------------------------------------------------------
+    # Bounds persistence (across prepare / ingest instances)
+    # ------------------------------------------------------------------
+
+    def _bounds_file(self) -> UPath | None:
+        """Path to the persisted bounds file, or None if ds_path is unavailable."""
+        if self._ds_path is None:
+            return None
+        return self._ds_path / ".era5_bounds.json"
+
+    def _persist_bounds(self) -> None:
+        """Write ``self.bounds`` to disk so a future instance can read them."""
+        bounds_file = self._bounds_file()
+        if bounds_file is None or self.bounds is None:
+            return
+        bounds_file.parent.mkdir(parents=True, exist_ok=True)
+        bounds_file.write_text(json.dumps(self.bounds))
+
+    def _load_persisted_bounds(self) -> list[float] | None:
+        """Read bounds previously saved by ``_persist_bounds``, if available."""
+        bounds_file = self._bounds_file()
+        if bounds_file is None or not bounds_file.exists():
+            return None
+        try:
+            return json.loads(bounds_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            return None
 
     def _write_geotiff(
         self,
@@ -542,17 +573,35 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         time_chunk_size = self.DEFAULT_TIME_CHUNK_SIZE
         n_times = len(time_vals)
 
-        # self.bounds is always set after get_items() (either explicitly by
-        # the user or computed from the union of all window geometries).
-        assert self.bounds is not None, (
-            "bounds must be set before ingest (normally done in get_items)"
-        )
-        bounds = (
-            float(self.bounds[0]),
-            float(self.bounds[1]),
-            float(self.bounds[2]),
-            float(self.bounds[3]),
-        )
+        # Resolve spatial bounds.  Priority:
+        # 1. Explicitly configured bounds (from dataset config).
+        # 2. Bounds persisted by get_items() during prepare (full window union).
+        # 3. Fallback: compute from this batch's geometries (partial).
+        if self.bounds is None:
+            persisted = self._load_persisted_bounds()
+            if persisted is not None:
+                self.bounds = persisted
+        if self.bounds is not None:
+            bounds = (
+                float(self.bounds[0]),
+                float(self.bounds[1]),
+                float(self.bounds[2]),
+                float(self.bounds[3]),
+            )
+        else:
+            all_geoms = [g for geom_list in geometries for g in geom_list]
+            min_lon = 180.0
+            min_lat = 90.0
+            max_lon = -180.0
+            max_lat = -90.0
+            for geom in all_geoms:
+                wgs84 = geom.to_projection(WGS84_PROJECTION)
+                b = wgs84.shp.bounds
+                min_lon = min(min_lon, b[0])
+                min_lat = min(min_lat, b[1])
+                max_lon = max(max_lon, b[2])
+                max_lat = max(max_lat, b[3])
+            bounds = (min_lon, min_lat, max_lon, max_lat)
 
         # Group items by chunk ID.
         items_by_chunk: dict[int, list[Item]] = {}
