@@ -78,7 +78,7 @@ def pad_slice_protect(
     crop_size: tuple[int, int],
     inputs: dict[str, DataInput],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Pad tensors in-place by crop size to protect slicing near right/bottom edges.
+    """Pad raster inputs in-place by crop size to protect slicing near right/bottom edges.
 
     The padding is scaled based on each input's resolution_factor.
 
@@ -93,7 +93,16 @@ def pad_slice_protect(
     """
     for d in [raw_inputs, passthrough_inputs]:
         for input_name, value in list(d.items()):
-            if not isinstance(value, torch.Tensor):
+            tensor_to_pad: torch.Tensor
+            wrap_as_rasterimage = False
+            timestamps = None
+            if isinstance(value, torch.Tensor):
+                tensor_to_pad = value
+            elif isinstance(value, RasterImage):
+                tensor_to_pad = value.image
+                wrap_as_rasterimage = True
+                timestamps = value.timestamps
+            else:
                 continue
             # Get resolution scale for this input
             rf = inputs[input_name].resolution_factor
@@ -101,8 +110,11 @@ def pad_slice_protect(
             # Scale the padding amount
             scaled_pad_x = int(crop_size[0] * scale)
             scaled_pad_y = int(crop_size[1] * scale)
-            d[input_name] = torch.nn.functional.pad(
-                value, pad=(0, scaled_pad_x, 0, scaled_pad_y)
+            padded = torch.nn.functional.pad(
+                tensor_to_pad, pad=(0, scaled_pad_x, 0, scaled_pad_y)
+            )
+            d[input_name] = (
+                RasterImage(padded, timestamps) if wrap_as_rasterimage else padded
             )
     return raw_inputs, passthrough_inputs
 
