@@ -6,10 +6,12 @@ import base64
 import math
 import os
 import tempfile
+import time as time_mod
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 import numpy as np
+import pandas as pd
 import rasterio
 import shapely
 import xarray as xr
@@ -138,6 +140,9 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         "v10",
     }
     PIXEL_SIZE_DEGREES = 0.1
+    DEFAULT_TIME_CHUNK_SIZE = 75
+    STALE_LOCK_TIMEOUT_SECONDS = 1800  # 30 minutes
+    LOCK_POLL_INTERVAL_SECONDS = 5
 
     def __init__(
         self,
@@ -162,6 +167,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                 environment configuration (including netrc) for auth/proxies.
             context: rslearn data source context.
         """
+        self._ds_path = context.ds_path
         self.zarr_url = zarr_url
         if bounds is not None:
             if len(bounds) != 4:
@@ -239,7 +245,84 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
             chunks=None,  # No dask
             storage_options=storage_options,
         )
+
+        # Sanity-check that the source time chunk size hasn't changed.
+        if self.zarr_url == self.DEFAULT_ZARR_URL:
+            ref_band = self.band_names[0]
+            chunks = self._ds[ref_band].encoding.get("chunks")
+            if chunks is not None and len(chunks) > 0:
+                assert int(chunks[0]) == self.DEFAULT_TIME_CHUNK_SIZE, (
+                    f"Expected time chunk size {self.DEFAULT_TIME_CHUNK_SIZE}, "
+                    f"got {chunks[0]}"
+                )
+
         return self._ds
+
+    # ------------------------------------------------------------------
+    # Chunk-level lock helpers
+    # ------------------------------------------------------------------
+
+    def _chunk_lock_dir(self) -> UPath | None:
+        """Return the directory for chunk lock files, creating it if needed.
+
+        Returns ``None`` when ``ds_path`` is unavailable (e.g. external usage).
+        """
+        if self._ds_path is None:
+            return None
+        lock_dir = self._ds_path / ".era5_chunk_locks"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        return lock_dir
+
+    def _try_acquire_chunk_lock(self, chunk_id: int) -> bool:
+        """Try to atomically claim a chunk for downloading.
+
+        Uses ``os.open`` with ``O_CREAT | O_EXCL`` so that exactly one process
+        wins the race.  A timestamp is written inside the lock file to allow
+        stale-lock detection (see ``STALE_LOCK_TIMEOUT_SECONDS``).
+
+        Returns ``True`` if the lock was acquired (caller must download the
+        chunk and then call ``_release_chunk_lock``).  Returns ``True`` also
+        when locking is unavailable (no ``ds_path``, or the filesystem does not
+        support ``O_EXCL``), in which case the caller should just proceed.
+        """
+        lock_dir = self._chunk_lock_dir()
+        if lock_dir is None:
+            return True  # No coordination possible, just proceed.
+
+        lock_file = lock_dir / f"chunk_{chunk_id}.lock"
+        lock_path_str = str(lock_file)
+        try:
+            fd = os.open(lock_path_str, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(time_mod.time()).encode())
+            os.close(fd)
+            return True
+        except FileExistsError:
+            # Another worker holds the lock.  Check for staleness.
+            try:
+                with open(lock_path_str) as f:
+                    ts = float(f.read().strip())
+                if time_mod.time() - ts > self.STALE_LOCK_TIMEOUT_SECONDS:
+                    logger.warning("Removing stale chunk lock: %s", lock_file)
+                    os.unlink(lock_path_str)
+                    return self._try_acquire_chunk_lock(chunk_id)
+            except (OSError, ValueError):
+                pass
+            return False
+        except OSError:
+            # Lock mechanism not supported (e.g. cloud storage).
+            logger.debug("Chunk locking not available, proceeding without coordination")
+            return True
+
+    def _release_chunk_lock(self, chunk_id: int) -> None:
+        """Delete the lock file for *chunk_id*."""
+        lock_dir = self._chunk_lock_dir()
+        if lock_dir is None:
+            return
+        lock_file = lock_dir / f"chunk_{chunk_id}.lock"
+        try:
+            os.unlink(str(lock_file))
+        except OSError:
+            pass
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
@@ -252,11 +335,24 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         if query_config.space_mode != SpaceMode.MOSAIC:
             raise ValueError("expected mosaic space mode in the query configuration")
 
-        if self.bounds is not None:
-            min_lon, min_lat, max_lon, max_lat = self.bounds
-            item_shp = shapely.box(min_lon, min_lat, max_lon, max_lat)
-        else:
-            item_shp = shapely.box(-180, -90, 180, 90)
+        # If bounds were not explicitly configured, compute them once from
+        # the union of all window geometries
+        if self.bounds is None:
+            min_lon = 180.0
+            min_lat = 90.0
+            max_lon = -180.0
+            max_lat = -90.0
+            for geom in geometries:
+                wgs84 = geom.to_projection(WGS84_PROJECTION)
+                b = wgs84.shp.bounds
+                min_lon = min(min_lon, b[0])
+                min_lat = min(min_lat, b[1])
+                max_lon = max(max_lon, b[2])
+                max_lat = max(max_lat, b[3])
+            self.bounds = [min_lon, min_lat, max_lon, max_lat]
+
+        min_lon, min_lat, max_lon, max_lat = self.bounds
+        item_shp = shapely.box(min_lon, min_lat, max_lon, max_lat)
 
         all_groups: list[list[list[Item]]] = []
         for geometry in geometries:
@@ -281,31 +377,6 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         """Deserialize an `Item` previously produced by this data source."""
         assert isinstance(serialized_item, dict)
         return Item.deserialize(serialized_item)
-
-    def _get_effective_bounds(
-        self, geometries: list[STGeometry]
-    ) -> tuple[float, float, float, float]:
-        """Compute an effective WGS84 bounding box for ingestion.
-
-        If `self.bounds` is set, it is used as-is; otherwise, the bounds are derived
-        from the union of the provided geometries (after projecting each to WGS84).
-        """
-        if self.bounds is not None:
-            min_lon, min_lat, max_lon, max_lat = self.bounds
-            return (min_lon, min_lat, max_lon, max_lat)
-
-        min_lon = 180.0
-        min_lat = 90.0
-        max_lon = -180.0
-        max_lat = -90.0
-        for geom in geometries:
-            wgs84 = geom.to_projection(WGS84_PROJECTION)
-            b = wgs84.shp.bounds
-            min_lon = min(min_lon, b[0])
-            min_lat = min(min_lat, b[1])
-            max_lon = max(max_lon, b[2])
-            max_lat = max(max_lat, b[3])
-        return (min_lon, min_lat, max_lon, max_lat)
 
     def _write_geotiff(
         self,
@@ -366,6 +437,87 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         ) as dst:
             dst.write(array)
 
+    def _fetch_and_write_chunk(
+        self,
+        tile_store: TileStoreWithLayer,
+        ds: xr.Dataset,
+        chunk_start_idx: int,
+        chunk_end_idx: int,
+        bounds: tuple[float, float, float, float],
+    ) -> None:
+        """Fetch an entire time-chunk from the Zarr store and write daily GeoTIFFs.
+
+        Args:
+            tile_store: the tile store to write into.
+            ds: the opened xarray Dataset.
+            chunk_start_idx: first time index (inclusive) of the chunk.
+            chunk_end_idx: last time index (exclusive) of the chunk.
+            bounds: WGS84 bounding box ``(min_lon, min_lat, max_lon, max_lat)``.
+        """
+        time_vals = ds["valid_time"].values
+
+        snapped_bounds = _snap_bounds_outward(
+            bounds, step_degrees=self.PIXEL_SIZE_DEGREES
+        )
+        lon_ranges_0_360 = _bounds_to_lon_ranges_0_360(snapped_bounds)
+        min_lat = snapped_bounds[1]
+        max_lat = snapped_bounds[3]
+
+        time_slice = slice(chunk_start_idx, chunk_end_idx)
+
+        # Select only the needed bands and subset time + space in one go.
+        subset = (
+            ds[self.band_names]
+            .isel(valid_time=time_slice)
+            .sel(
+                latitude=slice(max_lat, min_lat),
+            )
+        )
+        if len(lon_ranges_0_360) == 1:
+            subset = subset.sel(
+                longitude=slice(lon_ranges_0_360[0][0], lon_ranges_0_360[0][1]),
+            )
+        else:
+            subset = xr.concat(
+                [subset.sel(longitude=slice(lo, hi)) for lo, hi in lon_ranges_0_360],
+                dim="longitude",
+            )
+        subset = subset.load()
+
+        lat = subset["latitude"].to_numpy()
+        lon = subset["longitude"].to_numpy()
+        if lat.size == 0 or lon.size == 0:
+            raise ValueError(
+                "ERA5LandDailyUTCv1 chunk selection returned empty grid "
+                f"(bounds={snapped_bounds})"
+            )
+
+        # Write one GeoTIFF per day in the chunk.
+        n_times = chunk_end_idx - chunk_start_idx
+        for t_offset in range(n_times):
+            day_ts = pd.Timestamp(time_vals[chunk_start_idx + t_offset])
+            item_name = (
+                f"era5land_dailyutc_v1_"
+                f"{day_ts.year:04d}{day_ts.month:02d}{day_ts.day:02d}"
+            )
+
+            if tile_store.is_raster_ready(item_name, self.band_names):
+                continue
+
+            band_arrays: list[np.ndarray] = []
+            for band in self.band_names:
+                arr = subset[band].values[t_offset]  # (n_lat, n_lon)
+                if band == "t2m" and self.temperature_unit == "celsius":
+                    arr = arr - 273.15
+                band_arrays.append(arr)
+
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                local_tif_fname = os.path.join(tmp_dir, f"{item_name}.tif")
+                self._write_geotiff(local_tif_fname, lat, lon, band_arrays)
+                tile_store.write_raster_file(
+                    item_name, self.band_names, UPath(local_tif_fname)
+                )
+
     def ingest(
         self,
         tile_store: TileStoreWithLayer,
@@ -374,13 +526,38 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
     ) -> None:
         """Ingest daily ERA5-Land rasters for the requested items/geometries.
 
-        For each item (one UTC day), this reads the corresponding slice from the
-        EarthDataHub Zarr store (subsetting by lat/lon for performance), then writes
-        a GeoTIFF into the dataset tile store.
+        Instead of fetching one day at a time (which redundantly downloads the
+        same Zarr time-chunk for every day in the chunk), this method:
+
+        1. Groups the requested day-items by their underlying Zarr time-chunk.
+        2. Uses a lock file so that only one worker downloads a given chunk.
+        3. Fetches the entire chunk once and writes *all* daily GeoTIFFs from
+           that chunk into the tile store.
+
+        Workers that lose the lock wait for their specific day(s) to appear
+        in the tile store.
         """
         ds = self._get_dataset()
+        time_vals = ds["valid_time"].values
+        time_chunk_size = self.DEFAULT_TIME_CHUNK_SIZE
+        n_times = len(time_vals)
 
-        for item, item_geoms in zip(items, geometries):
+        # self.bounds is always set after get_items() (either explicitly by
+        # the user or computed from the union of all window geometries).
+        assert self.bounds is not None, (
+            "bounds must be set before ingest (normally done in get_items)"
+        )
+        bounds = (
+            float(self.bounds[0]),
+            float(self.bounds[1]),
+            float(self.bounds[2]),
+            float(self.bounds[3]),
+        )
+
+        # Group items by chunk ID.
+        items_by_chunk: dict[int, list[Item]] = {}
+
+        for item in items:
             if tile_store.is_raster_ready(item.name, self.band_names):
                 continue
 
@@ -388,58 +565,45 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                 raise ValueError("expected item to have a time range")
 
             day_start = _floor_to_utc_day(item.geometry.time_range[0])
-            day_str = f"{day_start.year:04d}-{day_start.month:02d}-{day_start.day:02d}"
+            # Build a timezone-naive datetime64 to avoid numpy timezone warnings.
+            day_np = np.datetime64(day_start.replace(tzinfo=None), "ns")
+            time_idx = int(np.searchsorted(time_vals, day_np))
+            time_idx = min(time_idx, n_times - 1)
+            chunk_id = time_idx // time_chunk_size
 
-            bounds = _snap_bounds_outward(
-                self._get_effective_bounds(item_geoms),
-                step_degrees=self.PIXEL_SIZE_DEGREES,
-            )
-            lon_ranges_0_360 = _bounds_to_lon_ranges_0_360(bounds)
-            min_lat = bounds[1]
-            max_lat = bounds[3]
+            if chunk_id not in items_by_chunk:
+                items_by_chunk[chunk_id] = []
+            items_by_chunk[chunk_id].append(item)
 
-            # Subset the dataset before computing, for performance.
-            # Latitude is descending in the dataset.
-            sel_kwargs_base: dict[str, Any] = dict(
-                valid_time=day_str,
-                latitude=slice(max_lat, min_lat),
-            )
+        # Process each chunk.
+        for chunk_id in items_by_chunk:
+            chunk_start = chunk_id * time_chunk_size
+            chunk_end = min((chunk_id + 1) * time_chunk_size, n_times)
 
-            band_arrays: list[np.ndarray] = []
-            lat: np.ndarray | None = None
-            lon: np.ndarray | None = None
-            for band in self.band_names:
-                if len(lon_ranges_0_360) == 1:
-                    da = ds[band].sel(
-                        **sel_kwargs_base,
-                        longitude=slice(lon_ranges_0_360[0][0], lon_ranges_0_360[0][1]),
+            if self._try_acquire_chunk_lock(chunk_id):
+                try:
+                    logger.info(
+                        "Fetching ERA5 chunk %d (time indices %d..%d) "
+                        "for %d requested item(s)",
+                        chunk_id,
+                        chunk_start,
+                        chunk_end - 1,
+                        len(items_by_chunk[chunk_id]),
                     )
-                else:
-                    parts = [
-                        ds[band].sel(**sel_kwargs_base, longitude=slice(lo, hi))
-                        for (lo, hi) in lon_ranges_0_360
-                    ]
-                    da = xr.concat(parts, dim="longitude")
-
-                if band == "t2m" and self.temperature_unit == "celsius":
-                    da = da - 273.15
-
-                da = da.load()
-                if lat is None:
-                    lat = da["latitude"].to_numpy()
-                    lon = da["longitude"].to_numpy()
-                band_arrays.append(da.to_numpy())
-
-            assert lat is not None and lon is not None
-            if lat.size == 0 or lon.size == 0:
-                raise ValueError(
-                    f"ERA5LandDailyUTCv1 selection returned empty grid for item {item.name} "
-                    f"(bounds={bounds})"
+                    self._fetch_and_write_chunk(
+                        tile_store, ds, chunk_start, chunk_end, bounds
+                    )
+                finally:
+                    self._release_chunk_lock(chunk_id)
+            else:
+                # Another worker is handling this chunk — poll until our
+                # items are ready.
+                logger.info(
+                    "Chunk %d is being processed by another worker, "
+                    "waiting for %d item(s)...",
+                    chunk_id,
+                    len(items_by_chunk[chunk_id]),
                 )
-
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                local_tif_fname = os.path.join(tmp_dir, f"{item.name}.tif")
-                self._write_geotiff(local_tif_fname, lat, lon, band_arrays)
-                tile_store.write_raster_file(
-                    item.name, self.band_names, UPath(local_tif_fname)
-                )
+                for item in items_by_chunk[chunk_id]:
+                    while not tile_store.is_raster_ready(item.name, self.band_names):
+                        time_mod.sleep(self.LOCK_POLL_INTERVAL_SECONDS)
