@@ -59,6 +59,24 @@ SOILDB_COLLECTIONS: dict[str, dict[str, str]] = {
     },
 }
 
+# Default STAC asset keys to use when asset_key is not provided.
+#
+# For most SoilDB collections, the STAC item exposes a consistent set of assets and
+# we default to the mean, 30m, 0–30cm depth GeoTIFF asset.
+#
+# For `soil.types_ensemble_probabilities`, the item contains many assets (one per
+# soil type), so a meaningful default doesn't exist; users must specify asset_key.
+SOILDB_DEFAULT_ASSET_KEY_CANDIDATES: dict[str, list[str] | None] = {
+    "bd.core_iso.11272.2017.g.cm3": ["bd.core_iso.11272.2017.g.cm3_m_30m_b0cm..30cm"],
+    "oc_iso.10694.1995.wpml": ["oc_iso.10694.1995.wpml_m_30m_b0cm..30cm"],
+    "oc_iso.10694.1995.mg.cm3": ["oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm"],
+    "ph.h2o_iso.10390.2021.index": ["ph.h2o_iso.10390.2021.index_m_30m_b0cm..30cm"],
+    "clay.tot_iso.11277.2020.wpct": ["clay.tot_iso.11277.2020.wpct_m_30m_b0cm..30cm"],
+    "sand.tot_iso.11277.2020.wpct": ["sand.tot_iso.11277.2020.wpct_m_30m_b0cm..30cm"],
+    "silt.tot_iso.11277.2020.wpct": ["silt.tot_iso.11277.2020.wpct_m_30m_b0cm..30cm"],
+    "soil.types_ensemble_probabilities": None,
+}
+
 
 class SoilDB(DirectMaterializeDataSource[SourceItem]):
     """Read SoilDB rasters from the OpenLandMap static STAC catalog."""
@@ -301,12 +319,7 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
         if self._explicit_asset_key is not None:
             stac_asset_key = self._explicit_asset_key
         else:
-            if len(assets) > self.max_assets_for_auto:
-                raise ValueError(
-                    f"collection {self.collection_id!r} has {len(assets)} assets; "
-                    "set asset_key explicitly (auto-selection disabled for large items)"
-                )
-            stac_asset_key = self._pick_default_asset_key(assets)
+            stac_asset_key = self._pick_default_asset_key_for_collection(assets)
 
         if stac_asset_key not in assets:
             raise ValueError(
@@ -335,6 +348,25 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
                 "stac_asset_key": stac_asset_key,
             },
         )
+
+    def _pick_default_asset_key_for_collection(self, assets: dict[str, Any]) -> str:
+        candidates = SOILDB_DEFAULT_ASSET_KEY_CANDIDATES.get(self.collection_id)
+        if candidates is None and self.collection_id in SOILDB_DEFAULT_ASSET_KEY_CANDIDATES:
+            raise ValueError(
+                f"collection {self.collection_id!r} requires asset_key to be set explicitly"
+            )
+
+        if candidates:
+            for k in candidates:
+                if k in assets:
+                    return k
+
+        if len(assets) > self.max_assets_for_auto:
+            raise ValueError(
+                f"collection {self.collection_id!r} has {len(assets)} assets; "
+                "set asset_key explicitly (auto-selection disabled for large items)"
+            )
+        return self._pick_default_asset_key(assets)
 
     def _pick_default_asset_key(self, assets: dict[str, Any]) -> str:
         candidates: list[str] = []

@@ -177,10 +177,8 @@ def test_requires_explicit_asset_key_when_disabled(
     data_source = SoilDB(
         collection_id=collection_id,
         collection_url=httpserver.url_for("/collection.json"),
-        max_assets_for_auto=1,
     )
 
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
-    with pytest.raises(ValueError, match="auto-selection disabled"):
+    with pytest.raises(ValueError, match="requires asset_key"):
         data_source.get_items([seattle2020], query_config)
-

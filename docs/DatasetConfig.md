@@ -1436,10 +1436,28 @@ assets (e.g., different depth ranges, resolutions, and summary statistics). rsle
 expects you to configure a **single-band** band set per layer and choose which STAC
 asset to read via `"asset_key"`.
 
-If `"asset_key"` is omitted, rslearn will attempt to auto-select a default asset
-(typically the mean, 30m, 0–30cm depth asset) for collections with a manageable number
-of assets. For collections with very large numbers of assets (notably
-`soil.types_ensemble_probabilities`), you must specify `"asset_key"`.
+If `"asset_key"` is omitted, rslearn selects a per-collection default when available:
+
+- `bd.core_iso.11272.2017.g.cm3` → `bd.core_iso.11272.2017.g.cm3_m_30m_b0cm..30cm`
+- `oc_iso.10694.1995.wpml` → `oc_iso.10694.1995.wpml_m_30m_b0cm..30cm`
+- `oc_iso.10694.1995.mg.cm3` → `oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm`
+- `ph.h2o_iso.10390.2021.index` → `ph.h2o_iso.10390.2021.index_m_30m_b0cm..30cm`
+- `clay.tot_iso.11277.2020.wpct` → `clay.tot_iso.11277.2020.wpct_m_30m_b0cm..30cm`
+- `sand.tot_iso.11277.2020.wpct` → `sand.tot_iso.11277.2020.wpct_m_30m_b0cm..30cm`
+- `silt.tot_iso.11277.2020.wpct` → `silt.tot_iso.11277.2020.wpct_m_30m_b0cm..30cm`
+
+For `soil.types_ensemble_probabilities`, you must specify `"asset_key"` (there is no
+meaningful single default).
+
+Example (one soil type probability layer):
+```jsonc
+{
+  "collection_id": "soil.types_ensemble_probabilities",
+  "asset_key": "soil.types_ensemble.aquic.udifluvents_p_30m_s",
+  "cache_dir": "cache/soildb",
+  "timeout": "30s"
+}
+```
 
 ```jsonc
 {
@@ -1447,10 +1465,6 @@ of assets. For collections with very large numbers of assets (notably
   "collection_id": null,
   // Optional STAC asset key. If null, rslearn will attempt auto-selection.
   "asset_key": null,
-  // Optional OpenLandMap STAC catalog.json URL.
-  "catalog_url": "https://s3.eu-central-1.wasabisys.com/stac/openlandmap/catalog.json",
-  // Optional override for the collection.json URL.
-  "collection_url": null,
   // Optional cache directory (relative to the dataset path if provided).
   "cache_dir": "cache/soildb",
   // Optional request timeout (jsonargparse accepts strings like \"30s\").
