@@ -9,6 +9,7 @@ from rslearn.data_sources.climate_data_store import (
     ERA5LandHourly,
     ERA5LandHourlyTimeseries,
     ERA5LandMonthlyMeans,
+    expand_hourly_band_names,
 )
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils import STGeometry
@@ -51,6 +52,7 @@ class TestERA5LandHourly:
     """Tests the ERA5LandHourly data source from the Climate Data Store."""
 
     TEST_BANDS = ["2m-temperature", "total-precipitation"]
+    EXPANDED_BANDS = expand_hourly_band_names(TEST_BANDS)
 
     def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         """Apply test where we ingest an item corresponding to seattle2020."""
@@ -78,14 +80,15 @@ class TestERA5LandHourly:
         data_source.ingest(
             TileStoreWithLayer(tile_store, layer_name), item_groups[1], [[seattle2020]]
         )
-        assert tile_store.is_raster_ready(layer_name, item_0.name, self.TEST_BANDS)
-        assert tile_store.is_raster_ready(layer_name, item_1.name, self.TEST_BANDS)
+        assert tile_store.is_raster_ready(layer_name, item_0.name, self.EXPANDED_BANDS)
+        assert tile_store.is_raster_ready(layer_name, item_1.name, self.EXPANDED_BANDS)
 
 
 class TestERA5LandHourlyTimeseries:
     """Tests the ERA5LandHourlyTimeseries data source from the Climate Data Store."""
 
     TEST_BANDS = ["2m-temperature", "total-precipitation"]
+    EXPANDED_BANDS = expand_hourly_band_names(TEST_BANDS)
 
     def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         """Apply test where we ingest an item corresponding to seattle2020."""
@@ -115,8 +118,8 @@ class TestERA5LandHourlyTimeseries:
         data_source.ingest(
             TileStoreWithLayer(tile_store, layer_name), item_groups[1], [[seattle2020]]
         )
-        assert tile_store.is_raster_ready(layer_name, item_0.name, self.TEST_BANDS)
-        assert tile_store.is_raster_ready(layer_name, item_1.name, self.TEST_BANDS)
+        assert tile_store.is_raster_ready(layer_name, item_0.name, self.EXPANDED_BANDS)
+        assert tile_store.is_raster_ready(layer_name, item_1.name, self.EXPANDED_BANDS)
 
     def test_grid_snapping(self) -> None:
         """Test that coordinates are correctly snapped to 0.1 degree grid."""

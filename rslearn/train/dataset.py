@@ -164,6 +164,7 @@ class DataInput:
         data_type: str,
         layers: list[str],
         bands: list[str] | None = None,
+        num_timesteps: int | None = None,
         required: bool = True,
         passthrough: bool = False,
         is_target: bool = False,
@@ -178,7 +179,12 @@ class DataInput:
         Args:
             data_type: either "raster" or "vector"
             layers: list of layer names that this input can be read from.
-            bands: the bands to read, if this is a raster.
+            bands: the bands to read, if this is a raster. If num_timesteps is also
+                set, these are treated as base variable names and expanded to
+                "{band}_t{timestep:03d}" for each timestep.
+            num_timesteps: number of timesteps for band expansion. When set, each
+                band name is expanded across this many timesteps, producing names
+                like "{band}_t000", "{band}_t001", etc.
             required: whether examples lacking one of these layers should be skipped
             passthrough: whether to expose this to the model even if it isn't returned
                 by any task
@@ -203,7 +209,19 @@ class DataInput:
         """
         self.data_type = data_type
         self.layers = layers
-        self.bands = bands
+
+        # Expand bands × timesteps if num_timesteps is set.
+        if num_timesteps is not None:
+            if bands is None:
+                raise ValueError("bands must be set when using num_timesteps")
+            expanded: list[str] = []
+            for t in range(num_timesteps):
+                for band in bands:
+                    expanded.append(f"{band}_t{t:03d}")
+            self.bands: list[str] | None = expanded
+        else:
+            self.bands = bands
+
         self.required = required
         self.passthrough = passthrough
         self.is_target = is_target
