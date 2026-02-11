@@ -1426,6 +1426,38 @@ default those to the window pixel size.
 Available bands:
 - B1 (float32 recommended; scale/offset applied; set `nodata_vals` to `-32768`)
 
+### rslearn.data_sources.soildb.SoilDB
+
+This data source reads OpenLandMap-SoilDB rasters from the [OpenLandMap static STAC
+catalog](https://stac.openlandmap.org/)
+
+Each SoilDB collection links to a single STAC Item which contains multiple GeoTIFF/COG
+assets (e.g., different depth ranges, resolutions, and summary statistics). rslearn
+expects you to configure a **single-band** band set per layer and choose which STAC
+asset to read via `"asset_key"`.
+
+If `"asset_key"` is omitted, rslearn will attempt to auto-select a default asset
+(typically the mean, 30m, 0–30cm depth asset) for collections with a manageable number
+of assets. For collections with very large numbers of assets (notably
+`soil.types_ensemble_probabilities`), you must specify `"asset_key"`.
+
+```jsonc
+{
+  // Required SoilDB collection id, e.g. "clay.tot_iso.11277.2020.wpct".
+  "collection_id": null,
+  // Optional STAC asset key. If null, rslearn will attempt auto-selection.
+  "asset_key": null,
+  // Optional OpenLandMap STAC catalog.json URL.
+  "catalog_url": "https://s3.eu-central-1.wasabisys.com/stac/openlandmap/catalog.json",
+  // Optional override for the collection.json URL.
+  "collection_url": null,
+  // Optional cache directory (relative to the dataset path if provided).
+  "cache_dir": "cache/soildb",
+  // Optional request timeout (jsonargparse accepts strings like \"30s\").
+  "timeout": "30s"
+}
+```
+
 ### rslearn.data_sources.worldcereal.WorldCereal
 
 This data source is for the ESA WorldCereal 2021 agricultural land cover map. For
