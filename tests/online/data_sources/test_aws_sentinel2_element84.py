@@ -1,7 +1,7 @@
 import pathlib
 
 import numpy as np
-from rasterio.crs import CRS
+import pytest
 from upath import UPath
 
 from rslearn.config import (
@@ -9,8 +9,11 @@ from rslearn.config import (
     SpaceMode,
 )
 from rslearn.data_sources.aws_sentinel2_element84 import Sentinel2
+from rslearn.data_sources.planetary_computer import (
+    Sentinel2 as PlanetaryComputerSentinel2,
+)
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
-from rslearn.utils.geometry import Projection, STGeometry
+from rslearn.utils.geometry import STGeometry
 
 
 def test_aws_sentinel2_element84(
@@ -68,61 +71,58 @@ def test_materialize_all_bands(tmp_path: pathlib.Path, seattle2020: STGeometry) 
         )
 
 
-def test_harmonize_applied() -> None:
-    """Make sure harmonize is applied for scenes that need it."""
-    harmonized_data_source = Sentinel2(harmonize=True)
-    unharmonized_data_source = Sentinel2()
-    # This is a scene that is processed using baseline and needs harmonization.
-    stac_id = "S2B_56MPC_20180101_1_L2A"
-    item = harmonized_data_source.get_item_by_name(stac_id)
-    assert item.properties["earthsearch:boa_offset_applied"]
+@pytest.mark.parametrize(
+    ("aws_item_name", "pc_item_name"),
+    [
+        (
+            "S2B_10TET_20260124_0_L2A",
+            "S2B_MSIL2A_20260124T191559_R056_T10TET_20260124T211343",
+        ),
+        (
+            "S2A_10TET_20210624_0_L2A",
+            "S2A_MSIL2A_20210624T190921_R056_T10TET_20210625T214830",
+        ),
+    ],
+    ids=["jan_2026_baseline_05_11", "jun_2021_baseline_03_00"],
+)
+def test_harmonization_preapplied(
+    seattle2020: STGeometry,
+    aws_item_name: str,
+    pc_item_name: str,
+) -> None:
+    """Verify AWS COGs are already harmonized.
 
-    # Get bounds of the raster in WebMercator and read a subset of it.
-    projection = Projection(CRS.from_epsg(3857), 10, -10)
-    bounds = harmonized_data_source.get_raster_bounds(
-        "unused", item.name, ["B04"], projection
-    )
-    center = ((bounds[0] + bounds[2]) // 2, (bounds[1] + bounds[3]) // 2)
-    read_bounds = (
-        center[0] - 8,
-        center[1] - 8,
-        center[0] + 8,
-        center[1] + 8,
-    )
-    harmonized_array = harmonized_data_source.read_raster(
-        "unused", item.name, ["B04"], projection, read_bounds
-    )
-    unharmonized_array = unharmonized_data_source.read_raster(
-        "unused", item.name, ["B04"], projection, read_bounds
-    )
-    assert np.all(harmonized_array == (np.clip(unharmonized_array, 1000, None) - 1000))
+    To do so, we use known scenes present in both AWS and Planetary Computer under the
+    same processing baseline, and make sure that when we materialize it we get the same
+    pixel values.
+    """
+    aws_data_source = Sentinel2(assets=["red"])
+    pc_source = PlanetaryComputerSentinel2(harmonize=True, assets=["B04"])
 
-
-def test_harmonize_not_applied() -> None:
-    """Make sure harmonize is not applied if the scene is processed using old baseline."""
-    harmonized_data_source = Sentinel2(harmonize=True)
-    unharmonized_data_source = Sentinel2()
-    # This scene is processed using old baseline so its values should not be changed.
-    stac_id = "S2B_56KKE_20180101_0_L2A"
-    item = harmonized_data_source.get_item_by_name(stac_id)
-    assert not item.properties["earthsearch:boa_offset_applied"]
-
-    # Get bounds of the raster in WebMercator and read a subset of it.
-    projection = Projection(CRS.from_epsg(3857), 10, -10)
-    bounds = harmonized_data_source.get_raster_bounds(
-        "unused", item.name, ["B04"], projection
+    projection = seattle2020.projection
+    bounds = (
+        int(seattle2020.shp.bounds[0]),
+        int(seattle2020.shp.bounds[1]),
+        int(seattle2020.shp.bounds[2]),
+        int(seattle2020.shp.bounds[3]),
     )
-    center = ((bounds[0] + bounds[2]) // 2, (bounds[1] + bounds[3]) // 2)
-    read_bounds = (
-        center[0] - 8,
-        center[1] - 8,
-        center[0] + 8,
-        center[1] + 8,
+    aws_array = aws_data_source.read_raster(
+        "unused", aws_item_name, ["B04"], projection, bounds
     )
-    harmonized_array = harmonized_data_source.read_raster(
-        "unused", item.name, ["B04"], projection, read_bounds
+    pc_array = pc_source.read_raster(
+        "unused", pc_item_name, ["B04"], projection, bounds
     )
-    unharmonized_array = unharmonized_data_source.read_raster(
-        "unused", item.name, ["B04"], projection, read_bounds
+    # The 2026 scenes are very similar (all pixels are at most 1 off). But the 2021
+    # scenes seem to have differences despite being from the same processing baseline.
+    # I checked the raw GeoTIFFs from each source and they do differ, so it probably
+    # relates to how one of them used to process the original JP2 files into COGs.
+    # They are still mostly the same though, so here we check that at most 10% of
+    # pixels are more than 200 off from each other (much tighter than the 1000 that
+    # would come from harmonization).
+    assert (
+        np.count_nonzero(
+            np.abs(aws_array.astype(np.int32) - pc_array.astype(np.int32)) > 200
+        )
+        / aws_array.size
+        < 0.1
     )
-    assert np.all(harmonized_array == unharmonized_array)
