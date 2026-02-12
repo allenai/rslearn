@@ -131,6 +131,19 @@ def test_leftover_tmp_file(tmp_path: pathlib.Path) -> None:
     assert array.min() == 1 and array.max() == 1
 
 
+def test_hidden_file_in_raster_dir(tmp_path: pathlib.Path) -> None:
+    tile_store = DefaultTileStore()
+    tile_store.set_dataset_path(UPath(tmp_path))
+
+    raster_dir = tile_store._get_raster_dir(LAYER_NAME, ITEM_NAME, BANDS)
+    raster_dir.mkdir(parents=True, exist_ok=True)
+    with (raster_dir / ".DS_Store").open("w") as f:
+        f.write("junk")
+
+    with pytest.raises(ValueError):
+        tile_store._get_raster_fname(LAYER_NAME, ITEM_NAME, BANDS)
+
+
 class TestGetRasterBands:
     """Tests for DefaultTileStore.get_raster_bands."""
 
@@ -146,6 +159,23 @@ class TestGetRasterBands:
             (0, 0, 4, 4),
             np.ones((2, 4, 4), dtype=np.uint8),
         )
+        assert tile_store.get_raster_bands("layer", "item") == [["B01", "B02"]]
+
+    def test_ignores_hidden_files(self, tmp_path: pathlib.Path) -> None:
+        tile_store = DefaultTileStore()
+        tile_store.set_dataset_path(UPath(tmp_path))
+        tile_store.write_raster(
+            "layer",
+            "item",
+            ["B01", "B02"],
+            WGS84_PROJECTION,
+            (0, 0, 4, 4),
+            np.ones((2, 4, 4), dtype=np.uint8),
+        )
+        assert tile_store.path is not None
+        item_dir = tile_store.path / "layer" / "item"
+        with (item_dir / ".DS_Store").open("w") as f:
+            f.write("junk")
         assert tile_store.get_raster_bands("layer", "item") == [["B01", "B02"]]
 
     def test_band_with_underscore(self, tmp_path: pathlib.Path) -> None:

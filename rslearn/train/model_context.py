@@ -19,6 +19,14 @@ class RasterImage:
     # if timestamps is not None, len(timestamps) must match the T dimension of the tensor
     timestamps: list[tuple[datetime, datetime]] | None = None
 
+    def __post_init__(self) -> None:
+        """Validate that the image tensor is 4D (CTHW)."""
+        if self.image.dim() != 4:
+            raise ValueError(
+                f"RasterImage expects a 4D CTHW tensor, got {self.image.dim()}D "
+                f"with shape {tuple(self.image.shape)}"
+            )
+
     @property
     def shape(self) -> torch.Size:
         """The shape of the image."""

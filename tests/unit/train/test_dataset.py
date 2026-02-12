@@ -1,5 +1,6 @@
 """Unit tests for rslearn.train.dataset."""
 
+import warnings
 from collections.abc import Callable
 from datetime import datetime
 
@@ -488,3 +489,124 @@ def test_skip_if_output_layer_exists(
     )
 
     assert len(dataset) == 2
+
+
+def test_non_required_layer_missing(
+    basic_classification_dataset: Dataset,
+    add_window_to_basic_classification_dataset: Callable,
+) -> None:
+    """Test that windows with missing non-required layers are still loaded.
+
+    When a DataInput has required=False, windows where that layer is missing
+    should still be included in the dataset, and reading from those windows
+    should skip the missing input without raising an error.
+    """
+    image = np.zeros((1, 4, 4), dtype=np.uint8)
+
+    # Window 1: has both image_layer1 and image_layer2
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        name="window_with_both",
+        images={
+            ("image_layer1", 0): image,
+            ("image_layer2", 0): image,
+        },
+    )
+
+    # Window 2: has only image_layer1 (image_layer2 is missing)
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        name="window_with_only_layer1",
+        images={
+            ("image_layer1", 0): image,
+            # image_layer2 is intentionally missing
+        },
+    )
+
+    # Create dataset with image_layer2 as non-required
+    dataset = ModelDataset(
+        basic_classification_dataset,
+        split_config=SplitConfig(),
+        task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+        workers=1,
+        inputs={
+            "image1": DataInput(
+                "raster",
+                ["image_layer1"],
+                bands=["band"],
+                passthrough=True,
+                required=True,
+            ),
+            "image2": DataInput(
+                "raster",
+                ["image_layer2"],
+                bands=["band"],
+                passthrough=True,
+                required=False,  # This layer is optional
+            ),
+            "targets": DataInput("vector", ["vector_layer"]),
+        },
+    )
+
+    # Both windows should be included (non-required layer doesn't filter)
+    assert len(dataset) == 2
+
+    # Reading from both windows should work
+    for idx in range(2):
+        inputs, _, metadata = dataset[idx]
+        # image1 should always be present
+        assert "image1" in inputs
+
+        # image2 may or may not be present depending on the window
+        if metadata.window_name == "window_with_both":
+            assert "image2" in inputs
+        else:
+            # For window_with_only_layer1, image2 should be skipped
+            assert "image2" not in inputs
+
+
+class TestSplitConfig:
+    """Tests for SplitConfig."""
+
+    def test_overlap_ratio_with_patch_size_in_separate_configs(self) -> None:
+        """Test that overlap_ratio works when patch_size is set in a different config.
+
+        This test simulates the user setting patch_size in the default config, and
+        overlap_ratio in the predict config (which is merged via merge_and_validate).
+        """
+        default_config = SplitConfig(patch_size=128, load_all_crops=True)
+        predict_config = SplitConfig(overlap_ratio=0.5)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            merged = SplitConfig.merge_and_validate([default_config, predict_config])
+
+        # get_overlap_pixels should compute correctly: 128 * 0.5 = 64
+        assert merged.get_overlap_pixels() == 64
+
+    def test_overlap_ratio_without_crop_size_raises_on_get(self) -> None:
+        """Test that overlap_ratio without crop_size raises error in get_overlap_pixels."""
+        config = SplitConfig(overlap_ratio=0.5)
+
+        # Should raise when trying to get overlap_pixels
+        with pytest.raises(ValueError, match="overlap_ratio requires crop_size"):
+            config.get_overlap_pixels()
+
+    def test_crop_size_and_patch_size_in_separate_configs_raises(self) -> None:
+        """Test that setting crop_size and patch_size in different configs raises error."""
+        config1 = SplitConfig(crop_size=128)
+        config2 = SplitConfig(patch_size=256)
+
+        with pytest.raises(
+            ValueError, match="Cannot specify both crop_size and patch_size"
+        ):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                SplitConfig.merge_and_validate([config1, config2])
+
+    def test_negative_overlap_pixels_raises(self) -> None:
+        """Test that negative overlap_pixels raises error."""
+        config = SplitConfig(crop_size=128, load_all_crops=True, overlap_pixels=-1)
+
+        with pytest.raises(ValueError, match="overlap_pixels must be non-negative"):
+            SplitConfig.merge_and_validate([config])

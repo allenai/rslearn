@@ -15,6 +15,8 @@ from upath import UPath
 from rslearn.const import WGS84_PROJECTION
 from rslearn.utils.feature import Feature
 from rslearn.utils.fsspec import (
+    iter_nonhidden_files,
+    iter_nonhidden_subdirs,
     join_upath,
     open_atomic,
     open_rasterio_upath_reader,
@@ -129,7 +131,7 @@ class DefaultTileStore(TileStore):
             ValueError: if no file is found.
         """
         raster_dir = self._get_raster_dir(layer_name, item_name, bands)
-        for fname in raster_dir.iterdir():
+        for fname in iter_nonhidden_files(raster_dir):
             # Ignore completed sentinel files, bands files, as well as temporary files created by
             # open_atomic (in case this tile store is on local filesystem).
             if fname.name == COMPLETED_FNAME:
@@ -175,7 +177,7 @@ class DefaultTileStore(TileStore):
             return []
 
         bands: list[list[str]] = []
-        for raster_dir in item_dir.iterdir():
+        for raster_dir in iter_nonhidden_subdirs(item_dir):
             if not (raster_dir / BANDS_FNAME).exists():
                 # This is likely a legacy directory where the bands are only encoded in
                 # the directory name, so we have to rely on that.

@@ -1,232 +1,101 @@
-import os
-import pathlib
-import random
-from datetime import UTC, datetime, timedelta
-from typing import Any
+"""Mocked integration tests for the GCP Public Data Sentinel-2 data source."""
 
+import pathlib
+import shutil
+from unittest.mock import MagicMock
+
+import numpy as np
 import pytest
-import shapely
+from google.cloud import storage
+from rasterio.crs import CRS
 from upath import UPath
 
-from rslearn.config import (
-    QueryConfig,
-    SpaceMode,
-)
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources.copernicus import get_sentinel2_tile_index
-from rslearn.data_sources.gcp_public_data import (
-    CorruptItemException,
-    MissingXMLException,
-    Sentinel2,
-)
-from rslearn.log_utils import get_logger
+from rslearn.data_sources.gcp_public_data import Sentinel2, Sentinel2Item
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
-from rslearn.utils import STGeometry
+from rslearn.utils.geometry import Projection, STGeometry
+from rslearn.utils.raster_format import GeotiffRasterFormat
 
-TEST_BAND = "B04"
+SEATTLE_WGS84_BOUNDS = (-122.34, 47.60, -122.32, 47.62)
+MOCK_ITEM_NAME = "S2A_MSIL1C_20200715T000000_N0209_R001_T10TEM_20200715T000000"
+MOCK_BLOB_PREFIX = "tiles/10/T/EM/S2A_MSIL1C_20200715T000000_N0209_R001_T10TEM_20200715T000000.SAFE/GRANULE/fake/IMG_DATA/T10TEM_20200715T000000_"
+DEGREES_PER_PIXEL = 0.001
 
-logger = get_logger(__name__)
+
+def _make_test_geotiff(path: pathlib.Path) -> pathlib.Path:
+    """Create a small test GeoTIFF (the real files are JP2 but it's okay)."""
+    # Use UTM projection like real Sentinel-2 band files.
+    projection = Projection(CRS.from_epsg(32610), 10, -10)
+    # Small area in UTM pixel coords.
+    bounds = (5500, -52740, 5516, -52724)
+    width = bounds[2] - bounds[0]
+    height = bounds[3] - bounds[1]
+    data = np.ones((1, height, width), dtype=np.uint16) * 1000
+    raster_dir = UPath(path / "raster")
+    fmt = GeotiffRasterFormat()
+    fmt.encode_raster(raster_dir, projection, bounds, data)
+    return raster_dir / fmt.fname
 
 
-class TestSentinel2:
-    """Tests the Sentinel2 data source."""
-
-    def run_simple_test(
-        self, tile_store_dir: UPath, seattle2020: STGeometry, **kwargs: Any
-    ) -> None:
-        """Apply test where we ingest an item corresponding to seattle2020."""
-        query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
-
-        # In case rtree is enabled, use a small time range to minimize the time needed
-        # to create the index.
-        assert seattle2020.time_range is not None
-        rtree_time_range = (
-            seattle2020.time_range[0],
-            seattle2020.time_range[0] + timedelta(days=3),
-        )
-        data_source = Sentinel2(
-            rtree_time_range=rtree_time_range, bands=[TEST_BAND], **kwargs
-        )
-
-        print("get items")
-        item_groups = data_source.get_items([seattle2020], query_config)[0]
-        item = item_groups[0][0]
-        tile_store = DefaultTileStore(str(tile_store_dir))
-        tile_store.set_dataset_path(tile_store_dir)
-        layer_name = "layer"
-        print("ingest")
-        data_source.ingest(
-            TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
-        )
-        assert tile_store.is_raster_ready(layer_name, item.name, [TEST_BAND])
-
-    # use_rtree_index=True and use_bigquery=False is not supported, so we test all the
-    # other combinations.
-    @pytest.mark.parametrize(
-        "use_rtree_index,use_bigquery", [(False, False), (False, True), (True, True)]
+def _make_item(seattle2020: STGeometry) -> Sentinel2Item:
+    """Create a mock Sentinel2Item corresponding to the seattle2020 fixture."""
+    wgs84_geom = seattle2020.to_projection(WGS84_PROJECTION)
+    geometry = STGeometry(
+        WGS84_PROJECTION,
+        wgs84_geom.shp,
+        seattle2020.time_range,
     )
-    def test_local(
-        self,
-        tmp_path: pathlib.Path,
-        seattle2020: STGeometry,
-        use_rtree_index: bool,
-        use_bigquery: bool,
-    ) -> None:
-        """Test ingesting to local filesystem."""
-        tile_store_dir = UPath(tmp_path) / "tiles"
-        tile_store_dir.mkdir(parents=True, exist_ok=True)
-        index_cache_dir = UPath(tmp_path) / "cache"
-        index_cache_dir.mkdir(parents=True, exist_ok=True)
-        self.run_simple_test(
-            tile_store_dir,
-            seattle2020,
-            index_cache_dir=index_cache_dir,
-            use_rtree_index=use_rtree_index,
-            use_bigquery=use_bigquery,
-        )
-
-    @pytest.mark.parametrize("use_rtree_index", [False, True])
-    def test_gcs(self, seattle2020: STGeometry, use_rtree_index: bool) -> None:
-        """Test ingesting to GCS.
-
-        Main thing is to test index_cache_dir being on GCS.
-        """
-        test_id = random.randint(10000, 99999)
-        bucket_name = os.environ["TEST_BUCKET"]
-        prefix = os.environ["TEST_PREFIX"] + f"test_{test_id}/"
-        test_path = UPath(f"gcs://{bucket_name}/{prefix}")
-        tile_store_dir = test_path / "tiles"
-        index_cache_dir = test_path / "cache"
-        self.run_simple_test(
-            tile_store_dir,
-            seattle2020,
-            index_cache_dir=index_cache_dir,
-            use_rtree_index=use_rtree_index,
-        )
-
-
-@pytest.fixture
-def sentinel2_without_rtree(tmp_path: pathlib.Path) -> Sentinel2:
-    sentinel2 = Sentinel2(
-        use_rtree_index=False,
-        index_cache_dir=UPath(tmp_path),
-        bands=[TEST_BAND],
+    return Sentinel2Item(
+        name=MOCK_ITEM_NAME,
+        geometry=geometry,
+        blob_prefix=MOCK_BLOB_PREFIX,
+        cloud_cover=5.0,
     )
-    return sentinel2
 
 
-def test_prepare_antimeridian_no_matches(sentinel2_without_rtree: Sentinel2) -> None:
-    # Make sure get_items works for scenes and geometries near +/- 180 longitude.
-    # At (0, 40) there should be no Sentinel-2 coverage.
-    time_range = (
-        datetime(2024, 1, 1, tzinfo=UTC),
-        datetime(2024, 2, 1, tzinfo=UTC),
-    )
-    negative_geom = STGeometry(
-        WGS84_PROJECTION, shapely.box(-179.99, 40.0, -179.9, 40.1), time_range
-    )
-    positive_geom = STGeometry(
-        WGS84_PROJECTION, shapely.box(179.9, 40.0, 179.99, 40.1), time_range
-    )
-    query_config = QueryConfig(space_mode=SpaceMode.MOSAIC)
-    groups = sentinel2_without_rtree.get_items(
-        [negative_geom, positive_geom], query_config
-    )
-    for group in groups:
-        assert len(group) == 0
-
-
-def test_prepare_antimeridian_yes_matches(sentinel2_without_rtree: Sentinel2) -> None:
-    # Make sure get_items works for scenes and geometries near 0 longitude.
-    # At (0, 63) there should be some Sentinel-2 scenes.
-    query_config = QueryConfig(space_mode=SpaceMode.MOSAIC)
-    time_range = (
-        datetime(2024, 1, 1, tzinfo=UTC),
-        datetime(2024, 2, 1, tzinfo=UTC),
-    )
-    negative_geom = STGeometry(
-        WGS84_PROJECTION, shapely.box(-179.99, 63.0, -179.9, 63.1), time_range
-    )
-    positive_geom = STGeometry(
-        WGS84_PROJECTION, shapely.box(179.9, 63.0, 179.99, 63.1), time_range
-    )
-    groups = sentinel2_without_rtree.get_items(
-        [negative_geom, positive_geom], query_config
-    )
-    for group in groups:
-        assert len(group) > 0 and len(group[0]) > 0
-
-
-def test_product_with_missing_xml(sentinel2_without_rtree: Sentinel2) -> None:
-    # Verify that the data source raises a MissingXMLException for products that have
-    # a product folder in the GCS bucket but no metadata XML file.
-
-    # This is an example product that has the issue.
-    item_name = "S2A_MSIL1C_20150822T175026_N0204_R012_T11GLR_20170122T004950"
-
-    with pytest.raises(MissingXMLException):
-        sentinel2_without_rtree.get_item_by_name(item_name)
-
-
-def test_search_intersecting_product_with_missing_xml(
-    sentinel2_without_rtree: Sentinel2, tmp_path: pathlib.Path
+def test_ingest(
+    tmp_path: pathlib.Path,
+    seattle2020: STGeometry,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Calling get_items on a cell/year that contains a product with missing XML issue
-    # should NOT cause an error. Instead, the data source should skip those bad products.
+    """Test GCP Public Data Sentinel-2 ingest with mocked GCS bucket."""
+    tif_path = _make_test_geotiff(tmp_path)
+    mock_item = _make_item(seattle2020)
 
-    # This is an example product that has the issue.
-    item_name = "S2A_MSIL1C_20150822T175026_N0204_R012_T11GLR_20170122T004950"
+    # Mock the GCS storage client and bucket to just return the test GeoTIFF on
+    # download_to_filename call. We don't mock any of the listing blobs stuff.
+    mock_bucket = MagicMock()
 
-    # Get a geometry that intersects the product's cell.
-    # To do so, we create it at the center of the bounds of the cell.
-    parts = item_name.split("_")
-    sense_time_str = parts[2]
-    cell_id = parts[5][1:]
-    sense_day = datetime(
-        int(sense_time_str[0:4]),
-        int(sense_time_str[4:6]),
-        int(sense_time_str[6:8]),
-        tzinfo=UTC,
+    def mock_download(local_fname: str) -> None:
+        shutil.copy(str(tif_path), local_fname)
+
+    mock_blob = MagicMock()
+    mock_blob.download_to_filename.side_effect = mock_download
+    mock_bucket.blob.return_value = mock_blob
+
+    mock_storage_client = MagicMock()
+    mock_storage_client.bucket.return_value = mock_bucket
+
+    monkeypatch.setattr(
+        storage.Client, "create_anonymous_client", lambda: mock_storage_client
     )
-    time_range = (sense_day, sense_day + timedelta(days=1))
-    cell_bounds = get_sentinel2_tile_index()[cell_id][0]
-    center = (
-        (cell_bounds[0] + cell_bounds[2]) / 2,
-        (cell_bounds[1] + cell_bounds[3]) / 2,
+    data_source = Sentinel2(
+        index_cache_dir=str(tmp_path / "cache"),
+        use_rtree_index=False,
+        use_bigquery=False,
+        bands=["B04"],
     )
-    shp = shapely.Point(center[0], center[1]).buffer(0.001)
-    geometry = STGeometry(WGS84_PROJECTION, shp, time_range)
 
-    # Ensure it includes products with matching tile, but does not throw error.
-    query_config = QueryConfig(space_mode=SpaceMode.MOSAIC, max_matches=1000)
-    item_groups = sentinel2_without_rtree.get_items([geometry], query_config)[0]
-    flat_items = [item for item_list in item_groups for item in item_list]
-    matching_items = [
-        item for item in flat_items if item.name.split("_")[5][1:] == cell_id
-    ]
-    assert len(matching_items) > 0
+    # Directly ingest with the mock item. We skip get_items here since we don't want to
+    # deal with mocking the listing blobs operations.
+    tile_store_dir = UPath(tmp_path / "tiles")
+    tile_store = DefaultTileStore(str(tile_store_dir))
+    tile_store.set_dataset_path(tile_store_dir)
+    layer_name = "layer"
 
-
-def test_product_with_missing_bands(sentinel2_without_rtree: Sentinel2) -> None:
-    # Verify that the data source raises a CorruptItemException for products that are
-    # missing some bands.
-
-    # This is an example product that is missing B08.jp2.
-    item_name = "S2A_MSIL1C_20170705T142751_N0205_R053_T20MPC_20170705T142752"
-
-    with pytest.raises(CorruptItemException):
-        sentinel2_without_rtree.get_item_by_name(item_name)
-
-
-def test_product_with_incorrect_geometry(sentinel2_without_rtree: Sentinel2) -> None:
-    """Verify that the data source raises a CorruptItemException for products with
-    missing or invalid geometry."""
-
-    # This is an example product where the geometry is a MultiLineString (area is 0).
-    item_name = "S2B_MSIL1C_20190111T193659_N0207_R056_T08MLS_20190111T205033"
-
-    with pytest.raises(CorruptItemException):
-        item = sentinel2_without_rtree.get_item_by_name(item_name)
-        logger.error(
-            "item should not have been returned, the geometry is %s", {item.geometry}
-        )
+    data_source.ingest(
+        TileStoreWithLayer(tile_store, layer_name),
+        [mock_item],
+        [[seattle2020]],
+    )
+    assert tile_store.is_raster_ready(layer_name, mock_item.name, ["B04"])

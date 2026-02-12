@@ -396,6 +396,15 @@ def read_data_input(
     else:
         layers_to_read = [rng.choice(layer_options)]
 
+    if not layers_to_read:
+        raise ValueError(
+            f"No completed layers found for data input with layers={data_input.layers}. "
+            f"Available layer options: {layer_options}. "
+            f"load_all_layers={data_input.load_all_layers}, "
+            f"load_all_item_groups={data_input.load_all_item_groups}. "
+            f"Check that the specified layers exist and are completed in the window."
+        )
+
     if data_input.data_type == "raster":
         # load it once here
         layer_datas = window.load_layer_datas()
@@ -496,53 +505,6 @@ class SplitConfig:
             overlap_ratio: deprecated, use overlap_pixels instead
             load_all_patches: deprecated, use load_all_crops instead
         """
-        # Handle deprecated load_all_patches parameter
-        if load_all_patches is not None:
-            warnings.warn(
-                "load_all_patches is deprecated, use load_all_crops instead",
-                FutureWarning,
-                stacklevel=2,
-            )
-            if load_all_crops is not None:
-                raise ValueError(
-                    "Cannot specify both load_all_patches and load_all_crops"
-                )
-            load_all_crops = load_all_patches
-        # Handle deprecated patch_size parameter
-        if patch_size is not None:
-            warnings.warn(
-                "patch_size is deprecated, use crop_size instead",
-                FutureWarning,
-                stacklevel=2,
-            )
-            if crop_size is not None:
-                raise ValueError("Cannot specify both patch_size and crop_size")
-            crop_size = patch_size
-
-        # Normalize crop_size to tuple[int, int] | None
-        self.crop_size: tuple[int, int] | None = None
-        if crop_size is not None:
-            if isinstance(crop_size, int):
-                self.crop_size = (crop_size, crop_size)
-            else:
-                self.crop_size = crop_size
-
-        # Handle deprecated overlap_ratio parameter
-        if overlap_ratio is not None:
-            warnings.warn(
-                "overlap_ratio is deprecated, use overlap_pixels instead",
-                FutureWarning,
-                stacklevel=2,
-            )
-            if overlap_pixels is not None:
-                raise ValueError("Cannot specify both overlap_ratio and overlap_pixels")
-            if self.crop_size is None:
-                raise ValueError("overlap_ratio requires crop_size to be set")
-            overlap_pixels = round(self.crop_size[0] * overlap_ratio)
-
-        if overlap_pixels is not None and overlap_pixels < 0:
-            raise ValueError("overlap_pixels must be non-negative")
-
         self.groups = groups
         self.names = names
         self.tags = tags
@@ -555,13 +517,22 @@ class SplitConfig:
             output_layer_name_skip_inference_if_exists
         )
 
-        # Note that load_all_crops is handled by the RslearnDataModule rather than the
-        # ModelDataset.
-        self.load_all_crops = load_all_crops
-        self.overlap_pixels = overlap_pixels
+        # These have deprecated equivalents -- we store both raw values since we don't
+        # have a complete picture until the final merged SplitConfig is computed. We
+        # raise deprecation warnings in merge_and_validate and we disambiguate them in
+        # get_ functions (so the variables should never be accessed directly).
+        self._crop_size = crop_size
+        self._patch_size = patch_size
+        self._overlap_pixels = overlap_pixels
+        self._overlap_ratio = overlap_ratio
+        self._load_all_crops = load_all_crops
+        self._load_all_patches = load_all_patches
 
-    def update(self, other: "SplitConfig") -> "SplitConfig":
-        """Override settings in this SplitConfig with those in another.
+    def _merge(self, other: "SplitConfig") -> "SplitConfig":
+        """Merge settings from another SplitConfig into this one.
+
+        Args:
+            other: the config to merge in (its non-None values override self's)
 
         Returns:
             the resulting SplitConfig combining the settings.
@@ -574,9 +545,12 @@ class SplitConfig:
             num_patches=self.num_patches,
             transforms=self.transforms,
             sampler=self.sampler,
-            crop_size=self.crop_size,
-            overlap_pixels=self.overlap_pixels,
-            load_all_crops=self.load_all_crops,
+            crop_size=self._crop_size,
+            patch_size=self._patch_size,
+            overlap_pixels=self._overlap_pixels,
+            overlap_ratio=self._overlap_ratio,
+            load_all_crops=self._load_all_crops,
+            load_all_patches=self._load_all_patches,
             skip_targets=self.skip_targets,
             output_layer_name_skip_inference_if_exists=self.output_layer_name_skip_inference_if_exists,
         )
@@ -594,12 +568,18 @@ class SplitConfig:
             result.transforms = other.transforms
         if other.sampler:
             result.sampler = other.sampler
-        if other.crop_size:
-            result.crop_size = other.crop_size
-        if other.overlap_pixels is not None:
-            result.overlap_pixels = other.overlap_pixels
-        if other.load_all_crops is not None:
-            result.load_all_crops = other.load_all_crops
+        if other._crop_size is not None:
+            result._crop_size = other._crop_size
+        if other._patch_size is not None:
+            result._patch_size = other._patch_size
+        if other._overlap_pixels is not None:
+            result._overlap_pixels = other._overlap_pixels
+        if other._overlap_ratio is not None:
+            result._overlap_ratio = other._overlap_ratio
+        if other._load_all_crops is not None:
+            result._load_all_crops = other._load_all_crops
+        if other._load_all_patches is not None:
+            result._load_all_patches = other._load_all_patches
         if other.skip_targets is not None:
             result.skip_targets = other.skip_targets
         if other.output_layer_name_skip_inference_if_exists is not None:
@@ -608,17 +588,90 @@ class SplitConfig:
             )
         return result
 
+    @staticmethod
+    def merge_and_validate(configs: list["SplitConfig"]) -> "SplitConfig":
+        """Merge a list of SplitConfigs and validate the result.
+
+        Args:
+            configs: list of SplitConfig to merge. Later configs override earlier ones.
+
+        Returns:
+            the merged and validated SplitConfig.
+        """
+        if not configs:
+            return SplitConfig()
+
+        result = configs[0]
+        for config in configs[1:]:
+            result = result._merge(config)
+
+        # Emit deprecation warnings
+        if result._patch_size is not None:
+            warnings.warn(
+                "patch_size is deprecated, use crop_size instead",
+                FutureWarning,
+                stacklevel=2,
+            )
+        if result._overlap_ratio is not None:
+            warnings.warn(
+                "overlap_ratio is deprecated, use overlap_pixels instead",
+                FutureWarning,
+                stacklevel=2,
+            )
+        if result._load_all_patches is not None:
+            warnings.warn(
+                "load_all_patches is deprecated, use load_all_crops instead",
+                FutureWarning,
+                stacklevel=2,
+            )
+
+        # Check for conflicting parameters
+        if result._crop_size is not None and result._patch_size is not None:
+            raise ValueError("Cannot specify both crop_size and patch_size")
+        if result._overlap_pixels is not None and result._overlap_ratio is not None:
+            raise ValueError("Cannot specify both overlap_pixels and overlap_ratio")
+        if result._load_all_crops is not None and result._load_all_patches is not None:
+            raise ValueError("Cannot specify both load_all_crops and load_all_patches")
+
+        # Validate overlap_pixels is non-negative
+        if result._overlap_pixels is not None and result._overlap_pixels < 0:
+            raise ValueError("overlap_pixels must be non-negative")
+
+        # overlap_pixels requires load_all_crops.
+        if result.get_overlap_pixels() > 0 and not result.get_load_all_crops():
+            raise ValueError(
+                "overlap_pixels requires load_all_crops to be True since (overlap is only used during sliding window inference"
+            )
+
+        return result
+
     def get_crop_size(self) -> tuple[int, int] | None:
-        """Get crop size as tuple."""
-        return self.crop_size
+        """Get crop size as tuple, handling deprecated patch_size."""
+        size = self._crop_size if self._crop_size is not None else self._patch_size
+        if size is None:
+            return None
+        if isinstance(size, int):
+            return (size, size)
+        return size
 
     def get_overlap_pixels(self) -> int:
-        """Get the overlap pixels (default 0)."""
-        return self.overlap_pixels if self.overlap_pixels is not None else 0
+        """Get the overlap pixels (default 0), handling deprecated overlap_ratio."""
+        if self._overlap_pixels is not None:
+            return self._overlap_pixels
+        if self._overlap_ratio is not None:
+            crop_size = self.get_crop_size()
+            if crop_size is None:
+                raise ValueError("overlap_ratio requires crop_size to be set")
+            return round(crop_size[0] * self._overlap_ratio)
+        return 0
 
     def get_load_all_crops(self) -> bool:
-        """Returns whether loading all patches is enabled (default False)."""
-        return True if self.load_all_crops is True else False
+        """Returns whether loading all crops is enabled (default False)."""
+        if self._load_all_crops is not None:
+            return self._load_all_crops
+        if self._load_all_patches is not None:
+            return self._load_all_patches
+        return False
 
     def get_skip_targets(self) -> bool:
         """Returns whether skip_targets is enabled (default False)."""
@@ -627,6 +680,33 @@ class SplitConfig:
     def get_output_layer_name_skip_inference_if_exists(self) -> str | None:
         """Returns output layer to use for resume checks (default None)."""
         return self.output_layer_name_skip_inference_if_exists
+
+
+def is_data_input_available(data_input: DataInput, window: Window) -> bool:
+    """Check if a data input's layers are available in a window.
+
+    Args:
+        data_input: the data input to check.
+        window: the window to check against.
+
+    Returns:
+        True if the layers are available based on the data input's configuration.
+    """
+    # If load_all_layers is enabled, we should check that all the layers are
+    # present. Otherwise, we just need one layer.
+    is_any_layer_available = False
+    are_all_layers_available = True
+
+    for layer_name in data_input.layers:
+        if window.is_layer_completed(layer_name):
+            is_any_layer_available = True
+        else:
+            are_all_layers_available = False
+
+    if data_input.load_all_layers:
+        return are_all_layers_available
+    else:
+        return is_any_layer_available
 
 
 def check_window(
@@ -645,27 +725,10 @@ def check_window(
         the window if it has all the required inputs and does not need to be skipped
         due to an existing output layer; or None otherwise
     """
-
-    # Make sure window has all the needed layers.
-    def is_available(data_input: DataInput) -> bool:
-        # If load_all_layers is enabled, we should check that all the layers are
-        # present. Otherwise, we just need one layer.
-        is_any_layer_available = False
-        are_all_layers_available = True
-        for layer_name in data_input.layers:
-            if window.is_layer_completed(layer_name):
-                is_any_layer_available = True
-            else:
-                are_all_layers_available = False
-        if data_input.load_all_layers:
-            return are_all_layers_available
-        else:
-            return is_any_layer_available
-
     for data_input in inputs.values():
         if not data_input.required:
             continue
-        if not is_available(data_input):
+        if not is_data_input_available(data_input, window):
             logger.debug(
                 "Skipping window %s since check for layers %s failed",
                 window.name,
@@ -697,7 +760,7 @@ class ModelDataset(torch.utils.data.Dataset):
         task: Task,
         workers: int,
         name: str | None = None,
-        fix_patch_pick: bool = False,
+        fix_crop_pick: bool = False,
         index_mode: IndexMode = IndexMode.OFF,
     ) -> None:
         """Instantiate a new ModelDataset.
@@ -709,7 +772,7 @@ class ModelDataset(torch.utils.data.Dataset):
             task: the task to train on
             workers: number of workers to use for initializing the dataset
             name: name of the dataset
-            fix_patch_pick: if True, fix the patch pick to be the same every time
+            fix_crop_pick: if True, fix the crop pick to be the same every time
                 for a given window. Useful for testing (default: False)
             index_mode: controls dataset index caching behavior (default: IndexMode.OFF)
         """
@@ -718,14 +781,14 @@ class ModelDataset(torch.utils.data.Dataset):
         self.inputs = inputs
         self.task = task
         self.name = name
-        self.fix_patch_pick = fix_patch_pick
+        self.fix_crop_pick = fix_crop_pick
         if split_config.transforms:
             self.transforms = Sequential(*split_config.transforms)
         else:
             self.transforms = rslearn.train.transforms.transform.Identity()
 
         # Get normalized crop size from the SplitConfig.
-        # But if load all patches is enabled, this is handled by AllCropsDataset, so
+        # But if load_all_crops is enabled, this is handled by AllCropsDataset, so
         # here we instead load the entire windows.
         if split_config.get_load_all_crops():
             self.crop_size = None
@@ -952,7 +1015,7 @@ class ModelDataset(torch.utils.data.Dataset):
         """Get a list of examples in the dataset.
 
         If load_all_crops is False, this is a list of Windows. Otherwise, this is a
-        list of (window, crop_bounds, (crop_idx, # patches)) tuples.
+        list of (window, crop_bounds, (crop_idx, # crops)) tuples.
         """
         if self.dataset_examples is None:
             logger.debug(
@@ -975,7 +1038,7 @@ class ModelDataset(torch.utils.data.Dataset):
         """Get the raw inputs and base metadata for this example.
 
         This is the raster or vector data before being processed by the Task. So it
-        should be a Tensor for raster and list[Feature] for vector.
+        should be a RasterImage for raster and list[Feature] for vector.
 
         Args:
             idx: the index in the dataset.
@@ -985,7 +1048,7 @@ class ModelDataset(torch.utils.data.Dataset):
         """
         dataset_examples = self.get_dataset_examples()
         example = dataset_examples[idx]
-        rng = random.Random(idx if self.fix_patch_pick else None)
+        rng = random.Random(idx if self.fix_crop_pick else None)
 
         # Select bounds to read.
         if self.crop_size:
@@ -1027,6 +1090,17 @@ class ModelDataset(torch.utils.data.Dataset):
         raw_inputs = {}
         passthrough_inputs = {}
         for name, data_input in self.inputs.items():
+            # Skip non-required inputs if their layers are not available
+            if not data_input.required and not is_data_input_available(
+                data_input, window
+            ):
+                logger.debug(
+                    "Skipping non-required input '%s' for window %s (layers not available)",
+                    name,
+                    window.name,
+                )
+                continue
+
             raw_inputs[name] = read_data_input(
                 self.dataset, window, bounds, data_input, rng
             )

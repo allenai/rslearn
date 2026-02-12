@@ -3,27 +3,26 @@
 import os
 import tempfile
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
-import affine
 import numpy.typing as npt
 import planetary_computer
 import rasterio
 import requests
-from rasterio.enums import Resampling
 from typing_extensions import override
 from upath import UPath
 
-from rslearn.config import LayerConfig
 from rslearn.data_sources import DataSourceContext
+from rslearn.data_sources.direct_materialize_data_source import (
+    DirectMaterializeDataSource,
+)
 from rslearn.data_sources.stac import SourceItem, StacDataSource
-from rslearn.dataset import Window
-from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.log_utils import get_logger
-from rslearn.tile_stores import TileStore, TileStoreWithLayer
+from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath
-from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
+from rslearn.utils.geometry import STGeometry
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 from rslearn.utils.stac import StacClient, StacItem
 
@@ -124,7 +123,7 @@ class PlanetaryComputerStacClient(StacClient):
         return all_items
 
 
-class PlanetaryComputer(StacDataSource, TileStore):
+class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource):
     """Modality-agnostic data source for data on Microsoft Planetary Computer.
 
     If there is a subclass available for a modality, it is recommended to use the
@@ -170,6 +169,9 @@ class PlanetaryComputer(StacDataSource, TileStore):
                 needed each time.
             context: the data source context.
         """
+        # Initialize the DirectMaterializeDataSource with asset_bands
+        DirectMaterializeDataSource.__init__(self, asset_bands=asset_bands)
+
         # Determine the cache_dir to use.
         cache_upath: UPath | None = None
         if cache_dir is not None:
@@ -185,7 +187,8 @@ class PlanetaryComputer(StacDataSource, TileStore):
         if skip_items_missing_assets:
             required_assets = list(asset_bands.keys())
 
-        super().__init__(
+        StacDataSource.__init__(
+            self,
             endpoint=self.STAC_ENDPOINT,
             collection_name=collection_name,
             query=query,
@@ -198,9 +201,51 @@ class PlanetaryComputer(StacDataSource, TileStore):
         # Replace the client with PlanetaryComputerStacClient to handle PC's pagination limits.
         self.client = PlanetaryComputerStacClient(self.STAC_ENDPOINT)
 
-        self.asset_bands = asset_bands
         self.timeout = timeout
         self.skip_items_missing_assets = skip_items_missing_assets
+
+    # --- DirectMaterializeDataSource implementation ---
+
+    def get_asset_url(self, item_name: str, asset_key: str) -> str:
+        """Get the signed URL to read the asset for the given item and asset key.
+
+        Args:
+            item_name: the name of the item.
+            asset_key: the key identifying which asset to get.
+
+        Returns:
+            the signed URL to read the asset from.
+        """
+        item = self.get_item_by_name(item_name)
+        return planetary_computer.sign(item.asset_urls[asset_key])
+
+    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
+        """Get the sets of bands that have been stored for the specified item.
+
+        Args:
+            layer_name: the layer name or alias.
+            item_name: the item.
+
+        Returns:
+            a list of lists of bands that are in the tile store (with one raster
+                stored corresponding to each inner list). If no rasters are ready for
+                this item, returns empty list.
+        """
+        if self.skip_items_missing_assets:
+            # In this case we can assume that the item has all of the assets.
+            return list(self.asset_bands.values())
+
+        # Otherwise we have to lookup the STAC item to see which assets it has.
+        # Here we use get_item_by_name since it handles caching.
+        item = self.get_item_by_name(item_name)
+        all_bands = []
+        for asset_key, band_names in self.asset_bands.items():
+            if asset_key not in item.asset_urls:
+                continue
+            all_bands.append(band_names)
+        return all_bands
+
+    # --- DataSource implementation ---
 
     def ingest(
         self,
@@ -254,152 +299,6 @@ class PlanetaryComputer(StacDataSource, TileStore):
                     item.name,
                     asset_key,
                 )
-
-    def is_raster_ready(
-        self, layer_name: str, item_name: str, bands: list[str]
-    ) -> bool:
-        """Checks if this raster has been written to the store.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item.
-            bands: the list of bands identifying which specific raster to read.
-
-        Returns:
-            whether there is a raster in the store matching the source, item, and
-                bands.
-        """
-        # Always ready since we wrap accesses to Planetary Computer.
-        return True
-
-    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
-        """Get the sets of bands that have been stored for the specified item.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item.
-
-        Returns:
-            a list of lists of bands that are in the tile store (with one raster
-                stored corresponding to each inner list). If no rasters are ready for
-                this item, returns empty list.
-        """
-        if self.skip_items_missing_assets:
-            # In this case we can assume that the item has all of the assets.
-            return list(self.asset_bands.values())
-
-        # Otherwise we have to lookup the STAC item to see which assets it has.
-        # Here we use get_item_by_name since it handles caching.
-        item = self.get_item_by_name(item_name)
-        all_bands = []
-        for asset_key, band_names in self.asset_bands.items():
-            if asset_key not in item.asset_urls:
-                continue
-            all_bands.append(band_names)
-        return all_bands
-
-    def _get_asset_by_band(self, bands: list[str]) -> str:
-        """Get the name of the asset based on the band names."""
-        for asset_key, asset_bands in self.asset_bands.items():
-            if bands == asset_bands:
-                return asset_key
-
-        raise ValueError(f"no raster with bands {bands}")
-
-    def get_raster_bounds(
-        self, layer_name: str, item_name: str, bands: list[str], projection: Projection
-    ) -> PixelBounds:
-        """Get the bounds of the raster in the specified projection.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item to check.
-            bands: the list of bands identifying which specific raster to read. These
-                bands must match the bands of a stored raster.
-            projection: the projection to get the raster's bounds in.
-
-        Returns:
-            the bounds of the raster in the projection.
-        """
-        item = self.get_item_by_name(item_name)
-        geom = item.geometry.to_projection(projection)
-        return (
-            int(geom.shp.bounds[0]),
-            int(geom.shp.bounds[1]),
-            int(geom.shp.bounds[2]),
-            int(geom.shp.bounds[3]),
-        )
-
-    def read_raster(
-        self,
-        layer_name: str,
-        item_name: str,
-        bands: list[str],
-        projection: Projection,
-        bounds: PixelBounds,
-        resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
-        """Read raster data from the store.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item to read.
-            bands: the list of bands identifying which specific raster to read. These
-                bands must match the bands of a stored raster.
-            projection: the projection to read in.
-            bounds: the bounds to read.
-            resampling: the resampling method to use in case reprojection is needed.
-
-        Returns:
-            the raster data
-        """
-        asset_key = self._get_asset_by_band(bands)
-        item = self.get_item_by_name(item_name)
-        asset_url = planetary_computer.sign(item.asset_urls[asset_key])
-
-        # Construct the transform to use for the warped dataset.
-        wanted_transform = affine.Affine(
-            projection.x_resolution,
-            0,
-            bounds[0] * projection.x_resolution,
-            0,
-            projection.y_resolution,
-            bounds[1] * projection.y_resolution,
-        )
-
-        with rasterio.open(asset_url) as src:
-            with rasterio.vrt.WarpedVRT(
-                src,
-                crs=projection.crs,
-                transform=wanted_transform,
-                width=bounds[2] - bounds[0],
-                height=bounds[3] - bounds[1],
-                resampling=resampling,
-            ) as vrt:
-                return vrt.read()
-
-    def materialize(
-        self,
-        window: Window,
-        item_groups: list[list[SourceItem]],
-        layer_name: str,
-        layer_cfg: LayerConfig,
-    ) -> None:
-        """Materialize data for the window.
-
-        Args:
-            window: the window to materialize
-            item_groups: the items from get_items
-            layer_name: the name of this layer
-            layer_cfg: the config of this layer
-        """
-        RasterMaterializer().materialize(
-            TileStoreWithLayer(self, layer_name),
-            window,
-            layer_name,
-            layer_cfg,
-            item_groups,
-        )
 
 
 class Sentinel2(PlanetaryComputer):
@@ -548,46 +447,144 @@ class Sentinel2(PlanetaryComputer):
                     asset_key,
                 )
 
-    def read_raster(
-        self,
-        layer_name: str,
-        item_name: str,
-        bands: list[str],
-        projection: Projection,
-        bounds: PixelBounds,
-        resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
-        """Read raster data from the store.
+    def get_read_callback(
+        self, item_name: str, asset_key: str
+    ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
+        """Return a callback to harmonize Sentinel-2 data if needed.
 
         Args:
-            layer_name: the layer name or alias.
-            item_name: the item to read.
-            bands: the list of bands identifying which specific raster to read. These
-                bands must match the bands of a stored raster.
-            projection: the projection to read in.
-            bounds: the bounds to read.
-            resampling: the resampling method to use in case reprojection is needed.
+            item_name: the name of the item being read.
+            asset_key: the key identifying which asset is being read.
 
         Returns:
-            the raster data
+            A callback function for harmonization, or None if not needed.
         """
-        # We override read_raster because we may need to harmonize the data.
-        raw_data = super().read_raster(
-            layer_name, item_name, bands, projection, bounds, resampling=resampling
-        )
-
         # TCI (visual) image does not need harmonization.
-        if not self.harmonize or bands == self.BANDS["visual"]:
-            return raw_data
+        if not self.harmonize or asset_key == "visual":
+            return None
 
         item = self.get_item_by_name(item_name)
-        harmonize_callback = get_harmonize_callback(self._get_product_xml(item))
+        return get_harmonize_callback(self._get_product_xml(item))
 
-        if harmonize_callback is None:
-            return raw_data
 
-        array = harmonize_callback(raw_data)
-        return array
+class LandsatC2L2(PlanetaryComputer):
+    """A data source for Landsat Collection 2 Level-2 data on Planetary Computer.
+
+    This data source targets Landsat 8/9 items in the `landsat-c2-l2` collection.
+    Band names exposed by this data source are Landsat-style band identifiers
+    (e.g. "B4", "B5", "B10") for maximum compatibility with
+    `rslearn.data_sources.aws_landsat.LandsatOliTirs`.
+
+    For convenience, configuration also accepts STAC `common_name` values (e.g. "red",
+    "nir08") and STAC `eo:bands[].name` aliases (e.g. "OLI_B4", "TIRS_B10"), which are
+    normalized to the Landsat-style band identifiers above.
+
+    Note: this is Level-2 data, not Level-1. If you need Level-1-specific bands
+    (e.g. panchromatic/cirrus or thermal band 11), use
+    `rslearn.data_sources.aws_landsat.LandsatOliTirs`.
+    """
+
+    COLLECTION_NAME = "landsat-c2-l2"
+
+    # Map STAC asset keys (common_name) to the Landsat band identifiers we expose.
+    # Planetary Computer assets for `landsat-c2-l2` are keyed by common_name.
+    ASSET_COMMON_NAME_TO_BAND = {
+        "coastal": "B1",
+        "blue": "B2",
+        "green": "B3",
+        "red": "B4",
+        "nir08": "B5",
+        "swir16": "B6",
+        "swir22": "B7",
+        "lwir11": "B10",
+    }
+
+    BAND_TO_ASSET_COMMON_NAME = {v: k for k, v in ASSET_COMMON_NAME_TO_BAND.items()}
+
+    # STAC eo:bands name -> Landsat-style band identifiers.
+    STAC_BAND_NAME_ALIASES = {
+        "OLI_B1": "B1",
+        "OLI_B2": "B2",
+        "OLI_B3": "B3",
+        "OLI_B4": "B4",
+        "OLI_B5": "B5",
+        "OLI_B6": "B6",
+        "OLI_B7": "B7",
+        "TIRS_B10": "B10",
+    }
+
+    DEFAULT_PLATFORM_QUERY = {"platform": {"in": ["landsat-8", "landsat-9"]}}
+
+    @classmethod
+    def _normalize_band_name(cls, band: str) -> str:
+        if band in cls.BAND_TO_ASSET_COMMON_NAME:
+            return band
+        if band in cls.ASSET_COMMON_NAME_TO_BAND:
+            return cls.ASSET_COMMON_NAME_TO_BAND[band]
+        if band in cls.STAC_BAND_NAME_ALIASES:
+            return cls.STAC_BAND_NAME_ALIASES[band]
+        if band in {"B8", "B9", "B11"}:
+            raise ValueError(
+                f"LandsatC2L2 does not provide {band} in the Planetary Computer "
+                "landsat-c2-l2 collection. Use rslearn.data_sources.aws_landsat.LandsatOliTirs "
+                "for Level-1 bands like panchromatic (B8), cirrus (B9), or thermal band 11 (B11)."
+            )
+        raise ValueError(
+            f"unknown Landsat band '{band}'. Use one of {sorted(cls.BAND_TO_ASSET_COMMON_NAME.keys())} "
+            f"(Landsat band names), {sorted(cls.ASSET_COMMON_NAME_TO_BAND.keys())} (STAC common names), "
+            f"or {sorted(cls.STAC_BAND_NAME_ALIASES.keys())} (STAC band names)."
+        )
+
+    def __init__(
+        self,
+        band_names: list[str] | None = None,
+        query: dict[str, Any] | None = None,
+        context: DataSourceContext = DataSourceContext(),
+        **kwargs: Any,
+    ):
+        """Initialize a new LandsatC2L2 instance.
+
+        Args:
+            band_names: optional list of band names to expose. Values can be either
+                STAC common names (preferred) or STAC `eo:bands[].name` aliases.
+                If not provided, defaults to the reflectance bands listed in BANDS.
+            query: optional STAC query filter to use. If not set, this defaults to a
+                platform filter for Landsat 8/9. If set, the provided query is used
+                as-is (no implicit platform filtering is added).
+            context: the data source context.
+            kwargs: additional arguments to pass to PlanetaryComputer.
+        """
+        # Prefer determining bands from the configured layer config (if present).
+        if context.layer_config is not None:
+            requested_bands = {
+                band
+                for band_set in context.layer_config.band_sets
+                for band in band_set.bands
+            }
+            band_names = [self._normalize_band_name(band) for band in requested_bands]
+        elif band_names is not None:
+            band_names = [self._normalize_band_name(band) for band in band_names]
+        else:
+            band_names = list(self.BAND_TO_ASSET_COMMON_NAME.keys())
+
+        # Landsat C2 L2 assets are keyed by common name; each asset is a single band.
+        # We expose Landsat-style band identifiers (B1, B2, ...).
+        asset_bands = {
+            self.BAND_TO_ASSET_COMMON_NAME[band]: [band] for band in band_names
+        }
+
+        if query is None:
+            query = self.DEFAULT_PLATFORM_QUERY
+
+        super().__init__(
+            collection_name=self.COLLECTION_NAME,
+            asset_bands=asset_bands,
+            query=query,
+            # Skip per-item asset checks; required assets are derived from asset_bands.
+            skip_items_missing_assets=True,
+            context=context,
+            **kwargs,
+        )
 
 
 class Sentinel1(PlanetaryComputer):

@@ -4,11 +4,35 @@ import torch
 
 from rslearn.models.component import FeatureMaps
 from rslearn.train.model_context import ModelContext, RasterImage, SampleMetadata
+from rslearn.train.tasks.multi_task import MultiTask
 from rslearn.train.tasks.segmentation import SegmentationHead, SegmentationTask
 
 
 class TestProcessInputs:
     """Unit tests relating to SegmentationTask.process_inputs."""
+
+    @staticmethod
+    def _make_metadata(
+        empty_sample_metadata: SampleMetadata,
+        height: int,
+        width: int,
+        *,
+        window_bounds: tuple[int, int, int, int] | None = None,
+        crop_bounds: tuple[int, int, int, int] | None = None,
+    ) -> SampleMetadata:
+        window_bounds = window_bounds or (0, 0, width, height)
+        crop_bounds = crop_bounds or window_bounds
+        return SampleMetadata(
+            window_group="",
+            window_name="",
+            window_bounds=window_bounds,
+            crop_bounds=crop_bounds,
+            crop_idx=0,
+            num_crops_in_window=1,
+            time_range=None,
+            projection=empty_sample_metadata.projection,
+            dataset_source=None,
+        )
 
     def test_zero_is_invalid_true(self, empty_sample_metadata: SampleMetadata) -> None:
         """Test process_inputs with zero_is_invalid=True."""
@@ -21,7 +45,8 @@ class TestProcessInputs:
             )
         }
 
-        _, target_dict = task.process_inputs(raw_inputs, empty_sample_metadata)
+        metadata = self._make_metadata(empty_sample_metadata, height=3, width=3)
+        _, target_dict = task.process_inputs(raw_inputs, metadata)
 
         # Check classes tensor (should be unchanged)
         expected_classes = torch.tensor(
@@ -46,7 +71,8 @@ class TestProcessInputs:
             )
         }
 
-        _, target_dict = task.process_inputs(raw_inputs, empty_sample_metadata)
+        metadata = self._make_metadata(empty_sample_metadata, height=3, width=3)
+        _, target_dict = task.process_inputs(raw_inputs, metadata)
 
         # Check classes tensor (should be unchanged)
         expected_classes = torch.tensor(
@@ -69,7 +95,8 @@ class TestProcessInputs:
             )
         }
 
-        _, target_dict = task.process_inputs(raw_inputs, empty_sample_metadata)
+        metadata = self._make_metadata(empty_sample_metadata, height=3, width=3)
+        _, target_dict = task.process_inputs(raw_inputs, metadata)
 
         # Check classes tensor (should be unchanged)
         expected_classes = torch.tensor(
@@ -94,7 +121,8 @@ class TestProcessInputs:
             )
         }
 
-        _, target_dict = task.process_inputs(raw_inputs, empty_sample_metadata)
+        metadata = self._make_metadata(empty_sample_metadata, height=3, width=3)
+        _, target_dict = task.process_inputs(raw_inputs, metadata)
 
         # Check classes tensor (should be unchanged)
         expected_classes = torch.tensor(
@@ -121,7 +149,8 @@ class TestProcessInputs:
             )
         }
 
-        _, target_dict = task.process_inputs(raw_inputs, empty_sample_metadata)
+        metadata = self._make_metadata(empty_sample_metadata, height=3, width=3)
+        _, target_dict = task.process_inputs(raw_inputs, metadata)
 
         # Check classes tensor (5s should be transformed to 0)
         expected_classes = torch.tensor(
@@ -148,7 +177,8 @@ class TestProcessInputs:
             )
         }
 
-        _, target_dict = task.process_inputs(raw_inputs, empty_sample_metadata)
+        metadata = self._make_metadata(empty_sample_metadata, height=3, width=3)
+        _, target_dict = task.process_inputs(raw_inputs, metadata)
 
         # Check classes tensor (3s should be transformed to 0)
         expected_classes = torch.tensor(
@@ -205,6 +235,37 @@ class TestProcessInputs:
 
         with pytest.raises(ValueError):
             task.process_inputs(raw_inputs, empty_sample_metadata)
+
+    def test_process_inputs_masks_out_of_window_padding(
+        self, empty_sample_metadata: SampleMetadata
+    ) -> None:
+        """Ensure padded (out-of-window) pixels are marked invalid."""
+        window_bounds = (0, 0, 10, 10)
+        crop_bounds = (-5, -5, 15, 15)
+
+        decoded = torch.zeros((20, 20), dtype=torch.int16)
+        decoded[5:15, 5:15] = 2
+
+        raw_inputs = {
+            "targets": RasterImage(decoded[None, None, :, :], timestamps=None),
+        }
+        metadata = self._make_metadata(
+            empty_sample_metadata,
+            height=20,
+            width=20,
+            window_bounds=window_bounds,
+            crop_bounds=crop_bounds,
+        )
+
+        task = SegmentationTask(num_classes=3, nodata_value=-1)
+        _, target_dict = task.process_inputs(
+            raw_inputs, metadata=metadata, load_targets=True
+        )
+
+        valid = target_dict["valid"].get_hw_tensor()
+        assert int(valid.sum().item()) == 10 * 10
+        assert valid[0, 0] == 0
+        assert valid[5, 5] == 1
 
 
 class TestProcessOutput:
@@ -318,3 +379,129 @@ def test_segmentation_head_temperature_confidence() -> None:
     max_prob_cold = cold_output.max().item()
     max_prob_hot = hot_output.max().item()
     assert max_prob_cold > max_prob_hot
+
+
+class TestSegmentationMetrics:
+    """Tests for SegmentationTask.get_metrics() and metric computation.
+
+    Uses a 2x2 3-class segmentation with one wrong pixel:
+        GT labels:    [[0, 1], [2, 0]]
+        Pred argmax:  [[0, 1], [2, 1]]  (pixel (1,1) wrong: pred=1, gt=0)
+    """
+
+    @pytest.fixture()
+    def segmentation_preds(self) -> torch.Tensor:
+        """BCHW softmax predictions for 3-class 2x2 segmentation."""
+        return torch.tensor(
+            [
+                [
+                    [[0.8, 0.1], [0.1, 0.1]],  # class 0 probs
+                    [[0.1, 0.8], [0.1, 0.8]],  # class 1 probs
+                    [[0.1, 0.1], [0.8, 0.1]],  # class 2 probs
+                ]
+            ]
+        )  # [1, 3, 2, 2]
+
+    @pytest.fixture()
+    def segmentation_targets(self) -> list[dict[str, RasterImage]]:
+        """Target dicts for 3-class 2x2 segmentation."""
+        return [
+            {
+                "classes": RasterImage(
+                    torch.tensor([[[[0, 1], [2, 0]]]], dtype=torch.long)
+                ),
+                "valid": RasterImage(torch.ones(1, 1, 2, 2)),
+            }
+        ]
+
+    def test_scalar_metrics_keys_and_values(
+        self,
+        segmentation_preds: torch.Tensor,
+        segmentation_targets: list[dict[str, RasterImage]],
+    ) -> None:
+        """Accuracy + mean_iou + F1 all return scalars with correct keys and values.
+
+        With 3 classes and one misclassified pixel out of 4:
+        - accuracy (macro, i.e. per-class recall averaged):
+            cls0=1/2, cls1=1/1, cls2=1/1 -> 5/6
+        - mean_iou = (1/2 + 1/2 + 1/1) / 3 = 2/3
+        - F1 = (2/3 + 2/3 + 1) / 3 = 7/9
+        """
+        task = SegmentationTask(
+            num_classes=3,
+            enable_accuracy_metric=True,
+            enable_miou_metric=True,
+            enable_f1_metric=True,
+        )
+        metrics = task.get_metrics()
+        metrics.update(segmentation_preds, segmentation_targets)
+        result = metrics.compute()
+
+        assert result["accuracy"] == pytest.approx(5 / 6, abs=1e-4)
+        assert result["mean_iou"] == pytest.approx(2 / 3, abs=1e-4)
+        assert result["F1"] == pytest.approx(7 / 9, abs=1e-4)
+
+    def test_dict_metric_per_class_miou(
+        self,
+        segmentation_preds: torch.Tensor,
+        segmentation_targets: list[dict[str, RasterImage]],
+    ) -> None:
+        """Mean IoU with per-class reporting returns a dict with per-class keys.
+
+        Per-class IoU:
+        - cls 0: intersection=1, union=2 -> 0.5
+        - cls 1: intersection=1, union=2 -> 0.5
+        - cls 2: intersection=1, union=1 -> 1.0
+        """
+        task = SegmentationTask(
+            num_classes=3,
+            enable_accuracy_metric=False,
+            enable_miou_metric=True,
+            report_metric_per_class=True,
+        )
+        metrics = task.get_metrics()
+        metrics.update(segmentation_preds, segmentation_targets)
+        result = metrics.compute()
+
+        assert result["mean_iou/avg"] == pytest.approx(2 / 3, abs=1e-4)
+        assert result["mean_iou/cls_0"] == pytest.approx(0.5, abs=1e-4)
+        assert result["mean_iou/cls_1"] == pytest.approx(0.5, abs=1e-4)
+        assert result["mean_iou/cls_2"] == pytest.approx(1.0, abs=1e-4)
+
+    def test_multi_task_dict_metric_keys(
+        self,
+        segmentation_preds: torch.Tensor,
+        segmentation_targets: list[dict[str, RasterImage]],
+    ) -> None:
+        """Verify that MultiTask wraps dict metric keys with task name.
+
+        This verifies the MetricWrapper in multi_task.py properly prefixes dict keys
+        so that per-class metrics from different tasks don't clash.
+        """
+        seg_task = SegmentationTask(
+            num_classes=3,
+            enable_accuracy_metric=True,
+            enable_miou_metric=True,
+            report_metric_per_class=True,
+        )
+        multi_task = MultiTask(
+            tasks={"seg": seg_task},
+            input_mapping={"seg": {"targets": "targets"}},
+        )
+        metrics = multi_task.get_metrics()
+
+        # Wrap preds/targets in multi-task format (list of per-sample dicts).
+        preds = [{"seg": segmentation_preds[0]}]  # each element is {task_name: CHW}
+        targets = [{"seg": segmentation_targets[0]}]
+
+        metrics.update(preds, targets)
+        result = metrics.compute()
+
+        # Scalar metric: MetricCollection uses the key "seg/accuracy" directly.
+        assert result["seg/accuracy"] == pytest.approx(5 / 6, abs=1e-4)
+
+        # Dict metric: MetricWrapper prefixes dict keys with "seg/".
+        assert result["seg/mean_iou/avg"] == pytest.approx(2 / 3, abs=1e-4)
+        assert result["seg/mean_iou/cls_0"] == pytest.approx(0.5, abs=1e-4)
+        assert result["seg/mean_iou/cls_1"] == pytest.approx(0.5, abs=1e-4)
+        assert result["seg/mean_iou/cls_2"] == pytest.approx(1.0, abs=1e-4)

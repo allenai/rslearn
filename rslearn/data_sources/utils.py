@@ -418,7 +418,8 @@ def match_candidate_items_to_window(
             )
 
     # Now apply space mode.
-    item_shps = []
+    acceptable_items = []
+    acceptable_item_shps = []
     for item in items:
         item_geom = item.geometry
         # We need to re-project items to the geometry projection for the spatial checks
@@ -430,14 +431,20 @@ def match_candidate_items_to_window(
                 item_geom = geometry
             else:
                 item_geom = item_geom.to_projection(geometry.projection)
-        item_shps.append(item_geom.shp)
+
+        if item_geom.shp.area == 0:
+            # Must have been an item that didn't quite match the window's spatial extent.
+            continue
+
+        acceptable_items.append(item)
+        acceptable_item_shps.append(item_geom.shp)
 
     # Dispatch to the appropriate space mode handler
     handler = space_mode_handlers.get(query_config.space_mode)
     if handler is None:
         raise ValueError(f"invalid space mode {query_config.space_mode}")
 
-    groups = handler(geometry, items, item_shps, query_config)
+    groups = handler(geometry, acceptable_items, acceptable_item_shps, query_config)
 
     # Enforce minimum matches if set.
     if len(groups) < query_config.min_matches:
