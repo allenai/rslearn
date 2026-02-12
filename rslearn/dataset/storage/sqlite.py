@@ -130,7 +130,6 @@ class SQLiteWindowStorage(WindowStorage):
         # Windows table stores window metadata
         conn.execute("""
             CREATE TABLE IF NOT EXISTS windows (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 group_name TEXT NOT NULL,
                 name TEXT NOT NULL,
                 crs TEXT NOT NULL,
@@ -143,14 +142,10 @@ class SQLiteWindowStorage(WindowStorage):
                 time_start TEXT,
                 time_end TEXT,
                 options_json TEXT NOT NULL,
-                UNIQUE(group_name, name)
+                PRIMARY KEY (group_name, name)
             )
         """)
-        # Index for faster lookups
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_windows_group
-            ON windows(group_name)
-        """)
+        # Index for lookups by name alone (group_name is covered by the PK)
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_windows_name
             ON windows(name)
@@ -159,33 +154,22 @@ class SQLiteWindowStorage(WindowStorage):
         # Layer datas table stores items.json content per window
         conn.execute("""
             CREATE TABLE IF NOT EXISTS layer_datas (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 group_name TEXT NOT NULL,
                 window_name TEXT NOT NULL,
                 layer_name TEXT NOT NULL,
                 data_json TEXT NOT NULL,
-                UNIQUE(group_name, window_name, layer_name)
+                PRIMARY KEY (group_name, window_name, layer_name)
             )
         """)
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_layer_datas_window
-            ON layer_datas(group_name, window_name)
-        """)
-
         # Completed layers table tracks which layers are completed
         conn.execute("""
             CREATE TABLE IF NOT EXISTS completed_layers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 group_name TEXT NOT NULL,
                 window_name TEXT NOT NULL,
                 layer_name TEXT NOT NULL,
                 group_idx INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(group_name, window_name, layer_name, group_idx)
+                PRIMARY KEY (group_name, window_name, layer_name, group_idx)
             )
-        """)
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_completed_layers_window
-            ON completed_layers(group_name, window_name)
         """)
 
     @override
@@ -275,48 +259,30 @@ class SQLiteWindowStorage(WindowStorage):
         options_json = json.dumps(window.options)
 
         conn = self._get_connection()
-        try:
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute(
-                """
-                INSERT INTO windows (
-                    group_name, name, crs, x_resolution, y_resolution,
-                    bounds_x1, bounds_y1, bounds_x2, bounds_y2,
-                    time_start, time_end, options_json
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(group_name, name)
-                DO UPDATE SET
-                    crs = excluded.crs,
-                    x_resolution = excluded.x_resolution,
-                    y_resolution = excluded.y_resolution,
-                    bounds_x1 = excluded.bounds_x1,
-                    bounds_y1 = excluded.bounds_y1,
-                    bounds_x2 = excluded.bounds_x2,
-                    bounds_y2 = excluded.bounds_y2,
-                    time_start = excluded.time_start,
-                    time_end = excluded.time_end,
-                    options_json = excluded.options_json
-                """,
-                (
-                    window.group,
-                    window.name,
-                    window.projection.crs.to_string(),
-                    window.projection.x_resolution,
-                    window.projection.y_resolution,
-                    window.bounds[0],
-                    window.bounds[1],
-                    window.bounds[2],
-                    window.bounds[3],
-                    time_start,
-                    time_end,
-                    options_json,
-                ),
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO windows (
+                group_name, name, crs, x_resolution, y_resolution,
+                bounds_x1, bounds_y1, bounds_x2, bounds_y2,
+                time_start, time_end, options_json
             )
-            conn.execute("COMMIT")
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                window.group,
+                window.name,
+                window.projection.crs.to_string(),
+                window.projection.x_resolution,
+                window.projection.y_resolution,
+                window.bounds[0],
+                window.bounds[1],
+                window.bounds[2],
+                window.bounds[3],
+                time_start,
+                time_end,
+                options_json,
+            ),
+        )
         logger.debug(f"Saved window {window.group}/{window.name} to SQLite")
 
     @_retry_on_locked
