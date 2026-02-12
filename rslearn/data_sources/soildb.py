@@ -314,7 +314,7 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
         if self._explicit_asset_key is not None:
             stac_asset_key = self._explicit_asset_key
         else:
-            stac_asset_key = self._pick_default_asset_key_for_collection(assets)
+            stac_asset_key = self._pick_stac_asset_key(assets)
 
         if stac_asset_key not in assets:
             raise ValueError(
@@ -337,7 +337,18 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
             },
         )
 
-    def _pick_default_asset_key_for_collection(self, assets: dict[str, Any]) -> str:
+    def _pick_stac_asset_key(self, assets: dict[str, Any]) -> str:
+        """Pick a STAC asset key for this collection.
+
+        This method implements SoilDB-specific selection logic:
+        - Some collections have a small, preferred list of asset keys.
+        - Some collections require an explicit asset key (no meaningful default).
+        - For large items, auto-selection can be disabled to avoid guessing.
+        - Otherwise, we fall back to a generic heuristic based on asset metadata.
+
+        For the generic heuristic (media type / key patterns / roles), see
+        `_pick_stac_asset_key_heuristic`.
+        """
         candidates = SOILDB_DEFAULT_ASSET_KEY_CANDIDATES.get(self.collection_id)
         if candidates is None and self.collection_id in SOILDB_DEFAULT_ASSET_KEY_CANDIDATES:
             raise ValueError(
@@ -354,9 +365,14 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
                 f"collection {self.collection_id!r} has {len(assets)} assets; "
                 "set asset_key explicitly (auto-selection disabled for large items)"
             )
-        return self._pick_default_asset_key(assets)
+        return self._pick_stac_asset_key_heuristic(assets)
 
-    def _pick_default_asset_key(self, assets: dict[str, Any]) -> str:
+    def _pick_stac_asset_key_heuristic(self, assets: dict[str, Any]) -> str:
+        """Pick a STAC asset key using generic heuristics.
+
+        Prefers GeoTIFF-like assets (by href/type), then scores candidates based on
+        roles and common SoilDB naming patterns (mean, COG, 30m, shallow depth).
+        """
         candidates: list[str] = []
         for key, asset in assets.items():
             href = (asset.get("href") or "").lower()
