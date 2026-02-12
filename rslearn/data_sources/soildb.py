@@ -141,9 +141,8 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
                 raise ValueError("expected band set to have a single band")
             band_name = context.layer_config.band_sets[0].bands[0]
 
-        # Initialize with a single-band mapping.
-        ds_asset_key = asset_key if asset_key is not None else self.AUTO_ASSET_KEY
-        super().__init__(asset_bands={ds_asset_key: [band_name]})
+        # Initialize with a single-band mapping under a stable internal asset key.
+        super().__init__(asset_bands={self.AUTO_ASSET_KEY: [band_name]})
 
         # Cache resolved item (optional).
         if cache_dir is not None:
@@ -163,6 +162,11 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
         """Get the URL to read the requested asset from."""
         item = self.get_item_by_name(item_name)
         if asset_key not in item.asset_urls:
+            # Backwards-compat: accept the resolved STAC asset key (when user passed
+            # an explicit asset_key and internal naming changed to AUTO_ASSET_KEY).
+            stac_asset_key = item.properties.get("stac_asset_key")
+            if isinstance(stac_asset_key, str) and asset_key == stac_asset_key:
+                return item.asset_urls[self.AUTO_ASSET_KEY]
             raise KeyError(
                 f"asset_key {asset_key!r} not available for item {item_name!r}; "
                 f"available={sorted(item.asset_urls.keys())}"
@@ -322,13 +326,10 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
         if not isinstance(href, str) or not href:
             raise ValueError(f"asset {stac_asset_key!r} has no href")
 
-        ds_asset_key = (
-            stac_asset_key if self._explicit_asset_key is not None else self.AUTO_ASSET_KEY
-        )
         return SourceItem(
             name=item_dict["id"],
             geometry=geom,
-            asset_urls={ds_asset_key: href},
+            asset_urls={self.AUTO_ASSET_KEY: href},
             properties={
                 "stac_collection": self.collection_id,
                 "stac_item_url": item_url,
