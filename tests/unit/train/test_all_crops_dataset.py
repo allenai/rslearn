@@ -14,6 +14,7 @@ from rslearn.train.dataset import (
     ModelDataset,
     SplitConfig,
 )
+from rslearn.train.model_context import RasterImage
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.tasks.segmentation import SegmentationTask
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
@@ -254,6 +255,64 @@ class TestIterableAllCropsDataset:
         _, _, metadata = samples[0]
         assert metadata.window_bounds == (0, 0, 2, 2)
         assert metadata.crop_bounds == (0, 0, 4, 4)
+
+    def test_small_window_raster_padded_to_crop_size(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
+        """Verify that raster inputs are padded when the window is smaller than crop size.
+
+        This is important for sliding-window inference (load_all_crops), where
+        get_window_crop_options may generate crops that extend beyond window bounds.
+        """
+        crop_size = 32
+        tiny_bounds = (0, 0, 24, 4)  # width/height smaller than crop_size
+
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset,
+            name="window",
+            bounds=tiny_bounds,
+            images={
+                ("image_layer1", 0): np.ones(
+                    (
+                        1,
+                        tiny_bounds[3] - tiny_bounds[1],
+                        tiny_bounds[2] - tiny_bounds[0],
+                    ),
+                    dtype=np.uint8,
+                ),
+            },
+        )
+
+        image_data_input = DataInput(
+            "raster", ["image_layer1"], bands=["band"], passthrough=True
+        )
+
+        model_dataset = ModelDataset(
+            basic_classification_dataset,
+            split_config=SplitConfig(
+                crop_size=crop_size, load_all_crops=True, skip_targets=True
+            ),
+            task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+            workers=1,
+            inputs={"image": image_data_input},
+        )
+
+        all_crops_dataset = IterableAllCropsDataset(
+            dataset=model_dataset,
+            crop_size=(crop_size, crop_size),
+        )
+
+        samples = list(all_crops_dataset)
+        assert len(samples) == 1
+        inputs, _, metadata = samples[0]
+
+        assert metadata.window_bounds == tiny_bounds
+        assert metadata.crop_bounds == (0, 0, crop_size, crop_size)
+        assert isinstance(inputs["image"], RasterImage)
+        assert inputs["image"].shape[-2:] == (crop_size, crop_size)
+        assert inputs["image"].image.shape[:2] == (1, 1)  # C, T
 
     def test_resolution_factor_cropping(
         self,
