@@ -258,8 +258,7 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
         return item
 
     def _collection_url_from_catalog(self) -> str:
-        base = self.catalog_url.rsplit("/", 1)[0]
-        return f"{base}/{self.collection_id}/collection.json"
+        return urljoin(self.catalog_url, f"./{self.collection_id}/collection.json")
 
     def _load_stac_item_dict(self) -> tuple[str, dict[str, Any]]:
         collection_url = self.collection_url or self._collection_url_from_catalog()
@@ -277,8 +276,7 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
                 f"collection {self.collection_id!r} has no rel='item' link at {collection_url!r}"
             )
 
-        collection_dir = collection_url.rsplit("/", 1)[0] + "/"
-        item_url = urljoin(collection_dir, item_link)
+        item_url = urljoin(collection_url, item_link)
         logger.debug("SoilDB loading item from %s", item_url)
         return item_url, self._fetch_json(item_url)
 
