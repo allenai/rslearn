@@ -156,9 +156,6 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
             self.cache_dir = None
 
         self._item: SourceItem | None = None
-        self._resolved_stac_asset_key: str | None = None
-        self._resolved_stac_asset_href: str | None = None
-        self._resolved_item_url: str | None = None
 
     # --- DirectMaterializeDataSource implementation ---
 
@@ -246,9 +243,6 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
             with cache_path.open() as f:
                 payload = json.load(f)
             self._item = SourceItem.deserialize(payload["item"])
-            self._resolved_item_url = payload.get("item_url")
-            self._resolved_stac_asset_key = payload.get("stac_asset_key")
-            self._resolved_stac_asset_href = payload.get("stac_asset_href")
             return self._item
 
         item_url, item_dict = self._load_stac_item_dict()
@@ -259,9 +253,6 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
                 json.dump(
                     {
                         "collection_id": self.collection_id,
-                        "item_url": item_url,
-                        "stac_asset_key": self._resolved_stac_asset_key,
-                        "stac_asset_href": self._resolved_stac_asset_href,
                         "item": item.serialize(),
                     },
                     f,
@@ -334,10 +325,6 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
         ds_asset_key = (
             stac_asset_key if self._explicit_asset_key is not None else self.AUTO_ASSET_KEY
         )
-        self._resolved_item_url = item_url
-        self._resolved_stac_asset_key = stac_asset_key
-        self._resolved_stac_asset_href = href
-
         return SourceItem(
             name=item_dict["id"],
             geometry=geom,
