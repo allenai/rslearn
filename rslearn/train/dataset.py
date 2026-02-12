@@ -697,8 +697,14 @@ def is_data_input_available(data_input: DataInput, window: Window) -> bool:
     is_any_layer_available = False
     are_all_layers_available = True
 
-    for layer_name in data_input.layers:
-        if window.is_layer_completed(layer_name):
+    for option in data_input.layers:
+        # The option could either be an entire layer (if load_all_item_groups=true)
+        # or an item group (otherwise). Either way, we can use
+        # get_layer_and_group_from_dir_name; if layer_name is an entire layer, it will
+        # give us group_idx=0 which works for this check.
+        layer_name, group_idx = get_layer_and_group_from_dir_name(option)
+
+        if window.is_layer_completed(layer_name, group_idx=group_idx):
             is_any_layer_available = True
         else:
             are_all_layers_available = False
