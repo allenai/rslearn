@@ -219,7 +219,9 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
                             for chunk in r.iter_content(chunk_size=1024 * 1024):
                                 f.write(chunk)
 
-                    tile_store.write_raster_file(item.name, band_names, UPath(local_fname))
+                    tile_store.write_raster_file(
+                        item.name, band_names, UPath(local_fname)
+                    )
 
     # --- STAC loading helpers ---
 
@@ -283,7 +285,9 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
         resp.raise_for_status()
         return resp.json()
 
-    def _stac_item_dict_to_item(self, item_url: str, item_dict: dict[str, Any]) -> SourceItem:
+    def _stac_item_dict_to_item(
+        self, item_url: str, item_dict: dict[str, Any]
+    ) -> SourceItem:
         if item_dict.get("geometry") is not None:
             shp = shapely.geometry.shape(item_dict["geometry"])
         elif item_dict.get("bbox") is not None and len(item_dict["bbox"]) == 4:
