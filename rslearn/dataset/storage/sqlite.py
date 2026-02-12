@@ -1,6 +1,7 @@
 """SQLite-based window storage backend."""
 
 import json
+import os
 import random
 import sqlite3
 import time
@@ -107,23 +108,34 @@ class SQLiteWindowStorage(WindowStorage):
         self.path = path
         self.db_path = _get_local_path(path) / self.DB_FILENAME
         self.max_retries = max_retries
+        self._conn: sqlite3.Connection | None = None
+        self._conn_pid: int | None = None
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
-        """Get a new database connection with appropriate settings."""
-        conn = sqlite3.connect(
-            str(self.db_path),
-            # Disable implicit transactions, so statements autocommit by default and we
-            # explicitly start transactions with BEGIN where needed.
-            isolation_level=None,
-        )
-        # Return sqlite3.Rows instead of tuples.
-        conn.row_factory = sqlite3.Row
-        # Enable WAL mode for better concurrent access
-        conn.execute("PRAGMA journal_mode=WAL")
-        # Enable foreign keys
-        conn.execute("PRAGMA foreign_keys=ON")
-        return conn
+        """Get a cached database connection, creating one if needed.
+
+        The connection is cached per instance and reused across calls.
+        After a process fork (e.g. PyTorch DataLoader workers), a new connection
+        is created since the parent's connection can't be safely reused.
+        """
+        pid = os.getpid()
+        if self._conn is None or self._conn_pid != pid:
+            conn = sqlite3.connect(
+                str(self.db_path),
+                # Disable implicit transactions, so statements autocommit by default
+                # and we explicitly start transactions with BEGIN where needed.
+                isolation_level=None,
+            )
+            # Return sqlite3.Rows instead of tuples.
+            conn.row_factory = sqlite3.Row
+            # Enable WAL mode for better concurrent access
+            conn.execute("PRAGMA journal_mode=WAL")
+            # Enable foreign keys
+            conn.execute("PRAGMA foreign_keys=ON")
+            self._conn = conn
+            self._conn_pid = pid
+        return self._conn
 
     def _init_db(self) -> None:
         """Initialize the database schema if it doesn't exist."""
@@ -190,7 +202,6 @@ class SQLiteWindowStorage(WindowStorage):
                 CREATE INDEX IF NOT EXISTS idx_completed_layers_window
                 ON completed_layers(group_name, window_name)
             """)
-            conn.close()
 
         _retry_on_locked(init, self.max_retries)
 
@@ -214,64 +225,61 @@ class SQLiteWindowStorage(WindowStorage):
 
         def load() -> list[Window]:
             conn = self._get_connection()
-            try:
-                query = """
-                    SELECT group_name, name, crs, x_resolution, y_resolution,
-                           bounds_x1, bounds_y1, bounds_x2, bounds_y2,
-                           time_start, time_end, options_json
-                    FROM windows
-                """
-                conditions: list[str] = []
-                params: list[str] = []
+            query = """
+                SELECT group_name, name, crs, x_resolution, y_resolution,
+                       bounds_x1, bounds_y1, bounds_x2, bounds_y2,
+                       time_start, time_end, options_json
+                FROM windows
+            """
+            conditions: list[str] = []
+            params: list[str] = []
 
-                if groups:
-                    placeholders = ",".join("?" * len(groups))
-                    conditions.append(f"group_name IN ({placeholders})")
-                    params.extend(groups)
+            if groups:
+                placeholders = ",".join("?" * len(groups))
+                conditions.append(f"group_name IN ({placeholders})")
+                params.extend(groups)
 
-                if names:
-                    placeholders = ",".join("?" * len(names))
-                    conditions.append(f"name IN ({placeholders})")
-                    params.extend(names)
+            if names:
+                placeholders = ",".join("?" * len(names))
+                conditions.append(f"name IN ({placeholders})")
+                params.extend(names)
 
-                if conditions:
-                    query += " WHERE " + " AND ".join(conditions)
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
 
-                cursor = conn.execute(query, params)
-                windows = []
-                for row in cursor.fetchall():
-                    projection = Projection(
-                        crs=CRS.from_string(row["crs"]),
-                        x_resolution=row["x_resolution"],
-                        y_resolution=row["y_resolution"],
+            cursor = conn.execute(query, params)
+            windows = []
+            for row in cursor.fetchall():
+                projection = Projection(
+                    crs=CRS.from_string(row["crs"]),
+                    x_resolution=row["x_resolution"],
+                    y_resolution=row["y_resolution"],
+                )
+                bounds = (
+                    row["bounds_x1"],
+                    row["bounds_y1"],
+                    row["bounds_x2"],
+                    row["bounds_y2"],
+                )
+                time_range = None
+                if row["time_start"] and row["time_end"]:
+                    time_range = (
+                        datetime.fromisoformat(row["time_start"]),
+                        datetime.fromisoformat(row["time_end"]),
                     )
-                    bounds = (
-                        row["bounds_x1"],
-                        row["bounds_y1"],
-                        row["bounds_x2"],
-                        row["bounds_y2"],
-                    )
-                    time_range = None
-                    if row["time_start"] and row["time_end"]:
-                        time_range = (
-                            datetime.fromisoformat(row["time_start"]),
-                            datetime.fromisoformat(row["time_end"]),
-                        )
-                    options = json.loads(row["options_json"])
+                options = json.loads(row["options_json"])
 
-                    window = Window(
-                        storage=self,
-                        group=row["group_name"],
-                        name=row["name"],
-                        projection=projection,
-                        bounds=bounds,
-                        time_range=time_range,
-                        options=options,
-                    )
-                    windows.append(window)
-                return windows
-            finally:
-                conn.close()
+                window = Window(
+                    storage=self,
+                    group=row["group_name"],
+                    name=row["name"],
+                    projection=projection,
+                    bounds=bounds,
+                    time_range=time_range,
+                    options=options,
+                )
+                windows.append(window)
+            return windows
 
         return _retry_on_locked(load, self.max_retries)
 
@@ -329,8 +337,6 @@ class SQLiteWindowStorage(WindowStorage):
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
-            finally:
-                conn.close()
 
         _retry_on_locked(upsert, self.max_retries)
         logger.debug(f"Saved window {window.group}/{window.name} to SQLite")
@@ -341,22 +347,19 @@ class SQLiteWindowStorage(WindowStorage):
 
         def load() -> dict[str, WindowLayerData]:
             conn = self._get_connection()
-            try:
-                cursor = conn.execute(
-                    """
-                    SELECT layer_name, data_json FROM layer_datas
-                    WHERE group_name = ? AND window_name = ?
-                    """,
-                    (group, name),
-                )
-                result = {}
-                for row in cursor.fetchall():
-                    data = json.loads(row["data_json"])
-                    layer_data = WindowLayerData.deserialize(data)
-                    result[layer_data.layer_name] = layer_data
-                return result
-            finally:
-                conn.close()
+            cursor = conn.execute(
+                """
+                SELECT layer_name, data_json FROM layer_datas
+                WHERE group_name = ? AND window_name = ?
+                """,
+                (group, name),
+            )
+            result = {}
+            for row in cursor.fetchall():
+                data = json.loads(row["data_json"])
+                layer_data = WindowLayerData.deserialize(data)
+                result[layer_data.layer_name] = layer_data
+            return result
 
         return _retry_on_locked(load, self.max_retries)
 
@@ -389,8 +392,6 @@ class SQLiteWindowStorage(WindowStorage):
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
-            finally:
-                conn.close()
 
         _retry_on_locked(save, self.max_retries)
         logger.info(f"Saved layer datas for {group}/{name} to SQLite")
@@ -401,19 +402,14 @@ class SQLiteWindowStorage(WindowStorage):
 
         def load() -> list[tuple[str, int]]:
             conn = self._get_connection()
-            try:
-                cursor = conn.execute(
-                    """
-                    SELECT layer_name, group_idx FROM completed_layers
-                    WHERE group_name = ? AND window_name = ?
-                    """,
-                    (group, name),
-                )
-                return [
-                    (row["layer_name"], row["group_idx"]) for row in cursor.fetchall()
-                ]
-            finally:
-                conn.close()
+            cursor = conn.execute(
+                """
+                SELECT layer_name, group_idx FROM completed_layers
+                WHERE group_name = ? AND window_name = ?
+                """,
+                (group, name),
+            )
+            return [(row["layer_name"], row["group_idx"]) for row in cursor.fetchall()]
 
         return _retry_on_locked(load, self.max_retries)
 
@@ -425,17 +421,14 @@ class SQLiteWindowStorage(WindowStorage):
 
         def check() -> bool:
             conn = self._get_connection()
-            try:
-                cursor = conn.execute(
-                    """
-                    SELECT 1 FROM completed_layers
-                    WHERE group_name = ? AND window_name = ? AND layer_name = ? AND group_idx = ?
-                    """,
-                    (group, name, layer_name, group_idx),
-                )
-                return cursor.fetchone() is not None
-            finally:
-                conn.close()
+            cursor = conn.execute(
+                """
+                SELECT 1 FROM completed_layers
+                WHERE group_name = ? AND window_name = ? AND layer_name = ? AND group_idx = ?
+                """,
+                (group, name, layer_name, group_idx),
+            )
+            return cursor.fetchone() is not None
 
         return _retry_on_locked(check, self.max_retries)
 
@@ -460,8 +453,6 @@ class SQLiteWindowStorage(WindowStorage):
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
-            finally:
-                conn.close()
 
         _retry_on_locked(mark, self.max_retries)
 
