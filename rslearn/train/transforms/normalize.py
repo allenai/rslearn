@@ -23,6 +23,7 @@ class Normalize(Transform):
         selectors: list[str] = ["image"],
         bands: list[int] | None = None,
         num_bands: int | None = None,
+        num_timesteps: int | None = None,
         skip_missing: bool = False,
     ) -> None:
         """Initialize a new Normalize.
@@ -38,6 +39,12 @@ class Normalize(Transform):
                 mean and std must either be one value, or have length equal to the
                 number of band indices passed here.
             num_bands: deprecated, no longer used. Will be removed after 2026-04-01.
+            num_timesteps: when set, mean and std are treated as per-variable values
+                and are repeated this many times to match the interleaved band layout
+                produced by num_timesteps expansion (i.e. for each timestep t, for
+                each variable v). For example, with mean=[280, 0.001] and
+                num_timesteps=744, the effective mean becomes
+                [280, 0.001, 280, 0.001, ...] with length 1488.
             skip_missing: if True, skip selectors that don't exist in the input/target
                 dicts. Useful when working with optional inputs.
         """
@@ -52,6 +59,10 @@ class Normalize(Transform):
 
         self.mean = torch.tensor(mean)
         self.std = torch.tensor(std)
+
+        if num_timesteps is not None:
+            self.mean = self.mean.repeat(num_timesteps)
+            self.std = self.std.repeat(num_timesteps)
 
         if valid_range:
             self.valid_min = torch.tensor(valid_range[0])
