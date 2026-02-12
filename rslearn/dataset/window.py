@@ -41,13 +41,10 @@ def get_window_layer_dir(
 
 
 def get_layer_and_group_from_dir_name(layer_dir_name: str) -> tuple[str, int]:
-    """Parse a layer directory name (or item group specifier) into layer name and group index.
-
-    The input can be a plain layer name like ``"sentinel2"`` (returns group_idx=0) or
-    an item group specifier like ``"sentinel2.1"`` (returns group_idx=1).
+    """Parse a layer directory name (item group specifier) into layer name and group index.
 
     Args:
-        layer_dir_name: the directory name or item group specifier to parse.
+        layer_dir_name: the item group specifier to parse.
 
     Returns:
         a tuple (layer_name, group_idx).
