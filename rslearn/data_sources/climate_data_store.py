@@ -480,9 +480,7 @@ class ERA5LandHourly(ERA5Land):
 
     The fill value used for padding and NaN replacement is read from the layer
     config's ``nodata_vals`` when available, otherwise defaults to FILL_VALUE
-    (-9999.0).  The dataset config should always set ``nodata_vals`` (required
-    when ``num_timesteps`` is set) to keep the data source and materialisation
-    in sync.
+    (-9999.0).
     """
 
     def __init__(
@@ -516,10 +514,6 @@ class ERA5LandHourly(ERA5Land):
             bounds=bounds,
             context=context,
         )
-        # self.band_names was set by the base class — either from
-        # context.layer_config (expanded names) or from the band_names
-        # parameter (base names).  Derive the base variable names and then
-        # re-expand so that both attributes are always consistent.
         self.base_band_names = extract_base_band_names(self.band_names)
         self.band_names = expand_hourly_band_names(self.base_band_names)
 
