@@ -61,7 +61,6 @@ class SegmentationTask(BasicTask):
         other_metrics: dict[str, Metric] = {},
         output_probs: bool = False,
         output_class_idx: int | None = None,
-        metric_class_idx: int | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize a new SegmentationTask.
@@ -99,8 +98,6 @@ class SegmentationTask(BasicTask):
                 during prediction.
             output_class_idx: if set along with output_probs, only output the probability
                 for this specific class index (single-channel output).
-            metric_class_idx: if set, report both the average and this specific class
-                index's metric value, instead of the full per-class breakdown.
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -116,12 +113,6 @@ class SegmentationTask(BasicTask):
         else:
             self.nodata_value = nodata_value
 
-        if metric_class_idx is not None and not report_metric_per_class:
-            raise ValueError(
-                "metric_class_idx requires report_metric_per_class=True to access "
-                "per-class metric values"
-            )
-
         self.enable_accuracy_metric = enable_accuracy_metric
         self.enable_f1_metric = enable_f1_metric
         self.enable_miou_metric = enable_miou_metric
@@ -133,7 +124,6 @@ class SegmentationTask(BasicTask):
         self.other_metrics = other_metrics
         self.output_probs = output_probs
         self.output_class_idx = output_class_idx
-        self.metric_class_idx = metric_class_idx
 
     def process_inputs(
         self,
@@ -262,7 +252,6 @@ class SegmentationTask(BasicTask):
                 torchmetrics.classification.MulticlassAccuracy(
                     **accuracy_metric_kwargs
                 ),
-                class_idx=self.metric_class_idx,
             )
 
         if self.enable_f1_metric:
@@ -280,7 +269,6 @@ class SegmentationTask(BasicTask):
                         score_thresholds=thresholds,
                         report_per_class=self.report_metric_per_class,
                     ),
-                    class_idx=self.metric_class_idx,
                 )
                 metrics["precision" + suffix] = SegmentationMetric(
                     F1Metric(
@@ -289,7 +277,6 @@ class SegmentationTask(BasicTask):
                         metric_mode="precision",
                         report_per_class=self.report_metric_per_class,
                     ),
-                    class_idx=self.metric_class_idx,
                 )
                 metrics["recall" + suffix] = SegmentationMetric(
                     F1Metric(
@@ -298,7 +285,6 @@ class SegmentationTask(BasicTask):
                         metric_mode="recall",
                         report_per_class=self.report_metric_per_class,
                     ),
-                    class_idx=self.metric_class_idx,
                 )
 
         if self.enable_miou_metric:
@@ -314,7 +300,6 @@ class SegmentationTask(BasicTask):
             metrics["mean_iou"] = SegmentationMetric(
                 MeanIoUMetric(**miou_metric_kwargs),
                 pass_probabilities=False,
-                class_idx=self.metric_class_idx,
             )
 
         if self.other_metrics:
@@ -401,7 +386,6 @@ class SegmentationMetric(Metric):
         self,
         metric: Metric,
         pass_probabilities: bool = True,
-        class_idx: int | None = None,
     ):
         """Initialize a new SegmentationMetric.
 
@@ -410,14 +394,10 @@ class SegmentationMetric(Metric):
                 classes from the targets and masking out invalid pixels.
             pass_probabilities: whether to pass predicted probabilities to the metric.
                 If False, argmax is applied to pass the predicted classes instead.
-            class_idx: if set and the wrapped metric returns a dict, return a filtered
-                dict containing "cls_{class_idx}" and "avg". This allows reporting both
-                the specific class metric and the average.
         """
         super().__init__()
         self.metric = metric
         self.pass_probablities = pass_probabilities
-        self.class_idx = class_idx
 
     def update(
         self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
@@ -452,34 +432,15 @@ class SegmentationMetric(Metric):
         If the wrapped metric returns a multi-element tensor (e.g., standard torchmetrics
         with average=None), it is converted to a dict with keys like "cls_0", "cls_1", etc,
         and an "avg" key is computed from the per-class values.
-
-        When class_idx is set and the result is a dict, returns both the "avg" key and
-        the specific class key, allowing reporting of both values.
         """
         result = self.metric.compute()
 
         # Convert multi-element tensors to dict for uniform handling.
         # This supports standard torchmetrics with average=None which return per-class tensors.
-        # We also compute the avg so it's available even with class_idx filtering.
         if isinstance(result, torch.Tensor) and result.ndim >= 1:
             result = {f"cls_{i}": result[i] for i in range(len(result))}
             result["avg"] = torch.mean(torch.stack(list(result.values())))
 
-        # Result is a scalar (ndim == 0, e.g., torch metric with average='macro')
-        # Just return it as-is since there's no per-class breakdown to filter
-        if (
-            isinstance(result, torch.Tensor) and result.ndim == 0
-        ):  # scalar from metric with average='macro'
-            return result
-
-        if self.class_idx is not None:
-            # Return both avg and the specific class
-            if isinstance(result, dict):
-                cls_key = f"cls_{self.class_idx}"
-                filtered = {cls_key: result[cls_key]}
-                if "avg" in result:
-                    filtered["avg"] = result["avg"]
-                return filtered
         return result
 
     def reset(self) -> None:
