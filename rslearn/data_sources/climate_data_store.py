@@ -667,23 +667,8 @@ class ERA5LandHourlyTimeseries(DataSource):
         )
 
     def _snap_to_grid(self, lon: float, lat: float) -> tuple[float, float]:
-        """Snap coordinates to the nearest 0.1 degree grid cell center.
-
-        The ERA5-Land timeseries dataset uses a 0.1 degree grid. When a requested
-        location doesn't exactly match a grid point, the API automatically selects
-        the nearest grid point. This method pre-computes the snapped coordinates
-        to enable proper caching and avoid duplicate requests.
-
-        Args:
-            lon: the longitude in degrees
-            lat: the latitude in degrees
-
-        Returns:
-            A tuple of (snapped_lon, snapped_lat) rounded to 1 decimal place.
-        """
-        snapped_lon = round(round(lon / self.PIXEL_SIZE) * self.PIXEL_SIZE, 1)
-        snapped_lat = round(round(lat / self.PIXEL_SIZE) * self.PIXEL_SIZE, 1)
-        return (snapped_lon, snapped_lat)
+        """Snap coordinates to the nearest 0.1 degree grid cell center."""
+        return (round(lon, 1), round(lat, 1))
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
