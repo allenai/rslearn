@@ -597,23 +597,15 @@ class ERA5LandHourly(ERA5Land):
 
 
 class ERA5LandHourlyTimeseries(DataSource):
-    """A data source for ingesting ERA5-Land hourly time-series data for individual points.
+    """A data source for ERA5-Land hourly time-series at individual points.
 
-    This data source corresponds to the reanalysis-era5-land-timeseries dataset, which is
-    optimized for retrieving long time-series data for single points rather than spatial
-    areas. It uses a 0.1 degree grid and automatically snaps requested coordinates to the
-    nearest grid cell center to avoid duplicate requests.
+    Uses the reanalysis-era5-land-timeseries dataset. For each window, it
+    materializes a 1x1 raster containing data from the closest 0.1-degree grid
+    cell to the window's center.
 
-    Each monthly item is padded to MAX_HOURS_PER_MONTH (744) timesteps so that
-    the band count is fixed regardless of month length. Shorter months are padded
-    with the nodata/fill value. Band names are auto-expanded from the base variable
-    names: for each timestep t and variable v, the band is named "{v}_t{t:03d}".
-
-    The fill value used for padding and NaN replacement is read from the layer
-    config's ``nodata_vals`` when available, otherwise defaults to FILL_VALUE
-    (-9999.0).  The dataset config should always set ``nodata_vals`` (required
-    when ``num_timesteps`` is set) to keep the data source and materialisation
-    in sync.
+    Each monthly item is padded to MAX_HOURS_PER_MONTH (744) timesteps so the
+    band count is fixed regardless of month length. For each timestep t and
+    variable v, the band is named ``{v}_t{t:03d}``.
 
     An API key must be passed either in the configuration or via the CDSAPI_KEY
     environment variable. You can acquire an API key by going to the Climate Data Store
