@@ -1436,7 +1436,8 @@ assets (e.g., different depth ranges, resolutions, and summary statistics). rsle
 expects you to configure a **single-band** band set per layer and choose which STAC
 asset to read via `"asset_key"`.
 
-If `"asset_key"` is omitted, rslearn selects a per-collection default when available:
+If `"asset_key"` is omitted, rslearn selects a per-collection default when available
+(otherwise you must specify `"asset_key"` explicitly):
 
 - `bd.core_iso.11272.2017.g.cm3` → `bd.core_iso.11272.2017.g.cm3_m_30m_b0cm..30cm`
 - `oc_iso.10694.1995.wpml` → `oc_iso.10694.1995.wpml_m_30m_b0cm..30cm`
@@ -1463,7 +1464,8 @@ Example (one soil type probability layer):
 {
   // Required SoilDB collection id, e.g. "clay.tot_iso.11277.2020.wpct".
   "collection_id": null,
-  // Optional STAC asset key. If null, rslearn will attempt auto-selection.
+  // Optional STAC asset key. If null, rslearn uses a per-collection default when
+  // available; otherwise you must set it explicitly.
   "asset_key": null,
   // Optional cache directory (relative to the dataset path if provided).
   "cache_dir": "cache/soildb",

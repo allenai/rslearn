@@ -96,7 +96,6 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
         validate_collection_id: bool = False,
         timeout: timedelta = timedelta(seconds=30),
         cache_dir: str | None = None,
-        max_assets_for_auto: int = 200,
         context: DataSourceContext = DataSourceContext(),
     ) -> None:
         """Initialize a new SoilDB data source.
@@ -104,7 +103,9 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
         Args:
             collection_id: SoilDB STAC collection id (e.g. "clay.tot_iso.11277.2020.wpct").
             asset_key: STAC asset key to read. If not set, chooses a default
-                GeoTIFF/COG asset (typically mean, 30m, 0–30cm) when possible.
+                GeoTIFF/COG asset for known collections (typically mean, 30m, 0–30cm).
+                For unknown collections or those without a meaningful default, this
+                must be set explicitly.
             band_name: band name to use if the layer config is missing from context.
             catalog_url: OpenLandMap static STAC catalog.json URL.
             collection_url: optional override for the collection.json URL.
@@ -112,16 +113,12 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
                 known SoilDB collections listed in this module.
             timeout: timeout for HTTP requests.
             cache_dir: optional directory to cache the resolved SourceItem JSON.
-            max_assets_for_auto: if a collection item has more assets than this and
-                asset_key is not specified, raise an error requiring explicit
-                selection.
             context: the data source context.
         """
         self.collection_id = collection_id
         self.catalog_url = catalog_url
         self.collection_url = collection_url
         self.timeout = timeout
-        self.max_assets_for_auto = max_assets_for_auto
         self._explicit_asset_key = asset_key
 
         if validate_collection_id and collection_id not in SOILDB_COLLECTIONS:
@@ -341,13 +338,9 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
         """Pick a STAC asset key for this collection.
 
         This method implements SoilDB-specific selection logic:
-        - Some collections have a small, preferred list of asset keys.
+        - Some collections have a per-collection default asset key (or short list).
         - Some collections require an explicit asset key (no meaningful default).
-        - For large items, auto-selection can be disabled to avoid guessing.
-        - Otherwise, we fall back to a generic heuristic based on asset metadata.
-
-        For the generic heuristic (media type / key patterns / roles), see
-        `_pick_stac_asset_key_heuristic`.
+        - For unknown collections, an explicit asset key is required.
         """
         candidates = SOILDB_DEFAULT_ASSET_KEY_CANDIDATES.get(self.collection_id)
         if candidates is None and self.collection_id in SOILDB_DEFAULT_ASSET_KEY_CANDIDATES:
@@ -360,41 +353,12 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
                 if k in assets:
                     return k
 
-        if len(assets) > self.max_assets_for_auto:
+        if self.collection_id in SOILDB_DEFAULT_ASSET_KEY_CANDIDATES:
             raise ValueError(
-                f"collection {self.collection_id!r} has {len(assets)} assets; "
-                "set asset_key explicitly (auto-selection disabled for large items)"
+                f"no default asset_key available for collection {self.collection_id!r}; "
+                f"set asset_key explicitly; available_count={len(assets)}"
             )
-        return self._pick_stac_asset_key_heuristic(assets)
-
-    def _pick_stac_asset_key_heuristic(self, assets: dict[str, Any]) -> str:
-        """Pick a STAC asset key using generic heuristics.
-
-        Prefers GeoTIFF-like assets (by href/type), then scores candidates based on
-        roles and common SoilDB naming patterns (mean, COG, 30m, shallow depth).
-        """
-        candidates: list[str] = []
-        for key, asset in assets.items():
-            href = (asset.get("href") or "").lower()
-            media_type = (asset.get("type") or "").lower()
-            if href.endswith((".tif", ".tiff")) or ("tiff" in media_type):
-                candidates.append(key)
-
-        if not candidates:
-            # Fall back to any asset key if none look like GeoTIFF.
-            return sorted(assets.keys())[0]
-
-        def score(key: str) -> tuple[int, int, int, int, int, str]:
-            asset = assets.get(key, {}) or {}
-            key_l = key.lower()
-            roles = [str(r).lower() for r in (asset.get("roles") or [])]
-            media_type = (asset.get("type") or "").lower()
-
-            is_data_role = int(any(r in {"data", "analytic"} for r in roles))
-            is_mean = int("_m_" in f"_{key_l}_")
-            is_30m = int("30m" in key_l)
-            is_shallow = int("b0cm..30cm" in key_l or "0cm..30cm" in key_l)
-            is_cog = int("cloud-optimized" in media_type)
-            return (is_data_role, is_mean, is_cog, is_30m, is_shallow, key)
-
-        return max(candidates, key=score)
+        raise ValueError(
+            f"unknown collection {self.collection_id!r}; set asset_key explicitly; "
+            f"available_count={len(assets)}"
+        )

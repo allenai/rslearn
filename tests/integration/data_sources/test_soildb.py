@@ -70,7 +70,7 @@ def test_materialize_auto_asset(
             "end_datetime": "2022-12-31T00:00:00Z",
         },
         "assets": {
-            # The auto-selection should prefer mean + COG + 30m + shallow.
+            # The per-collection default should match the 30m 0–30cm mean asset.
             f"{collection_id}_m_30m_b0cm..30cm": {
                 "href": asset_url,
                 "type": "image/tiff; profile=cloud-optimized",
