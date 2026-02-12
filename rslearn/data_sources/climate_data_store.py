@@ -481,6 +481,11 @@ class ERA5LandHourly(ERA5Land):
     The fill value used for padding and NaN replacement is read from the layer
     config's ``nodata_vals`` when available, otherwise defaults to FILL_VALUE
     (-9999.0).
+
+    .. note::
+       For single-point or small-region queries, consider using
+       ``ERA5LandHourlyTimeseries`` instead — it is significantly faster because
+       it uses a CDS endpoint optimized for single-point time-series retrieval.
     """
 
     def __init__(
@@ -516,6 +521,12 @@ class ERA5LandHourly(ERA5Land):
         )
         self.base_band_names = extract_base_band_names(self.band_names)
         self.band_names = expand_hourly_band_names(self.base_band_names)
+
+        logger.warning(
+            "ERA5LandHourly downloads full spatial grids and can be slow. "
+            "For single-point or small-region queries, use "
+            "ERA5LandHourlyTimeseries instead."
+        )
 
     def ingest(
         self,

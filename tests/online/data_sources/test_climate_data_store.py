@@ -1,11 +1,14 @@
 import pathlib
 
+import rasterio
 from upath import UPath
 
 from rslearn.config import (
     QueryConfig,
 )
 from rslearn.data_sources.climate_data_store import (
+    FILL_VALUE,
+    MAX_HOURS_PER_MONTH,
     ERA5LandHourly,
     ERA5LandHourlyTimeseries,
     ERA5LandMonthlyMeans,
@@ -83,6 +86,47 @@ class TestERA5LandHourly:
         assert tile_store.is_raster_ready(layer_name, item_0.name, self.EXPANDED_BANDS)
         assert tile_store.is_raster_ready(layer_name, item_1.name, self.EXPANDED_BANDS)
 
+    def test_padding(self, tmp_path: pathlib.Path, seattlefeb2020: STGeometry) -> None:
+        """Test that February (29 days in 2020) is padded to 744 timesteps."""
+        query_config = QueryConfig(max_matches=1)
+        data_source = ERA5LandHourly(
+            band_names=self.TEST_BANDS, bounds=[-122.4, 47.6, -122.3, 47.7]
+        )
+        item_groups = data_source.get_items([seattlefeb2020], query_config)[0]
+        item = item_groups[0][0]
+
+        tile_store_dir = UPath(tmp_path) / "tiles"
+        tile_store_dir.mkdir(parents=True, exist_ok=True)
+        tile_store = DefaultTileStore(str(tile_store_dir))
+        tile_store.set_dataset_path(tile_store_dir)
+        layer_name = "layer"
+
+        data_source.ingest(
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[0],
+            [[seattlefeb2020]],
+        )
+        assert tile_store.is_raster_ready(layer_name, item.name, self.EXPANDED_BANDS)
+
+        # Read raster and verify padding.
+        raster_fname = tile_store._get_raster_fname(
+            layer_name, item.name, self.EXPANDED_BANDS
+        )
+        with rasterio.open(raster_fname) as ds:
+            array = ds.read()
+
+        num_vars = len(self.TEST_BANDS)
+        assert array.shape[0] == MAX_HOURS_PER_MONTH * num_vars
+
+        # Real data: 29 days × 24 hours = 696 timesteps per variable.
+        # In the spatial format, shape is (time * num_vars, height, width).
+        # Padding starts after the real timesteps.
+        real_hours = 29 * 24
+        for t in range(real_hours, MAX_HOURS_PER_MONTH):
+            for v in range(num_vars):
+                band_idx = t * num_vars + v
+                assert (array[band_idx] == FILL_VALUE).all()
+
 
 class TestERA5LandHourlyTimeseries:
     """Tests the ERA5LandHourlyTimeseries data source from the Climate Data Store."""
@@ -120,6 +164,45 @@ class TestERA5LandHourlyTimeseries:
         )
         assert tile_store.is_raster_ready(layer_name, item_0.name, self.EXPANDED_BANDS)
         assert tile_store.is_raster_ready(layer_name, item_1.name, self.EXPANDED_BANDS)
+
+    def test_padding(self, tmp_path: pathlib.Path, seattlefeb2020: STGeometry) -> None:
+        """Test that February (29 days in 2020) is padded to 744 timesteps."""
+        query_config = QueryConfig(max_matches=1)
+        data_source = ERA5LandHourlyTimeseries(band_names=self.TEST_BANDS)
+        item_groups = data_source.get_items([seattlefeb2020], query_config)[0]
+        item = item_groups[0][0]
+
+        tile_store_dir = UPath(tmp_path) / "tiles"
+        tile_store_dir.mkdir(parents=True, exist_ok=True)
+        tile_store = DefaultTileStore(str(tile_store_dir))
+        tile_store.set_dataset_path(tile_store_dir)
+        layer_name = "layer"
+
+        data_source.ingest(
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[0],
+            [[seattlefeb2020]],
+        )
+        assert tile_store.is_raster_ready(layer_name, item.name, self.EXPANDED_BANDS)
+
+        # Read raster and verify padding.
+        raster_fname = tile_store._get_raster_fname(
+            layer_name, item.name, self.EXPANDED_BANDS
+        )
+        with rasterio.open(raster_fname) as ds:
+            array = ds.read()  # (bands, 1, 1)
+
+        num_vars = len(self.TEST_BANDS)
+        assert array.shape[0] == MAX_HOURS_PER_MONTH * num_vars
+
+        # Real data: 29 days × 24 hours = 696 timesteps.
+        # Bands are interleaved: [v0_t000, v1_t000, v0_t001, v1_t001, ...].
+        # All bands from timestep 696 onward should be fill value.
+        real_hours = 29 * 24
+        for t in range(real_hours, MAX_HOURS_PER_MONTH):
+            for v in range(num_vars):
+                band_idx = t * num_vars + v
+                assert (array[band_idx] == FILL_VALUE).all()
 
     def test_grid_snapping(self) -> None:
         """Test that coordinates are correctly snapped to 0.1 degree grid."""
