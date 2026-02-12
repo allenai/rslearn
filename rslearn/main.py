@@ -649,6 +649,7 @@ class IngestHandler:
             data_source = layer_cfg.instantiate_data_source(self.dataset.path)
 
             geometries_by_item: dict = {}
+            seen_items: dict[str, Item] = {}
             for window, layer_datas in windows_and_layer_datas:
                 if layer_name not in layer_datas:
                     continue
@@ -656,12 +657,14 @@ class IngestHandler:
                 layer_data = layer_datas[layer_name]
                 for group in layer_data.serialized_item_groups:
                     for serialized_item in group:
-                        item = data_source.deserialize_item(  # type: ignore
-                            serialized_item
-                        )
-                        if item not in geometries_by_item:
+                        item_name = serialized_item["name"]
+                        if item_name not in seen_items:
+                            item = data_source.deserialize_item(  # type: ignore
+                                serialized_item
+                            )
+                            seen_items[item_name] = item
                             geometries_by_item[item] = []
-                        geometries_by_item[item].append(geometry)
+                        geometries_by_item[seen_items[item_name]].append(geometry)
 
             for item, geometries in geometries_by_item.items():
                 jobs.append((layer_name, layer_cfg, item, geometries))
