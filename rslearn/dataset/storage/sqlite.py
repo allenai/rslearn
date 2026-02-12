@@ -1,5 +1,6 @@
 """SQLite-based window storage backend."""
 
+import functools
 import json
 import os
 import random
@@ -23,9 +24,9 @@ from .storage import WindowStorage, WindowStorageFactory
 
 logger = get_logger(__name__)
 
-# Default retry parameters for handling concurrent access
-DEFAULT_MAX_RETRIES = 10
-DEFAULT_RETRY_DELAY = 0.1  # seconds
+# Retry parameters for handling concurrent access
+MAX_RETRIES = 10
+RETRY_DELAY = 0.1  # seconds
 
 
 def _get_local_path(ds_path: UPath) -> Path:
@@ -48,42 +49,29 @@ def _get_local_path(ds_path: UPath) -> Path:
     return Path(ds_path.path)
 
 
-def _retry_on_locked(
-    func: Callable[[], Any],
-    max_retries: int = DEFAULT_MAX_RETRIES,
-    retry_delay: float = DEFAULT_RETRY_DELAY,
-) -> Any:
-    """Execute a function with retries on database locked errors.
+def _retry_on_locked(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Decorator that retries a method on database locked/busy errors."""
 
-    Args:
-        func: the function to execute.
-        max_retries: maximum number of retries.
-        retry_delay: delay between retries in seconds.
-
-    Returns:
-        the result of the function.
-
-    Raises:
-        sqlite3.OperationalError: if all retries are exhausted.
-    """
-    for attempt in range(max_retries):
-        try:
-            return func()
-        except sqlite3.OperationalError as e:
-            if "locked" in str(e).lower() or "busy" in str(e).lower():
-                if attempt < max_retries:
-                    # Exponential backoff with jitter
-                    sleep_time = retry_delay * (2**attempt) * random.uniform(0.5, 1.0)
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        for attempt in range(MAX_RETRIES):
+            try:
+                return func(*args, **kwargs)
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e).lower() or "busy" in str(e).lower():
+                    sleep_time = RETRY_DELAY * (2**attempt) * random.uniform(0.5, 1.0)
                     logger.debug(
                         f"Database locked, retrying in {sleep_time:.3f}s "
-                        f"(attempt {attempt + 1}/{max_retries + 1})"
+                        f"(attempt {attempt + 1}/{MAX_RETRIES + 1})"
                     )
                     time.sleep(sleep_time)
-                continue
-            raise
+                    continue
+                raise
 
-    # Call without try/except for final retry.
-    return func()
+        # Call without try/except for final retry.
+        return func(*args, **kwargs)
+
+    return wrapper
 
 
 class SQLiteWindowStorage(WindowStorage):
@@ -95,19 +83,17 @@ class SQLiteWindowStorage(WindowStorage):
 
     DB_FILENAME = "windows.sqlite3"
 
-    def __init__(self, path: UPath, max_retries: int = DEFAULT_MAX_RETRIES):
+    def __init__(self, path: UPath):
         """Create a new SQLiteWindowStorage.
 
         Args:
             path: the path to the dataset (must be a local filesystem path).
-            max_retries: maximum number of retries for concurrent access errors.
 
         Raises:
             ValueError: if the path is not a local filesystem path.
         """
         self.path = path
         self.db_path = _get_local_path(path) / self.DB_FILENAME
-        self.max_retries = max_retries
         self._conn: sqlite3.Connection | None = None
         self._conn_pid: int | None = None
         self._init_db()
@@ -137,79 +123,77 @@ class SQLiteWindowStorage(WindowStorage):
             self._conn_pid = pid
         return self._conn
 
+    @_retry_on_locked
     def _init_db(self) -> None:
         """Initialize the database schema if it doesn't exist."""
+        conn = self._get_connection()
+        # Windows table stores window metadata
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS windows (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_name TEXT NOT NULL,
+                name TEXT NOT NULL,
+                crs TEXT NOT NULL,
+                x_resolution REAL NOT NULL,
+                y_resolution REAL NOT NULL,
+                bounds_x1 INTEGER NOT NULL,
+                bounds_y1 INTEGER NOT NULL,
+                bounds_x2 INTEGER NOT NULL,
+                bounds_y2 INTEGER NOT NULL,
+                time_start TEXT,
+                time_end TEXT,
+                options_json TEXT NOT NULL,
+                UNIQUE(group_name, name)
+            )
+        """)
+        # Index for faster lookups
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_windows_group
+            ON windows(group_name)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_windows_name
+            ON windows(name)
+        """)
 
-        def init() -> None:
-            conn = self._get_connection()
-            # Windows table stores window metadata
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS windows (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    group_name TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    crs TEXT NOT NULL,
-                    x_resolution REAL NOT NULL,
-                    y_resolution REAL NOT NULL,
-                    bounds_x1 INTEGER NOT NULL,
-                    bounds_y1 INTEGER NOT NULL,
-                    bounds_x2 INTEGER NOT NULL,
-                    bounds_y2 INTEGER NOT NULL,
-                    time_start TEXT,
-                    time_end TEXT,
-                    options_json TEXT NOT NULL,
-                    UNIQUE(group_name, name)
-                )
-            """)
-            # Index for faster lookups
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_windows_group
-                ON windows(group_name)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_windows_name
-                ON windows(name)
-            """)
+        # Layer datas table stores items.json content per window
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS layer_datas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_name TEXT NOT NULL,
+                window_name TEXT NOT NULL,
+                layer_name TEXT NOT NULL,
+                data_json TEXT NOT NULL,
+                UNIQUE(group_name, window_name, layer_name)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_layer_datas_window
+            ON layer_datas(group_name, window_name)
+        """)
 
-            # Layer datas table stores items.json content per window
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS layer_datas (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    group_name TEXT NOT NULL,
-                    window_name TEXT NOT NULL,
-                    layer_name TEXT NOT NULL,
-                    data_json TEXT NOT NULL,
-                    UNIQUE(group_name, window_name, layer_name)
-                )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_layer_datas_window
-                ON layer_datas(group_name, window_name)
-            """)
-
-            # Completed layers table tracks which layers are completed
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS completed_layers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    group_name TEXT NOT NULL,
-                    window_name TEXT NOT NULL,
-                    layer_name TEXT NOT NULL,
-                    group_idx INTEGER NOT NULL DEFAULT 0,
-                    UNIQUE(group_name, window_name, layer_name, group_idx)
-                )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_completed_layers_window
-                ON completed_layers(group_name, window_name)
-            """)
-
-        _retry_on_locked(init, self.max_retries)
+        # Completed layers table tracks which layers are completed
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS completed_layers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_name TEXT NOT NULL,
+                window_name TEXT NOT NULL,
+                layer_name TEXT NOT NULL,
+                group_idx INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(group_name, window_name, layer_name, group_idx)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_completed_layers_window
+            ON completed_layers(group_name, window_name)
+        """)
 
     @override
     def get_window_root(self, group: str, name: str) -> UPath:
         """Get the path where the window should be stored."""
         return Window.get_window_root(self.path, group, name)
 
+    @_retry_on_locked
     @override
     def get_windows(
         self,
@@ -222,67 +206,64 @@ class SQLiteWindowStorage(WindowStorage):
             groups: an optional list of groups to filter loading
             names: an optional list of window names to filter loading
         """
+        conn = self._get_connection()
+        query = """
+            SELECT group_name, name, crs, x_resolution, y_resolution,
+                   bounds_x1, bounds_y1, bounds_x2, bounds_y2,
+                   time_start, time_end, options_json
+            FROM windows
+        """
+        conditions: list[str] = []
+        params: list[str] = []
 
-        def load() -> list[Window]:
-            conn = self._get_connection()
-            query = """
-                SELECT group_name, name, crs, x_resolution, y_resolution,
-                       bounds_x1, bounds_y1, bounds_x2, bounds_y2,
-                       time_start, time_end, options_json
-                FROM windows
-            """
-            conditions: list[str] = []
-            params: list[str] = []
+        if groups:
+            placeholders = ",".join("?" * len(groups))
+            conditions.append(f"group_name IN ({placeholders})")
+            params.extend(groups)
 
-            if groups:
-                placeholders = ",".join("?" * len(groups))
-                conditions.append(f"group_name IN ({placeholders})")
-                params.extend(groups)
+        if names:
+            placeholders = ",".join("?" * len(names))
+            conditions.append(f"name IN ({placeholders})")
+            params.extend(names)
 
-            if names:
-                placeholders = ",".join("?" * len(names))
-                conditions.append(f"name IN ({placeholders})")
-                params.extend(names)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
 
-            if conditions:
-                query += " WHERE " + " AND ".join(conditions)
-
-            cursor = conn.execute(query, params)
-            windows = []
-            for row in cursor.fetchall():
-                projection = Projection(
-                    crs=CRS.from_string(row["crs"]),
-                    x_resolution=row["x_resolution"],
-                    y_resolution=row["y_resolution"],
+        cursor = conn.execute(query, params)
+        windows = []
+        for row in cursor.fetchall():
+            projection = Projection(
+                crs=CRS.from_string(row["crs"]),
+                x_resolution=row["x_resolution"],
+                y_resolution=row["y_resolution"],
+            )
+            bounds = (
+                row["bounds_x1"],
+                row["bounds_y1"],
+                row["bounds_x2"],
+                row["bounds_y2"],
+            )
+            time_range = None
+            if row["time_start"] and row["time_end"]:
+                time_range = (
+                    datetime.fromisoformat(row["time_start"]),
+                    datetime.fromisoformat(row["time_end"]),
                 )
-                bounds = (
-                    row["bounds_x1"],
-                    row["bounds_y1"],
-                    row["bounds_x2"],
-                    row["bounds_y2"],
-                )
-                time_range = None
-                if row["time_start"] and row["time_end"]:
-                    time_range = (
-                        datetime.fromisoformat(row["time_start"]),
-                        datetime.fromisoformat(row["time_end"]),
-                    )
-                options = json.loads(row["options_json"])
+            options = json.loads(row["options_json"])
 
-                window = Window(
-                    storage=self,
-                    group=row["group_name"],
-                    name=row["name"],
-                    projection=projection,
-                    bounds=bounds,
-                    time_range=time_range,
-                    options=options,
-                )
-                windows.append(window)
-            return windows
+            window = Window(
+                storage=self,
+                group=row["group_name"],
+                name=row["name"],
+                projection=projection,
+                bounds=bounds,
+                time_range=time_range,
+                options=options,
+            )
+            windows.append(window)
+        return windows
 
-        return _retry_on_locked(load, self.max_retries)
-
+    @_retry_on_locked
     @override
     def create_or_update_window(self, window: Window) -> None:
         """Create or update the window."""
@@ -293,182 +274,156 @@ class SQLiteWindowStorage(WindowStorage):
             time_end = window.time_range[1].isoformat()
         options_json = json.dumps(window.options)
 
-        def upsert() -> None:
-            conn = self._get_connection()
-            try:
-                conn.execute("BEGIN IMMEDIATE")
-                conn.execute(
-                    """
-                    INSERT INTO windows (
-                        group_name, name, crs, x_resolution, y_resolution,
-                        bounds_x1, bounds_y1, bounds_x2, bounds_y2,
-                        time_start, time_end, options_json
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(group_name, name)
-                    DO UPDATE SET
-                        crs = excluded.crs,
-                        x_resolution = excluded.x_resolution,
-                        y_resolution = excluded.y_resolution,
-                        bounds_x1 = excluded.bounds_x1,
-                        bounds_y1 = excluded.bounds_y1,
-                        bounds_x2 = excluded.bounds_x2,
-                        bounds_y2 = excluded.bounds_y2,
-                        time_start = excluded.time_start,
-                        time_end = excluded.time_end,
-                        options_json = excluded.options_json
-                    """,
-                    (
-                        window.group,
-                        window.name,
-                        window.projection.crs.to_string(),
-                        window.projection.x_resolution,
-                        window.projection.y_resolution,
-                        window.bounds[0],
-                        window.bounds[1],
-                        window.bounds[2],
-                        window.bounds[3],
-                        time_start,
-                        time_end,
-                        options_json,
-                    ),
+        conn = self._get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """
+                INSERT INTO windows (
+                    group_name, name, crs, x_resolution, y_resolution,
+                    bounds_x1, bounds_y1, bounds_x2, bounds_y2,
+                    time_start, time_end, options_json
                 )
-                conn.execute("COMMIT")
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
-
-        _retry_on_locked(upsert, self.max_retries)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(group_name, name)
+                DO UPDATE SET
+                    crs = excluded.crs,
+                    x_resolution = excluded.x_resolution,
+                    y_resolution = excluded.y_resolution,
+                    bounds_x1 = excluded.bounds_x1,
+                    bounds_y1 = excluded.bounds_y1,
+                    bounds_x2 = excluded.bounds_x2,
+                    bounds_y2 = excluded.bounds_y2,
+                    time_start = excluded.time_start,
+                    time_end = excluded.time_end,
+                    options_json = excluded.options_json
+                """,
+                (
+                    window.group,
+                    window.name,
+                    window.projection.crs.to_string(),
+                    window.projection.x_resolution,
+                    window.projection.y_resolution,
+                    window.bounds[0],
+                    window.bounds[1],
+                    window.bounds[2],
+                    window.bounds[3],
+                    time_start,
+                    time_end,
+                    options_json,
+                ),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
         logger.debug(f"Saved window {window.group}/{window.name} to SQLite")
 
+    @_retry_on_locked
     @override
     def get_layer_datas(self, group: str, name: str) -> dict[str, WindowLayerData]:
         """Get the window layer datas for the specified window."""
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            SELECT layer_name, data_json FROM layer_datas
+            WHERE group_name = ? AND window_name = ?
+            """,
+            (group, name),
+        )
+        result = {}
+        for row in cursor.fetchall():
+            data = json.loads(row["data_json"])
+            layer_data = WindowLayerData.deserialize(data)
+            result[layer_data.layer_name] = layer_data
+        return result
 
-        def load() -> dict[str, WindowLayerData]:
-            conn = self._get_connection()
-            cursor = conn.execute(
-                """
-                SELECT layer_name, data_json FROM layer_datas
-                WHERE group_name = ? AND window_name = ?
-                """,
-                (group, name),
-            )
-            result = {}
-            for row in cursor.fetchall():
-                data = json.loads(row["data_json"])
-                layer_data = WindowLayerData.deserialize(data)
-                result[layer_data.layer_name] = layer_data
-            return result
-
-        return _retry_on_locked(load, self.max_retries)
-
+    @_retry_on_locked
     @override
     def save_layer_datas(
         self, group: str, name: str, layer_datas: dict[str, WindowLayerData]
     ) -> None:
         """Set the window layer datas for the specified window."""
-
-        def save() -> None:
-            conn = self._get_connection()
-            try:
-                conn.execute("BEGIN IMMEDIATE")
-                # Delete existing layer datas for this window
+        conn = self._get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            # Delete existing layer datas for this window
+            conn.execute(
+                "DELETE FROM layer_datas WHERE group_name = ? AND window_name = ?",
+                (group, name),
+            )
+            # Insert new layer datas
+            for layer_data in layer_datas.values():
+                data_json = json.dumps(layer_data.serialize())
                 conn.execute(
-                    "DELETE FROM layer_datas WHERE group_name = ? AND window_name = ?",
-                    (group, name),
+                    """
+                    INSERT INTO layer_datas (group_name, window_name, layer_name, data_json)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (group, name, layer_data.layer_name, data_json),
                 )
-                # Insert new layer datas
-                for layer_data in layer_datas.values():
-                    data_json = json.dumps(layer_data.serialize())
-                    conn.execute(
-                        """
-                        INSERT INTO layer_datas (group_name, window_name, layer_name, data_json)
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        (group, name, layer_data.layer_name, data_json),
-                    )
-                conn.execute("COMMIT")
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
-
-        _retry_on_locked(save, self.max_retries)
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
         logger.info(f"Saved layer datas for {group}/{name} to SQLite")
 
+    @_retry_on_locked
     @override
     def list_completed_layers(self, group: str, name: str) -> list[tuple[str, int]]:
         """List the layers available for this window that are completed."""
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            SELECT layer_name, group_idx FROM completed_layers
+            WHERE group_name = ? AND window_name = ?
+            """,
+            (group, name),
+        )
+        return [(row["layer_name"], row["group_idx"]) for row in cursor.fetchall()]
 
-        def load() -> list[tuple[str, int]]:
-            conn = self._get_connection()
-            cursor = conn.execute(
-                """
-                SELECT layer_name, group_idx FROM completed_layers
-                WHERE group_name = ? AND window_name = ?
-                """,
-                (group, name),
-            )
-            return [(row["layer_name"], row["group_idx"]) for row in cursor.fetchall()]
-
-        return _retry_on_locked(load, self.max_retries)
-
+    @_retry_on_locked
     @override
     def is_layer_completed(
         self, group: str, name: str, layer_name: str, group_idx: int = 0
     ) -> bool:
         """Check whether the specified layer is completed in the given window."""
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            SELECT 1 FROM completed_layers
+            WHERE group_name = ? AND window_name = ? AND layer_name = ? AND group_idx = ?
+            """,
+            (group, name, layer_name, group_idx),
+        )
+        return cursor.fetchone() is not None
 
-        def check() -> bool:
-            conn = self._get_connection()
-            cursor = conn.execute(
-                """
-                SELECT 1 FROM completed_layers
-                WHERE group_name = ? AND window_name = ? AND layer_name = ? AND group_idx = ?
-                """,
-                (group, name, layer_name, group_idx),
-            )
-            return cursor.fetchone() is not None
-
-        return _retry_on_locked(check, self.max_retries)
-
+    @_retry_on_locked
     @override
     def mark_layer_completed(
         self, group: str, name: str, layer_name: str, group_idx: int = 0
     ) -> None:
         """Mark the specified layer completed for the given window."""
-
-        def mark() -> None:
-            conn = self._get_connection()
-            try:
-                conn.execute("BEGIN IMMEDIATE")
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO completed_layers (group_name, window_name, layer_name, group_idx)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (group, name, layer_name, group_idx),
-                )
-                conn.execute("COMMIT")
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
-
-        _retry_on_locked(mark, self.max_retries)
+        conn = self._get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO completed_layers (group_name, window_name, layer_name, group_idx)
+                VALUES (?, ?, ?, ?)
+                """,
+                (group, name, layer_name, group_idx),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
 
 
 class SQLiteWindowStorageFactory(WindowStorageFactory):
     """Factory class for SQLiteWindowStorage."""
 
-    def __init__(self, max_retries: int = DEFAULT_MAX_RETRIES):
-        """Create a new SQLiteWindowStorageFactory.
-
-        Args:
-            max_retries: maximum number of retries for concurrent access errors.
-        """
-        self.max_retries = max_retries
-
     @override
     def get_storage(self, ds_path: UPath) -> SQLiteWindowStorage:
         """Get a SQLiteWindowStorage for the given dataset path."""
-        return SQLiteWindowStorage(ds_path, self.max_retries)
+        return SQLiteWindowStorage(ds_path)
