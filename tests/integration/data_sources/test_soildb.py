@@ -180,5 +180,5 @@ def test_requires_explicit_asset_key_when_disabled(
     )
 
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
-    with pytest.raises(ValueError, match="requires asset_key"):
+    with pytest.raises(ValueError, match="no default asset_key available"):
         data_source.get_items([seattle2020], query_config)

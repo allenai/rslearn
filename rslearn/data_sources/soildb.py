@@ -64,9 +64,9 @@ SOILDB_COLLECTIONS: dict[str, dict[str, str]] = {
 # For most SoilDB collections, the STAC item exposes a consistent set of assets and
 # we default to the mean, 30m, 0–30cm depth GeoTIFF asset.
 #
-# For `soil.types_ensemble_probabilities`, the item contains many assets (one per
-# soil type), so a meaningful default doesn't exist; users must specify asset_key.
-SOILDB_DEFAULT_ASSET_KEY_CANDIDATES: dict[str, list[str] | None] = {
+# For other collections (including `soil.types_ensemble_probabilities`), users must
+# specify asset_key explicitly.
+SOILDB_DEFAULT_ASSET_KEY_CANDIDATES: dict[str, list[str]] = {
     "bd.core_iso.11272.2017.g.cm3": ["bd.core_iso.11272.2017.g.cm3_m_30m_b0cm..30cm"],
     "oc_iso.10694.1995.wpml": ["oc_iso.10694.1995.wpml_m_30m_b0cm..30cm"],
     "oc_iso.10694.1995.mg.cm3": ["oc_iso.10694.1995.mg.cm3_m_30m_b0cm..30cm"],
@@ -74,7 +74,6 @@ SOILDB_DEFAULT_ASSET_KEY_CANDIDATES: dict[str, list[str] | None] = {
     "clay.tot_iso.11277.2020.wpct": ["clay.tot_iso.11277.2020.wpct_m_30m_b0cm..30cm"],
     "sand.tot_iso.11277.2020.wpct": ["sand.tot_iso.11277.2020.wpct_m_30m_b0cm..30cm"],
     "silt.tot_iso.11277.2020.wpct": ["silt.tot_iso.11277.2020.wpct_m_30m_b0cm..30cm"],
-    "soil.types_ensemble_probabilities": None,
 }
 
 
@@ -103,9 +102,8 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
         Args:
             collection_id: SoilDB STAC collection id (e.g. "clay.tot_iso.11277.2020.wpct").
             asset_key: STAC asset key to read. If not set, chooses a default
-                GeoTIFF/COG asset for known collections (typically mean, 30m, 0–30cm).
-                For unknown collections or those without a meaningful default, this
-                must be set explicitly.
+                GeoTIFF/COG asset for collections that define one (typically mean,
+                30m, 0–30cm). Otherwise this must be set explicitly.
             band_name: band name to use if the layer config is missing from context.
             catalog_url: OpenLandMap static STAC catalog.json URL.
             collection_url: optional override for the collection.json URL.
@@ -332,26 +330,20 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
 
         This method implements SoilDB-specific selection logic:
         - Some collections have a per-collection default asset key (or short list).
-        - Some collections require an explicit asset key (no meaningful default).
-        - For unknown collections, an explicit asset key is required.
+        - Otherwise, an explicit asset key is required.
         """
         candidates = SOILDB_DEFAULT_ASSET_KEY_CANDIDATES.get(self.collection_id)
-        if candidates is None and self.collection_id in SOILDB_DEFAULT_ASSET_KEY_CANDIDATES:
-            raise ValueError(
-                f"collection {self.collection_id!r} requires asset_key to be set explicitly"
-            )
-
-        if candidates:
-            for k in candidates:
-                if k in assets:
-                    return k
-
-        if self.collection_id in SOILDB_DEFAULT_ASSET_KEY_CANDIDATES:
+        if not candidates:
             raise ValueError(
                 f"no default asset_key available for collection {self.collection_id!r}; "
-                f"set asset_key explicitly; available_count={len(assets)}"
+                "set asset_key explicitly"
             )
+
+        for k in candidates:
+            if k in assets:
+                return k
+
         raise ValueError(
-            f"unknown collection {self.collection_id!r}; set asset_key explicitly; "
-            f"available_count={len(assets)}"
+            f"default asset_key candidates not found in STAC item for collection {self.collection_id!r}; "
+            f"candidates={candidates!r}; set asset_key explicitly"
         )
