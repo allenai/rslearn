@@ -159,11 +159,6 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
         """Get the URL to read the requested asset from."""
         item = self.get_item_by_name(item_name)
         if asset_key not in item.asset_urls:
-            # Backwards-compat: accept the resolved STAC asset key (when user passed
-            # an explicit asset_key and internal naming changed to AUTO_ASSET_KEY).
-            stac_asset_key = item.properties.get("stac_asset_key")
-            if isinstance(stac_asset_key, str) and asset_key == stac_asset_key:
-                return item.asset_urls[self.AUTO_ASSET_KEY]
             raise KeyError(
                 f"asset_key {asset_key!r} not available for item {item_name!r}; "
                 f"available={sorted(item.asset_urls.keys())}"
