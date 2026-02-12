@@ -19,16 +19,19 @@ LAYERS_DIRECTORY_NAME = "layers"
 def get_window_layer_dir(
     window_path: UPath, layer_name: str, group_idx: int = 0
 ) -> UPath:
-    """Get the directory containing materialized data for the specified layer.
+    """Get the directory containing materialized data for the specified item group.
+
+    A layer may have multiple item groups (different timesteps/mosaics). The directory
+    for group_idx=0 is named after the layer (e.g. ``layers/sentinel2``), while
+    subsequent groups append the index (e.g. ``layers/sentinel2.1``).
 
     Args:
         window_path: the window directory.
         layer_name: the layer name.
-        group_idx: the index of the group within the layer to get the directory
-            for (default 0).
+        group_idx: the item group index within the layer (default 0).
 
     Returns:
-        the path where data is or should be materialized.
+        the path where data for this item group is or should be materialized.
     """
     if group_idx == 0:
         folder_name = layer_name
@@ -38,13 +41,16 @@ def get_window_layer_dir(
 
 
 def get_layer_and_group_from_dir_name(layer_dir_name: str) -> tuple[str, int]:
-    """Get the layer name and group index from the layer directory name.
+    """Parse a layer directory name (or item group specifier) into layer name and group index.
+
+    The input can be a plain layer name like ``"sentinel2"`` (returns group_idx=0) or
+    an item group specifier like ``"sentinel2.1"`` (returns group_idx=1).
 
     Args:
-        layer_dir_name: the name of the layer folder.
+        layer_dir_name: the directory name or item group specifier to parse.
 
     Returns:
-        a tuple (layer_name, group_idx)
+        a tuple (layer_name, group_idx).
     """
     if "." in layer_dir_name:
         parts = layer_dir_name.split(".")
@@ -60,17 +66,17 @@ def get_layer_and_group_from_dir_name(layer_dir_name: str) -> tuple[str, int]:
 def get_window_raster_dir(
     window_path: UPath, layer_name: str, bands: list[str], group_idx: int = 0
 ) -> UPath:
-    """Get the directory where the raster is materialized.
+    """Get the directory where the raster is materialized for a specific item group.
 
     Args:
         window_path: the window directory.
-        layer_name: the layer name
+        layer_name: the layer name.
         bands: the bands in the raster. It should match a band set defined for this
             layer.
-        group_idx: the index of the group within the layer.
+        group_idx: the item group index within the layer (default 0).
 
     Returns:
-        the directory containing the raster.
+        the directory containing the raster for this item group.
     """
     dirname = get_bandset_dirname(bands)
     return get_window_layer_dir(window_path, layer_name, group_idx) / dirname
@@ -181,73 +187,69 @@ class Window:
         self.storage.save_layer_datas(self.group, self.name, layer_datas)
 
     def list_completed_layers(self) -> list[tuple[str, int]]:
-        """List the layers available for this window that are completed.
+        """List the completed (materialized) item groups for this window.
 
         Returns:
-            a list of (layer_name, group_idx) completed layers.
+            a list of (layer_name, group_idx) tuples identifying completed item groups.
         """
         return self.storage.list_completed_layers(self.group, self.name)
 
     def get_layer_dir(self, layer_name: str, group_idx: int = 0) -> UPath:
-        """Get the directory containing materialized data for the specified layer.
+        """Get the directory containing materialized data for the specified item group.
 
         Args:
             layer_name: the layer name.
-            group_idx: the index of the group within the layer to get the directory
-                for (default 0).
+            group_idx: the item group index within the layer (default 0).
 
         Returns:
-            the path where data is or should be materialized.
+            the path where data for this item group is or should be materialized.
         """
         return get_window_layer_dir(
             self.storage.get_window_root(self.group, self.name), layer_name, group_idx
         )
 
     def is_layer_completed(self, layer_name: str, group_idx: int = 0) -> bool:
-        """Check whether the specified layer is completed.
-
-        Completed means there is data in the layer and the data has been written
-        (materialized).
+        """Check whether the specified item group is completed (materialized).
 
         Args:
             layer_name: the layer name.
-            group_idx: the index of the group within the layer.
+            group_idx: the item group index within the layer (default 0).
 
         Returns:
-            whether the layer is completed
+            whether the item group is completed.
         """
         return self.storage.is_layer_completed(
             self.group, self.name, layer_name, group_idx
         )
 
     def mark_layer_completed(self, layer_name: str, group_idx: int = 0) -> None:
-        """Mark the specified layer completed.
+        """Mark the specified item group completed.
 
-        This must be done after the contents of the layer have been written. If a layer
-        has multiple groups, the caller should wait until the contents of all groups
-        have been written before marking them completed; this is because, when
-        materializing a window, we skip materialization if the first group
+        This must be done after the contents of the item group have been written. If a
+        layer has multiple item groups, the caller should wait until the contents of all
+        groups have been written before marking them completed; this is because, when
+        materializing a window, we skip materialization if the first item group
         (group_idx=0) is marked completed.
 
         Args:
             layer_name: the layer name.
-            group_idx: the index of the group within the layer.
+            group_idx: the item group index within the layer (default 0).
         """
         self.storage.mark_layer_completed(self.group, self.name, layer_name, group_idx)
 
     def get_raster_dir(
         self, layer_name: str, bands: list[str], group_idx: int = 0
     ) -> UPath:
-        """Get the directory where the raster is materialized.
+        """Get the directory where the raster is materialized for a specific item group.
 
         Args:
-            layer_name: the layer name
+            layer_name: the layer name.
             bands: the bands in the raster. It should match a band set defined for this
                 layer.
-            group_idx: the index of the group within the layer.
+            group_idx: the item group index within the layer (default 0).
 
         Returns:
-            the directory containing the raster.
+            the directory containing the raster for this item group.
         """
         return get_window_raster_dir(
             self.storage.get_window_root(self.group, self.name),
