@@ -147,7 +147,7 @@ def test_with_worldcereal_dir(
         raster_data = tile_store.read_raster(
             layer_name, item.name, [band], seattle2020.projection, bounds
         )
-        assert raster_data.max() == 1
+        assert raster_data.get_chw_array().max() == 1
         print(f"Succeeded for {band}")
 
 

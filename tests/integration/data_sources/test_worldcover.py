@@ -137,7 +137,7 @@ def run_test_with_worldcover_dir(
     raster_data = tile_store.read_raster(
         layer_name, item.name, [TEST_BAND], seattle2020.projection, bounds
     )
-    assert raster_data.max() == 1
+    assert raster_data.get_chw_array().max() == 1
 
 
 def test_local_worldcover_dir(

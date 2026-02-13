@@ -183,7 +183,7 @@ def test_sentinel2_ingest(
     array = tile_store.read_raster(
         layer_name, item.name, ["B04"], seattle2020.projection, bounds
     )
-    assert array.max() == expected_value
+    assert array.get_chw_array().max() == expected_value
 
 
 @HARMONIZATION_PARAMS
@@ -247,8 +247,9 @@ def test_sentinel2_materialize(
     assert (raster_dir / "geotiff.tif").exists()
 
     # Read back and verify pixel values match expected harmonization behavior.
-    array = GeotiffRasterFormat().decode_raster(
+    raster_array = GeotiffRasterFormat().decode_raster(
         raster_dir, seattle2020.projection, bounds
     )
+    array = raster_array.get_chw_array()
     assert array.shape == (1, bounds[3] - bounds[1], bounds[2] - bounds[0])
     assert array.max() == expected_value

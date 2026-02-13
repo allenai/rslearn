@@ -202,14 +202,9 @@ class TestLocalFiles:
         materialized_image = GeotiffRasterFormat().decode_raster(
             raster_dir, window.projection, window.bounds
         )
-        assert (
-            materialized_image[0, :, :].min() == 0
-            and materialized_image[0, :, :].max() == 0
-        )
-        assert (
-            materialized_image[1, :, :].min() == 1
-            and materialized_image[1, :, :].max() == 1
-        )
+        arr = materialized_image.get_chw_array()
+        assert arr[0, :, :].min() == 0 and arr[0, :, :].max() == 0
+        assert arr[1, :, :].min() == 1 and arr[1, :, :].max() == 1
 
 
 class TestCoordinateModes:

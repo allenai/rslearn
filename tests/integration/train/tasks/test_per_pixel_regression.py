@@ -225,10 +225,14 @@ def test_per_pixel_regression_prediction_writes_to_dataset(
     # Verify that predictions were written to the dataset.
     window = regression_dataset.load_windows()[0]
     assert window.is_layer_completed("predictions")
-    array = GeotiffRasterFormat().decode_raster(
-        window.get_raster_dir("predictions", ["value"]),
-        window.projection,
-        window.bounds,
+    array = (
+        GeotiffRasterFormat()
+        .decode_raster(
+            window.get_raster_dir("predictions", ["value"]),
+            window.projection,
+            window.bounds,
+        )
+        .get_chw_array()
     )
     assert array.shape == (1, 32, 32)
 

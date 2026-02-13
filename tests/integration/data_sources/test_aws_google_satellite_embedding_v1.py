@@ -147,7 +147,7 @@ def test_ingest(
     array = tile_store.read_raster(
         layer_name, item.name, BANDS, seattle2020.projection, bounds
     )
-    assert array.max() == expected_value
+    assert array.get_chw_array().max() == expected_value
 
 
 @pytest.mark.parametrize(
@@ -203,4 +203,4 @@ def test_materialize(
         projection=seattle2020.projection,
         bounds=bounds,
     )
-    assert array.max() == expected_value
+    assert array.get_chw_array().max() == expected_value
