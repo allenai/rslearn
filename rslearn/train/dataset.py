@@ -515,17 +515,6 @@ def read_data_input(
             if expected_timestamps is None:
                 expected_timestamps = compute_expected_timestamps(window, layer_config)
 
-        # Sort images and time_ranges chronologically by actual timestamp
-        # This ensures the T dimension is temporally ordered (oldest first)
-        if time_ranges[0] is not None:
-            # Create list of (time_range, image) tuples and sort by time_range start
-            sorted_pairs = sorted(
-                zip(time_ranges, images),
-                key=lambda x: x[0][0] if x[0] is not None else datetime.min,
-            )
-            time_ranges = [pair[0] for pair in sorted_pairs]
-            images = [pair[1] for pair in sorted_pairs]
-
         return RasterImage(
             torch.stack(images, dim=1),
             time_ranges if time_ranges[0] is not None else None,  # type: ignore
