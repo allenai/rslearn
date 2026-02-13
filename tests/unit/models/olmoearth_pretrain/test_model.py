@@ -3,7 +3,7 @@
 from datetime import datetime
 
 import torch
-from olmoearth_pretrain.train.masking import MaskValue
+from olmoearth_pretrain.datatypes import MaskValue
 
 from rslearn.models.attention_pooling import AttentionPool, SimpleAttentionPool
 from rslearn.models.olmoearth_pretrain.model import OlmoEarth

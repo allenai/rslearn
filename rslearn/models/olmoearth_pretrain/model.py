@@ -10,13 +10,13 @@ import torch
 from einops import rearrange
 from olmo_core.config import Config
 from olmoearth_pretrain.data.constants import Modality
+from olmoearth_pretrain.datatypes import MaskedOlmoEarthSample, MaskValue
 from olmoearth_pretrain.model_loader import (
     ModelID,
     load_model_from_id,
     load_model_from_path,
 )
 from olmoearth_pretrain.nn.flexihelios import Encoder, TokensAndMasks
-from olmoearth_pretrain.train.masking import MaskedOlmoEarthSample, MaskValue
 from upath import UPath
 
 from rslearn.log_utils import get_logger
