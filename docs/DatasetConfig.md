@@ -556,8 +556,6 @@ Only the keys documented below are supported in `init_args`; unknown keys will r
   // Retry settings for EarthDaily API client requests (search/get item).
   "max_retries": 3,
   "retry_backoff_factor": 5.0,
-  // EarthDaily service name (only "platform" is supported).
-  "service_name": "platform"
 }
 ```
 

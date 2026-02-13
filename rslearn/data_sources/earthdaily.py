@@ -99,7 +99,6 @@ class EarthDaily(DataSource, TileStore):
         cache_dir: str | None = None,
         max_retries: int = 3,
         retry_backoff_factor: float = 5.0,
-        service_name: Literal["platform"] = "platform",
         context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new EarthDaily instance.
@@ -122,8 +121,6 @@ class EarthDaily(DataSource, TileStore):
             retry_backoff_factor: backoff factor for exponential retry delays between HTTP
                 request attempts.  The delay between retries is calculated using the formula:
                 `(retry_backoff_factor * (2 ** (retry_count - 1)))` seconds.
-            service_name: the service name, only "platform" is supported, the other
-                services "legacy" and "internal" are not supported.
             context: the data source context.
         """
         self.collection_name = collection_name
@@ -135,7 +132,6 @@ class EarthDaily(DataSource, TileStore):
         self.skip_items_missing_assets = skip_items_missing_assets
         self.max_retries = max_retries
         self.retry_backoff_factor = retry_backoff_factor
-        self.service_name = service_name
 
         if cache_dir is not None:
             # Use dataset path as root if provided.
@@ -172,11 +168,8 @@ class EarthDaily(DataSource, TileStore):
             )
         )
 
-        if self.service_name == "platform":
-            self.client = self.eds_client.platform.pystac_client
-            self.collection = self.client.get_collection(self.collection_name)
-        else:
-            raise ValueError(f"Invalid service name: {self.service_name}")
+        self.client = self.eds_client.platform.pystac_client
+        self.collection = self.client.get_collection(self.collection_name)
 
         return self.eds_client, self.client, self.collection
 
@@ -636,7 +629,6 @@ class Sentinel2(EarthDaily):
         cache_dir: str | None = None,
         max_retries: int = 3,
         retry_backoff_factor: float = 5.0,
-        service_name: Literal["platform"] = "platform",
         context: DataSourceContext = DataSourceContext(),
     ) -> None:
         """Initialize an EarthDaily Sentinel-2 data source.
@@ -663,7 +655,6 @@ class Sentinel2(EarthDaily):
             cache_dir: optional directory to cache item metadata by item id.
             max_retries: max retries for EarthDaily API client (search/get item).
             retry_backoff_factor: backoff factor for EarthDaily API client retries.
-            service_name: EarthDaily service name (only "platform" supported).
             context: rslearn data source context.
             apply_scale_offset: apply per-asset scale/offset metadata from STAC
                 `raster:bands` (defaults to True). Set to False to use raw values.
@@ -693,7 +684,6 @@ class Sentinel2(EarthDaily):
             cache_dir=cache_dir,
             max_retries=max_retries,
             retry_backoff_factor=retry_backoff_factor,
-            service_name=service_name,
             context=context,
         )
 
