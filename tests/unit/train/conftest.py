@@ -13,6 +13,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 from rslearn.utils.vector_format import GeojsonVectorFormat
 
@@ -87,8 +88,9 @@ def add_window(
 
     for (layer_name, group_idx), image in images.items():
         raster_dir = window.get_raster_dir(layer_name, ["band"], group_idx=group_idx)
+        raster = RasterArray(chw_array=image)
         GeotiffRasterFormat().encode_raster(
-            raster_dir, window.projection, window.bounds, image
+            raster_dir, window.projection, window.bounds, raster
         )
         window.mark_layer_completed(layer_name, group_idx=group_idx)
 

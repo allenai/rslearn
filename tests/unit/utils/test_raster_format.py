@@ -1,4 +1,5 @@
 import pathlib
+from datetime import UTC, datetime
 
 import numpy as np
 import pytest
@@ -7,6 +8,7 @@ from rasterio.crs import CRS
 from upath import UPath
 
 from rslearn.utils.geometry import Projection
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
@@ -22,7 +24,7 @@ def test_geotiff_tiling(tmp_path: pathlib.Path) -> None:
     array = np.zeros((1, 60, 64), dtype=np.uint8)
     GeotiffRasterFormat(
         block_size=block_size, always_enable_tiling=False
-    ).encode_raster(path, projection, (0, 0, 64, 60), array)
+    ).encode_raster(path, projection, (0, 0, 64, 60), RasterArray(chw_array=array))
     with (path / "geotiff.tif").open("rb") as f:
         with rasterio.open(f) as raster:
             assert not raster.profile["tiled"]
@@ -30,7 +32,7 @@ def test_geotiff_tiling(tmp_path: pathlib.Path) -> None:
     array = np.zeros((1, 252, 256), dtype=np.uint8)
     GeotiffRasterFormat(
         block_size=block_size, always_enable_tiling=False
-    ).encode_raster(path, projection, (0, 0, 256, 252), array)
+    ).encode_raster(path, projection, (0, 0, 256, 252), RasterArray(chw_array=array))
     with (path / "geotiff.tif").open("rb") as f:
         with rasterio.open(f) as raster:
             assert raster.profile["tiled"]
@@ -38,7 +40,7 @@ def test_geotiff_tiling(tmp_path: pathlib.Path) -> None:
     # If always_enable_tiling=True it should create tiled GeoTIFF either way.
     array = np.zeros((1, 60, 64), dtype=np.uint8)
     GeotiffRasterFormat(block_size=block_size, always_enable_tiling=True).encode_raster(
-        path, projection, (0, 0, 64, 60), array
+        path, projection, (0, 0, 64, 60), RasterArray(chw_array=array)
     )
     with (path / "geotiff.tif").open("rb") as f:
         with rasterio.open(f) as raster:
@@ -52,30 +54,32 @@ class TestGeotiffInOrOutOfBounds:
     def encoded_raster_path(self, tmp_path: pathlib.Path) -> UPath:
         path = UPath(tmp_path)
         array = np.ones((1, 8, 8), dtype=np.uint8)
-        GeotiffRasterFormat().encode_raster(path, self.PROJECTION, (0, 0, 8, 8), array)
+        GeotiffRasterFormat().encode_raster(
+            path, self.PROJECTION, (0, 0, 8, 8), RasterArray(chw_array=array)
+        )
         return path
 
     def test_geotiff_in_bounds(self, encoded_raster_path: UPath) -> None:
-        array = GeotiffRasterFormat().decode_raster(
+        ra = GeotiffRasterFormat().decode_raster(
             encoded_raster_path, self.PROJECTION, (2, 2, 6, 6)
         )
-        assert array.shape == (1, 4, 4)
-        assert np.all(array == 1)
+        assert ra.array.shape == (1, 1, 4, 4)
+        assert np.all(ra.array == 1)
 
     def test_geotiff_partial_overlap(self, encoded_raster_path: UPath) -> None:
-        array = GeotiffRasterFormat().decode_raster(
+        ra = GeotiffRasterFormat().decode_raster(
             encoded_raster_path, self.PROJECTION, (4, 4, 12, 12)
         )
-        assert array.shape == (1, 8, 8)
-        assert np.all(array[:, 0:4, 0:4] == 1)
-        assert np.all(array[:, 0:8, 4:8] == 0)
+        assert ra.array.shape == (1, 1, 8, 8)
+        assert np.all(ra.array[:, :, 0:4, 0:4] == 1)
+        assert np.all(ra.array[:, :, 0:8, 4:8] == 0)
 
     def test_geotiff_out_of_bounds(self, encoded_raster_path: UPath) -> None:
-        array = GeotiffRasterFormat().decode_raster(
+        ra = GeotiffRasterFormat().decode_raster(
             encoded_raster_path, self.PROJECTION, (8, 8, 12, 12)
         )
-        assert array.shape == (1, 4, 4)
-        assert np.all(array == 0)
+        assert ra.array.shape == (1, 1, 4, 4)
+        assert np.all(ra.array == 0)
 
 
 def test_geotiff_compress_zstd(tmp_path: pathlib.Path) -> None:
@@ -88,7 +92,9 @@ def test_geotiff_compress_zstd(tmp_path: pathlib.Path) -> None:
             compress="zstd",
         )
     )
-    raster_format.encode_raster(path, projection, (0, 0, 4, 4), array)
+    raster_format.encode_raster(
+        path, projection, (0, 0, 4, 4), RasterArray(chw_array=array)
+    )
     with rasterio.open(path / "geotiff.tif") as raster:
         assert raster.profile["compress"] == "zstd"
 
@@ -101,7 +107,11 @@ def test_geotiff_write_nodata_val(tmp_path: pathlib.Path) -> None:
     nodata_val = -9999.0
 
     GeotiffRasterFormat().encode_raster(
-        path, projection, (0, 0, 4, 4), array, nodata_val=nodata_val
+        path,
+        projection,
+        (0, 0, 4, 4),
+        RasterArray(chw_array=array),
+        nodata_val=nodata_val,
     )
 
     with rasterio.open(path / "geotiff.tif") as raster:
@@ -117,17 +127,18 @@ def test_geotiff_read_nodata_val_out_of_bounds(tmp_path: pathlib.Path) -> None:
     # Create a raster with value 1 and nodata=0.
     array = np.ones((1, 4, 4), dtype=np.float32)
     GeotiffRasterFormat().encode_raster(
-        path, projection, (0, 0, 4, 4), array, nodata_val=0
+        path, projection, (0, 0, 4, 4), RasterArray(chw_array=array), nodata_val=0
     )
 
     # Read a region that partially overlaps the source raster.
     # We override the nodata_val to -9999.
     # In the out-of-bounds portions it should be filled in as -9999.
-    result = GeotiffRasterFormat().decode_raster(
+    raster_array = GeotiffRasterFormat().decode_raster(
         path, projection, (2, 2, 8, 8), nodata_val=nodata_val
     )
 
-    assert result.shape == (1, 6, 6)
+    assert raster_array.array.shape == (1, 1, 6, 6)
+    result = raster_array.get_chw_array()
     # Top-left 2x2 region overlaps source and should have value 1.
     assert np.all(result[:, 0:2, 0:2] == 1)
     # Pixels outside source bounds should be filled with nodata_val.
@@ -151,18 +162,102 @@ def test_geotiff_read_nodata_val_orig_nodata(tmp_path: pathlib.Path) -> None:
     array = np.ones((1, 4, 4), dtype=np.float32)
     array[:, 2:4, 2:4] = original_nodata
     GeotiffRasterFormat().encode_raster(
-        path, projection, (0, 0, 4, 4), array, nodata_val=original_nodata
+        path,
+        projection,
+        (0, 0, 4, 4),
+        RasterArray(chw_array=array),
+        nodata_val=original_nodata,
     )
 
     # Decode with a different nodata_val.
     # The pixels that were originally nodata should be unchanged.
-    result = GeotiffRasterFormat().decode_raster(
+    raster_array = GeotiffRasterFormat().decode_raster(
         path, projection, (0, 0, 4, 4), nodata_val=new_nodata
     )
 
-    assert result.shape == (1, 4, 4)
+    assert raster_array.array.shape == (1, 1, 4, 4)
+    result = raster_array.get_chw_array()
     # Valid data pixels should still have value 1.
     assert np.all(result[:, 0:2, :] == 1)
     assert np.all(result[:, :, 0:2] == 1)
     # Original nodata pixels should still be as they were.
     assert np.all(result[:, 2:4, 2:4] == original_nodata)
+
+
+def test_geotiff_multi_timestep_roundtrip(tmp_path: pathlib.Path) -> None:
+    """Test encoding and decoding a multi-timestep CTHW raster."""
+    path = UPath(tmp_path)
+    projection = Projection(CRS.from_epsg(3857), 1, -1)
+
+    c, t, h, w = 3, 5, 8, 8
+    data = np.random.randint(0, 255, (c, t, h, w), dtype=np.uint8)
+    timestamps = [
+        (datetime(2024, 1, i + 1, tzinfo=UTC), datetime(2024, 1, i + 2, tzinfo=UTC))
+        for i in range(t)
+    ]
+    raster = RasterArray(array=data, timestamps=timestamps)
+    GeotiffRasterFormat().encode_raster(path, projection, (0, 0, w, h), raster)
+
+    # Decode and verify shape + data.
+    decoded = GeotiffRasterFormat().decode_raster(path, projection, (0, 0, w, h))
+    assert decoded.array.shape == (c, t, h, w)
+    assert np.array_equal(decoded.array, data)
+    assert decoded.timestamps == timestamps
+
+
+def test_geotiff_single_timestep_with_timestamps(tmp_path: pathlib.Path) -> None:
+    """Test that T=1 with timestamps writes metadata.json and reads it back."""
+    path = UPath(tmp_path)
+    projection = Projection(CRS.from_epsg(3857), 1, -1)
+
+    data = np.ones((2, 1, 4, 4), dtype=np.float32)
+    ts = [(datetime(2024, 6, 1, tzinfo=UTC), datetime(2024, 6, 2, tzinfo=UTC))]
+    raster = RasterArray(array=data, timestamps=ts)
+    GeotiffRasterFormat().encode_raster(path, projection, (0, 0, 4, 4), raster)
+
+    decoded = GeotiffRasterFormat().decode_raster(path, projection, (0, 0, 4, 4))
+    assert decoded.array.shape == (2, 1, 4, 4)
+    assert decoded.timestamps == ts
+
+
+def test_raster_array_validation() -> None:
+    """Test RasterArray validation."""
+    # Must be 4D.
+    with pytest.raises(ValueError, match="4D CTHW"):
+        RasterArray(array=np.zeros((3, 4, 4)))
+
+    # Timestamps length must match T.
+    with pytest.raises(ValueError, match="timestamps length"):
+        RasterArray(
+            array=np.zeros((1, 2, 4, 4)),
+            timestamps=[
+                (datetime(2024, 1, 1, tzinfo=UTC), datetime(2024, 1, 2, tzinfo=UTC))
+            ],
+        )
+
+    # Valid with matching timestamps.
+    ra = RasterArray(
+        array=np.zeros((1, 2, 4, 4)),
+        timestamps=[
+            (datetime(2024, 1, 1, tzinfo=UTC), datetime(2024, 1, 2, tzinfo=UTC)),
+            (datetime(2024, 1, 2, tzinfo=UTC), datetime(2024, 1, 3, tzinfo=UTC)),
+        ],
+    )
+    assert ra.array.shape == (1, 2, 4, 4)
+
+
+def test_raster_image_from_raster_array() -> None:
+    """Test RasterImage.from_raster_array conversion."""
+    from rslearn.train.model_context import RasterImage
+
+    data = np.random.rand(3, 2, 8, 8).astype(np.float32)
+    ts = [
+        (datetime(2024, 1, 1, tzinfo=UTC), datetime(2024, 1, 2, tzinfo=UTC)),
+        (datetime(2024, 1, 2, tzinfo=UTC), datetime(2024, 1, 3, tzinfo=UTC)),
+    ]
+    ra = RasterArray(array=data, timestamps=ts)
+    ri = RasterImage.from_raster_array(ra)
+
+    assert ri.image.shape == (3, 2, 8, 8)
+    assert ri.timestamps == ts
+    assert ri.image.dtype.is_floating_point

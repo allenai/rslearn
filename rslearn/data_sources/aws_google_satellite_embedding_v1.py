@@ -32,6 +32,7 @@ from rslearn.data_sources.direct_materialize_data_source import (
 from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.grid_index import GridIndex
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 # Band names for the 64 embedding channels
@@ -282,7 +283,16 @@ class GoogleSatelliteEmbeddingV1(
                         array = src.read()
                         projection, bounds = get_raster_projection_and_bounds(src)
                     array = self._dequantize(array)
-                    tile_store.write_raster(item.name, BANDS, projection, bounds, array)
+                    tile_store.write_raster(
+                        item.name,
+                        BANDS,
+                        projection,
+                        bounds,
+                        RasterArray(
+                            chw_array=array,
+                            time_range=item.geometry.time_range,
+                        ),
+                    )
                 else:
                     tile_store.write_raster_file(item.name, BANDS, UPath(local_path))
 

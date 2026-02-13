@@ -3,7 +3,7 @@
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TypeVar
 
 import shapely
@@ -256,110 +256,32 @@ def match_with_space_mode_mosaic(
     )
 
 
-def match_with_space_mode_per_period_mosaic(
+def match_with_space_mode_single_composite(
     geometry: STGeometry,
     items: list[ItemType],
     item_shps: list[shapely.Geometry],
     query_config: QueryConfig,
 ) -> list[list[ItemType]]:
-    """Match items to the geometry with one mosaic per period.
+    """Match items for SINGLE_COMPOSITE.
 
-    We divide the time range of the geometry into shorter periods. Within each period,
-    we use the items corresponding to that period to create a mosaic. The returned item
-    groups include one group per period, up to the provided max_matches.
-
-    By default (reverse_time_order=True), groups are returned starting from the most
-    recent periods. When reverse_time_order=False, groups are returned in chronological
-    order (oldest first). reverse_time_order should always be set False, and
-    FutureWarning will be warned if it is not.
-
-    The periods are also bounded to the window's time range, and aligned with the end
-    of that time range, i.e. the most recent window is
-    (end_time - period_duration, end_time), the next is
-    (end_time - 2*period_duration, end_time - period_duration), and so on. Note that
-    this means that if the window duration is shorter than the period_duration, there
-    will be zero matches.
-
-    This is used e.g. when a model should process three mosaics, where each mosaic
-    should come from a different month. This gives more diversity of images, since
-    simply searching for the least cloudy images could result in selecting all of the
-    images from the same month.
-
-    max_matches may be smaller than the total number of periods in the given time
-    range. In this case, we prefer to use mosaics of the most recent periods. However,
-    sometimes there may be no items in a period; in that case, the older periods are
-    used as a fallback. This means that reducing the window duration down to match
-    max_matches*period_duration is not equivalent to a longer window duration.
+    All spatially-intersecting items go into a single group so that one composite can
+    be created from all matching items.
 
     Args:
         geometry: the window's geometry.
         items: list of items.
-        item_shps: the item shapes projected to the window's projection (unused here)
+        item_shps: the item shapes projected to the window's projection.
         query_config: the query configuration.
 
     Returns:
-        list of matched item groups, where each group contains items that yield a
-        per-period mosaic.
+        list containing a single item group of all spatially-intersecting items,
+        or empty list if no items intersect.
     """
-    if geometry.time_range is None:
-        raise ValueError(
-            "all windows must have time range for per period mosaic matching"
-        )
-
-    # Emit warning if per_period_mosaic_reverse_time_order is True (the default).
-    if query_config.per_period_mosaic_reverse_time_order:
-        warnings.warn(
-            "QueryConfig.per_period_mosaic_reverse_time_order defaults to True, which "
-            "returns item groups in reverse temporal order (most recent first) for "
-            "PER_PERIOD_MOSAIC mode. This default will change to False (chronological "
-            "order) after 2026-04-01. To silence this warning, explicitly set "
-            "per_period_mosaic_reverse_time_order=False.",
-            FutureWarning,
-            stacklevel=3,
-        )
-
-    period_duration = query_config.period_duration
-
-    # For each period, we create an STGeometry with modified time range matching that
-    # period, and use it with match_candidate_items_to_window to get a mosaic.
-    cur_groups: list[list[ItemType]] = []
-    period_start = geometry.time_range[1] - period_duration
-    while (
-        period_start >= geometry.time_range[0]
-        and len(cur_groups) < query_config.max_matches
-    ):
-        period_time_range = (
-            period_start,
-            period_start + period_duration,
-        )
-        period_start -= period_duration
-        period_geom = STGeometry(geometry.projection, geometry.shp, period_time_range)
-
-        # We modify the QueryConfig here since caller should be asking for
-        # multiple mosaics, but we just want one mosaic per period.
-        period_groups = match_candidate_items_to_window(
-            period_geom,
-            items,
-            QueryConfig(
-                space_mode=SpaceMode.MOSAIC,
-                max_matches=1,
-                mosaic_compositing_overlaps=query_config.mosaic_compositing_overlaps,
-            ),
-        )
-
-        # There should be zero or one group depending on whether there were
-        # any items that matched. We keep the group if it is there.
-        if len(period_groups) == 0 or len(period_groups[0]) == 0:
-            # No matches for this period.
-            continue
-        cur_groups.append(period_groups[0])
-
-    # Currently the item groups are in reverse chronologic order.
-    # Reverse it to correct chronological order if requested.
-    if not query_config.per_period_mosaic_reverse_time_order:
-        cur_groups.reverse()
-
-    return cur_groups
+    group_items: list[ItemType] = []
+    for item, item_shp in zip(items, item_shps):
+        if shp_intersects(item_shp, geometry.shp):
+            group_items.append(item)
+    return [group_items] if group_items else []
 
 
 # Type alias for space mode handler functions
@@ -368,30 +290,25 @@ SpaceModeHandler = Callable[
     list[list[ItemType]],
 ]
 
-# Dict mapping SpaceMode values to their handler functions
+# Dict mapping SpaceMode values to their handler functions.
+# PER_PERIOD_MOSAIC is deprecated; it reuses the MOSAIC handler and period splitting
+# is handled in match_candidate_items_to_window.
 space_mode_handlers: dict[SpaceMode, SpaceModeHandler] = {
     SpaceMode.CONTAINS: match_with_space_mode_contains,
     SpaceMode.INTERSECTS: match_with_space_mode_intersects,
     SpaceMode.MOSAIC: match_with_space_mode_mosaic,
-    SpaceMode.PER_PERIOD_MOSAIC: match_with_space_mode_per_period_mosaic,
+    SpaceMode.PER_PERIOD_MOSAIC: match_with_space_mode_mosaic,
+    SpaceMode.SINGLE_COMPOSITE: match_with_space_mode_single_composite,
 }
 
 
-def match_candidate_items_to_window(
+def _filter_and_project_items(
     geometry: STGeometry, items: list[ItemType], query_config: QueryConfig
-) -> list[list[ItemType]]:
-    """Match candidate items to a window based on the query configuration.
-
-    Candidate items should be collected that intersect with the window's spatial
-    extent.
-
-    Args:
-        geometry: the window's geometry
-        items: all items from the data source that intersect spatially with the geometry
-        query_config: the query configuration to use for matching
+) -> tuple[list[ItemType], list[shapely.Geometry]]:
+    """Filter items by time and project to geometry's projection.
 
     Returns:
-        list of matched item groups.
+        tuple of (acceptable_items, acceptable_item_shps)
     """
     # Use time mode to filter and order the items.
     if geometry.time_range:
@@ -417,13 +334,13 @@ def match_candidate_items_to_window(
                 reverse=False,
             )
 
-    # Now apply space mode.
-    acceptable_items = []
-    acceptable_item_shps = []
+    # Project items to geometry's projection.
+    acceptable_items: list[ItemType] = []
+    acceptable_item_shps: list[shapely.Geometry] = []
     for item in items:
         item_geom = item.geometry
         # We need to re-project items to the geometry projection for the spatial checks
-        # below. Unless the item's geometry indicates global coverage, in which case we
+        # later. Unless the item's geometry indicates global coverage, in which case we
         # set it to match the geometry to show that it should cover the entire
         # geometry.
         if item_geom.projection != geometry.projection:
@@ -439,12 +356,117 @@ def match_candidate_items_to_window(
         acceptable_items.append(item)
         acceptable_item_shps.append(item_geom.shp)
 
-    # Dispatch to the appropriate space mode handler
+    return acceptable_items, acceptable_item_shps
+
+
+_PERIOD_SPLITTING_MODES = frozenset(
+    {
+        SpaceMode.CONTAINS,
+        SpaceMode.INTERSECTS,
+        SpaceMode.MOSAIC,
+        SpaceMode.PER_PERIOD_MOSAIC,
+        SpaceMode.SINGLE_COMPOSITE,
+    }
+)
+
+
+def match_candidate_items_to_window(
+    geometry: STGeometry, items: list[ItemType], query_config: QueryConfig
+) -> list[list[ItemType]]:
+    """Match candidate items to a window based on the query configuration.
+
+    If ``period_duration`` is set and the space mode is CONTAINS, INTERSECTS,
+    MOSAIC, or PER_PERIOD_MOSAIC, the window time range is split into sub-periods
+    and the handler is applied per-period with effective max_matches=1.
+    SPATIAL_MOSAIC_TEMPORAL_STACK handles period splitting inside its own handler.
+
+    When ``period_duration`` is set and ``per_period_mosaic_reverse_time_order``
+    is True (the current default), the resulting groups are reversed so that the
+    most recent period comes first. This default will change to False after
+    2026-04-01.
+
+    Args:
+        geometry: the window's geometry
+        items: all items from the data source that intersect spatially with the geometry
+        query_config: the query configuration to use for matching
+
+    Returns:
+        list of matched item groups.
+    """
+    # PER_PERIOD_MOSAIC should default to 30-day periods in case period_duration is not
+    # set, since period_duration previously applied only for PER_PERIOD_MOSAIC with
+    # default 30 day duration.
+    period_duration = query_config.period_duration
+    if (
+        query_config.space_mode == SpaceMode.PER_PERIOD_MOSAIC
+        and period_duration is None
+    ):
+        period_duration = timedelta(days=30)
+
+    # Filter items by time and project them into the geometry's projection.
+    acceptable_items, acceptable_item_shps = _filter_and_project_items(
+        geometry, items, query_config
+    )
+
     handler = space_mode_handlers.get(query_config.space_mode)
     if handler is None:
         raise ValueError(f"invalid space mode {query_config.space_mode}")
 
-    groups = handler(geometry, acceptable_items, acceptable_item_shps, query_config)
+    # Handle period_duration if set. This causes the space_mode_handler to be called
+    # once for each period within the window time range. In this case max_matches
+    # controls the number of periods, while each handler creates at most one item
+    # group.
+    if (
+        period_duration is not None
+        and query_config.space_mode in _PERIOD_SPLITTING_MODES
+        and geometry.time_range is not None
+    ):
+        per_period_query_config = QueryConfig(
+            space_mode=query_config.space_mode,
+            max_matches=1,
+            mosaic_compositing_overlaps=query_config.mosaic_compositing_overlaps,
+        )
+
+        # Iterate from most recent period backwards so that when max_matches
+        # truncates, we keep the most recent periods.
+        groups: list[list[ItemType]] = []
+        period_end = geometry.time_range[1]
+        while (
+            period_end - period_duration >= geometry.time_range[0]
+            and len(groups) < query_config.max_matches
+        ):
+            period_start = period_end - period_duration
+            period_geom = STGeometry(
+                geometry.projection, geometry.shp, (period_start, period_end)
+            )
+            period_end = period_start
+
+            # Re-filter items to this period.
+            period_items, period_shps = _filter_and_project_items(
+                period_geom, items, per_period_query_config
+            )
+            period_groups = handler(
+                period_geom, period_items, period_shps, per_period_query_config
+            )
+            if period_groups:
+                groups.append(period_groups[0])
+
+        # Groups are in reverse chronological order. Reverse to chronological
+        # unless the deprecated per_period_mosaic_reverse_time_order is True.
+        if query_config.per_period_mosaic_reverse_time_order:
+            warnings.warn(
+                "QueryConfig.per_period_mosaic_reverse_time_order defaults to True, "
+                "which returns item groups in reverse temporal order (most recent "
+                "first) when period_duration is set. This default will change to "
+                "False (chronological order) after 2026-04-01. To silence this "
+                "warning, explicitly set per_period_mosaic_reverse_time_order=False.",
+                FutureWarning,
+                stacklevel=3,
+            )
+        else:
+            groups.reverse()
+    else:
+        groups = handler(geometry, acceptable_items, acceptable_item_shps, query_config)
 
     # Enforce minimum matches if set.
     if len(groups) < query_config.min_matches:

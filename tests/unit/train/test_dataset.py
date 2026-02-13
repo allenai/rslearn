@@ -27,6 +27,7 @@ from rslearn.train.dataset_index import INDEX_DIR_NAME
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.transforms.concatenate import Concatenate
 from rslearn.utils.geometry import STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
@@ -242,7 +243,7 @@ def test_read_layer_time_range(tmp_path: UPath) -> None:
     image = np.ones((1, 4, 4), dtype=np.uint8)
     raster_dir = window.get_raster_dir("image", ["band"])
     GeotiffRasterFormat().encode_raster(
-        raster_dir, window.projection, window.bounds, image
+        raster_dir, window.projection, window.bounds, RasterArray(chw_array=image)
     )
     window.mark_layer_completed("image")
 

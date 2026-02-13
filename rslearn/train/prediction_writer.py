@@ -26,6 +26,7 @@ from rslearn.train.model_context import SampleMetadata
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import (
     RasterFormat,
     adjust_projection_and_bounds_for_array,
@@ -431,7 +432,9 @@ class RslearnWriter(BasePredictionWriter):
             projection, bounds = adjust_projection_and_bounds_for_array(
                 window.projection, window.bounds, merged_output
             )
-            self.format.encode_raster(raster_dir, projection, bounds, merged_output)
+            # Wrap CHW ndarray as CTHW RasterArray.
+            raster = RasterArray(chw_array=merged_output)
+            self.format.encode_raster(raster_dir, projection, bounds, raster)
 
         elif self.layer_config.type == LayerType.VECTOR:
             layer_dir = window.get_layer_dir(self.output_layer)

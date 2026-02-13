@@ -29,6 +29,7 @@ from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import (
     Resampling,
     get_raster_projection_and_bounds_from_transform,
@@ -412,7 +413,14 @@ class GEE(DataSource, TileStore):
                 else:
                     array, projection, bounds = self._merge_rasters(blobs)
                     tile_store.write_raster(
-                        item.name, self.bands, projection, bounds, array
+                        item.name,
+                        self.bands,
+                        projection,
+                        bounds,
+                        RasterArray(
+                            chw_array=array,
+                            time_range=item.geometry.time_range,
+                        ),
                     )
 
             for blob in blobs:
