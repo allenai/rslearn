@@ -466,9 +466,14 @@ def build_composite(
         bounds: pixel bounds defining the spatial extent of the composite
         remapper: remapper to apply to pixel values, or None
     """
-    nodata_vals = band_cfg.nodata_vals
-    if nodata_vals is None:
-        nodata_vals = [0 for _ in band_cfg.bands]
+    raw_nodata = band_cfg.nodata_vals
+    if raw_nodata is None:
+        nodata_vals: list[Any] = [0 for _ in band_cfg.bands]
+    elif isinstance(raw_nodata, list):
+        nodata_vals = raw_nodata
+    else:
+        # Scalar nodata – broadcast to all bands.
+        nodata_vals = [raw_nodata] * len(band_cfg.bands)
 
     return compositing_methods[compositing_method](
         group=group,

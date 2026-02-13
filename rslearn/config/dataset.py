@@ -140,11 +140,20 @@ class BandSetConfig(BaseModel):
     )
     bands: list[str] = Field(
         default_factory=lambda: [],
-        description="List of band names in this BandSetConfig. One of bands or num_bands must be set.",
+        description="List of band names in this BandSetConfig. One of bands or num_bands must be set. "
+        "If num_timesteps is also set, these are treated as base variable names and "
+        "expanded to '{band}_t{timestep:03d}' for each timestep.",
     )
     num_bands: int | None = Field(
         default=None,
         description="The number of bands in this band set. The bands will be named B0, B1, B2, etc.",
+    )
+    num_timesteps: int | None = Field(
+        default=None,
+        description="Number of timesteps for band expansion. When set, each band name is "
+        "expanded across this many timesteps, producing band names like "
+        "'{band}_t000', '{band}_t001', etc. The total number of bands becomes "
+        "len(bands) * num_timesteps.",
     )
     format: dict[str, Any] = Field(
         default_factory=lambda: {
@@ -178,16 +187,18 @@ class BandSetConfig(BaseModel):
         description="Optional list of names for the different possible values of each band.",
     )
 
-    # Optional list of nodata values for this band set. This is used during
-    # materialization when creating mosaics, to determine which parts of the source
-    # images should be copied.
-    nodata_vals: list[float] | None = Field(
-        default=None, description="Optional nodata value for each band."
+    # Optional nodata values for this band set. This is used during materialization
+    # when creating mosaics, to determine which parts of the source images should be
+    # copied. Can be a single float (broadcast to all bands) or a list with one value
+    # per band.
+    nodata_vals: list[float] | float | None = Field(
+        default=None,
+        description="Optional nodata value(s). A single float is broadcast to all bands.",
     )
 
     @model_validator(mode="after")
     def after_validator(self) -> "BandSetConfig":
-        """Ensure the BandSetConfig is valid, and handle the num_bands field."""
+        """Ensure the BandSetConfig is valid, and handle shorthand fields."""
         if (len(self.bands) == 0 and self.num_bands is None) or (
             len(self.bands) != 0 and self.num_bands is not None
         ):
@@ -196,6 +207,22 @@ class BandSetConfig(BaseModel):
         if self.num_bands is not None:
             self.bands = [f"B{band_idx}" for band_idx in range(self.num_bands)]
             self.num_bands = None
+
+        # Expand bands × timesteps if num_timesteps is set.
+        # Each base band name becomes "{band}_t{t:03d}" for t in range(num_timesteps).
+        if self.num_timesteps is not None:
+            if len(self.bands) == 0:
+                raise ValueError("bands must be set when using num_timesteps")
+            expanded = []
+            for t in range(self.num_timesteps):
+                for band in self.bands:
+                    expanded.append(f"{band}_t{t:03d}")
+            self.bands = expanded
+            self.num_timesteps = None
+
+        # Broadcast scalar nodata_vals to all bands.
+        if isinstance(self.nodata_vals, int | float):
+            self.nodata_vals = [float(self.nodata_vals)] * len(self.bands)
 
         return self
 
