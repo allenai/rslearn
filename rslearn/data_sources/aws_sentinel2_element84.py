@@ -2,13 +2,9 @@
 
 import os
 import tempfile
-from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
 
-import numpy as np
-import numpy.typing as npt
-import rasterio
 import requests
 from upath import UPath
 
@@ -20,7 +16,6 @@ from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
 from rslearn.utils.fsspec import join_upath
-from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 from .data_source import (
     DataSourceContext,
@@ -36,6 +31,9 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
     allows anonymous free access, so no credentials are needed.
 
     See https://aws.amazon.com/marketplace/pp/prodview-ykj5gyumkzlme for details.
+
+    Note that we don't implement harmonization here since the COGs are already
+    harmonized, even though it is not really documented.
     """
 
     STAC_ENDPOINT = "https://earth-search.aws.element84.com/v1"
@@ -55,8 +53,6 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
         "nir08": ["B8A"],
         "visual": ["R", "G", "B"],
     }
-    HARMONIZE_OFFSET = -1000
-    HARMONIZE_PROPERTY_NAME = "earthsearch:boa_offset_applied"
 
     def __init__(
         self,
@@ -65,7 +61,6 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
         sort_by: str | None = None,
         sort_ascending: bool = True,
         cache_dir: str | None = None,
-        harmonize: bool = False,
         timeout: timedelta = timedelta(seconds=10),
         context: DataSourceContext = DataSourceContext(),
     ) -> None:
@@ -78,8 +73,6 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
             sort_by: STAC item property to sort by. For example, use "eo:cloud_cover" to sort by cloud cover.
             sort_ascending: whether to sort ascending or descending.
             cache_dir: directory to cache discovered items.
-            harmonize: harmonize pixel values across different processing baselines,
-                see https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
             timeout: timeout to use for requests.
             context: the data source context.
         """  # noqa: E501
@@ -125,10 +118,8 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
             sort_ascending=sort_ascending,
             required_assets=list(asset_bands.keys()),
             cache_dir=cache_upath,
-            properties_to_record=[self.HARMONIZE_PROPERTY_NAME],
         )
 
-        self.harmonize = harmonize
         self.timeout = timeout
 
     # --- DirectMaterializeDataSource implementation ---
@@ -145,50 +136,6 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
         """
         item = self.get_item_by_name(item_name)
         return item.asset_urls[asset_key]
-
-    def get_read_callback(
-        self, item_name: str, asset_key: str
-    ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
-        """Return a callback to harmonize Sentinel-2 data if needed.
-
-        Args:
-            item_name: the name of the item being read.
-            asset_key: the key identifying which asset is being read.
-
-        Returns:
-            A callback function for harmonization, or None if not needed.
-        """
-        # Visual bands do not need harmonization.
-        if not self.harmonize or asset_key == "visual":
-            return None
-
-        item = self.get_item_by_name(item_name)
-        return self._get_harmonize_callback(item)
-
-    # --- Harmonization helpers ---
-
-    def _get_harmonize_callback(
-        self, item: SourceItem
-    ) -> Callable[[npt.NDArray], npt.NDArray] | None:
-        """Get the harmonization callback to remove offset for newly processed scenes.
-
-        We do not use copernicus.get_harmonize_callback here because the S3 bucket does
-        not seem to provide the product metadata XML file. So instead we check the
-        earthsearch:boa_offset_applied property on the item.
-        """
-        if not item.properties[self.HARMONIZE_PROPERTY_NAME]:
-            # This means no offset was applied so we don't need to subtract it.
-            return None
-
-        def harmonize_callback(array: npt.NDArray) -> npt.NDArray:
-            # We assume the offset is -1000 since that is the standard.
-            # To work with uint16 array, we clip to 1000+ and then subtract 1000.
-            assert array.shape[0] == 1 and array.dtype == np.uint16
-            return np.clip(array, -self.HARMONIZE_OFFSET, None) - (
-                -self.HARMONIZE_OFFSET
-            )
-
-        return harmonize_callback
 
     def ingest(
         self,
@@ -233,28 +180,9 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
                         item.name,
                         asset_key,
                     )
-
-                    # Harmonize values if needed.
-                    # TCI does not need harmonization.
-                    harmonize_callback = None
-                    if self.harmonize and asset_key != "visual":
-                        harmonize_callback = self._get_harmonize_callback(item)
-
-                    if harmonize_callback is not None:
-                        # In this case we need to read the array, convert the pixel
-                        # values, and pass modified array directly to the TileStore.
-                        with rasterio.open(local_fname) as src:
-                            array = src.read()
-                            projection, bounds = get_raster_projection_and_bounds(src)
-                        array = harmonize_callback(array)
-                        tile_store.write_raster(
-                            item.name, band_names, projection, bounds, array
-                        )
-
-                    else:
-                        tile_store.write_raster_file(
-                            item.name, band_names, UPath(local_fname)
-                        )
+                    tile_store.write_raster_file(
+                        item.name, band_names, UPath(local_fname)
+                    )
 
                 logger.debug(
                     "Done ingesting item %s asset %s",

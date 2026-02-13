@@ -170,7 +170,16 @@ class MetricWrapper(Metric):
 
     def compute(self) -> Any:
         """Returns the computed metric."""
-        return self.metric.compute()
+        result = self.metric.compute()
+        # If the inner metric returns a dict, prefix each key with the task name so
+        # keys don't clash across tasks in MetricCollection. For scalar metrics, the
+        # name in the MetricCollection will be included as a prefix in the dict
+        # returned from MetricCollection.compute(), but for dict metrics, it copies
+        # over the key directly with no prefixing, so we need to handle the prefixing
+        # ourselves.
+        if isinstance(result, dict):
+            return {f"{self.task_name}/{k}": v for k, v in result.items()}
+        return result
 
     def reset(self) -> None:
         """Reset metric."""

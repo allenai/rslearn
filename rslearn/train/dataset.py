@@ -1124,7 +1124,7 @@ class ModelDataset(torch.utils.data.Dataset):
         """Get the raw inputs and base metadata for this example.
 
         This is the raster or vector data before being processed by the Task. So it
-        should be a Tensor for raster and list[Feature] for vector.
+        should be a RasterImage for raster and list[Feature] for vector.
 
         Args:
             idx: the index in the dataset.

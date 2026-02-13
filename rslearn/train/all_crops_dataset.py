@@ -35,7 +35,7 @@ def get_window_crop_options(
     """
     # We stride the crops by (crop_size - overlap_size) until the last crop.
     # The first crop always starts at bounds[0]/bounds[1]. It's okay if it extends
-    # beyond the window bounds since pad_slice_protect pads the tensors.
+    # beyond the window bounds since pad_slice_protect pads raster inputs.
     # We handle the last crop with a special case to ensure it does not exceed the
     # window bounds. Instead, it may overlap the previous crop.
     # Here is a simple 1D example:
@@ -78,7 +78,7 @@ def pad_slice_protect(
     crop_size: tuple[int, int],
     inputs: dict[str, DataInput],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Pad tensors in-place by crop size to protect slicing near right/bottom edges.
+    """Pad raster inputs in-place by crop size to protect slicing near right/bottom edges.
 
     The padding is scaled based on each input's resolution_factor.
 
@@ -91,19 +91,30 @@ def pad_slice_protect(
     Returns:
         a tuple of (raw_inputs, passthrough_inputs).
     """
-    for d in [raw_inputs, passthrough_inputs]:
-        for input_name, value in list(d.items()):
-            if not isinstance(value, torch.Tensor):
-                continue
-            # Get resolution scale for this input
-            rf = inputs[input_name].resolution_factor
-            scale = rf.numerator / rf.denominator
-            # Scale the padding amount
-            scaled_pad_x = int(crop_size[0] * scale)
-            scaled_pad_y = int(crop_size[1] * scale)
-            d[input_name] = torch.nn.functional.pad(
-                value, pad=(0, scaled_pad_x, 0, scaled_pad_y)
+    for input_name in set(raw_inputs.keys()) | set(passthrough_inputs.keys()):
+        data_input = inputs.get(input_name)
+        if data_input is None or data_input.data_type != "raster":
+            continue
+
+        value = raw_inputs.get(input_name, passthrough_inputs.get(input_name))
+        if not isinstance(value, RasterImage):
+            raise TypeError(
+                f"expected raster input '{input_name}' to be a RasterImage, got {type(value)}"
             )
+
+        rf = data_input.resolution_factor
+        scale = rf.numerator / rf.denominator
+        scaled_pad_x = int(crop_size[0] * scale)
+        scaled_pad_y = int(crop_size[1] * scale)
+
+        padded = torch.nn.functional.pad(
+            value.image, pad=(0, scaled_pad_x, 0, scaled_pad_y)
+        )
+        padded_value = RasterImage(padded, value.timestamps)
+        if input_name in raw_inputs:
+            raw_inputs[input_name] = padded_value
+        if input_name in passthrough_inputs:
+            passthrough_inputs[input_name] = padded_value
     return raw_inputs, passthrough_inputs
 
 
@@ -280,9 +291,9 @@ class IterableAllCropsDataset(torch.utils.data.IterableDataset):
                 )
                 bounds = metadata.crop_bounds
 
-                # For simplicity, pad tensors by crop size to ensure that any crop bounds
-                # extending outside the window bounds will not have issues when we slice
-                # the tensors later. Padding is scaled per-input based on resolution_factor.
+                # For simplicity, pad raster inputs by crop size to ensure that any crop
+                # bounds extending outside the window bounds will not have issues when
+                # we slice later. Padding is scaled per-input based on resolution_factor.
                 pad_slice_protect(
                     raw_inputs, passthrough_inputs, self.crop_size, self.inputs
                 )
@@ -423,7 +434,7 @@ class InMemoryAllCropsDataset(torch.utils.data.Dataset):
     ) -> tuple[dict[str, Any], dict[str, Any], SampleMetadata]:
         """Get the raw inputs for a single crop. Retrieve from cache if possible.
 
-        Also crops/pads the tensors by crop size to protect slicing near right/bottom edges.
+        Also pads raster inputs by crop size to protect slicing near right/bottom edges.
 
         Args:
             index: the index of the crop.

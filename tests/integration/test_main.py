@@ -1,20 +1,23 @@
 import json
 import pathlib
-import shutil
 import subprocess
 import sys
 from datetime import UTC, datetime
 from typing import Any
 
 import google.api_core.exceptions
+import numpy as np
 import pytest
 import shapely
+from soilgrids import SoilGridsWcsError
 from upath import UPath
 
 import rslearn.main
 from rslearn.const import WGS84_PROJECTION
+from rslearn.data_sources.data_source import Item
 from rslearn.data_sources.gcp_public_data import Sentinel2Item
 from rslearn.data_sources.local_files import VectorItem
+from rslearn.data_sources.soilgrids import SoilGrids
 from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.log_utils import get_logger
 from rslearn.utils.geometry import STGeometry
@@ -411,17 +414,12 @@ class TestMaterialization:
         assert self.expected_materialized_fname(ingested_dataset.path).exists()
 
     def test_materialization_errors_on_bad_geojson(
-        self, ingested_dataset: Dataset, monkeypatch: Any, tmp_path: pathlib.Path
+        self, ingested_dataset: Dataset, monkeypatch: Any
     ) -> None:
-        # Copy the ingested dataset to a new location.
-        new_path = UPath(tmp_path) / "new_dataset"
-        logger.info("copying dataset to %s", new_path)
-        shutil.copytree(ingested_dataset.path, new_path)
+        ds_path = ingested_dataset.path
 
-        # Modify the dataset configuration to use a bad data source.
-        logger.info("modify dataset configuration")
         # Corrupt the data.geojson file by writing invalid JSON
-        data_file = new_path / "tiles" / "local_files" / "foo" / "data.geojson"
+        data_file = ds_path / "tiles" / "local_files" / "foo" / "data.geojson"
         with data_file.open("w") as f:
             f.write("invalid json{")
 
@@ -431,7 +429,7 @@ class TestMaterialization:
             "dataset",
             "materialize",
             "--root",
-            str(new_path),
+            str(ds_path),
         ]
         monkeypatch.setattr(sys, "argv", mock_args)
         with pytest.raises(json.decoder.JSONDecodeError):
@@ -440,16 +438,11 @@ class TestMaterialization:
     def test_ignore_errors(
         self,
         ingested_dataset: Dataset,
-        tmp_path: pathlib.Path,
         monkeypatch: Any,
     ) -> None:
-        print("test_ignore_errors tmp_path", tmp_path)
-        # Copy the ingested dataset to a new location.
-        new_path = UPath(tmp_path) / "new_dataset"
-        logger.info("copying dataset to %s", new_path)
-        shutil.copytree(ingested_dataset.path, new_path)
+        ds_path = ingested_dataset.path
         # Corrupt the data.geojson file by writing invalid JSON
-        data_file = new_path / "tiles" / "local_files" / "bar" / "data.geojson"
+        data_file = ds_path / "tiles" / "local_files" / "bar" / "data.geojson"
         with data_file.open("w") as f:
             f.write("invalid json{")
 
@@ -459,11 +452,112 @@ class TestMaterialization:
             "dataset",
             "materialize",
             "--root",
-            str(new_path),
+            str(ds_path),
             "--ignore-errors",
             "--workers",
             "0",
         ]
         monkeypatch.setattr(sys, "argv", mock_args)
         rslearn.main.main()
-        assert self.expected_materialized_fname(new_path).exists()
+        assert self.expected_materialized_fname(ds_path).exists()
+
+    def test_ignore_errors_soilgrids_wcs_error(
+        self,
+        ingested_dataset: Dataset,
+        monkeypatch: Any,
+    ) -> None:
+        """--ignore-errors continues even after a data source error during materialization."""
+        ds_path = ingested_dataset.path
+
+        # Add a direct-materialization SoilGrids layer.
+        cfg_path = ds_path / "config.json"
+        with cfg_path.open("r") as f:
+            cfg = json.load(f)
+        cfg["layers"]["soilgrids"] = {
+            "type": "raster",
+            "band_sets": [{"bands": ["B1"], "dtype": "float32"}],
+            "data_source": {
+                "class_path": "rslearn.data_sources.soilgrids.SoilGrids",
+                "init_args": {
+                    "service_id": "clay",
+                    "coverage_id": "clay_0-5cm_mean",
+                    "crs": "EPSG:4326",
+                },
+                "ingest": False,
+            },
+        }
+        with cfg_path.open("w") as f:
+            json.dump(cfg, f)
+
+        # Add prepared items for the SoilGrids layer to each window.
+        dataset = Dataset(ds_path)
+
+        for window in dataset.load_windows():
+            layer_datas = window.load_layer_datas()
+            soilgrids_item = Item(
+                name="clay:clay_0-5cm_mean", geometry=window.get_geometry()
+            )
+            layer_datas["soilgrids"] = WindowLayerData(
+                "soilgrids", [[soilgrids_item.serialize()]]
+            )
+            window.save_layer_datas(layer_datas)
+
+        # Make job order deterministic so the first window errors (initial job) and
+        # the second still materializes.
+        def deterministic_shuffle(seq: list[Any]) -> None:
+            seq.sort(key=lambda w: getattr(w, "name", ""))
+
+        monkeypatch.setattr(rslearn.main.random, "shuffle", deterministic_shuffle)
+
+        # Patch SoilGrids to fail for the first window only.
+        def fake_read_raster(
+            self: Any,
+            layer_name: str,
+            item_name: str,
+            bands: list[str],
+            projection: Any,
+            bounds: tuple[int, int, int, int],
+            resampling: Any = None,
+        ) -> Any:
+            if bounds == (-1, -1, 1, 1):
+                raise SoilGridsWcsError("msImageCreate(): out of memory")
+            height = bounds[3] - bounds[1]
+            width = bounds[2] - bounds[0]
+            return np.ones((1, height, width), dtype=np.float32)
+
+        monkeypatch.setattr(SoilGrids, "read_raster", fake_read_raster)
+
+        # Materialize, ignoring errors; should still complete other windows.
+        mock_args = [
+            "rslearn",
+            "dataset",
+            "materialize",
+            "--root",
+            str(ds_path),
+            "--ignore-errors",
+            "--workers",
+            "0",
+        ]
+        monkeypatch.setattr(sys, "argv", mock_args)
+        rslearn.main.main()
+
+        # The second window should have materialized both layers.
+        assert (
+            ds_path
+            / "windows"
+            / "default"
+            / "window2"
+            / "layers"
+            / "local_files"
+            / "data.geojson"
+        ).exists()
+        assert (
+            ds_path
+            / "windows"
+            / "default"
+            / "window2"
+            / "layers"
+            / "soilgrids"
+            / "B1"
+            / "geotiff.tif"
+        ).exists()
