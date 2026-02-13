@@ -25,6 +25,7 @@ from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 from rslearn.utils.stac import StacAsset, StacItem
 
@@ -52,7 +53,7 @@ def test_geotiff(tmp_path: pathlib.Path) -> pathlib.Path:
     data = np.ones((1, height, width), dtype=np.uint16) * RAW_PIXEL_VALUE
     raster_dir = UPath(tmp_path / "raster")
     fmt = GeotiffRasterFormat()
-    fmt.encode_raster(raster_dir, projection, bounds, data)
+    fmt.encode_raster(raster_dir, projection, bounds, RasterArray(chw_array=data))
     return raster_dir / fmt.fname
 
 

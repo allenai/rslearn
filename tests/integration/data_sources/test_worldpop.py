@@ -14,6 +14,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.worldpop import WorldPop
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 # WorldPop is based on LocalFiles so it names the bands in order from B1, B2, ...
@@ -72,7 +73,9 @@ def make_test_tif(tmp_path: pathlib.Path) -> pathlib.Path:
     array = np.ones((1, SIZE, SIZE), dtype=np.uint8)
     raster_path = UPath(tmp_path)
     raster_format = GeotiffRasterFormat()
-    raster_format.encode_raster(raster_path, projection, bounds, array)
+    raster_format.encode_raster(
+        raster_path, projection, bounds, RasterArray(chw_array=array)
+    )
 
     return tmp_path / raster_format.fname
 

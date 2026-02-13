@@ -18,6 +18,7 @@ from rslearn.dataset.manage import (
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import Projection, STGeometry
 from rslearn.utils.get_utm_ups_crs import get_utm_ups_projection
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 from rslearn.utils.vector_format import (
     GeojsonCoordinateMode,
@@ -144,10 +145,10 @@ class TestLocalFiles:
         b1 = np.zeros((1, 8, 8), dtype=np.uint8)
         b2 = np.ones((1, 8, 8), dtype=np.uint8)
         GeotiffRasterFormat().encode_raster(
-            src_path, projection, bounds, b1, fname="b1.tif"
+            src_path, projection, bounds, RasterArray(chw_array=b1), fname="b1.tif"
         )
         GeotiffRasterFormat().encode_raster(
-            src_path, projection, bounds, b2, fname="b2.tif"
+            src_path, projection, bounds, RasterArray(chw_array=b2), fname="b2.tif"
         )
 
         # Make an rslearn dataset that uses LocalFiles to ingest the source data.

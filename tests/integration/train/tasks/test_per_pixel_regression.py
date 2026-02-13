@@ -14,6 +14,7 @@ from rslearn.lightning_cli import RslearnLightningCLI
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.utils.jsonargparse import init_jsonargparse
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
@@ -83,7 +84,7 @@ def regression_dataset(tmp_path: pathlib.Path) -> Dataset:
         layer_dir / "band",
         window.projection,
         window.bounds,
-        image,
+        RasterArray(chw_array=image),
     )
     window.mark_layer_completed(layer_name)
 
@@ -95,7 +96,7 @@ def regression_dataset(tmp_path: pathlib.Path) -> Dataset:
         layer_dir / "value",
         window.projection,
         window.bounds,
-        targets,
+        RasterArray(chw_array=targets),
     )
     window.mark_layer_completed(layer_name)
 

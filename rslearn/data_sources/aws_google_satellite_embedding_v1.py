@@ -343,7 +343,7 @@ class GoogleSatelliteEmbeddingV1(
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Read raster data from the store.
 
         Overrides base class to handle band selection (the base class reads all bands).
@@ -382,4 +382,4 @@ class GoogleSatelliteEmbeddingV1(
         if callback is not None:
             data = callback(data)
 
-        return data
+        return RasterArray(chw_array=data)

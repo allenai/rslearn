@@ -25,6 +25,7 @@ from rslearn.train.tasks.per_pixel_regression import (
     PerPixelRegressionTask,
 )
 from rslearn.utils.geometry import Projection, ResolutionFactor
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
@@ -144,7 +145,7 @@ class TestResolutionFactor:
             window.get_raster_dir("image", ["B1"]),
             window.projection,
             window.bounds,
-            np.ones((1, 4, 4), dtype=np.uint8),
+            RasterArray(chw_array=np.ones((1, 4, 4), dtype=np.uint8)),
         )
         window.mark_layer_completed("image")
 
@@ -153,7 +154,7 @@ class TestResolutionFactor:
             window.get_raster_dir("label", ["B1"]),
             window.projection,
             window.bounds,
-            2 * np.ones((1, 4, 4), dtype=np.uint8),
+            RasterArray(chw_array=2 * np.ones((1, 4, 4), dtype=np.uint8)),
         )
         window.mark_layer_completed("label")
 

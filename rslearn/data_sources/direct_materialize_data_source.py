@@ -16,6 +16,7 @@ from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils.geometry import PixelBounds, Projection
+from rslearn.utils.raster_array import RasterArray
 
 
 class DirectMaterializeDataSource(
@@ -208,7 +209,7 @@ class DirectMaterializeDataSource(
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Read raster data from the store.
 
         Args:
@@ -220,7 +221,7 @@ class DirectMaterializeDataSource(
             resampling: the resampling method to use in case reprojection is needed.
 
         Returns:
-            the raster data as a numpy array.
+            the raster data as a RasterArray.
         """
         # Get the asset key for the requested bands
         asset_key = self._get_asset_key_by_bands(bands)
@@ -236,7 +237,7 @@ class DirectMaterializeDataSource(
         if callback is not None:
             raw_data = callback(raw_data)
 
-        return raw_data
+        return RasterArray(chw_array=raw_data)
 
     def materialize(
         self,
