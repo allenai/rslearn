@@ -836,6 +836,14 @@ def model_predict() -> None:
     model_handler()
 
 
+@register_handler("model", "fit_and_test")
+def model_fit_and_test() -> None:
+    """Handler for rslearn model fit_and_test."""
+    from .lightning_cli import fit_and_test_handler
+
+    fit_and_test_handler()
+
+
 def main() -> None:
     """CLI entrypoint."""
     try:

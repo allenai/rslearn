@@ -345,6 +345,12 @@ Now we can train the model:
 rslearn model fit --config land_cover_model.yaml
 ```
 
+Or, train and then immediately run the test loop in one command:
+
+```
+rslearn model fit_and_test --config land_cover_model.yaml
+```
+
 
 ### Apply the Model
 

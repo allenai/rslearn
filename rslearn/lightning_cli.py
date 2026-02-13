@@ -452,3 +452,83 @@ def model_handler() -> None:
         save_config_kwargs={"overwrite": True},
         parser_class=RslearnArgumentParser,
     )
+
+
+def _infer_checkpoint_path_for_test(trainer: Trainer) -> str | None:
+    """Infer which checkpoint to use for a post-fit test run.
+
+    Preference is given to the best checkpoint if available, otherwise the last
+    checkpoint. If neither is available, returns None to test the in-memory
+    weights from the end of training.
+    """
+    callbacks = getattr(trainer, "callbacks", None) or []
+
+    for callback in callbacks:
+        best_model_path = getattr(callback, "best_model_path", None)
+        if isinstance(best_model_path, str) and best_model_path:
+            return best_model_path
+
+    for callback in callbacks:
+        last_model_path = getattr(callback, "last_model_path", None)
+        if isinstance(last_model_path, str) and last_model_path:
+            return last_model_path
+
+    return None
+
+
+def fit_and_test_handler() -> None:
+    """Handler for rslearn model fit_and_test.
+
+    Runs `fit` and then `test` back-to-back using the same instantiated
+    Trainer/LightningModule/DataModule objects.
+    """
+    init_jsonargparse()
+
+    forwarded_args = list(sys.argv[2:])
+    if not forwarded_args or forwarded_args[0] != "fit_and_test":
+        raise ValueError(
+            "fit_and_test_handler must be invoked as: rslearn model fit_and_test ..."
+        )
+    forwarded_args[0] = "fit"
+
+    cli = RslearnLightningCLI(
+        model_class=RslearnLightningModule,
+        datamodule_class=RslearnDataModule,
+        args=forwarded_args,
+        subclass_mode_model=True,
+        subclass_mode_data=True,
+        save_config_kwargs={"overwrite": True},
+        parser_class=RslearnArgumentParser,
+        run=False,
+    )
+
+    if not hasattr(cli.config, "subcommand"):
+        logger.warning(
+            "Config does not have subcommand attribute, assuming we are in run=False mode"
+        )
+        subcommand_cfg = cli.config
+    else:
+        subcommand = cli.config.subcommand
+        if subcommand != "fit":
+            logger.warning(
+                "fit_and_test expected subcommand 'fit' but got '%s'", subcommand
+            )
+        try:
+            subcommand_cfg = cli.config[subcommand]
+        except (KeyError, TypeError) as e:
+            raise ValueError(
+                f"Could not resolve config for subcommand {subcommand!r}"
+            ) from e
+    ckpt_path_fit = getattr(subcommand_cfg, "ckpt_path", None)
+    if not isinstance(ckpt_path_fit, str):
+        ckpt_path_fit = None
+
+    logger.info("starting fit")
+    cli.trainer.fit(cli.model, datamodule=cli.datamodule, ckpt_path=ckpt_path_fit)
+
+    ckpt_path_test = _infer_checkpoint_path_for_test(cli.trainer)
+    if ckpt_path_test:
+        logger.info("starting test (ckpt_path=%s)", ckpt_path_test)
+    else:
+        logger.info("starting test (ckpt_path=None; using in-memory weights)")
+    cli.trainer.test(cli.model, datamodule=cli.datamodule, ckpt_path=ckpt_path_test)
