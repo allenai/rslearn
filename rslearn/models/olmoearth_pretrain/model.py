@@ -95,7 +95,7 @@ class OlmoEarth(FeatureExtractor):
         """
         if use_legacy_timestamps:
             warnings.warn(
-                "For new projects, don't use legacy timesteps."
+                "For new projects, don't use legacy timesteps. "
                 "Support will be removed after 2026-04-01.",
                 FutureWarning,
             )
