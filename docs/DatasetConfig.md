@@ -526,9 +526,13 @@ Only the keys documented below are supported in `init_args`; unknown keys will r
   // Example: ["red", "green", "blue", "nir", "swir16", "swir22"]
   "assets": null,
   // Optional: maximum cloud cover (%) to filter items at search time.
-  // If set, it overrides any `eo:cloud_cover` filter in `query`.
+  // If set, it takes precedence over cloud_cover_threshold and overrides any
+  // `eo:cloud_cover` filter in `query`.
   "cloud_cover_max": null,
-  // Optional: default cloud cover threshold (%) to apply if cloud_cover_max is not set.
+  // Optional: default max cloud cover (%) to apply when cloud_cover_max is not set.
+  // If set, it overrides any `eo:cloud_cover` filter in `query`.
+  // If both cloud_cover_max and cloud_cover_threshold are null, `query` (including
+  // any `eo:cloud_cover` filter) is passed through unchanged.
   "cloud_cover_threshold": null,
   // Maximum number of STAC items to fetch per window before rslearn grouping/matching.
   "search_max_items": 500,
