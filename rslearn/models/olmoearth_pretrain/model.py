@@ -8,7 +8,7 @@ from typing import Any
 
 import torch
 from einops import rearrange
-from olmo_core.config import Config
+from olmoearth_pretrain.config import Config, require_olmo_core
 from olmoearth_pretrain.data.constants import Modality
 from olmoearth_pretrain.datatypes import MaskedOlmoEarthSample, MaskValue
 from olmoearth_pretrain.model_loader import (
@@ -169,6 +169,9 @@ class OlmoEarth(FeatureExtractor):
 
         # Load the checkpoint (requires olmo_core for distributed checkpoint loading).
         if not random_initialization:
+            require_olmo_core(
+                "_load_model_from_checkpoint with random_initialization=False"
+            )
             from olmo_core.distributed.checkpoint import load_model_and_optim_state
 
             train_module_dir = checkpoint_upath / "model_and_optim"
