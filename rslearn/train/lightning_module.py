@@ -303,9 +303,9 @@ class RslearnLightningModule(L.LightningModule):
                 project_dir = os.path.dirname(ckpt_dir)
                 metrics_write_path = os.path.join(project_dir, "test_metrics.json")
             else:
-                logger.warning(
-                    "write_test_metrics is enabled but no ckpt_path provided, "
-                    "metrics will not be saved to file"
+                raise ValueError(
+                    "write_test_metrics is enabled but no ckpt_path provided. "
+                    "Please provide a checkpoint path or set metrics_file explicitly."
                 )
 
         if metrics_write_path:
