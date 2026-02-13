@@ -499,7 +499,7 @@ windows while direct materialization will be faster for sparse windows.
 
 ### rslearn.data_sources.earthdaily.Sentinel2
 
-Sentinel-2 L2A data on EarthDaily platform (collection: `sentinel-2-c1-l2a`).
+Sentinel-2 L2A data on [EarthDaily](https://earthdaily.com/) platform (collection: `sentinel-2-c1-l2a`).
 
 This data source requires the optional `earthdaily[platform]` dependency and EarthDaily
 credentials in the environment (see [EarthDaily documentation](https://earthdaily.github.io/earthdaily-python-client/main/) for supported methods).
