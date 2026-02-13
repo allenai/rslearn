@@ -5,7 +5,6 @@ import math
 import shutil
 from typing import Any
 
-import numpy.typing as npt
 import rasterio.transform
 import rasterio.vrt
 import shapely
@@ -24,6 +23,7 @@ from rslearn.utils.fsspec import (
 )
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.get_utm_ups_crs import get_utm_ups_crs
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import (
     GeotiffRasterFormat,
     get_bandset_dirname,
@@ -138,6 +138,8 @@ class DefaultTileStore(TileStore):
                 continue
             if fname.name == BANDS_FNAME:
                 continue
+            if fname.name == "metadata.json":
+                continue
             if ".tmp." in fname.name:
                 continue
             return fname
@@ -234,7 +236,7 @@ class DefaultTileStore(TileStore):
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Read raster data from the store.
 
         Args:
@@ -265,7 +267,7 @@ class DefaultTileStore(TileStore):
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
-        array: npt.NDArray[Any],
+        raster: RasterArray,
     ) -> None:
         """Write raster data to the store.
 
@@ -275,11 +277,11 @@ class DefaultTileStore(TileStore):
             bands: the list of bands in the array.
             projection: the projection of the array.
             bounds: the bounds of the array.
-            array: the raster data.
+            raster: the raster data.
         """
         raster_dir = self._get_raster_dir(layer_name, item_name, bands, write=True)
         raster_format = GeotiffRasterFormat(geotiff_options=self.geotiff_options)
-        raster_format.encode_raster(raster_dir, projection, bounds, array)
+        raster_format.encode_raster(raster_dir, projection, bounds, raster)
         (raster_dir / COMPLETED_FNAME).touch()
 
     def write_raster_file(

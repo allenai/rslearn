@@ -56,7 +56,7 @@ def test_materialize_all_bands(tmp_path: pathlib.Path, seattle2020: STGeometry) 
     )
 
     for bands in Sentinel2.ASSET_BANDS.values():
-        array = data_source.read_raster(
+        raster_array = data_source.read_raster(
             # layer_name is ignored
             layer_name="fake",
             item_name=item.name,
@@ -64,6 +64,7 @@ def test_materialize_all_bands(tmp_path: pathlib.Path, seattle2020: STGeometry) 
             projection=seattle2020.projection,
             bounds=bounds,
         )
+        array = raster_array.get_chw_array()
         assert array.max() > 0 and array.shape == (
             len(bands),
             bounds[3] - bounds[1],
@@ -108,10 +109,10 @@ def test_harmonization_preapplied(
     )
     aws_array = aws_data_source.read_raster(
         "unused", aws_item_name, ["B04"], projection, bounds
-    )
+    ).get_chw_array()
     pc_array = pc_source.read_raster(
         "unused", pc_item_name, ["B04"], projection, bounds
-    )
+    ).get_chw_array()
     # The 2026 scenes are very similar (all pixels are at most 1 off). But the 2021
     # scenes seem to have differences despite being from the same processing baseline.
     # I checked the raw GeoTIFFs from each source and they do differ, so it probably

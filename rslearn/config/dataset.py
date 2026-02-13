@@ -4,7 +4,7 @@ import copy
 import functools
 import json
 import warnings
-from datetime import timedelta
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -287,9 +287,13 @@ class SpaceMode(StrEnum):
     """
 
     PER_PERIOD_MOSAIC = "PER_PERIOD_MOSAIC"
-    """Create one mosaic per sub-period of the time range.
+    """Deprecated: use MOSAIC with period_duration instead. Will be removed after 2026-05-01."""
 
-    The duration of the sub-periods is controlled by another option in QueryConfig.
+    SINGLE_COMPOSITE = "SINGLE_COMPOSITE"
+    """Put all intersecting items into a single group.
+
+    This can be used together with compositing method to create one composite for the
+    layer.
     """
 
 
@@ -329,11 +333,25 @@ class QueryConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _warn_deprecated_time_mode(self) -> "QueryConfig":
+    def _warn_deprecated_fields(self) -> "QueryConfig":
         if "time_mode" in self.model_fields_set:
             warnings.warn(
                 "time_mode is deprecated and will be removed in a future version. "
                 "Remove it from your config (WITHIN is the only supported behavior).",
+                FutureWarning,
+                stacklevel=6,
+            )
+        if self.space_mode == SpaceMode.PER_PERIOD_MOSAIC:
+            warnings.warn(
+                "SpaceMode.PER_PERIOD_MOSAIC is deprecated and will be removed after "
+                "2026-05-01. Use SpaceMode.MOSAIC with period_duration instead.",
+                FutureWarning,
+                stacklevel=6,
+            )
+        if "per_period_mosaic_reverse_time_order" in self.model_fields_set:
+            warnings.warn(
+                "per_period_mosaic_reverse_time_order is deprecated and will be "
+                "removed after 2026-05-01.",
                 FutureWarning,
                 stacklevel=6,
             )
@@ -347,15 +365,21 @@ class QueryConfig(BaseModel):
     )
 
     max_matches: int = Field(
-        default=1, description="The maximum number of item groups."
+        default=1,
+        description="The maximum number of item groups. When period_duration is set, this "
+        "controls the maximum number of sub-periods for which item groups are created,"
+        "and within each sub-period, the matching strategy is applied with an effective "
+        "max_matches of 1 (i.e. one item group per sub-period).",
     )
     period_duration: Annotated[
-        timedelta,
-        BeforeValidator(ensure_timedelta),
+        timedelta | None,
+        BeforeValidator(ensure_optional_timedelta),
         PlainSerializer(serialize_optional_timedelta),
     ] = Field(
-        default=timedelta(days=30),
-        description="The duration of the periods, if the space mode is PER_PERIOD_MOSAIC.",
+        default=None,
+        description="If set, split the window's time range into sub-periods of this duration. "
+        "Applies to all SpaceModes. Each sub-period produces a separate item group, up to "
+        "max_matches total groups/periods.",
     )
     mosaic_compositing_overlaps: int = Field(
         default=1,
@@ -407,6 +431,29 @@ class DataSourceConfig(BaseModel):
         default=True,
         description="Whether to ingest this layer (default True). If False, it will be directly materialized without ingestion.",
     )
+
+    def get_request_time_range(
+        self, window_time_range: tuple[datetime, datetime] | None
+    ) -> tuple[datetime, datetime] | None:
+        """Apply time_offset and duration to a window time range.
+
+        This converts a window's time range into the request time range that should be
+        used during prepare and materialize.
+
+        Args:
+            window_time_range: the window's original time range, or None.
+
+        Returns:
+            The adjusted time range, or None if the input was None.
+        """
+        if window_time_range is None:
+            return None
+        result = window_time_range
+        if self.time_offset:
+            result = (result[0] + self.time_offset, result[1] + self.time_offset)
+        if self.duration:
+            result = (result[0], result[0] + self.duration)
+        return result
 
     @model_validator(mode="before")
     @classmethod
@@ -482,6 +529,15 @@ class CompositingMethod(StrEnum):
 
     MEDIAN = "MEDIAN"
     """Select per-pixel median value of corresponding items of a window"""
+
+    SPATIAL_MOSAIC_TEMPORAL_STACK = "SPATIAL_MOSAIC_TEMPORAL_STACK"
+    """Spatial first-valid compositing per timestep, stacked along T.
+
+    Items, which can contain multi-temporal rasters, are spatially composited using
+    first-valid logic within each timestep, but timesteps are stacked. The result is a
+    (C, T, H, W) RasterArray whose T dimension spans the union of all item timesteps,
+    clipped to the window time range.
+    """
 
 
 class LayerConfig(BaseModel):

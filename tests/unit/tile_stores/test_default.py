@@ -10,6 +10,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.tile_stores.default import DefaultTileStore
 from rslearn.utils.fsspec import open_atomic
 from rslearn.utils.geometry import Projection
+from rslearn.utils.raster_array import RasterArray
 
 LAYER_NAME = "layer"
 ITEM_NAME = "item"
@@ -24,13 +25,14 @@ def tile_store_with_ones(tmp_path: pathlib.Path) -> DefaultTileStore:
     tile_store.set_dataset_path(ds_path)
     # Write square.
     raster_size = 4
+    arr = np.ones((len(BANDS), raster_size, raster_size), dtype=np.uint8)
     tile_store.write_raster(
         LAYER_NAME,
         ITEM_NAME,
         BANDS,
         PROJECTION,
         (0, 0, raster_size, raster_size),
-        np.ones((len(BANDS), raster_size, raster_size), dtype=np.uint8),
+        RasterArray(chw_array=arr),
     )
     return tile_store
 
@@ -43,7 +45,7 @@ def test_rectangle_read(tile_store_with_ones: DefaultTileStore) -> None:
     result = tile_store_with_ones.read_raster(
         LAYER_NAME, ITEM_NAME, BANDS, PROJECTION, (0, 0, width, height)
     )
-    assert result.shape == (len(BANDS), height, width)
+    assert result.array.shape == (len(BANDS), 1, height, width)
 
 
 def test_partial_read(tile_store_with_ones: DefaultTileStore) -> None:
@@ -52,11 +54,12 @@ def test_partial_read(tile_store_with_ones: DefaultTileStore) -> None:
     result = tile_store_with_ones.read_raster(
         LAYER_NAME, ITEM_NAME, BANDS, PROJECTION, (2, 2, 6, 6)
     )
+    arr = result.array
     # This portion matches the raster which is all ones.
-    assert np.all(result[:, 0:2, 0:2] == 1)
+    assert np.all(arr[:, 0, 0:2, 0:2] == 1)
     # These portions do not.
-    assert np.all(result[:, :, 2:4] == 0)
-    assert np.all(result[:, 2:4, :] == 0)
+    assert np.all(arr[:, 0, :, 2:4] == 0)
+    assert np.all(arr[:, 0, 2:4, :] == 0)
 
 
 def test_zstd_compression(tmp_path: pathlib.Path) -> None:
@@ -69,13 +72,14 @@ def test_zstd_compression(tmp_path: pathlib.Path) -> None:
     )
     tile_store.set_dataset_path(ds_path)
     raster_size = 4
+    arr = np.zeros((len(BANDS), raster_size, raster_size), dtype=np.uint8)
     tile_store.write_raster(
         LAYER_NAME,
         ITEM_NAME,
         BANDS,
         PROJECTION,
         (0, 0, raster_size, raster_size),
-        np.zeros((len(BANDS), raster_size, raster_size), dtype=np.uint8),
+        RasterArray(chw_array=arr),
     )
 
     assert tile_store.path is not None
@@ -117,18 +121,19 @@ def test_leftover_tmp_file(tmp_path: pathlib.Path) -> None:
         tile_store.read_raster(LAYER_NAME, ITEM_NAME, BANDS, PROJECTION, bounds)
 
     # Now write actual raster.
+    arr = np.ones((len(BANDS), raster_size, raster_size), dtype=np.uint8)
     tile_store.write_raster(
         LAYER_NAME,
         ITEM_NAME,
         BANDS,
         PROJECTION,
         bounds,
-        np.ones((len(BANDS), raster_size, raster_size), dtype=np.uint8),
+        RasterArray(chw_array=arr),
     )
 
     # And make sure this time the read succeeds.
-    array = tile_store.read_raster(LAYER_NAME, ITEM_NAME, BANDS, PROJECTION, bounds)
-    assert array.min() == 1 and array.max() == 1
+    raster = tile_store.read_raster(LAYER_NAME, ITEM_NAME, BANDS, PROJECTION, bounds)
+    assert raster.array.min() == 1 and raster.array.max() == 1
 
 
 def test_hidden_file_in_raster_dir(tmp_path: pathlib.Path) -> None:
@@ -151,26 +156,28 @@ class TestGetRasterBands:
         """Test with two bands with standard names."""
         tile_store = DefaultTileStore()
         tile_store.set_dataset_path(UPath(tmp_path))
+        arr = np.ones((2, 4, 4), dtype=np.uint8)
         tile_store.write_raster(
             "layer",
             "item",
             ["B01", "B02"],
             WGS84_PROJECTION,
             (0, 0, 4, 4),
-            np.ones((2, 4, 4), dtype=np.uint8),
+            RasterArray(chw_array=arr),
         )
         assert tile_store.get_raster_bands("layer", "item") == [["B01", "B02"]]
 
     def test_ignores_hidden_files(self, tmp_path: pathlib.Path) -> None:
         tile_store = DefaultTileStore()
         tile_store.set_dataset_path(UPath(tmp_path))
+        arr = np.ones((2, 4, 4), dtype=np.uint8)
         tile_store.write_raster(
             "layer",
             "item",
             ["B01", "B02"],
             WGS84_PROJECTION,
             (0, 0, 4, 4),
-            np.ones((2, 4, 4), dtype=np.uint8),
+            RasterArray(chw_array=arr),
         )
         assert tile_store.path is not None
         item_dir = tile_store.path / "layer" / "item"
@@ -186,13 +193,14 @@ class TestGetRasterBands:
         """
         tile_store = DefaultTileStore()
         tile_store.set_dataset_path(UPath(tmp_path))
+        arr = np.ones((2, 4, 4), dtype=np.uint8)
         tile_store.write_raster(
             "layer",
             "item",
             ["B01", "_"],
             WGS84_PROJECTION,
             (0, 0, 4, 4),
-            np.ones((2, 4, 4), dtype=np.uint8),
+            RasterArray(chw_array=arr),
         )
         assert tile_store.get_raster_bands("layer", "item") == [["B01", "_"]]
 
@@ -200,13 +208,15 @@ class TestGetRasterBands:
         """Test when there are multiple files with different subsets of bands."""
         tile_store = DefaultTileStore()
         tile_store.set_dataset_path(UPath(tmp_path))
+        arr1 = np.ones((2, 4, 4), dtype=np.uint8)
+        arr2 = np.ones((1, 4, 4), dtype=np.uint8)  # ["_"] is 1 band
         tile_store.write_raster(
             "layer",
             "item",
             ["B01", "B02"],
             WGS84_PROJECTION,
             (0, 0, 4, 4),
-            np.ones((2, 4, 4), dtype=np.uint8),
+            RasterArray(chw_array=arr1),
         )
         tile_store.write_raster(
             "layer",
@@ -214,7 +224,7 @@ class TestGetRasterBands:
             ["_"],
             WGS84_PROJECTION,
             (0, 0, 4, 4),
-            np.ones((2, 4, 4), dtype=np.uint8),
+            RasterArray(chw_array=arr2),
         )
         assert list(sorted(tile_store.get_raster_bands("layer", "item"))) == list(
             sorted([["B01", "B02"], ["_"]])

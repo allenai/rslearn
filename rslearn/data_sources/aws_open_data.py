@@ -28,6 +28,7 @@ from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_EPSG, WGS84_PROJECTION
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import GridIndex, Projection, STGeometry, daterange
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 from .copernicus import get_harmonize_callback, get_sentinel2_tiles
@@ -726,7 +727,14 @@ class Sentinel2(
                             projection, bounds = get_raster_projection_and_bounds(src)
                         array = harmonize_callback(array)
                         tile_store.write_raster(
-                            item.name, band_names, projection, bounds, array
+                            item.name,
+                            band_names,
+                            projection,
+                            bounds,
+                            RasterArray(
+                                chw_array=array,
+                                time_range=item.geometry.time_range,
+                            ),
                         )
 
                     else:

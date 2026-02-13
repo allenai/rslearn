@@ -12,6 +12,7 @@ from rslearn.config import QueryConfig, SpaceMode
 from rslearn.data_sources.hf_srtm import SRTM
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
@@ -33,7 +34,11 @@ def _make_srtm_geotiff(path: pathlib.Path) -> pathlib.Path:
     data = np.ones((1, height, width), dtype=np.int16) * 100
     raster_dir = UPath(path / "srtm_raster")
     GeotiffRasterFormat().encode_raster(
-        raster_dir, projection, bounds, data, fname="SRTM1N47W123V2.tif"
+        raster_dir,
+        projection,
+        bounds,
+        RasterArray(chw_array=data),
+        fname="SRTM1N47W123V2.tif",
     )
     return raster_dir / "SRTM1N47W123V2.tif"
 

@@ -14,6 +14,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.gcp_public_data import Sentinel2, Sentinel2Item
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 SEATTLE_WGS84_BOUNDS = (-122.34, 47.60, -122.32, 47.62)
@@ -33,7 +34,7 @@ def _make_test_geotiff(path: pathlib.Path) -> pathlib.Path:
     data = np.ones((1, height, width), dtype=np.uint16) * 1000
     raster_dir = UPath(path / "raster")
     fmt = GeotiffRasterFormat()
-    fmt.encode_raster(raster_dir, projection, bounds, data)
+    fmt.encode_raster(raster_dir, projection, bounds, RasterArray(chw_array=data))
     return raster_dir / fmt.fname
 
 

@@ -21,6 +21,7 @@ from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils import PixelBounds, Projection, STGeometry, get_global_raster_bounds
 from rslearn.utils.array import copy_spatial_array
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_transform_from_projection_and_bounds
 
 from .data_source import DataSource, DataSourceContext, Item
@@ -290,7 +291,7 @@ class XyzTiles(DataSource, TileStore):
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Read raster data from the store.
 
         Args:
@@ -342,7 +343,7 @@ class XyzTiles(DataSource, TileStore):
             dst_transform=dst_transform,
             resampling=resampling,
         )
-        return dst_array
+        return RasterArray(chw_array=dst_array)
 
     def materialize(
         self,

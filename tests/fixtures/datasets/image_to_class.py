@@ -15,6 +15,7 @@ from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.dataset import DataInput
 from rslearn.train.tasks.classification import ClassificationHead, ClassificationTask
 from rslearn.utils import Feature, STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import SingleImageRasterFormat
 from rslearn.utils.vector_format import GeojsonVectorFormat
 
@@ -71,7 +72,7 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
         layer_dir / "band",
         window.projection,
         window.bounds,
-        image,
+        RasterArray(chw_array=image),
     )
     window.mark_layer_completed(layer_name)
 

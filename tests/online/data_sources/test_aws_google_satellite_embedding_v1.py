@@ -43,13 +43,14 @@ def test_read_raster_subset_bands(
         bounds=bounds,
     )
 
+    arr = data.get_chw_array()
     expected_height = bounds[3] - bounds[1]
     expected_width = bounds[2] - bounds[0]
-    assert data.shape == (3, expected_height, expected_width)
+    assert arr.shape == (3, expected_height, expected_width)
     # Check that it was dequantized to float32 correctly. Should be roughly [-1, 1].
-    assert data.dtype == np.float32
-    assert data.min() >= -1.5
-    assert data.max() <= 1.5
+    assert arr.dtype == np.float32
+    assert arr.min() >= -1.5
+    assert arr.max() <= 1.5
 
 
 def test_read_raster_no_dequantization(
@@ -83,13 +84,14 @@ def test_read_raster_no_dequantization(
         bounds=bounds,
     )
 
-    print(f"Raw data shape: {data.shape}")
-    print(f"Raw data dtype: {data.dtype}")
-    print(f"Raw data range: [{data.min()}, {data.max()}]")
+    arr = data.get_chw_array()
+    print(f"Raw data shape: {arr.shape}")
+    print(f"Raw data dtype: {arr.dtype}")
+    print(f"Raw data range: [{arr.min()}, {arr.max()}]")
 
     # Raw data should be integer type (int8 or int16 depending on resampling)
-    assert np.issubdtype(data.dtype, np.integer)
+    assert np.issubdtype(arr.dtype, np.integer)
 
     # Values should be in [-127, 127] range (the original int8 range)
-    assert -150 < data.min() < -50
-    assert 150 > data.max() > 50
+    assert -150 < arr.min() < -50
+    assert 150 > arr.max() > 50
