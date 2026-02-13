@@ -1,6 +1,7 @@
 """Tests for all storages."""
 
 import pathlib
+import sqlite3
 
 import pytest
 from upath import UPath
@@ -9,7 +10,10 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import Item
 from rslearn.dataset.storage.file import FileWindowStorageFactory
 from rslearn.dataset.storage.migrate import migrate_window_storage
-from rslearn.dataset.storage.sqlite import SQLiteWindowStorageFactory
+from rslearn.dataset.storage.sqlite import (
+    SQLiteWindowStorage,
+    SQLiteWindowStorageFactory,
+)
 from rslearn.dataset.storage.storage import WindowStorageFactory
 from rslearn.dataset.window import Window, WindowLayerData
 
@@ -257,3 +261,15 @@ def test_migrate_window_storage_requires_empty_target(
 
     with pytest.raises(ValueError, match="not empty"):
         migrate_window_storage(source_storage, target_storage)
+
+
+def test_sqlite_rejects_wrong_schema_version(tmp_path: pathlib.Path) -> None:
+    """Opening a database with a different schema version should raise RuntimeError."""
+    db_path = tmp_path / SQLiteWindowStorage.DB_FILENAME
+    conn = sqlite3.connect(str(db_path))
+    # Stamp a version that doesn't match SCHEMA_VERSION.
+    conn.execute(f"PRAGMA user_version = {SQLiteWindowStorage.SCHEMA_VERSION + 1}")
+    conn.close()
+
+    with pytest.raises(RuntimeError, match="schema version"):
+        SQLiteWindowStorage(UPath(tmp_path))

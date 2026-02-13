@@ -82,6 +82,7 @@ class SQLiteWindowStorage(WindowStorage):
     """
 
     DB_FILENAME = "windows.sqlite3"
+    SCHEMA_VERSION = 1
 
     def __init__(self, path: UPath):
         """Create a new SQLiteWindowStorage.
@@ -126,7 +127,25 @@ class SQLiteWindowStorage(WindowStorage):
     def _init_db(self) -> None:
         """Initialize the database schema if it doesn't exist."""
         conn = self._get_connection()
-        # Windows table stores window metadata
+
+        # Check database version. A fresh database should have version 0.
+        (user_version,) = conn.execute("PRAGMA user_version").fetchone()
+
+        if user_version == self.SCHEMA_VERSION:
+            # Schema is up to date, nothing to do.
+            return
+
+        if user_version != 0:
+            # This means a version was previously set on the db, but it doesn't match
+            # our SCHEMA_VERSION. For now we don't support database migration, and just
+            # raise error instead.
+            raise RuntimeError(
+                f"SQLite database {self.db_path} has schema version {user_version}, "
+                f"but this code expects version {self.SCHEMA_VERSION}. "
+                f"Please migrate or recreate the database."
+            )
+
+        # Fresh database — create tables and stamp the version.
         conn.execute("""
             CREATE TABLE IF NOT EXISTS windows (
                 group_name TEXT NOT NULL,
@@ -134,23 +153,22 @@ class SQLiteWindowStorage(WindowStorage):
                 crs TEXT NOT NULL,
                 x_resolution REAL NOT NULL,
                 y_resolution REAL NOT NULL,
+                -- Window bounds (PixelBounds) - always integers.
                 bounds_x1 INTEGER NOT NULL,
                 bounds_y1 INTEGER NOT NULL,
                 bounds_x2 INTEGER NOT NULL,
                 bounds_y2 INTEGER NOT NULL,
+                -- ISO 8601 strings from datetime.isoformat()
                 time_start TEXT,
                 time_end TEXT,
                 options_json TEXT NOT NULL,
                 PRIMARY KEY (group_name, name)
             )
         """)
-        # Index for lookups by name alone (group_name is covered by the PK)
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_windows_name
             ON windows(name)
         """)
-
-        # Layer datas table stores all layer datas for a window as a single JSON blob
         conn.execute("""
             CREATE TABLE IF NOT EXISTS layer_datas (
                 group_name TEXT NOT NULL,
@@ -159,7 +177,6 @@ class SQLiteWindowStorage(WindowStorage):
                 PRIMARY KEY (group_name, window_name)
             )
         """)
-        # Completed layers table tracks which layers are completed
         conn.execute("""
             CREATE TABLE IF NOT EXISTS completed_layers (
                 group_name TEXT NOT NULL,
@@ -169,6 +186,7 @@ class SQLiteWindowStorage(WindowStorage):
                 PRIMARY KEY (group_name, window_name, layer_name, group_idx)
             )
         """)
+        conn.execute(f"PRAGMA user_version = {self.SCHEMA_VERSION}")
 
     @override
     def get_window_root(self, group: str, name: str) -> UPath:
