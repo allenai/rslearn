@@ -9,13 +9,13 @@ import tempfile
 
 import fsspec
 import jsonargparse
+import wandb
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
 from lightning.pytorch.utilities import rank_zero_only
 from upath import UPath
 
-import wandb
 from rslearn.arg_parser import RslearnArgumentParser
 from rslearn.log_utils import get_logger
 from rslearn.train.data_module import RslearnDataModule
@@ -94,17 +94,15 @@ class SaveWandbRunIdCallback(Callback):
             trainer: the Trainer object.
             pl_module: the LightningModule object.
         """
-        if wandb.run is None:  # type: ignore[attr-defined]
-            raise RuntimeError("wandb.run is not initialized")
-        wandb_id = wandb.run.id  # type: ignore[attr-defined]
+        wandb_id = wandb.run.id
 
         project_dir = UPath(self.project_dir)
         project_dir.mkdir(parents=True, exist_ok=True)
         with (project_dir / WANDB_ID_FNAME).open("w") as f:
             f.write(wandb_id)
 
-        if self.config_str is not None and "project_name" not in wandb.config:  # type: ignore[attr-defined]
-            wandb.config.update(json.loads(self.config_str))  # type: ignore[attr-defined]
+        if self.config_str is not None and "project_name" not in wandb.config:
+            wandb.config.update(json.loads(self.config_str))
 
 
 class RslearnLightningCLI(LightningCLI):
