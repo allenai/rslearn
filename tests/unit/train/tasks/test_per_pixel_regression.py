@@ -259,3 +259,34 @@ def test_process_inputs_masks_out_of_window_padding(
     assert int(valid.sum().item()) == 10 * 10
     assert valid[0, 0] == 0
     assert valid[5, 5] == 1
+
+
+def test_visualize_without_image_does_not_crash() -> None:
+    task = PerPixelRegressionTask(scale_factor=1.0, metrics=("mse",), nodata_value=-1.0)
+    target_dict = {
+        "values": RasterImage(torch.zeros((1, 1, 2, 2), dtype=torch.float32), timestamps=None),
+        "valid": RasterImage(torch.ones((1, 1, 2, 2), dtype=torch.float32), timestamps=None),
+    }
+    output = torch.zeros((1, 2, 2), dtype=torch.float32)
+    images = task.visualize({}, target_dict, output)
+    assert "gt" in images
+    assert "pred" in images
+    assert "image" not in images
+
+
+def test_visualize_uses_first_raster_image_when_image_key_missing() -> None:
+    task = PerPixelRegressionTask(scale_factor=1.0, metrics=("mse",), nodata_value=-1.0)
+    input_dict = {
+        "sentinel2_l2a": RasterImage(
+            torch.zeros((3, 1, 2, 2), dtype=torch.float32), timestamps=None
+        )
+    }
+    target_dict = {
+        "values": RasterImage(torch.zeros((1, 1, 2, 2), dtype=torch.float32), timestamps=None),
+        "valid": RasterImage(torch.ones((1, 1, 2, 2), dtype=torch.float32), timestamps=None),
+    }
+    output = torch.zeros((1, 2, 2), dtype=torch.float32)
+    images = task.visualize(input_dict, target_dict, output)
+    assert "image" in images
+    assert images["image"].dtype == np.uint8
+    assert images["image"].shape == (2, 2, 3)
