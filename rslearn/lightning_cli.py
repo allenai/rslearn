@@ -162,13 +162,6 @@ class RslearnLightningCLI(LightningCLI):
             help="Whether to log to W&B (used with --management_dir). 'yes' will enable logging, 'no' will disable logging, and 'auto' will use 'yes' during fit and 'no' during val/test/predict.",
             default="auto",
         )
-        parser.add_argument(
-            "--write_test_metrics",
-            type=bool,
-            help="Write test metrics to a JSON file (used with --management_dir). "
-            "Defaults to project_dir/test_metrics.json unless model.init_args.metrics_file is set.",
-            default=False,
-        )
 
     def _get_checkpoint_path(
         self,
@@ -440,26 +433,6 @@ class RslearnLightningCLI(LightningCLI):
                             {"find_unused_parameters": True}
                         ),
                     }
-                )
-
-        # Set up test metrics writing if enabled, deriving path from ckpt_path.
-        if subcommand == "test" and c.write_test_metrics:
-            if not c.model.init_args.metrics_file:
-                # If ckpt_path is set, write metrics to the parent of the checkpoint directory.
-                if c.ckpt_path:
-                    ckpt_dir = os.path.dirname(c.ckpt_path)
-                    project_dir = os.path.dirname(ckpt_dir)
-                    metrics_file = os.path.join(project_dir, "test_metrics.json")
-                    c.model.init_args.metrics_file = metrics_file
-                    logger.info(f"test metrics will be saved to {metrics_file}")
-                else:
-                    logger.warning(
-                        "write_test_metrics is enabled but no ckpt_path provided, "
-                        "metrics will not be saved to file"
-                    )
-            else:
-                logger.info(
-                    f"test metrics will be saved to {c.model.init_args.metrics_file}"
                 )
 
         if c.management_dir:
