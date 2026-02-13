@@ -10,6 +10,7 @@ import torchmetrics.classification
 from torchmetrics import Metric, MetricCollection
 
 from rslearn.models.component import FeatureMaps, Predictor
+from rslearn.train.metrics import ConfusionMatrixMetric
 from rslearn.train.model_context import (
     ModelContext,
     ModelOutput,
@@ -17,27 +18,9 @@ from rslearn.train.model_context import (
     SampleMetadata,
 )
 from rslearn.utils import Feature
+from rslearn.utils.colors import DEFAULT_COLORS
 
 from .task import BasicTask
-
-# TODO: This is duplicated code fix it
-DEFAULT_COLORS = [
-    (255, 0, 0),
-    (0, 255, 0),
-    (0, 0, 255),
-    (255, 255, 0),
-    (0, 255, 255),
-    (255, 0, 255),
-    (0, 128, 0),
-    (255, 160, 122),
-    (139, 69, 19),
-    (128, 128, 128),
-    (255, 255, 255),
-    (143, 188, 143),
-    (95, 158, 160),
-    (255, 200, 0),
-    (128, 0, 0),
-]
 
 
 class SegmentationTask(BasicTask):
@@ -59,6 +42,10 @@ class SegmentationTask(BasicTask):
         miou_metric_kwargs: dict[str, Any] = {},
         prob_scales: list[float] | None = None,
         other_metrics: dict[str, Metric] = {},
+        output_probs: bool = False,
+        output_class_idx: int | None = None,
+        enable_confusion_matrix: bool = False,
+        class_names: list[str] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize a new SegmentationTask.
@@ -92,6 +79,14 @@ class SegmentationTask(BasicTask):
                 this is only applied during prediction, not when computing val or test
                 metrics.
             other_metrics: additional metrics to configure on this task.
+            output_probs: if True, output raw softmax probabilities instead of class IDs
+                during prediction.
+            output_class_idx: if set along with output_probs, only output the probability
+                for this specific class index (single-channel output).
+            enable_confusion_matrix: whether to compute confusion matrix (default false).
+                If true, it requires wandb to be initialized for logging.
+            class_names: optional list of class names for labeling confusion matrix axes.
+                If not provided, classes will be labeled as "class_0", "class_1", etc.
             kwargs: additional arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -116,6 +111,10 @@ class SegmentationTask(BasicTask):
         self.miou_metric_kwargs = miou_metric_kwargs
         self.prob_scales = prob_scales
         self.other_metrics = other_metrics
+        self.output_probs = output_probs
+        self.output_class_idx = output_class_idx
+        self.enable_confusion_matrix = enable_confusion_matrix
+        self.class_names = class_names
 
     def process_inputs(
         self,
@@ -138,9 +137,7 @@ class SegmentationTask(BasicTask):
             return {}, {}
 
         assert isinstance(raw_inputs["targets"], RasterImage)
-        assert raw_inputs["targets"].image.shape[0] == 1
-        assert raw_inputs["targets"].image.shape[1] == 1
-        labels = raw_inputs["targets"].image[0, 0, :, :].long()
+        labels = raw_inputs["targets"].get_hw_tensor().long()
 
         if self.class_id_mapping is not None:
             new_labels = labels.clone()
@@ -148,17 +145,20 @@ class SegmentationTask(BasicTask):
                 new_labels[labels == old_id] = new_id
             labels = new_labels
 
+        window_valid = self._get_window_valid_mask(labels, metadata)
         if self.nodata_value is not None:
-            valid = (labels != self.nodata_value).float()
+            valid = (labels != self.nodata_value).float() * window_valid
             # Labels, even masked ones, must be in the range 0 to num_classes-1
             if self.nodata_value >= self.num_classes:
                 labels[labels == self.nodata_value] = 0
         else:
-            valid = torch.ones(labels.shape, dtype=torch.float32)
+            valid = window_valid
 
+        # Wrap in RasterImage with CTHW format (C=1, T=1) so classes and valid can be
+        # used in image transforms.
         return {}, {
-            "classes": labels,
-            "valid": valid,
+            "classes": RasterImage(labels[None, None, :, :], timestamps=None),
+            "valid": RasterImage(valid[None, None, :, :], timestamps=None),
         }
 
     def process_output(
@@ -171,7 +171,9 @@ class SegmentationTask(BasicTask):
             metadata: metadata about the patch being read
 
         Returns:
-            CHW numpy array with one channel, containing the predicted class IDs.
+            CHW numpy array. If output_probs is False, returns one channel with
+            predicted class IDs. If output_probs is True, returns softmax probabilities
+            (num_classes channels, or 1 channel if output_class_idx is set).
         """
         if not isinstance(raw_output, torch.Tensor) or len(raw_output.shape) != 3:
             raise ValueError("the output for SegmentationTask must be a CHW tensor")
@@ -183,6 +185,15 @@ class SegmentationTask(BasicTask):
                     self.prob_scales, device=raw_output.device, dtype=raw_output.dtype
                 )[:, None, None]
             )
+
+        if self.output_probs:
+            # Return raw softmax probabilities
+            probs = raw_output.cpu().numpy()
+            if self.output_class_idx is not None:
+                # Return only the specified class probability
+                return probs[self.output_class_idx : self.output_class_idx + 1, :, :]
+            return probs
+
         classes = raw_output.argmax(dim=0).cpu().numpy()
         return classes[None, :, :]
 
@@ -205,7 +216,7 @@ class SegmentationTask(BasicTask):
         image = super().visualize(input_dict, target_dict, output)["image"]
         if target_dict is None:
             raise ValueError("target_dict is required for visualization")
-        gt_classes = target_dict["classes"].cpu().numpy()
+        gt_classes = target_dict["classes"].get_hw_tensor().cpu().numpy()
         pred_classes = output.cpu().numpy().argmax(axis=0)
         gt_vis = np.zeros((gt_classes.shape[0], gt_classes.shape[1], 3), dtype=np.uint8)
         pred_vis = np.zeros(
@@ -241,7 +252,8 @@ class SegmentationTask(BasicTask):
                     # Metric name can't contain "." so change to ",".
                     suffix = "_" + str(thresholds[0]).replace(".", ",")
 
-                # Create one metric per type - it returns a dict with "avg" and optionally per-class keys
+                # Create one metric per type -- it returns either a scalar average or
+                # a dict with per-class keys.
                 metrics["F1" + suffix] = SegmentationMetric(
                     F1Metric(
                         num_classes=self.num_classes,
@@ -274,8 +286,6 @@ class SegmentationTask(BasicTask):
             if self.nodata_value is not None:
                 miou_metric_kwargs["nodata_value"] = self.nodata_value
             miou_metric_kwargs.update(self.miou_metric_kwargs)
-
-            # Create one metric - it returns a dict with "avg" and optionally per-class keys
             metrics["mean_iou"] = SegmentationMetric(
                 MeanIoUMetric(**miou_metric_kwargs),
                 pass_probabilities=False,
@@ -284,18 +294,33 @@ class SegmentationTask(BasicTask):
         if self.other_metrics:
             metrics.update(self.other_metrics)
 
+        if self.enable_confusion_matrix:
+            metrics["confusion_matrix"] = SegmentationMetric(
+                ConfusionMatrixMetric(
+                    num_classes=self.num_classes,
+                    class_names=self.class_names,
+                ),
+            )
+
         return MetricCollection(metrics)
 
 
 class SegmentationHead(Predictor):
     """Head for segmentation task."""
 
-    def __init__(self, weights: list[float] | None = None, dice_loss: bool = False):
+    def __init__(
+        self,
+        weights: list[float] | None = None,
+        dice_loss: bool = False,
+        temperature: float = 1.0,
+    ):
         """Initialize a new SegmentationTask.
 
         Args:
             weights: weights for cross entropy loss (Tensor of size C)
             dice_loss: weather to add dice loss to cross entropy
+            temperature: temperature scaling for softmax, does not affect the loss,
+                only the predictor outputs
         """
         super().__init__()
         if weights is not None:
@@ -303,6 +328,7 @@ class SegmentationHead(Predictor):
         else:
             self.weights = None
         self.dice_loss = dice_loss
+        self.temperature = temperature
 
     def forward(
         self,
@@ -331,12 +357,16 @@ class SegmentationHead(Predictor):
             )
 
         logits = intermediates.feature_maps[0]
-        outputs = torch.nn.functional.softmax(logits, dim=1)
+        outputs = torch.nn.functional.softmax(logits / self.temperature, dim=1)
 
         losses = {}
         if targets:
-            labels = torch.stack([target["classes"] for target in targets], dim=0)
-            mask = torch.stack([target["valid"] for target in targets], dim=0)
+            labels = torch.stack(
+                [target["classes"].get_hw_tensor() for target in targets], dim=0
+            )
+            mask = torch.stack(
+                [target["valid"].get_hw_tensor() for target in targets], dim=0
+            )
             per_pixel_loss = torch.nn.functional.cross_entropy(
                 logits, labels, weight=self.weights, reduction="none"
             )
@@ -349,7 +379,8 @@ class SegmentationHead(Predictor):
                 # the summed mask loss be zero.
                 losses["cls"] = torch.sum(per_pixel_loss * mask)
             if self.dice_loss:
-                dice_loss = DiceLoss()(outputs, labels, mask)
+                softmax_woT = torch.nn.functional.softmax(logits, dim=1)
+                dice_loss = DiceLoss()(softmax_woT, labels, mask)
                 losses["dice"] = dice_loss
 
         return ModelOutput(
@@ -400,12 +431,12 @@ class SegmentationMetric(Metric):
         """
         if not isinstance(preds, torch.Tensor):
             preds = torch.stack(preds)
-        labels = torch.stack([target["classes"] for target in targets])
+        labels = torch.stack([target["classes"].get_hw_tensor() for target in targets])
 
         # Sub-select the valid labels.
         # We flatten the prediction and label images at valid pixels.
         # Prediction is changed from BCHW to BHWC so we can select the valid BHW mask.
-        mask = torch.stack([target["valid"] > 0 for target in targets])
+        mask = torch.stack([target["valid"].get_hw_tensor() > 0 for target in targets])
         preds = preds.permute(0, 2, 3, 1)[mask]
         labels = labels[mask]
         if len(preds) == 0:
@@ -443,6 +474,7 @@ class SegmentationMetric(Metric):
             if isinstance(result, dict):
                 return result[f"cls_{self.class_idx}"]
             return result[self.class_idx]
+
         return result
 
     def reset(self) -> None:
@@ -477,8 +509,8 @@ class F1Metric(Metric):
                 metric is the best F1 across score thresholds.
             metric_mode: set to "precision" or "recall" to return that instead of F1
                 (default "f1")
-            report_per_class: whether to include per-class scores in the output dict.
-                If False, only returns the "avg" key.
+            report_per_class: whether to return a dict with per-class scores and "avg"
+                score instead of just returning the scalar average score.
         """
         super().__init__()
         self.num_classes = num_classes
@@ -529,8 +561,8 @@ class F1Metric(Metric):
         """Compute metric.
 
         Returns:
-            dict with "avg" key containing mean score across classes.
-            If report_per_class is True, also includes "cls_N" keys for each class N.
+            the average F1 score, or, if report_per_class is True, a dict with "f1/avg"
+                key containing the average score and "f1/cls_N" keys for each class N.
         """
         cls_best_scores = {}
 
@@ -569,12 +601,16 @@ class F1Metric(Metric):
                 if best_score is None or score > best_score:
                     best_score = score
 
-            cls_best_scores[f"cls_{cls_idx}"] = best_score
+            cls_best_scores[f"f1/cls_{cls_idx}"] = best_score
 
-        report_scores = {"avg": torch.mean(torch.stack(list(cls_best_scores.values())))}
+        average_score = torch.mean(torch.stack(list(cls_best_scores.values())))
+
         if self.report_per_class:
+            report_scores = {"f1/avg": average_score}
             report_scores.update(cls_best_scores)
-        return report_scores
+            return report_scores
+        else:
+            return average_score
 
 
 class MeanIoUMetric(Metric):
@@ -606,8 +642,9 @@ class MeanIoUMetric(Metric):
             ignore_missing_classes: whether to ignore classes that don't appear in
                 either the predictions or the ground truth. If false, the IoU for a
                 missing class will be 0.
-            report_per_class: whether to include per-class IoU scores in the output dict.
-                If False, only returns the "avg" key.
+            report_per_class: whether to return a dict with per-class mean IoU scores
+                and "avg" average across classes instead of returning the scalar
+                average only.
         """
         super().__init__()
         self.num_classes = num_classes
@@ -654,8 +691,9 @@ class MeanIoUMetric(Metric):
         """Compute metric.
 
         Returns:
-            dict with "avg" containing the mean IoU across classes.
-            If report_per_class is True, also includes "cls_N" keys for each valid class N.
+            the mean IoU score, or, if report_per_class is true, a dict with
+            "mean_iou/avg" key containing the mean IoU across classes and
+            "mean_iou/cls_N" keys containing the mean IoU for each class N.
         """
         cls_scores = {}
         valid_scores = []
@@ -672,13 +710,17 @@ class MeanIoUMetric(Metric):
                 continue
 
             score = intersection / union
-            cls_scores[f"cls_{cls_idx}"] = score
+            cls_scores[f"mean_iou/cls_{cls_idx}"] = score
             valid_scores.append(score)
 
-        report_scores = {"avg": torch.mean(torch.stack(valid_scores))}
+        mean_iou = torch.mean(torch.stack(valid_scores))
+
         if self.report_per_class:
+            report_scores = {"mean_iou/avg": mean_iou}
             report_scores.update(cls_scores)
-        return report_scores
+            return report_scores
+        else:
+            return mean_iou
 
 
 class DiceLoss(torch.nn.Module):

@@ -182,19 +182,6 @@ class RasterFormat:
         """
         raise NotImplementedError
 
-    @staticmethod
-    def from_config(name: str, config: dict[str, Any]) -> "RasterFormat":
-        """Create a RasterFormat from a config dict.
-
-        Args:
-            name: the name of this format
-            config: the config dict
-
-        Returns:
-            the RasterFormat instance
-        """
-        raise NotImplementedError
-
 
 class ImageTileRasterFormat(RasterFormat):
     """A RasterFormat that stores data in image tiles corresponding to grid cells.
@@ -430,19 +417,6 @@ class ImageTileRasterFormat(RasterFormat):
             return "tif"
         raise ValueError(f"unknown image format {self.format}")
 
-    @staticmethod
-    def from_config(name: str, config: dict[str, Any]) -> "ImageTileRasterFormat":
-        """Create a ImageTileRasterFormat from a config dict.
-
-        Args:
-            name: the name of this format
-            config: the config dict
-        """
-        return ImageTileRasterFormat(
-            format=config.get("format", "geotiff"),
-            tile_size=config.get("tile_size", 512),
-        )
-
 
 class GeotiffRasterFormat(RasterFormat):
     """A raster format that uses one big, tiled GeoTIFF with small block size."""
@@ -476,6 +450,7 @@ class GeotiffRasterFormat(RasterFormat):
         bounds: PixelBounds,
         array: npt.NDArray[Any],
         fname: str | None = None,
+        nodata_val: int | float | None = None,
     ) -> None:
         """Encodes raster data.
 
@@ -485,6 +460,7 @@ class GeotiffRasterFormat(RasterFormat):
             bounds: the bounds of the raster data in the projection
             array: the raster data
             fname: override the filename to save as
+            nodata_val: set the nodata value when writing the raster.
         """
         if fname is None:
             fname = self.fname
@@ -520,6 +496,9 @@ class GeotiffRasterFormat(RasterFormat):
             profile["tiled"] = True
             profile["blockxsize"] = self.block_size
             profile["blockysize"] = self.block_size
+        # Set nodata_val if provided.
+        if nodata_val is not None:
+            profile["nodata"] = nodata_val
 
         profile.update(self.geotiff_options)
 
@@ -535,6 +514,7 @@ class GeotiffRasterFormat(RasterFormat):
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
         fname: str | None = None,
+        nodata_val: int | float | None = None,
     ) -> npt.NDArray[Any]:
         """Decodes raster data.
 
@@ -544,6 +524,16 @@ class GeotiffRasterFormat(RasterFormat):
             bounds: the bounds to read in the given projection.
             resampling: resampling method to use in case resampling is needed.
             fname: override the filename to read from
+            nodata_val: override the nodata value in the raster when reading. Pixels in
+                bounds that are not present in the source raster will be initialized to
+                this value. Note that, if the raster specifies a nodata value, and
+                some source pixels have that value, they will still be read under their
+                original value; overriding the nodata value is primarily useful if the
+                user wants out of bounds pixels to have a different value from the
+                source pixels, e.g. if the source data has background and foreground
+                classes (with background being nodata) but we want to read it in a
+                different projection and have out of bounds pixels be a third "invalid"
+                value.
 
         Returns:
             the raster data
@@ -561,6 +551,7 @@ class GeotiffRasterFormat(RasterFormat):
                 width=bounds[2] - bounds[0],
                 height=bounds[3] - bounds[1],
                 resampling=resampling,
+                src_nodata=nodata_val,
             ) as vrt:
                 return vrt.read()
 
@@ -576,26 +567,6 @@ class GeotiffRasterFormat(RasterFormat):
         with open_rasterio_upath_reader(path / self.fname) as src:
             _, bounds = get_raster_projection_and_bounds(src)
             return bounds
-
-    @staticmethod
-    def from_config(name: str, config: dict[str, Any]) -> "GeotiffRasterFormat":
-        """Create a GeotiffRasterFormat from a config dict.
-
-        Args:
-            name: the name of this format
-            config: the config dict
-
-        Returns:
-            the GeotiffRasterFormat
-        """
-        kwargs = {}
-        if "block_size" in config:
-            kwargs["block_size"] = config["block_size"]
-        if "always_enable_tiling" in config:
-            kwargs["always_enable_tiling"] = config["always_enable_tiling"]
-        if "geotiff_options" in config:
-            kwargs["geotiff_options"] = config["geotiff_options"]
-        return GeotiffRasterFormat(**kwargs)
 
 
 class SingleImageRasterFormat(RasterFormat):
@@ -733,19 +704,3 @@ class SingleImageRasterFormat(RasterFormat):
             src_col_offset : src_col_offset + col_overlap,
         ]
         return dst
-
-    @staticmethod
-    def from_config(name: str, config: dict[str, Any]) -> "SingleImageRasterFormat":
-        """Create a SingleImageRasterFormat from a config dict.
-
-        Args:
-            name: the name of this format
-            config: the config dict
-
-        Returns:
-            the SingleImageRasterFormat
-        """
-        kwargs = {}
-        if "format" in config:
-            kwargs["format"] = config["format"]
-        return SingleImageRasterFormat(**kwargs)

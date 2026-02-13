@@ -1,5 +1,6 @@
 """SimpleTimeSeries encoder."""
 
+import warnings
 from typing import Any
 
 import torch
@@ -25,13 +26,14 @@ class SimpleTimeSeries(FeatureExtractor):
     def __init__(
         self,
         encoder: FeatureExtractor,
-        image_channels: int | None = None,
+        num_timesteps_per_forward_pass: int = 1,
         op: str = "max",
         groups: list[list[int]] | None = None,
         num_layers: int | None = None,
         image_key: str = "image",
         backbone_channels: list[tuple[int, int]] | None = None,
-        image_keys: dict[str, int] | None = None,
+        image_keys: list[str] | dict[str, int] | None = None,
+        image_channels: int | None = None,
     ) -> None:
         """Create a new SimpleTimeSeries.
 
@@ -39,9 +41,11 @@ class SimpleTimeSeries(FeatureExtractor):
             encoder: the underlying FeatureExtractor. It must provide get_backbone_channels
                 function that returns the output channels, or backbone_channels must be set.
                 It must output a FeatureMaps.
-            image_channels: the number of channels per image of the time series. The
-                input should have multiple images concatenated on the channel axis, so
-                this parameter is used to distinguish the different images.
+            num_timesteps_per_forward_pass: how many timesteps to pass to the encoder
+                in each forward pass. Defaults to 1 (one timestep per forward pass).
+                Set to a higher value to batch multiple timesteps together, e.g. for
+                pre/post change detection where you want 4 pre and 4 post images
+                processed together.
             op: one of max, mean, convrnn, conv3d, or conv1d
             groups: sets of images for which to combine features. Within each set,
                 features are combined using the specified operation; then, across sets,
@@ -51,28 +55,53 @@ class SimpleTimeSeries(FeatureExtractor):
                 combined before features and the combined after features. groups is a
                 list of sets, and each set is a list of image indices.
             num_layers: the number of layers for convrnn, conv3d, and conv1d ops.
-            image_key: the key to access the images.
+            image_key: the key to access the images (used when image_keys is not set).
             backbone_channels: manually specify the backbone channels. Can be set if
                 the encoder does not provide get_backbone_channels function.
-            image_keys: as an alternative to setting image_channels, map from the key
-                in input dict to the number of channels per timestep for that modality.
-                This way SimpleTimeSeries can be used with multimodal inputs. One of
-                image_channels or image_keys must be specified.
+            image_keys: list of keys in input dict to process as multimodal inputs.
+                All keys use the same num_timesteps_per_forward_pass. If not set,
+                only the single image_key is used. Passing a dict[str, int] is
+                deprecated and will be removed on 2026-04-01.
+            image_channels: Deprecated, use num_timesteps_per_forward_pass instead.
+                Will be removed on 2026-04-01.
         """
-        if (image_channels is None and image_keys is None) or (
-            image_channels is not None and image_keys is not None
-        ):
-            raise ValueError(
-                "exactly one of image_channels and image_keys must be specified"
+        # Handle deprecated image_channels parameter
+        if image_channels is not None:
+            warnings.warn(
+                "image_channels is deprecated and will be removed on 2026-04-01. "
+                "Use num_timesteps_per_forward_pass instead. The new parameter directly "
+                "specifies the number of timesteps per forward pass rather than requiring "
+                "image_channels // actual_channels.",
+                FutureWarning,
+                stacklevel=2,
             )
+
+        # Handle deprecated dict form of image_keys
+        deprecated_image_keys_dict: dict[str, int] | None = None
+        if isinstance(image_keys, dict):
+            warnings.warn(
+                "Passing image_keys as a dict is deprecated and will be removed on "
+                "2026-04-01. Use image_keys as a list[str] and set "
+                "num_timesteps_per_forward_pass instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            deprecated_image_keys_dict = image_keys
+            image_keys = None  # Will use deprecated path in forward
 
         super().__init__()
         self.encoder = encoder
-        self.image_channels = image_channels
+        self.num_timesteps_per_forward_pass = num_timesteps_per_forward_pass
+        # Store deprecated parameters for runtime conversion
+        self._deprecated_image_channels = image_channels
+        self._deprecated_image_keys_dict = deprecated_image_keys_dict
         self.op = op
         self.groups = groups
-        self.image_key = image_key
-        self.image_keys = image_keys
+        # Normalize image_key to image_keys list form
+        if image_keys is not None:
+            self.image_keys = image_keys
+        else:
+            self.image_keys = [image_key]
 
         if backbone_channels is not None:
             out_channels = backbone_channels
@@ -163,24 +192,25 @@ class SimpleTimeSeries(FeatureExtractor):
         return out_channels
 
     def _get_batched_images(
-        self, input_dicts: list[dict[str, Any]], image_key: str, image_channels: int
+        self, input_dicts: list[dict[str, Any]], image_key: str, num_timesteps: int
     ) -> list[RasterImage]:
         """Collect and reshape images across input dicts.
 
         The BTCHW image time series are reshaped to (B*T)CHW so they can be passed to
         the forward pass of a per-image (unitemporal) model.
+
+        Args:
+            input_dicts: list of input dictionaries containing RasterImage objects.
+            image_key: the key to access the RasterImage in each input dict.
+            num_timesteps: how many timesteps to batch together per forward pass.
         """
         images = torch.stack(
             [input_dict[image_key].image for input_dict in input_dicts], dim=0
         )  # B, C, T, H, W
         timestamps = [input_dict[image_key].timestamps for input_dict in input_dicts]
-        # if image channels is not equal to the actual number of channels, then
-        # then every N images should be batched together. For example, if the
-        # number of input channels c == 2, and image_channels == 4, then we
-        # want to pass 2 timesteps to the model.
-        # TODO is probably to make this behaviour clearer but lets leave it like
-        # this for now to not break things.
-        num_timesteps = images.shape[1] // image_channels
+        # num_timesteps specifies how many timesteps to batch together per forward pass.
+        # For example, if the input has 8 timesteps and num_timesteps=4, we do 2
+        # forward passes, each with 4 timesteps batched together.
         batched_timesteps = images.shape[2] // num_timesteps
         images = rearrange(
             images,
@@ -222,10 +252,22 @@ class SimpleTimeSeries(FeatureExtractor):
         n_batch = len(context.inputs)
         n_images: int | None = None
 
-        if self.image_keys is not None:
-            for image_key, image_channels in self.image_keys.items():
+        if self._deprecated_image_keys_dict is not None:
+            # Deprecated dict form: each key has its own channels_per_timestep.
+            # The channels_per_timestep could be used to group multiple timesteps,
+            # together, so we need to divide by the actual image channel count to get
+            # the number of timesteps to be grouped.
+            for (
+                image_key,
+                channels_per_timestep,
+            ) in self._deprecated_image_keys_dict.items():
+                # For deprecated image_keys dict, the value is channels per timestep,
+                # so we need to compute num_timesteps from the actual image channels
+                sample_image = context.inputs[0][image_key].image
+                actual_channels = sample_image.shape[0]  # C in CTHW
+                num_timesteps = channels_per_timestep // actual_channels
                 batched_images = self._get_batched_images(
-                    context.inputs, image_key, image_channels
+                    context.inputs, image_key, num_timesteps
                 )
 
                 if batched_inputs is None:
@@ -240,12 +282,32 @@ class SimpleTimeSeries(FeatureExtractor):
                     batched_inputs[i][image_key] = image
 
         else:
-            assert self.image_channels is not None
-            batched_images = self._get_batched_images(
-                context.inputs, self.image_key, self.image_channels
-            )
-            batched_inputs = [{self.image_key: image} for image in batched_images]
-            n_images = len(batched_images) // n_batch
+            # Determine num_timesteps - either from deprecated image_channels or
+            # directly from num_timesteps_per_forward_pass
+            if self._deprecated_image_channels is not None:
+                # Backwards compatibility: compute num_timesteps from image_channels
+                # (which should be a multiple of the actual per-timestep channels).
+                sample_image = context.inputs[0][self.image_keys[0]].image
+                actual_channels = sample_image.shape[0]  # C in CTHW
+                num_timesteps = self._deprecated_image_channels // actual_channels
+            else:
+                num_timesteps = self.num_timesteps_per_forward_pass
+
+            for image_key in self.image_keys:
+                batched_images = self._get_batched_images(
+                    context.inputs, image_key, num_timesteps
+                )
+
+                if batched_inputs is None:
+                    batched_inputs = [{} for _ in batched_images]
+                    n_images = len(batched_images) // n_batch
+                elif n_images != len(batched_images) // n_batch:
+                    raise ValueError(
+                        "expected all modalities to have the same number of timesteps"
+                    )
+
+                for i, image in enumerate(batched_images):
+                    batched_inputs[i][image_key] = image
 
         assert n_images is not None
         # Now we can apply the underlying FeatureExtractor.

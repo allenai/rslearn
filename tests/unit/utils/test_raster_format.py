@@ -91,3 +91,78 @@ def test_geotiff_compress_zstd(tmp_path: pathlib.Path) -> None:
     raster_format.encode_raster(path, projection, (0, 0, 4, 4), array)
     with rasterio.open(path / "geotiff.tif") as raster:
         assert raster.profile["compress"] == "zstd"
+
+
+def test_geotiff_write_nodata_val(tmp_path: pathlib.Path) -> None:
+    """Test that nodata_val is correctly set when writing a GeoTIFF."""
+    path = UPath(tmp_path)
+    projection = Projection(CRS.from_epsg(3857), 1, -1)
+    array = np.zeros((1, 4, 4), dtype=np.float32)
+    nodata_val = -9999.0
+
+    GeotiffRasterFormat().encode_raster(
+        path, projection, (0, 0, 4, 4), array, nodata_val=nodata_val
+    )
+
+    with rasterio.open(path / "geotiff.tif") as raster:
+        assert raster.nodata == nodata_val
+
+
+def test_geotiff_read_nodata_val_out_of_bounds(tmp_path: pathlib.Path) -> None:
+    """Test that nodata_val is used to fill pixels outside source bounds when reading."""
+    path = UPath(tmp_path)
+    projection = Projection(CRS.from_epsg(3857), 1, -1)
+    nodata_val = -9999.0
+
+    # Create a raster with value 1 and nodata=0.
+    array = np.ones((1, 4, 4), dtype=np.float32)
+    GeotiffRasterFormat().encode_raster(
+        path, projection, (0, 0, 4, 4), array, nodata_val=0
+    )
+
+    # Read a region that partially overlaps the source raster.
+    # We override the nodata_val to -9999.
+    # In the out-of-bounds portions it should be filled in as -9999.
+    result = GeotiffRasterFormat().decode_raster(
+        path, projection, (2, 2, 8, 8), nodata_val=nodata_val
+    )
+
+    assert result.shape == (1, 6, 6)
+    # Top-left 2x2 region overlaps source and should have value 1.
+    assert np.all(result[:, 0:2, 0:2] == 1)
+    # Pixels outside source bounds should be filled with nodata_val.
+    assert np.all(result[:, 2:6, :] == nodata_val)
+    assert np.all(result[:, :, 2:6] == nodata_val)
+
+
+def test_geotiff_read_nodata_val_orig_nodata(tmp_path: pathlib.Path) -> None:
+    """Test reading from GeoTIFF that has nodata values, but we set different nodata_val.
+
+    Since we override the nodata value in the read operation, the source pixels that
+    were a different nodata value should still have the original value.
+    """
+    path = UPath(tmp_path)
+    projection = Projection(CRS.from_epsg(3857), 1, -1)
+    original_nodata = -9999.0
+    new_nodata = -1.0
+
+    # Create a raster where some pixels have the nodata value -9999.
+    # Other pixels are valid (1).
+    array = np.ones((1, 4, 4), dtype=np.float32)
+    array[:, 2:4, 2:4] = original_nodata
+    GeotiffRasterFormat().encode_raster(
+        path, projection, (0, 0, 4, 4), array, nodata_val=original_nodata
+    )
+
+    # Decode with a different nodata_val.
+    # The pixels that were originally nodata should be unchanged.
+    result = GeotiffRasterFormat().decode_raster(
+        path, projection, (0, 0, 4, 4), nodata_val=new_nodata
+    )
+
+    assert result.shape == (1, 4, 4)
+    # Valid data pixels should still have value 1.
+    assert np.all(result[:, 0:2, :] == 1)
+    assert np.all(result[:, :, 0:2] == 1)
+    # Original nodata pixels should still be as they were.
+    assert np.all(result[:, 2:4, 2:4] == original_nodata)

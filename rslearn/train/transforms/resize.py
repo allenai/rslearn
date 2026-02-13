@@ -2,7 +2,6 @@
 
 from typing import Any
 
-import torch
 import torchvision
 from torchvision.transforms import InterpolationMode
 
@@ -26,6 +25,7 @@ class Resize(Transform):
         target_size: tuple[int, int],
         selectors: list[str] = [],
         interpolation: str = "nearest",
+        skip_missing: bool = False,
     ):
         """Initialize a resize transform.
 
@@ -34,38 +34,25 @@ class Resize(Transform):
             selectors: items to transform.
             interpolation: the interpolation mode to use for resizing.
                 Must be one of "nearest", "nearest_exact", "bilinear", or "bicubic".
+            skip_missing: if True, skip selectors that don't exist in the input/target
+                dicts. Useful when working with optional inputs.
         """
         super().__init__()
         self.target_size = target_size
         self.selectors = selectors
         self.interpolation = INTERPOLATION_MODES[interpolation]
+        self.skip_missing = skip_missing
 
-    def apply_resize(
-        self, image: torch.Tensor | RasterImage
-    ) -> torch.Tensor | RasterImage:
+    def apply_resize(self, image: RasterImage) -> RasterImage:
         """Apply resizing on the specified image.
-
-        If the image is 2D, it is unsqueezed to 3D and then squeezed
-        back after resizing.
 
         Args:
             image: the image to transform.
         """
-        if isinstance(image, torch.Tensor):
-            if image.dim() == 2:
-                image = image.unsqueeze(0)  # (H, W) -> (1, H, W)
-                result = torchvision.transforms.functional.resize(
-                    image, self.target_size, self.interpolation
-                )
-                return result.squeeze(0)  # (1, H, W) -> (H, W)
-            return torchvision.transforms.functional.resize(
-                image, self.target_size, self.interpolation
-            )
-        else:
-            image.image = torchvision.transforms.functional.resize(
-                image.image, self.target_size, self.interpolation
-            )
-            return image
+        image.image = torchvision.transforms.functional.resize(
+            image.image, self.target_size, self.interpolation
+        )
+        return image
 
     def forward(
         self, input_dict: dict[str, Any], target_dict: dict[str, Any]

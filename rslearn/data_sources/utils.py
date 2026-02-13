@@ -1,7 +1,9 @@
 """Utilities shared by data sources."""
 
+import warnings
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import TypeVar
 
 import shapely
@@ -40,13 +42,13 @@ class PendingMosaic:
     completed: bool = False
 
 
-def mosaic_matching(
+def _create_single_coverage_mosaics(
     window_geometry: STGeometry,
     items: list[ItemType],
     item_shps: list[shapely.Geometry],
-    max_matches: int,
+    max_mosaics: int,
 ) -> list[list[ItemType]]:
-    """Spatial item matching for mosaic space mode.
+    """Create mosaics where each mosaic covers the window geometry once.
 
     This attempts to piece together items into mosaics that fully cover the window
     geometry. If there are items leftover that only partially cover the window
@@ -56,15 +58,16 @@ def mosaic_matching(
         window_geometry: the geometry of the window.
         items: list of items.
         item_shps: the item shapes projected to the window's projection.
-        max_matches: the maximum number of matches (mosaics) to create.
+        max_mosaics: the maximum number of mosaics to create.
 
     Returns:
-        list of item groups, each one corresponding to a different mosaic.
+        list of item groups, each one corresponding to a different single-coverage
+        mosaic.
     """
     # To create mosaics, we iterate over the items in order, and add each item to
     # the first mosaic that the new item adds coverage to.
 
-    # max_matches could be very high if the user just wants us to create as many
+    # max_mosaics could be very high if the user just wants us to create as many
     # mosaics as possible, so we initialize the list here as empty and just add
     # more pending mosaics when it is necessary.
     pending_mosaics: list[PendingMosaic] = []
@@ -108,7 +111,7 @@ def mosaic_matching(
 
         # See if we can add a new mosaic based on this item. There must be room for
         # more mosaics, but the item must also intersect the requested geometry.
-        if len(pending_mosaics) >= max_matches:
+        if len(pending_mosaics) >= max_mosaics:
             continue
         intersect_area = item_shp.intersection(window_geometry.shp).area
         if (
@@ -127,18 +130,148 @@ def mosaic_matching(
     return [pending_mosaic.items for pending_mosaic in pending_mosaics]
 
 
-def per_period_mosaic_matching(
-    window_geometry: STGeometry,
-    item_list: list[ItemType],
-    period_duration: timedelta,
-    max_matches: int,
+def _consolidate_mosaics_by_overlaps(
+    mosaics: list[list[ItemType]],
+    overlaps: int,
+    max_groups: int,
+) -> list[list[ItemType]]:
+    """Consolidate single-coverage mosaics into groups based on desired overlaps.
+
+    Args:
+        mosaics: list of single-coverage mosaics (each mosaic is a list of items).
+        overlaps: the number of overlapping coverages wanted per group.
+        max_groups: the maximum number of groups to return.
+
+    Returns:
+        list of item groups, where each group contains items from multiple mosaics
+        to achieve the desired number of overlapping coverages.
+    """
+    if overlaps <= 0:
+        overlaps = 1
+
+    groups: list[list[ItemType]] = []
+    for i in range(0, len(mosaics), overlaps):
+        if len(groups) >= max_groups:
+            break
+        # Combine overlaps consecutive mosaics into one group
+        combined_items: list[ItemType] = []
+        for mosaic in mosaics[i : i + overlaps]:
+            combined_items.extend(mosaic)
+        if combined_items:
+            groups.append(combined_items)
+
+    return groups
+
+
+def match_with_space_mode_contains(
+    geometry: STGeometry,
+    items: list[ItemType],
+    item_shps: list[shapely.Geometry],
+    query_config: QueryConfig,
+) -> list[list[ItemType]]:
+    """Match items that fully contain the window geometry.
+
+    Args:
+        geometry: the window's geometry.
+        items: list of items.
+        item_shps: the item shapes projected to the window's projection.
+        query_config: the query configuration.
+
+    Returns:
+        list of matched item groups, where each group contains a single item.
+    """
+    groups: list[list[ItemType]] = []
+    for item, item_shp in zip(items, item_shps):
+        if not item_shp.contains(geometry.shp):
+            continue
+        groups.append([item])
+        if len(groups) >= query_config.max_matches:
+            break
+    return groups
+
+
+def match_with_space_mode_intersects(
+    geometry: STGeometry,
+    items: list[ItemType],
+    item_shps: list[shapely.Geometry],
+    query_config: QueryConfig,
+) -> list[list[ItemType]]:
+    """Match items that intersect any portion of the window geometry.
+
+    Args:
+        geometry: the window's geometry.
+        items: list of items.
+        item_shps: the item shapes projected to the window's projection.
+        query_config: the query configuration.
+
+    Returns:
+        list of matched item groups, where each group contains a single item.
+    """
+    groups: list[list[ItemType]] = []
+    for item, item_shp in zip(items, item_shps):
+        if not shp_intersects(item_shp, geometry.shp):
+            continue
+        groups.append([item])
+        if len(groups) >= query_config.max_matches:
+            break
+    return groups
+
+
+def match_with_space_mode_mosaic(
+    geometry: STGeometry,
+    items: list[ItemType],
+    item_shps: list[shapely.Geometry],
+    query_config: QueryConfig,
+) -> list[list[ItemType]]:
+    """Match items into mosaic groups that cover the window geometry.
+
+    Creates groups of items that together cover the window geometry. The number of
+    overlapping coverages in each group is controlled by mosaic_compositing_overlaps.
+
+    Args:
+        geometry: the window's geometry.
+        items: list of items.
+        item_shps: the item shapes projected to the window's projection.
+        query_config: the query configuration.
+
+    Returns:
+        list of matched item groups, where each group forms a mosaic covering the
+        window.
+    """
+    overlaps = query_config.mosaic_compositing_overlaps
+
+    # Calculate how many single-coverage mosaics we need to create.
+    # We need enough mosaics to consolidate into max_matches groups with the
+    # desired number of overlaps per group.
+    max_single_mosaics = query_config.max_matches * overlaps
+
+    # Create single-coverage mosaics
+    single_mosaics = _create_single_coverage_mosaics(
+        geometry, items, item_shps, max_single_mosaics
+    )
+
+    # Consolidate into groups based on overlaps
+    return _consolidate_mosaics_by_overlaps(
+        single_mosaics, overlaps, query_config.max_matches
+    )
+
+
+def match_with_space_mode_per_period_mosaic(
+    geometry: STGeometry,
+    items: list[ItemType],
+    item_shps: list[shapely.Geometry],
+    query_config: QueryConfig,
 ) -> list[list[ItemType]]:
     """Match items to the geometry with one mosaic per period.
 
     We divide the time range of the geometry into shorter periods. Within each period,
     we use the items corresponding to that period to create a mosaic. The returned item
-    groups include one group per period, starting from the most recent periods, up to
-    the provided max_matches.
+    groups include one group per period, up to the provided max_matches.
+
+    By default (reverse_time_order=True), groups are returned starting from the most
+    recent periods. When reverse_time_order=False, groups are returned in chronological
+    order (oldest first). reverse_time_order should always be set False, and
+    FutureWarning will be warned if it is not.
 
     The periods are also bounded to the window's time range, and aligned with the end
     of that time range, i.e. the most recent window is
@@ -159,42 +292,59 @@ def per_period_mosaic_matching(
     max_matches*period_duration is not equivalent to a longer window duration.
 
     Args:
-        window_geometry: the window geometry to match items to.
-        item_list: the list of items.
-        period_duration: the duration of one period.
-        max_matches: the number of per-period mosaics to create.
+        geometry: the window's geometry.
+        items: list of items.
+        item_shps: the item shapes projected to the window's projection (unused here)
+        query_config: the query configuration.
 
     Returns:
-        the matched item groups, where each group contains items that yield a
-            per-period mosaic.
+        list of matched item groups, where each group contains items that yield a
+        per-period mosaic.
     """
-    if window_geometry.time_range is None:
+    if geometry.time_range is None:
         raise ValueError(
             "all windows must have time range for per period mosaic matching"
         )
 
+    # Emit warning if per_period_mosaic_reverse_time_order is True (the default).
+    if query_config.per_period_mosaic_reverse_time_order:
+        warnings.warn(
+            "QueryConfig.per_period_mosaic_reverse_time_order defaults to True, which "
+            "returns item groups in reverse temporal order (most recent first) for "
+            "PER_PERIOD_MOSAIC mode. This default will change to False (chronological "
+            "order) after 2026-04-01. To silence this warning, explicitly set "
+            "per_period_mosaic_reverse_time_order=False.",
+            FutureWarning,
+            stacklevel=3,
+        )
+
+    period_duration = query_config.period_duration
+
     # For each period, we create an STGeometry with modified time range matching that
     # period, and use it with match_candidate_items_to_window to get a mosaic.
     cur_groups: list[list[ItemType]] = []
-    period_start = window_geometry.time_range[1] - period_duration
+    period_start = geometry.time_range[1] - period_duration
     while (
-        period_start >= window_geometry.time_range[0] and len(cur_groups) < max_matches
+        period_start >= geometry.time_range[0]
+        and len(cur_groups) < query_config.max_matches
     ):
         period_time_range = (
             period_start,
             period_start + period_duration,
         )
         period_start -= period_duration
-        period_geom = STGeometry(
-            window_geometry.projection, window_geometry.shp, period_time_range
-        )
+        period_geom = STGeometry(geometry.projection, geometry.shp, period_time_range)
 
         # We modify the QueryConfig here since caller should be asking for
         # multiple mosaics, but we just want one mosaic per period.
         period_groups = match_candidate_items_to_window(
             period_geom,
-            item_list,
-            QueryConfig(space_mode=SpaceMode.MOSAIC, max_matches=1),
+            items,
+            QueryConfig(
+                space_mode=SpaceMode.MOSAIC,
+                max_matches=1,
+                mosaic_compositing_overlaps=query_config.mosaic_compositing_overlaps,
+            ),
         )
 
         # There should be zero or one group depending on whether there were
@@ -204,7 +354,27 @@ def per_period_mosaic_matching(
             continue
         cur_groups.append(period_groups[0])
 
+    # Currently the item groups are in reverse chronologic order.
+    # Reverse it to correct chronological order if requested.
+    if not query_config.per_period_mosaic_reverse_time_order:
+        cur_groups.reverse()
+
     return cur_groups
+
+
+# Type alias for space mode handler functions
+SpaceModeHandler = Callable[
+    [STGeometry, list[ItemType], list[shapely.Geometry], QueryConfig],
+    list[list[ItemType]],
+]
+
+# Dict mapping SpaceMode values to their handler functions
+space_mode_handlers: dict[SpaceMode, SpaceModeHandler] = {
+    SpaceMode.CONTAINS: match_with_space_mode_contains,
+    SpaceMode.INTERSECTS: match_with_space_mode_intersects,
+    SpaceMode.MOSAIC: match_with_space_mode_mosaic,
+    SpaceMode.PER_PERIOD_MOSAIC: match_with_space_mode_per_period_mosaic,
+}
 
 
 def match_candidate_items_to_window(
@@ -248,7 +418,8 @@ def match_candidate_items_to_window(
             )
 
     # Now apply space mode.
-    item_shps = []
+    acceptable_items = []
+    acceptable_item_shps = []
     for item in items:
         item_geom = item.geometry
         # We need to re-project items to the geometry projection for the spatial checks
@@ -260,44 +431,20 @@ def match_candidate_items_to_window(
                 item_geom = geometry
             else:
                 item_geom = item_geom.to_projection(geometry.projection)
-        item_shps.append(item_geom.shp)
 
-    if query_config.space_mode == SpaceMode.CONTAINS:
-        groups = []
-        for item, item_shp in zip(items, item_shps):
-            if not item_shp.contains(geometry.shp):
-                continue
-            groups.append([item])
-            if len(groups) >= query_config.max_matches:
-                break
+        if item_geom.shp.area == 0:
+            # Must have been an item that didn't quite match the window's spatial extent.
+            continue
 
-    elif query_config.space_mode == SpaceMode.INTERSECTS:
-        groups = []
-        for item, item_shp in zip(items, item_shps):
-            if not shp_intersects(item_shp, geometry.shp):
-                continue
-            groups.append([item])
-            if len(groups) >= query_config.max_matches:
-                break
+        acceptable_items.append(item)
+        acceptable_item_shps.append(item_geom.shp)
 
-    elif query_config.space_mode == SpaceMode.MOSAIC:
-        groups = mosaic_matching(geometry, items, item_shps, query_config.max_matches)
-
-    elif query_config.space_mode == SpaceMode.PER_PERIOD_MOSAIC:
-        groups = per_period_mosaic_matching(
-            geometry, items, query_config.period_duration, query_config.max_matches
-        )
-
-    elif query_config.space_mode == SpaceMode.COMPOSITE:
-        group = []
-        for item, item_shp in zip(items, item_shps):
-            if not shp_intersects(item_shp, geometry.shp):
-                continue
-            group.append(item)
-        groups = [group]
-
-    else:
+    # Dispatch to the appropriate space mode handler
+    handler = space_mode_handlers.get(query_config.space_mode)
+    if handler is None:
         raise ValueError(f"invalid space mode {query_config.space_mode}")
+
+    groups = handler(geometry, acceptable_items, acceptable_item_shps, query_config)
 
     # Enforce minimum matches if set.
     if len(groups) < query_config.min_matches:

@@ -7,7 +7,7 @@ import torchvision
 
 from rslearn.train.model_context import RasterImage
 
-from .transform import Transform, read_selector
+from .transform import Transform, read_selector, selector_exists
 
 
 class Crop(Transform):
@@ -18,6 +18,7 @@ class Crop(Transform):
         crop_size: int | tuple[int, int],
         image_selectors: list[str] = ["image"],
         box_selectors: list[str] = [],
+        skip_missing: bool = False,
     ):
         """Initialize a new Crop.
 
@@ -27,6 +28,8 @@ class Crop(Transform):
             crop_size: the size to crop to, or a min/max range of crop sizes
             image_selectors: image items to transform.
             box_selectors: boxes items to transform.
+            skip_missing: if True, skip selectors that don't exist in the input/target
+                dicts. Useful when working with optional inputs.
         """
         super().__init__()
         if isinstance(crop_size, int):
@@ -36,6 +39,7 @@ class Crop(Transform):
 
         self.image_selectors = image_selectors
         self.box_selectors = box_selectors
+        self.skip_missing = skip_missing
 
     def sample_state(self, image_shape: tuple[int, int]) -> dict[str, Any]:
         """Randomly decide how to transform the input.
@@ -71,9 +75,7 @@ class Crop(Transform):
             "remove_from_top": remove_from_top,
         }
 
-    def apply_image(
-        self, image: RasterImage | torch.Tensor, state: dict[str, Any]
-    ) -> RasterImage | torch.Tensor:
+    def apply_image(self, image: RasterImage, state: dict[str, Any]) -> RasterImage:
         """Apply the sampled state on the specified image.
 
         Args:
@@ -84,22 +86,13 @@ class Crop(Transform):
         crop_size = state["crop_size"] * image.shape[-1] // image_shape[1]
         remove_from_left = state["remove_from_left"] * image.shape[-1] // image_shape[1]
         remove_from_top = state["remove_from_top"] * image.shape[-2] // image_shape[0]
-        if isinstance(image, RasterImage):
-            image.image = torchvision.transforms.functional.crop(
-                image.image,
-                top=remove_from_top,
-                left=remove_from_left,
-                height=crop_size,
-                width=crop_size,
-            )
-        else:
-            image = torchvision.transforms.functional.crop(
-                image,
-                top=remove_from_top,
-                left=remove_from_left,
-                height=crop_size,
-                width=crop_size,
-            )
+        image.image = torchvision.transforms.functional.crop(
+            image.image,
+            top=remove_from_top,
+            left=remove_from_left,
+            height=crop_size,
+            width=crop_size,
+        )
         return image
 
     def apply_boxes(self, boxes: Any, state: dict[str, bool]) -> torch.Tensor:
@@ -125,6 +118,10 @@ class Crop(Transform):
         """
         smallest_image_shape = None
         for selector in self.image_selectors:
+            if self.skip_missing and not selector_exists(
+                input_dict, target_dict, selector
+            ):
+                continue
             image = read_selector(input_dict, target_dict, selector)
             if (
                 smallest_image_shape is None
@@ -133,6 +130,9 @@ class Crop(Transform):
                 smallest_image_shape = image.shape[-2:]
 
         if smallest_image_shape is None:
+            if self.skip_missing:
+                # All selectors were missing, nothing to crop
+                return input_dict, target_dict
             raise ValueError("No image found to crop")
         state = self.sample_state(smallest_image_shape)
 

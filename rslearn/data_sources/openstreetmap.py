@@ -461,7 +461,7 @@ class OpenStreetMap(DataSource[OsmItem]):
             groups.append(cur_groups)
         return groups
 
-    def deserialize_item(self, serialized_item: Any) -> OsmItem:
+    def deserialize_item(self, serialized_item: dict) -> OsmItem:
         """Deserializes an item from JSON-decoded data."""
         return OsmItem.deserialize(serialized_item)
 

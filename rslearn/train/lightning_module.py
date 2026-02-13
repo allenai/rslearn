@@ -6,12 +6,14 @@ from typing import Any
 
 import lightning as L
 import torch
+import wandb
 from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
 from PIL import Image
 from upath import UPath
 
 from rslearn.log_utils import get_logger
 
+from .metrics import NonScalarMetricOutput
 from .model_context import ModelContext, ModelOutput
 from .optimizer import AdamW, OptimizerFactory
 from .scheduler import PlateauScheduler, SchedulerFactory
@@ -214,15 +216,53 @@ class RslearnLightningModule(L.LightningModule):
             # Fail silently for single-dataset case, which is okay
             pass
 
+    def _log_non_scalar_metric(self, name: str, value: NonScalarMetricOutput) -> None:
+        """Log a non-scalar metric to wandb.
+
+        Args:
+            name: the metric name (e.g., "val_confusion_matrix")
+            value: the non-scalar metric output
+        """
+        # The non-scalar metrics are logging directly without Lightning
+        # So we need to skip logging during sanity check.
+        if self.trainer.sanity_checking:
+            return
+
+        # Wandb is required for logging non-scalar metrics.
+        if not wandb.run:
+            logger.warning(
+                f"Weights & Biases is not initialized, skipping logging of {name}"
+            )
+            return
+
+        value.log_to_wandb(name)
+
     def on_validation_epoch_end(self) -> None:
         """Compute and log validation metrics at epoch end.
 
         We manually compute and log metrics here (instead of passing the MetricCollection
         to log_dict) because MetricCollection.compute() properly flattens dict-returning
         metrics, while log_dict expects each metric to return a scalar tensor.
+
+        Non-scalar metrics (like confusion matrices) are logged separately using
+        logger-specific APIs.
         """
         metrics = self.val_metrics.compute()
-        self.log_dict(metrics)
+
+        # Separate scalar and non-scalar metrics
+        scalar_metrics = {}
+        for k, v in metrics.items():
+            if isinstance(v, NonScalarMetricOutput):
+                self._log_non_scalar_metric(k, v)
+            elif isinstance(v, torch.Tensor) and v.dim() > 0 and v.numel() > 1:
+                raise ValueError(
+                    f"Metric '{k}' returned a non-scalar tensor with shape {v.shape}. "
+                    "Wrap it in a NonScalarMetricOutput subclass."
+                )
+            else:
+                scalar_metrics[k] = v
+
+        self.log_dict(scalar_metrics)
         self.val_metrics.reset()
 
     def on_test_epoch_end(self) -> None:
@@ -235,9 +275,24 @@ class RslearnLightningModule(L.LightningModule):
         If metrics_file is set, the metrics are saved to that file. Otherwise, if
         write_test_metrics is True, the metrics are saved to test_metrics.json in the
         parent directory of the checkpoint.
+        Non-scalar metrics (like confusion matrices) are logged separately.
         """
         metrics = self.test_metrics.compute()
-        self.log_dict(metrics)
+
+        # Separate scalar and non-scalar metrics
+        scalar_metrics = {}
+        for k, v in metrics.items():
+            if isinstance(v, NonScalarMetricOutput):
+                self._log_non_scalar_metric(k, v)
+            elif isinstance(v, torch.Tensor) and v.dim() > 0 and v.numel() > 1:
+                raise ValueError(
+                    f"Metric '{k}' returned a non-scalar tensor with shape {v.shape}. "
+                    "Wrap it in a NonScalarMetricOutput subclass."
+                )
+            else:
+                scalar_metrics[k] = v
+
+        self.log_dict(scalar_metrics)
         self.test_metrics.reset()
 
         # Resolve where to write metrics:
@@ -254,7 +309,7 @@ class RslearnLightningModule(L.LightningModule):
                 )
 
         if metrics_write_path:
-            metrics_dict = {k: v.item() for k, v in metrics.items()}
+            metrics_dict = {k: v.item() for k, v in scalar_metrics.items()}
 
             # Record the checkpoint path if available (from --ckpt_path CLI argument)
             if self.trainer.ckpt_path:
@@ -391,7 +446,7 @@ class RslearnLightningModule(L.LightningModule):
                 for image_suffix, image in images.items():
                     out_fname = os.path.join(
                         self.visualize_dir,
-                        f"{metadata.window_name}_{metadata.patch_bounds[0]}_{metadata.patch_bounds[1]}_{image_suffix}.png",
+                        f"{metadata.window_name}_{metadata.crop_bounds[0]}_{metadata.crop_bounds[1]}_{image_suffix}.png",
                     )
                     Image.fromarray(image).save(out_fname)
 

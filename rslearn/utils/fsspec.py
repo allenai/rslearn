@@ -2,7 +2,7 @@
 
 import os
 import tempfile
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from typing import Any
 
@@ -14,6 +14,56 @@ from upath import UPath
 from rslearn.log_utils import get_logger
 
 logger = get_logger(__name__)
+
+
+def iter_nonhidden(path: UPath) -> Iterator[UPath]:
+    """Iterate over non-hidden entries in a directory.
+
+    Hidden entries are those whose basename starts with "." (e.g. ".DS_Store").
+
+    Args:
+        path: the directory to iterate.
+
+    Yields:
+        non-hidden UPath entries in the directory.
+    """
+    try:
+        it = path.iterdir()
+    except (FileNotFoundError, NotADirectoryError):
+        return
+
+    for p in it:
+        if p.name.startswith("."):
+            continue
+        yield p
+
+
+def iter_nonhidden_subdirs(path: UPath) -> Iterator[UPath]:
+    """Iterate over non-hidden subdirectories in a directory.
+
+    Args:
+        path: the directory to iterate.
+
+    Yields:
+        non-hidden subdirectories in the directory.
+    """
+    for p in iter_nonhidden(path):
+        if p.is_dir():
+            yield p
+
+
+def iter_nonhidden_files(path: UPath) -> Iterator[UPath]:
+    """Iterate over non-hidden files in a directory.
+
+    Args:
+        path: the directory to iterate.
+
+    Yields:
+        non-hidden files in the directory.
+    """
+    for p in iter_nonhidden(path):
+        if p.is_file():
+            yield p
 
 
 @contextmanager

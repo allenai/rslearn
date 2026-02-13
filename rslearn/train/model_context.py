@@ -19,6 +19,14 @@ class RasterImage:
     # if timestamps is not None, len(timestamps) must match the T dimension of the tensor
     timestamps: list[tuple[datetime, datetime]] | None = None
 
+    def __post_init__(self) -> None:
+        """Validate that the image tensor is 4D (CTHW)."""
+        if self.image.dim() != 4:
+            raise ValueError(
+                f"RasterImage expects a 4D CTHW tensor, got {self.image.dim()}D "
+                f"with shape {tuple(self.image.shape)}"
+            )
+
     @property
     def shape(self) -> torch.Size:
         """The shape of the image."""
@@ -43,6 +51,22 @@ class RasterImage:
             raise ValueError(f"Expected a single timestep, got {self.image.shape[1]}")
         return self.image[:, 0]
 
+    def get_hw_tensor(self) -> torch.Tensor:
+        """Get a 2D HW tensor from a single-channel, single-timestep RasterImage.
+
+        This function checks that C=1 and T=1, then returns the HW tensor.
+        Useful for per-pixel labels like segmentation masks.
+        """
+        if self.image.shape[0] != 1:
+            raise ValueError(
+                f"Expected single channel (C=1), got {self.image.shape[0]}"
+            )
+        if self.image.shape[1] != 1:
+            raise ValueError(
+                f"Expected single timestep (T=1), got {self.image.shape[1]}"
+            )
+        return self.image[0, 0]
+
 
 @dataclass
 class SampleMetadata:
@@ -51,9 +75,9 @@ class SampleMetadata:
     window_group: str
     window_name: str
     window_bounds: PixelBounds
-    patch_bounds: PixelBounds
-    patch_idx: int
-    num_patches_in_window: int
+    crop_bounds: PixelBounds
+    crop_idx: int
+    num_crops_in_window: int
     time_range: tuple[datetime, datetime] | None
     projection: Projection
 
