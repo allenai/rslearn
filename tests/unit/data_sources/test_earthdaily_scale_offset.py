@@ -15,8 +15,10 @@ from rslearn.utils.geometry import Projection, STGeometry
 
 
 class _FakeSentinel2(Sentinel2):
-    def __init__(self, item: EarthDailyItem, *, harmonize: bool = True):
-        super().__init__(harmonize=harmonize, assets=["red"], cache_dir=None)
+    def __init__(self, item: EarthDailyItem, *, apply_scale_offset: bool = True):
+        super().__init__(
+            apply_scale_offset=apply_scale_offset, assets=["red"], cache_dir=None
+        )
         self._item = item
 
     def get_item_by_name(self, name: str) -> EarthDailyItem:
@@ -68,7 +70,7 @@ def test_read_raster_applies_asset_scale_offset(tmp_path) -> None:
     np.testing.assert_allclose(out[0], raw.astype(np.float32) * 0.001 + 1.0)
 
 
-def test_read_raster_no_harmonize_returns_raw(tmp_path) -> None:
+def test_read_raster_no_apply_scale_offset_returns_raw(tmp_path) -> None:
     tif_path = tmp_path / "red.tif"
 
     crs = CRS.from_epsg(3857)
@@ -98,7 +100,7 @@ def test_read_raster_no_harmonize_returns_raw(tmp_path) -> None:
         asset_urls={"red": str(tif_path)},
         asset_scale_offsets={"red": [{"scale": 0.001, "offset": 1.0}]},
     )
-    ds = _FakeSentinel2(item, harmonize=False)
+    ds = _FakeSentinel2(item, apply_scale_offset=False)
 
     projection = Projection(crs, 1, -1)
     out = ds.read_raster(

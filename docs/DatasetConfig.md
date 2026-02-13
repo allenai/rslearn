@@ -505,8 +505,9 @@ This data source requires the optional `earthdaily[platform]` dependency and Ear
 credentials in the environment (see [EarthDaily documentation](https://earthdaily.github.io/earthdaily-python-client/main/) for supported methods).
 
 By default, this data source applies per-asset scale/offset values from STAC
-`raster:bands` metadata (`harmonize: true`) using `physical = raw * scale + offset`. Set
-`harmonize: false` to keep raw values.
+`raster:bands` metadata (`apply_scale_offset: true`) to convert raw pixel values into
+physical units using `physical = raw * scale + offset`. Set `apply_scale_offset: false`
+to keep raw values.
 
 To use SCL-based cloud masking, include the `scl` band in your dataset (e.g. as a
 separate band set) and apply masking as a training-time transform (see
@@ -519,7 +520,7 @@ Only the keys documented below are supported in `init_args`; unknown keys will r
 {
   // Whether to apply STAC `raster:bands` scale/offset (default true). Set to false to
   // keep raw values.
-  "harmonize": true,
+  "apply_scale_offset": true,
   // Optional: EarthDaily Sentinel-2 asset keys to use (default null). If null and the
   // layer config is available, assets are inferred from the layer's band sets.
   // Example: ["red", "green", "blue", "nir", "swir16", "swir22"]
@@ -564,8 +565,8 @@ Example:
     "sentinel2": {
       "type": "raster",
       "band_sets": [{
-        // When harmonize=true (default), reflectance bands are typically scaled to float.
-        // Use float32 (recommended) or set harmonize=false to keep raw integer values.
+        // When apply_scale_offset=true (default), reflectance bands are typically scaled to float.
+        // Use float32 (recommended) or set apply_scale_offset=false to keep raw integer values.
         "dtype": "float32",
         "bands": ["B02", "B03", "B04", "B08"]
       }],

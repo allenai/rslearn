@@ -623,7 +623,7 @@ class Sentinel2(EarthDaily):
 
     def __init__(
         self,
-        harmonize: bool = True,
+        apply_scale_offset: bool = True,
         assets: list[str] | None = None,
         cloud_cover_threshold: float | None = None,
         cloud_cover_max: float | None = None,
@@ -665,8 +665,8 @@ class Sentinel2(EarthDaily):
             retry_backoff_factor: backoff factor for EarthDaily API client retries.
             service_name: EarthDaily service name (only "platform" supported).
             context: rslearn data source context.
-            harmonize: apply per-asset scale/offset metadata from STAC `raster:bands`
-                (defaults to True). Set to False to use raw values.
+            apply_scale_offset: apply per-asset scale/offset metadata from STAC
+                `raster:bands` (defaults to True). Set to False to use raw values.
         """
         asset_bands: dict[str, list[str]]
         if context.layer_config is not None and assets is None:
@@ -701,7 +701,7 @@ class Sentinel2(EarthDaily):
         self.cloud_cover_max = cloud_cover_max
         self.search_max_items = search_max_items
         self.sort_items_by = sort_items_by
-        self.harmonize = harmonize
+        self.apply_scale_offset = apply_scale_offset
 
     def read_raster(
         self,
@@ -714,12 +714,12 @@ class Sentinel2(EarthDaily):
     ) -> npt.NDArray[Any]:
         """Read raster data from the store.
 
-        Applies per-asset scale/offset metadata when harmonize=True.
+        Applies per-asset scale/offset metadata when apply_scale_offset=True.
         """
         raw_data = super().read_raster(
             layer_name, item_name, bands, projection, bounds, resampling=resampling
         )
-        if not self.harmonize:
+        if not self.apply_scale_offset:
             return raw_data
 
         asset_key = self._get_asset_by_band(bands)
@@ -850,7 +850,7 @@ class Sentinel2(EarthDaily):
                         asset_url, tmp_dir, asset_key, item.name
                     )
 
-                    if not self.harmonize:
+                    if not self.apply_scale_offset:
                         tile_store.write_raster_file(
                             item.name, band_names, UPath(local_fname)
                         )

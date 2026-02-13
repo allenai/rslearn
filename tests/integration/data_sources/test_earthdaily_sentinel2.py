@@ -82,7 +82,7 @@ def test_sentinel2_ingest_does_not_apply_scl_cloud_mask(
         },
     )
 
-    data_source = Sentinel2(assets=["red", "scl"], harmonize=False)
+    data_source = Sentinel2(assets=["red", "scl"], apply_scale_offset=False)
 
     ds_path = UPath(tmp_path / "ds")
     tile_store = DefaultTileStore(convert_rasters_to_cogs=False)
@@ -105,7 +105,7 @@ def test_sentinel2_ingest_does_not_apply_scl_cloud_mask(
     assert out_scl[0, 1, 1] == 8
 
 
-def test_sentinel2_read_raster_applies_scale_offset_when_harmonize_true(
+def test_sentinel2_read_raster_applies_scale_offset_when_apply_scale_offset_true(
     httpserver: HTTPServer,
 ) -> None:
     pytest.importorskip("earthdaily")
@@ -143,7 +143,7 @@ def test_sentinel2_read_raster_applies_scale_offset_when_harmonize_true(
         asset_scale_offsets={"red": [{"scale": 0.1, "offset": 1.0}]},
     )
 
-    data_source = Sentinel2(assets=["red"], harmonize=True)
+    data_source = Sentinel2(assets=["red"], apply_scale_offset=True)
     data_source.get_item_by_name = lambda _: item  # type: ignore[method-assign]
 
     out = data_source.read_raster("sentinel2", item.name, ["B04"], projection, bounds)
@@ -152,7 +152,7 @@ def test_sentinel2_read_raster_applies_scale_offset_when_harmonize_true(
     assert out[0, 0, 0] == pytest.approx(11.0)
 
 
-def test_sentinel2_ingest_applies_scale_offset_when_harmonize_true(
+def test_sentinel2_ingest_applies_scale_offset_when_apply_scale_offset_true(
     tmp_path,
     httpserver: HTTPServer,
 ) -> None:
@@ -192,7 +192,7 @@ def test_sentinel2_ingest_applies_scale_offset_when_harmonize_true(
         asset_scale_offsets={"red": [{"scale": 0.1, "offset": 1.0}]},
     )
 
-    data_source = Sentinel2(assets=["red"], harmonize=True)
+    data_source = Sentinel2(assets=["red"], apply_scale_offset=True)
 
     ds_path = UPath(tmp_path / "ds")
     tile_store = DefaultTileStore(convert_rasters_to_cogs=False)
