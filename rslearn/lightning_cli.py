@@ -491,12 +491,12 @@ def fit_and_test_handler() -> None:
         )
     forwarded_args[0] = "fit"
 
-    # LightningCLI will warn if both sys.argv and args are populated; we always drive
-    # parsing via the explicit args list, so temporarily clear sys.argv to keep
-    # output clean.
+    # LightningCLI warns if both sys.argv and args are populated. We always drive
+    # parsing via the explicit args list; set sys.argv to match to keep output clean
+    # while preserving visibility for any code that consults sys.argv.
     original_argv = sys.argv
     try:
-        sys.argv = [original_argv[0]]
+        sys.argv = [original_argv[0], *forwarded_args]
         cli = RslearnLightningCLI(
             model_class=RslearnLightningModule,
             datamodule_class=RslearnDataModule,
