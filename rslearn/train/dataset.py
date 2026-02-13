@@ -697,8 +697,19 @@ def is_data_input_available(data_input: DataInput, window: Window) -> bool:
     is_any_layer_available = False
     are_all_layers_available = True
 
-    for layer_name in data_input.layers:
-        if window.is_layer_completed(layer_name):
+    for option in data_input.layers:
+        if data_input.load_all_item_groups:
+            # In this case the option should be a layer name directly.
+            # We can check group_idx=0 to verify there is at least one item group
+            # present in this layer (since load_all_item_groups=true, the user doesn't
+            # care how many item groups are completed).
+            layer_name = option
+            group_idx = 0
+        else:
+            # In this case it specifies an item group (like raster_layer.1).
+            layer_name, group_idx = get_layer_and_group_from_dir_name(option)
+
+        if window.is_layer_completed(layer_name, group_idx=group_idx):
             is_any_layer_available = True
         else:
             are_all_layers_available = False

@@ -124,6 +124,11 @@ class FileWindowStorage(WindowStorage):
 
         return windows
 
+    def _validate_layer_name(self, layer_name: str) -> None:
+        """Raise if the layer name contains '.', which is reserved for group index."""
+        if "." in layer_name:
+            raise ValueError(f"Layer name must not contain '.': got '{layer_name}'.")
+
     @override
     def create_or_update_window(self, window: Window) -> None:
         window_path = self.get_window_root(window.group, window.name)
@@ -178,6 +183,7 @@ class FileWindowStorage(WindowStorage):
     def is_layer_completed(
         self, group: str, name: str, layer_name: str, group_idx: int = 0
     ) -> bool:
+        self._validate_layer_name(layer_name)
         window_path = self.get_window_root(group, name)
         layer_dir = get_window_layer_dir(
             window_path,
@@ -190,6 +196,7 @@ class FileWindowStorage(WindowStorage):
     def mark_layer_completed(
         self, group: str, name: str, layer_name: str, group_idx: int = 0
     ) -> None:
+        self._validate_layer_name(layer_name)
         window_path = self.get_window_root(group, name)
         layer_dir = get_window_layer_dir(window_path, layer_name, group_idx)
         # We assume the directory exists because the layer should be materialized before
