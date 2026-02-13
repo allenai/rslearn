@@ -521,9 +521,19 @@ Only the keys documented below are supported in `init_args`; unknown keys will r
   // Whether to apply STAC `raster:bands` scale/offset (default true). Set to false to
   // keep raw values.
   "apply_scale_offset": true,
-  // Optional: EarthDaily Sentinel-2 asset keys to use (default null). If null and the
-  // layer config is available, assets are inferred from the layer's band sets.
-  // Example: ["red", "green", "blue", "nir", "swir16", "swir22"]
+  // Optional: EarthDaily Sentinel-2 *asset keys* to fetch (default null).
+  // If null and the layer config is available, assets are inferred from the layer's
+  // requested band names.
+  //
+  // Note: this is different from the "Available bands" list below:
+  // - "assets" uses EarthDaily STAC asset keys (e.g. "red", "nir", "visual", "scl").
+  // - "band_sets[].bands" uses rslearn band names (e.g. "B04", "B08", "R", "scl").
+  //
+  // Examples:
+  // - To read band "B04", include asset "red".
+  // - To read bands "R","G","B", include asset "visual".
+  // - To read band "scl", include asset "scl".
+  // Example: ["red", "green", "blue", "nir", "swir16", "swir22", "visual", "scl"]
   "assets": null,
   // Optional: maximum cloud cover (%) to filter items at search time.
   // If set, it takes precedence over cloud_cover_threshold and overrides any
@@ -590,7 +600,8 @@ Example:
 }
 ```
 
-Available bands:
+Available rslearn band names (select via `band_sets[].bands`; rslearn infers required
+EarthDaily assets when `assets` is null):
 - B01
 - B02
 - B03
@@ -605,3 +616,22 @@ Available bands:
 - B8A
 - R, G, B (from the `visual` asset)
 - scl, aot, wvp
+
+Common EarthDaily asset key → rslearn band name mapping:
+- coastal → B01
+- blue → B02
+- green → B03
+- red → B04
+- rededge1 → B05
+- rededge2 → B06
+- rededge3 → B07
+- nir → B08
+- nir08 → B8A
+- nir09 → B09
+- swir16 → B11
+- swir22 → B12
+- visual → R, G, B
+- scl → scl
+- aot → aot
+- wvp → wvp
+- thumbnail → thumbnail (preview; not ingested)
