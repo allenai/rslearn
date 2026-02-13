@@ -359,26 +359,13 @@ def _filter_and_project_items(
     return acceptable_items, acceptable_item_shps
 
 
-_PERIOD_SPLITTING_MODES = frozenset(
-    {
-        SpaceMode.CONTAINS,
-        SpaceMode.INTERSECTS,
-        SpaceMode.MOSAIC,
-        SpaceMode.PER_PERIOD_MOSAIC,
-        SpaceMode.SINGLE_COMPOSITE,
-    }
-)
-
-
 def match_candidate_items_to_window(
     geometry: STGeometry, items: list[ItemType], query_config: QueryConfig
 ) -> list[list[ItemType]]:
     """Match candidate items to a window based on the query configuration.
 
-    If ``period_duration`` is set and the space mode is CONTAINS, INTERSECTS,
-    MOSAIC, or PER_PERIOD_MOSAIC, the window time range is split into sub-periods
+    If ``period_duration`` is set, the window time range is split into sub-periods
     and the handler is applied per-period with effective max_matches=1.
-    SPATIAL_MOSAIC_TEMPORAL_STACK handles period splitting inside its own handler.
 
     When ``period_duration`` is set and ``per_period_mosaic_reverse_time_order``
     is True (the current default), the resulting groups are reversed so that the
@@ -416,11 +403,9 @@ def match_candidate_items_to_window(
     # once for each period within the window time range. In this case max_matches
     # controls the number of periods, while each handler creates at most one item
     # group.
-    if (
-        period_duration is not None
-        and query_config.space_mode in _PERIOD_SPLITTING_MODES
-        and geometry.time_range is not None
-    ):
+    if period_duration is not None:
+        if geometry.time_range is None:
+            raise ValueError("period_duration is set but geometry has no time_range")
         per_period_query_config = QueryConfig(
             space_mode=query_config.space_mode,
             max_matches=1,
