@@ -491,40 +491,23 @@ def fit_and_test_handler() -> None:
         )
     forwarded_args[0] = "fit"
 
-    cli = RslearnLightningCLI(
-        model_class=RslearnLightningModule,
-        datamodule_class=RslearnDataModule,
-        args=forwarded_args,
-        subclass_mode_model=True,
-        subclass_mode_data=True,
-        save_config_kwargs={"overwrite": True},
-        parser_class=RslearnArgumentParser,
-        run=False,
-    )
-
-    if not hasattr(cli.config, "subcommand"):
-        logger.warning(
-            "Config does not have subcommand attribute, assuming we are in run=False mode"
+    # LightningCLI will warn if both sys.argv and args are populated; we always drive
+    # parsing via the explicit args list, so temporarily clear sys.argv to keep
+    # output clean.
+    original_argv = sys.argv
+    try:
+        sys.argv = [original_argv[0]]
+        cli = RslearnLightningCLI(
+            model_class=RslearnLightningModule,
+            datamodule_class=RslearnDataModule,
+            args=forwarded_args,
+            subclass_mode_model=True,
+            subclass_mode_data=True,
+            save_config_kwargs={"overwrite": True},
+            parser_class=RslearnArgumentParser,
         )
-        subcommand_cfg = cli.config
-    else:
-        subcommand = cli.config.subcommand
-        if subcommand != "fit":
-            logger.warning(
-                "fit_and_test expected subcommand 'fit' but got '%s'", subcommand
-            )
-        try:
-            subcommand_cfg = cli.config[subcommand]
-        except (KeyError, TypeError) as e:
-            raise ValueError(
-                f"Could not resolve config for subcommand {subcommand!r}"
-            ) from e
-    ckpt_path_fit = getattr(subcommand_cfg, "ckpt_path", None)
-    if not isinstance(ckpt_path_fit, str):
-        ckpt_path_fit = None
-
-    logger.info("starting fit")
-    cli.trainer.fit(cli.model, datamodule=cli.datamodule, ckpt_path=ckpt_path_fit)
+    finally:
+        sys.argv = original_argv
 
     ckpt_path_test = _infer_checkpoint_path_for_test(cli.trainer)
     if ckpt_path_test:
