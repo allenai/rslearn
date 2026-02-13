@@ -58,7 +58,7 @@ def _retry_on_locked(func: Callable[..., Any]) -> Callable[..., Any]:
             try:
                 return func(*args, **kwargs)
             except sqlite3.OperationalError as e:
-                if "locked" in str(e).lower() or "busy" in str(e).lower():
+                if e.sqlite_errorcode in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
                     sleep_time = RETRY_DELAY * (2**attempt) * random.uniform(0.5, 1.0)
                     logger.debug(
                         f"Database locked, retrying in {sleep_time:.3f}s "
@@ -109,8 +109,7 @@ class SQLiteWindowStorage(WindowStorage):
         if self._conn is None or self._conn_pid != pid:
             conn = sqlite3.connect(
                 str(self.db_path),
-                # Disable implicit transactions, so statements autocommit by default
-                # and we explicitly start transactions with BEGIN where needed.
+                # Autocommit mode — no transactions needed.
                 isolation_level=None,
             )
             # Return sqlite3.Rows instead of tuples.
@@ -151,14 +150,13 @@ class SQLiteWindowStorage(WindowStorage):
             ON windows(name)
         """)
 
-        # Layer datas table stores items.json content per window
+        # Layer datas table stores all layer datas for a window as a single JSON blob
         conn.execute("""
             CREATE TABLE IF NOT EXISTS layer_datas (
                 group_name TEXT NOT NULL,
                 window_name TEXT NOT NULL,
-                layer_name TEXT NOT NULL,
                 data_json TEXT NOT NULL,
-                PRIMARY KEY (group_name, window_name, layer_name)
+                PRIMARY KEY (group_name, window_name)
             )
         """)
         # Completed layers table tracks which layers are completed
@@ -292,17 +290,19 @@ class SQLiteWindowStorage(WindowStorage):
         conn = self._get_connection()
         cursor = conn.execute(
             """
-            SELECT layer_name, data_json FROM layer_datas
+            SELECT data_json FROM layer_datas
             WHERE group_name = ? AND window_name = ?
             """,
             (group, name),
         )
-        result = {}
-        for row in cursor.fetchall():
-            data = json.loads(row["data_json"])
-            layer_data = WindowLayerData.deserialize(data)
-            result[layer_data.layer_name] = layer_data
-        return result
+        row = cursor.fetchone()
+        if row is None:
+            return {}
+        layer_datas_list = json.loads(row["data_json"])
+        return {
+            ld.layer_name: ld
+            for ld in (WindowLayerData.deserialize(d) for d in layer_datas_list)
+        }
 
     @_retry_on_locked
     @override
@@ -311,27 +311,14 @@ class SQLiteWindowStorage(WindowStorage):
     ) -> None:
         """Set the window layer datas for the specified window."""
         conn = self._get_connection()
-        try:
-            conn.execute("BEGIN IMMEDIATE")
-            # Delete existing layer datas for this window
-            conn.execute(
-                "DELETE FROM layer_datas WHERE group_name = ? AND window_name = ?",
-                (group, name),
-            )
-            # Insert new layer datas
-            for layer_data in layer_datas.values():
-                data_json = json.dumps(layer_data.serialize())
-                conn.execute(
-                    """
-                    INSERT INTO layer_datas (group_name, window_name, layer_name, data_json)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (group, name, layer_data.layer_name, data_json),
-                )
-            conn.execute("COMMIT")
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
+        data_json = json.dumps([ld.serialize() for ld in layer_datas.values()])
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO layer_datas (group_name, window_name, data_json)
+            VALUES (?, ?, ?)
+            """,
+            (group, name, data_json),
+        )
         logger.info(f"Saved layer datas for {group}/{name} to SQLite")
 
     @_retry_on_locked
@@ -371,19 +358,21 @@ class SQLiteWindowStorage(WindowStorage):
     ) -> None:
         """Mark the specified layer completed for the given window."""
         conn = self._get_connection()
-        try:
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO completed_layers (group_name, window_name, layer_name, group_idx)
-                VALUES (?, ?, ?, ?)
-                """,
-                (group, name, layer_name, group_idx),
-            )
-            conn.execute("COMMIT")
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO completed_layers (group_name, window_name, layer_name, group_idx)
+            VALUES (?, ?, ?, ?)
+            """,
+            (group, name, layer_name, group_idx),
+        )
+
+    @override
+    def close(self) -> None:
+        """Release any resources held by this storage backend."""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+            self._conn_pid = None
 
 
 class SQLiteWindowStorageFactory(WindowStorageFactory):
