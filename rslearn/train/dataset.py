@@ -177,7 +177,11 @@ class DataInput:
 
         Args:
             data_type: either "raster" or "vector"
-            layers: list of layer names that this input can be read from.
+            layers: list of layer names or item group specifiers that this input can be
+                read from. If load_all_item_groups=False, each entry should be an item
+                group specifier, e.g. "sentinel2" for layer_name=sentinel2, group_idx=0
+                or "sentinel2.1" for layer_name=sentinel2, group_idx=1. Otherwise, each
+                entry should be a layer name.
             bands: the bands to read, if this is a raster.
             required: whether examples lacking one of these layers should be skipped
             passthrough: whether to expose this to the model even if it isn't returned
@@ -185,16 +189,20 @@ class DataInput:
             is_target: whether this DataInput represents a target for the task. Targets
                 are not read during prediction phase.
             dtype: data type to load the raster as
-            load_all_layers: whether to load all of the layers specified in the list of
-                layer names. By default, we randomly pick one layer to read. When
-                reading multiple layers, the images are stacked on the channel
-                dimension. This option will also cause the dataset to only include
-                windows where all of the layers are materialized (by default, only
-                windows with none of the layers materialized would be excluded).
+            load_all_layers: whether to load all of the entries specified in the layers
+                list. By default, we randomly pick one entry to read. When reading
+                multiple entries, raster images are stacked on the time dimension. This
+                option will also cause the dataset to only include windows where all of
+                the entries are materialized (by default, only windows with none of the
+                entries materialized would be excluded).
             load_all_item_groups: whether to load all item groups in the layer(s) we
-                are reading from. By default, we assume the specified layer name is of
-                the form "{layer_name}.{group_idx}" and read that item group only. With
-                this option enabled, we ignore the group_idx and read all item groups.
+                are reading from. By default, we treat layers as a list of item group
+                specifiers, and either pick a random item group to read (if
+                load_all_layers=False) or stack all of them (if load_all_layers=True). If
+                load_all_item_groups=True, we treat layers as a list of layer names,
+                and include all item groups within each layer as candidates for
+                reading; whether we pick a random item group or stack them is still
+                controlled by load_all_layers.
             resolution_factor: controls the resolution at which raster data is loaded for training.
                 By default (factor=1), data is loaded at the window resolution.
                 E.g. for a 64x64 window at 10 m/pixel with resolution_factor=1/2,
@@ -222,16 +230,16 @@ def read_raster_layer_for_data_input(
     layer_config: LayerConfig,
     data_input: DataInput,
 ) -> torch.Tensor:
-    """Read a raster layer for a DataInput.
+    """Read a raster from a specific item group for a DataInput.
 
-    This scans the available rasters for the layer at the window to determine which
-    ones are needed to get all of the configured bands.
+    This scans the available rasters for the item group at the window to determine
+    which band sets are needed to get all of the configured bands.
 
     Args:
         window: the window to read from.
         bounds: the bounds to read.
-        layer_name: the layer.
-        group_idx: the item group.
+        layer_name: the layer name.
+        group_idx: the item group index within the layer.
         layer_config: the layer configuration.
         data_input: the DataInput that specifies the bands and dtype.
 
@@ -368,9 +376,10 @@ def read_data_input(
     Returns:
         the raster or vector data.
     """
-    # We first enumerate which layers are available.
-    # If load_all_item_groups is set, we need to check each item group within the
-    # layer.
+    # We first enumerate which item groups are available.
+    # If load_all_item_groups is set, we discover all item groups within each layer.
+    # Otherwise, we parse each entry in data_input.layers as a (layer_name, group_idx)
+    # specifier.
     layer_options: list[tuple[str, int]] = []
     if data_input.load_all_item_groups:
         wanted_layers = set(data_input.layers)
@@ -385,9 +394,9 @@ def read_data_input(
                 continue
             layer_options.append((layer_name, group_idx))
 
-    # Now determine the layers that we should actually read.
-    # We randomly pick one, unless load_all_layers is set, in which case we read all of
-    # them.
+    # Now determine which item groups we should actually read.
+    # We randomly pick one, unless load_all_layers is set, in which case we read all
+    # available options.
     layers_to_read: list[tuple[str, int]]
     if data_input.load_all_layers:
         # We assume that the user has ensured the layers are compatible, e.g. raster
@@ -683,30 +692,29 @@ class SplitConfig:
 
 
 def is_data_input_available(data_input: DataInput, window: Window) -> bool:
-    """Check if a data input's layers are available in a window.
+    """Check if a data input's required item groups are available in a window.
 
     Args:
         data_input: the data input to check.
         window: the window to check against.
 
     Returns:
-        True if the layers are available based on the data input's configuration.
+        True if the required item groups are available.
     """
-    # If load_all_layers is enabled, we should check that all the layers are
-    # present. Otherwise, we just need one layer.
-    is_any_layer_available = False
-    are_all_layers_available = True
+    # If load_all_layers is enabled, we need all entries present. Otherwise, just one.
+    is_any_available = False
+    are_all_available = True
 
     for layer_name in data_input.layers:
         if window.is_layer_completed(layer_name):
-            is_any_layer_available = True
+            is_any_available = True
         else:
-            are_all_layers_available = False
+            are_all_available = False
 
     if data_input.load_all_layers:
-        return are_all_layers_available
+        return are_all_available
     else:
-        return is_any_layer_available
+        return is_any_available
 
 
 def check_window(

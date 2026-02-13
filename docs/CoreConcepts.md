@@ -70,7 +70,7 @@ place in three steps:
 The first step is to match items in the data source with each window in the dataset.
 The output of matching is a list of *item groups* for each window, where each group
 specifies a different list of items that should be mosaiced to form a different
-sub-layer for that window.
+composite for that window.
 
 There are a number of options in the [dataset configuration](DatasetConfig.md) that can
 control how this matching is performed. The default is to create one mosaic that covers
