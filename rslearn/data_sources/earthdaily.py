@@ -4,7 +4,6 @@ import copy
 import json
 import os
 import tempfile
-from contextlib import ExitStack
 from datetime import timedelta
 from typing import Any, Literal
 
@@ -593,9 +592,7 @@ class Sentinel2(EarthDaily):
     """Sentinel-2 L2A on EarthDaily platform.
 
     Uses the `sentinel-2-c1-l2a` collection and applies per-asset scale/offset metadata
-    from STAC `raster:bands` when present. Optionally applies a cloud mask during
-    ingestion using the SCL asset so that rslearn composites can treat cloudy pixels
-    as nodata.
+    from STAC `raster:bands` when present.
     """
 
     COLLECTION_NAME = "sentinel-2-c1-l2a"
@@ -624,8 +621,6 @@ class Sentinel2(EarthDaily):
         "thumbnail": ["thumbnail"],
     }
 
-    DEFAULT_EXCLUDE_SCL_VALUES = [3, 8, 9, 10]
-
     def __init__(
         self,
         harmonize: bool = True,
@@ -634,10 +629,6 @@ class Sentinel2(EarthDaily):
         cloud_cover_max: float | None = None,
         search_max_items: int = 500,
         sort_items_by: Literal["cloud_cover", "datetime"] | None = "cloud_cover",
-        apply_cloud_mask: bool = False,
-        mask_band: str = "scl",
-        exclude_scl_values: list[int] | None = None,
-        mask_nodata_value: int | float = 0,
         query: dict[str, Any] | None = None,
         sort_by: str | None = None,
         sort_ascending: bool = True,
@@ -662,12 +653,6 @@ class Sentinel2(EarthDaily):
                 rslearn's grouping/matching logic runs.
             sort_items_by: optional ordering applied before grouping; useful when
                 using `SpaceMode.COMPOSITE` with `CompositingMethod.FIRST_VALID`.
-            apply_cloud_mask: whether to apply a cloud mask during ingest using SCL.
-                Cloudy pixels are set to `mask_nodata_value`.
-            mask_band: which asset key to use as the mask (default "scl").
-            exclude_scl_values: SCL values to treat as invalid (defaults to common
-                cloud/cloud-shadow/cirrus values).
-            mask_nodata_value: value to write into cloudy pixels.
             query: optional STAC API `query` filter passed to searches. If
                 cloud_cover_max/cloud_cover_threshold is set, the effective query also
                 includes an `eo:cloud_cover` upper bound.
@@ -692,14 +677,8 @@ class Sentinel2(EarthDaily):
             for asset_key, band_names in self.ASSET_BANDS.items():
                 if wanted_bands.intersection(set(band_names)):
                     asset_bands[asset_key] = band_names
-            if apply_cloud_mask and mask_band not in asset_bands:
-                # We may need the mask even if it is not explicitly requested.
-                if mask_band in self.ASSET_BANDS:
-                    asset_bands[mask_band] = self.ASSET_BANDS[mask_band]
         elif assets is not None:
             asset_bands = {asset_key: self.ASSET_BANDS[asset_key] for asset_key in assets}
-            if apply_cloud_mask and mask_band not in asset_bands:
-                asset_bands[mask_band] = self.ASSET_BANDS[mask_band]
         else:
             asset_bands = dict(self.ASSET_BANDS)
 
@@ -723,14 +702,6 @@ class Sentinel2(EarthDaily):
         self.search_max_items = search_max_items
         self.sort_items_by = sort_items_by
         self.harmonize = harmonize
-        self.apply_cloud_mask = apply_cloud_mask
-        self.mask_band = mask_band
-        self.exclude_scl_values = (
-            exclude_scl_values
-            if exclude_scl_values is not None
-            else list(self.DEFAULT_EXCLUDE_SCL_VALUES)
-        )
-        self.mask_nodata_value = mask_nodata_value
 
     def read_raster(
         self,
@@ -853,39 +824,6 @@ class Sentinel2(EarthDaily):
                     f.write(chunk)
         return local_fname
 
-    def _apply_scl_cloud_mask(
-        self,
-        src: rasterio.DatasetReader,
-        scl_src: rasterio.DatasetReader,
-        *,
-        item: EarthDailyItem,
-        asset_key: str,
-    ) -> tuple[npt.NDArray[Any], Projection, PixelBounds]:
-        # Align the SCL raster to the source raster's grid.
-        with rasterio.vrt.WarpedVRT(
-            scl_src,
-            crs=src.crs,
-            transform=src.transform,
-            width=src.width,
-            height=src.height,
-            resampling=Resampling.nearest,
-        ) as scl_vrt:
-            scl = scl_vrt.read(1)
-
-        cloud_mask = np.isin(scl, np.array(self.exclude_scl_values, dtype=scl.dtype))
-        array = src.read()
-        if self.harmonize:
-            array = self._apply_scale_offsets(
-                array,
-                scale_offsets=item.asset_scale_offsets.get(asset_key),
-                item_name=item.name,
-                asset_key=asset_key,
-            )
-        array[:, cloud_mask] = self.mask_nodata_value
-
-        projection, bounds = get_raster_projection_and_bounds(src)
-        return array, projection, bounds
-
     def ingest(
         self,
         tile_store: TileStoreWithLayer,
@@ -894,20 +832,10 @@ class Sentinel2(EarthDaily):
     ) -> None:
         """Ingest Sentinel-2 items into the provided tile store.
 
-        Applies per-asset scale/offset metadata (when present) and optionally applies
-        an SCL-derived cloud mask during ingest.
+        Applies per-asset scale/offset metadata (when present).
         """
         for item in items:
-            with tempfile.TemporaryDirectory() as tmp_dir, ExitStack() as stack:
-                scl_src: rasterio.DatasetReader | None = None
-                if self.apply_cloud_mask:
-                    scl_url = item.asset_urls.get(self.mask_band)
-                    if scl_url is not None:
-                        scl_local_fname = self._download_asset_to_tmp(
-                            scl_url, tmp_dir, self.mask_band, item.name
-                        )
-                        scl_src = stack.enter_context(rasterio.open(scl_local_fname))
-
+            with tempfile.TemporaryDirectory() as tmp_dir:
                 for asset_key, band_names in self.asset_bands.items():
                     asset_url = item.asset_urls.get(asset_key)
                     if asset_url is None:
@@ -922,32 +850,20 @@ class Sentinel2(EarthDaily):
                         asset_url, tmp_dir, asset_key, item.name
                     )
 
-                    if self.apply_cloud_mask and asset_key == self.mask_band:
-                        # If mask band itself is requested, store it unmodified.
-                        tile_store.write_raster_file(
-                            item.name, band_names, UPath(local_fname)
-                        )
-                        continue
-
-                    if not self.harmonize and (not self.apply_cloud_mask or scl_src is None):
+                    if not self.harmonize:
                         tile_store.write_raster_file(
                             item.name, band_names, UPath(local_fname)
                         )
                         continue
 
                     with rasterio.open(local_fname) as src:
-                        if self.apply_cloud_mask and scl_src is not None:
-                            array, projection, bounds = self._apply_scl_cloud_mask(
-                                src, scl_src, item=item, asset_key=asset_key
-                            )
-                        else:
-                            array = src.read()
-                            array = self._apply_scale_offsets(
-                                array,
-                                scale_offsets=item.asset_scale_offsets.get(asset_key),
-                                item_name=item.name,
-                                asset_key=asset_key,
-                            )
+                        array = src.read()
+                        array = self._apply_scale_offsets(
+                            array,
+                            scale_offsets=item.asset_scale_offsets.get(asset_key),
+                            item_name=item.name,
+                            asset_key=asset_key,
+                        )
 
-                            projection, bounds = get_raster_projection_and_bounds(src)
+                        projection, bounds = get_raster_projection_and_bounds(src)
                     tile_store.write_raster(item.name, band_names, projection, bounds, array)

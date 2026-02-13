@@ -31,7 +31,7 @@ def _make_geotiff_bytes(
         return memfile.read()
 
 
-def test_sentinel2_ingest_applies_scl_cloud_mask(
+def test_sentinel2_ingest_does_not_apply_scl_cloud_mask(
     tmp_path,
     httpserver: HTTPServer,
 ) -> None:
@@ -82,11 +82,7 @@ def test_sentinel2_ingest_applies_scl_cloud_mask(
         },
     )
 
-    data_source = Sentinel2(
-        assets=["red"],
-        apply_cloud_mask=True,
-        mask_nodata_value=0,
-    )
+    data_source = Sentinel2(assets=["red", "scl"], harmonize=False)
 
     ds_path = UPath(tmp_path / "ds")
     tile_store = DefaultTileStore(convert_rasters_to_cogs=False)
@@ -102,7 +98,11 @@ def test_sentinel2_ingest_applies_scl_cloud_mask(
     out = tile_store.read_raster("sentinel2", item.name, ["B04"], projection, bounds)
     assert out.shape == red.shape
     assert out[0, 0, 0] == 100
-    assert out[0, 1, 1] == 0
+    assert out[0, 1, 1] == 100
+
+    out_scl = tile_store.read_raster("sentinel2", item.name, ["scl"], projection, bounds)
+    assert out_scl.shape == scl.shape
+    assert out_scl[0, 1, 1] == 8
 
 
 def test_sentinel2_read_raster_applies_scale_offset_when_harmonize_true(
@@ -282,11 +282,7 @@ def test_sentinel2_ingest_raises_on_download_failure(
         asset_urls={"red": httpserver.url_for("/red.tif")},
     )
 
-    data_source = Sentinel2(
-        assets=["red"],
-        apply_cloud_mask=True,
-        mask_nodata_value=0,
-    )
+    data_source = Sentinel2(assets=["red"])
 
     ds_path = UPath(tmp_path / "ds")
     tile_store = DefaultTileStore(convert_rasters_to_cogs=False)

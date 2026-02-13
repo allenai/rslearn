@@ -508,6 +508,10 @@ By default, this data source applies per-asset scale/offset values from STAC
 `raster:bands` metadata (`harmonize: true`) using `physical = raw * scale + offset`. Set
 `harmonize: false` to keep raw values.
 
+To use SCL-based cloud masking, include the `scl` band in your dataset (e.g. as a
+separate band set) and apply masking as a training-time transform (see
+`docs/Transforms.md`).
+
 The additional data source configuration looks like this:
 Only the keys documented below are supported in `init_args`; unknown keys will raise an error.
 
@@ -530,16 +534,6 @@ Only the keys documented below are supported in `init_args`; unknown keys will r
   // Optional ordering of items before grouping (useful with SpaceMode.COMPOSITE +
   // CompositingMethod.FIRST_VALID): "cloud_cover" (default), "datetime", or null.
   "sort_items_by": "cloud_cover",
-  // Whether to apply an SCL-based cloud mask during ingest (default false). If true,
-  // cloudy pixels are set to mask_nodata_value before writing to the dataset tile store.
-  // Note: this only applies when ingest is enabled (the default).
-  "apply_cloud_mask": false,
-  // Which asset key to use as the mask band (default "scl").
-  "mask_band": "scl",
-  // SCL values treated as cloudy (default [3, 8, 9, 10]); set to override.
-  "exclude_scl_values": null,
-  // Nodata value to write into cloudy pixels.
-  "mask_nodata_value": 0,
   // Optional: STAC API `query` filter passed to searches.
   // Example: {"s2:product_type": {"eq": "S2MSI2A"}}
   // Note: if cloud_cover_max/cloud_cover_threshold is set, the effective query also
@@ -585,9 +579,7 @@ Example:
         },
         "init_args": {
           "cloud_cover_max": 15.0,
-          "sort_items_by": "cloud_cover",
-          "apply_cloud_mask": true,
-          "mask_nodata_value": 0
+          "sort_items_by": "cloud_cover"
         }
       }
     }
