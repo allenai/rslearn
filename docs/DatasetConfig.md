@@ -634,4 +634,5 @@ Common EarthDaily asset key → rslearn band name mapping:
 - scl → scl
 - aot → aot
 - wvp → wvp
-- thumbnail → thumbnail (preview; not ingested)
+
+Note: EarthDaily may include a preview `thumbnail` asset; rslearn does not ingest/materialize it.

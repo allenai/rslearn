@@ -610,8 +610,6 @@ class Sentinel2(EarthDaily):
         "scl": ["scl"],
         "aot": ["aot"],
         "wvp": ["wvp"],
-        # Preview.
-        "thumbnail": ["thumbnail"],
     }
 
     def __init__(
@@ -669,7 +667,17 @@ class Sentinel2(EarthDaily):
                 if wanted_bands.intersection(set(band_names)):
                     asset_bands[asset_key] = band_names
         elif assets is not None:
-            asset_bands = {asset_key: self.ASSET_BANDS[asset_key] for asset_key in assets}
+            unknown_assets = [
+                asset_key for asset_key in assets if asset_key not in self.ASSET_BANDS
+            ]
+            if unknown_assets:
+                raise ValueError(
+                    f"unknown EarthDaily Sentinel-2 assets {unknown_assets}; "
+                    f"supported assets are {sorted(self.ASSET_BANDS.keys())}"
+                )
+            asset_bands = {
+                asset_key: self.ASSET_BANDS[asset_key] for asset_key in assets
+            }
         else:
             asset_bands = dict(self.ASSET_BANDS)
 
@@ -831,9 +839,6 @@ class Sentinel2(EarthDaily):
                     if asset_url is None:
                         continue
                     if tile_store.is_raster_ready(item.name, band_names):
-                        continue
-                    if asset_key == "thumbnail":
-                        # Thumbnails are generally not GeoTIFF rasters; skip ingestion.
                         continue
 
                     local_fname = self._download_asset_to_tmp(
