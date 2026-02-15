@@ -498,8 +498,7 @@ class SplitConfig:
                 for each window, read all crops as separate sequential items in the
                 dataset.
             center_crop: with crop_size set, always take the center crop of each
-                window instead of a random crop. Mutually exclusive with
-                load_all_crops. Useful for fast deterministic evaluation.
+                window instead of a random crop. Mutually exclusive with load_all_crops.
             skip_targets: whether to skip targets when loading inputs
             output_layer_name_skip_inference_if_exists: optional name of the output layer used during prediction.
                 If set, windows that already
@@ -653,9 +652,7 @@ class SplitConfig:
 
         # center_crop is mutually exclusive with load_all_crops.
         if result.get_center_crop() and result.get_load_all_crops():
-            raise ValueError(
-                "center_crop and load_all_crops are mutually exclusive"
-            )
+            raise ValueError("center_crop and load_all_crops are mutually exclusive")
 
         # center_crop requires crop_size.
         if result.get_center_crop() and result.get_crop_size() is None:
@@ -1079,7 +1076,6 @@ class ModelDataset(torch.utils.data.Dataset):
 
             def get_crop_range(n_crop: int, n_window: int) -> list[int]:
                 if self.center_crop:
-                    # Always take the center crop of the window.
                     start = (n_window - n_crop) // 2
                     return [start, start + n_crop]
 

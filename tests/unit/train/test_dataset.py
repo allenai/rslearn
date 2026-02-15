@@ -570,9 +570,7 @@ def test_center_crop(
     add_window_to_basic_classification_dataset: Callable,
 ) -> None:
     """Test that center_crop returns the center crop of a window."""
-    # Create a 10x10 window so there's room for a center crop.
     image = np.zeros((1, 10, 10), dtype=np.uint8)
-    # Fill the center 4x4 region with ones so we can verify the crop content.
     image[0, 3:7, 3:7] = 1
     add_window_to_basic_classification_dataset(
         basic_classification_dataset,
