@@ -56,6 +56,7 @@ class SimpleTCNEncoder(FeatureExtractor):
 
         self.mod_key = mod_key
         self.output_spatial_size = output_spatial_size
+        self._warned_spatial = False
 
         # Front-end linear projection
         self.input_proj = nn.Linear(in_channels, base_dim)
@@ -120,9 +121,19 @@ class SimpleTCNEncoder(FeatureExtractor):
             dim=0,  # [B, HW, T, C]
         )
 
-        # Squeeze spatial dimensions: [B, T, C]
+        # Average-pool spatial dimensions: [B, T, C]
         if TS_data.dim() == 4:
-            TS_data = TS_data.squeeze(1)
+            if TS_data.shape[1] > 1 and not self._warned_spatial:
+                import warnings
+
+                warnings.warn(
+                    f"SimpleTCNEncoder: spatial extent {TS_data.shape[1]} > 1, "
+                    f"averaging over spatial dimensions. Consider loading the "
+                    f"input at coarser resolution to avoid this.",
+                    stacklevel=2,
+                )
+                self._warned_spatial = True
+            TS_data = TS_data.mean(dim=1)
 
         x = self.input_proj(TS_data)
         x = x.transpose(1, 2)
