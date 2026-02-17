@@ -181,25 +181,19 @@ class ResolutionFactor:
     def multiply_bounds(self, bounds: PixelBounds) -> PixelBounds:
         """Multiply the bounds by this factor.
 
-        When coarsening, the width and height of the given bounds must be a multiple of
-        the denominator.
+        When coarsening, start bounds use floor division and end bounds use
+        ceiling division so that the coarsened region fully covers the original
+        extent (it may slightly over-cover when bounds are not exact multiples
+        of the denominator).
         """
         if self.denominator > 1:
-            # Verify the width and height are multiples of the denominator.
-            # Otherwise the new width and height is not an integer.
-            width = bounds[2] - bounds[0]
-            height = bounds[3] - bounds[1]
-            if width % self.denominator != 0 or height % self.denominator != 0:
-                raise ValueError(
-                    f"width {width} or height {height} is not a multiple of the resolution factor {self.denominator}"
-                )
-            # TODO: an offset could be introduced by bounds not being a multiple
-            # of the denominator -> will need to decide how to handle that.
+            import math
+
             return (
                 bounds[0] // self.denominator,
                 bounds[1] // self.denominator,
-                bounds[2] // self.denominator,
-                bounds[3] // self.denominator,
+                math.ceil(bounds[2] / self.denominator),
+                math.ceil(bounds[3] / self.denominator),
             )
         else:
             return (
