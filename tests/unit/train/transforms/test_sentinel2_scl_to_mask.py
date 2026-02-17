@@ -18,9 +18,9 @@ def test_sentinel2_scl_to_mask_and_apply_mask() -> None:
 
     input_dict, _ = scl_to_mask(input_dict, {})
     assert torch.all(
-        input_dict["mask"].image == torch.tensor([[[[1, 0], [0, 1]]]], dtype=torch.int32)
+        input_dict["mask"].image
+        == torch.tensor([[[[1, 0], [0, 1]]]], dtype=torch.int32)
     )
 
     input_dict, _ = apply_mask(input_dict, {})
     assert torch.all(input_dict["image"].image == torch.tensor([[[[5, 0], [0, 5]]]]))
-

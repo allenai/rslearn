@@ -199,7 +199,9 @@ class EarthDaily(DataSource, TileStore):
                 or "href" not in asset_obj.extra_fields["alternate"]["download"]
             ):
                 continue
-            asset_urls[asset_key] = asset_obj.extra_fields["alternate"]["download"]["href"]
+            asset_urls[asset_key] = asset_obj.extra_fields["alternate"]["download"][
+                "href"
+            ]
 
             raster_bands = asset_obj.extra_fields.get("raster:bands", [])
             if not isinstance(raster_bands, list) or not raster_bands:
@@ -450,18 +452,16 @@ class EarthDaily(DataSource, TileStore):
         if len(scale_offsets) == 1:
             scale = _to_float(scale_offsets[0].get("scale"), 1.0)
             offset = _to_float(scale_offsets[0].get("offset"), 0.0)
-            scales = np.full(
-                (num_bands, 1, 1), scale, dtype=np.float32
-            )
-            offsets = np.full(
-                (num_bands, 1, 1), offset, dtype=np.float32
-            )
+            scales = np.full((num_bands, 1, 1), scale, dtype=np.float32)
+            offsets = np.full((num_bands, 1, 1), offset, dtype=np.float32)
         elif len(scale_offsets) == num_bands:
             scales = np.array(
-                [_to_float(so.get("scale"), 1.0) for so in scale_offsets], dtype=np.float32
+                [_to_float(so.get("scale"), 1.0) for so in scale_offsets],
+                dtype=np.float32,
             ).reshape(num_bands, 1, 1)
             offsets = np.array(
-                [_to_float(so.get("offset"), 0.0) for so in scale_offsets], dtype=np.float32
+                [_to_float(so.get("offset"), 0.0) for so in scale_offsets],
+                dtype=np.float32,
             ).reshape(num_bands, 1, 1)
         else:
             logger.debug(
@@ -475,9 +475,7 @@ class EarthDaily(DataSource, TileStore):
             scale = _to_float(scale_offsets[0].get("scale"), 1.0)
             offset = _to_float(scale_offsets[0].get("offset"), 0.0)
             scales = np.full((num_bands, 1, 1), scale, dtype=np.float32)
-            offsets = np.full(
-                (num_bands, 1, 1), offset, dtype=np.float32
-            )
+            offsets = np.full((num_bands, 1, 1), offset, dtype=np.float32)
 
         if np.all(scales == 1.0) and np.all(offsets == 0.0):
             return array
@@ -743,7 +741,9 @@ class Sentinel2(EarthDaily):
         for geometry in geometries:
             wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
             if wgs84_geometry.time_range is None:
-                raise ValueError("EarthDaily Sentinel-2 requires geometry time ranges to be set")
+                raise ValueError(
+                    "EarthDaily Sentinel-2 requires geometry time ranges to be set"
+                )
 
             max_cloud_cover = (
                 self.cloud_cover_max
@@ -799,9 +799,13 @@ class Sentinel2(EarthDaily):
                     )
                 )
             elif self.sort_items_by is not None:
-                raise ValueError(f"invalid sort_items_by setting ({self.sort_items_by})")
+                raise ValueError(
+                    f"invalid sort_items_by setting ({self.sort_items_by})"
+                )
 
-            candidate_items = [self.get_item_by_name(stac_item.id) for stac_item in stac_items]
+            candidate_items = [
+                self.get_item_by_name(stac_item.id) for stac_item in stac_items
+            ]
             cur_groups = match_candidate_items_to_window(
                 geometry, candidate_items, query_config
             )
@@ -861,4 +865,6 @@ class Sentinel2(EarthDaily):
                         )
 
                         projection, bounds = get_raster_projection_and_bounds(src)
-                    tile_store.write_raster(item.name, band_names, projection, bounds, array)
+                    tile_store.write_raster(
+                        item.name, band_names, projection, bounds, array
+                    )

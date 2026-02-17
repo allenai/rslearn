@@ -60,7 +60,9 @@ class Sentinel2SCLToMask(Transform):
         self, input_dict: dict[str, Any], target_dict: dict[str, Any]
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Write a binary mask derived from SCL into the input/target dicts."""
-        if self.skip_missing and not selector_exists(input_dict, target_dict, self.scl_selector):
+        if self.skip_missing and not selector_exists(
+            input_dict, target_dict, self.scl_selector
+        ):
             return input_dict, target_dict
 
         scl = read_selector(input_dict, target_dict, self.scl_selector)

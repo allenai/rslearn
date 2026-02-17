@@ -101,7 +101,9 @@ def test_sentinel2_ingest_does_not_apply_scl_cloud_mask(
     assert out[0, 0, 0] == 100
     assert out[0, 1, 1] == 100
 
-    out_scl = tile_store.read_raster("sentinel2", item.name, ["scl"], projection, bounds)
+    out_scl = tile_store.read_raster(
+        "sentinel2", item.name, ["scl"], projection, bounds
+    )
     assert out_scl.shape == scl.shape
     assert out_scl[0, 1, 1] == 8
 
@@ -145,6 +147,7 @@ def test_sentinel2_read_raster_applies_scale_offset_when_apply_scale_offset_true
     )
 
     data_source = Sentinel2(assets=["red"], apply_scale_offset=True)
+
     def _get_item_by_name(name: str) -> EarthDailyItem:
         return item
 
