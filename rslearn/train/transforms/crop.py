@@ -78,6 +78,16 @@ class Crop(Transform):
         if self.offset is not None:
             remove_from_left = self.offset[0]
             remove_from_top = self.offset[1]
+            if remove_from_left + crop_size > image_shape[1]:
+                raise ValueError(
+                    f"offset[0]={remove_from_left} + crop_size={crop_size} "
+                    f"exceeds image width={image_shape[1]}"
+                )
+            if remove_from_top + crop_size > image_shape[0]:
+                raise ValueError(
+                    f"offset[1]={remove_from_top} + crop_size={crop_size} "
+                    f"exceeds image height={image_shape[0]}"
+                )
         else:
             remove_from_left = torch.randint(
                 low=0,

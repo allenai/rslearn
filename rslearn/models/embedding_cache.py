@@ -32,6 +32,22 @@ class EmbeddingCache(FeatureExtractor):
             cache_on_cpu: if True, store cached tensors on CPU to save GPU memory.
         """
         super().__init__()
+
+        # Verify encoder type -- should be FeatureExtractor followed by one or more
+        # IntermediateComponents.
+        if not encoder:
+            raise ValueError("encoder must be a non-empty list")
+        if not isinstance(encoder[0], FeatureExtractor):
+            raise TypeError(
+                f"encoder[0] must be a FeatureExtractor, got {type(encoder[0]).__name__}"
+            )
+        for i, module in enumerate(encoder[1:], start=1):
+            if not isinstance(module, IntermediateComponent):
+                raise TypeError(
+                    f"encoder[{i}] must be an IntermediateComponent, "
+                    f"got {type(module).__name__}"
+                )
+
         self.encoder = torch.nn.ModuleList(encoder)
         self.cache_on_cpu = cache_on_cpu
         # Cache maps (window_name, crop_bounds) -> list of detached tensors per level
