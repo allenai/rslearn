@@ -56,6 +56,15 @@ class Mask(Transform):
             # Repeat along C dimension, keep T, H, W the same
             mask_tensor = mask_tensor.repeat(image.shape[0], 1, 1, 1)
 
+        # Tile the mask to have same number of timesteps (T dimension) as the image.
+        if image.shape[1] != mask_tensor.shape[1]:
+            if mask_tensor.shape[1] != 1:
+                raise ValueError(
+                    "expected mask to either have same timesteps as image, or one"
+                    " timestep"
+                )
+            mask_tensor = mask_tensor.repeat(1, image.shape[1], 1, 1)
+
         image.image[mask_tensor == 0] = self.mask_value
         return image
 
