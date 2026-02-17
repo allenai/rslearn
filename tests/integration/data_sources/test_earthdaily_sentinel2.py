@@ -5,10 +5,16 @@ import affine
 import numpy as np
 import pytest
 import rasterio
+import requests
 import shapely
 from pytest_httpserver import HTTPServer
 from rasterio.io import MemoryFile
 from upath import UPath
+
+from rslearn.config.dataset import QueryConfig
+from rslearn.const import WGS84_PROJECTION
+from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
+from rslearn.utils.geometry import Projection, STGeometry
 
 
 def _make_geotiff_bytes(
@@ -38,10 +44,7 @@ def test_sentinel2_ingest_does_not_apply_scl_cloud_mask(
 ) -> None:
     pytest.importorskip("earthdaily")
 
-    from rslearn.const import WGS84_PROJECTION
     from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2
-    from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
-    from rslearn.utils.geometry import Projection, STGeometry
 
     # Create a tiny georeferenced raster and an aligned SCL mask.
     projection = Projection(WGS84_PROJECTION.crs, 0.0001, -0.0001)
@@ -109,13 +112,12 @@ def test_sentinel2_ingest_does_not_apply_scl_cloud_mask(
 
 
 def test_sentinel2_read_raster_applies_scale_offset_when_apply_scale_offset_true(
-    httpserver: HTTPServer,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pytest.importorskip("earthdaily")
 
-    from rslearn.const import WGS84_PROJECTION
     from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2
-    from rslearn.utils.geometry import Projection, STGeometry
 
     projection = Projection(WGS84_PROJECTION.crs, 0.0001, -0.0001)
     bounds = (0, 0, 4, 4)
@@ -130,9 +132,8 @@ def test_sentinel2_read_raster_applies_scale_offset_when_apply_scale_offset_true
 
     raw = np.full((1, 4, 4), 100, dtype=np.uint16)
     red_bytes = _make_geotiff_bytes(raw, projection.crs, transform, nodata=0)
-    httpserver.expect_request("/red.tif", method="GET").respond_with_data(
-        red_bytes, content_type="image/tiff"
-    )
+    red_path = tmp_path / "red.tif"
+    red_path.write_bytes(red_bytes)
 
     item_geom = STGeometry(
         WGS84_PROJECTION,
@@ -142,16 +143,12 @@ def test_sentinel2_read_raster_applies_scale_offset_when_apply_scale_offset_true
     item = EarthDailyItem(
         name="S2_TEST_ITEM",
         geometry=item_geom,
-        asset_urls={"red": httpserver.url_for("/red.tif")},
+        asset_urls={"red": str(red_path)},
         asset_scale_offsets={"red": [{"scale": 0.1, "offset": 1.0}]},
     )
 
     data_source = Sentinel2(assets=["red"], apply_scale_offset=True)
-
-    def _get_item_by_name(name: str) -> EarthDailyItem:
-        return item
-
-    data_source.get_item_by_name = _get_item_by_name  # type: ignore[method-assign]
+    monkeypatch.setattr(data_source, "get_item_by_name", lambda name: item)
 
     out = data_source.read_raster("sentinel2", item.name, ["B04"], projection, bounds)
     assert out.dtype == np.float32
@@ -165,10 +162,7 @@ def test_sentinel2_ingest_applies_scale_offset_when_apply_scale_offset_true(
 ) -> None:
     pytest.importorskip("earthdaily")
 
-    from rslearn.const import WGS84_PROJECTION
     from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2
-    from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
-    from rslearn.utils.geometry import Projection, STGeometry
 
     projection = Projection(WGS84_PROJECTION.crs, 0.0001, -0.0001)
     bounds = (0, 0, 4, 4)
@@ -218,13 +212,12 @@ def test_sentinel2_ingest_applies_scale_offset_when_apply_scale_offset_true(
     assert out[0, 0, 0] == pytest.approx(11.0)
 
 
-def test_sentinel2_get_items_passes_query_to_helper() -> None:
+def test_sentinel2_get_items_passes_query_to_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pytest.importorskip("earthdaily")
 
-    from rslearn.config.dataset import QueryConfig
-    from rslearn.const import WGS84_PROJECTION
     from rslearn.data_sources.earthdaily import Sentinel2
-    from rslearn.utils.geometry import STGeometry
 
     captured: dict[str, object] = {}
 
@@ -242,8 +235,8 @@ def test_sentinel2_get_items_passes_query_to_helper() -> None:
         cloud_cover_max=15.0,
         query={"s2:product_type": {"eq": "S2MSI2A"}},
     )
-    data_source._load_client = (  # type: ignore[method-assign]
-        lambda: (object(), StubClient(), object())
+    monkeypatch.setattr(
+        data_source, "_load_client", lambda: (object(), StubClient(), object())
     )
 
     geometry = STGeometry(
@@ -267,12 +260,7 @@ def test_sentinel2_ingest_raises_on_download_failure(
 ) -> None:
     pytest.importorskip("earthdaily")
 
-    import requests
-
-    from rslearn.const import WGS84_PROJECTION
     from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2
-    from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
-    from rslearn.utils.geometry import STGeometry
 
     httpserver.expect_request("/red.tif", method="GET").respond_with_data(
         b"nope", status=500
