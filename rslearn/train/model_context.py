@@ -18,6 +18,9 @@ class RasterImage:
     image: torch.Tensor
     # if timestamps is not None, len(timestamps) must match the T dimension of the tensor
     timestamps: list[tuple[datetime, datetime]] | None = None
+    # expected_timestamps specifies the full set of expected timestamps for temporal alignment.
+    # This is computed from layer config (window time_range + query config parameters).
+    expected_timestamps: list[tuple[datetime, datetime]] | None = None
 
     def __post_init__(self) -> None:
         """Validate that the image tensor is 4D (CTHW)."""
