@@ -141,7 +141,10 @@ class SQLiteWindowStorage(WindowStorage):
 
         try:
             # Use transaction here since we need to create tables and set the schema
-            # version together (if the database was not already setup).
+            # version together (if the database was not already setup). We use BEGIN
+            # instead of BEGIN IMMEDIATE here since in the common case where the schema
+            # has previously been initialized, we can just read the user_version and
+            # continue.
             conn.execute("BEGIN")
 
             # Check database version. A fresh database should have version 0.
