@@ -54,7 +54,7 @@ class Sentinel2SCLToMask(Transform):
         for v in self.exclude_scl_values:
             invalid |= scl_tensor == v
         mask = (~invalid).to(dtype=torch.int32)
-        return RasterImage(mask, scl.time_ranges)
+        return RasterImage(mask, scl.timestamps)
 
     def forward(
         self, input_dict: dict[str, Any], target_dict: dict[str, Any]
@@ -67,4 +67,3 @@ class Sentinel2SCLToMask(Transform):
         mask = self._to_mask(scl)
         write_selector(input_dict, target_dict, self.output_selector, mask)
         return input_dict, target_dict
-
