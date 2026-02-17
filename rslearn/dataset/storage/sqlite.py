@@ -99,12 +99,25 @@ class SQLiteWindowStorage(WindowStorage):
         self._conn_pid: int | None = None
         self._init_db()
 
+    def __getstate__(self) -> dict:
+        """Get the state for pickling without _conn and _conn_pid."""
+        # For forkserver, it will attempt to pickle the SQLiteWindowStorage. This will
+        # fail so we need to remove _conn from the state.
+        state = self.__dict__.copy()
+        state["_conn"] = None
+        state["_conn_pid"] = None
+        return state
+
     def _get_connection(self) -> sqlite3.Connection:
         """Get a cached database connection, creating one if needed.
 
         The connection is cached per instance and reused across calls.
         After a process fork (e.g. PyTorch DataLoader workers), a new connection
         is created since the parent's connection can't be safely reused.
+
+        (For forkserver, it will pickle the SQLiteWindowStorage instead, which we
+        handle in __getstate__, but we still double check with self._conn_pid in case
+        the multiprocessing method is not forkserver.)
         """
         pid = os.getpid()
         if self._conn is None or self._conn_pid != pid:
@@ -117,8 +130,6 @@ class SQLiteWindowStorage(WindowStorage):
             conn.row_factory = sqlite3.Row
             # Enable WAL mode for better concurrent access
             conn.execute("PRAGMA journal_mode=WAL")
-            # Enable foreign keys
-            conn.execute("PRAGMA foreign_keys=ON")
             self._conn = conn
             self._conn_pid = pid
         return self._conn
@@ -128,65 +139,78 @@ class SQLiteWindowStorage(WindowStorage):
         """Initialize the database schema if it doesn't exist."""
         conn = self._get_connection()
 
-        # Check database version. A fresh database should have version 0.
-        (user_version,) = conn.execute("PRAGMA user_version").fetchone()
+        try:
+            # Use transaction here since we need to create tables and set the schema
+            # version together (if the database was not already setup).
+            conn.execute("BEGIN")
 
-        if user_version == self.SCHEMA_VERSION:
-            # Schema is up to date, nothing to do.
-            return
+            # Check database version. A fresh database should have version 0.
+            (user_version,) = conn.execute("PRAGMA user_version").fetchone()
 
-        if user_version != 0:
-            # This means a version was previously set on the db, but it doesn't match
-            # our SCHEMA_VERSION. For now we don't support database migration, and just
-            # raise error instead.
-            raise RuntimeError(
-                f"SQLite database {self.db_path} has schema version {user_version}, "
-                f"but this code expects version {self.SCHEMA_VERSION}. "
-                f"Please migrate or recreate the database."
-            )
+            if user_version == self.SCHEMA_VERSION:
+                # Schema is up to date, nothing to do.
+                conn.execute("COMMIT")
+                return
 
-        # Fresh database — create tables and stamp the version.
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS windows (
-                group_name TEXT NOT NULL,
-                name TEXT NOT NULL,
-                crs TEXT NOT NULL,
-                x_resolution REAL NOT NULL,
-                y_resolution REAL NOT NULL,
-                -- Window bounds (PixelBounds) - always integers.
-                bounds_x1 INTEGER NOT NULL,
-                bounds_y1 INTEGER NOT NULL,
-                bounds_x2 INTEGER NOT NULL,
-                bounds_y2 INTEGER NOT NULL,
-                -- ISO 8601 strings from datetime.isoformat()
-                time_start TEXT,
-                time_end TEXT,
-                options_json TEXT NOT NULL,
-                PRIMARY KEY (group_name, name)
-            )
-        """)
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_windows_name
-            ON windows(name)
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS layer_datas (
-                group_name TEXT NOT NULL,
-                window_name TEXT NOT NULL,
-                data_json TEXT NOT NULL,
-                PRIMARY KEY (group_name, window_name)
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS completed_layers (
-                group_name TEXT NOT NULL,
-                window_name TEXT NOT NULL,
-                layer_name TEXT NOT NULL,
-                group_idx INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (group_name, window_name, layer_name, group_idx)
-            )
-        """)
-        conn.execute(f"PRAGMA user_version = {self.SCHEMA_VERSION}")
+            if user_version != 0:
+                # This means a version was previously set on the db, but it doesn't match
+                # our SCHEMA_VERSION. For now we don't support database migration, and just
+                # raise error instead.
+                raise RuntimeError(
+                    f"SQLite database {self.db_path} has schema version {user_version}, "
+                    f"but this code expects version {self.SCHEMA_VERSION}. "
+                    f"Please migrate or recreate the database."
+                )
+
+            # Fresh database — create tables and stamp the version.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS windows (
+                    group_name TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    crs TEXT NOT NULL,
+                    x_resolution REAL NOT NULL,
+                    y_resolution REAL NOT NULL,
+                    -- Window bounds (PixelBounds) - always integers.
+                    bounds_x1 INTEGER NOT NULL,
+                    bounds_y1 INTEGER NOT NULL,
+                    bounds_x2 INTEGER NOT NULL,
+                    bounds_y2 INTEGER NOT NULL,
+                    -- ISO 8601 strings from datetime.isoformat()
+                    time_start TEXT,
+                    time_end TEXT,
+                    options_json TEXT NOT NULL,
+                    PRIMARY KEY (group_name, name)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_windows_name
+                ON windows(name)
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS layer_datas (
+                    group_name TEXT NOT NULL,
+                    window_name TEXT NOT NULL,
+                    data_json TEXT NOT NULL,
+                    PRIMARY KEY (group_name, window_name)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS completed_layers (
+                    group_name TEXT NOT NULL,
+                    window_name TEXT NOT NULL,
+                    layer_name TEXT NOT NULL,
+                    group_idx INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (group_name, window_name, layer_name, group_idx)
+                )
+            """)
+            conn.execute(f"PRAGMA user_version = {self.SCHEMA_VERSION}")
+            conn.execute("COMMIT")
+        except:
+            # If ROLLBACK fails then BEGIN will be rejected (so all retries will fail),
+            # but it is rare for ROLLBACK to fail (and it won't leave the database in
+            # an inconsistent state).
+            conn.execute("ROLLBACK")
+            raise
 
     @override
     def get_window_root(self, group: str, name: str) -> UPath:
