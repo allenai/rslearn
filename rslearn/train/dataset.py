@@ -1,5 +1,6 @@
 """Default Dataset for rslearn."""
 
+import dataclasses
 import hashlib
 import json
 import multiprocessing
@@ -720,11 +721,27 @@ def is_data_input_available(data_input: DataInput, window: Window) -> bool:
         return is_any_layer_available
 
 
+@dataclasses.dataclass
+class CheckWindowResult:
+    """Aggregated counts of why windows were skipped during check_window."""
+
+    missing_data_input_counts: dict[str, int] = dataclasses.field(default_factory=dict)
+    has_output_layer_count: int = 0
+
+    def add(self, other: "CheckWindowResult") -> None:
+        """Merge another result into this one."""
+        for key, count in other.missing_data_input_counts.items():
+            self.missing_data_input_counts[key] = (
+                self.missing_data_input_counts.get(key, 0) + count
+            )
+        self.has_output_layer_count += other.has_output_layer_count
+
+
 def check_window(
     inputs: dict[str, DataInput],
     window: Window,
     output_layer_name_skip_inference_if_exists: str | None = None,
-) -> Window | None:
+) -> tuple[Window | None, CheckWindowResult]:
     """Verify that the window has the required layers based on the specified inputs.
 
     Args:
@@ -733,19 +750,20 @@ def check_window(
         output_layer_name_skip_inference_if_exists: optional name of the output layer to check for existence.
 
     Returns:
-        the window if it has all the required inputs and does not need to be skipped
-        due to an existing output layer; or None otherwise
+        a tuple of (window, result) where window is the window if it passes all
+        checks or None otherwise, and result records why the window was skipped.
     """
-    for data_input in inputs.values():
+    for key, data_input in inputs.items():
         if not data_input.required:
             continue
         if not is_data_input_available(data_input, window):
             logger.debug(
-                "Skipping window %s since check for layers %s failed",
+                "Skipping window %s since check for input '%s' (layers %s) failed",
                 window.name,
+                key,
                 data_input.layers,
             )
-            return None
+            return (None, CheckWindowResult(missing_data_input_counts={key: 1}))
 
     # Optionally skip windows that already have the specified output layer completed.
     if output_layer_name_skip_inference_if_exists is not None:
@@ -755,9 +773,9 @@ def check_window(
                 window.name,
                 output_layer_name_skip_inference_if_exists,
             )
-            return None
+            return (None, CheckWindowResult(has_output_layer_count=1))
 
-    return window
+    return (window, CheckWindowResult())
 
 
 class ModelDataset(torch.utils.data.Dataset):
@@ -953,19 +971,11 @@ class ModelDataset(torch.utils.data.Dataset):
             self.split_config.get_output_layer_name_skip_inference_if_exists()
         )
 
-        if workers == 0:
-            return [
-                w
-                for w in windows
-                if check_window(
-                    self.inputs,
-                    w,
-                    output_layer_name_skip_inference_if_exists=output_layer_skip,
-                )
-                is not None
-            ]
+        result = CheckWindowResult()
+        filtered = []
 
-        p = multiprocessing.Pool(workers)
+        workers = max(workers, 1)
+        p = multiprocessing.Pool(workers if workers >= 1 else 1)
         outputs = star_imap_unordered(
             p,
             check_window,
@@ -978,15 +988,25 @@ class ModelDataset(torch.utils.data.Dataset):
                 for window in windows
             ],
         )
-        filtered = []
-        for window in tqdm.tqdm(
+        for window, check_result in tqdm.tqdm(
             outputs,
             total=len(windows),
             desc="Checking available layers in windows",
         ):
+            result.add(check_result)
             if window is not None:
                 filtered.append(window)
         p.close()
+
+        if result.missing_data_input_counts:
+            for key, count in sorted(result.missing_data_input_counts.items()):
+                logger.info("Skipped %d windows due to missing input '%s'", count, key)
+        if result.has_output_layer_count > 0:
+            logger.info(
+                "Skipped %d windows due to existing output layer",
+                result.has_output_layer_count,
+            )
+
         return filtered
 
     def _sort_and_limit_windows(
