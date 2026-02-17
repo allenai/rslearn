@@ -16,7 +16,6 @@ for details.
 import functools
 import json
 import math
-import multiprocessing
 import os
 import re
 import shutil
@@ -36,7 +35,7 @@ from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath, open_atomic
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.m2m_api import M2MAPIClient
-from rslearn.utils.mp import star_imap_unordered
+from rslearn.utils.mp import make_pool_and_star_imap_unordered
 from rslearn.utils.retry_session import create_retry_session
 
 logger = get_logger(__name__)
@@ -537,10 +536,10 @@ def bulk_download_srtm(
     # Download in parallel using multiprocessing.Pool
     # Each worker creates its own M2M API client to get download URLs
     logger.info(f"Starting downloads with {num_workers} workers...")
-    with multiprocessing.Pool(num_workers) as pool:
-        for output_path in star_imap_unordered(
-            pool, _worker_download_scene, download_tasks
-        ):
+    with make_pool_and_star_imap_unordered(
+        num_workers, _worker_download_scene, download_tasks
+    ) as outputs:
+        for output_path in outputs:
             logger.info(f"Downloaded {output_path}")
 
 

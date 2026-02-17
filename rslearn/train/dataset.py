@@ -3,7 +3,6 @@
 import dataclasses
 import hashlib
 import json
-import multiprocessing
 import os
 import random
 import tempfile
@@ -36,7 +35,7 @@ from rslearn.train.dataset_index import DatasetIndex
 from rslearn.train.model_context import RasterImage
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
-from rslearn.utils.mp import star_imap_unordered
+from rslearn.utils.mp import make_pool_and_star_imap_unordered
 
 from .model_context import SampleMetadata
 from .tasks import Task
@@ -974,10 +973,8 @@ class ModelDataset(torch.utils.data.Dataset):
         result = CheckWindowResult()
         filtered = []
 
-        workers = max(workers, 1)
-        p = multiprocessing.Pool(workers if workers >= 1 else 1)
-        outputs = star_imap_unordered(
-            p,
+        with make_pool_and_star_imap_unordered(
+            workers,
             check_window,
             [
                 dict(
@@ -987,16 +984,15 @@ class ModelDataset(torch.utils.data.Dataset):
                 )
                 for window in windows
             ],
-        )
-        for window, check_result in tqdm.tqdm(
-            outputs,
-            total=len(windows),
-            desc="Checking available layers in windows",
-        ):
-            result.add(check_result)
-            if window is not None:
-                filtered.append(window)
-        p.close()
+        ) as outputs:
+            for window, check_result in tqdm.tqdm(
+                outputs,
+                total=len(windows),
+                desc="Checking available layers in windows",
+            ):
+                result.add(check_result)
+                if window is not None:
+                    filtered.append(window)
 
         if result.missing_data_input_counts:
             for key, count in sorted(result.missing_data_input_counts.items()):
