@@ -13,8 +13,6 @@ def _write_window_metadata(dataset_path: UPath, group: str, name: str) -> None:
     window_dir = dataset_path / "windows" / group / name
     window_dir.mkdir(parents=True, exist_ok=True)
     metadata = {
-        "group": group,
-        "name": name,
         "projection": WGS84_PROJECTION.serialize(),
         "bounds": [0, 0, 1, 1],
         "time_range": None,
@@ -51,6 +49,25 @@ def test_get_windows_skips_non_directory_group(tmp_path: Path) -> None:
     windows = storage.get_windows(groups=[".DS_Store"])
 
     assert windows == []
+
+
+def test_window_survives_move_to_different_group(tmp_path: Path) -> None:
+    """Moving a window directory to a different group should just work."""
+    dataset_path = UPath(str(tmp_path / "dataset"))
+    _write_window_metadata(dataset_path, group="group1", name="w1")
+
+    # Move the window from group1 to group2
+    dst_group = dataset_path / "windows" / "group2"
+    dst_group.mkdir(parents=True, exist_ok=True)
+    src = dataset_path / "windows" / "group1" / "w1"
+    dst = dst_group / "w1"
+    src.rename(dst)
+
+    storage = FileWindowStorage(dataset_path)
+    windows = storage.get_windows()
+    assert len(windows) == 1
+    assert windows[0].group == "group2"
+    assert windows[0].name == "w1"
 
 
 def test_list_completed_layers_ignores_non_directories(tmp_path: Path) -> None:

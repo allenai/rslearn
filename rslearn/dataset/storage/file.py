@@ -1,6 +1,7 @@
 """The default file-based window storage backend."""
 
 import json
+from datetime import datetime
 
 import tqdm
 from typing_extensions import override
@@ -15,6 +16,7 @@ from rslearn.dataset.window import (
 )
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import iter_nonhidden_subdirs, open_atomic
+from rslearn.utils.geometry import Projection
 from rslearn.utils.mp import make_pool_and_star_imap_unordered
 
 from .storage import WindowStorage, WindowStorageFactory
@@ -24,6 +26,8 @@ logger = get_logger(__name__)
 
 def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window:
     """Load the window from its directory by reading metadata.json.
+
+    The group and window name are derived from the filesystem path.
 
     Args:
         storage: the underlying FileWindowStorage.
@@ -35,7 +39,37 @@ def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window:
     metadata_fname = window_dir / "metadata.json"
     with metadata_fname.open() as f:
         metadata = json.load(f)
-    return Window.from_metadata(storage, metadata)
+
+    group = window_dir.parent.name
+    name = window_dir.name
+
+    if len(metadata["bounds"]) != 4:
+        raise ValueError(
+            f"expected bounds to have 4 elements but got {len(metadata['bounds'])}"
+        )
+    bounds = (
+        metadata["bounds"][0],
+        metadata["bounds"][1],
+        metadata["bounds"][2],
+        metadata["bounds"][3],
+    )
+
+    time_range = None
+    if metadata.get("time_range"):
+        time_range = (
+            datetime.fromisoformat(metadata["time_range"][0]),
+            datetime.fromisoformat(metadata["time_range"][1]),
+        )
+
+    return Window(
+        storage=storage,
+        group=group,
+        name=name,
+        projection=Projection.deserialize(metadata["projection"]),
+        bounds=bounds,
+        time_range=time_range,
+        options=metadata.get("options", {}),
+    )
 
 
 class FileWindowStorage(WindowStorage):
@@ -124,8 +158,18 @@ class FileWindowStorage(WindowStorage):
         window_path.mkdir(parents=True, exist_ok=True)
         metadata_path = window_path / "metadata.json"
         logger.debug(f"Saving window metadata to {metadata_path}")
+        metadata = {
+            "projection": window.projection.serialize(),
+            "bounds": window.bounds,
+            "time_range": (
+                [window.time_range[0].isoformat(), window.time_range[1].isoformat()]
+                if window.time_range
+                else None
+            ),
+            "options": window.options,
+        }
         with open_atomic(metadata_path, "w") as f:
-            json.dump(window.get_metadata(), f)
+            json.dump(metadata, f)
 
     @override
     def get_layer_datas(self, group: str, name: str) -> dict[str, "WindowLayerData"]:

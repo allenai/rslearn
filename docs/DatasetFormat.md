@@ -54,8 +54,6 @@ of the window. Here is an example:
 
 ```json
 {
-  "group": "group1",
-  "name": "window_name1",
   "projection": {
     "crs": "EPSG:32612",
     "x_resolution": 10,
@@ -77,11 +75,10 @@ of the window. Here is an example:
 }
 ```
 
-The `group` and `name` keys match the group and window folder names. The `projection`
-key specifies the coordinate reference system and resolution; here, the resolution is
-10 m/pixel. It is typical for the `y_resolution` to be negative so that north is up in
-the image and south is down. The `time_range` key specifies the time range of the
-window.
+The `projection` key specifies the coordinate reference system and resolution; here,
+the resolution is 10 m/pixel. It is typical for the `y_resolution` to be negative so
+that north is up in the image and south is down. The `time_range` key specifies the
+time range of the window.
 
 The `bounds` key specifies the bounds of the window in pixel coordinates. This can be
 multiplied by the resolution to get the bounds in projection units. Here, the bounds in
