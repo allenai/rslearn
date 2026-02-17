@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 
 import affine
 import numpy as np
@@ -32,7 +33,7 @@ def _make_geotiff_bytes(
 
 
 def test_sentinel2_ingest_does_not_apply_scl_cloud_mask(
-    tmp_path,
+    tmp_path: Path,
     httpserver: HTTPServer,
 ) -> None:
     pytest.importorskip("earthdaily")
@@ -144,7 +145,10 @@ def test_sentinel2_read_raster_applies_scale_offset_when_apply_scale_offset_true
     )
 
     data_source = Sentinel2(assets=["red"], apply_scale_offset=True)
-    data_source.get_item_by_name = lambda _: item  # type: ignore[method-assign]
+    def _get_item_by_name(name: str) -> EarthDailyItem:
+        return item
+
+    data_source.get_item_by_name = _get_item_by_name  # type: ignore[method-assign]
 
     out = data_source.read_raster("sentinel2", item.name, ["B04"], projection, bounds)
     assert out.dtype == np.float32
@@ -153,7 +157,7 @@ def test_sentinel2_read_raster_applies_scale_offset_when_apply_scale_offset_true
 
 
 def test_sentinel2_ingest_applies_scale_offset_when_apply_scale_offset_true(
-    tmp_path,
+    tmp_path: Path,
     httpserver: HTTPServer,
 ) -> None:
     pytest.importorskip("earthdaily")
@@ -222,11 +226,11 @@ def test_sentinel2_get_items_passes_query_to_helper() -> None:
     captured: dict[str, object] = {}
 
     class StubSearchResult:
-        def item_collection(self):
+        def item_collection(self) -> list[object]:
             return []
 
     class StubClient:
-        def search(self, **kwargs):
+        def search(self, **kwargs: object) -> StubSearchResult:
             captured.update(kwargs)
             return StubSearchResult()
 
@@ -255,7 +259,7 @@ def test_sentinel2_get_items_passes_query_to_helper() -> None:
 
 
 def test_sentinel2_ingest_raises_on_download_failure(
-    tmp_path,
+    tmp_path: Path,
     httpserver: HTTPServer,
 ) -> None:
     pytest.importorskip("earthdaily")
