@@ -17,6 +17,7 @@ from olmoearth_pretrain.model_loader import (
     load_model_from_path,
 )
 from olmoearth_pretrain.nn.flexihelios import Encoder, TokensAndMasks
+from torch.nn.modules import Dropout
 from upath import UPath
 
 from rslearn.log_utils import get_logger
@@ -63,6 +64,7 @@ class OlmoEarth(FeatureExtractor):
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
         use_legacy_timestamps: bool = True,
+        attn_drop: float | None = None,
     ):
         """Create a new OlmoEarth model.
 
@@ -92,6 +94,7 @@ class OlmoEarth(FeatureExtractor):
             use_legacy_timestamps: In our original implementation of OlmoEarth, we applied timestamps starting
                 from 0 (instead of the actual timestamps of the input). The option to do this is preserved
                 for backwards compatability with finetuned models which were trained against this implementation.
+            attn_drop: Whether to apply attn_drop to the model (and if so, how much).
         """
         if use_legacy_timestamps:
             warnings.warn(
@@ -151,6 +154,10 @@ class OlmoEarth(FeatureExtractor):
         self.model = model
         self.token_pooling = token_pooling
         self.use_legacy_timestamps = use_legacy_timestamps
+        if attn_drop is not None and attn_drop > 0:
+            logger.info(f"Updating default attn_drop with {attn_drop}")
+            for block in self.model.blocks:
+                block.attn.attn_drop = Dropout(p=attn_drop)
 
     def _load_model_from_checkpoint(
         self, checkpoint_upath: UPath, random_initialization: bool
