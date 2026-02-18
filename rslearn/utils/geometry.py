@@ -1,6 +1,7 @@
 """Spatiotemporal geometry utilities."""
 
 import functools
+import math
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
@@ -186,16 +187,10 @@ class ResolutionFactor:
         absolute position. The start is floor-divided.
         """
         if self.denominator > 1:
-            import math
-
             coarse_start_x = bounds[0] // self.denominator
             coarse_start_y = bounds[1] // self.denominator
-            coarse_width = math.ceil(
-                (bounds[2] - bounds[0]) / self.denominator
-            )
-            coarse_height = math.ceil(
-                (bounds[3] - bounds[1]) / self.denominator
-            )
+            coarse_width = math.ceil((bounds[2] - bounds[0]) / self.denominator)
+            coarse_height = math.ceil((bounds[3] - bounds[1]) / self.denominator)
             return (
                 coarse_start_x,
                 coarse_start_y,

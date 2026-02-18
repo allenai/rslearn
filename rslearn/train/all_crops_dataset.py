@@ -103,9 +103,9 @@ def pad_slice_protect(
             )
 
         rf = data_input.resolution_factor
-        scale = rf.numerator / rf.denominator
-        scaled_pad_x = int(crop_size[0] * scale)
-        scaled_pad_y = int(crop_size[1] * scale)
+        pad_bounds = rf.multiply_bounds((0, 0, crop_size[0], crop_size[1]))
+        scaled_pad_x = pad_bounds[2] - pad_bounds[0]
+        scaled_pad_y = pad_bounds[3] - pad_bounds[1]
 
         padded = torch.nn.functional.pad(
             value.image, pad=(0, scaled_pad_x, 0, scaled_pad_y)
@@ -323,17 +323,23 @@ class IterableAllCropsDataset(torch.utils.data.IterableDataset):
                         cropped = {}
                         for input_name, value in d.items():
                             if isinstance(value, torch.Tensor | RasterImage):
-                                # Get resolution scale for this input
+                                # Scale crop coordinates via multiply_bounds
+                                # to stay consistent with the training path.
                                 rf = self.inputs[input_name].resolution_factor
-                                scale = rf.numerator / rf.denominator
-                                # Scale the crop coordinates
+                                relative_bounds = (
+                                    start_offset[0],
+                                    start_offset[1],
+                                    end_offset[0],
+                                    end_offset[1],
+                                )
+                                scaled_bounds = rf.multiply_bounds(relative_bounds)
                                 scaled_start = (
-                                    int(start_offset[0] * scale),
-                                    int(start_offset[1] * scale),
+                                    scaled_bounds[0],
+                                    scaled_bounds[1],
                                 )
                                 scaled_end = (
-                                    int(end_offset[0] * scale),
-                                    int(end_offset[1] * scale),
+                                    scaled_bounds[2],
+                                    scaled_bounds[3],
                                 )
                                 cropped[input_name] = crop_tensor_or_rasterimage(
                                     value, scaled_start, scaled_end
@@ -460,22 +466,27 @@ class InMemoryAllCropsDataset(torch.utils.data.Dataset):
     ) -> dict[str, Any]:
         """Crop a dictionary of inputs to the given bounds.
 
-        Crop coordinates are scaled based on each input's resolution_factor.
+        Crop coordinates are scaled via multiply_bounds to stay consistent
+        with the training path.
         """
         cropped = {}
         for input_name, value in d.items():
             if isinstance(value, torch.Tensor | RasterImage):
-                # Get resolution scale for this input
                 rf = self.inputs[input_name].resolution_factor
-                scale = rf.numerator / rf.denominator
-                # Scale the crop coordinates
+                relative_bounds = (
+                    start_offset[0],
+                    start_offset[1],
+                    end_offset[0],
+                    end_offset[1],
+                )
+                scaled_bounds = rf.multiply_bounds(relative_bounds)
                 scaled_start = (
-                    int(start_offset[0] * scale),
-                    int(start_offset[1] * scale),
+                    scaled_bounds[0],
+                    scaled_bounds[1],
                 )
                 scaled_end = (
-                    int(end_offset[0] * scale),
-                    int(end_offset[1] * scale),
+                    scaled_bounds[2],
+                    scaled_bounds[3],
                 )
                 cropped[input_name] = crop_tensor_or_rasterimage(
                     value, scaled_start, scaled_end
