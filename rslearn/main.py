@@ -603,6 +603,7 @@ def dataset_prepare() -> None:
                 "Some windows failed. Consider enabling retries with: "
                 "--retry-max-attempts 5 --retry-backoff-seconds 5"
             )
+            logger.info("Or use --no-ignore-errors to quit after the first error.")
 
 
 def _load_window_layer_datas(
@@ -858,6 +859,7 @@ def dataset_ingest() -> None:
                 "Some ingestions failed. Consider enabling retries with: "
                 "--retry-max-attempts 5 --retry-backoff-seconds 5"
             )
+            logger.info("Or use --no-ignore-errors to quit after the first error.")
 
 
 class MaterializeHandler:
@@ -970,6 +972,7 @@ def dataset_materialize() -> None:
                 "Some windows failed to materialize. Consider enabling retries with: "
                 "--retry-max-attempts 5 --retry-backoff-seconds 5"
             )
+            logger.info("Or use --no-ignore-errors to quit after the first error.")
 
 
 @register_handler("model", "fit")
