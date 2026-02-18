@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 import torch
+from torchvision.ops import sigmoid_focal_loss
 
 from rslearn.models.component import FeatureMaps
 from rslearn.train.model_context import ModelContext, RasterImage, SampleMetadata
@@ -379,6 +380,101 @@ def test_segmentation_head_temperature_confidence() -> None:
     max_prob_cold = cold_output.max().item()
     max_prob_hot = hot_output.max().item()
     assert max_prob_cold > max_prob_hot
+
+
+class TestSegmentationHeadLoss:
+    """Tests for SegmentationHead loss computation (focal loss and loss_weights)."""
+
+    @staticmethod
+    def _make_inputs(
+        num_classes: int = 3,
+        h: int = 4,
+        w: int = 4,
+        mask_value: float = 1.0,
+    ) -> tuple:
+        """Create deterministic inputs for SegmentationHead.
+
+        Returns (FeatureMaps, ModelContext, targets list).
+        """
+        torch.manual_seed(42)
+        logits = torch.randn(1, num_classes, h, w)
+        labels = torch.randint(0, num_classes, (h, w))
+        targets = [
+            {
+                "classes": RasterImage(labels[None, None, :, :].long()),
+                "valid": RasterImage(
+                    torch.full((1, 1, h, w), mask_value, dtype=torch.float32)
+                ),
+            }
+        ]
+        return FeatureMaps([logits]), ModelContext(inputs=[], metadatas=[]), targets
+
+    def test_loss_weights_scale_losses(self) -> None:
+        """Verify loss_weights[0] proportionally scales the classification loss."""
+        fm, ctx, targets = self._make_inputs()
+
+        head_1x = SegmentationHead(loss_weights=(1.0, 1.0))
+        head_3x = SegmentationHead(loss_weights=(3.0, 1.0))
+        head_1x_dice = SegmentationHead(dice_loss=True, loss_weights=(1.0, 1.0))
+        head_3x_dice = SegmentationHead(dice_loss=True, loss_weights=(1.0, 3.0))
+
+        loss_1x = head_1x(fm, ctx, targets).loss_dict["cls"]
+        loss_3x = head_3x(fm, ctx, targets).loss_dict["cls"]
+        loss_1x_dice = head_1x_dice(fm, ctx, targets).loss_dict["dice"]
+        loss_3x_dice = head_3x_dice(fm, ctx, targets).loss_dict["dice"]
+
+        assert loss_3x.item() == pytest.approx(3.0 * loss_1x.item(), rel=1e-5)
+        assert loss_3x_dice.item() == pytest.approx(3.0 * loss_1x_dice.item(), rel=1e-5)
+
+    def test_losses_match_manual_computation(self) -> None:
+        """Verify CE and focal loss match manually computed reference values."""
+        # 2-class, 2x2 image with one masked pixel.
+        logits = torch.tensor(
+            [[[[1.0, -1.0], [0.5, 2.0]], [[-1.0, 1.0], [0.5, -2.0]]]]
+        )  # [1, 2, 2, 2]
+        labels = torch.tensor([[0, 1], [1, 0]])  # [2, 2]
+        mask = torch.tensor([[1.0, 1.0], [1.0, 0.0]])  # pixel (1,1) masked
+
+        targets = [
+            {
+                "classes": RasterImage(labels[None, None, :, :].long()),
+                "valid": RasterImage(mask[None, None, :, :]),
+            }
+        ]
+        fm = FeatureMaps([logits])
+        ctx = ModelContext(inputs=[], metadatas=[])
+
+        # --- Cross-entropy reference ---
+        per_pixel_ce = torch.nn.functional.cross_entropy(
+            logits, labels.unsqueeze(0), reduction="none"
+        )  # [1, 2, 2]
+        expected_ce = (per_pixel_ce * mask.unsqueeze(0)).sum() / mask.sum()
+
+        ce_head = SegmentationHead()
+        actual_ce = ce_head(fm, ctx, targets).loss_dict["cls"]
+        assert actual_ce.item() == pytest.approx(expected_ce.item(), rel=1e-5)
+
+        # --- Focal loss reference ---
+        labels_one_hot = (
+            torch.nn.functional.one_hot(labels, 2).permute(2, 0, 1).float().unsqueeze(0)
+        )  # [1, 2, 2, 2]
+        per_pixel_focal = sigmoid_focal_loss(
+            logits, labels_one_hot, alpha=0.25, gamma=2.0, reduction="none"
+        ).sum(dim=1)  # [1, 2, 2]
+        expected_focal = (per_pixel_focal * mask.unsqueeze(0)).sum() / mask.sum()
+
+        focal_head = SegmentationHead(focal_loss=True)
+        actual_focal = focal_head(fm, ctx, targets).loss_dict["cls"]
+        assert actual_focal.item() == pytest.approx(expected_focal.item(), rel=1e-5)
+
+    def test_focal_loss_all_masked_produces_zero(self) -> None:
+        """Focal loss with all pixels masked should produce zero loss."""
+        fm, ctx, targets = self._make_inputs(mask_value=0.0)
+
+        head = SegmentationHead(focal_loss=True)
+        loss = head(fm, ctx, targets).loss_dict["cls"]
+
+        assert loss.item() == 0.0
 
 
 class TestSegmentationMetrics:

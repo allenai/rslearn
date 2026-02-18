@@ -417,7 +417,7 @@ class SegmentationHead(Predictor):
             if self.dice_loss:
                 softmax_woT = torch.nn.functional.softmax(logits, dim=1)
                 dice_loss = DiceLoss()(softmax_woT, labels, mask)
-                losses["dice"] = dice_loss
+                losses["dice"] = dice_loss * self.loss_weights[1]
 
         return ModelOutput(
             outputs=outputs,
