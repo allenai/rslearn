@@ -469,6 +469,7 @@ class SplitConfig:
         crop_size: int | tuple[int, int] | None = None,
         overlap_pixels: int | None = None,
         load_all_crops: bool | None = None,
+        center_crop: bool | None = None,
         skip_targets: bool | None = None,
         output_layer_name_skip_inference_if_exists: str | None = None,
         # Deprecated parameters (for backwards compatibility)
@@ -496,6 +497,8 @@ class SplitConfig:
             load_all_crops: with crop_size set, rather than sampling a random crop
                 for each window, read all crops as separate sequential items in the
                 dataset.
+            center_crop: with crop_size set, always take the center crop of each
+                window instead of a random crop. Mutually exclusive with load_all_crops.
             skip_targets: whether to skip targets when loading inputs
             output_layer_name_skip_inference_if_exists: optional name of the output layer used during prediction.
                 If set, windows that already
@@ -512,6 +515,7 @@ class SplitConfig:
         self.num_patches = num_patches
         self.transforms = transforms
         self.sampler = sampler
+        self.center_crop = center_crop
         self.skip_targets = skip_targets
         self.output_layer_name_skip_inference_if_exists = (
             output_layer_name_skip_inference_if_exists
@@ -551,6 +555,7 @@ class SplitConfig:
             overlap_ratio=self._overlap_ratio,
             load_all_crops=self._load_all_crops,
             load_all_patches=self._load_all_patches,
+            center_crop=self.center_crop,
             skip_targets=self.skip_targets,
             output_layer_name_skip_inference_if_exists=self.output_layer_name_skip_inference_if_exists,
         )
@@ -580,6 +585,8 @@ class SplitConfig:
             result._load_all_crops = other._load_all_crops
         if other._load_all_patches is not None:
             result._load_all_patches = other._load_all_patches
+        if other.center_crop is not None:
+            result.center_crop = other.center_crop
         if other.skip_targets is not None:
             result.skip_targets = other.skip_targets
         if other.output_layer_name_skip_inference_if_exists is not None:
@@ -643,6 +650,14 @@ class SplitConfig:
                 "overlap_pixels requires load_all_crops to be True since (overlap is only used during sliding window inference"
             )
 
+        # center_crop is mutually exclusive with load_all_crops.
+        if result.get_center_crop() and result.get_load_all_crops():
+            raise ValueError("center_crop and load_all_crops are mutually exclusive")
+
+        # center_crop requires crop_size.
+        if result.get_center_crop() and result.get_crop_size() is None:
+            raise ValueError("center_crop requires crop_size to be set")
+
         return result
 
     def get_crop_size(self) -> tuple[int, int] | None:
@@ -672,6 +687,10 @@ class SplitConfig:
         if self._load_all_patches is not None:
             return self._load_all_patches
         return False
+
+    def get_center_crop(self) -> bool:
+        """Returns whether center_crop is enabled (default False)."""
+        return True if self.center_crop is True else False
 
     def get_skip_targets(self) -> bool:
         """Returns whether skip_targets is enabled (default False)."""
@@ -782,6 +801,7 @@ class ModelDataset(torch.utils.data.Dataset):
         self.task = task
         self.name = name
         self.fix_crop_pick = fix_crop_pick
+        self.center_crop = split_config.get_center_crop()
         if split_config.transforms:
             self.transforms = Sequential(*split_config.transforms)
         else:
@@ -1055,6 +1075,10 @@ class ModelDataset(torch.utils.data.Dataset):
             window = example
 
             def get_crop_range(n_crop: int, n_window: int) -> list[int]:
+                if self.center_crop:
+                    start = (n_window - n_crop) // 2
+                    return [start, start + n_crop]
+
                 if n_crop > n_window:
                     # Select arbitrary range containing the entire window.
                     # Basically arbitrarily padding the window to get to crop size.

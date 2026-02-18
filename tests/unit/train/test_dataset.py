@@ -565,8 +565,101 @@ def test_non_required_layer_missing(
             assert "image2" not in inputs
 
 
+def test_center_crop(
+    basic_classification_dataset: Dataset,
+    add_window_to_basic_classification_dataset: Callable,
+) -> None:
+    """Test that center_crop returns the center crop of a window."""
+    image = np.zeros((1, 10, 10), dtype=np.uint8)
+    image[0, 3:7, 3:7] = 1
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        images={("image_layer1", 0): image},
+        bounds=(0, 0, 10, 10),
+    )
+
+    dataset = ModelDataset(
+        basic_classification_dataset,
+        split_config=SplitConfig(crop_size=4, center_crop=True),
+        task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+        workers=1,
+        inputs={
+            "image": DataInput(
+                "raster", ["image_layer1"], bands=["band"], passthrough=True
+            ),
+            "targets": DataInput("vector", ["vector_layer"]),
+        },
+    )
+
+    assert len(dataset) == 1
+    inputs, _, metadata = dataset[0]
+
+    # The center crop of a 10x10 window with crop_size=4 should be at (3, 3, 7, 7).
+    assert metadata.crop_bounds == (3, 3, 7, 7)
+
+    # The cropped image should be all ones (the center 4x4 region).
+    assert inputs["image"].image.shape == (1, 1, 4, 4)
+    assert torch.all(inputs["image"].image == 1)
+
+
+def test_center_crop_is_deterministic(
+    basic_classification_dataset: Dataset,
+    add_window_to_basic_classification_dataset: Callable,
+) -> None:
+    """Test that center_crop returns the same crop on repeated reads."""
+    image = np.arange(64, dtype=np.uint8).reshape(1, 8, 8)
+    add_window_to_basic_classification_dataset(
+        basic_classification_dataset,
+        images={("image_layer1", 0): image},
+        bounds=(0, 0, 8, 8),
+    )
+
+    dataset = ModelDataset(
+        basic_classification_dataset,
+        split_config=SplitConfig(crop_size=4, center_crop=True),
+        task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+        workers=1,
+        inputs={
+            "image": DataInput(
+                "raster", ["image_layer1"], bands=["band"], passthrough=True
+            ),
+            "targets": DataInput("vector", ["vector_layer"]),
+        },
+    )
+
+    inputs1, _, meta1 = dataset[0]
+    inputs2, _, meta2 = dataset[0]
+
+    assert meta1.crop_bounds == meta2.crop_bounds
+    assert torch.all(inputs1["image"].image == inputs2["image"].image)
+
+
 class TestSplitConfig:
     """Tests for SplitConfig."""
+
+    def test_center_crop_and_load_all_crops_raises(self) -> None:
+        """Test that center_crop and load_all_crops together raises an error."""
+        config = SplitConfig(crop_size=128, center_crop=True, load_all_crops=True)
+        with pytest.raises(
+            ValueError, match="center_crop and load_all_crops are mutually exclusive"
+        ):
+            SplitConfig.merge_and_validate([config])
+
+    def test_center_crop_without_crop_size_raises(self) -> None:
+        """Test that center_crop without crop_size raises an error."""
+        config = SplitConfig(center_crop=True)
+        with pytest.raises(
+            ValueError, match="center_crop requires crop_size to be set"
+        ):
+            SplitConfig.merge_and_validate([config])
+
+    def test_center_crop_merges_from_default_config(self) -> None:
+        """Test that center_crop set in a specific config overrides default."""
+        default = SplitConfig(crop_size=128)
+        val = SplitConfig(center_crop=True)
+        merged = SplitConfig.merge_and_validate([default, val])
+        assert merged.get_center_crop() is True
+        assert merged.get_crop_size() == (128, 128)
 
     def test_overlap_ratio_with_patch_size_in_separate_configs(self) -> None:
         """Test that overlap_ratio works when patch_size is set in a different config.
