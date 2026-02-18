@@ -385,9 +385,11 @@ class SegmentationHead(Predictor):
             if self.focal_loss:
                 # Convert labels to one-hot for focal loss
                 num_classes = logits.shape[1]
-                labels_one_hot = torch.nn.functional.one_hot(
-                    labels, num_classes
-                ).permute(0, 3, 1, 2).float()
+                labels_one_hot = (
+                    torch.nn.functional.one_hot(labels, num_classes)
+                    .permute(0, 3, 1, 2)
+                    .float()
+                )
                 per_pixel_loss = sigmoid_focal_loss(
                     logits,
                     labels_one_hot,
