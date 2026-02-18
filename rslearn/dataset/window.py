@@ -1,5 +1,6 @@
 """rslearn windows."""
 
+import warnings
 from datetime import datetime
 from typing import Any
 
@@ -172,6 +173,15 @@ class Window:
             time_range=self.time_range,
         )
 
+    @property
+    def window_root(self) -> UPath:
+        """Get the root directory of this window.
+
+        Returns:
+            the path for this window's root directory.
+        """
+        return self.storage.get_window_root(self.group, self.name)
+
     def load_layer_datas(self) -> dict[str, WindowLayerData]:
         """Load layer datas describing items in retrieved layers from items.json."""
         return self.storage.get_layer_datas(self.group, self.name)
@@ -188,8 +198,26 @@ class Window:
         """
         return self.storage.list_completed_layers(self.group, self.name)
 
+    def get_vector_layer_dir(self, layer_name: str, group_idx: int = 0) -> UPath:
+        """Get the directory for vector layer data.
+
+        For raster data, use the RasterDataStorage abstraction instead.
+
+        Args:
+            layer_name: the layer name.
+            group_idx: the index of the group within the layer to get the directory
+                for (default 0).
+
+        Returns:
+            the path where vector data is or should be materialized.
+        """
+        return get_window_layer_dir(self.window_root, layer_name, group_idx)
+
     def get_layer_dir(self, layer_name: str, group_idx: int = 0) -> UPath:
         """Get the directory containing materialized data for the specified layer.
+
+        .. deprecated::
+            Use get_vector_layer_dir for vectors, or RasterDataStorage for raster data.
 
         Args:
             layer_name: the layer name.
@@ -199,9 +227,13 @@ class Window:
         Returns:
             the path where data is or should be materialized.
         """
-        return get_window_layer_dir(
-            self.storage.get_window_root(self.group, self.name), layer_name, group_idx
+        warnings.warn(
+            "get_layer_dir is deprecated. Use get_vector_layer_dir for vectors, "
+            "or RasterDataStorage for raster data.",
+            DeprecationWarning,
+            stacklevel=2,
         )
+        return self.get_vector_layer_dir(layer_name, group_idx)
 
     def is_layer_completed(self, layer_name: str, group_idx: int = 0) -> bool:
         """Check whether the specified layer is completed.
@@ -240,6 +272,11 @@ class Window:
     ) -> UPath:
         """Get the directory where the raster is materialized.
 
+        .. deprecated::
+            Use RasterDataStorage for reading/writing raster data. This method
+            remains functional for programmatic use (e.g., custom scripts that
+            create label rasters).
+
         Args:
             layer_name: the layer name
             bands: the bands in the raster. It should match a band set defined for this
@@ -249,8 +286,14 @@ class Window:
         Returns:
             the directory containing the raster.
         """
+        warnings.warn(
+            "get_raster_dir is deprecated. Use RasterDataStorage for reading/writing "
+            "raster data. This method remains functional for programmatic use.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return get_window_raster_dir(
-            self.storage.get_window_root(self.group, self.name),
+            self.window_root,
             layer_name,
             bands,
             group_idx,

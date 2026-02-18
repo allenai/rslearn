@@ -232,8 +232,7 @@ class FileWindowStorage(WindowStorage):
         self._validate_layer_name(layer_name)
         window_path = self.get_window_root(group, name)
         layer_dir = get_window_layer_dir(window_path, layer_name, group_idx)
-        # We assume the directory exists because the layer should be materialized before
-        # being marked completed.
+        layer_dir.mkdir(parents=True, exist_ok=True)
         (layer_dir / "completed").touch()
 
 
