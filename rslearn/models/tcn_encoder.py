@@ -71,6 +71,7 @@ class SimpleTCNEncoder(FeatureExtractor):
         dropout: float = 0.1,
         mod_key: str = "era5_daily",
         output_spatial_size: int | None = None,
+        num_variables: int | None = None,
     ):
         """Create a new SimpleTCNEncoder.
 
@@ -86,11 +87,16 @@ class SimpleTCNEncoder(FeatureExtractor):
             mod_key: key in the input dict that holds the time series data
             output_spatial_size: if provided, upsample to a spatial grid of this size (e.g., 5 for 5x5).
                 If None, outputs a FeatureVector. If set, outputs FeatureMaps with replicated embeddings.
+            num_variables: if set, the input is assumed to be a stacked representation
+                where all timesteps are flattened into the channel dimension (C*T bands
+                with T=1). The data will be reshaped from [B, 1, C*T] to [B, T, C] where
+                C = num_variables and T = C*T / num_variables.
         """
         super().__init__()
 
         self.mod_key = mod_key
         self.output_spatial_size = output_spatial_size
+        self.num_variables = num_variables
         self._warned_spatial = False
 
         # Front-end linear projection
@@ -163,6 +169,12 @@ class SimpleTCNEncoder(FeatureExtractor):
                 )
                 self._warned_spatial = True
             TS_data = TS_data.mean(dim=1)
+
+        # If num_variables is set, the input is stacked: [B, 1, C*T].
+        # Reshape to [B, T, C] where C = num_variables.
+        if self.num_variables is not None:
+            B = TS_data.shape[0]
+            TS_data = TS_data.reshape(B, -1, self.num_variables)  # [B, T, C]
 
         x = self.input_proj(TS_data)
         x = x.transpose(1, 2)
