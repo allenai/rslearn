@@ -49,6 +49,11 @@ ItemType = TypeVar("ItemType", bound="Item")
 MULTIPROCESSING_CONTEXT = "forkserver"
 MP_CONTEXT_ENV_VAR = "RSLEARN_MULTIPROCESSING_CONTEXT"
 
+# Maximum number of workers when using the default workers=-1 option.
+# Many data sources have rate limits, so this is a sensible default level of maximum
+# parallelism.
+DEFAULT_MAX_WORKERS = 32
+
 
 def register_handler(category: Any, command: str) -> Callable:
     """Register a new handler for a command."""
@@ -331,8 +336,11 @@ def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--workers",
         type=int,
-        default=0,
-        help="Number of worker processes (default 0 to use main process only)",
+        default=-1,
+        help=(
+            "Number of worker processes (-1 to use #CPUs capped at "
+            f"{DEFAULT_MAX_WORKERS}, 0 for main process only)"
+        ),
     )
     parser.add_argument(
         "--load-workers",
@@ -365,7 +373,7 @@ def apply_on_windows(
     dataset: Dataset,
     group: str | list[str] | None = None,
     names: list[str] | None = None,
-    workers: int = 0,
+    workers: int = -1,
     load_workers: int | None = None,
     batch_size: int = 1,
     jobs_per_process: int | None = None,
@@ -380,7 +388,8 @@ def apply_on_windows(
         dataset: the dataset.
         group: optional, only apply on windows in this group.
         names: optional, only apply on windows with these names.
-        workers: the number of parallel workers to use, default 0 (main thread only).
+        workers: the number of parallel workers to use, default -1 (use number of
+            workers equal to number of available CPUs, capped at DEFAULT_MAX_WORKERS).
         load_workers: optional different number of workers to use for loading the
             windows. If set, workers controls the number of workers to process the
             jobs, while load_workers controls the number of workers to use for reading
@@ -395,6 +404,9 @@ def apply_on_windows(
             like building indexes that should not be done in parallel. Set this false
             to disable using the initial job.
     """
+    if workers == -1:
+        workers = min(os.cpu_count() or 1, DEFAULT_MAX_WORKERS)
+
     if hasattr(f, "set_dataset"):
         f.set_dataset(dataset)
 
@@ -572,6 +584,7 @@ def dataset_prepare() -> None:
             f"Total windows requested: {combined.total_windows_requested}, "
             f"duration: {combined.duration_seconds:.1f}s"
         )
+        has_errors = False
         for ls in combined.layer_summaries.values():
             msg = (
                 f"  Layer {ls.layer_name}: "
@@ -583,6 +596,13 @@ def dataset_prepare() -> None:
             logger.info(msg)
             for err_msg, count in summarize_errors(ls.error_messages):
                 logger.info(f"    Error (x{count}): {err_msg}")
+            if ls.error_messages:
+                has_errors = True
+        if has_errors:
+            logger.info(
+                "Some windows failed. Consider enabling retries with: "
+                "--retry-max-attempts 5 --retry-backoff-seconds 5"
+            )
 
 
 def _load_window_layer_datas(
@@ -820,16 +840,24 @@ def dataset_ingest() -> None:
             f"Total jobs: {combined.num_jobs}, "
             f"duration: {combined.duration_seconds:.1f}s"
         )
+        has_errors = False
         for ls in combined.layer_summaries.values():
             failed = "FAILED" if ls.error_messages else "ok"
             msg = (
                 f"  Layer {ls.layer_name} [{failed}]: "
-                f"items attempted={ls.ingest_counts.items}, "
-                f"geometries attempted={ls.ingest_counts.geometries}"
+                f"items={ls.ingest_counts.items}, "
+                f"geometries={ls.ingest_counts.geometries}"
             )
             logger.info(msg)
             for err_msg, count in summarize_errors(ls.error_messages):
                 logger.info(f"    Error (x{count}): {err_msg}")
+            if ls.error_messages:
+                has_errors = True
+        if has_errors:
+            logger.info(
+                "Some ingestions failed. Consider enabling retries with: "
+                "--retry-max-attempts 5 --retry-backoff-seconds 5"
+            )
 
 
 class MaterializeHandler:
@@ -925,6 +953,7 @@ def dataset_materialize() -> None:
             f"Total windows requested: {combined.total_windows_requested}, "
             f"duration: {combined.duration_seconds:.1f}s"
         )
+        has_errors = False
         for ls in combined.layer_summaries.values():
             msg = (
                 f"  Layer {ls.layer_name}: "
@@ -934,6 +963,13 @@ def dataset_materialize() -> None:
             logger.info(msg)
             for err_msg, count in summarize_errors(ls.error_messages):
                 logger.info(f"    Error (x{count}): {err_msg}")
+            if ls.error_messages:
+                has_errors = True
+        if has_errors:
+            logger.info(
+                "Some windows failed to materialize. Consider enabling retries with: "
+                "--retry-max-attempts 5 --retry-backoff-seconds 5"
+            )
 
 
 @register_handler("model", "fit")
