@@ -103,9 +103,9 @@ def pad_slice_protect(
             )
 
         rf = data_input.resolution_factor
-        scale = rf.numerator / rf.denominator
-        scaled_pad_x = int(crop_size[0] * scale)
-        scaled_pad_y = int(crop_size[1] * scale)
+        pad_bounds = rf.multiply_bounds((0, 0, crop_size[0], crop_size[1]))
+        scaled_pad_x = pad_bounds[2] - pad_bounds[0]
+        scaled_pad_y = pad_bounds[3] - pad_bounds[1]
 
         padded = torch.nn.functional.pad(
             value.image, pad=(0, scaled_pad_x, 0, scaled_pad_y)
