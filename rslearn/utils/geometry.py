@@ -181,19 +181,26 @@ class ResolutionFactor:
     def multiply_bounds(self, bounds: PixelBounds) -> PixelBounds:
         """Multiply the bounds by this factor.
 
-        When coarsening, start bounds use floor division and end bounds use
-        ceiling division so that the coarsened region fully covers the original
-        extent (it may slightly over-cover when bounds are not exact multiples
-        of the denominator).
+        When coarsening, the output size is computed from the input width/height
+        via ceiling division, ensuring a deterministic output size regardless of
+        absolute position. The start is floor-divided.
         """
         if self.denominator > 1:
             import math
 
+            coarse_start_x = bounds[0] // self.denominator
+            coarse_start_y = bounds[1] // self.denominator
+            coarse_width = math.ceil(
+                (bounds[2] - bounds[0]) / self.denominator
+            )
+            coarse_height = math.ceil(
+                (bounds[3] - bounds[1]) / self.denominator
+            )
             return (
-                bounds[0] // self.denominator,
-                bounds[1] // self.denominator,
-                math.ceil(bounds[2] / self.denominator),
-                math.ceil(bounds[3] / self.denominator),
+                coarse_start_x,
+                coarse_start_y,
+                coarse_start_x + coarse_width,
+                coarse_start_y + coarse_height,
             )
         else:
             return (

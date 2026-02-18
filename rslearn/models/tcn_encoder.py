@@ -112,30 +112,28 @@ class SimpleTCNEncoder(FeatureExtractor):
             If output_spatial_size is set: a FeatureMaps with shape [B, output_dim, H, W]
                 where the embedding is replicated across all spatial locations.
         """
-        # Extract TS data from context, averaging over spatial dims per sample
-        # so that all samples have a consistent [T, C] shape (spatial size can
-        # vary across samples when crop bounds don't align to the resolution
-        # factor grid).
-        ts_list: list[torch.Tensor] = []
-        for inp in context.inputs:
-            # [C, T, H, W] -> [HW, T, C]
-            sample = rearrange(inp[self.mod_key].image, "c t h w -> (h w) t c")
-            if sample.shape[0] > 1:
-                if not self._warned_spatial:
-                    import warnings
+        # Extract TS data from context
+        TS_data = torch.stack(
+            [
+                rearrange(inp[self.mod_key].image, "c t h w -> (h w) t c")
+                for inp in context.inputs
+            ],
+            dim=0,  # [B, HW, T, C]
+        )
 
-                    warnings.warn(
-                        f"SimpleTCNEncoder: spatial extent {sample.shape[0]} > 1, "
-                        f"averaging over spatial dimensions. Consider loading the "
-                        f"input at coarser resolution to avoid this.",
-                        stacklevel=2,
-                    )
-                    self._warned_spatial = True
-                sample = sample.mean(dim=0)  # [T, C]
-            else:
-                sample = sample.squeeze(0)  # [T, C]
-            ts_list.append(sample)
-        TS_data = torch.stack(ts_list, dim=0)  # [B, T, C]
+        # Average-pool spatial dimensions: [B, T, C]
+        if TS_data.dim() == 4:
+            if TS_data.shape[1] > 1 and not self._warned_spatial:
+                import warnings
+
+                warnings.warn(
+                    f"SimpleTCNEncoder: spatial extent {TS_data.shape[1]} > 1, "
+                    f"averaging over spatial dimensions. Consider loading the "
+                    f"input at coarser resolution to avoid this.",
+                    stacklevel=2,
+                )
+                self._warned_spatial = True
+            TS_data = TS_data.mean(dim=1)
 
         x = self.input_proj(TS_data)
         x = x.transpose(1, 2)
