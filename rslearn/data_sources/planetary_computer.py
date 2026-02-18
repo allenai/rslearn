@@ -776,6 +776,11 @@ class Sentinel3SlstrLST(PlanetaryComputer):
     def _fit_affine_from_geodetic(
         self, lons: npt.NDArray[np.floating], lats: npt.NDArray[np.floating]
     ) -> Affine:
+        """Fit an affine transform from geodetic lon/lat arrays.
+
+        Uses a least-squares fit to map pixel coordinates (col, row) to lon/lat.
+        This provides an approximate georeferencing for the swath.
+        """
         if lons.shape != lats.shape:
             raise ValueError(
                 f"expected lon/lat arrays to have same shape, got {lons.shape} and {lats.shape}"
