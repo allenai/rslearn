@@ -143,6 +143,7 @@ class TestIngestion:
             "ingest",
             "--root",
             str(prepared_dataset.path),
+            "--no-ignore-errors",
         ]
         monkeypatch.setattr(sys, "argv", mock_args)
 
@@ -430,6 +431,7 @@ class TestMaterialization:
             "materialize",
             "--root",
             str(ds_path),
+            "--no-ignore-errors",
         ]
         monkeypatch.setattr(sys, "argv", mock_args)
         with pytest.raises(json.decoder.JSONDecodeError):
