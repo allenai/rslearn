@@ -21,6 +21,7 @@ from rslearn.train.dataset import (
     ModelDataset,
     RetryDataset,
     SplitConfig,
+    check_window,
     read_layer_time_range,
 )
 from rslearn.train.dataset_index import INDEX_DIR_NAME
@@ -610,3 +611,78 @@ class TestSplitConfig:
 
         with pytest.raises(ValueError, match="overlap_pixels must be non-negative"):
             SplitConfig.merge_and_validate([config])
+
+
+class TestCheckWindow:
+    """Tests for check_window and CheckWindowResult."""
+
+    def test_passes_when_all_inputs_available(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
+        """Window is returned with empty result when all required inputs are present."""
+        image = np.zeros((1, 4, 4), dtype=np.uint8)
+        window = add_window_to_basic_classification_dataset(
+            basic_classification_dataset,
+            images={("image_layer1", 0): image},
+        )
+        inputs = {
+            "image": DataInput("raster", ["image_layer1"], bands=["band"]),
+            "targets": DataInput("vector", ["vector_layer"]),
+        }
+        result_window, result = check_window(inputs, window)
+        assert result_window is window
+        assert result.missing_data_input_counts == {}
+        assert result.has_output_layer_count == 0
+
+    def test_skipped_for_missing_required_input(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
+        """Window is skipped and result reports the missing input key."""
+        image = np.zeros((1, 4, 4), dtype=np.uint8)
+        window = add_window_to_basic_classification_dataset(
+            basic_classification_dataset,
+            images={("image_layer1", 0): image},
+        )
+        inputs = {
+            "image": DataInput("raster", ["image_layer1"], bands=["band"]),
+            "missing_layer": DataInput(
+                "raster", ["nonexistent_layer"], bands=["band"], required=True
+            ),
+        }
+        result_window, result = check_window(inputs, window)
+        assert result_window is None
+        assert result.missing_data_input_counts == {"missing_layer": 1}
+        assert result.has_output_layer_count == 0
+
+    def test_skipped_for_existing_output_layer(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
+        """Window is skipped and result reports existing output layer."""
+        image = np.zeros((1, 4, 4), dtype=np.uint8)
+        window = add_window_to_basic_classification_dataset(
+            basic_classification_dataset,
+            images={("image_layer1", 0): image},
+        )
+        # Mark an output layer as completed.
+        layer_dir = window.get_layer_dir("predictions")
+        layer_dir.mkdir(parents=True, exist_ok=True)
+        window.mark_layer_completed("predictions")
+
+        inputs = {
+            "image": DataInput("raster", ["image_layer1"], bands=["band"]),
+            "targets": DataInput("vector", ["vector_layer"]),
+        }
+        result_window, result = check_window(
+            inputs,
+            window,
+            output_layer_name_skip_inference_if_exists="predictions",
+        )
+        assert result_window is None
+        assert result.missing_data_input_counts == {}
+        assert result.has_output_layer_count == 1
