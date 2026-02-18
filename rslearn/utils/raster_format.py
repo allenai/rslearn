@@ -704,3 +704,78 @@ class SingleImageRasterFormat(RasterFormat):
             src_col_offset : src_col_offset + col_overlap,
         ]
         return dst
+
+
+class NumpyRasterFormat(RasterFormat):
+    """A raster format that stores data as a raw NumPy .npy file.
+
+    This is optimized for layers with many bands (e.g., 5000+) where GeoTIFF's
+    per-band IFD overhead makes reading extremely slow. A 5110-band GeoTIFF
+    takes ~1s to open due to per-band metadata parsing; the same data in .npy
+    format loads in <1ms.
+
+    The data is stored without spatial metadata (CRS/transform), so this format
+    is best suited for layers where the spatial dimensions are trivial (e.g.,
+    1×1) and no reprojection is needed during reading.
+
+    The stored array must be [C, H, W]. On decode, if the stored spatial size
+    is 1×1 and larger bounds are requested, the data is broadcast to match.
+    """
+
+    def __init__(self, fname: str = "data.npy"):
+        """Initialize a NumpyRasterFormat.
+
+        Args:
+            fname: filename for the numpy array file.
+        """
+        self.fname = fname
+
+    def encode_raster(
+        self,
+        path: UPath,
+        projection: Projection,
+        bounds: PixelBounds,
+        array: npt.NDArray[Any],
+    ) -> None:
+        """Encodes raster data as a .npy file.
+
+        Args:
+            path: the directory to write to
+            projection: the projection of the raster data (stored as metadata
+                but not embedded in the file)
+            bounds: the bounds of the raster data in the projection
+            array: the raster data (C, H, W)
+        """
+        path.mkdir(parents=True, exist_ok=True)
+        np.save(path / self.fname, array)
+
+    def decode_raster(
+        self,
+        path: UPath,
+        projection: Projection,
+        bounds: PixelBounds,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> npt.NDArray[Any]:
+        """Decodes raster data from a .npy file.
+
+        If the stored array is 1×1 spatially and the requested bounds are
+        larger, the single pixel is broadcast (replicated) to the requested
+        size.
+
+        Args:
+            path: the directory to read from
+            projection: the projection to read the raster in (ignored; no
+                reprojection is performed).
+            bounds: the bounds to read in the given projection.
+            resampling: resampling method (ignored; nearest-neighbor broadcast
+                is always used for 1×1 data).
+
+        Returns:
+            the raster data as a [C, H, W] array.
+        """
+        data = np.load(path / self.fname)
+        out_h = bounds[3] - bounds[1]
+        out_w = bounds[2] - bounds[0]
+        if data.shape[1] == 1 and data.shape[2] == 1 and (out_h != 1 or out_w != 1):
+            data = np.broadcast_to(data, (data.shape[0], out_h, out_w)).copy()
+        return data
