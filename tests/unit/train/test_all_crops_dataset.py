@@ -1,102 +1,135 @@
-"""Tests for rslearn.train.all_patches_dataset."""
+"""Tests for rslearn.train.all_crops_dataset."""
 
 from collections.abc import Callable
 
 import numpy as np
 
 from rslearn.dataset import Dataset
-from rslearn.train.all_patches_dataset import (
-    InMemoryAllPatchesDataset,
-    IterableAllPatchesDataset,
+from rslearn.train.all_crops_dataset import (
+    InMemoryAllCropsDataset,
+    IterableAllCropsDataset,
 )
 from rslearn.train.dataset import (
     DataInput,
     ModelDataset,
     SplitConfig,
 )
+from rslearn.train.model_context import RasterImage
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.tasks.segmentation import SegmentationTask
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
 
 
-def test_dataset_covers_border(image_to_class_dataset: Dataset) -> None:
-    # Make sure that, when loading all patches, the border of the raster is included in
-    # the generated windows.
-    # The image_to_class_dataset window is 4x4 so 3x3 patch will ensure irregular window
-    # at the border.
-    patch_size = 3
-    split_config = SplitConfig(
-        patch_size=patch_size,
-        load_all_patches=True,
-    )
-    image_data_input = DataInput("raster", ["image"], bands=["band"], passthrough=True)
-    target_data_input = DataInput("vector", ["label"])
-    task = ClassificationTask("label", ["cls0", "cls1"], read_class_id=True)
-    model_dataset = ModelDataset(
-        image_to_class_dataset,
-        split_config=split_config,
-        task=task,
-        workers=1,
-        inputs={
-            "image": image_data_input,
-            "targets": target_data_input,
-        },
-    )
-    dataset = IterableAllPatchesDataset(model_dataset, (patch_size, patch_size))
+class TestIterableAllCropsDataset:
+    """Tests for IterableAllCropsDataset."""
 
-    point_coverage = {}
-    for col in range(4):
-        for row in range(4):
-            point_coverage[(col, row)] = False
+    def test_crop_positions_first_and_last_only(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
+        """Test crop positions when window only needs first/last crops (no intermediate crops).
 
-    # There should be 4 windows with top-left at:
-    # - (0, 0)
-    # - (0, 1)
-    # - (1, 0)
-    # - (1, 1)
-    assert len(list(dataset)) == 4
+        With a 6x6 window, crop_size=4, overlap_pixels=2:
+        - First crop on each dimension covers [0, 4)
+        - Last crop on each dimension covers [2, 6)
 
-    for _, _, metadata in dataset:
-        bounds = metadata.patch_bounds
-        for col, row in list(point_coverage.keys()):
-            if col < bounds[0] or col >= bounds[2]:
-                continue
-            if row < bounds[1] or row >= bounds[3]:
-                continue
-            point_coverage[(col, row)] = True
+        So we get 2x2 = 4 crops starting at positions [0, 2] x [0, 2].
+        """
+        window_size = 6
+        crop_size = 4
+        overlap_pixels = 2
 
-    assert all(point_coverage.values())
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset,
+            name="window0",
+            bounds=(0, 0, window_size, window_size),
+        )
+        model_dataset = ModelDataset(
+            basic_classification_dataset,
+            split_config=SplitConfig(),
+            task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+            workers=1,
+            inputs={
+                "targets": DataInput("vector", ["vector_layer"]),
+            },
+        )
+        all_crops_dataset = IterableAllCropsDataset(
+            model_dataset,
+            crop_size=(crop_size, crop_size),
+            overlap_pixels=overlap_pixels,
+        )
+        samples = list(all_crops_dataset)
 
-    # Test with overlap_ratio=0.5 for 2x2 patches
-    dataset_with_overlap = IterableAllPatchesDataset(
-        model_dataset, (2, 2), overlap_ratio=0.5
-    )
+        # Should have 2x2 = 4 crops (only first and last, no middle)
+        assert len(samples) == 4
 
-    point_coverage = {}
-    for col in range(4):
-        for row in range(4):
-            point_coverage[(col, row)] = False
+        # Verify exact crop bounds
+        crop_bounds = set(sample[2].crop_bounds for sample in samples)
+        expected_bounds = {
+            (0, 0, 4, 4),
+            (0, 2, 4, 6),
+            (2, 0, 6, 4),
+            (2, 2, 6, 6),
+        }
+        assert crop_bounds == expected_bounds, (
+            f"Expected {expected_bounds}, got {crop_bounds}"
+        )
 
-    # With overlap_ratio=0.5, there should be 9 windows given that overlap is 1 pixel.
-    assert len(list(dataset_with_overlap)) == 9
+    def test_crop_positions_with_middle_crops(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
+        """Test crop positions when window needs middle crops between first/last.
 
-    for _, _, metadata in dataset:
-        bounds = metadata.patch_bounds
+        With a 15x15 window, crop_size=8, overlap_pixels=2:
+        - First crop at 0
+        - Middle crops at range(6, 7, 6) = [6] (one middle crop)
+        - Last crop at 15 - 8 = 7
 
-        for col, row in list(point_coverage.keys()):
-            if col < bounds[0] or col >= bounds[2]:
-                continue
-            if row < bounds[1] or row >= bounds[3]:
-                continue
-            point_coverage[(col, row)] = True
+        So we get 3x3 = 9 crops at positions [0, 6, 7] x [0, 6, 7].
+        """
+        window_size = 15
+        crop_size = 8
+        overlap_pixels = 2
 
-    assert all(point_coverage.values())
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset,
+            name="window0",
+            bounds=(0, 0, window_size, window_size),
+        )
+        model_dataset = ModelDataset(
+            basic_classification_dataset,
+            split_config=SplitConfig(),
+            task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+            workers=1,
+            inputs={
+                "targets": DataInput("vector", ["vector_layer"]),
+            },
+        )
+        all_crops_dataset = IterableAllCropsDataset(
+            model_dataset,
+            crop_size=(crop_size, crop_size),
+            overlap_pixels=overlap_pixels,
+        )
+        samples = list(all_crops_dataset)
 
+        # Should have 3x3 = 9 crops (first, middle, and last)
+        assert len(samples) == 9
 
-class TestIterableAllPatchesDataset:
-    """Tests for IterableAllPatchesDataset."""
+        # Verify exact crop bounds
+        crop_bounds = set(sample[2].crop_bounds for sample in samples)
+        expected_bounds = {
+            (col, row, col + crop_size, row + crop_size)
+            for col in [0, 6, 7]
+            for row in [0, 6, 7]
+        }
+        assert crop_bounds == expected_bounds, (
+            f"Expected {expected_bounds}, got {crop_bounds}"
+        )
 
-    def test_one_window_per_worker(
+    def test_distributed_one_window_per_worker(
         self,
         basic_classification_dataset: Dataset,
         add_window_to_basic_classification_dataset: Callable,
@@ -126,15 +159,15 @@ class TestIterableAllPatchesDataset:
         world_size = 4
         window_names = set()
         for rank in range(world_size):
-            all_patches_dataset = IterableAllPatchesDataset(
-                model_dataset, (4, 4), rank=rank, world_size=world_size
+            all_crops_dataset = IterableAllCropsDataset(
+                model_dataset, crop_size=(4, 4), rank=rank, world_size=world_size
             )
-            samples = list(all_patches_dataset)
+            samples = list(all_crops_dataset)
             assert len(samples) == 1
             window_names.add(samples[0][2].window_name)
         assert len(window_names) == 4
 
-    def test_different_window_sizes(
+    def test_distributed_different_window_sizes(
         self,
         basic_classification_dataset: Dataset,
         add_window_to_basic_classification_dataset: Callable,
@@ -160,13 +193,13 @@ class TestIterableAllPatchesDataset:
         world_size = 2
         seen_patches: dict[tuple[str, PixelBounds], int] = {}
         for rank in range(world_size):
-            all_patches_dataset = IterableAllPatchesDataset(
-                model_dataset, (4, 4), rank=rank, world_size=world_size
+            all_crops_dataset = IterableAllCropsDataset(
+                model_dataset, crop_size=(4, 4), rank=rank, world_size=world_size
             )
-            samples = list(all_patches_dataset)
+            samples = list(all_crops_dataset)
             assert len(samples) == 4
             for sample in samples:
-                patch_id = (sample[2].window_name, sample[2].patch_bounds)
+                patch_id = (sample[2].window_name, sample[2].crop_bounds)
                 seen_patches[patch_id] = seen_patches.get(patch_id, 0) + 1
 
         assert len(seen_patches) == 5
@@ -177,7 +210,7 @@ class TestIterableAllPatchesDataset:
         assert seen_patches[("window1", (4, 4, 8, 8))] == 1
 
     def test_empty_dataset(self, basic_classification_dataset: Dataset) -> None:
-        """Verify that IterableAllPatchesDataset works with no windows."""
+        """Verify that IterableAllCropsDataset works with no windows."""
         model_dataset = ModelDataset(
             basic_classification_dataset,
             split_config=SplitConfig(),
@@ -189,10 +222,10 @@ class TestIterableAllPatchesDataset:
         )
         world_size = 2
         for rank in range(world_size):
-            all_patches_dataset = IterableAllPatchesDataset(
-                model_dataset, (4, 4), rank=rank, world_size=world_size
+            all_crops_dataset = IterableAllCropsDataset(
+                model_dataset, crop_size=(4, 4), rank=rank, world_size=world_size
             )
-            samples = list(all_patches_dataset)
+            samples = list(all_crops_dataset)
             assert len(samples) == 0
 
     def test_small_window(
@@ -200,7 +233,7 @@ class TestIterableAllPatchesDataset:
         basic_classification_dataset: Dataset,
         add_window_to_basic_classification_dataset: Callable,
     ) -> None:
-        """Verify that it works when the window is smaller than the patch size."""
+        """Verify that it works when the window is smaller than the crop size."""
         add_window_to_basic_classification_dataset(
             basic_classification_dataset, name="window", bounds=(0, 0, 2, 2)
         )
@@ -213,15 +246,73 @@ class TestIterableAllPatchesDataset:
                 "targets": DataInput("vector", ["vector_layer"]),
             },
         )
-        all_patches_dataset = IterableAllPatchesDataset(
+        all_crops_dataset = IterableAllCropsDataset(
             dataset=model_dataset,
-            patch_size=(4, 4),
+            crop_size=(4, 4),
         )
-        samples = list(all_patches_dataset)
+        samples = list(all_crops_dataset)
         assert len(samples) == 1
         _, _, metadata = samples[0]
         assert metadata.window_bounds == (0, 0, 2, 2)
-        assert metadata.patch_bounds == (0, 0, 4, 4)
+        assert metadata.crop_bounds == (0, 0, 4, 4)
+
+    def test_small_window_raster_padded_to_crop_size(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
+        """Verify that raster inputs are padded when the window is smaller than crop size.
+
+        This is important for sliding-window inference (load_all_crops), where
+        get_window_crop_options may generate crops that extend beyond window bounds.
+        """
+        crop_size = 32
+        tiny_bounds = (0, 0, 24, 4)  # width/height smaller than crop_size
+
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset,
+            name="window",
+            bounds=tiny_bounds,
+            images={
+                ("image_layer1", 0): np.ones(
+                    (
+                        1,
+                        tiny_bounds[3] - tiny_bounds[1],
+                        tiny_bounds[2] - tiny_bounds[0],
+                    ),
+                    dtype=np.uint8,
+                ),
+            },
+        )
+
+        image_data_input = DataInput(
+            "raster", ["image_layer1"], bands=["band"], passthrough=True
+        )
+
+        model_dataset = ModelDataset(
+            basic_classification_dataset,
+            split_config=SplitConfig(
+                crop_size=crop_size, load_all_crops=True, skip_targets=True
+            ),
+            task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+            workers=1,
+            inputs={"image": image_data_input},
+        )
+
+        all_crops_dataset = IterableAllCropsDataset(
+            dataset=model_dataset,
+            crop_size=(crop_size, crop_size),
+        )
+
+        samples = list(all_crops_dataset)
+        assert len(samples) == 1
+        inputs, _, metadata = samples[0]
+
+        assert metadata.window_bounds == tiny_bounds
+        assert metadata.crop_bounds == (0, 0, crop_size, crop_size)
+        assert isinstance(inputs["image"], RasterImage)
+        assert inputs["image"].shape[-2:] == (crop_size, crop_size)
+        assert inputs["image"].image.shape[:2] == (1, 1)  # C, T
 
     def test_resolution_factor_cropping(
         self,
@@ -255,32 +346,34 @@ class TestIterableAllPatchesDataset:
 
         model_dataset = ModelDataset(
             basic_classification_dataset,
-            split_config=SplitConfig(patch_size=4, load_all_patches=True),
+            split_config=SplitConfig(crop_size=4, load_all_crops=True),
             task=SegmentationTask(num_classes=2),
             workers=1,
             inputs={"image": image_data_input, "targets": target_data_input},
         )
 
-        dataset = IterableAllPatchesDataset(model_dataset, (4, 4), rank=0, world_size=1)
+        dataset = IterableAllCropsDataset(
+            model_dataset, crop_size=(4, 4), rank=0, world_size=1
+        )
 
         # Verify we actually have samples to test
         sample_count = 0
         for inputs, targets, metadata in dataset:
             sample_count += 1
             assert inputs["image"].shape[-2:] == (4, 4)
-            assert targets["classes"].shape == (2, 2)
+            assert targets["classes"].get_hw_tensor().shape == (2, 2)
         assert sample_count > 0, "No samples were generated - test is not valid"
 
 
-class TestInMemoryAllPatchesDataset:
-    """Tests for InMemoryAllPatchesDataset."""
+class TestInMemoryAllCropsDataset:
+    """Tests for InMemoryAllCropsDataset."""
 
     def test_iterable_equal(
         self,
         basic_classification_dataset: Dataset,
         add_window_to_basic_classification_dataset: Callable,
     ) -> None:
-        """Verify that InMemoryAllPatchesDataset and IterableAllPatchesDataset are equivalent."""
+        """Verify that InMemoryAllCropsDataset and IterableAllCropsDataset are equivalent."""
         # Create a couple of windows with different sizes to exercise patching.
         add_window_to_basic_classification_dataset(
             basic_classification_dataset, name="w0", bounds=(0, 0, 4, 4)
@@ -301,11 +394,11 @@ class TestInMemoryAllPatchesDataset:
         )
 
         # Construct iterable and regular versions.
-        patch_size = (3, 3)
-        iterable_ds = IterableAllPatchesDataset(
-            model_dataset, patch_size, rank=0, world_size=1
+        crop_size = (3, 3)
+        iterable_ds = IterableAllCropsDataset(
+            model_dataset, crop_size=crop_size, rank=0, world_size=1
         )
-        regular_ds = InMemoryAllPatchesDataset(model_dataset, patch_size)
+        regular_ds = InMemoryAllCropsDataset(model_dataset, crop_size=crop_size)
 
         iterable_samples = list(iterable_ds)
         regular_samples = [regular_ds[i] for i in range(len(regular_ds))]
@@ -347,17 +440,17 @@ class TestInMemoryAllPatchesDataset:
 
         model_dataset = ModelDataset(
             basic_classification_dataset,
-            split_config=SplitConfig(patch_size=4, load_all_patches=True),
+            split_config=SplitConfig(crop_size=4, load_all_crops=True),
             task=SegmentationTask(num_classes=2),
             workers=1,
             inputs={"image": image_data_input, "targets": target_data_input},
         )
 
-        dataset = InMemoryAllPatchesDataset(model_dataset, (4, 4))
+        dataset = InMemoryAllCropsDataset(model_dataset, crop_size=(4, 4))
         assert len(dataset) > 0, "No samples were generated - test is not valid"
 
         for i in range(len(dataset)):
             inputs, targets, metadata = dataset[i]
             # Target patch should have half the resolution of the input patch
             assert inputs["image"].shape[-2:] == (4, 4)
-            assert targets["classes"].shape == (2, 2)
+            assert targets["classes"].get_hw_tensor().shape == (2, 2)

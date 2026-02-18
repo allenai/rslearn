@@ -21,7 +21,11 @@ Quick links:
 - [Examples](docs/Examples.md) contains more examples, including customizing different
   stages of rslearn with additional code.
 - [DatasetConfig](docs/DatasetConfig.md) documents the dataset configuration file.
+- [DataSources](docs/DataSources.md) details the built-in data sources in rslearn, from
+  which raster and vector data can be imported into rslearn dataset layers.
 - [ModelConfig](docs/ModelConfig.md) documents the model configuration file.
+- [TasksAndModels](docs/TasksAndModels.md) details the training tasks and model
+  components available in rslearn.
 
 
 Setup
@@ -320,7 +324,7 @@ data:
       groups: ["default"]
     predict_config:
       groups: ["predict"]
-      load_all_patches: true
+      load_all_crops: true
       skip_targets: true
       patch_size: 512
 trainer:
@@ -483,7 +487,7 @@ test_config:
     split: val
 predict_config:
   groups: ["predict"]
-  load_all_patches: true
+  load_all_crops: true
   skip_targets: true
   patch_size: 512
 ```

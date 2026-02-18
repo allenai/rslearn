@@ -18,6 +18,7 @@ class Flip(Transform):
         vertical: bool = True,
         image_selectors: list[str] = ["image"],
         box_selectors: list[str] = [],
+        skip_missing: bool = False,
     ):
         """Initialize a new Flip.
 
@@ -26,12 +27,15 @@ class Flip(Transform):
             vertical: whether to randomly flip vertically
             image_selectors: image items to transform.
             box_selectors: boxes items to transform.
+            skip_missing: if True, skip selectors that don't exist in the input/target
+                dicts. Useful when working with optional inputs.
         """
         super().__init__()
         self.horizontal = horizontal
         self.vertical = vertical
         self.image_selectors = image_selectors
         self.box_selectors = box_selectors
+        self.skip_missing = skip_missing
 
     def sample_state(self) -> dict[str, bool]:
         """Randomly decide how to transform the input.
@@ -57,16 +61,10 @@ class Flip(Transform):
             image: the image to transform.
             state: the sampled state.
         """
-        if isinstance(image, RasterImage):
-            if state["horizontal"]:
-                image.image = torch.flip(image.image, dims=[-1])
-            if state["vertical"]:
-                image.image = torch.flip(image.image, dims=[-2])
-        elif isinstance(image, torch.Tensor):
-            if state["horizontal"]:
-                image = torch.flip(image, dims=[-1])
-            if state["vertical"]:
-                image = torch.flip(image, dims=[-2])
+        if state["horizontal"]:
+            image.image = torch.flip(image.image, dims=[-1])
+        if state["vertical"]:
+            image.image = torch.flip(image.image, dims=[-2])
         return image
 
     def apply_boxes(

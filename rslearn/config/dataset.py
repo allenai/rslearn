@@ -166,7 +166,7 @@ class BandSetConfig(BaseModel):
 
     remap: dict[str, Any] | None = Field(
         default=None,
-        description="Optional jsonargparse configuration for a Remapper to remap pixel values.",
+        description="Optional configuration for a Remapper to remap pixel values.",
     )
 
     # Optional list of names for the different possible values of each band. The length
@@ -236,11 +236,9 @@ class BandSetConfig(BaseModel):
 
         warnings.warn(
             "`format = {'name': ...}` is deprecated; "
-            "use `{'class_path': '...', 'init_args': {...}}` instead.",
-            DeprecationWarning,
-        )
-        logger.warning(
-            "BandSet.format uses legacy format; support will be removed after 2026-03-01."
+            "use `{'class_path': '...', 'init_args': {...}}` instead. "
+            "Support will be removed after 2026-03-01.",
+            FutureWarning,
         )
 
         legacy_name_to_class_path = {
@@ -294,31 +292,25 @@ class SpaceMode(StrEnum):
     The duration of the sub-periods is controlled by another option in QueryConfig.
     """
 
-    COMPOSITE = "COMPOSITE"
-    """Creates one composite covering the entire window.
-
-    During querying all items intersecting the window are placed in one group.
-    The compositing_method in the rasterlayer config specifies how these items are reduced
-    to a single item (e.g MEAN/MEDIAN/FIRST_VALID) during materialization.
-    """
-
-    # TODO add PER_PERIOD_COMPOSITE
-
 
 class TimeMode(StrEnum):
-    """Temporal  matching mode when looking up items corresponding to a window."""
+    """Temporal matching mode when looking up items corresponding to a window.
+
+    Note: setting this is deprecated. It should always be set to TimeMode.WITHIN, and
+    TimeMode will be removed in a future release.
+    """
 
     WITHIN = "WITHIN"
     """Items must be within the window time range."""
 
     NEAREST = "NEAREST"
-    """Select items closest to the window time range, up to max_matches."""
+    """Deprecated: Select items closest to the window time range, up to max_matches."""
 
     BEFORE = "BEFORE"
-    """Select items before the end of the window time range, up to max_matches."""
+    """Deprecated: Select items before the end of the window time range, up to max_matches."""
 
     AFTER = "AFTER"
-    """Select items after the start of the window time range, up to max_matches."""
+    """Deprecated: Select items after the start of the window time range, up to max_matches."""
 
 
 class QueryConfig(BaseModel):
@@ -332,8 +324,20 @@ class QueryConfig(BaseModel):
     )
     time_mode: TimeMode = Field(
         default=TimeMode.WITHIN,
-        description="Specifies how items should be matched with windows temporally.",
+        description="Deprecated: This option will be removed. Only WITHIN is supported.",
+        exclude=True,
     )
+
+    @model_validator(mode="after")
+    def _warn_deprecated_time_mode(self) -> "QueryConfig":
+        if "time_mode" in self.model_fields_set:
+            warnings.warn(
+                "time_mode is deprecated and will be removed in a future version. "
+                "Remove it from your config (WITHIN is the only supported behavior).",
+                FutureWarning,
+                stacklevel=6,
+            )
+        return self
 
     # Minimum number of item groups. If there are fewer than this many matches, then no
     # matches will be returned. This can be used to prevent unnecessary data ingestion
@@ -352,6 +356,20 @@ class QueryConfig(BaseModel):
     ] = Field(
         default=timedelta(days=30),
         description="The duration of the periods, if the space mode is PER_PERIOD_MOSAIC.",
+    )
+    mosaic_compositing_overlaps: int = Field(
+        default=1,
+        description="For MOSAIC and PER_PERIOD_MOSAIC modes, the number of overlapping items "
+        "wanted within each item group covering the window. Set to 1 for a single coverage "
+        "(default mosaic behavior), or higher for compositing multiple overlapping items."
+        "with mean or median compositing method.",
+    )
+    per_period_mosaic_reverse_time_order: bool = Field(
+        default=True,
+        description="For PER_PERIOD_MOSAIC mode, whether to return item groups in reverse "
+        "temporal order (most recent first). Set to False for chronological order (oldest first). "
+        "Default True is deprecated and will change to False with error if still unset or set True "
+        "after 2026-04-01.",
     )
 
 
@@ -404,11 +422,9 @@ class DataSourceConfig(BaseModel):
 
         warnings.warn(
             "`Data source configuration {'name': ...}` is deprecated; "
-            "use `{'class_path': '...', 'init_args': {...}, ...}` instead.",
-            DeprecationWarning,
-        )
-        logger.warning(
-            "Data source configuration uses legacy format; support will be removed after 2026-03-01."
+            "use `{'class_path': '...', 'init_args': {...}, ...}` instead. "
+            "Support will be removed after 2026-03-01.",
+            FutureWarning,
         )
 
         # Split the dict into the base config that is in the pydantic model, and the
@@ -431,8 +447,9 @@ class DataSourceConfig(BaseModel):
             and "max_cloud_cover" in ds_init_args
         ):
             warnings.warn(
-                "Data source configuration specifies invalid 'max_cloud_cover' option.",
-                DeprecationWarning,
+                "Data source configuration specifies invalid 'max_cloud_cover' option."
+                "Support for ignoring this option will be removed after 2026-03-01.",
+                FutureWarning,
             )
             del ds_init_args["max_cloud_cover"]
 
@@ -449,7 +466,13 @@ class LayerType(StrEnum):
 
 
 class CompositingMethod(StrEnum):
-    """Method how to select pixels for the composite from corresponding items of a window."""
+    """Method how to select pixels for the composite from corresponding items of a window.
+
+    For MEAN and MEDIAN modes, mosaic_compositing_overlaps (in the QueryConfig) should
+    be set higher than 1 so that rslearn creates item groups during prepare that cover
+    the window with multiple overlaps. At each pixel/band, the mean and median can then
+    be computed across items in each group that cover that pixel.
+    """
 
     FIRST_VALID = "FIRST_VALID"
     """Select first valid pixel in order of corresponding items (might be sorted)"""

@@ -53,11 +53,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Set Environment Variables
-        run: |
-          echo "TEST_BUCKET=test-bucket" >> $GITHUB_ENV
-          echo "TEST_PREFIX=tests/"
-
       - name: Store Image Names
         # We need the docker image name downstream in test & deploy. This saves the full docker image names to outputs
         id: image-names
@@ -80,21 +75,13 @@ jobs:
             username: ${{ github.actor }}
             password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set Environment Variables
-        run: |
-          echo "TEST_BUCKET=test-bucket-rslearn" >> $GITHUB_ENV
-          echo "GCSFS_DEFAULT_PROJECT=skylight-proto-1" >> $GITHUB_ENV
-
-      - name: Authenticate into gcp
-        uses: "google-github-actions/auth@v2"
-        with:
-          credentials_json: ${{secrets.GOOGLE_CREDENTIALS }}
-
       - name: Run Data Sources Integration Tests
         run: |
+          printenv GOOGLE_CREDENTIALS > /tmp/gcp-credentials.json
           docker run --rm \
-            -e TEST_BUCKET="${{ env.TEST_BUCKET }}" \
-            -v ${{env.GOOGLE_GHA_CREDS_PATH}}:/tmp/gcp-credentials.json:ro \
+            -e TEST_BUCKET="earthsystem-dev-c3po-rslearn-test-bucket" \
+            -e TEST_PREFIX="rslearn_gha_data_source_tests/" \
+            -v /tmp/gcp-credentials.json:/tmp/gcp-credentials.json:ro \
             -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-credentials.json \
             -e GCSFS_DEFAULT_PROJECT="${GCSFS_DEFAULT_PROJECT}" \
             -e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
@@ -117,8 +104,9 @@ jobs:
             -e CI="true" \
             --network host \
             ${{ needs.build.outputs.ghcr_docker_image }} \
-            pytest tests/integration/data_sources/
+            pytest tests/online/
         env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
@@ -140,4 +128,5 @@ jobs:
       - name: Clean up
         if: always()
         run: |
+          rm -f /tmp/gcp-credentials.json
           docker image prune -f

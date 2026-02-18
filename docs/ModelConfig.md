@@ -486,7 +486,8 @@ Here is an example of its usage.
               # Compute metric as the L1 (absolute error) between the predicted values
               # and the labels. Note that while the loss operates over the scaled
               # values, the metric operates over the unscaled values.
-              metric_mode: "l1"
+              # (metric_mode is deprecated; use metrics.)
+              metrics: ["l1"]
           segment:
             class_path: rslearn.train.tasks.segmentation.SegmentationTask
             init_args:
@@ -565,11 +566,15 @@ Here is a summary of all of the options available in the SplitConfig.
       # For validation, testing, and prediction, patch_size can be combined with
       # load_all_crops to perform sliding window inference. For training, it should
       # usually be left false so that each training epoch sees a different crop.
-      load_all_patches: false
+      load_all_crops: false
       # This should typically be enabled for predict_config, so that windows without
       # layers containing targets are skipped. For training, validation, and testing,
       # targets are needed so it should be false.
       skip_targets: false
+      # Resume partial inference: if set, windows that already have this layer
+      # completed will be skipped by default, so predict can resume without
+      # reprocessing completed windows.
+      output_layer_name_skip_inference_if_exists: null
 ```
 
 The transforms will adjust the initial input and target dicts that come from reading

@@ -17,6 +17,7 @@ class Sentinel1ToDecibels(Transform):
         selectors: list[str] = ["image"],
         from_decibels: bool = False,
         epsilon: float = 1e-6,
+        skip_missing: bool = False,
     ):
         """Initialize a new Sentinel1ToDecibels.
 
@@ -27,37 +28,28 @@ class Sentinel1ToDecibels(Transform):
             epsilon: when converting to decibels, clip the intensities to this minimum
                 value to avoid log issues. This is mostly to avoid pixels that have no
                 data with no data value being 0.
+            skip_missing: if True, skip selectors that don't exist in the input/target
+                dicts. Useful when working with optional inputs.
         """
         super().__init__()
         self.selectors = selectors
         self.from_decibels = from_decibels
         self.epsilon = epsilon
+        self.skip_missing = skip_missing
 
-    def apply_image(
-        self, image: torch.Tensor | RasterImage
-    ) -> torch.Tensor | RasterImage:
+    def apply_image(self, image: RasterImage) -> RasterImage:
         """Normalize the specified image.
 
         Args:
             image: the image to transform.
         """
-        if isinstance(image, torch.Tensor):
-            image_to_process = image
-        else:
-            image_to_process = image.image
         if self.from_decibels:
             # Decibels to linear scale.
-            image_to_process = torch.pow(10.0, image_to_process / 10.0)
+            image.image = torch.pow(10.0, image.image / 10.0)
         else:
             # Linear scale to decibels.
-            image_to_process = 10 * torch.log10(
-                torch.clamp(image_to_process, min=self.epsilon)
-            )
-        if isinstance(image, torch.Tensor):
-            return image_to_process
-        else:
-            image.image = image_to_process
-            return image
+            image.image = 10 * torch.log10(torch.clamp(image.image, min=self.epsilon))
+        return image
 
     def forward(
         self, input_dict: dict[str, Any], target_dict: dict[str, Any]

@@ -234,9 +234,8 @@ class PlanetBasemap(DataSource):
 
         return groups
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: dict) -> Item:
         """Deserializes an item from JSON-decoded data."""
-        assert isinstance(serialized_item, dict)
         return PlanetItem.deserialize(serialized_item)
 
     def ingest(

@@ -211,11 +211,11 @@ data:
             band_names:
               sentinel2_l2a: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
               sentinel1: ["vv", "vh"]
-      # We apply sliding window inference (using 64x64 input crops) with overlap.
-      load_all_patches: true
+      # We apply sliding-window inference (using 64x64 input crops) with overlap.
+      load_all_crops: true
       # This is the crop size for inference.
-      patch_size: 64
-      overlap_ratio: 0.5
+      crop_size: 64
+      overlap_pixels: 32
 trainer:
   callbacks:
    # The RslearnWriter will write our embeddings to a layer in the rslearn dataset.
@@ -227,15 +227,20 @@ trainer:
         # file to store the embeddings.
         output_layer: embeddings
         merger:
+          # The RasterMerge will merge the outputs across the different sliding-window
+          # crops that pertain to the same rslearn windows.
           class_path: rslearn.train.prediction_writer.RasterMerger
           init_args:
-            # This removes the border from the overlap_ratio. With patch size 4 and
-            # input crop size 64, the model produces a 16x16 output, so we keep the
-            # middle 8x8 of that by removing 4 pixels of padding from each side.
-            padding: 4
-            # Set this equal to patch size, so the merger expects the output from the
-            # task to be at 1/(downsample_factor) resolution relative to the window
-            # resolution.
+            # This removes the border from the overlap_pixels. With model patch size 4
+            # and input crop size 64, the model produces a 16x16 output. We have
+            # overlap_pixels=32 at input resolution, which is 8 pixels at output
+            # resolution, so we remove 4 pixels from each side.
+            overlap_pixels: 8
+            # This lets the merger know what output resolution to expect relative to
+            # the window's resolution. Here, our output will be 1/patch_size relative
+            # to the window resolution (input resolution), since we compute one
+            # embedding per patch in the input, so we set the downsample_factor to
+            # patch_size.
             downsample_factor: 4
 ```
 
