@@ -16,6 +16,41 @@ MODALITY_NAMES = [
 ]
 
 
+def prepare_ts_modality(context: ModelContext, mod_key: str) -> torch.Tensor:
+    """Extract and batch a time-series modality from model context.
+
+    Handles variable-length sequences across batch items by zero-padding
+    shorter sequences to the maximum length in the batch.
+
+    Args:
+        context: the model context containing all modality inputs.
+        mod_key: key identifying the time-series modality in each input dict.
+
+    Returns:
+        a tensor of shape [B, HW, T, C] where T is the max sequence length
+        in the batch and shorter sequences are zero-padded.
+    """
+    ts_list = [
+        rearrange(inp[mod_key].image, "c t h w -> (h w) t c") for inp in context.inputs
+    ]
+
+    max_t = max(x.shape[1] for x in ts_list)
+    padded = []
+    for x in ts_list:
+        if x.shape[1] < max_t:
+            pad = torch.zeros(
+                x.shape[0],
+                max_t - x.shape[1],
+                x.shape[2],
+                dtype=x.dtype,
+                device=x.device,
+            )
+            x = torch.cat([x, pad], dim=1)
+        padded.append(x)
+
+    return torch.stack(padded, dim=0)  # [B, HW, T, C]
+
+
 class SimpleTCNEncoder(FeatureExtractor):
     """Simple baseline CNN encoder for Time Series data.
 
@@ -112,14 +147,8 @@ class SimpleTCNEncoder(FeatureExtractor):
             If output_spatial_size is set: a FeatureMaps with shape [B, output_dim, H, W]
                 where the embedding is replicated across all spatial locations.
         """
-        # Extract TS data from context
-        TS_data = torch.stack(
-            [
-                rearrange(inp[self.mod_key].image, "c t h w -> (h w) t c")
-                for inp in context.inputs
-            ],
-            dim=0,  # [B, HW, T, C]
-        )
+        # Extract TS data from context (pads variable-length sequences)
+        TS_data = prepare_ts_modality(context, self.mod_key)  # [B, HW, T, C]
 
         # Average-pool spatial dimensions: [B, T, C]
         if TS_data.dim() == 4:
@@ -356,15 +385,9 @@ class TCNEncoder(FeatureExtractor):
         Returns:
             a FeatureVector with the weather embedding of shape [B, d_output].
         """
-        # Extract ERA5 data from context
-        # Expected shape: [B, T, C] where T is days, C is variables
-        era5_data = torch.stack(
-            [
-                rearrange(inp[self.era5_key].image, "c t h w -> (h w) t c")
-                for inp in context.inputs
-            ],
-            dim=0,
-        )
+        # Extract ERA5 data from context (pads variable-length sequences)
+        # Expected shape after: [B, HW, T, C] where T is days, C is variables
+        era5_data = prepare_ts_modality(context, self.era5_key)
 
         # If spatial dimensions exist, we need to handle them
         # Assuming H=W=1 for daily ERA5 aggregated data, so shape is [B, 1, T, C]
