@@ -7,10 +7,13 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
+import numpy as np
 import numpy.typing as npt
 import planetary_computer
 import rasterio
 import requests
+import xarray as xr
+from affine import Affine
 from typing_extensions import override
 from upath import UPath
 
@@ -712,3 +715,194 @@ class CopDemGlo30(PlanetaryComputer):
     def _get_search_time_range(self, geometry: STGeometry) -> None:
         # Copernicus DEM is static; do not filter STAC searches by time.
         return None
+
+
+class Sentinel3SlstrLST(PlanetaryComputer):
+    """Sentinel-3 SLSTR L2 Land Surface Temperature data on Planetary Computer.
+
+    This collection provides netCDF swaths with geolocation arrays. We fit an affine
+    transform from the geodetic lat/lon arrays and write a GeoTIFF during ingestion.
+    Direct materialization is not supported; keep ingest enabled.
+
+    Requires the optional netCDF/xarray dependencies (netCDF4/h5netcdf/h5py).
+    """
+
+    COLLECTION_NAME = "sentinel-3-slstr-lst-l2-netcdf"
+    LST_ASSET_KEY = "lst-in"
+    GEODETIC_ASSET_KEY = "slstr-geodetic-in"
+    DEFAULT_BANDS = ["LST"]
+
+    def __init__(
+        self,
+        sample_step: int = 20,
+        nodata_value: float = 0.0,
+        context: DataSourceContext = DataSourceContext(),
+        **kwargs: Any,
+    ) -> None:
+        """Initialize a new Sentinel3SlstrLST instance.
+
+        Args:
+            sample_step: stride (in pixels) for sampling the geodetic arrays when
+                fitting the affine transform.
+            nodata_value: value to use for missing data in the output GeoTIFF.
+            context: the data source context.
+            kwargs: additional arguments to pass to PlanetaryComputer.
+        """
+        self.sample_step = max(1, sample_step)
+        self.nodata_value = nodata_value
+
+        if context.layer_config is not None:
+            requested_bands = {
+                band
+                for band_set in context.layer_config.band_sets
+                for band in band_set.bands
+            }
+            if requested_bands != set(self.DEFAULT_BANDS):
+                raise ValueError(
+                    "Sentinel3SlstrLST only supports the LST band. "
+                    f"Requested: {sorted(requested_bands)}"
+                )
+
+        self.band_names = self.DEFAULT_BANDS
+
+        super().__init__(
+            collection_name=self.COLLECTION_NAME,
+            asset_bands={self.LST_ASSET_KEY: self.band_names},
+            skip_items_missing_assets=True,
+            context=context,
+            **kwargs,
+        )
+
+    def _fit_affine_from_geodetic(
+        self, lons: npt.NDArray[np.floating], lats: npt.NDArray[np.floating]
+    ) -> Affine:
+        if lons.shape != lats.shape:
+            raise ValueError(
+                f"expected lon/lat arrays to have same shape, got {lons.shape} and {lats.shape}"
+            )
+        height, width = lons.shape
+        step = self.sample_step
+        rows = np.arange(0, height, step)
+        cols = np.arange(0, width, step)
+        rr, cc = np.meshgrid(rows, cols, indexing="ij")
+        rr = rr.ravel()
+        cc = cc.ravel()
+
+        lon_samples = lons[rr, cc]
+        lat_samples = lats[rr, cc]
+        mask = np.isfinite(lon_samples) & np.isfinite(lat_samples)
+        if mask.sum() < 6:
+            raise ValueError(
+                "insufficient valid geolocation samples to fit affine transform"
+            )
+
+        A = np.stack([np.ones(mask.sum()), cc[mask], rr[mask]], axis=1)
+        coeff_lon, _, _, _ = np.linalg.lstsq(A, lon_samples[mask], rcond=None)
+        coeff_lat, _, _, _ = np.linalg.lstsq(A, lat_samples[mask], rcond=None)
+        return Affine(
+            coeff_lon[1],
+            coeff_lon[2],
+            coeff_lon[0],
+            coeff_lat[1],
+            coeff_lat[2],
+            coeff_lat[0],
+        )
+
+    def ingest(
+        self,
+        tile_store: TileStoreWithLayer,
+        items: list[SourceItem],
+        geometries: list[list[STGeometry]],
+    ) -> None:
+        """Ingest items into the given tile store."""
+        for item in items:
+            if tile_store.is_raster_ready(item.name, self.band_names):
+                continue
+
+            if self.LST_ASSET_KEY not in item.asset_urls:
+                logger.warning(
+                    "Sentinel3SlstrLST item %s missing asset %s, skipping",
+                    item.name,
+                    self.LST_ASSET_KEY,
+                )
+                continue
+            if self.GEODETIC_ASSET_KEY not in item.asset_urls:
+                logger.warning(
+                    "Sentinel3SlstrLST item %s missing asset %s, skipping",
+                    item.name,
+                    self.GEODETIC_ASSET_KEY,
+                )
+                continue
+
+            lst_url = planetary_computer.sign(item.asset_urls[self.LST_ASSET_KEY])
+            geodetic_url = planetary_computer.sign(
+                item.asset_urls[self.GEODETIC_ASSET_KEY]
+            )
+
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                lst_path = os.path.join(tmp_dir, "lst-in.nc")
+                geodetic_path = os.path.join(tmp_dir, "geodetic-in.nc")
+                for url, path in ((lst_url, lst_path), (geodetic_url, geodetic_path)):
+                    with requests.get(
+                        url, stream=True, timeout=self.timeout.total_seconds()
+                    ) as r:
+                        r.raise_for_status()
+                        with open(path, "wb") as f:
+                            for chunk in r.iter_content(chunk_size=8192):
+                                f.write(chunk)
+
+                with xr.open_dataset(lst_path, mask_and_scale=True) as lst_ds, xr.open_dataset(
+                    geodetic_path, mask_and_scale=True
+                ) as geo_ds:
+                    lons = np.asarray(geo_ds["longitude_in"].values, dtype=np.float64)
+                    lats = np.asarray(geo_ds["latitude_in"].values, dtype=np.float64)
+                    transform = self._fit_affine_from_geodetic(lons, lats)
+
+                    band_arrays = []
+                    for band in self.band_names:
+                        if band not in lst_ds:
+                            raise ValueError(
+                                f"Sentinel3SlstrLST band '{band}' not found in {self.LST_ASSET_KEY}"
+                            )
+                        band_arrays.append(
+                            np.asarray(lst_ds[band].values, dtype=np.float32)
+                        )
+
+                    stack = np.stack(band_arrays, axis=0)
+                    if np.issubdtype(stack.dtype, np.floating):
+                        stack = np.nan_to_num(stack, nan=self.nodata_value)
+
+                height, width = stack.shape[1], stack.shape[2]
+                tif_path = os.path.join(tmp_dir, "lst.tif")
+                with rasterio.open(
+                    tif_path,
+                    "w",
+                    driver="GTiff",
+                    height=height,
+                    width=width,
+                    count=len(self.band_names),
+                    dtype=stack.dtype,
+                    crs="EPSG:4326",
+                    transform=transform,
+                    nodata=self.nodata_value,
+                ) as dst:
+                    dst.write(stack)
+                    for idx, band in enumerate(self.band_names, start=1):
+                        dst.set_band_description(idx, band)
+
+                tile_store.write_raster_file(
+                    item.name, self.band_names, UPath(tif_path)
+                )
+
+    def read_raster(
+        self,
+        layer_name: str,
+        item_name: str,
+        bands: list[str],
+        projection: Any,
+        bounds: Any,
+        resampling: Any = rasterio.enums.Resampling.bilinear,
+    ) -> npt.NDArray[Any]:
+        raise NotImplementedError(
+            "Sentinel3SlstrLST does not support direct materialization; set ingest=true."
+        )
