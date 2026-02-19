@@ -53,7 +53,7 @@ def interpolate_to_grid(
     data_valid = flat_data[:, valid]
 
     logger.debug(
-        "%s %s %s %s",
+        "Identified lon/lat valid bounds to interpolate: %s %s %s %s",
         lon_valid.min(),
         lat_valid.min(),
         lon_valid.max(),
