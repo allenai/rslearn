@@ -179,9 +179,12 @@ class DataInput:
             data_type: either "raster" or "vector"
             layers: list of layer names or item group specifiers that this input can be
                 read from. If load_all_item_groups=False, each entry should be an item
-                group specifier, e.g. "sentinel2" for layer_name=sentinel2, group_idx=0
-                or "sentinel2.1" for layer_name=sentinel2, group_idx=1. Otherwise, each
-                entry should be a layer name.
+                group specifier (e.g. "sentinel2" for layer_name=sentinel2, group_idx=0
+                or "sentinel2.1" for layer_name=sentinel2, group_idx=1). Otherwise,
+                each entry should be a layer name. For example, if you have a layer
+                "sentinel2" with three item groups: with load_all_item_groups=False,
+                set layers=["sentinel2", "sentinel2.1", "sentinel2.2"]; with
+                load_all_item_groups=True, set layers=["sentinel2"].
             bands: the bands to read, if this is a raster.
             required: whether examples lacking one of these layers should be skipped
             passthrough: whether to expose this to the model even if it isn't returned
@@ -202,7 +205,11 @@ class DataInput:
                 load_all_item_groups=True, we treat layers as a list of layer names,
                 and include all item groups within each layer as candidates for
                 reading; whether we pick a random item group or stack them is still
-                controlled by load_all_layers.
+                controlled by load_all_layers. Note that, when load_all_layers=True and
+                load_all_item_groups=True, we will only exclude windows from training
+                that have zero item groups in one of the configured layers; additionally,
+                if windows have different numbers of item groups, then we will read
+                RasterImages with different numbers of timesteps.
             resolution_factor: controls the resolution at which raster data is loaded for training.
                 By default (factor=1), data is loaded at the window resolution.
                 E.g. for a 64x64 window at 10 m/pixel with resolution_factor=1/2,
