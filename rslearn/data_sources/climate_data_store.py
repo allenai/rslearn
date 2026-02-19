@@ -4,6 +4,7 @@ import os
 import tempfile
 import zipfile
 from datetime import UTC, datetime
+from typing import Any
 
 import cdsapi
 import netCDF4
@@ -475,8 +476,8 @@ class ERA5LandHourlyTimeseries(DataSource):
 
     This data source corresponds to the reanalysis-era5-land-timeseries dataset, which is
     optimized for retrieving long time-series data for single points rather than spatial
-    areas. It uses a 0.1 degree grid and automatically snaps requested coordinates to the
-    nearest grid cell center to avoid duplicate requests.
+    areas. It always materializes a 1x1 raster for each window, containing data from the
+    closest 0.1 degree grid cell to the window's center.
 
     An API key must be passed either in the configuration or via the CDSAPI_KEY
     environment variable. You can acquire an API key by going to the Climate Data Store
@@ -535,8 +536,7 @@ class ERA5LandHourlyTimeseries(DataSource):
 
         The ERA5-Land timeseries dataset uses a 0.1 degree grid. When a requested
         location doesn't exactly match a grid point, the API automatically selects
-        the nearest grid point. This method pre-computes the snapped coordinates
-        to enable proper caching and avoid duplicate requests.
+        the nearest grid point.
 
         Args:
             lon: the longitude in degrees
@@ -545,8 +545,8 @@ class ERA5LandHourlyTimeseries(DataSource):
         Returns:
             A tuple of (snapped_lon, snapped_lat) rounded to 1 decimal place.
         """
-        snapped_lon = round(round(lon / self.PIXEL_SIZE) * self.PIXEL_SIZE, 1)
-        snapped_lat = round(round(lat / self.PIXEL_SIZE) * self.PIXEL_SIZE, 1)
+        snapped_lon = round(lon, 1)
+        snapped_lat = round(lat, 1)
         return (snapped_lon, snapped_lat)
 
     def get_items(
@@ -668,7 +668,13 @@ class ERA5LandHourlyTimeseries(DataSource):
                 if len(band_data.shape) != 1:
                     continue
                 # Skip coordinate/time variables
-                if band_name in ("time", "valid_time", "latitude", "longitude", "expver"):
+                if band_name in (
+                    "time",
+                    "valid_time",
+                    "latitude",
+                    "longitude",
+                    "expver",
+                ):
                     continue
 
                 logger.debug(
@@ -763,9 +769,7 @@ class ERA5LandHourlyTimeseries(DataSource):
                 "date": [date_str],
                 "data_format": self.DATA_FORMAT,
             }
-            logger.debug(
-                f"CDS API request for location=({lat}, {lon}) date={date_str}"
-            )
+            logger.debug(f"CDS API request for location=({lat}, {lon}) date={date_str}")
 
             with tempfile.TemporaryDirectory() as tmp_dir:
                 local_zip_fname = os.path.join(tmp_dir, f"{item.name}.zip")
