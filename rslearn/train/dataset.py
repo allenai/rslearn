@@ -292,6 +292,14 @@ def read_raster_layer_for_data_input(
         raster_dir = window.get_raster_dir(
             layer_name, band_set.bands, group_idx=group_idx
         )
+        # Fallback: some datasets (e.g. rasterized vector layers) write the geotiff
+        # directly under the layer dir (layers/<name>/geotiff.tif) instead of
+        # layers/<name>/<bandset_dir>/geotiff.tif.
+        geotiff_fname = getattr(raster_format, "fname", "geotiff.tif")
+        if not (raster_dir / geotiff_fname).exists():
+            layer_dir = window.get_layer_dir(layer_name, group_idx=group_idx)
+            if (layer_dir / geotiff_fname).exists():
+                raster_dir = layer_dir
 
         # TODO: previously we try to read based on band_set.zoom_offset when possible,
         # and handle zooming in with torch.repeat (if resampling method is nearest

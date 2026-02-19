@@ -238,32 +238,32 @@ def render_vector_label_segmentation(
 
     sorted_features = sorted(features, key=get_label, reverse=True)
 
+    def draw_polygon(poly: shapely.Polygon, fill_color: tuple[int, int, int]) -> None:
+        """Draw a single polygon and its holes (interiors) onto the mask."""
+        if poly.is_empty:
+            return
+        coords = list(poly.exterior.coords)
+        pixel_coords = [(int(x - bounds[0]), int(y - bounds[1])) for x, y in coords]
+        if len(pixel_coords) >= 3:
+            draw.polygon(pixel_coords, fill=fill_color, outline=fill_color)
+        for interior in poly.interiors:
+            hole_coords = [
+                (int(x - bounds[0]), int(y - bounds[1])) for x, y in interior.coords
+            ]
+            if len(hole_coords) >= 3:
+                draw.polygon(hole_coords, fill=(0, 0, 0), outline=fill_color)
+
     for feature in sorted_features:
         label = feature.properties.get(class_property_name)
         label = str(label)
         color = label_colors.get(label, (255, 255, 255))
         geom_pixel = feature.geometry.to_projection(projection)
         shp = geom_pixel.shp
-        if shp.geom_type == "Polygon":
-            coords = list(shp.exterior.coords)
-            pixel_coords = [(int(x - bounds[0]), int(y - bounds[1])) for x, y in coords]
-            if len(pixel_coords) >= 3:
-                draw.polygon(pixel_coords, fill=color, outline=color)
-                for interior in shp.interiors:
-                    hole_coords = [
-                        (int(x - bounds[0]), int(y - bounds[1]))
-                        for x, y in interior.coords
-                    ]
-                    if len(hole_coords) >= 3:
-                        draw.polygon(hole_coords, fill=(0, 0, 0), outline=color)
-        elif shp.geom_type == "MultiPolygon":
-            for poly in shp.geoms:
-                coords = list(poly.exterior.coords)
-                pixel_coords = [
-                    (int(x - bounds[0]), int(y - bounds[1])) for x, y in coords
-                ]
-                if len(pixel_coords) >= 3:
-                    draw.polygon(pixel_coords, fill=color, outline=color)
+        # Flatten so we handle Polygon, MultiPolygon, and GeometryCollection (e.g.
+        # after clip). Only draw polygon primitives.
+        for poly in flatten_shape(shp):
+            if isinstance(poly, shapely.Polygon):
+                draw_polygon(poly, color)
 
     return np.array(mask_img)
 
