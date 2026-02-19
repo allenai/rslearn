@@ -162,14 +162,21 @@ class OlmoEarth(FeatureExtractor):
         The folder should contain config.json as well as the model_and_optim folder
         that contains the distributed checkpoint. This is the format produced by
         pre-training runs in olmoearth_pretrain.
+
+        Uses the full olmoearth_pretrain package if available (to pick up architecture
+        updates), otherwise falls back to olmoearth_pretrain_minimal.
         """
+        try:
+            from olmoearth_pretrain.config import Config as FullConfig
+        except ImportError:
+            FullConfig = Config
+
         with (checkpoint_upath / "config.json").open() as f:
             config_dict = json.load(f)
-            model_config = Config.from_dict(config_dict["model"])
+            model_config = FullConfig.from_dict(config_dict["model"])
 
         model = model_config.build()
 
-        # Load the checkpoint (requires olmo_core for distributed checkpoint loading).
         if not random_initialization:
             try:
                 from olmo_core.distributed.checkpoint import (
