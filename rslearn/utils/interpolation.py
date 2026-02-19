@@ -73,9 +73,13 @@ def interpolate_to_grid(
     height = bounds[3] - bounds[1]
     width = bounds[2] - bounds[0]
 
+    # Convert lon/lat to fractional grid coordinates within the output grid.
+    # (0,0) corresponds to the lower-left grid cell determined by bounds.
     x = lon_valid / grid_resolution - bounds[0]
     y = lat_valid / grid_resolution - bounds[1]
 
+    # Integer grid indices of the top-left neighbor for each sample.
+    # We splat each sample into the 4 neighboring grid cells using bilinear weights.
     x0 = np.floor(x).astype(np.int64)
     y0 = np.floor(y).astype(np.int64)
     x1 = x0 + 1
@@ -84,6 +88,7 @@ def interpolate_to_grid(
     wx = x - x0
     wy = y - y0
 
+    # Bilinear weights for the 4 neighbors.
     w00 = (1.0 - wx) * (1.0 - wy)
     w10 = wx * (1.0 - wy)
     w01 = (1.0 - wx) * wy
@@ -93,6 +98,7 @@ def interpolate_to_grid(
     wgt = np.zeros((height, width), dtype=np.float64)
 
     def add(ix: npt.NDArray[np.int64], iy: npt.NDArray[np.int64], w: npt.NDArray) -> None:
+        # Accumulate weighted contributions at integer grid indices.
         valid_idx = (ix >= 0) & (ix < width) & (iy >= 0) & (iy < height) & (w > 0)
         if not np.any(valid_idx):
             return
