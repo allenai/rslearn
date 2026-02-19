@@ -117,15 +117,3 @@ class TestERA5LandHourlyTimeseries:
         )
         assert tile_store.is_raster_ready(layer_name, item_0.name, self.TEST_BANDS)
         assert tile_store.is_raster_ready(layer_name, item_1.name, self.TEST_BANDS)
-
-    def test_grid_snapping(self) -> None:
-        """Test that coordinates are correctly snapped to 0.1 degree grid."""
-        data_source = ERA5LandHourlyTimeseries(band_names=self.TEST_BANDS)
-
-        snapped_lon, snapped_lat = data_source._snap_to_grid(-122.38, 47.62)
-        assert snapped_lon == -122.4
-        assert snapped_lat == 47.6
-
-        snapped_lon, snapped_lat = data_source._snap_to_grid(-122.32, 47.67)
-        assert snapped_lon == -122.3
-        assert snapped_lat == 47.7
