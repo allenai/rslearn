@@ -164,6 +164,7 @@ class DataInput:
         data_type: str,
         layers: list[str],
         bands: list[str] | None = None,
+        num_bands: int | None = None,
         required: bool = True,
         passthrough: bool = False,
         is_target: bool = False,
@@ -178,7 +179,12 @@ class DataInput:
         Args:
             data_type: either "raster" or "vector"
             layers: list of layer names that this input can be read from.
-            bands: the bands to read, if this is a raster.
+            bands: the bands to read, if this is a raster. Exactly one of bands
+                and num_bands must be set for raster inputs.
+            num_bands: the number of bands in this input. The bands will be named
+                B0, B1, B2, etc. Useful for layers with many bands where listing
+                them explicitly is impractical. Exactly one of bands and num_bands
+                must be set for raster inputs.
             required: whether examples lacking one of these layers should be skipped
             passthrough: whether to expose this to the model even if it isn't returned
                 by any task
@@ -203,7 +209,13 @@ class DataInput:
         """
         self.data_type = data_type
         self.layers = layers
-        self.bands = bands
+
+        self.bands: list[str] | None
+        if num_bands is not None and bands is None:
+            self.bands = [f"B{i}" for i in range(num_bands)]
+        else:
+            self.bands = bands
+
         self.required = required
         self.passthrough = passthrough
         self.is_target = is_target
