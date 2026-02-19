@@ -982,6 +982,8 @@ Available bands:
     "sample_step": 20,
     // Nodata value used for missing pixels (default 0.0).
     "nodata_value": 0.0,
+    // Optional output grid resolution in degrees. If omitted, estimate from geodetic arrays.
+    "grid_resolution": null,
     // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
     "query": null,
     "sort_by": null,

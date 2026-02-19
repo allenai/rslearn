@@ -736,6 +736,7 @@ class Sentinel3SlstrLST(PlanetaryComputer):
         self,
         sample_step: int = 20,
         nodata_value: float = 0.0,
+        grid_resolution: float | None = None,
         context: DataSourceContext = DataSourceContext(),
         **kwargs: Any,
     ) -> None:
@@ -745,11 +746,14 @@ class Sentinel3SlstrLST(PlanetaryComputer):
             sample_step: stride (in pixels) for sampling the geodetic arrays when
                 estimating grid resolution.
             nodata_value: value to use for missing data in the output GeoTIFF.
+            grid_resolution: optional output grid resolution (degrees). If not set,
+                it is estimated from the geodetic arrays.
             context: the data source context.
             kwargs: additional arguments to pass to PlanetaryComputer.
         """
         self.sample_step = max(1, sample_step)
         self.nodata_value = nodata_value
+        self.grid_resolution = grid_resolution
 
         if context.layer_config is not None:
             requested_bands = {
@@ -867,9 +871,13 @@ class Sentinel3SlstrLST(PlanetaryComputer):
                     stack = np.stack(band_arrays, axis=0)
                     lons, lats = self._mask_geodetic_by_valid_data(lons, lats, stack)
 
-                    grid_resolution = self._estimate_grid_resolution(lons, lats)
+                    grid_resolution = (
+                        self.grid_resolution
+                        if self.grid_resolution is not None
+                        else self._estimate_grid_resolution(lons, lats)
+                    )
                     logger.debug(
-                        "Estimated SLSTR LST grid resolution (deg): %s",
+                        "SLSTR LST grid resolution (deg): %s",
                         grid_resolution,
                     )
                     gridded_array, projection, bounds = interpolate_to_grid(
