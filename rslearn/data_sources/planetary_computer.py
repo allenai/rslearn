@@ -908,6 +908,7 @@ class Sentinel3SlstrLST(PlanetaryComputer):
         bounds: Any,
         resampling: Any = rasterio.enums.Resampling.bilinear,
     ) -> npt.NDArray[Any]:
+        """Direct materialization is not supported for this data source."""
         raise NotImplementedError(
             "Sentinel3SlstrLST does not support direct materialization; set ingest=true."
         )

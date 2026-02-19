@@ -10,7 +10,7 @@ from rasterio.crs import CRS
 from scipy.interpolate import griddata
 
 from rslearn.log_utils import get_logger
-from rslearn.utils.geometry import PixelBounds, Projection, WGS84_EPSG
+from rslearn.utils.geometry import WGS84_EPSG, PixelBounds, Projection
 
 logger = get_logger(__name__)
 
