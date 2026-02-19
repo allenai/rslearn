@@ -868,6 +868,10 @@ class Sentinel3SlstrLST(PlanetaryComputer):
                     lons, lats = self._mask_geodetic_by_valid_data(lons, lats, stack)
 
                     grid_resolution = self._estimate_grid_resolution(lons, lats)
+                    logger.debug(
+                        "Estimated SLSTR LST grid resolution (deg): %s",
+                        grid_resolution,
+                    )
                     gridded_array, projection, bounds = interpolate_to_grid(
                         data=stack,
                         lon=lons,
