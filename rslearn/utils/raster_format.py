@@ -182,19 +182,6 @@ class RasterFormat:
         """
         raise NotImplementedError
 
-    @staticmethod
-    def from_config(name: str, config: dict[str, Any]) -> "RasterFormat":
-        """Create a RasterFormat from a config dict.
-
-        Args:
-            name: the name of this format
-            config: the config dict
-
-        Returns:
-            the RasterFormat instance
-        """
-        raise NotImplementedError
-
 
 class ImageTileRasterFormat(RasterFormat):
     """A RasterFormat that stores data in image tiles corresponding to grid cells.
@@ -430,19 +417,6 @@ class ImageTileRasterFormat(RasterFormat):
             return "tif"
         raise ValueError(f"unknown image format {self.format}")
 
-    @staticmethod
-    def from_config(name: str, config: dict[str, Any]) -> "ImageTileRasterFormat":
-        """Create a ImageTileRasterFormat from a config dict.
-
-        Args:
-            name: the name of this format
-            config: the config dict
-        """
-        return ImageTileRasterFormat(
-            format=config.get("format", "geotiff"),
-            tile_size=config.get("tile_size", 512),
-        )
-
 
 class GeotiffRasterFormat(RasterFormat):
     """A raster format that uses one big, tiled GeoTIFF with small block size."""
@@ -594,26 +568,6 @@ class GeotiffRasterFormat(RasterFormat):
             _, bounds = get_raster_projection_and_bounds(src)
             return bounds
 
-    @staticmethod
-    def from_config(name: str, config: dict[str, Any]) -> "GeotiffRasterFormat":
-        """Create a GeotiffRasterFormat from a config dict.
-
-        Args:
-            name: the name of this format
-            config: the config dict
-
-        Returns:
-            the GeotiffRasterFormat
-        """
-        kwargs = {}
-        if "block_size" in config:
-            kwargs["block_size"] = config["block_size"]
-        if "always_enable_tiling" in config:
-            kwargs["always_enable_tiling"] = config["always_enable_tiling"]
-        if "geotiff_options" in config:
-            kwargs["geotiff_options"] = config["geotiff_options"]
-        return GeotiffRasterFormat(**kwargs)
-
 
 class SingleImageRasterFormat(RasterFormat):
     """A raster format that produces a single image called image.png/jpg.
@@ -750,19 +704,3 @@ class SingleImageRasterFormat(RasterFormat):
             src_col_offset : src_col_offset + col_overlap,
         ]
         return dst
-
-    @staticmethod
-    def from_config(name: str, config: dict[str, Any]) -> "SingleImageRasterFormat":
-        """Create a SingleImageRasterFormat from a config dict.
-
-        Args:
-            name: the name of this format
-            config: the config dict
-
-        Returns:
-            the SingleImageRasterFormat
-        """
-        kwargs = {}
-        if "format" in config:
-            kwargs["format"] = config["format"]
-        return SingleImageRasterFormat(**kwargs)

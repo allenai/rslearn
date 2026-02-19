@@ -172,6 +172,27 @@ were outside the context used for labeling, and 1 otherwise, and a `sentinel2` l
 containing the input image. The image will be masked to 0 at regions not considered
 during labeling, so that the model can learn to predict no boxes in those regions.
 
+## Sentinel2SCLToMask
+
+The `Sentinel2SCLToMask` transform converts a Sentinel-2 Scene Classification Layer
+(SCL) raster into a binary mask image (1 = valid, 0 = masked). This can be used with
+`Mask` to apply SCL-based masking at training time.
+
+```yaml
+      transforms:
+        - class_path: rslearn.train.transforms.sentinel2.Sentinel2SCLToMask
+          init_args:
+            scl_selector: "scl"
+            output_selector: "mask"
+            # Default: [3, 8, 9, 10] (cloud shadow, medium/high cloud, cirrus)
+            exclude_scl_values: [3, 8, 9, 10]
+        - class_path: rslearn.train.transforms.mask.Mask
+          init_args:
+            selectors: ["image"]
+            mask_selector: "mask"
+            mask_value: 0
+```
+
 ## Normalize
 
 The `Normalize` transform implements linear normalization of images.
