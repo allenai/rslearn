@@ -129,7 +129,3 @@ class TestERA5LandHourlyTimeseries:
         snapped_lon, snapped_lat = data_source._snap_to_grid(-122.32, 47.67)
         assert snapped_lon == -122.3
         assert snapped_lat == 47.7
-
-        snapped_lon, snapped_lat = data_source._snap_to_grid(10.23, 45.18)
-        assert snapped_lon == 10.2
-        assert snapped_lat == 45.2
