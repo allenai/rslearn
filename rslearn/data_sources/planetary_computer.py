@@ -793,6 +793,18 @@ class Sentinel3SlstrLST(PlanetaryComputer):
             return 0.01
         return float(np.median(diffs))
 
+    def _mask_geodetic_by_valid_data(
+        self,
+        lons: npt.NDArray[np.floating],
+        lats: npt.NDArray[np.floating],
+        data: npt.NDArray[np.floating],
+    ) -> tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
+        """Mask lon/lat arrays where the data is invalid."""
+        valid_mask = np.isfinite(data[0])
+        lons = np.where(valid_mask, lons, np.nan)
+        lats = np.where(valid_mask, lats, np.nan)
+        return lons, lats
+
     def ingest(
         self,
         tile_store: TileStoreWithLayer,
@@ -853,9 +865,7 @@ class Sentinel3SlstrLST(PlanetaryComputer):
                         )
 
                     stack = np.stack(band_arrays, axis=0)
-                    valid_mask = np.isfinite(stack[0])
-                    lons = np.where(valid_mask, lons, np.nan)
-                    lats = np.where(valid_mask, lats, np.nan)
+                    lons, lats = self._mask_geodetic_by_valid_data(lons, lats, stack)
 
                     grid_resolution = self._estimate_grid_resolution(lons, lats)
                     gridded_array, projection, bounds = interpolate_to_grid(
