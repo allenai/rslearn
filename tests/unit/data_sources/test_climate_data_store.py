@@ -1,9 +1,12 @@
+from unittest.mock import MagicMock, patch
+
 from rslearn.data_sources.climate_data_store import ERA5LandHourlyTimeseries
 
 TEST_BANDS = ["2m-temperature", "total-precipitation"]
 
 
-def test_grid_snapping() -> None:
+@patch("rslearn.data_sources.climate_data_store.cdsapi.Client")
+def test_grid_snapping(mock_client: MagicMock) -> None:
     """Test that coordinates are correctly snapped to 0.1 degree grid."""
     data_source = ERA5LandHourlyTimeseries(band_names=TEST_BANDS)
 
