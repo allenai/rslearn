@@ -966,7 +966,7 @@ Note that B10 is not present in L2A.
 [Sentinel-3 SLSTR Level-2 Land Surface Temperature (LST) data on Microsoft Planetary
 Computer](https://planetarycomputer.microsoft.com/dataset/sentinel-3-slstr-lst-l2-netcdf). This dataset is provided as netCDF swaths; the data source uses the `lst-in`
 asset for measurements and the `slstr-geodetic-in` asset for geolocation. During
-ingestion it interpolates the swath onto a regular lat/lon grid using bilinear
+ingestion it interpolates the swath onto a regular lat/lon grid using linear
 weights (this is an approximation; for precise geolocation you may need a custom
 workflow).
 Direct materialization is not supported, so keep `ingest` set to true.

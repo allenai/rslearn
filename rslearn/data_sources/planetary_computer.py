@@ -721,7 +721,7 @@ class Sentinel3SlstrLST(PlanetaryComputer):
     """Sentinel-3 SLSTR L2 Land Surface Temperature data on Planetary Computer.
 
     This collection provides netCDF swaths with geolocation arrays. We interpolate
-    the swath onto a regular lat/lon grid using bilinear weights during ingestion.
+    the swath onto a regular lat/lon grid using linear interpolation during ingestion.
     Direct materialization is not supported; keep ingest enabled.
 
     Requires the optional netCDF/xarray dependencies (netCDF4/h5netcdf/h5py).

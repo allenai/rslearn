@@ -8,6 +8,7 @@ import numpy as np
 import numpy.typing as npt
 import torch
 from rasterio.crs import CRS
+from scipy.interpolate import griddata
 
 from rslearn.log_utils import get_logger
 from rslearn.utils.geometry import PixelBounds, Projection, WGS84_EPSG
@@ -55,7 +56,13 @@ def interpolate_to_grid(
     lat_valid = lat_flat[valid]
     data_valid = flat_data[:, valid]
 
-    logger.debug("%s %s %s %s", lon_valid.min(), lat_valid.min(), lon_valid.max(), lat_valid.max())
+    logger.debug(
+        "%s %s %s %s",
+        lon_valid.min(),
+        lat_valid.min(),
+        lon_valid.max(),
+        lat_valid.max(),
+    )
     bounds = (
         math.floor(lon_valid.min() / grid_resolution),
         math.floor(lat_valid.min() / grid_resolution),
@@ -73,54 +80,29 @@ def interpolate_to_grid(
     height = bounds[3] - bounds[1]
     width = bounds[2] - bounds[0]
 
-    # Convert lon/lat to fractional grid coordinates within the output grid.
-    # (0,0) corresponds to the lower-left grid cell determined by bounds.
-    x = lon_valid / grid_resolution - bounds[0]
-    y = lat_valid / grid_resolution - bounds[1]
-
-    # Integer grid indices of the top-left neighbor for each sample.
-    # We splat each sample into the 4 neighboring grid cells using bilinear weights.
-    x0 = np.floor(x).astype(np.int64)
-    y0 = np.floor(y).astype(np.int64)
-    x1 = x0 + 1
-    y1 = y0 + 1
-
-    wx = x - x0
-    wy = y - y0
-
-    # Bilinear weights for the 4 neighbors.
-    w00 = (1.0 - wx) * (1.0 - wy)
-    w10 = wx * (1.0 - wy)
-    w01 = (1.0 - wx) * wy
-    w11 = wx * wy
-
-    acc = np.zeros((num_bands, height, width), dtype=np.float64)
-    wgt = np.zeros((height, width), dtype=np.float64)
-
-    def add(ix: npt.NDArray[np.int64], iy: npt.NDArray[np.int64], w: npt.NDArray) -> None:
-        # Accumulate weighted contributions at integer grid indices.
-        valid_idx = (ix >= 0) & (ix < width) & (iy >= 0) & (iy < height) & (w > 0)
-        if not np.any(valid_idx):
-            return
-        ix = ix[valid_idx]
-        iy = iy[valid_idx]
-        w = w[valid_idx]
-        data_slice = data_valid[:, valid_idx]
-        for band in range(num_bands):
-            np.add.at(acc[band], (iy, ix), data_slice[band] * w)
-        np.add.at(wgt, (iy, ix), w)
-
-    add(x0, y0, w00)
-    add(x1, y0, w10)
-    add(x0, y1, w01)
-    add(x1, y1, w11)
+    # Construct lon/lat coordinates for each grid cell in the output.
+    xs = (np.arange(bounds[0], bounds[2]) * grid_resolution).astype(np.float64)
+    ys = (np.arange(bounds[1], bounds[3]) * grid_resolution).astype(np.float64)
+    grid_lon, grid_lat = np.meshgrid(xs, ys)
 
     gridded_array = NODATA_VALUE * np.ones(
         (num_bands, height, width), dtype=np.float32
     )
-    mask = wgt > 0
-    if np.any(mask):
-        gridded_array[:, mask] = (acc[:, mask] / wgt[mask]).astype(np.float32)
+    points = np.column_stack([lon_valid, lat_valid])
+
+    for band in range(num_bands):
+        values = data_valid[band]
+        band_valid = np.isfinite(values)
+        if not np.any(band_valid):
+            continue
+        grid = griddata(
+            points[band_valid],
+            values[band_valid],
+            (grid_lon, grid_lat),
+            method="linear",
+        )
+        grid = np.where(np.isfinite(grid), grid, NODATA_VALUE).astype(np.float32)
+        gridded_array[band] = grid
 
     gridded_array = torch.as_tensor(gridded_array)
     for step_idx in range(dilation_steps):
