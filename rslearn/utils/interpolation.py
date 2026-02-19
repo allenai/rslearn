@@ -6,7 +6,6 @@ import math
 
 import numpy as np
 import numpy.typing as npt
-import torch
 from rasterio.crs import CRS
 from scipy.interpolate import griddata
 
@@ -23,7 +22,6 @@ def interpolate_to_grid(
     lon: npt.NDArray,
     lat: npt.NDArray,
     grid_resolution: float,
-    dilation_steps: int,
 ) -> tuple[npt.NDArray, Projection, PixelBounds]:
     """Interpolate points onto a fixed-resolution grid.
 
@@ -32,8 +30,6 @@ def interpolate_to_grid(
         lon: longitude of each pixel (N).
         lat: latitude of each pixel (N).
         grid_resolution: the resolution of the grid.
-        dilation_steps: how many steps to run dilation for determining where to copy
-            VIIRS data.
 
     Returns:
         a tuple (array, projection, bounds) containing the gridded array along with
@@ -79,7 +75,6 @@ def interpolate_to_grid(
     num_bands = data.shape[0]
     height = bounds[3] - bounds[1]
     width = bounds[2] - bounds[0]
-
     # Construct lon/lat coordinates for each grid cell in the output.
     xs = (np.arange(bounds[0], bounds[2]) * grid_resolution).astype(np.float64)
     ys = (np.arange(bounds[1], bounds[3]) * grid_resolution).astype(np.float64)
@@ -103,19 +98,6 @@ def interpolate_to_grid(
         )
         grid = np.where(np.isfinite(grid), grid, NODATA_VALUE).astype(np.float32)
         gridded_array[band] = grid
-
-    gridded_array = torch.as_tensor(gridded_array)
-    for step_idx in range(dilation_steps):
-        logger.debug("Dilation step %s", step_idx)
-        max_pool_result = torch.nn.functional.max_pool2d(
-            input=gridded_array,
-            kernel_size=3,
-            stride=1,
-            padding=1,
-        )
-        masked_result = max_pool_result * (gridded_array == NODATA_VALUE).float()
-        gridded_array = torch.maximum(gridded_array, masked_result)
-    gridded_array = gridded_array.numpy()
 
     projection = Projection(CRS.from_epsg(WGS84_EPSG), grid_resolution, grid_resolution)
     return (gridded_array, projection, bounds)

@@ -14,7 +14,6 @@ def test_interpolate_to_grid_linear_griddata() -> None:
         lon=lon,
         lat=lat,
         grid_resolution=1.0,
-        dilation_steps=0,
     )
 
     assert bounds == (0, 0, 2, 2)

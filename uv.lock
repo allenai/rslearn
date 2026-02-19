@@ -1484,6 +1484,19 @@ wheels = [
 ]
 
 [[package]]
+name = "h5netcdf"
+version = "1.8.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "packaging" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ef/03/92d6cc02c0055158167255980461155d6e17f1c4143c03f8bcc18d3e3f3a/h5netcdf-1.8.1.tar.gz", hash = "sha256:9b396a4cc346050fc1a4df8523bc1853681ec3544e0449027ae397cb953c7a16", size = 78679, upload-time = "2026-01-23T07:35:31.233Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b1/8b/88f16936a8e8070a83d36239555227ecd91728f9ef222c5382cda07e0fd6/h5netcdf-1.8.1-py3-none-any.whl", hash = "sha256:a76ed7cfc9b8a8908ea7057c4e57e27307acff1049b7f5ed52db6c2247636879", size = 62915, upload-time = "2026-01-23T07:35:30.195Z" },
+]
+
+[[package]]
 name = "h5py"
 version = "3.15.1"
 source = { registry = "https://pypi.org/simple" }
@@ -4382,6 +4395,8 @@ extra = [
     { name = "fsspec", extra = ["gcs", "s3"] },
     { name = "google-cloud-bigquery" },
     { name = "google-cloud-storage" },
+    { name = "h5netcdf" },
+    { name = "h5py" },
     { name = "huggingface-hub" },
     { name = "netcdf4" },
     { name = "numcodecs" },
@@ -4416,6 +4431,8 @@ requires-dist = [
     { name = "fsspec", extras = ["gcs", "s3"], marker = "extra == 'extra'" },
     { name = "google-cloud-bigquery", marker = "extra == 'extra'", specifier = ">=3.35" },
     { name = "google-cloud-storage", marker = "extra == 'extra'", specifier = ">=2.18" },
+    { name = "h5netcdf", marker = "extra == 'extra'", specifier = ">=1.6" },
+    { name = "h5py", marker = "extra == 'extra'", specifier = ">=3.12" },
     { name = "huggingface-hub", marker = "extra == 'extra'", specifier = ">=0.34.4" },
     { name = "interrogate", marker = "extra == 'dev'", specifier = ">=1.7.0" },
     { name = "jsonargparse", specifier = ">=4.35.0" },

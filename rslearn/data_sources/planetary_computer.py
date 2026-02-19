@@ -863,7 +863,6 @@ class Sentinel3SlstrLST(PlanetaryComputer):
                         lon=lons,
                         lat=lats,
                         grid_resolution=grid_resolution,
-                        dilation_steps=0,
                     )
 
                     if self.nodata_value != NODATA_VALUE:
