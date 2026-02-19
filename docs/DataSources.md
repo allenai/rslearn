@@ -861,8 +861,9 @@ Note that B10 is not present in L2A.
 [Sentinel-3 SLSTR Level-2 Land Surface Temperature (LST) data on Microsoft Planetary
 Computer](https://planetarycomputer.microsoft.com/dataset/sentinel-3-slstr-lst-l2-netcdf). This dataset is provided as netCDF swaths; the data source uses the `lst-in`
 asset for measurements and the `slstr-geodetic-in` asset for geolocation. During
-ingestion it fits an affine transform from the geodetic arrays and writes a GeoTIFF
-(this is an approximation; for precise geolocation you may need a custom workflow).
+ingestion it interpolates the swath onto a regular lat/lon grid using bilinear
+weights (this is an approximation; for precise geolocation you may need a custom
+workflow).
 Direct materialization is not supported, so keep `ingest` set to true.
 
 Available bands:
@@ -872,7 +873,7 @@ Available bands:
 {
   "class_path": "rslearn.data_sources.planetary_computer.Sentinel3SlstrLST",
   "init_args": {
-    // Stride for sampling geolocation arrays when fitting the affine transform.
+    // Stride for sampling geolocation arrays when estimating grid resolution.
     "sample_step": 20,
     // Nodata value used for missing pixels (default 0.0).
     "nodata_value": 0.0,

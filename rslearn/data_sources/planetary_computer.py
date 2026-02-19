@@ -13,7 +13,6 @@ import planetary_computer
 import rasterio
 import requests
 import xarray as xr
-from affine import Affine
 from typing_extensions import override
 from upath import UPath
 
@@ -26,6 +25,7 @@ from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import STGeometry
+from rslearn.utils.interpolation import NODATA_VALUE, interpolate_to_grid
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 from rslearn.utils.stac import StacClient, StacItem
 
@@ -720,8 +720,8 @@ class CopDemGlo30(PlanetaryComputer):
 class Sentinel3SlstrLST(PlanetaryComputer):
     """Sentinel-3 SLSTR L2 Land Surface Temperature data on Planetary Computer.
 
-    This collection provides netCDF swaths with geolocation arrays. We fit an affine
-    transform from the geodetic lat/lon arrays and write a GeoTIFF during ingestion.
+    This collection provides netCDF swaths with geolocation arrays. We interpolate
+    the swath onto a regular lat/lon grid using bilinear weights during ingestion.
     Direct materialization is not supported; keep ingest enabled.
 
     Requires the optional netCDF/xarray dependencies (netCDF4/h5netcdf/h5py).
@@ -743,7 +743,7 @@ class Sentinel3SlstrLST(PlanetaryComputer):
 
         Args:
             sample_step: stride (in pixels) for sampling the geodetic arrays when
-                fitting the affine transform.
+                estimating grid resolution.
             nodata_value: value to use for missing data in the output GeoTIFF.
             context: the data source context.
             kwargs: additional arguments to pass to PlanetaryComputer.
@@ -773,45 +773,25 @@ class Sentinel3SlstrLST(PlanetaryComputer):
             **kwargs,
         )
 
-    def _fit_affine_from_geodetic(
+    def _estimate_grid_resolution(
         self, lons: npt.NDArray[np.floating], lats: npt.NDArray[np.floating]
-    ) -> Affine:
-        """Fit an affine transform from geodetic lon/lat arrays.
-
-        Uses a least-squares fit to map pixel coordinates (col, row) to lon/lat.
-        This provides an approximate georeferencing for the swath.
-        """
+    ) -> float:
+        """Estimate grid resolution in degrees from geodetic arrays."""
         if lons.shape != lats.shape:
             raise ValueError(
                 f"expected lon/lat arrays to have same shape, got {lons.shape} and {lats.shape}"
             )
-        height, width = lons.shape
-        step = self.sample_step
-        rows = np.arange(0, height, step)
-        cols = np.arange(0, width, step)
-        rr, cc = np.meshgrid(rows, cols, indexing="ij")
-        rr = rr.ravel()
-        cc = cc.ravel()
+        step = max(1, self.sample_step)
+        lons_s = lons[::step, ::step]
+        lats_s = lats[::step, ::step]
 
-        lon_samples = lons[rr, cc]
-        lat_samples = lats[rr, cc]
-        mask = np.isfinite(lon_samples) & np.isfinite(lat_samples)
-        if mask.sum() < 6:
-            raise ValueError(
-                "insufficient valid geolocation samples to fit affine transform"
-            )
-
-        A = np.stack([np.ones(mask.sum()), cc[mask], rr[mask]], axis=1)
-        coeff_lon, _, _, _ = np.linalg.lstsq(A, lon_samples[mask], rcond=None)
-        coeff_lat, _, _, _ = np.linalg.lstsq(A, lat_samples[mask], rcond=None)
-        return Affine(
-            coeff_lon[1],
-            coeff_lon[2],
-            coeff_lon[0],
-            coeff_lat[1],
-            coeff_lat[2],
-            coeff_lat[0],
-        )
+        lon_diff = np.abs(np.diff(lons_s, axis=1)).ravel()
+        lat_diff = np.abs(np.diff(lats_s, axis=0)).ravel()
+        diffs = np.concatenate([lon_diff, lat_diff])
+        diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
+        if diffs.size == 0:
+            return 0.01
+        return float(np.median(diffs))
 
     def ingest(
         self,
@@ -861,7 +841,6 @@ class Sentinel3SlstrLST(PlanetaryComputer):
                 ) as geo_ds:
                     lons = np.asarray(geo_ds["longitude_in"].values, dtype=np.float64)
                     lats = np.asarray(geo_ds["latitude_in"].values, dtype=np.float64)
-                    transform = self._fit_affine_from_geodetic(lons, lats)
 
                     band_arrays = []
                     for band in self.band_names:
@@ -874,29 +853,28 @@ class Sentinel3SlstrLST(PlanetaryComputer):
                         )
 
                     stack = np.stack(band_arrays, axis=0)
-                    if np.issubdtype(stack.dtype, np.floating):
-                        stack = np.nan_to_num(stack, nan=self.nodata_value)
+                    valid_mask = np.isfinite(stack[0])
+                    lons = np.where(valid_mask, lons, np.nan)
+                    lats = np.where(valid_mask, lats, np.nan)
 
-                height, width = stack.shape[1], stack.shape[2]
-                tif_path = os.path.join(tmp_dir, "lst.tif")
-                with rasterio.open(
-                    tif_path,
-                    "w",
-                    driver="GTiff",
-                    height=height,
-                    width=width,
-                    count=len(self.band_names),
-                    dtype=stack.dtype,
-                    crs="EPSG:4326",
-                    transform=transform,
-                    nodata=self.nodata_value,
-                ) as dst:
-                    dst.write(stack)
-                    for idx, band in enumerate(self.band_names, start=1):
-                        dst.set_band_description(idx, band)
+                    grid_resolution = self._estimate_grid_resolution(lons, lats)
+                    gridded_array, projection, bounds = interpolate_to_grid(
+                        data=stack,
+                        lon=lons,
+                        lat=lats,
+                        grid_resolution=grid_resolution,
+                        dilation_steps=0,
+                    )
 
-                tile_store.write_raster_file(
-                    item.name, self.band_names, UPath(tif_path)
+                    if self.nodata_value != NODATA_VALUE:
+                        gridded_array = np.where(
+                            gridded_array == NODATA_VALUE,
+                            self.nodata_value,
+                            gridded_array,
+                        )
+
+                tile_store.write_raster(
+                    item.name, self.band_names, projection, bounds, gridded_array
                 )
 
     def read_raster(
