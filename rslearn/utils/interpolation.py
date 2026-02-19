@@ -80,9 +80,7 @@ def interpolate_to_grid(
     ys = (np.arange(bounds[1], bounds[3]) * grid_resolution).astype(np.float64)
     grid_lon, grid_lat = np.meshgrid(xs, ys)
 
-    gridded_array = NODATA_VALUE * np.ones(
-        (num_bands, height, width), dtype=np.float32
-    )
+    gridded_array = NODATA_VALUE * np.ones((num_bands, height, width), dtype=np.float32)
     points = np.column_stack([lon_valid, lat_valid])
 
     for band in range(num_bands):

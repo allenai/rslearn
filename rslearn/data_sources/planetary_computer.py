@@ -852,9 +852,10 @@ class Sentinel3SlstrLST(PlanetaryComputer):
                             for chunk in r.iter_content(chunk_size=8192):
                                 f.write(chunk)
 
-                with xr.open_dataset(lst_path, mask_and_scale=True) as lst_ds, xr.open_dataset(
-                    geodetic_path, mask_and_scale=True
-                ) as geo_ds:
+                with (
+                    xr.open_dataset(lst_path, mask_and_scale=True) as lst_ds,
+                    xr.open_dataset(geodetic_path, mask_and_scale=True) as geo_ds,
+                ):
                     lons = np.asarray(geo_ds["longitude_in"].values, dtype=np.float64)
                     lats = np.asarray(geo_ds["latitude_in"].values, dtype=np.float64)
 
