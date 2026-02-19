@@ -46,6 +46,7 @@ class ERA5Land(DataSource):
     DATA_FORMAT = "netcdf"
     DOWNLOAD_FORMAT = "unarchived"
     PIXEL_SIZE = 0.1  # degrees, native resolution is 9km
+    NODATA_VALUE = 0.0
 
     def __init__(
         self,
@@ -212,6 +213,9 @@ class ERA5Land(DataSource):
         array = stacked_array.reshape(
             -1, stacked_array.shape[2], stacked_array.shape[3]
         )
+
+        # Replace NaN values with nodata value
+        array = np.where(np.isnan(array), self.NODATA_VALUE, array)
 
         # Get metadata for the GeoTIFF
         lat = nc.variables["latitude"][:]
@@ -494,6 +498,7 @@ class ERA5LandHourlyTimeseries(DataSource):
     DATASET = "reanalysis-era5-land-timeseries"
     DATA_FORMAT = "netcdf"
     PIXEL_SIZE = 0.1  # degrees, native resolution is 9km
+    NODATA_VALUE = 0.0
 
     def __init__(
         self,
@@ -705,6 +710,9 @@ class ERA5LandHourlyTimeseries(DataSource):
         # Reshape to (time * num_variables, 1, 1) for raster format
         # This creates a 1x1 pixel raster with all time steps as bands
         array = stacked_array.reshape(-1, 1, 1)
+
+        # Replace NaN values with nodata value
+        array = np.where(np.isnan(array), self.NODATA_VALUE, array)
 
         # Create a minimal geotransform for the single point
         # The point is at the center of a 0.1 degree pixel
