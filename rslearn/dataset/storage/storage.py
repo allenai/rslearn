@@ -127,6 +127,10 @@ class WindowStorage(abc.ABC):
         """
         raise NotImplementedError
 
+    def close(self) -> None:
+        """Release any resources held by this storage backend."""
+        pass
+
 
 class WindowStorageFactory(abc.ABC):
     """An abstract class for a configurable storage backend for window metadata.
