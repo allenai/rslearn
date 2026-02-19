@@ -35,31 +35,8 @@ jobs:
             -e CI="true" \
             rslearn-test \
             pytest -n auto tests/unit/ tests/integration/ -vv \
-            --ignore tests/unit/models/test_molmo.py \
-            --ignore tests/unit/models/olmoearth_pretrain/
+            --ignore tests/unit/models/test_molmo.py
 
       - name: Clean up
         if: always()
         run: docker image prune -f
-
-  test-olmoearth:
-    runs-on: ubuntu-latest-m
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Set up Python and venv
-        run: |
-          uv python install 3.12
-          uv venv
-
-      - name: Install dependencies
-        run: |
-          uv pip install olmoearth-pretrain -e ".[extra,dev]"
-
-      - name: Run OlmoEarth Tests
-        run: |
-          uv run pytest tests/unit/models/olmoearth_pretrain/ -vv

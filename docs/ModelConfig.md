@@ -592,10 +592,6 @@ also copy it to the "image" key so that it can be accessed when creating visuali
 the size of the original input images. We also show a flipping augmentation, which
 needs to flip the boxes and not just the images.
 
-Note: Using OlmoEarth requires installing the `olmoearth_pretrain` package separately
-(`pip install olmoearth_pretrain`). See [the OlmoEarth reference](foundation_models/OlmoEarth.md)
-for details.
-
 ```yaml
 model:
   class_path: rslearn.train.lightning_module.RslearnLightningModule
