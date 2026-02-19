@@ -81,7 +81,7 @@ def prepare_dataset_windows(
     dataset: Dataset,
     windows: list[Window],
     force: bool = False,
-    ignore_errors: bool = True,
+    ignore_errors: bool = False,
     retry_max_attempts: int = 0,
     retry_backoff: timedelta = timedelta(minutes=1),
 ) -> PrepareDatasetWindowsSummary:
@@ -462,7 +462,7 @@ def materialize_window(
 def materialize_dataset_windows(
     dataset: Dataset,
     windows: list[Window],
-    ignore_errors: bool = True,
+    ignore_errors: bool = False,
     retry_max_attempts: int = 0,
     retry_backoff: timedelta = timedelta(minutes=1),
 ) -> MaterializeDatasetWindowsSummary:

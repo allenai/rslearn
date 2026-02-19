@@ -480,7 +480,7 @@ class PrepareHandler:
     def __init__(
         self,
         force: bool,
-        ignore_errors: bool = True,
+        ignore_errors: bool = False,
         retry_max_attempts: int = 0,
         retry_backoff: timedelta = timedelta(minutes=1),
     ) -> None:
@@ -488,7 +488,9 @@ class PrepareHandler:
 
         Args:
             force: force prepare
-            ignore_errors: if True, catch errors per-layer and continue.
+            ignore_errors: if True, catch errors per-layer and continue. Note that this
+                defaults to False here in case of external use, but True in the CLI
+                argument.
             retry_max_attempts: set greater than zero to retry for this many attempts in
                 case of error.
             retry_backoff: how long to wait before retrying (see retry).
