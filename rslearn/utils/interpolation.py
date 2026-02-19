@@ -27,8 +27,8 @@ def interpolate_to_grid(
 
     Args:
         data: the band data to convert (CxN).
-        lon: longitude of each pixel (N).
-        lat: latitude of each pixel (N).
+        lon: longitude of each pixel (N). Pixels with NaN longitude are ignored.
+        lat: latitude of each pixel (N). Pixels with NaN latitude are ignored.
         grid_resolution: the resolution of the grid.
 
     Returns:
