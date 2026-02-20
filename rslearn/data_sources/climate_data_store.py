@@ -223,10 +223,10 @@ class ERA5Land(DataSource):
         array = np.where(np.isnan(array), self.NODATA_VALUE, array)
 
         # Build timestamps from valid_time.
-        valid_times = nc.variables["valid_time"][:]
+        valid_time_var = nc.variables["valid_time"]
         datetimes = [
-            datetime.fromtimestamp(float(valid_time), tz=UTC)
-            for valid_time in valid_times
+            datetime(d.year, d.month, d.day, d.hour, d.minute, d.second, tzinfo=UTC)
+            for d in netCDF4.num2date(valid_time_var[:], units=valid_time_var.units)
         ]
         timestamps: list[tuple[datetime, datetime]] = []
         for i, start in enumerate(datetimes):
@@ -699,13 +699,27 @@ class ERA5LandHourlyTimeseries(DataSource):
         # We need to collect these from all files and stack them into a multi-band raster
         band_arrays = []
         num_time_steps = None
-        all_valid_times = None
+        all_datetimes: list[datetime] | None = None
 
         for nc_path in nc_paths:
             nc = netCDF4.Dataset(nc_path)
 
-            if "valid_time" in nc.variables and all_valid_times is None:
-                all_valid_times = nc.variables["valid_time"][:]
+            if "valid_time" in nc.variables and all_datetimes is None:
+                valid_time_var = nc.variables["valid_time"]
+                all_datetimes = [
+                    datetime(
+                        d.year,
+                        d.month,
+                        d.day,
+                        d.hour,
+                        d.minute,
+                        d.second,
+                        tzinfo=UTC,
+                    )
+                    for d in netCDF4.num2date(
+                        valid_time_var[:], units=valid_time_var.units
+                    )
+                ]
 
             for band_name in nc.variables:
                 band_data = nc.variables[band_name]
@@ -751,26 +765,20 @@ class ERA5LandHourlyTimeseries(DataSource):
         array = np.where(np.isnan(array), self.NODATA_VALUE, array)
 
         # Build timestamps.
+        if all_datetimes is None:
+            raise ValueError(
+                f"No valid_time variable found in any of the NetCDF files: {nc_paths}"
+            )
+
         timestamps: list[tuple[datetime, datetime]] = []
-        if all_valid_times is not None:
-            datetimes = [
-                datetime.fromtimestamp(float(valid_time), tz=UTC)
-                for valid_time in all_valid_times
-            ]
-            for i, start in enumerate(datetimes):
-                if len(datetimes) == 1:
-                    timestamps.append((start, start))
-                elif i < len(datetimes) - 1:
-                    timestamps.append((start, datetimes[i + 1]))
-                else:
-                    spacing = datetimes[i] - datetimes[i - 1]
-                    timestamps.append((start, start + spacing))
-        else:
-            assert num_time_steps is not None
-            for i in range(num_time_steps):
-                timestamps.append(
-                    (datetime(2000, 1, 1, tzinfo=UTC), datetime(2000, 1, 1, tzinfo=UTC))
-                )
+        for i, start in enumerate(all_datetimes):
+            if len(all_datetimes) == 1:
+                timestamps.append((start, start))
+            elif i < len(all_datetimes) - 1:
+                timestamps.append((start, all_datetimes[i + 1]))
+            else:
+                spacing = all_datetimes[i] - all_datetimes[i - 1]
+                timestamps.append((start, start + spacing))
 
         # Build projection and bounds for a 1x1 pixel.
         projection = Projection(
