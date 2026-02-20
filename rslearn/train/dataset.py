@@ -450,7 +450,7 @@ def read_data_input(
         layer_datas = window.load_layer_datas()
         images: list[torch.Tensor] = []  # each is CTHW
         all_timestamps: list[tuple[datetime, datetime]] = []
-        has_timestamps = True
+        has_all_timestamps = True
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
             image, timestamps = read_raster_layer_for_data_input(
@@ -465,20 +465,26 @@ def read_data_input(
 
             if timestamps is not None:
                 all_timestamps.extend(timestamps)
-            else:
-                # Fall back to item-level time range for this group.
+            elif image.shape[1] == 1:
+                # For single-timestep RasterImage, fallback to item-level time range
+                # for this item group.
                 layer_data = layer_datas.get(layer_name)
                 time_range = read_layer_time_range(layer_data, group_idx)
                 if time_range is not None:
-                    # Repeat the time range for each timestep in this image.
-                    all_timestamps.extend([time_range] * image.shape[1])
+                    all_timestamps.append(time_range)
                 else:
-                    has_timestamps = False
+                    # It is okay for single-timestep RasterImage to not have timestamps.
+                    has_all_timestamps = False
+            else:
+                # Multi-timestep RasterImage must have timestamps.
+                raise ValueError(
+                    f"Expected multi-timestep RasterImage with T={image.shape[1]} to have timestamps"
+                )
 
         stacked = torch.cat(images, dim=1)
         return RasterImage(
             stacked,
-            all_timestamps if has_timestamps and all_timestamps else None,
+            all_timestamps if has_all_timestamps else None,
         )
 
     elif data_input.data_type == "vector":
