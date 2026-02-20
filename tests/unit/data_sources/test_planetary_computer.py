@@ -7,8 +7,8 @@ from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType
 from rslearn.data_sources import DataSourceContext
 from rslearn.data_sources.planetary_computer import (
     CopDemGlo30,
-    Hls2S30,
     Hls2L30,
+    Hls2S30,
     LandsatC2L2,
     PlanetaryComputer,
     Sentinel3SlstrLST,
