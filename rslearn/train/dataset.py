@@ -366,11 +366,18 @@ def read_data_input(
     # specifier.
     layer_options: list[tuple[str, int]] = []
     if data_input.load_all_item_groups:
-        wanted_layers = set(data_input.layers)
+        # We ensure that item groups are ordered within each layer, and across layers
+        # we respect the user's given order.
+        completed_groups_by_layer: dict[str, list[int]] = {}
         for layer_name, group_idx in window.list_completed_layers():
-            if layer_name not in wanted_layers:
-                continue
-            layer_options.append((layer_name, group_idx))
+            if layer_name not in completed_groups_by_layer:
+                completed_groups_by_layer[layer_name] = []
+            completed_groups_by_layer[layer_name].append(group_idx)
+
+        for layer_name in data_input.layers:
+            cur_completed_groups = completed_groups_by_layer[layer_name]
+            for group_idx in sorted(cur_completed_groups):
+                layer_options.append((layer_name, group_idx))
     else:
         for option in data_input.layers:
             layer_name, group_idx = get_layer_and_group_from_dir_name(option)
