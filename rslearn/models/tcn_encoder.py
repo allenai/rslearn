@@ -307,19 +307,17 @@ class AttentionPooling(nn.Module):
 
 
 class TCNEncoder(FeatureExtractor):
-    """Temporal Convolutional Network encoder for ERA5 weather data.
+    """Temporal Convolutional Network encoder for time series data.
 
-    This encoder processes daily weather sequences (e.g., 365 days × 12 variables)
-    into a compact weather embedding using dilated causal convolutions and
-    multi-scale pooling.
+    This encoder processes time series into a compact embedding
+    using dilated causal convolutions and multi-scale pooling.
     """
 
     def __init__(
         self,
-        in_channels: int = 12,
+        in_channels: int = 14,
         d_model: int = 128,
         d_output: int = 256,
-        seq_length: int = 365,
         kernel_size: int = 3,
         dilations: list[int] | None = None,
         dropout: float = 0.1,
@@ -330,29 +328,30 @@ class TCNEncoder(FeatureExtractor):
         """Create a new TCNEncoder.
 
         Args:
-            in_channels: number of input weather variables (e.g., 12).
-            d_model: hidden dimension for the TCN backbone (e.g., 128).
-            d_output: output embedding dimension (e.g., 256).
-            seq_length: expected sequence length in days (e.g., 365).
-            kernel_size: convolutional kernel size (usually 3).
+            in_channels: number of input variables per timestep.
+            d_model: hidden dimension for the TCN backbone.
+            d_output: output embedding dimension.
+            kernel_size: convolutional kernel size.
             dilations: list of dilation factors for residual blocks.
                 Default: [1, 2, 4, 8, 16, 32, 64, 128].
             dropout: dropout probability.
             num_groups: number of groups for GroupNorm.
-            era5_key: key in the input dict that holds ERA5 data.
-            pooling_windows: list of window sizes for multi-scale pooling.
-                Default: [30, 120, 365] for recent, mid-term, and full-year.
+            era5_key: key in the input dict that holds the time series data.
+            pooling_windows: list of pyramid levels where each entry is the
+                number of bins at that level. Default: [1, 2, 4, 12] for
+                whole-sequence, halves, quarters, and monthly bins.
         """
         super().__init__()
 
         if dilations is None:
             dilations = [1, 2, 4, 8, 16, 32, 64, 128]
 
+        # Pooling_windows as pyramid levels: number of bins per level.
+        # Example: [1, 2, 4] => pool over whole year, halves, and quarters.
         if pooling_windows is None:
-            pooling_windows = [30, 120, 365]
+            pooling_windows = [1, 2, 4, 12]
 
         self.era5_key = era5_key
-        self.seq_length = seq_length
         self.pooling_windows = pooling_windows
 
         # Front-end: normalize input variables and project to d_model
@@ -373,14 +372,15 @@ class TCNEncoder(FeatureExtractor):
             ]
         )
 
-        # Multi-scale attention pooling
+        # Temporal pyramid attention pooling:
+        # one pooling module per BIN across all pyramid levels
+        self.num_pyramid_bins = sum(pooling_windows)
         self.pooling_modules = nn.ModuleList(
-            [AttentionPooling(d_model) for _ in pooling_windows]
+            [AttentionPooling(d_model) for _ in range(self.num_pyramid_bins)]
         )
 
         # Final MLP to produce output embedding
-        # Input is concatenation of all pooled representations
-        mlp_input_dim = d_model * len(pooling_windows)
+        mlp_input_dim = d_model * self.num_pyramid_bins
         self.mlp = nn.Sequential(
             nn.Linear(mlp_input_dim, d_output),
             nn.GELU(),
@@ -389,61 +389,54 @@ class TCNEncoder(FeatureExtractor):
         )
 
     def forward(self, context: ModelContext) -> FeatureVector:
-        """Extract weather embedding from ERA5 daily data.
+        """Extract time series embedding via TCN and temporal pyramid pooling.
 
         Args:
             context: the model context containing all modality inputs.
 
         Returns:
-            a FeatureVector with the weather embedding of shape [B, d_output].
+            a FeatureVector with the embedding of shape [B, d_output].
         """
         # Extract ERA5 data from context (pads variable-length sequences)
-        # Expected shape after: [B, HW, T, C] where T is days, C is variables
         era5_data = prepare_ts_modality(context, self.era5_key)
 
-        # If spatial dimensions exist, we need to handle them
-        # Assuming H=W=1 for daily ERA5 aggregated data, so shape is [B, 1, T, C]
-        # Squeeze spatial dimensions: [B, T, C]
+        # Average-pool spatial dimensions if needed: [B, T, C]
         if era5_data.dim() == 4:
-            era5_data = era5_data.squeeze(1)
+            era5_data = era5_data.mean(dim=1)
 
         B, T, C = era5_data.shape
 
-        # Normalize input variables per timestep
+        max_bins = max(self.pooling_windows)
+        if T < max_bins:
+            raise ValueError(
+                f"Sequence length T={T} is shorter than the largest pyramid "
+                f"level n_bins={max_bins}. Each pyramid bin must contain at "
+                f"least one timestep. Use shorter pooling_windows or longer "
+                f"sequences."
+            )
+
         x = self.input_norm(era5_data)  # [B, T, C]
-
-        # Project to d_model
         x = self.input_proj(x)  # [B, T, d_model]
+        x = x.transpose(1, 2)  # [B, d_model, T]
 
-        # Transpose for conv1d: [B, d_model, T]
-        x = x.transpose(1, 2)
-
-        # Apply TCN blocks
         for block in self.tcn_blocks:
             x = block(x)  # [B, d_model, T]
 
-        # Multi-scale pooling
+        # Temporal pyramid pooling
         pooled_features = []
-        for window_size, pooling_module in zip(
-            self.pooling_windows, self.pooling_modules
-        ):
-            # Extract last window_size timesteps
-            if window_size >= T:
-                x_window = x
-            else:
-                x_window = x[:, :, -window_size:]
+        pool_idx = 0
+        for n_bins in self.pooling_windows:
+            # Split into n_bins contiguous chunks (nearly equal lengths)
+            chunks = torch.chunk(x, chunks=n_bins, dim=2)
 
-            # Apply attention pooling
-            pooled = pooling_module(x_window)  # [B, d_model]
-            pooled_features.append(pooled)
+            for chunk in chunks:
+                pooled = self.pooling_modules[pool_idx](chunk)  # [B, d_model]
+                pooled_features.append(pooled)
+                pool_idx += 1
 
-        # Concatenate all pooled features
-        combined = torch.cat(pooled_features, dim=1)  # [B, d_model * num_windows]
-
-        # Final MLP to produce weather embedding
-        z_wx = self.mlp(combined)  # [B, d_output]
-
-        return FeatureVector(feature_vector=z_wx)
+        combined = torch.cat(pooled_features, dim=1)  # [B, d_model * num_bins_total]
+        x = self.mlp(combined)  # [B, d_output]
+        return FeatureVector(feature_vector=x)
 
 
 # Commented out - incomplete implementation that references undefined Era5Encoder
