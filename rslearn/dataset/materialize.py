@@ -111,8 +111,8 @@ def read_raster_window_from_tiles(
                 ),
                 dtype=band_dtype,
             )
-            for idx, nv in enumerate(nodata_vals):
-                dst_arr[idx, :, :, :] = nv
+            for idx, nodata_val in enumerate(nodata_vals):
+                dst_arr[idx, :, :, :] = nodata_val
             dst = RasterArray(array=dst_arr, timestamps=raster_array.timestamps)
 
         if src.shape[1] != dst.array.shape[1]:
@@ -206,8 +206,9 @@ def build_first_valid_composite(
 ) -> RasterArray:
     """Build a composite by selecting the first valid pixel of items in the group.
 
-    A composite of shape of (bands, 1, H, W) is created by iterating over items in
-    group in order and selecting the first pixel that is not nodata per index.
+    A composite of shape (C, T, H, W) is created by iterating over items in group in
+    order and selecting the first pixel that is not nodata per index. T is determined by
+    the items' data in the tile store (all items must have the same T).
 
     Args:
         group: list of items to composite together
@@ -222,20 +223,15 @@ def build_first_valid_composite(
         request_time_range: unused, accepted for interface compatibility
 
     Returns:
-        RasterArray with shape (C, 1, H, W) built from all items in the group.
+        RasterArray with shape (C, T, H, W) built from all items in the group.
 
     """
-    dst = RasterArray(
-        array=np.empty(
-            (len(bands), 1, bounds[3] - bounds[1], bounds[2] - bounds[0]),
-            dtype=band_dtype,
-        )
-    )
-    for idx, nodata_val in enumerate(nodata_vals):
-        dst.array[idx, :, :, :] = nodata_val
+    height = bounds[3] - bounds[1]
+    width = bounds[2] - bounds[0]
 
+    dst: RasterArray | None = None
     for item in group:
-        read_raster_window_from_tiles(
+        dst = read_raster_window_from_tiles(
             tile_store=tile_store,
             item=item,
             bands=bands,
@@ -247,6 +243,12 @@ def build_first_valid_composite(
             resampling=resampling_method,
             dst=dst,
         )
+
+    if dst is None:
+        arr = np.empty((len(bands), 1, height, width), dtype=band_dtype)
+        for idx, nodata_val in enumerate(nodata_vals):
+            arr[idx, :, :, :] = nodata_val
+        dst = RasterArray(array=arr)
 
     return dst
 
@@ -308,7 +310,7 @@ def mask_stacked_rasters(
     """Masks the stacked rasters - each items band with the corresponding nodata val.
 
     Args:
-        stacked_rasters: NumPy array of shape (num_items, num_bands, height, width)
+        stacked_rasters: NumPy array of shape (num_items, num_bands, T, height, width)
             containing raster values for each item in the group.
         nodata_vals: Sequence of nodata values, one per band, used to identify invalid
             pixels in the stacked rasters.
@@ -317,11 +319,8 @@ def mask_stacked_rasters(
         np.ma.MaskedArray with the same shape as `stacked_rasters`, where all
         pixels equal to the per-band nodata value are masked.
     """
-    # Create mask based on nodata values
-    nodata_vals_array = np.array(nodata_vals).reshape(1, -1, 1, 1)
+    nodata_vals_array = np.array(nodata_vals).reshape(1, -1, 1, 1, 1)
     valid_mask = stacked_rasters != nodata_vals_array
-
-    # Create masked array for all bands
     masked_data = np.ma.masked_where(~valid_mask, stacked_rasters)
 
     return masked_data
@@ -341,8 +340,9 @@ def build_mean_composite(
 ) -> RasterArray:
     """Build a composite by computing the mean of valid pixels across items in the group.
 
-    A RasterArray with shape (C, 1, H, W) is created by computing the per-pixel mean of
-    valid (non-nodata) pixels across all items in the group.
+    A RasterArray with shape (C, T, H, W) is created by computing the per-pixel mean of
+    valid (non-nodata) pixels across all items in the group. All items must have the same
+    number of timesteps T.
 
     Args:
         group: list of items to composite together
@@ -357,7 +357,7 @@ def build_mean_composite(
         request_time_range: unused, accepted for interface compatibility
 
     Returns:
-        RasterArray with shape (C, 1, H, W) having per-pixel mean of all items.
+        RasterArray with shape (C, T, H, W) having per-pixel mean of all items.
     """
     rasters = read_raster_windows(
         group=group,
@@ -371,17 +371,25 @@ def build_mean_composite(
         resampling_method=resampling_method,
     )
 
-    # Stack into (N_items, C, H, W) and mask nodata values per band.
-    stacked_arrays = np.stack([raster.get_chw_array() for raster in rasters], axis=0)
+    num_timesteps = rasters[0].array.shape[1]
+    for raster in rasters[1:]:
+        if raster.array.shape[1] != num_timesteps:
+            raise ValueError(
+                f"All items must have the same number of timesteps, "
+                f"got T={num_timesteps} and T={raster.array.shape[1]}"
+            )
+
+    # Stack into (N_items, C, T, H, W) and mask nodata values per band.
+    stacked_arrays = np.stack([raster.array for raster in rasters], axis=0)
     masked_data = mask_stacked_rasters(stacked_arrays, nodata_vals)
 
     # Compute mean along the items axis.
     mean_result = np.ma.mean(masked_data, axis=0)
 
     # Fill masked values and convert to target dtype.
-    fill_vals = np.array(nodata_vals).reshape(-1, 1, 1)
-    chw = np.ma.filled(mean_result, fill_value=fill_vals).astype(band_dtype)
-    return RasterArray(chw_array=chw)
+    fill_vals = np.array(nodata_vals).reshape(-1, 1, 1, 1)
+    cthw = np.ma.filled(mean_result, fill_value=fill_vals).astype(band_dtype)
+    return RasterArray(array=cthw, timestamps=rasters[0].timestamps)
 
 
 def build_median_composite(
@@ -398,8 +406,9 @@ def build_median_composite(
 ) -> RasterArray:
     """Build a composite by computing the median of valid pixels across items in the group.
 
-    A RasterArray with shape (C, 1, H, W) is created by computing the per-pixel median of
-    valid (non-nodata) pixels across all items in the group.
+    A RasterArray with shape (C, T, H, W) is created by computing the per-pixel median of
+    valid (non-nodata) pixels across all items in the group. All items must have the same
+    number of timesteps T.
 
     Args:
         group: list of items to composite together
@@ -414,7 +423,7 @@ def build_median_composite(
         request_time_range: unused, accepted for interface compatibility
 
     Returns:
-        RasterArray with shape (C, 1, H, W) having per-pixel median of all items.
+        RasterArray with shape (C, T, H, W) having per-pixel median of all items.
     """
     rasters = read_raster_windows(
         group=group,
@@ -428,17 +437,25 @@ def build_median_composite(
         resampling_method=resampling_method,
     )
 
-    # Stack into (N_items, C, H, W) and mask nodata values per band.
-    stacked_arrays = np.stack([raster.get_chw_array() for raster in rasters], axis=0)
+    num_timesteps = rasters[0].array.shape[1]
+    for raster in rasters[1:]:
+        if raster.array.shape[1] != num_timesteps:
+            raise ValueError(
+                f"All items must have the same number of timesteps, "
+                f"got T={num_timesteps} and T={raster.array.shape[1]}"
+            )
+
+    # Stack into (N_items, C, T, H, W) and mask nodata values per band.
+    stacked_arrays = np.stack([raster.array for raster in rasters], axis=0)
     masked_data = mask_stacked_rasters(stacked_arrays, nodata_vals)
 
     # Compute median along the items axis.
     median_result = np.ma.median(masked_data, axis=0)
 
     # Fill masked values and convert to target dtype.
-    fill_vals = np.array(nodata_vals).reshape(-1, 1, 1)
-    chw = np.ma.filled(median_result, fill_value=fill_vals).astype(band_dtype)
-    return RasterArray(chw_array=chw)
+    fill_vals = np.array(nodata_vals).reshape(-1, 1, 1, 1)
+    cthw = np.ma.filled(median_result, fill_value=fill_vals).astype(band_dtype)
+    return RasterArray(array=cthw, timestamps=rasters[0].timestamps)
 
 
 def build_temporal_stack_composite(

@@ -11,6 +11,7 @@ from upath import UPath
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import Item
 from rslearn.dataset.materialize import (
+    build_first_valid_composite,
     build_mean_composite,
     build_median_composite,
     build_temporal_stack_composite,
@@ -865,3 +866,185 @@ class TestBuildTemporalStackComposite:
         assert np.all(result.array[0, 1, 1:, :] == 20)
         assert np.all(result.array[1, 1, 0, 1:] == 20)
         assert np.all(result.array[1, 1, 1:, :] == 20)
+
+
+class TestMultiTimestepComposites:
+    """Test first valid, mean, and median composites with multi-timestep items."""
+
+    LAYER_NAME = "layer"
+    BANDS = ["B1"]
+    BOUNDS = (0, 0, 4, 4)
+    PROJECTION = WGS84_PROJECTION
+
+    def test_first_valid_multi_timestep(self, tmp_path: pathlib.Path) -> None:
+        """Two items with T=2: first-valid logic applies independently per timestep."""
+        tile_store = DefaultTileStore()
+        tile_store.set_dataset_path(UPath(tmp_path))
+
+        t0 = datetime(2024, 1, 1, tzinfo=UTC)
+        t1 = datetime(2024, 1, 2, tzinfo=UTC)
+        t2 = datetime(2024, 1, 3, tzinfo=UTC)
+        bbox = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
+        timestamps = [(t0, t1), (t1, t2)]
+
+        # Item 1: T=2, value 10 everywhere except bottom half is nodata at T=0.
+        data_a = np.full((1, 2, 4, 4), 10, dtype=np.uint8)
+        data_a[:, 0, 2:4, :] = 0
+        tile_store.write_raster(
+            self.LAYER_NAME,
+            "a",
+            self.BANDS,
+            self.PROJECTION,
+            self.BOUNDS,
+            RasterArray(array=data_a, timestamps=timestamps),
+        )
+
+        # Item 2: T=2, value 20 everywhere.
+        data_b = np.full((1, 2, 4, 4), 20, dtype=np.uint8)
+        tile_store.write_raster(
+            self.LAYER_NAME,
+            "b",
+            self.BANDS,
+            self.PROJECTION,
+            self.BOUNDS,
+            RasterArray(array=data_b, timestamps=timestamps),
+        )
+
+        item_a = Item("a", STGeometry(self.PROJECTION, bbox, (t0, t2)))
+        item_b = Item("b", STGeometry(self.PROJECTION, bbox, (t0, t2)))
+
+        result = build_first_valid_composite(
+            group=[item_a, item_b],
+            nodata_vals=[0],
+            bands=self.BANDS,
+            bounds=self.BOUNDS,
+            band_dtype=np.uint8,
+            tile_store=TileStoreWithLayer(tile_store, self.LAYER_NAME),
+            projection=self.PROJECTION,
+            remapper=None,
+        )
+
+        assert result.array.shape == (1, 2, 4, 4)
+        # T=0: top half from item_a (10), bottom half from item_b (20).
+        assert np.all(result.array[:, 0, 0:2, :] == 10)
+        assert np.all(result.array[:, 0, 2:4, :] == 20)
+        # T=1: all from item_a (10) since it was valid everywhere.
+        assert np.all(result.array[:, 1, :, :] == 10)
+
+    def test_mean_multi_timestep(self, tmp_path: pathlib.Path) -> None:
+        """Two items with T=2: mean is computed independently per timestep.
+
+        Item 1 has nodata in the bottom half at T=0 and item 2 has nodata at
+        pixel (0,0) at T=1, so the mean must fall back to the single valid
+        value at those locations.
+        """
+        tile_store = DefaultTileStore()
+        tile_store.set_dataset_path(UPath(tmp_path))
+
+        t0 = datetime(2024, 1, 1, tzinfo=UTC)
+        t1 = datetime(2024, 1, 2, tzinfo=UTC)
+        t2 = datetime(2024, 1, 3, tzinfo=UTC)
+        bbox = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
+        timestamps = [(t0, t1), (t1, t2)]
+
+        # Item 1: T=2, value 2 at T=0, value 6 at T=1.
+        # Bottom half is nodata (0) at T=0.
+        data_a = np.empty((1, 2, 4, 4), dtype=np.uint8)
+        data_a[:, 0, :, :] = 2
+        data_a[:, 0, 2:4, :] = 0  # nodata
+        data_a[:, 1, :, :] = 6
+        tile_store.write_raster(
+            self.LAYER_NAME,
+            "a",
+            self.BANDS,
+            self.PROJECTION,
+            self.BOUNDS,
+            RasterArray(array=data_a, timestamps=timestamps),
+        )
+
+        # Item 2: T=2, value 4 at T=0, value 10 at T=1.
+        # Pixel (0,0) is nodata at T=1.
+        data_b = np.empty((1, 2, 4, 4), dtype=np.uint8)
+        data_b[:, 0, :, :] = 4
+        data_b[:, 1, :, :] = 10
+        data_b[:, 1, 0, 0] = 0  # nodata
+        tile_store.write_raster(
+            self.LAYER_NAME,
+            "b",
+            self.BANDS,
+            self.PROJECTION,
+            self.BOUNDS,
+            RasterArray(array=data_b, timestamps=timestamps),
+        )
+
+        item_a = Item("a", STGeometry(self.PROJECTION, bbox, (t0, t2)))
+        item_b = Item("b", STGeometry(self.PROJECTION, bbox, (t0, t2)))
+
+        result = build_mean_composite(
+            group=[item_a, item_b],
+            nodata_vals=[0],
+            bands=self.BANDS,
+            bounds=self.BOUNDS,
+            band_dtype=np.uint8,
+            tile_store=TileStoreWithLayer(tile_store, self.LAYER_NAME),
+            projection=self.PROJECTION,
+            remapper=None,
+        )
+
+        assert result.array.shape == (1, 2, 4, 4)
+        # T=0 top half: mean(2, 4) = 3
+        assert np.all(result.array[:, 0, 0:2, :] == 3)
+        # T=0 bottom half: item_a nodata, only item_b valid -> 4
+        assert np.all(result.array[:, 0, 2:4, :] == 4)
+        # T=1 pixel (0,0): item_b nodata, only item_a valid -> 6
+        assert result.array[0, 1, 0, 0] == 6
+        # T=1 everywhere else: mean(6, 10) = 8
+        assert np.all(result.array[0, 1, 0, 1:] == 8)
+        assert np.all(result.array[0, 1, 1:, :] == 8)
+
+    def test_mean_mismatched_timesteps(self, tmp_path: pathlib.Path) -> None:
+        """Items with different T should raise ValueError."""
+        tile_store = DefaultTileStore()
+        tile_store.set_dataset_path(UPath(tmp_path))
+
+        t0 = datetime(2024, 1, 1, tzinfo=UTC)
+        t1 = datetime(2024, 1, 2, tzinfo=UTC)
+        t2 = datetime(2024, 1, 3, tzinfo=UTC)
+        bbox = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
+
+        # Item 1: T=2
+        data_a = np.full((1, 2, 4, 4), 2, dtype=np.uint8)
+        tile_store.write_raster(
+            self.LAYER_NAME,
+            "a",
+            self.BANDS,
+            self.PROJECTION,
+            self.BOUNDS,
+            RasterArray(array=data_a, timestamps=[(t0, t1), (t1, t2)]),
+        )
+
+        # Item 2: T=1
+        data_b = np.full((1, 4, 4), 4, dtype=np.uint8)
+        tile_store.write_raster(
+            self.LAYER_NAME,
+            "b",
+            self.BANDS,
+            self.PROJECTION,
+            self.BOUNDS,
+            RasterArray(chw_array=data_b, time_range=(t0, t1)),
+        )
+
+        item_a = Item("a", STGeometry(self.PROJECTION, bbox, (t0, t2)))
+        item_b = Item("b", STGeometry(self.PROJECTION, bbox, (t0, t1)))
+
+        with pytest.raises(ValueError, match="same number of timesteps"):
+            build_mean_composite(
+                group=[item_a, item_b],
+                nodata_vals=[0],
+                bands=self.BANDS,
+                bounds=self.BOUNDS,
+                band_dtype=np.uint8,
+                tile_store=TileStoreWithLayer(tile_store, self.LAYER_NAME),
+                projection=self.PROJECTION,
+                remapper=None,
+            )
