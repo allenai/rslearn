@@ -16,19 +16,28 @@ MODALITY_NAMES = [
 ]
 
 
-def prepare_ts_modality(context: ModelContext, mod_key: str) -> torch.Tensor:
-    """Extract and batch a time-series modality from model context.
+def prepare_ts_modality(
+    context: ModelContext,
+    mod_key: str,
+    num_variables: int | None = None,
+) -> torch.Tensor:
+    """Extract, batch, and pre-process a time-series modality from model context.
 
     Handles variable-length sequences across batch items by zero-padding
-    shorter sequences to the maximum length in the batch.
+    shorter sequences to the maximum length in the batch.  Spatial dimensions
+    are averaged so the output is always 3-D.
 
     Args:
         context: the model context containing all modality inputs.
         mod_key: key identifying the time-series modality in each input dict.
+        num_variables: if set, the input is assumed to be a stacked
+            representation where all timesteps are flattened into the channel
+            dimension (C*T bands with T=1).  The data will be reshaped from
+            [B, 1, C*T] to [B, T, C] where C = num_variables.
 
     Returns:
-        a tensor of shape [B, HW, T, C] where T is the max sequence length
-        in the batch and shorter sequences are zero-padded.
+        a tensor of shape [B, T, C] where T is the max sequence length in the
+        batch and shorter sequences are zero-padded.
     """
     ts_list = [
         rearrange(inp[mod_key].image, "c t h w -> (h w) t c") for inp in context.inputs
@@ -48,7 +57,19 @@ def prepare_ts_modality(context: ModelContext, mod_key: str) -> torch.Tensor:
             x = torch.cat([x, pad], dim=1)
         padded.append(x)
 
-    return torch.stack(padded, dim=0)  # [B, HW, T, C]
+    data = torch.stack(padded, dim=0)  # [B, HW, T, C]
+
+    # Average-pool spatial dimensions: [B, T, C]
+    if data.dim() == 4:
+        data = data.mean(dim=1)
+
+    # If num_variables is set, the input is stacked: [B, 1, C*T].
+    # Reshape to [B, T, C] where C = num_variables.
+    if num_variables is not None:
+        B = data.shape[0]
+        data = data.reshape(B, -1, num_variables)  # [B, T, C]
+
+    return data
 
 
 class SimpleTCNEncoder(FeatureExtractor):
@@ -97,7 +118,6 @@ class SimpleTCNEncoder(FeatureExtractor):
         self.mod_key = mod_key
         self.output_spatial_size = output_spatial_size
         self.num_variables = num_variables
-        self._warned_spatial = False
 
         # Front-end linear projection
         self.input_proj = nn.Linear(in_channels, base_dim)
@@ -153,28 +173,10 @@ class SimpleTCNEncoder(FeatureExtractor):
             If output_spatial_size is set: a FeatureMaps with shape [B, output_dim, H, W]
                 where the embedding is replicated across all spatial locations.
         """
-        # Extract TS data from context (pads variable-length sequences)
-        TS_data = prepare_ts_modality(context, self.mod_key)  # [B, HW, T, C]
-
-        # Average-pool spatial dimensions: [B, T, C]
-        if TS_data.dim() == 4:
-            if TS_data.shape[1] > 1 and not self._warned_spatial:
-                import warnings
-
-                warnings.warn(
-                    f"SimpleTCNEncoder: spatial extent {TS_data.shape[1]} > 1, "
-                    f"averaging over spatial dimensions. Consider loading the "
-                    f"input at coarser resolution to avoid this.",
-                    stacklevel=2,
-                )
-                self._warned_spatial = True
-            TS_data = TS_data.mean(dim=1)
-
-        # If num_variables is set, the input is stacked: [B, 1, C*T].
-        # Reshape to [B, T, C] where C = num_variables.
-        if self.num_variables is not None:
-            B = TS_data.shape[0]
-            TS_data = TS_data.reshape(B, -1, self.num_variables)  # [B, T, C]
+        # Extract, spatially pool, and reshape TS data: [B, T, C]
+        TS_data = prepare_ts_modality(
+            context, self.mod_key, num_variables=self.num_variables
+        )
 
         x = self.input_proj(TS_data)
         x = x.transpose(1, 2)
@@ -325,6 +327,7 @@ class TCNEncoder(FeatureExtractor):
         era5_key: str = "era5_daily",
         output_spatial_size: int | None = None,
         pooling_windows: list[int] | None = None,
+        num_variables: int | None = None,
     ):
         """Create a new TCNEncoder.
 
@@ -343,6 +346,11 @@ class TCNEncoder(FeatureExtractor):
             pooling_windows: list of pyramid levels where each entry is the
                 number of bins at that level. Default: [1, 2, 4, 12] for
                 whole-sequence, halves, quarters, and monthly bins.
+            num_variables: if set, the input is assumed to be a stacked
+                representation where all timesteps are flattened into the
+                channel dimension (C*T bands with T=1). The data will be
+                reshaped from [B, 1, C*T] to [B, T, C] where
+                C = num_variables.
         """
         super().__init__()
 
@@ -357,6 +365,7 @@ class TCNEncoder(FeatureExtractor):
         self.era5_key = era5_key
         self.output_spatial_size = output_spatial_size
         self.pooling_windows = pooling_windows
+        self.num_variables = num_variables
 
         # Front-end: normalize input variables and project to d_model
         self.input_norm = nn.LayerNorm(in_channels)
@@ -401,12 +410,10 @@ class TCNEncoder(FeatureExtractor):
         Returns:
             a FeatureVector with the embedding of shape [B, d_output].
         """
-        # Extract ERA5 data from context (pads variable-length sequences)
-        era5_data = prepare_ts_modality(context, self.era5_key)
-
-        # Average-pool spatial dimensions if needed: [B, T, C]
-        if era5_data.dim() == 4:
-            era5_data = era5_data.mean(dim=1)
+        # Extract, spatially pool, and reshape TS data: [B, T, C]
+        era5_data = prepare_ts_modality(
+            context, self.era5_key, num_variables=self.num_variables
+        )
 
         B, T, C = era5_data.shape
 
