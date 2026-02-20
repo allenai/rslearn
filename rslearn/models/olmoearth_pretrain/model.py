@@ -8,15 +8,17 @@ from typing import Any
 
 import torch
 from einops import rearrange
-from olmoearth_pretrain.config import Config, require_olmo_core
-from olmoearth_pretrain.data.constants import Modality
-from olmoearth_pretrain.datatypes import MaskedOlmoEarthSample, MaskValue
-from olmoearth_pretrain.model_loader import (
-    ModelID,
-    load_model_from_id,
-    load_model_from_path,
+from olmoearth_pretrain_minimal import ModelID, load_model_from_id, load_model_from_path
+from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.nn.flexi_vit import (
+    Encoder,
+    TokensAndMasks,
 )
-from olmoearth_pretrain.nn.flexihelios import Encoder, TokensAndMasks
+from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.config import Config
+from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
+from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (
+    MaskedOlmoEarthSample,
+    MaskValue,
+)
 from upath import UPath
 
 from rslearn.log_utils import get_logger
@@ -160,19 +162,31 @@ class OlmoEarth(FeatureExtractor):
         The folder should contain config.json as well as the model_and_optim folder
         that contains the distributed checkpoint. This is the format produced by
         pre-training runs in olmoearth_pretrain.
+
+        Uses the full olmoearth_pretrain package if available (to pick up architecture
+        updates), otherwise falls back to olmoearth_pretrain_minimal.
         """
+        try:
+            from olmoearth_pretrain.config import Config as FullConfig
+        except ImportError:
+            FullConfig = Config
+
         with (checkpoint_upath / "config.json").open() as f:
             config_dict = json.load(f)
-            model_config = Config.from_dict(config_dict["model"])
+            model_config = FullConfig.from_dict(config_dict["model"])
 
         model = model_config.build()
 
-        # Load the checkpoint (requires olmo_core for distributed checkpoint loading).
         if not random_initialization:
-            require_olmo_core(
-                "_load_model_from_checkpoint with random_initialization=False"
-            )
-            from olmo_core.distributed.checkpoint import load_model_and_optim_state
+            try:
+                from olmo_core.distributed.checkpoint import (
+                    load_model_and_optim_state,
+                )
+            except ImportError:
+                raise ImportError(
+                    "olmo-core is required for loading distributed checkpoints. "
+                    "Install it with: pip install olmo-core"
+                )
 
             train_module_dir = checkpoint_upath / "model_and_optim"
             load_model_and_optim_state(str(train_module_dir), model)

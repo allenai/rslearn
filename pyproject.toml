@@ -37,6 +37,7 @@ extra = [
     "earthdaily[platform]>=1.9.0",
     "earthengine-api>=1.6.3",
     "einops>=0.8",
+    "olmoearth-pretrain-minimal>=0.0.2",
     # https://github.com/fsspec/universal_pathlib?tab=readme-ov-file#adding-universal_pathlib-to-your-project
     # https://github.com/fsspec/filesystem_spec?tab=readme-ov-file#install
     "fsspec[gcs, s3]", # for both direct use via fsspec and indirect use via universal_pathlib, docs suggest enabling specific backends like this

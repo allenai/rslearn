@@ -323,13 +323,6 @@ management_dir: ${MANAGEMENT_DIR}
 
 Save this as `model.yaml`.
 
-Due to license incompatibility, the `olmoearth_pretrain` package required for this
-example is not included as a dependency and must be installed explicitly:
-
-```bash
-pip install olmoearth_pretrain
-```
-
 Now execute training with `model fit`:
 
 ```

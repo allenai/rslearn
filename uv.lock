@@ -2818,6 +2818,21 @@ wheels = [
 ]
 
 [[package]]
+name = "olmoearth-pretrain-minimal"
+version = "0.0.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "einops" },
+    { name = "huggingface-hub" },
+    { name = "numpy" },
+    { name = "universal-pathlib" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/76/0e/6a9318dae9269c453787f000ee4bcfcad94e4bc517bcf173668cdf03f564/olmoearth_pretrain_minimal-0.0.2.tar.gz", hash = "sha256:832fad5311e9827ebc74093335d774ba03cd0b9b8fba17d6bec5168b14b6c7a7", size = 60641, upload-time = "2026-02-04T17:45:13.376Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c4/5e/4b5f88029eabf50029b3ad6608ecb3c2d7ada04671fb521f7ecd1d85c9fe/olmoearth_pretrain_minimal-0.0.2-py3-none-any.whl", hash = "sha256:165693ecd1e22dc39956a8620cbf9d498f5df151ef60c7f60128f89b1e68f6fe", size = 65784, upload-time = "2026-02-04T17:45:12.036Z" },
+]
+
+[[package]]
 name = "omegaconf"
 version = "2.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4385,6 +4400,7 @@ extra = [
     { name = "huggingface-hub" },
     { name = "netcdf4" },
     { name = "numcodecs" },
+    { name = "olmoearth-pretrain-minimal" },
     { name = "osmium" },
     { name = "planet" },
     { name = "planetary-computer" },
@@ -4423,6 +4439,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.17.1,<2" },
     { name = "netcdf4", marker = "extra == 'extra'", specifier = ">=1.7.2" },
     { name = "numcodecs", marker = "extra == 'extra'", specifier = ">=0.16" },
+    { name = "olmoearth-pretrain-minimal", marker = "extra == 'extra'", specifier = ">=0.0.2" },
     { name = "osmium", marker = "extra == 'extra'", specifier = ">=4.0.2" },
     { name = "pillow", specifier = ">=11.3" },
     { name = "planet", marker = "extra == 'extra'", specifier = ">=3.1" },
