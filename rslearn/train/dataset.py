@@ -22,12 +22,10 @@ from rslearn.config import (
     DType,
     LayerConfig,
 )
-from rslearn.data_sources.data_source import Item
 from rslearn.dataset.dataset import Dataset
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.window import (
     Window,
-    WindowLayerData,
     get_layer_and_group_from_dir_name,
 )
 from rslearn.log_utils import get_logger
@@ -343,45 +341,6 @@ def read_raster_layer_for_data_input(
     return image, timestamps
 
 
-def read_layer_time_range(
-    layer_data: WindowLayerData | None, group_idx: int
-) -> tuple[datetime, datetime] | None:
-    """Extract the combined time range from all items in a layer data group.
-
-    Returns the min start time and max end time across all items, or None if
-    no items have time ranges.
-
-    Raises:
-        ValueError: If some items have time_range and others don't.
-    """
-    if layer_data is None:
-        return None
-
-    serialized_items = layer_data.serialized_item_groups[group_idx]
-    if not serialized_items:
-        return None
-
-    first_item = Item.deserialize(serialized_items[0])
-    if first_item.geometry.time_range is None:
-        return None
-
-    # If the first item has a time_range, all items must have one
-    time_ranges: list[tuple[datetime, datetime]] = []
-    for serialized_item in serialized_items:
-        item = Item.deserialize(serialized_item)
-        if item.geometry.time_range is None:
-            raise ValueError(
-                f"Item '{item.name}' has no time_range, but first item does. "
-                "All items in a group must consistently have or lack time_range."
-            )
-        time_ranges.append(item.geometry.time_range)
-
-    return (
-        min(tr[0] for tr in time_ranges),
-        max(tr[1] for tr in time_ranges),
-    )
-
-
 def read_data_input(
     dataset: Dataset,
     window: Window,
@@ -440,10 +399,9 @@ def read_data_input(
         )
 
     if data_input.data_type == "raster":
-        layer_datas = window.load_layer_datas()
         images: list[torch.Tensor] = []  # each is CTHW
         all_timestamps: list[tuple[datetime, datetime]] = []
-        has_timestamps = True
+        has_all_timestamps = True
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
             image, timestamps = read_raster_layer_for_data_input(
@@ -459,19 +417,14 @@ def read_data_input(
             if timestamps is not None:
                 all_timestamps.extend(timestamps)
             else:
-                # Fall back to item-level time range for this group.
-                layer_data = layer_datas.get(layer_name)
-                time_range = read_layer_time_range(layer_data, group_idx)
-                if time_range is not None:
-                    # Repeat the time range for each timestep in this image.
-                    all_timestamps.extend([time_range] * image.shape[1])
-                else:
-                    has_timestamps = False
+                # If any raster is missing timestamps, we need to exclude it from the
+                # resulting RasterArray since we are stacking the CTHW rasters.
+                has_all_timestamps = False
 
         stacked = torch.cat(images, dim=1)
         return RasterImage(
             stacked,
-            all_timestamps if has_timestamps and all_timestamps else None,
+            all_timestamps if has_all_timestamps else None,
         )
 
     elif data_input.data_type == "vector":
