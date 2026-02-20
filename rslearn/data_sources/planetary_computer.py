@@ -470,6 +470,91 @@ class Sentinel2(PlanetaryComputer):
         return get_harmonize_callback(self._get_product_xml(item))
 
 
+class Hls2S30(PlanetaryComputer):
+    """A data source for HLS v2 Sentinel-2 (S30) data on Planetary Computer."""
+
+    COLLECTION_NAME = "hls2-s30"
+    DEFAULT_PLATFORMS = ["sentinel-2a", "sentinel-2b", "sentinel-2c"]
+    # Asset keys exposed by the collection.
+    ASSET_KEY_TO_COMMON_NAME = {
+        "B01": "coastal",
+        "B02": "blue",
+        "B03": "green",
+        "B04": "red",
+        "B08": "nir",
+        "B10": "cirrus",
+        "B11": "swir16",
+        "B12": "swir22",
+    }
+    COMMON_NAME_TO_ASSET_KEY = {
+        common: asset for asset, common in ASSET_KEY_TO_COMMON_NAME.items()
+    }
+    DEFAULT_BANDS = list(ASSET_KEY_TO_COMMON_NAME.keys())
+
+    @classmethod
+    def _normalize_band_name(cls, band: str) -> str:
+        if band in cls.ASSET_KEY_TO_COMMON_NAME:
+            return band
+        if band in cls.COMMON_NAME_TO_ASSET_KEY:
+            return cls.COMMON_NAME_TO_ASSET_KEY[band]
+        raise ValueError(
+            f"unknown HLS2 S30 band '{band}'. Use one of {sorted(cls.ASSET_KEY_TO_COMMON_NAME.keys())} "
+            f"(asset keys) or {sorted(cls.COMMON_NAME_TO_ASSET_KEY.keys())} (common names)."
+        )
+
+    def __init__(
+        self,
+        band_names: list[str] | None = None,
+        platforms: list[str] | None = None,
+        query: dict[str, Any] | None = None,
+        context: DataSourceContext = DataSourceContext(),
+        **kwargs: Any,
+    ):
+        """Initialize a new Hls2S30 instance.
+
+        Args:
+            band_names: optional list of bands to expose. If not provided and a layer
+                config is present, bands are inferred from the band sets. Otherwise
+                defaults to the HLS S30 reflectance bands.
+            platforms: optional list of Sentinel-2 platform identifiers to include.
+                Defaults to ["sentinel-2a", "sentinel-2b", "sentinel-2c"].
+            query: optional STAC query filter to use. If not set, this defaults to a
+                platform filter for the configured platforms.
+            context: the data source context.
+            kwargs: additional arguments to pass to PlanetaryComputer.
+        """
+        if context.layer_config is not None:
+            requested_bands = {
+                band
+                for band_set in context.layer_config.band_sets
+                for band in band_set.bands
+            }
+            band_names = [self._normalize_band_name(band) for band in requested_bands]
+        elif band_names is None:
+            band_names = self.DEFAULT_BANDS
+        else:
+            band_names = [self._normalize_band_name(band) for band in band_names]
+
+        if platforms is None:
+            platforms = self.DEFAULT_PLATFORMS
+
+        if query is None:
+            query = {"platform": {"in": platforms}}
+
+        # Assets are keyed by band name; each asset is a single band.
+        asset_bands = {band: [band] for band in band_names}
+
+        super().__init__(
+            collection_name=self.COLLECTION_NAME,
+            asset_bands=asset_bands,
+            query=query,
+            # Skip per-item asset checks; required assets are derived from asset_bands.
+            skip_items_missing_assets=True,
+            context=context,
+            **kwargs,
+        )
+
+
 class LandsatC2L2(PlanetaryComputer):
     """A data source for Landsat Collection 2 Level-2 data on Planetary Computer.
 

@@ -7,6 +7,7 @@ from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType
 from rslearn.data_sources import DataSourceContext
 from rslearn.data_sources.planetary_computer import (
     CopDemGlo30,
+    Hls2S30,
     LandsatC2L2,
     PlanetaryComputer,
     Sentinel3SlstrLST,
@@ -112,6 +113,21 @@ def test_landsat_c2_l2_uses_user_query_unmodified() -> None:
     query = {"eo:cloud_cover": {"lt": 5}}
     data_source = LandsatC2L2(query=query)
     assert data_source.query == query
+
+
+def test_hls2_s30_defaults_to_reflectance_bands() -> None:
+    data_source = Hls2S30()
+    assert set(data_source.asset_bands.keys()) == set(Hls2S30.DEFAULT_BANDS)
+
+
+def test_hls2_s30_rejects_unknown_band() -> None:
+    with pytest.raises(ValueError, match="unsupported HLS2 S30 band"):
+        Hls2S30(band_names=["B01", "NOT_A_BAND"])
+
+
+def test_hls2_s30_accepts_common_name_aliases() -> None:
+    data_source = Hls2S30(band_names=["coastal", "red", "nir"])
+    assert set(data_source.asset_bands.keys()) == {"B01", "B04", "B08"}
 
 
 def test_planetary_computer_get_item_by_name_delegates_to_stac_data_source() -> None:
