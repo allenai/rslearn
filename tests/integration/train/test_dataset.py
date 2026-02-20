@@ -154,7 +154,7 @@ class TestDataset:
                 raster_dir,
                 projection,
                 bounds,
-                np.full((1, 4, 4), pixel_value, dtype=np.uint8),
+                RasterArray(chw_array=np.full((1, 4, 4), pixel_value, dtype=np.uint8)),
             )
             window.mark_layer_completed("raster_layer", group_idx=group_idx)
 
