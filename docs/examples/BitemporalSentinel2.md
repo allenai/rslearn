@@ -259,10 +259,10 @@ run_name: ${RUN_NAME}
 management_dir: ${MANAGEMENT_DIR}
 ```
 
-Save this as `model.yaml`.
-
 See [TasksAndModels](../TasksAndModels.md) for more details about the SimpleTimeSeries
 and OlmoEarth model components.
+
+Save this as `model.yaml`.
 
 ## Implement the ReverseImageOrder Transform
 
