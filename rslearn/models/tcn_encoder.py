@@ -323,6 +323,7 @@ class TCNEncoder(FeatureExtractor):
         dropout: float = 0.1,
         num_groups: int = 8,
         era5_key: str = "era5_daily",
+        output_spatial_size: int | None = None,
         pooling_windows: list[int] | None = None,
     ):
         """Create a new TCNEncoder.
@@ -337,6 +338,8 @@ class TCNEncoder(FeatureExtractor):
             dropout: dropout probability.
             num_groups: number of groups for GroupNorm.
             era5_key: key in the input dict that holds the time series data.
+            output_spatial_size: if provided, upsample to a spatial grid of this size (e.g., 5 for 5x5).
+                If None, outputs a FeatureVector. If set, outputs FeatureMaps with replicated embeddings.
             pooling_windows: list of pyramid levels where each entry is the
                 number of bins at that level. Default: [1, 2, 4, 12] for
                 whole-sequence, halves, quarters, and monthly bins.
@@ -352,6 +355,7 @@ class TCNEncoder(FeatureExtractor):
             pooling_windows = [1, 2, 4, 12]
 
         self.era5_key = era5_key
+        self.output_spatial_size = output_spatial_size
         self.pooling_windows = pooling_windows
 
         # Front-end: normalize input variables and project to d_model
@@ -388,7 +392,7 @@ class TCNEncoder(FeatureExtractor):
             nn.Linear(d_output, d_output),
         )
 
-    def forward(self, context: ModelContext) -> FeatureVector:
+    def forward(self, context: ModelContext) -> FeatureVector | FeatureMaps:
         """Extract time series embedding via TCN and temporal pyramid pooling.
 
         Args:
@@ -436,6 +440,14 @@ class TCNEncoder(FeatureExtractor):
 
         combined = torch.cat(pooled_features, dim=1)  # [B, d_model * num_bins_total]
         x = self.mlp(combined)  # [B, d_output]
+
+        # If output_spatial_size is specified, replicate across spatial dimensions
+        if self.output_spatial_size is not None:
+            # x: [B, output_dim] -> [B, output_dim, H, W]
+            B = x.shape[0]
+            x = x.view(B, -1, 1, 1)  # [B, output_dim, 1, 1]
+            x = x.expand(B, -1, self.output_spatial_size, self.output_spatial_size)
+            return FeatureMaps([x])
         return FeatureVector(feature_vector=x)
 
 
