@@ -15,11 +15,11 @@ class WindowStorage(abc.ABC):
     This is instantiated by a WindowStorageFactory for a specific rslearn dataset.
 
     Window metadata includes the location and time range of windows (metadata.json),
-    the window layer datas (items.json), and the completed (materialized) layers. It
-    excludes the actual materialized data. All operations involving window metadata go
-    through the WindowStorage, including enumerating windows, creating new windows, and
-    updating window layer datas during `rslearn dataset prepare` or the completed
-    layers during `rslearn dataset materialize`.
+    the window layer datas (items.json), and which item groups have been completed
+    (materialized). It excludes the actual materialized data. All operations involving
+    window metadata go through the WindowStorage, including enumerating windows, creating
+    new windows, updating window layer datas during `rslearn dataset prepare`, and
+    marking item groups completed during `rslearn dataset materialize`.
     """
 
     @abc.abstractmethod
@@ -75,14 +75,16 @@ class WindowStorage(abc.ABC):
 
     @abc.abstractmethod
     def list_completed_layers(self, group: str, name: str) -> list[tuple[str, int]]:
-        """List the layers available for this window that are completed.
+        """List the completed (materialized) item groups for this window.
+
+        Each item group is identified by a (layer_name, group_idx) pair.
 
         Args:
             group: the window group.
             name: the window name.
 
         Returns:
-            a list of (layer_name, group_idx) completed layers.
+            a list of (layer_name, group_idx) tuples identifying completed item groups.
         """
         raise NotImplementedError
 
@@ -90,19 +92,18 @@ class WindowStorage(abc.ABC):
     def is_layer_completed(
         self, group: str, name: str, layer_name: str, group_idx: int = 0
     ) -> bool:
-        """Check whether the specified layer is completed in the given window.
+        """Check whether the specified item group is completed in the given window.
 
-        Completed means there is data in the layer and the data has been written
-        (materialized).
+        Completed means the data for this item group has been written (materialized).
 
         Args:
             group: the window group.
             name: the window name.
             layer_name: the layer name.
-            group_idx: the index of the group within the layer.
+            group_idx: the item group index within the layer (default 0).
 
         Returns:
-            whether the layer is completed.
+            whether the item group is completed.
         """
         raise NotImplementedError
 
@@ -110,21 +111,25 @@ class WindowStorage(abc.ABC):
     def mark_layer_completed(
         self, group: str, name: str, layer_name: str, group_idx: int = 0
     ) -> None:
-        """Mark the specified layer completed for the given window.
+        """Mark the specified item group completed for the given window.
 
-        This must be done after the contents of the layer have been written. If a layer
-        has multiple groups, the caller should wait until the contents of all groups
-        have been written before marking them completed; this is because, when
-        materializing a window, we skip materialization if the first group
+        This must be done after the contents of the item group have been written. If a
+        layer has multiple item groups, the caller should wait until the contents of all
+        groups have been written before marking them completed; this is because, when
+        materializing a window, we skip materialization if the first item group
         (group_idx=0) is marked completed.
 
         Args:
             group: the window group.
             name: the window name.
             layer_name: the layer name.
-            group_idx: the index of the group within the layer.
+            group_idx: the item group index within the layer (default 0).
         """
         raise NotImplementedError
+
+    def close(self) -> None:
+        """Release any resources held by this storage backend."""
+        pass
 
 
 class WindowStorageFactory(abc.ABC):

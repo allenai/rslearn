@@ -7,10 +7,12 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
+import numpy as np
 import numpy.typing as npt
 import planetary_computer
 import rasterio
 import requests
+import xarray as xr
 from typing_extensions import override
 from upath import UPath
 
@@ -23,6 +25,7 @@ from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import STGeometry
+from rslearn.utils.interpolation import NODATA_VALUE, interpolate_to_grid
 from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 from rslearn.utils.stac import StacClient, StacItem
@@ -720,3 +723,200 @@ class CopDemGlo30(PlanetaryComputer):
     def _get_search_time_range(self, geometry: STGeometry) -> None:
         # Copernicus DEM is static; do not filter STAC searches by time.
         return None
+
+
+class Sentinel3SlstrLST(PlanetaryComputer):
+    """Sentinel-3 SLSTR L2 Land Surface Temperature data on Planetary Computer.
+
+    This collection provides netCDF swaths with geolocation arrays. We interpolate
+    the swath onto a regular lat/lon grid using linear interpolation during ingestion.
+    Direct materialization is not supported; keep ingest enabled.
+
+    Requires the optional netCDF/xarray dependencies (netCDF4/h5netcdf/h5py).
+    """
+
+    COLLECTION_NAME = "sentinel-3-slstr-lst-l2-netcdf"
+    LST_ASSET_KEY = "lst-in"
+    GEODETIC_ASSET_KEY = "slstr-geodetic-in"
+    DEFAULT_BANDS = ["LST"]
+
+    def __init__(
+        self,
+        sample_step: int = 20,
+        nodata_value: float = 0.0,
+        grid_resolution: float | None = None,
+        context: DataSourceContext = DataSourceContext(),
+        **kwargs: Any,
+    ) -> None:
+        """Initialize a new Sentinel3SlstrLST instance.
+
+        Args:
+            sample_step: stride (in pixels) for sampling the geodetic arrays when
+                estimating grid resolution.
+            nodata_value: value to use for missing data in the output GeoTIFF.
+            grid_resolution: optional output grid resolution (degrees). If not set,
+                it is estimated from the geodetic arrays.
+            context: the data source context.
+            kwargs: additional arguments to pass to PlanetaryComputer.
+        """
+        self.sample_step = max(1, sample_step)
+        self.nodata_value = nodata_value
+        self.grid_resolution = grid_resolution
+
+        if context.layer_config is not None:
+            requested_bands = {
+                band
+                for band_set in context.layer_config.band_sets
+                for band in band_set.bands
+            }
+            if requested_bands != set(self.DEFAULT_BANDS):
+                raise ValueError(
+                    "Sentinel3SlstrLST only supports the LST band. "
+                    f"Requested: {sorted(requested_bands)}"
+                )
+
+        self.band_names = self.DEFAULT_BANDS
+
+        super().__init__(
+            collection_name=self.COLLECTION_NAME,
+            asset_bands={self.LST_ASSET_KEY: self.band_names},
+            skip_items_missing_assets=True,
+            context=context,
+            **kwargs,
+        )
+
+    def _estimate_grid_resolution(
+        self, lons: npt.NDArray[np.floating], lats: npt.NDArray[np.floating]
+    ) -> float:
+        """Estimate grid resolution in degrees from geodetic arrays."""
+        if lons.shape != lats.shape:
+            raise ValueError(
+                f"expected lon/lat arrays to have same shape, got {lons.shape} and {lats.shape}"
+            )
+        step = max(1, self.sample_step)
+        lons_s = lons[::step, ::step]
+        lats_s = lats[::step, ::step]
+
+        lon_diff = np.abs(np.diff(lons_s, axis=1)).ravel()
+        lat_diff = np.abs(np.diff(lats_s, axis=0)).ravel()
+        diffs = np.concatenate([lon_diff, lat_diff])
+        diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
+        if diffs.size == 0:
+            return 0.01
+        return float(np.median(diffs))
+
+    def _mask_geodetic_by_valid_data(
+        self,
+        lons: npt.NDArray[np.floating],
+        lats: npt.NDArray[np.floating],
+        data: npt.NDArray[np.floating],
+    ) -> tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
+        """Mask lon/lat arrays where the data is invalid."""
+        valid_mask = np.isfinite(data[0])
+        lons = np.where(valid_mask, lons, np.nan)
+        lats = np.where(valid_mask, lats, np.nan)
+        return lons, lats
+
+    def ingest(
+        self,
+        tile_store: TileStoreWithLayer,
+        items: list[SourceItem],
+        geometries: list[list[STGeometry]],
+    ) -> None:
+        """Ingest items into the given tile store."""
+        for item in items:
+            if tile_store.is_raster_ready(item.name, self.band_names):
+                continue
+
+            if self.LST_ASSET_KEY not in item.asset_urls:
+                logger.warning(
+                    "Sentinel3SlstrLST item %s missing asset %s, skipping",
+                    item.name,
+                    self.LST_ASSET_KEY,
+                )
+                continue
+            if self.GEODETIC_ASSET_KEY not in item.asset_urls:
+                logger.warning(
+                    "Sentinel3SlstrLST item %s missing asset %s, skipping",
+                    item.name,
+                    self.GEODETIC_ASSET_KEY,
+                )
+                continue
+
+            lst_url = planetary_computer.sign(item.asset_urls[self.LST_ASSET_KEY])
+            geodetic_url = planetary_computer.sign(
+                item.asset_urls[self.GEODETIC_ASSET_KEY]
+            )
+
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                lst_path = os.path.join(tmp_dir, "lst-in.nc")
+                geodetic_path = os.path.join(tmp_dir, "geodetic-in.nc")
+                for url, path in ((lst_url, lst_path), (geodetic_url, geodetic_path)):
+                    with requests.get(
+                        url, stream=True, timeout=self.timeout.total_seconds()
+                    ) as r:
+                        r.raise_for_status()
+                        with open(path, "wb") as f:
+                            for chunk in r.iter_content(chunk_size=8192):
+                                f.write(chunk)
+
+                with (
+                    xr.open_dataset(lst_path, mask_and_scale=True) as lst_ds,
+                    xr.open_dataset(geodetic_path, mask_and_scale=True) as geo_ds,
+                ):
+                    lons = np.asarray(geo_ds["longitude_in"].values, dtype=np.float64)
+                    lats = np.asarray(geo_ds["latitude_in"].values, dtype=np.float64)
+
+                    band_arrays = []
+                    for band in self.band_names:
+                        if band not in lst_ds:
+                            raise ValueError(
+                                f"Sentinel3SlstrLST band '{band}' not found in {self.LST_ASSET_KEY}"
+                            )
+                        band_arrays.append(
+                            np.asarray(lst_ds[band].values, dtype=np.float32)
+                        )
+
+                    stack = np.stack(band_arrays, axis=0)
+                    lons, lats = self._mask_geodetic_by_valid_data(lons, lats, stack)
+
+                    grid_resolution = (
+                        self.grid_resolution
+                        if self.grid_resolution is not None
+                        else self._estimate_grid_resolution(lons, lats)
+                    )
+                    logger.debug(
+                        "SLSTR LST grid resolution (deg): %s",
+                        grid_resolution,
+                    )
+                    gridded_array, projection, bounds = interpolate_to_grid(
+                        data=stack,
+                        lon=lons,
+                        lat=lats,
+                        grid_resolution=grid_resolution,
+                    )
+
+                    if self.nodata_value != NODATA_VALUE:
+                        gridded_array = np.where(
+                            gridded_array == NODATA_VALUE,
+                            self.nodata_value,
+                            gridded_array,
+                        )
+
+                tile_store.write_raster(
+                    item.name, self.band_names, projection, bounds, gridded_array
+                )
+
+    def read_raster(
+        self,
+        layer_name: str,
+        item_name: str,
+        bands: list[str],
+        projection: Any,
+        bounds: Any,
+        resampling: Any = rasterio.enums.Resampling.bilinear,
+    ) -> npt.NDArray[Any]:
+        """Direct materialization is not supported for this data source."""
+        raise NotImplementedError(
+            "Sentinel3SlstrLST does not support direct materialization; set ingest=true."
+        )
