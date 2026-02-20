@@ -2,6 +2,7 @@
 
 from typing import Any
 
+import torch
 import torchvision
 from torchvision.transforms import InterpolationMode
 
@@ -67,4 +68,68 @@ class Resize(Transform):
             transformed (input_dicts, target_dicts) tuple
         """
         self.apply_fn(self.apply_resize, input_dict, target_dict, self.selectors)
+        return input_dict, target_dict
+
+
+class MaxPoolResize(Transform):
+    """Resizes inputs to a target size using adaptive max pooling.
+
+    Unlike Resize (which uses interpolation), this uses max pooling over each
+    spatial region.  This is useful for binary label masks: if *any* pixel in a
+    pooling region is positive, the output pixel is positive.
+    """
+
+    def __init__(
+        self,
+        target_size: tuple[int, int],
+        selectors: list[str] = [],
+        skip_missing: bool = False,
+    ):
+        """Initialize a MaxPoolResize transform.
+
+        Args:
+            target_size: the (height, width) to resize to.
+            selectors: items to transform.
+            skip_missing: if True, skip selectors that don't exist in the
+                input/target dicts.
+        """
+        super().__init__()
+        self.target_size = target_size
+        self.selectors = selectors
+        self.skip_missing = skip_missing
+
+    def apply_max_pool_resize(self, image: RasterImage) -> RasterImage:
+        """Apply adaptive max-pool resizing on the specified image.
+
+        Args:
+            image: the image to transform (CTHW tensor).
+
+        Returns:
+            the resized image.
+        """
+        # image.image is [C, T, H, W].  Merge C and T so we can max-pool over
+        # (H, W), then restore the original leading dims.
+        c, t, h, w = image.image.shape
+        merged = image.image.reshape(c * t, 1, h, w)
+        pooled = torch.nn.functional.adaptive_max_pool2d(
+            merged.float(), self.target_size
+        )
+        image.image = pooled.reshape(c, t, *self.target_size).to(image.image.dtype)
+        return image
+
+    def forward(
+        self, input_dict: dict[str, Any], target_dict: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Apply transform over the inputs and targets.
+
+        Args:
+            input_dict: the input
+            target_dict: the target
+
+        Returns:
+            transformed (input_dicts, target_dicts) tuple
+        """
+        self.apply_fn(
+            self.apply_max_pool_resize, input_dict, target_dict, self.selectors
+        )
         return input_dict, target_dict
