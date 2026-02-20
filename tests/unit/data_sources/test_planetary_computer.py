@@ -9,6 +9,7 @@ from rslearn.data_sources.planetary_computer import (
     CopDemGlo30,
     LandsatC2L2,
     PlanetaryComputer,
+    Sentinel3SlstrLST,
 )
 from rslearn.utils.stac import StacAsset, StacItem
 
@@ -147,3 +148,26 @@ def test_planetary_computer_get_item_by_name_delegates_to_stac_data_source() -> 
 
     assert item.name == "test-item-id"
     assert "visual" in item.asset_urls
+
+
+def test_sentinel3_slstr_lst_uses_fixed_band() -> None:
+    layer_cfg = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.FLOAT32, bands=["LST"])],
+    )
+    context = DataSourceContext(layer_config=layer_cfg)
+
+    data_source = Sentinel3SlstrLST(context=context)
+    assert data_source.asset_bands["lst-in"] == ["LST"]
+    assert data_source.band_names == ["LST"]
+
+
+def test_sentinel3_slstr_lst_rejects_non_lst_band_in_context() -> None:
+    layer_cfg = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.FLOAT32, bands=["LST_uncertainty"])],
+    )
+    context = DataSourceContext(layer_config=layer_cfg)
+
+    with pytest.raises(ValueError, match="only supports the LST band"):
+        Sentinel3SlstrLST(context=context)
