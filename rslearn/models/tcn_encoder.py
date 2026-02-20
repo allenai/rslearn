@@ -322,7 +322,7 @@ class TCNEncoder(FeatureExtractor):
         dilations: list[int] | None = None,
         dropout: float = 0.1,
         num_groups: int = 8,
-        era5_key: str = "era5_daily",
+        mod_key: str = "era5_daily",
         output_spatial_size: int | None = None,
         pooling_windows: list[int] | None = None,
     ):
@@ -337,7 +337,7 @@ class TCNEncoder(FeatureExtractor):
                 Default: [1, 2, 4, 8, 16, 32, 64, 128].
             dropout: dropout probability.
             num_groups: number of groups for GroupNorm.
-            era5_key: key in the input dict that holds the time series data.
+            mod_key: key in the input dict that holds the time series data.
             output_spatial_size: if provided, upsample to a spatial grid of this size (e.g., 5 for 5x5).
                 If None, outputs a FeatureVector. If set, outputs FeatureMaps with replicated embeddings.
             pooling_windows: list of pyramid levels where each entry is the
@@ -354,7 +354,7 @@ class TCNEncoder(FeatureExtractor):
         if pooling_windows is None:
             pooling_windows = [1, 2, 4, 12]
 
-        self.era5_key = era5_key
+        self.mod_key = mod_key
         self.in_channels = in_channels
         self.output_spatial_size = output_spatial_size
         self.pooling_windows = pooling_windows
@@ -404,7 +404,7 @@ class TCNEncoder(FeatureExtractor):
         """
         # Extract, spatially pool, and reshape TS data: [B, T, C]
         era5_data = prepare_ts_modality(
-            context, self.era5_key, in_channels=self.in_channels
+            context, self.mod_key, in_channels=self.in_channels
         )
 
         B, T, C = era5_data.shape
