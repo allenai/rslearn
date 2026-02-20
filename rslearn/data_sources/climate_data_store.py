@@ -253,7 +253,7 @@ class ERA5Land(DataSource):
         lon = lon[sorted_indices]
 
         # Reorder the data array to match the new longitude order
-        array = array[:, :, sorted_indices]
+        array = array[:, :, :, sorted_indices]
 
         # Check the spacing of the grid, make sure it's uniform
         for i in range(len(lon) - 1):
