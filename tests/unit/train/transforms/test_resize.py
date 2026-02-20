@@ -3,7 +3,7 @@ from typing import Any
 import torch
 
 from rslearn.train.model_context import RasterImage
-from rslearn.train.transforms.resize import Resize
+from rslearn.train.transforms.resize import MaxPoolResize, Resize
 
 
 def test_resize() -> None:
@@ -20,3 +20,30 @@ def test_resize() -> None:
     ).unsqueeze(dim=1)
     assert torch.all(tsf_target_4D["image"].image == expected_target_4D)
     assert tsf_input_4D == {}
+
+
+def test_max_pool_resize_all_zeros() -> None:
+    """MaxPoolResize on an all-zero label mask should produce all zeros."""
+    # CTHW: 1 channel, 1 timestep, 10x10 spatial — all zeros
+    label = torch.zeros(1, 1, 10, 10, dtype=torch.int32)
+    transform = MaxPoolResize((2, 2), ["target/classes"])
+    input_dict: dict[str, Any] = {}
+    target_dict: dict[str, Any] = {"classes": RasterImage(label)}
+    _, out_target = transform(input_dict, target_dict)
+    assert out_target["classes"].image.shape == (1, 1, 2, 2)
+    assert (out_target["classes"].image == 0).all()
+
+
+def test_max_pool_resize_single_positive_pixel() -> None:
+    """MaxPoolResize with one positive pixel should propagate a 1 to that pool region."""
+    # CTHW: 1 channel, 1 timestep, 10x10 spatial — all zeros except one pixel
+    label = torch.zeros(1, 1, 10, 10, dtype=torch.int32)
+    label[0, 0, 3, 7] = 1  # falls in pool region (0, 1) for a 2x2 output
+    transform = MaxPoolResize((2, 2), ["target/classes"])
+    input_dict: dict[str, Any] = {}
+    target_dict: dict[str, Any] = {"classes": RasterImage(label)}
+    _, out_target = transform(input_dict, target_dict)
+    assert out_target["classes"].image.shape == (1, 1, 2, 2)
+    # The output should not be all zeros — the region containing the positive pixel is 1
+    assert out_target["classes"].image.sum().item() == 1
+    assert out_target["classes"].image[0, 0, 0, 1] == 1
