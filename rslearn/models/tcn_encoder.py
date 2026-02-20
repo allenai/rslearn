@@ -19,7 +19,7 @@ MODALITY_NAMES = [
 def prepare_ts_modality(
     context: ModelContext,
     mod_key: str,
-    num_variables: int | None = None,
+    in_channels: int,
 ) -> torch.Tensor:
     """Extract, batch, and pre-process a time-series modality from model context.
 
@@ -27,13 +27,16 @@ def prepare_ts_modality(
     shorter sequences to the maximum length in the batch.  Spatial dimensions
     are averaged so the output is always 3-D.
 
+    The final reshape ensures the last dimension equals ``in_channels``.  This
+    is a no-op when the data already has the correct number of channels, and
+    correctly unstacks data where all timesteps were flattened into the channel
+    dimension (C*T bands with T=1): [B, 1, C*T] → [B, T, C].
+
     Args:
         context: the model context containing all modality inputs.
         mod_key: key identifying the time-series modality in each input dict.
-        num_variables: if set, the input is assumed to be a stacked
-            representation where all timesteps are flattened into the channel
-            dimension (C*T bands with T=1).  The data will be reshaped from
-            [B, 1, C*T] to [B, T, C] where C = num_variables.
+        in_channels: number of variables per timestep (must match the
+            encoder's ``in_channels``).
 
     Returns:
         a tensor of shape [B, T, C] where T is the max sequence length in the
@@ -63,11 +66,11 @@ def prepare_ts_modality(
     if data.dim() == 4:
         data = data.mean(dim=1)
 
-    # If num_variables is set, the input is stacked: [B, 1, C*T].
-    # Reshape to [B, T, C] where C = num_variables.
-    if num_variables is not None:
-        B = data.shape[0]
-        data = data.reshape(B, -1, num_variables)  # [B, T, C]
+    # Reshape so the last dim equals in_channels.  This is a no-op when the
+    # data is already [B, T, in_channels] and unstacks the flattened
+    # representation [B, 1, C*T] → [B, T, C] when needed.
+    B = data.shape[0]
+    data = data.reshape(B, -1, in_channels)
 
     return data
 
@@ -92,7 +95,6 @@ class SimpleTCNEncoder(FeatureExtractor):
         dropout: float = 0.1,
         mod_key: str = "era5_daily",
         output_spatial_size: int | None = None,
-        num_variables: int | None = None,
     ):
         """Create a new SimpleTCNEncoder.
 
@@ -108,16 +110,12 @@ class SimpleTCNEncoder(FeatureExtractor):
             mod_key: key in the input dict that holds the time series data
             output_spatial_size: if provided, upsample to a spatial grid of this size (e.g., 5 for 5x5).
                 If None, outputs a FeatureVector. If set, outputs FeatureMaps with replicated embeddings.
-            num_variables: if set, the input is assumed to be a stacked representation
-                where all timesteps are flattened into the channel dimension (C*T bands
-                with T=1). The data will be reshaped from [B, 1, C*T] to [B, T, C] where
-                C = num_variables and T = C*T / num_variables.
         """
         super().__init__()
 
         self.mod_key = mod_key
+        self.in_channels = in_channels
         self.output_spatial_size = output_spatial_size
-        self.num_variables = num_variables
 
         # Front-end linear projection
         self.input_proj = nn.Linear(in_channels, base_dim)
@@ -175,7 +173,7 @@ class SimpleTCNEncoder(FeatureExtractor):
         """
         # Extract, spatially pool, and reshape TS data: [B, T, C]
         TS_data = prepare_ts_modality(
-            context, self.mod_key, num_variables=self.num_variables
+            context, self.mod_key, in_channels=self.in_channels
         )
 
         x = self.input_proj(TS_data)
@@ -327,7 +325,6 @@ class TCNEncoder(FeatureExtractor):
         era5_key: str = "era5_daily",
         output_spatial_size: int | None = None,
         pooling_windows: list[int] | None = None,
-        num_variables: int | None = None,
     ):
         """Create a new TCNEncoder.
 
@@ -346,11 +343,6 @@ class TCNEncoder(FeatureExtractor):
             pooling_windows: list of pyramid levels where each entry is the
                 number of bins at that level. Default: [1, 2, 4, 12] for
                 whole-sequence, halves, quarters, and monthly bins.
-            num_variables: if set, the input is assumed to be a stacked
-                representation where all timesteps are flattened into the
-                channel dimension (C*T bands with T=1). The data will be
-                reshaped from [B, 1, C*T] to [B, T, C] where
-                C = num_variables.
         """
         super().__init__()
 
@@ -363,9 +355,9 @@ class TCNEncoder(FeatureExtractor):
             pooling_windows = [1, 2, 4, 12]
 
         self.era5_key = era5_key
+        self.in_channels = in_channels
         self.output_spatial_size = output_spatial_size
         self.pooling_windows = pooling_windows
-        self.num_variables = num_variables
 
         # Front-end: normalize input variables and project to d_model
         self.input_norm = nn.LayerNorm(in_channels)
@@ -412,7 +404,7 @@ class TCNEncoder(FeatureExtractor):
         """
         # Extract, spatially pool, and reshape TS data: [B, T, C]
         era5_data = prepare_ts_modality(
-            context, self.era5_key, num_variables=self.num_variables
+            context, self.era5_key, in_channels=self.in_channels
         )
 
         B, T, C = era5_data.shape
