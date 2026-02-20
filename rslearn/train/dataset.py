@@ -472,6 +472,13 @@ def read_data_input(
                 time_range = read_layer_time_range(layer_data, group_idx)
                 if time_range is not None:
                     all_timestamps.append(time_range)
+                    warnings.warn(
+                        "Falling back to item-level time range for single-timestep "
+                        "RasterImage is deprecated and will be removed after "
+                        "2026-05-01. Ensure timestamps are stored with the raster data.",
+                        FutureWarning,
+                        stacklevel=2,
+                    )
                 else:
                     # It is okay for single-timestep RasterImage to not have timestamps.
                     has_all_timestamps = False
