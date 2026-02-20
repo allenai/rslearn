@@ -107,16 +107,21 @@ class ERA5Land(DataSource):
         Returns:
             List of groups of items that should be retrieved for each geometry.
         """
-        # We only support mosaic here, other query modes don't really make sense.
-        if query_config.space_mode != SpaceMode.MOSAIC:
-            raise ValueError("expected mosaic space mode in the query configuration")
+        # We only support MOSAIC and SINGLE_COMPOSITE here, other query modes don't really make sense.
+        if query_config.space_mode not in (
+            SpaceMode.MOSAIC,
+            SpaceMode.SINGLE_COMPOSITE,
+        ):
+            raise ValueError(
+                "expected MOSAIC or SINGLE_COMPOSITE space mode in the query configuration"
+            )
 
         all_groups = []
         for geometry in geometries:
             if geometry.time_range is None:
                 raise ValueError("expected all geometries to have a time range")
 
-            # Compute one mosaic for each month in this geometry.
+            # Compute one item for each month in this geometry.
             cur_date = datetime(
                 geometry.time_range[0].year,
                 geometry.time_range[0].month,
@@ -135,30 +140,27 @@ class ERA5Land(DataSource):
                 month_dates.append(cur_date)
                 cur_date += relativedelta(months=1)
 
-            cur_groups = []
+            # Use bounds if set, otherwise use whole globe.
+            bounds = self.bounds if self.bounds is not None else [-180, -90, 180, 90]
+            items = []
             for cur_date in month_dates:
-                # Collect Item list corresponding to the current month.
-                items = []
                 item_name = f"era5land_monthlyaveraged_{cur_date.year}_{cur_date.month}"
-                # Use bounds if set, otherwise use whole globe
-                if self.bounds is not None:
-                    bounds = self.bounds
-                else:
-                    bounds = [-180, -90, 180, 90]
-                # Time is just the given month.
                 start_date = datetime(cur_date.year, cur_date.month, 1, tzinfo=UTC)
                 time_range = (
                     start_date,
                     start_date + relativedelta(months=1),
                 )
-                geometry = STGeometry(
+                item_geometry = STGeometry(
                     WGS84_PROJECTION,
                     shapely.box(*bounds),
                     time_range,
                 )
-                items.append(Item(item_name, geometry))
-                cur_groups.append(items)
-            all_groups.append(cur_groups)
+                items.append(Item(item_name, item_geometry))
+
+            if query_config.space_mode == SpaceMode.SINGLE_COMPOSITE:
+                all_groups.append([items])
+            else:
+                all_groups.append([[item] for item in items])
 
         return all_groups
 
@@ -600,9 +602,14 @@ class ERA5LandHourlyTimeseries(DataSource):
         Returns:
             List of groups of items that should be retrieved for each geometry.
         """
-        # We only support mosaic here, other query modes don't really make sense.
-        if query_config.space_mode != SpaceMode.MOSAIC:
-            raise ValueError("expected mosaic space mode in the query configuration")
+        # We only support MOSAIC/SINGLE_COMPOSITE here, other query modes don't really make sense.
+        if query_config.space_mode not in (
+            SpaceMode.MOSAIC,
+            SpaceMode.SINGLE_COMPOSITE,
+        ):
+            raise ValueError(
+                "expected MOSAIC or SINGLE_COMPOSITE space mode in the query configuration"
+            )
 
         all_groups = []
         for geometry in geometries:
@@ -635,12 +642,12 @@ class ERA5LandHourlyTimeseries(DataSource):
                 month_dates.append(cur_date)
                 cur_date += relativedelta(months=1)
 
-            cur_groups = []
+            # Create a unique item name based on grid coordinates and time.
+            # Use consistent formatting for lat/lon to ensure proper caching.
+            lat_str = f"{snapped_lat:.1f}".replace("-", "n")
+            lon_str = f"{snapped_lon:.1f}".replace("-", "n")
+            items = []
             for cur_date in month_dates:
-                # Create a unique item name based on grid coordinates and time
-                # Use consistent formatting for lat/lon to ensure proper caching
-                lat_str = f"{snapped_lat:.1f}".replace("-", "n")
-                lon_str = f"{snapped_lon:.1f}".replace("-", "n")
                 item_name = (
                     f"era5land_timeseries_{lat_str}_{lon_str}_"
                     f"{cur_date.year}_{cur_date.month:02d}"
@@ -660,11 +667,12 @@ class ERA5LandHourlyTimeseries(DataSource):
                     point_geom,
                     time_range,
                 )
+                items.append(Item(item_name, item_geometry))
 
-                items = [Item(item_name, item_geometry)]
-                cur_groups.append(items)
-
-            all_groups.append(cur_groups)
+            if query_config.space_mode == SpaceMode.SINGLE_COMPOSITE:
+                all_groups.append([items])
+            else:
+                all_groups.append([[item] for item in items])
 
         return all_groups
 
