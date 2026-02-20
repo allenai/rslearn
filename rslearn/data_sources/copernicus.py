@@ -603,7 +603,10 @@ class Copernicus(DataSource):
                     # Now we can ingest it.
                     logger.debug(f"Ingesting the raster for bands {band_names}")
                     tile_store.write_raster_file(
-                        item.name, band_names, UPath(local_raster_fname)
+                        item.name,
+                        band_names,
+                        UPath(local_raster_fname),
+                        time_range=item.geometry.time_range,
                     )
 
     def ingest(
@@ -835,7 +838,10 @@ class Sentinel2(Copernicus):
                         # No callback -- we can just ingest the file directly.
                         # Or it is TCI product which is not impacted by the harmonization issue.
                         tile_store.write_raster_file(
-                            item.name, band_names, UPath(local_raster_fname)
+                            item.name,
+                            band_names,
+                            UPath(local_raster_fname),
+                            time_range=item.geometry.time_range,
                         )
 
                     else:

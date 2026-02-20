@@ -295,7 +295,10 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
                         asset_key,
                     )
                     tile_store.write_raster_file(
-                        item.name, band_names, UPath(local_fname)
+                        item.name,
+                        band_names,
+                        UPath(local_fname),
+                        time_range=item.geometry.time_range,
                     )
 
                 logger.debug(
@@ -449,7 +452,10 @@ class Sentinel2(PlanetaryComputer):
 
                     else:
                         tile_store.write_raster_file(
-                            item.name, band_names, UPath(local_fname)
+                            item.name,
+                            band_names,
+                            UPath(local_fname),
+                            time_range=item.geometry.time_range,
                         )
 
                 logger.debug(
@@ -904,7 +910,14 @@ class Sentinel3SlstrLST(PlanetaryComputer):
                         )
 
                 tile_store.write_raster(
-                    item.name, self.band_names, projection, bounds, gridded_array
+                    item.name,
+                    self.band_names,
+                    projection,
+                    bounds,
+                    RasterArray(
+                        chw_array=gridded_array,
+                        time_range=item.geometry.time_range,
+                    ),
                 )
 
     def read_raster(
@@ -915,7 +928,7 @@ class Sentinel3SlstrLST(PlanetaryComputer):
         projection: Any,
         bounds: Any,
         resampling: Any = rasterio.enums.Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Direct materialization is not supported for this data source."""
         raise NotImplementedError(
             "Sentinel3SlstrLST does not support direct materialization; set ingest=true."

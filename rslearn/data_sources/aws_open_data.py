@@ -346,7 +346,9 @@ class Naip(DataSource):
                 self.bucket.download_file(
                     item.blob_path, fname, ExtraArgs={"RequestPayer": "requester"}
                 )
-                tile_store.write_raster_file(item.name, bands, UPath(fname))
+                tile_store.write_raster_file(
+                    item.name, bands, UPath(fname), time_range=item.geometry.time_range
+                )
 
 
 class Sentinel2Modality(Enum):
@@ -739,5 +741,8 @@ class Sentinel2(
 
                     else:
                         tile_store.write_raster_file(
-                            item.name, band_names, UPath(local_fname)
+                            item.name,
+                            band_names,
+                            UPath(local_fname),
+                            time_range=item.geometry.time_range,
                         )

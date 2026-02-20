@@ -98,6 +98,23 @@ def read_raster_window_from_tiles(
         raster_array = tile_store.read_raster(
             item.name, src_bands, projection, intersection, resampling=resampling
         )
+
+        if (
+            raster_array.timestamps is None
+            and raster_array.array.shape[1] == 1
+            and item.geometry.time_range is not None
+        ):
+            # The TileStore returned a single-timestep raster and the item had a time
+            # range, but it didn't make it into the RasterArray.
+            # This can happen with data sources implementing TileStore interface that
+            # omit the time range for efficiency, since they just see the item name and
+            # would need to perform a lookup to get the time range.
+            # We add it in here.
+            raster_array = RasterArray(
+                array=raster_array.array,
+                timestamps=[item.geometry.time_range],
+            )
+
         src = raster_array.array  # (C_src, T, H_int, W_int)
 
         if dst is None:
@@ -207,8 +224,8 @@ def build_first_valid_composite(
     """Build a composite by selecting the first valid pixel of items in the group.
 
     A composite of shape (C, T, H, W) is created by iterating over items in group in
-    order and selecting the first pixel that is not nodata per index. T is determined by
-    the items' data in the tile store (all items must have the same T).
+    order and selecting the first pixel that is not nodata per index. All items must
+    have the same number of timesteps (T).
 
     Args:
         group: list of items to composite together
@@ -226,9 +243,6 @@ def build_first_valid_composite(
         RasterArray with shape (C, T, H, W) built from all items in the group.
 
     """
-    height = bounds[3] - bounds[1]
-    width = bounds[2] - bounds[0]
-
     dst: RasterArray | None = None
     for item in group:
         dst = read_raster_window_from_tiles(
@@ -245,6 +259,9 @@ def build_first_valid_composite(
         )
 
     if dst is None:
+        # Create a single-timestep nodata raster.
+        height = bounds[3] - bounds[1]
+        width = bounds[2] - bounds[0]
         arr = np.empty((len(bands), 1, height, width), dtype=band_dtype)
         for idx, nodata_val in enumerate(nodata_vals):
             arr[idx, :, :, :] = nodata_val
@@ -310,7 +327,7 @@ def mask_stacked_rasters(
     """Masks the stacked rasters - each items band with the corresponding nodata val.
 
     Args:
-        stacked_rasters: NumPy array of shape (num_items, num_bands, T, height, width)
+        stacked_rasters: numpy array of shape (num_items, num_bands, T, height, width)
             containing raster values for each item in the group.
         nodata_vals: Sequence of nodata values, one per band, used to identify invalid
             pixels in the stacked rasters.
@@ -321,6 +338,8 @@ def mask_stacked_rasters(
     """
     nodata_vals_array = np.array(nodata_vals).reshape(1, -1, 1, 1, 1)
     valid_mask = stacked_rasters != nodata_vals_array
+
+    # Create masked array for all bands
     masked_data = np.ma.masked_where(~valid_mask, stacked_rasters)
 
     return masked_data

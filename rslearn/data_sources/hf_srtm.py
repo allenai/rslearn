@@ -327,7 +327,10 @@ class SRTM(DataSource):
 
                 logger.debug(f"Ingesting data for {item.name}")
                 tile_store.write_raster_file(
-                    item.name, [self.band_name], UPath(local_fname)
+                    item.name,
+                    [self.band_name],
+                    UPath(local_fname),
+                    time_range=item.geometry.time_range,
                 )
 
 

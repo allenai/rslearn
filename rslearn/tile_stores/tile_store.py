@@ -1,5 +1,7 @@
 """Base class for tile stores."""
 
+from datetime import datetime
+
 from rasterio.enums import Resampling
 from upath import UPath
 
@@ -118,7 +120,12 @@ class TileStore:
         raise NotImplementedError
 
     def write_raster_file(
-        self, layer_name: str, item_name: str, bands: list[str], fname: UPath
+        self,
+        layer_name: str,
+        item_name: str,
+        bands: list[str],
+        fname: UPath,
+        time_range: tuple[datetime, datetime] | None = None,
     ) -> None:
         """Write raster data to the store.
 
@@ -127,6 +134,7 @@ class TileStore:
             item_name: the item to write.
             bands: the list of bands in the array.
             fname: the raster file.
+            time_range: optional time range for the raster.
         """
         raise NotImplementedError
 
@@ -278,15 +286,24 @@ class TileStoreWithLayer:
             self.layer_name, item_name, bands, projection, bounds, raster
         )
 
-    def write_raster_file(self, item_name: str, bands: list[str], fname: UPath) -> None:
+    def write_raster_file(
+        self,
+        item_name: str,
+        bands: list[str],
+        fname: UPath,
+        time_range: tuple[datetime, datetime] | None = None,
+    ) -> None:
         """Write raster data to the store.
 
         Args:
             item_name: the item to write.
             bands: the list of bands in the array.
             fname: the raster file.
+            time_range: optional time range for the raster.
         """
-        self.tile_store.write_raster_file(self.layer_name, item_name, bands, fname)
+        self.tile_store.write_raster_file(
+            self.layer_name, item_name, bands, fname, time_range=time_range
+        )
 
     def is_vector_ready(self, item_name: str) -> bool:
         """Checks if this vector item has been written to the store.

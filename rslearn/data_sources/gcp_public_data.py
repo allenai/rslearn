@@ -899,7 +899,10 @@ class Sentinel2(DataSource):
 
                     else:
                         tile_store.write_raster_file(
-                            item.name, band_names, UPath(fname)
+                            item.name,
+                            band_names,
+                            UPath(fname),
+                            time_range=item.geometry.time_range,
                         )
 
                 logger.debug(

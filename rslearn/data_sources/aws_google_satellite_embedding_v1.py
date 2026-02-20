@@ -294,7 +294,12 @@ class GoogleSatelliteEmbeddingV1(
                         ),
                     )
                 else:
-                    tile_store.write_raster_file(item.name, BANDS, UPath(local_path))
+                    tile_store.write_raster_file(
+                        item.name,
+                        BANDS,
+                        UPath(local_path),
+                        time_range=item.geometry.time_range,
+                    )
 
     # --- DirectMaterializeDataSource implementation ---
 

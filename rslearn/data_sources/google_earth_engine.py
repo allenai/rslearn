@@ -407,7 +407,10 @@ class GEE(DataSource, TileStore):
                     )
                     blobs[0].download_to_filename(local_fname)
                     tile_store.write_raster_file(
-                        item.name, self.bands, UPath(local_fname)
+                        item.name,
+                        self.bands,
+                        UPath(local_fname),
+                        time_range=item.geometry.time_range,
                     )
 
                 else:

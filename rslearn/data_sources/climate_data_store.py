@@ -9,10 +9,9 @@ from typing import Any
 import cdsapi
 import netCDF4
 import numpy as np
-import rasterio
 import shapely
 from dateutil.relativedelta import relativedelta
-from rasterio.transform import from_origin
+from rasterio.crs import CRS
 from upath import UPath
 
 from rslearn.config import QueryConfig, SpaceMode
@@ -20,7 +19,8 @@ from rslearn.const import WGS84_EPSG, WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
-from rslearn.utils.geometry import STGeometry
+from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
+from rslearn.utils.raster_array import RasterArray
 
 logger = get_logger(__name__)
 
@@ -166,12 +166,23 @@ class ERA5Land(DataSource):
         """Deserializes an item from JSON-decoded data."""
         return Item.deserialize(serialized_item)
 
-    def _convert_nc_to_tif(self, nc_path: UPath, tif_path: UPath) -> None:
-        """Convert a netCDF file to a GeoTIFF file.
+    def _parse_nc(
+        self, nc_path: UPath
+    ) -> tuple[
+        np.ndarray,
+        list[tuple[datetime, datetime]],
+        Projection,
+        PixelBounds,
+    ]:
+        """Convert a netCDF file into a CTHW array with timestamps and geo metadata.
 
         Args:
-            nc_path: the path to the netCDF file
-            tif_path: the path to the output GeoTIFF file
+            nc_path: path to the NetCDF file.
+
+        Returns:
+            A tuple of (array, timestamps, projection, bounds) where array has
+            shape (C, T, H, W), timestamps has length T, and projection/bounds
+            describe the spatial extent.
         """
         nc = netCDF4.Dataset(nc_path)
         # The file contains a list of variables.
@@ -203,21 +214,35 @@ class ERA5Land(DataSource):
                 )
             # Original shape: (time, height, width)
             band_array = np.array(band_data[:])
-            band_array = np.expand_dims(band_array, axis=1)
             band_arrays.append(band_array)
 
-        # After concatenation: (time, num_variables, height, width)
-        stacked_array = np.concatenate(band_arrays, axis=1)
-
-        # After reshaping: (time x num_variables, height, width)
-        array = stacked_array.reshape(
-            -1, stacked_array.shape[2], stacked_array.shape[3]
-        )
+        # After stacking: (num_variables, time, height, width)
+        array = np.stack(band_arrays, axis=0)
 
         # Replace NaN values with nodata value
         array = np.where(np.isnan(array), self.NODATA_VALUE, array)
 
-        # Get metadata for the GeoTIFF
+        # Build timestamps from valid_time.
+        valid_times = nc.variables["valid_time"][:]
+        datetimes = [
+            datetime.fromtimestamp(float(valid_time), tz=UTC)
+            for valid_time in valid_times
+        ]
+        timestamps: list[tuple[datetime, datetime]] = []
+        for i, start in enumerate(datetimes):
+            # If there's only one timestamp, we treat the item as covering a point
+            # in time.
+            if len(datetimes) == 1:
+                timestamps.append((start, start))
+            # Otherwise, we use the provided time spacing. For the last timestamp, we
+            # use the spacing from the previous timestamp.
+            elif i < len(datetimes) - 1:
+                timestamps.append((start, datetimes[i + 1]))
+            else:
+                spacing = datetimes[i] - datetimes[i - 1]
+                timestamps.append((start, start + spacing))
+
+        # Build projection and bounds.
         lat = nc.variables["latitude"][:]
         lon = nc.variables["longitude"][:]
         # Convert longitude from 0–360 to -180–180 and sort
@@ -239,23 +264,23 @@ class ERA5Land(DataSource):
                 raise ValueError(
                     f"Latitude spacing is not uniform: {lat[i + 1] - lat[i]}"
                 )
+
+        projection = Projection(
+            CRS.from_epsg(WGS84_EPSG), self.PIXEL_SIZE, -self.PIXEL_SIZE
+        )
         west = lon.min() - self.PIXEL_SIZE / 2
         north = lat.max() + self.PIXEL_SIZE / 2
-        pixel_size_x, pixel_size_y = self.PIXEL_SIZE, self.PIXEL_SIZE
-        transform = from_origin(west, north, pixel_size_x, pixel_size_y)
-        crs = f"EPSG:{WGS84_EPSG}"
-        with rasterio.open(
-            tif_path,
-            "w",
-            driver="GTiff",
-            height=array.shape[1],
-            width=array.shape[2],
-            count=array.shape[0],
-            dtype=array.dtype,
-            crs=crs,
-            transform=transform,
-        ) as dst:
-            dst.write(array)
+        col_off = round(west / self.PIXEL_SIZE)
+        row_off = round(north / (-self.PIXEL_SIZE))
+        bounds: PixelBounds = (
+            col_off,
+            row_off,
+            col_off + len(lon),
+            row_off + len(lat),
+        )
+
+        nc.close()
+        return array, timestamps, projection, bounds
 
     def ingest(
         self,
@@ -353,14 +378,16 @@ class ERA5LandMonthlyMeans(ERA5Land):
             )
             with tempfile.TemporaryDirectory() as tmp_dir:
                 local_nc_fname = os.path.join(tmp_dir, f"{item.name}.nc")
-                local_tif_fname = os.path.join(tmp_dir, f"{item.name}.tif")
                 self.client.retrieve(self.dataset, request, local_nc_fname)
-                self._convert_nc_to_tif(
-                    UPath(local_nc_fname),
-                    UPath(local_tif_fname),
+                array, timestamps, projection, bounds = self._parse_nc(
+                    UPath(local_nc_fname)
                 )
-                tile_store.write_raster_file(
-                    item.name, self.band_names, UPath(local_tif_fname)
+                tile_store.write_raster(
+                    item.name,
+                    self.band_names,
+                    projection,
+                    bounds,
+                    RasterArray(array=array, timestamps=timestamps),
                 )
 
 
@@ -464,14 +491,16 @@ class ERA5LandHourly(ERA5Land):
             )
             with tempfile.TemporaryDirectory() as tmp_dir:
                 local_nc_fname = os.path.join(tmp_dir, f"{item.name}.nc")
-                local_tif_fname = os.path.join(tmp_dir, f"{item.name}.tif")
                 self.client.retrieve(self.dataset, request, local_nc_fname)
-                self._convert_nc_to_tif(
-                    UPath(local_nc_fname),
-                    UPath(local_tif_fname),
+                array, timestamps, projection, bounds = self._parse_nc(
+                    UPath(local_nc_fname)
                 )
-                tile_store.write_raster_file(
-                    item.name, self.band_names, UPath(local_tif_fname)
+                tile_store.write_raster(
+                    item.name,
+                    self.band_names,
+                    projection,
+                    bounds,
+                    RasterArray(array=array, timestamps=timestamps),
                 )
 
 
@@ -644,28 +673,39 @@ class ERA5LandHourlyTimeseries(DataSource):
         assert isinstance(serialized_item, dict)
         return Item.deserialize(serialized_item)
 
-    def _convert_nc_to_tif(
-        self, nc_paths: list[UPath], tif_path: UPath, lon: float, lat: float
-    ) -> None:
-        """Convert timeseries netCDF files to a GeoTIFF file.
+    def _parse_nc_timeseries(
+        self, nc_paths: list[UPath], lon: float, lat: float
+    ) -> tuple[
+        np.ndarray,
+        list[tuple[datetime, datetime]],
+        Projection,
+        PixelBounds,
+    ]:
+        """Parse timeseries netCDF files into a CTHW array with timestamps.
 
-        The timeseries API may return multiple NetCDF files (one per variable).
-        This method reads data from all files and combines them into a single
-        1x1 pixel GeoTIFF with time steps encoded as bands.
+        The timeseries API may return multiple netCDF files (one per variable).
+        This method reads data from all files and combines them into a
+        (C, T, 1, 1) array with per-hour timestamps.
 
         Args:
-            nc_paths: list of paths to the netCDF files
-            tif_path: the path to the output GeoTIFF file
-            lon: the longitude of the point
-            lat: the latitude of the point
+            nc_paths: list of paths to the netCDF files.
+            lon: the longitude of the point.
+            lat: the latitude of the point.
+
+        Returns:
+            A tuple of (array, timestamps, projection, bounds).
         """
         # The timeseries files contain 1D arrays for each variable (time dimension only)
         # We need to collect these from all files and stack them into a multi-band raster
         band_arrays = []
         num_time_steps = None
+        all_valid_times = None
 
         for nc_path in nc_paths:
             nc = netCDF4.Dataset(nc_path)
+
+            if "valid_time" in nc.variables and all_valid_times is None:
+                all_valid_times = nc.variables["valid_time"][:]
 
             for band_name in nc.variables:
                 band_data = nc.variables[band_name]
@@ -694,9 +734,8 @@ class ERA5LandHourlyTimeseries(DataSource):
                         f"but expected {num_time_steps}"
                     )
 
-                # Get the 1D array and reshape to (time, 1) for stacking
+                # Get the 1D array for this variable.
                 band_array = np.array(band_data[:])
-                band_array = np.expand_dims(band_array, axis=1)
                 band_arrays.append(band_array)
 
             nc.close()
@@ -704,35 +743,46 @@ class ERA5LandHourlyTimeseries(DataSource):
         if not band_arrays:
             raise ValueError(f"No valid band data found in {nc_paths}")
 
-        # Stack arrays: shape becomes (time, num_variables)
-        stacked_array = np.concatenate(band_arrays, axis=1)
-
-        # Reshape to (time * num_variables, 1, 1) for raster format
-        # This creates a 1x1 pixel raster with all time steps as bands
-        array = stacked_array.reshape(-1, 1, 1)
+        # Stack: (C, T) then reshape to (C, T, 1, 1).
+        stacked = np.stack(band_arrays, axis=0)  # (C, T)
+        array = stacked[:, :, np.newaxis, np.newaxis]  # (C, T, 1, 1)
 
         # Replace NaN values with nodata value
         array = np.where(np.isnan(array), self.NODATA_VALUE, array)
 
-        # Create a minimal geotransform for the single point
-        # The point is at the center of a 0.1 degree pixel
+        # Build timestamps.
+        timestamps: list[tuple[datetime, datetime]] = []
+        if all_valid_times is not None:
+            datetimes = [
+                datetime.fromtimestamp(float(valid_time), tz=UTC)
+                for valid_time in all_valid_times
+            ]
+            for i, start in enumerate(datetimes):
+                if len(datetimes) == 1:
+                    timestamps.append((start, start))
+                elif i < len(datetimes) - 1:
+                    timestamps.append((start, datetimes[i + 1]))
+                else:
+                    spacing = datetimes[i] - datetimes[i - 1]
+                    timestamps.append((start, start + spacing))
+        else:
+            assert num_time_steps is not None
+            for i in range(num_time_steps):
+                timestamps.append(
+                    (datetime(2000, 1, 1, tzinfo=UTC), datetime(2000, 1, 1, tzinfo=UTC))
+                )
+
+        # Build projection and bounds for a 1x1 pixel.
+        projection = Projection(
+            CRS.from_epsg(WGS84_EPSG), self.PIXEL_SIZE, -self.PIXEL_SIZE
+        )
         west = lon - self.PIXEL_SIZE / 2
         north = lat + self.PIXEL_SIZE / 2
-        transform = from_origin(west, north, self.PIXEL_SIZE, self.PIXEL_SIZE)
-        crs = f"EPSG:{WGS84_EPSG}"
+        col_off = round(west / self.PIXEL_SIZE)
+        row_off = round(north / (-self.PIXEL_SIZE))
+        bounds: PixelBounds = (col_off, row_off, col_off + 1, row_off + 1)
 
-        with rasterio.open(
-            tif_path,
-            "w",
-            driver="GTiff",
-            height=1,
-            width=1,
-            count=array.shape[0],
-            dtype=array.dtype,
-            crs=crs,
-            transform=transform,
-        ) as dst:
-            dst.write(array)
+        return array, timestamps, projection, bounds
 
     def ingest(
         self,
@@ -781,7 +831,6 @@ class ERA5LandHourlyTimeseries(DataSource):
 
             with tempfile.TemporaryDirectory() as tmp_dir:
                 local_zip_fname = os.path.join(tmp_dir, f"{item.name}.zip")
-                local_tif_fname = os.path.join(tmp_dir, f"{item.name}.tif")
 
                 # The timeseries API returns a zip file containing the NetCDF
                 self.client.retrieve(self.DATASET, request, local_zip_fname)
@@ -799,12 +848,13 @@ class ERA5LandHourlyTimeseries(DataSource):
                         UPath(os.path.join(tmp_dir, nc_file)) for nc_file in nc_files
                     ]
 
-                self._convert_nc_to_tif(
-                    local_nc_paths,
-                    UPath(local_tif_fname),
-                    lon,
-                    lat,
+                array, timestamps, projection, bounds = self._parse_nc_timeseries(
+                    local_nc_paths, lon, lat
                 )
-                tile_store.write_raster_file(
-                    item.name, self.band_names, UPath(local_tif_fname)
+                tile_store.write_raster(
+                    item.name,
+                    self.band_names,
+                    projection,
+                    bounds,
+                    RasterArray(array=array, timestamps=timestamps),
                 )

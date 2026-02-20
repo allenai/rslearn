@@ -2,6 +2,7 @@
 
 from abc import abstractmethod
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any, Generic
 
 import affine
@@ -9,12 +10,15 @@ import numpy.typing as npt
 import rasterio
 import rasterio.vrt
 from rasterio.enums import Resampling
+from typing_extensions import override
+from upath import UPath
 
 from rslearn.config import LayerConfig
 from rslearn.data_sources.data_source import ItemLookupDataSource, ItemType
 from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
+from rslearn.utils import Feature
 from rslearn.utils.geometry import PixelBounds, Projection
 from rslearn.utils.raster_array import RasterArray
 
@@ -103,6 +107,7 @@ class DirectMaterializeDataSource(
 
     # --- TileStore implementation ---
 
+    @override
     def is_raster_ready(
         self, layer_name: str, item_name: str, bands: list[str]
     ) -> bool:
@@ -121,6 +126,7 @@ class DirectMaterializeDataSource(
         """
         return True
 
+    @override
     def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
         """Get the sets of bands that have been stored for the specified item.
 
@@ -136,20 +142,10 @@ class DirectMaterializeDataSource(
         """
         return list(self.asset_bands.values())
 
+    @override
     def get_raster_bounds(
         self, layer_name: str, item_name: str, bands: list[str], projection: Projection
     ) -> PixelBounds:
-        """Get the bounds of the raster in the specified projection.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item to check.
-            bands: the list of bands identifying which specific raster to read.
-            projection: the projection to get the raster's bounds in.
-
-        Returns:
-            the bounds of the raster in the projection.
-        """
         item = self.get_item_by_name(item_name)
         geom = item.geometry.to_projection(projection)
         return (
@@ -201,6 +197,7 @@ class DirectMaterializeDataSource(
             ) as vrt:
                 return vrt.read()
 
+    @override
     def read_raster(
         self,
         layer_name: str,
@@ -210,19 +207,6 @@ class DirectMaterializeDataSource(
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
     ) -> RasterArray:
-        """Read raster data from the store.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item to read.
-            bands: the list of bands identifying which specific raster to read.
-            projection: the projection to read in.
-            bounds: the bounds to read.
-            resampling: the resampling method to use in case reprojection is needed.
-
-        Returns:
-            the raster data as a RasterArray.
-        """
         # Get the asset key for the requested bands
         asset_key = self._get_asset_key_by_bands(bands)
 
@@ -264,6 +248,7 @@ class DirectMaterializeDataSource(
 
     # --- TileStore methods that are not supported ---
 
+    @override
     def write_raster(
         self,
         layer_name: str,
@@ -271,56 +256,47 @@ class DirectMaterializeDataSource(
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
-        array: npt.NDArray[Any],
+        raster: RasterArray,
     ) -> None:
-        """Write raster data to the store.
-
-        This is not supported for remote-backed tile stores.
-        """
         raise NotImplementedError(
             "DirectMaterializeDataSource does not support writing raster data"
         )
 
+    @override
     def write_raster_file(
-        self, layer_name: str, item_name: str, bands: list[str], fname: Any
+        self,
+        layer_name: str,
+        item_name: str,
+        bands: list[str],
+        fname: UPath,
+        time_range: tuple[datetime, datetime] | None = None,
     ) -> None:
-        """Write raster data to the store.
-
-        This is not supported for remote-backed tile stores.
-        """
         raise NotImplementedError(
             "DirectMaterializeDataSource does not support writing raster files"
         )
 
+    @override
     def is_vector_ready(self, layer_name: str, item_name: str) -> bool:
-        """Checks if this vector item has been written to the store.
-
-        This is not supported for remote-backed tile stores.
-        """
         raise NotImplementedError(
             "DirectMaterializeDataSource does not support vector operations"
         )
 
+    @override
     def read_vector(
         self,
         layer_name: str,
         item_name: str,
         projection: Projection,
         bounds: PixelBounds,
-    ) -> Any:
-        """Read vector data from the store.
-
-        This is not supported for remote-backed tile stores.
-        """
+    ) -> list[Feature]:
         raise NotImplementedError(
             "DirectMaterializeDataSource does not support vector operations"
         )
 
-    def write_vector(self, layer_name: str, item_name: str, features: Any) -> None:
-        """Write vector data to the store.
-
-        This is not supported for remote-backed tile stores.
-        """
+    @override
+    def write_vector(
+        self, layer_name: str, item_name: str, features: list[Feature]
+    ) -> None:
         raise NotImplementedError(
             "DirectMaterializeDataSource does not support vector operations"
         )
