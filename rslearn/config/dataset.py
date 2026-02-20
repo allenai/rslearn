@@ -378,8 +378,9 @@ class QueryConfig(BaseModel):
     ] = Field(
         default=None,
         description="If set, split the window's time range into sub-periods of this duration. "
-        "Applies to all SpaceModes. Each sub-period produces a separate item group, up to "
-        "max_matches total groups/periods.",
+        "The sub-period splitting takes effect before the SpaceMode, i.e., SpaceMode matching "
+        "operates within the sub-periods. Each sub-period produces a single separate item group, "
+        "up to max_matches total groups/periods.",
     )
     mosaic_compositing_overlaps: int = Field(
         default=1,
