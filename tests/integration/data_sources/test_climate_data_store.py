@@ -1,5 +1,6 @@
 """Mocked integration tests for Climate Data Store (ERA5-Land) data sources."""
 
+import json
 import pathlib
 import shutil
 import zipfile
@@ -14,14 +15,24 @@ import shapely
 from rasterio.crs import CRS
 from upath import UPath
 
-from rslearn.config import QueryConfig
+from rslearn.config import (
+    QueryConfig,
+)
 from rslearn.const import WGS84_EPSG, WGS84_PROJECTION
 from rslearn.data_sources.climate_data_store import (
     ERA5LandHourlyTimeseries,
     ERA5LandMonthlyMeans,
 )
+from rslearn.dataset import Dataset
+from rslearn.dataset.manage import (
+    ingest_dataset_windows,
+    materialize_dataset_windows,
+    prepare_dataset_windows,
+)
+from rslearn.dataset.window import Window
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
+from rslearn.utils.raster_format import GeotiffRasterFormat
 
 PIXEL_SIZE = 0.1
 TEST_BANDS = ["2m-temperature", "total-precipitation"]
@@ -94,6 +105,7 @@ def _make_timeseries_nc(
     month: int,
     band_name: str,
     num_hours: int,
+    start_value: int = 0,
 ) -> None:
     """Create a netCDF file mimicking one ERA5-Land timeseries variable.
 
@@ -106,6 +118,8 @@ def _make_timeseries_nc(
         month: month for the valid_time.
         band_name: CDS variable name (e.g., "t2m").
         num_hours: number of hourly time steps.
+        start_value: first value in the sequence (default 0). Allows creating
+            continuous sequences across multiple months.
     """
     ds = netCDF4.Dataset(str(nc_path), "w", format="NETCDF4")
 
@@ -121,7 +135,7 @@ def _make_timeseries_nc(
 
     # And add the data variable.
     var = ds.createVariable(band_name, "f4", ("valid_time",))
-    var[:] = np.arange(num_hours, dtype=np.float32)
+    var[:] = np.arange(start_value, start_value + num_hours, dtype=np.float32)
 
     ds.close()
 
@@ -317,3 +331,147 @@ class TestERA5LandHourlyTimeseries:
         assert raster.array[0, -1, 0, 0] == self.NUM_HOURS - 1
         assert raster.array[1, 0, 0, 0] == 0.0
         assert raster.array[1, -1, 0, 0] == self.NUM_HOURS - 1
+
+    def test_full_pipeline_with_temporal_clipping(
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test full prepare/ingest/materialize pipeline with temporal clipping.
+
+        Creates data for January and February 2025 with sequential values 1-1416.
+        Window covers Jan 15 - Feb 15, so after materialization with
+        SPATIAL_MOSAIC_TEMPORAL_STACK, only timesteps within that range should remain.
+
+        Expected:
+        - Jan 15 00:00 (hour 336, value 337) through Feb 14 23:00 (hour 1079, value 1080)
+        - Total: 744 hours (31 days)
+        """
+        band_name = "2m-temperature"
+
+        # Create NetCDF files with sequential values
+        nc_dir = tmp_path / "nc_files"
+        nc_dir.mkdir()
+
+        # January 2025: values 1-744
+        nc_jan = nc_dir / "jan_t2m.nc"
+        _make_timeseries_nc(nc_jan, 2025, 1, "t2m", 744, start_value=1)
+
+        # February 2025: values 745-1416
+        nc_feb = nc_dir / "feb_t2m.nc"
+        _make_timeseries_nc(nc_feb, 2025, 2, "t2m", 672, start_value=745)
+
+        # Package each in a zip file
+        zip_jan = tmp_path / "jan_timeseries.zip"
+        with zipfile.ZipFile(zip_jan, "w") as zf:
+            zf.write(nc_jan, arcname="t2m.nc")
+
+        zip_feb = tmp_path / "feb_timeseries.zip"
+        with zipfile.ZipFile(zip_feb, "w") as zf:
+            zf.write(nc_feb, arcname="t2m.nc")
+
+        # Mock the CDS API to return the appropriate zip file based on month
+        def fake_retrieve(dataset: str, request: dict, target: str) -> None:
+            # Parse the month from the date field (format: '2025-01-01/2025-01-31')
+            date_str = request.get("date", [""])[0]
+            if "/" in date_str:
+                start_date = date_str.split("/")[0]
+                month = start_date.split("-")[1]
+            else:
+                raise ValueError(f"Unexpected date format in request: {date_str}")
+
+            if month == "01":
+                shutil.copy(str(zip_jan), target)
+            elif month == "02":
+                shutil.copy(str(zip_feb), target)
+            else:
+                raise ValueError(f"Unexpected month in request: {month}")
+
+        mock_client = MagicMock()
+        mock_client.retrieve.side_effect = fake_retrieve
+        monkeypatch.setattr(cdsapi, "Client", lambda **kwargs: mock_client)
+
+        # Create a dataset with ERA5LandHourlyTimeseries data source
+        ds_path = UPath(tmp_path / "dataset")
+        ds_path.mkdir()
+
+        dataset_config = {
+            "layers": {
+                "era5_layer": {
+                    "type": "raster",
+                    "compositing_method": "SPATIAL_MOSAIC_TEMPORAL_STACK",
+                    "band_sets": [
+                        {
+                            "dtype": "float32",
+                            "bands": [band_name],
+                        }
+                    ],
+                    "data_source": {
+                        "class_path": "rslearn.data_sources.climate_data_store.ERA5LandHourlyTimeseries",
+                        "init_args": {
+                            "band_names": [band_name],
+                        },
+                        "query_config": {
+                            "space_mode": "SINGLE_COMPOSITE",
+                        },
+                    },
+                },
+            },
+        }
+
+        with (ds_path / "config.json").open("w") as f:
+            json.dump(dataset_config, f)
+
+        dataset = Dataset(ds_path)
+
+        # Create a window with time range Jan 15 - Feb 15
+        # Convert lat/lon to pixel coordinates at 0.001 degrees/pixel.
+        window_pixel_size = 0.001
+        window_projection = Projection(
+            CRS.from_epsg(WGS84_EPSG), window_pixel_size, -window_pixel_size
+        )
+        bounds = (
+            int(self.LON / window_pixel_size),
+            int(self.LAT / -window_pixel_size),
+            int(self.LON / window_pixel_size) + 1,
+            int(self.LAT / -window_pixel_size) + 1,
+        )
+        window = Window(
+            storage=dataset.storage,
+            group="default",
+            name="test_window",
+            projection=window_projection,
+            bounds=bounds,
+            time_range=(
+                datetime(2025, 1, 15, tzinfo=UTC),
+                datetime(2025, 2, 15, tzinfo=UTC),
+            ),
+        )
+        window.save()
+
+        # Run prepare/ingest/materialize.
+        windows = dataset.load_windows()
+        prepare_dataset_windows(dataset, windows)
+        ingest_dataset_windows(dataset, windows)
+        materialize_dataset_windows(dataset, windows)
+
+        # Read the materialized raster
+        layer_dir = window.get_raster_dir("era5_layer", [band_name], group_idx=0)
+        raster_format = GeotiffRasterFormat()
+        raster = raster_format.decode_raster(
+            layer_dir, window.projection, window.bounds
+        )
+
+        # Verify shape: (1 band, 744 timesteps, height, width)
+        # The spatial dimensions depend on the window bounds, but temporal should be 744
+        assert raster.array.shape == (1, 744, 1, 1)
+
+        # Verify timestamps are clipped correctly
+        assert raster.timestamps is not None
+        assert len(raster.timestamps) == 744
+        assert raster.timestamps[0][0] == datetime(2025, 1, 15, 0, 0, 0, tzinfo=UTC)
+        assert raster.timestamps[-1][0] == datetime(2025, 2, 14, 23, 0, 0, tzinfo=UTC)
+
+        # Verify data values are sequential and correct (337, 338, 339, ..., 1080)
+        expected_values = np.arange(337, 1081, dtype=np.float32)
+        assert np.array_equal(raster.array[0, :, 0, 0], expected_values)
