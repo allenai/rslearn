@@ -8,6 +8,7 @@ from rslearn.data_sources import DataSourceContext
 from rslearn.data_sources.planetary_computer import (
     CopDemGlo30,
     Hls2S30,
+    Hls2L30,
     LandsatC2L2,
     PlanetaryComputer,
     Sentinel3SlstrLST,
@@ -128,6 +129,16 @@ def test_hls2_s30_rejects_unknown_band() -> None:
 def test_hls2_s30_accepts_common_name_aliases() -> None:
     data_source = Hls2S30(band_names=["coastal", "red", "nir"])
     assert set(data_source.asset_bands.keys()) == {"B01", "B04", "B08"}
+
+
+def test_hls2_l30_defaults_to_reflectance_bands() -> None:
+    data_source = Hls2L30()
+    assert set(data_source.asset_bands.keys()) == set(Hls2L30.DEFAULT_BANDS)
+
+
+def test_hls2_l30_accepts_common_name_aliases() -> None:
+    data_source = Hls2L30(band_names=["coastal", "red", "nir"])
+    assert set(data_source.asset_bands.keys()) == {"B01", "B04", "B05"}
 
 
 def test_planetary_computer_get_item_by_name_delegates_to_stac_data_source() -> None:
