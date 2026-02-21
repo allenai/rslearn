@@ -10,7 +10,6 @@ import tempfile
 from typing import Any
 
 import numpy as np
-import numpy.typing as npt
 import rasterio
 import rasterio.warp
 import shapely
@@ -24,6 +23,7 @@ from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils import PixelBounds, Projection, STGeometry, get_global_raster_bounds
 from rslearn.utils.geometry import get_global_geometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_transform_from_projection_and_bounds
 
 from .data_source import DataSource, DataSourceContext, Item
@@ -217,7 +217,7 @@ class SoilGrids(DataSource, TileStore):
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Read and reproject a SoilGrids coverage subset into the requested grid."""
         if bands != self.band_names:
             raise ValueError(
@@ -312,7 +312,7 @@ class SoilGrids(DataSource, TileStore):
                     dst_nodata=dst_nodata,
                     resampling=resampling,
                 )
-                return dst
+                return RasterArray(chw_array=dst)
 
     def materialize(
         self,

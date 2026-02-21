@@ -126,4 +126,9 @@ class Sentinel1(DataSource, TileStore):
                             f"encountered error while downloading s3://{self.bucket_name}/{blob_path}"
                         )
                         raise
-                    tile_store.write_raster_file(item.name, band_names, UPath(fname))
+                    tile_store.write_raster_file(
+                        item.name,
+                        band_names,
+                        UPath(fname),
+                        time_range=item.geometry.time_range,
+                    )

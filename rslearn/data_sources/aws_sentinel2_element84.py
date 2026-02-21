@@ -181,7 +181,10 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
                         asset_key,
                     )
                     tile_store.write_raster_file(
-                        item.name, band_names, UPath(local_fname)
+                        item.name,
+                        band_names,
+                        UPath(local_fname),
+                        time_range=item.geometry.time_range,
                     )
 
                 logger.debug(

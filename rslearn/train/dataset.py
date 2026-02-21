@@ -236,11 +236,11 @@ def read_raster_layer_for_data_input(
     group_idx: int,
     layer_config: LayerConfig,
     data_input: DataInput,
-) -> torch.Tensor:
-    """Read a raster from a specific item group for a DataInput.
+) -> tuple[torch.Tensor, list[tuple[datetime, datetime]] | None]:
+    """Read a raster layer from a specific item group for a DataInput.
 
-    This scans the available rasters for the item group at the window to determine
-    which band sets are needed to get all of the configured bands.
+    This scans the available rasters for the layer at the window to determine which
+    ones are needed to get all of the configured bands. All timesteps are preserved.
 
     Args:
         window: the window to read from.
@@ -251,7 +251,8 @@ def read_raster_layer_for_data_input(
         data_input: the DataInput that specifies the bands and dtype.
 
     Returns:
-        Raster data as a tensor.
+        Tuple of (CTHW tensor, timestamps). Timestamps may be None if the raster
+        format did not store them.
     """
     # See what different sets of bands we need to read to get all the
     # configured bands.
@@ -291,14 +292,10 @@ def read_raster_layer_for_data_input(
     )
     final_bounds = data_input.resolution_factor.multiply_bounds(bounds)
 
-    image = torch.zeros(
-        (
-            len(needed_bands),
-            final_bounds[3] - final_bounds[1],
-            final_bounds[2] - final_bounds[0],
-        ),
-        dtype=get_torch_dtype(data_input.dtype),
-    )
+    # We don't know T upfront (it depends on the stored raster), so we allocate
+    # the output tensor after reading the first band set.
+    image: torch.Tensor | None = None
+    timestamps: list[tuple[datetime, datetime]] | None = None
 
     for band_set, src_indexes, dst_indexes in needed_sets_and_indexes:
         if band_set.format is None:
@@ -315,14 +312,35 @@ def read_raster_layer_for_data_input(
         # resampling. If it really is much faster to handle it via torch, then it may
         # make sense to bring back that functionality.
 
-        src = raster_format.decode_raster(
+        raster_array = raster_format.decode_raster(
             raster_dir, final_projection, final_bounds, resampling=Resampling.nearest
         )
-        image[dst_indexes, :, :] = torch.as_tensor(
-            src[src_indexes, :, :].astype(data_input.dtype.get_numpy_dtype())
+        src = raster_array.array  # (C, T, H, W)
+
+        if image is None:
+            t = src.shape[1]
+            image = torch.zeros(
+                (
+                    len(needed_bands),
+                    t,
+                    final_bounds[3] - final_bounds[1],
+                    final_bounds[2] - final_bounds[0],
+                ),
+                dtype=get_torch_dtype(data_input.dtype),
+            )
+            timestamps = raster_array.timestamps
+
+        image[dst_indexes, :, :, :] = torch.as_tensor(
+            src[src_indexes, :, :, :].astype(data_input.dtype.get_numpy_dtype())
         )
 
-    return image
+    if image is None:
+        raise RuntimeError(
+            f"No band sets were read for layer {layer_name} group {group_idx} "
+            f"in window {window.name}, but found all needed bands"
+        )
+
+    return image, timestamps
 
 
 def read_layer_time_range(
@@ -389,11 +407,18 @@ def read_data_input(
     # specifier.
     layer_options: list[tuple[str, int]] = []
     if data_input.load_all_item_groups:
-        wanted_layers = set(data_input.layers)
+        # We ensure that item groups are ordered within each layer, and across layers
+        # we respect the user's given order.
+        completed_groups_by_layer: dict[str, list[int]] = {}
         for layer_name, group_idx in window.list_completed_layers():
-            if layer_name not in wanted_layers:
-                continue
-            layer_options.append((layer_name, group_idx))
+            if layer_name not in completed_groups_by_layer:
+                completed_groups_by_layer[layer_name] = []
+            completed_groups_by_layer[layer_name].append(group_idx)
+
+        for layer_name in data_input.layers:
+            cur_completed_groups = completed_groups_by_layer[layer_name]
+            for group_idx in sorted(cur_completed_groups):
+                layer_options.append((layer_name, group_idx))
     else:
         for option in data_input.layers:
             layer_name, group_idx = get_layer_and_group_from_dir_name(option)
@@ -422,13 +447,13 @@ def read_data_input(
         )
 
     if data_input.data_type == "raster":
-        # load it once here
         layer_datas = window.load_layer_datas()
-        images: list[torch.Tensor] = []
-        time_ranges: list[tuple[datetime, datetime] | None] = []
+        images: list[torch.Tensor] = []  # each is CTHW
+        all_timestamps: list[tuple[datetime, datetime]] = []
+        has_all_timestamps = True
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
-            image = read_raster_layer_for_data_input(
+            image, timestamps = read_raster_layer_for_data_input(
                 window,
                 bounds,
                 layer_name,
@@ -436,19 +461,37 @@ def read_data_input(
                 layer_config,
                 data_input,
             )
-            # some layers (e.g. "label_raster") won't have associated layer datas
-            layer_data = layer_datas.get(layer_name)
-            time_range = read_layer_time_range(layer_data, group_idx)
-            if len(time_ranges) > 0:
-                if type(time_ranges[-1]) is not type(time_range):
-                    raise ValueError(
-                        f"All time ranges should be datetime tuples or None. Got {type(time_range)} amd {type(time_ranges[-1])}"
-                    )
             images.append(image)
-            time_ranges.append(time_range)
+
+            if timestamps is not None:
+                all_timestamps.extend(timestamps)
+            elif image.shape[1] == 1:
+                # For single-timestep RasterImage, fallback to item-level time range
+                # for this item group.
+                layer_data = layer_datas.get(layer_name)
+                time_range = read_layer_time_range(layer_data, group_idx)
+                if time_range is not None:
+                    all_timestamps.append(time_range)
+                    warnings.warn(
+                        "Falling back to item-level time range for single-timestep "
+                        "RasterImage is deprecated and will be removed after "
+                        "2026-05-01. Ensure timestamps are stored with the raster data.",
+                        FutureWarning,
+                        stacklevel=2,
+                    )
+                else:
+                    # It is okay for single-timestep RasterImage to not have timestamps.
+                    has_all_timestamps = False
+            else:
+                # Multi-timestep RasterImage must have timestamps.
+                raise ValueError(
+                    f"Expected multi-timestep RasterImage with T={image.shape[1]} to have timestamps"
+                )
+
+        stacked = torch.cat(images, dim=1)
         return RasterImage(
-            torch.stack(images, dim=1),
-            time_ranges if time_ranges[0] is not None else None,  # type: ignore
+            stacked,
+            all_timestamps if has_all_timestamps else None,
         )
 
     elif data_input.data_type == "vector":

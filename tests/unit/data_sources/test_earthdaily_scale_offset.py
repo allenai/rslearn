@@ -68,8 +68,9 @@ def test_read_raster_applies_asset_scale_offset(tmp_path: Path) -> None:
         bounds=(0, 0, 2, 2),
     )
 
-    assert out.dtype == np.float32
-    np.testing.assert_allclose(out[0], raw.astype(np.float32) * 0.001 + 1.0)
+    arr = out.get_chw_array()
+    assert arr.dtype == np.float32
+    np.testing.assert_allclose(arr[0], raw.astype(np.float32) * 0.001 + 1.0)
 
 
 def test_read_raster_no_apply_scale_offset_returns_raw(tmp_path: Path) -> None:
@@ -113,5 +114,6 @@ def test_read_raster_no_apply_scale_offset_returns_raw(tmp_path: Path) -> None:
         bounds=(0, 0, 2, 2),
     )
 
-    assert out.dtype == raw.dtype
-    np.testing.assert_array_equal(out[0], raw)
+    arr = out.get_chw_array()
+    assert arr.dtype == raw.dtype
+    np.testing.assert_array_equal(arr[0], raw)

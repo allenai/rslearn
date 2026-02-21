@@ -1,12 +1,12 @@
 """Base class for tile stores."""
 
-from typing import Any
+from datetime import datetime
 
-import numpy.typing as npt
 from rasterio.enums import Resampling
 from upath import UPath
 
 from rslearn.utils import Feature, PixelBounds, Projection
+from rslearn.utils.raster_array import RasterArray
 
 
 class TileStore:
@@ -81,7 +81,7 @@ class TileStore:
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Read raster data from the store.
 
         Args:
@@ -105,7 +105,7 @@ class TileStore:
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
-        array: npt.NDArray[Any],
+        raster: RasterArray,
     ) -> None:
         """Write raster data to the store.
 
@@ -115,12 +115,17 @@ class TileStore:
             bands: the list of bands in the array.
             projection: the projection of the array.
             bounds: the bounds of the array.
-            array: the raster data.
+            raster: the raster data.
         """
         raise NotImplementedError
 
     def write_raster_file(
-        self, layer_name: str, item_name: str, bands: list[str], fname: UPath
+        self,
+        layer_name: str,
+        item_name: str,
+        bands: list[str],
+        fname: UPath,
+        time_range: tuple[datetime, datetime] | None = None,
     ) -> None:
         """Write raster data to the store.
 
@@ -129,6 +134,7 @@ class TileStore:
             item_name: the item to write.
             bands: the list of bands in the array.
             fname: the raster file.
+            time_range: optional time range for the raster.
         """
         raise NotImplementedError
 
@@ -241,7 +247,7 @@ class TileStoreWithLayer:
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Read raster data from the store.
 
         Args:
@@ -265,7 +271,7 @@ class TileStoreWithLayer:
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
-        array: npt.NDArray[Any],
+        raster: RasterArray,
     ) -> None:
         """Write raster data to the store.
 
@@ -274,21 +280,30 @@ class TileStoreWithLayer:
             bands: the list of bands in the array.
             projection: the projection of the array.
             bounds: the bounds of the array.
-            array: the raster data.
+            raster: the raster data.
         """
         self.tile_store.write_raster(
-            self.layer_name, item_name, bands, projection, bounds, array
+            self.layer_name, item_name, bands, projection, bounds, raster
         )
 
-    def write_raster_file(self, item_name: str, bands: list[str], fname: UPath) -> None:
+    def write_raster_file(
+        self,
+        item_name: str,
+        bands: list[str],
+        fname: UPath,
+        time_range: tuple[datetime, datetime] | None = None,
+    ) -> None:
         """Write raster data to the store.
 
         Args:
             item_name: the item to write.
             bands: the list of bands in the array.
             fname: the raster file.
+            time_range: optional time range for the raster.
         """
-        self.tile_store.write_raster_file(self.layer_name, item_name, bands, fname)
+        self.tile_store.write_raster_file(
+            self.layer_name, item_name, bands, fname, time_range=time_range
+        )
 
     def is_vector_ready(self, item_name: str) -> bool:
         """Checks if this vector item has been written to the store.

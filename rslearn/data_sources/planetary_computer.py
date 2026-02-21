@@ -26,6 +26,7 @@ from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.interpolation import NODATA_VALUE, interpolate_to_grid
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 from rslearn.utils.stac import StacClient, StacItem
 
@@ -294,7 +295,10 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
                         asset_key,
                     )
                     tile_store.write_raster_file(
-                        item.name, band_names, UPath(local_fname)
+                        item.name,
+                        band_names,
+                        UPath(local_fname),
+                        time_range=item.geometry.time_range,
                     )
 
                 logger.debug(
@@ -436,12 +440,22 @@ class Sentinel2(PlanetaryComputer):
                             projection, bounds = get_raster_projection_and_bounds(src)
                         array = harmonize_callback(array)
                         tile_store.write_raster(
-                            item.name, band_names, projection, bounds, array
+                            item.name,
+                            band_names,
+                            projection,
+                            bounds,
+                            RasterArray(
+                                chw_array=array,
+                                time_range=item.geometry.time_range,
+                            ),
                         )
 
                     else:
                         tile_store.write_raster_file(
-                            item.name, band_names, UPath(local_fname)
+                            item.name,
+                            band_names,
+                            UPath(local_fname),
+                            time_range=item.geometry.time_range,
                         )
 
                 logger.debug(
@@ -896,7 +910,14 @@ class Sentinel3SlstrLST(PlanetaryComputer):
                         )
 
                 tile_store.write_raster(
-                    item.name, self.band_names, projection, bounds, gridded_array
+                    item.name,
+                    self.band_names,
+                    projection,
+                    bounds,
+                    RasterArray(
+                        chw_array=gridded_array,
+                        time_range=item.geometry.time_range,
+                    ),
                 )
 
     def read_raster(
@@ -907,7 +928,7 @@ class Sentinel3SlstrLST(PlanetaryComputer):
         projection: Any,
         bounds: Any,
         resampling: Any = rasterio.enums.Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Direct materialization is not supported for this data source."""
         raise NotImplementedError(
             "Sentinel3SlstrLST does not support direct materialization; set ingest=true."
