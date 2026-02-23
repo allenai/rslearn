@@ -1,7 +1,7 @@
 """The default file-based window storage backend."""
 
 import json
-import multiprocessing
+from datetime import datetime
 
 import tqdm
 from typing_extensions import override
@@ -16,7 +16,8 @@ from rslearn.dataset.window import (
 )
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import iter_nonhidden_subdirs, open_atomic
-from rslearn.utils.mp import star_imap_unordered
+from rslearn.utils.geometry import Projection
+from rslearn.utils.mp import make_pool_and_star_imap_unordered
 
 from .storage import WindowStorage, WindowStorageFactory
 
@@ -25,6 +26,8 @@ logger = get_logger(__name__)
 
 def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window:
     """Load the window from its directory by reading metadata.json.
+
+    The group and window name are derived from the filesystem path.
 
     Args:
         storage: the underlying FileWindowStorage.
@@ -36,7 +39,37 @@ def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window:
     metadata_fname = window_dir / "metadata.json"
     with metadata_fname.open() as f:
         metadata = json.load(f)
-    return Window.from_metadata(storage, metadata)
+
+    group = window_dir.parent.name
+    name = window_dir.name
+
+    if len(metadata["bounds"]) != 4:
+        raise ValueError(
+            f"expected bounds to have 4 elements but got {len(metadata['bounds'])}"
+        )
+    bounds = (
+        metadata["bounds"][0],
+        metadata["bounds"][1],
+        metadata["bounds"][2],
+        metadata["bounds"][3],
+    )
+
+    time_range = None
+    if metadata.get("time_range"):
+        time_range = (
+            datetime.fromisoformat(metadata["time_range"][0]),
+            datetime.fromisoformat(metadata["time_range"][1]),
+        )
+
+    return Window(
+        storage=storage,
+        group=group,
+        name=name,
+        projection=Projection.deserialize(metadata["projection"]),
+        bounds=bounds,
+        time_range=time_range,
+        options=metadata.get("options", {}),
+    )
 
 
 class FileWindowStorage(WindowStorage):
@@ -101,28 +134,23 @@ class FileWindowStorage(WindowStorage):
                 for window_dir in iter_nonhidden_subdirs(group_dir):
                     window_dirs.append(window_dir)
 
-        if workers == 0:
-            windows = [load_window(self, window_dir) for window_dir in window_dirs]
-        else:
-            p = multiprocessing.Pool(workers)
-            outputs = star_imap_unordered(
-                p,
-                load_window,
-                [
-                    dict(storage=self, window_dir=window_dir)
-                    for window_dir in window_dirs
-                ],
-            )
+        with make_pool_and_star_imap_unordered(
+            workers,
+            load_window,
+            [dict(storage=self, window_dir=window_dir) for window_dir in window_dirs],
+        ) as outputs:
             if show_progress:
                 outputs = tqdm.tqdm(
                     outputs, total=len(window_dirs), desc="Loading windows"
                 )
-            windows = []
-            for window in outputs:
-                windows.append(window)
-            p.close()
+            windows = list(outputs)
 
         return windows
+
+    def _validate_layer_name(self, layer_name: str) -> None:
+        """Raise if the layer name contains '.', which is reserved for group index."""
+        if "." in layer_name:
+            raise ValueError(f"Layer name must not contain '.': got '{layer_name}'.")
 
     @override
     def create_or_update_window(self, window: Window) -> None:
@@ -130,8 +158,18 @@ class FileWindowStorage(WindowStorage):
         window_path.mkdir(parents=True, exist_ok=True)
         metadata_path = window_path / "metadata.json"
         logger.debug(f"Saving window metadata to {metadata_path}")
+        metadata = {
+            "projection": window.projection.serialize(),
+            "bounds": window.bounds,
+            "time_range": (
+                [window.time_range[0].isoformat(), window.time_range[1].isoformat()]
+                if window.time_range
+                else None
+            ),
+            "options": window.options,
+        }
         with open_atomic(metadata_path, "w") as f:
-            json.dump(window.get_metadata(), f)
+            json.dump(metadata, f)
 
     @override
     def get_layer_datas(self, group: str, name: str) -> dict[str, "WindowLayerData"]:
@@ -165,19 +203,20 @@ class FileWindowStorage(WindowStorage):
         if not layers_directory.exists():
             return []
 
-        completed_layers = []
+        completed_item_groups = []
         for layer_dir in iter_nonhidden_subdirs(layers_directory):
             layer_name, group_idx = get_layer_and_group_from_dir_name(layer_dir.name)
             if not self.is_layer_completed(group, name, layer_name, group_idx):
                 continue
-            completed_layers.append((layer_name, group_idx))
+            completed_item_groups.append((layer_name, group_idx))
 
-        return completed_layers
+        return completed_item_groups
 
     @override
     def is_layer_completed(
         self, group: str, name: str, layer_name: str, group_idx: int = 0
     ) -> bool:
+        self._validate_layer_name(layer_name)
         window_path = self.get_window_root(group, name)
         layer_dir = get_window_layer_dir(
             window_path,
@@ -190,10 +229,11 @@ class FileWindowStorage(WindowStorage):
     def mark_layer_completed(
         self, group: str, name: str, layer_name: str, group_idx: int = 0
     ) -> None:
+        self._validate_layer_name(layer_name)
         window_path = self.get_window_root(group, name)
         layer_dir = get_window_layer_dir(window_path, layer_name, group_idx)
-        # We assume the directory exists because the layer should be materialized before
-        # being marked completed.
+        # We assume the directory exists because the item group should be materialized
+        # before being marked completed.
         (layer_dir / "completed").touch()
 
 

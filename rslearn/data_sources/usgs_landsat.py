@@ -267,5 +267,8 @@ class LandsatOliTirs(DataSource):
                             shutil.copyfileobj(r.raw, f)
 
                     tile_store.write_raster_file(
-                        item.name, band_names, UPath(local_filename)
+                        item.name,
+                        band_names,
+                        UPath(local_filename),
+                        time_range=item.geometry.time_range,
                     )

@@ -9,7 +9,14 @@ import torch
 from rasterio.crs import CRS
 from upath import UPath
 
-from rslearn.config import BandSetConfig, DatasetConfig, DType, LayerConfig, LayerType
+from rslearn.config import (
+    BandSetConfig,
+    DatasetConfig,
+    DType,
+    LayerConfig,
+    LayerType,
+    StorageConfig,
+)
 from rslearn.dataset import Dataset, Window
 from rslearn.models.conv import Conv
 from rslearn.models.module_wrapper import EncoderModuleWrapper
@@ -25,6 +32,7 @@ from rslearn.train.tasks.per_pixel_regression import (
     PerPixelRegressionTask,
 )
 from rslearn.utils.geometry import Projection, ResolutionFactor
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
@@ -91,6 +99,97 @@ class TestDataset:
         )
         assert len(dataset) == 0
 
+    def test_load_two_item_groups_sqlite(self, tmp_path: pathlib.Path) -> None:
+        """Test ModelDataset with multiple item groups and with SQLiteWindowStorage.
+
+        Verifies that layers specified as ["raster_layer.0", "raster_layer.1"] are
+        correctly resolved via is_data_input_available and read_data_input when the
+        storage backend is SQLite (where the layer_name and group_idx are stored
+        separately rather than derived from a directory name).
+        """
+        ds_path = UPath(tmp_path)
+
+        # Write dataset config with SQLiteWindowStorage and one single-band layer.
+        cfg = DatasetConfig(
+            layers=dict(
+                raster_layer=LayerConfig(
+                    type=LayerType.RASTER,
+                    band_sets=[
+                        BandSetConfig(
+                            dtype=DType.UINT8,
+                            bands=["B1"],
+                        )
+                    ],
+                ),
+            ),
+            storage=StorageConfig(
+                class_path="rslearn.dataset.storage.sqlite.SQLiteWindowStorageFactory",
+                init_args={},
+            ),
+        )
+        with (ds_path / "config.json").open("w") as f:
+            f.write(cfg.model_dump_json())
+
+        dataset = Dataset(ds_path)
+
+        # Create a window.
+        projection = Projection(CRS.from_epsg(3857), 1, -1)
+        bounds = (0, 0, 4, 4)
+        window = Window(
+            storage=dataset.storage,
+            group="default",
+            name="win0",
+            projection=projection,
+            bounds=bounds,
+            time_range=None,
+        )
+        window.save()
+
+        # Write raster data for group_idx=0 (value 1) and group_idx=1 (value 2).
+        for group_idx, pixel_value in [(0, 1), (1, 2)]:
+            raster_dir = window.get_raster_dir(
+                "raster_layer", ["B1"], group_idx=group_idx
+            )
+            GeotiffRasterFormat().encode_raster(
+                raster_dir,
+                projection,
+                bounds,
+                RasterArray(chw_array=np.full((1, 4, 4), pixel_value, dtype=np.uint8)),
+            )
+            window.mark_layer_completed("raster_layer", group_idx=group_idx)
+
+        # Build ModelDataset with both item groups specified explicitly.
+        model_dataset = ModelDataset(
+            dataset=dataset,
+            split_config=SplitConfig(),
+            inputs=dict(
+                image=DataInput(
+                    data_type="raster",
+                    layers=["raster_layer.0", "raster_layer.1"],
+                    bands=["B1"],
+                    dtype=DType.FLOAT32,
+                    passthrough=True,
+                    load_all_layers=True,
+                ),
+            ),
+            task=PerPixelRegressionTask(),
+            workers=0,
+        )
+
+        # The window should be found.
+        assert len(model_dataset) == 1
+
+        # Load the raw inputs.  With load_all_layers=True the two groups are
+        # stacked along dim=1, giving shape (batch=1, time=2, H=4, W=4).
+        raw_inputs, _, _ = model_dataset.get_raw_inputs(0)
+        image_tensor = raw_inputs["image"].image
+        assert image_tensor.shape == (1, 2, 4, 4), (
+            f"unexpected shape {image_tensor.shape}"
+        )
+        # group_idx=0 was filled with 1, group_idx=1 with 2.
+        assert image_tensor[0, 0].mean().item() == pytest.approx(1.0)
+        assert image_tensor[0, 1].mean().item() == pytest.approx(2.0)
+
 
 class TestResolutionFactor:
     """Integration test for ModelDataset with DataInputs that have resolution factor.
@@ -144,7 +243,7 @@ class TestResolutionFactor:
             window.get_raster_dir("image", ["B1"]),
             window.projection,
             window.bounds,
-            np.ones((1, 4, 4), dtype=np.uint8),
+            RasterArray(chw_array=np.ones((1, 4, 4), dtype=np.uint8)),
         )
         window.mark_layer_completed("image")
 
@@ -153,7 +252,7 @@ class TestResolutionFactor:
             window.get_raster_dir("label", ["B1"]),
             window.projection,
             window.bounds,
-            2 * np.ones((1, 4, 4), dtype=np.uint8),
+            RasterArray(chw_array=2 * np.ones((1, 4, 4), dtype=np.uint8)),
         )
         window.mark_layer_completed("label")
 

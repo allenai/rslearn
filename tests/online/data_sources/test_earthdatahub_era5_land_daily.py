@@ -5,18 +5,19 @@ import numpy as np
 import pytest
 import rasterio
 import shapely
+import xarray as xr
+import zarr  # noqa: F401
+from upath import UPath
+
+from rslearn.config import QueryConfig
+from rslearn.const import WGS84_PROJECTION
+from rslearn.data_sources.earthdatahub import ERA5LandDailyUTCv1
+from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
+from rslearn.utils.geometry import STGeometry
+from rslearn.utils.raster_format import get_bandset_dirname
 
 
 def test_era5land_dailyutc_v1_ingest_from_local_zarr(tmp_path: Path) -> None:
-    import xarray as xr
-    import zarr  # noqa: F401
-    from upath import UPath
-
-    from rslearn.const import WGS84_PROJECTION
-    from rslearn.data_sources.earthdatahub import ERA5LandDailyUTCv1
-    from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
-    from rslearn.utils.geometry import STGeometry
-
     valid_time = np.array(["2020-01-01", "2020-01-02"], dtype="datetime64[ns]")
     latitude = np.array([1.0, 0.9], dtype=np.float64)  # descending, 0.1 deg spacing
     longitude = np.array([0.0, 0.1], dtype=np.float64)  # 0..360 convention
@@ -57,7 +58,6 @@ def test_era5land_dailyutc_v1_ingest_from_local_zarr(tmp_path: Path) -> None:
         shapely.box(0.0, 0.85, 0.2, 1.05),
         (datetime(2020, 1, 1, 12, tzinfo=UTC), datetime(2020, 1, 3, 0, tzinfo=UTC)),
     )
-    from rslearn.config import QueryConfig
 
     groups = data_source.get_items([window_geom], query_config=QueryConfig())
     items = [group[0] for group in groups[0]]
@@ -73,22 +73,13 @@ def test_era5land_dailyutc_v1_ingest_from_local_zarr(tmp_path: Path) -> None:
         geometries=[[window_geom] for _ in items],
     )
 
-    from rslearn.utils.raster_format import get_bandset_dirname
-
     bands = ["t2m", "tp"]
     for idx, item in enumerate(items):
         raster_dir = ds_path / "tiles" / "era5" / item.name / get_bandset_dirname(bands)
-        raster_fname = None
-        for p in raster_dir.iterdir():
-            if p.name in {"completed", "bands.json"}:
-                continue
-            if ".tmp." in p.name:
-                continue
-            raster_fname = p
-            break
-        assert raster_fname is not None
+        tif_files = [p for p in raster_dir.iterdir() if p.suffix == ".tif"]
+        assert len(tif_files) == 1
 
-        with rasterio.open(raster_fname) as src:
+        with rasterio.open(tif_files[0]) as src:
             out = src.read()
         assert out.shape == (2, 2, 2)
         assert np.allclose(out[0], t2m[idx])
@@ -96,16 +87,6 @@ def test_era5land_dailyutc_v1_ingest_from_local_zarr(tmp_path: Path) -> None:
 
 
 def test_era5land_dailyutc_v1_ingest_negative_longitude_bounds(tmp_path: Path) -> None:
-    import xarray as xr
-    import zarr  # noqa: F401
-    from upath import UPath
-
-    from rslearn.config import QueryConfig
-    from rslearn.const import WGS84_PROJECTION
-    from rslearn.data_sources.earthdatahub import ERA5LandDailyUTCv1
-    from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
-    from rslearn.utils.geometry import STGeometry
-
     valid_time = np.array(["2024-06-01", "2024-06-02"], dtype="datetime64[ns]")
     latitude = np.array([51.6, 51.5], dtype=np.float64)  # descending, 0.1 deg spacing
     longitude = np.array(
@@ -167,22 +148,13 @@ def test_era5land_dailyutc_v1_ingest_negative_longitude_bounds(tmp_path: Path) -
         geometries=[[window_geom] for _ in items],
     )
 
-    from rslearn.utils.raster_format import get_bandset_dirname
-
     bands = ["t2m", "tp"]
     for idx, item in enumerate(items):
         raster_dir = ds_path / "tiles" / "era5" / item.name / get_bandset_dirname(bands)
-        raster_fname = None
-        for p in raster_dir.iterdir():
-            if p.name in {"completed", "bands.json"}:
-                continue
-            if ".tmp." in p.name:
-                continue
-            raster_fname = p
-            break
-        assert raster_fname is not None
+        tif_files = [p for p in raster_dir.iterdir() if p.suffix == ".tif"]
+        assert len(tif_files) == 1
 
-        with rasterio.open(raster_fname) as src:
+        with rasterio.open(tif_files[0]) as src:
             out = src.read()
         assert out.shape == (2, 2, 2)
         assert np.allclose(out[0], t2m[idx])
@@ -192,8 +164,6 @@ def test_era5land_dailyutc_v1_ingest_negative_longitude_bounds(tmp_path: Path) -
 def test_era5land_dailyutc_v1_bounds_cross_dateline_error_message(
     tmp_path: Path,
 ) -> None:
-    from rslearn.data_sources.earthdatahub import ERA5LandDailyUTCv1
-
     with pytest.raises(ValueError, match=r"does not yet support .* cross the dateline"):
         ERA5LandDailyUTCv1(
             band_names=["t2m"],

@@ -1,8 +1,8 @@
 """Default Dataset for rslearn."""
 
+import dataclasses
 import hashlib
 import json
-import multiprocessing
 import os
 import random
 import tempfile
@@ -36,7 +36,7 @@ from rslearn.train.dataset_index import DatasetIndex
 from rslearn.train.model_context import RasterImage
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
-from rslearn.utils.mp import star_imap_unordered
+from rslearn.utils.mp import make_pool_and_star_imap_unordered
 
 from .model_context import SampleMetadata
 from .tasks import Task
@@ -254,7 +254,14 @@ class DataInput:
 
         Args:
             data_type: either "raster" or "vector"
-            layers: list of layer names that this input can be read from.
+            layers: list of layer names or item group specifiers that this input can be
+                read from. If load_all_item_groups=False, each entry should be an item
+                group specifier (e.g. "sentinel2" for layer_name=sentinel2, group_idx=0
+                or "sentinel2.1" for layer_name=sentinel2, group_idx=1). Otherwise,
+                each entry should be a layer name. For example, if you have a layer
+                "sentinel2" with three item groups: with load_all_item_groups=False,
+                set layers=["sentinel2", "sentinel2.1", "sentinel2.2"]; with
+                load_all_item_groups=True, set layers=["sentinel2"].
             bands: the bands to read, if this is a raster.
             required: whether examples lacking one of these layers should be skipped
             passthrough: whether to expose this to the model even if it isn't returned
@@ -262,16 +269,24 @@ class DataInput:
             is_target: whether this DataInput represents a target for the task. Targets
                 are not read during prediction phase.
             dtype: data type to load the raster as
-            load_all_layers: whether to load all of the layers specified in the list of
-                layer names. By default, we randomly pick one layer to read. When
-                reading multiple layers, the images are stacked on the channel
-                dimension. This option will also cause the dataset to only include
-                windows where all of the layers are materialized (by default, only
-                windows with none of the layers materialized would be excluded).
+            load_all_layers: whether to load all of the entries specified in the layers
+                list. By default, we randomly pick one entry to read. When reading
+                multiple entries, raster images are stacked on the time dimension. This
+                option will also cause the dataset to only include windows where all of
+                the entries are materialized (by default, only windows with none of the
+                entries materialized would be excluded).
             load_all_item_groups: whether to load all item groups in the layer(s) we
-                are reading from. By default, we assume the specified layer name is of
-                the form "{layer_name}.{group_idx}" and read that item group only. With
-                this option enabled, we ignore the group_idx and read all item groups.
+                are reading from. By default, we treat layers as a list of item group
+                specifiers, and either pick a random item group to read (if
+                load_all_layers=False) or stack all of them (if load_all_layers=True). If
+                load_all_item_groups=True, we treat layers as a list of layer names,
+                and include all item groups within each layer as candidates for
+                reading; whether we pick a random item group or stack them is still
+                controlled by load_all_layers. Note that, when load_all_layers=True and
+                load_all_item_groups=True, we will only exclude windows from training
+                that have zero item groups in one of the configured layers; additionally,
+                if windows have different numbers of item groups, then we will read
+                RasterImages with different numbers of timesteps.
             resolution_factor: controls the resolution at which raster data is loaded for training.
                 By default (factor=1), data is loaded at the window resolution.
                 E.g. for a 64x64 window at 10 m/pixel with resolution_factor=1/2,
@@ -298,22 +313,23 @@ def read_raster_layer_for_data_input(
     group_idx: int,
     layer_config: LayerConfig,
     data_input: DataInput,
-) -> torch.Tensor:
-    """Read a raster layer for a DataInput.
+) -> tuple[torch.Tensor, list[tuple[datetime, datetime]] | None]:
+    """Read a raster layer from a specific item group for a DataInput.
 
     This scans the available rasters for the layer at the window to determine which
-    ones are needed to get all of the configured bands.
+    ones are needed to get all of the configured bands. All timesteps are preserved.
 
     Args:
         window: the window to read from.
         bounds: the bounds to read.
-        layer_name: the layer.
-        group_idx: the item group.
+        layer_name: the layer name.
+        group_idx: the item group index within the layer.
         layer_config: the layer configuration.
         data_input: the DataInput that specifies the bands and dtype.
 
     Returns:
-        Raster data as a tensor.
+        Tuple of (CTHW tensor, timestamps). Timestamps may be None if the raster
+        format did not store them.
     """
     # See what different sets of bands we need to read to get all the
     # configured bands.
@@ -353,14 +369,10 @@ def read_raster_layer_for_data_input(
     )
     final_bounds = data_input.resolution_factor.multiply_bounds(bounds)
 
-    image = torch.zeros(
-        (
-            len(needed_bands),
-            final_bounds[3] - final_bounds[1],
-            final_bounds[2] - final_bounds[0],
-        ),
-        dtype=get_torch_dtype(data_input.dtype),
-    )
+    # We don't know T upfront (it depends on the stored raster), so we allocate
+    # the output tensor after reading the first band set.
+    image: torch.Tensor | None = None
+    timestamps: list[tuple[datetime, datetime]] | None = None
 
     for band_set, src_indexes, dst_indexes in needed_sets_and_indexes:
         if band_set.format is None:
@@ -377,14 +389,35 @@ def read_raster_layer_for_data_input(
         # resampling. If it really is much faster to handle it via torch, then it may
         # make sense to bring back that functionality.
 
-        src = raster_format.decode_raster(
+        raster_array = raster_format.decode_raster(
             raster_dir, final_projection, final_bounds, resampling=Resampling.nearest
         )
-        image[dst_indexes, :, :] = torch.as_tensor(
-            src[src_indexes, :, :].astype(data_input.dtype.get_numpy_dtype())
+        src = raster_array.array  # (C, T, H, W)
+
+        if image is None:
+            t = src.shape[1]
+            image = torch.zeros(
+                (
+                    len(needed_bands),
+                    t,
+                    final_bounds[3] - final_bounds[1],
+                    final_bounds[2] - final_bounds[0],
+                ),
+                dtype=get_torch_dtype(data_input.dtype),
+            )
+            timestamps = raster_array.timestamps
+
+        image[dst_indexes, :, :, :] = torch.as_tensor(
+            src[src_indexes, :, :, :].astype(data_input.dtype.get_numpy_dtype())
         )
 
-    return image
+    if image is None:
+        raise RuntimeError(
+            f"No band sets were read for layer {layer_name} group {group_idx} "
+            f"in window {window.name}, but found all needed bands"
+        )
+
+    return image, timestamps
 
 
 def read_layer_time_range(
@@ -445,16 +478,24 @@ def read_data_input(
     Returns:
         the raster or vector data.
     """
-    # We first enumerate which layers are available.
-    # If load_all_item_groups is set, we need to check each item group within the
-    # layer.
+    # We first enumerate which item groups are available.
+    # If load_all_item_groups is set, we discover all item groups within each layer.
+    # Otherwise, we parse each entry in data_input.layers as a (layer_name, group_idx)
+    # specifier.
     layer_options: list[tuple[str, int]] = []
     if data_input.load_all_item_groups:
-        wanted_layers = set(data_input.layers)
+        # We ensure that item groups are ordered within each layer, and across layers
+        # we respect the user's given order.
+        completed_groups_by_layer: dict[str, list[int]] = {}
         for layer_name, group_idx in window.list_completed_layers():
-            if layer_name not in wanted_layers:
-                continue
-            layer_options.append((layer_name, group_idx))
+            if layer_name not in completed_groups_by_layer:
+                completed_groups_by_layer[layer_name] = []
+            completed_groups_by_layer[layer_name].append(group_idx)
+
+        for layer_name in data_input.layers:
+            cur_completed_groups = completed_groups_by_layer[layer_name]
+            for group_idx in sorted(cur_completed_groups):
+                layer_options.append((layer_name, group_idx))
     else:
         for option in data_input.layers:
             layer_name, group_idx = get_layer_and_group_from_dir_name(option)
@@ -462,9 +503,9 @@ def read_data_input(
                 continue
             layer_options.append((layer_name, group_idx))
 
-    # Now determine the layers that we should actually read.
-    # We randomly pick one, unless load_all_layers is set, in which case we read all of
-    # them.
+    # Now determine which item groups we should actually read.
+    # We randomly pick one, unless load_all_layers is set, in which case we read all
+    # available options.
     layers_to_read: list[tuple[str, int]]
     if data_input.load_all_layers:
         # We assume that the user has ensured the layers are compatible, e.g. raster
@@ -483,15 +524,14 @@ def read_data_input(
         )
 
     if data_input.data_type == "raster":
-        # load it once here
         layer_datas = window.load_layer_datas()
-        images: list[torch.Tensor] = []
-        time_ranges: list[tuple[datetime, datetime] | None] = []
+        images: list[torch.Tensor] = []  # each is CTHW
         expected_timestamps: list[tuple[datetime, datetime]] | None = None
-
+        all_timestamps: list[tuple[datetime, datetime]] = []
+        has_all_timestamps = True
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
-            image = read_raster_layer_for_data_input(
+            image, timestamps = read_raster_layer_for_data_input(
                 window,
                 bounds,
                 layer_name,
@@ -499,25 +539,42 @@ def read_data_input(
                 layer_config,
                 data_input,
             )
-            # some layers (e.g. "label_raster") won't have associated layer datas
-            layer_data = layer_datas.get(layer_name)
-            time_range = read_layer_time_range(layer_data, group_idx)
-            if len(time_ranges) > 0:
-                if type(time_ranges[-1]) is not type(time_range):
-                    raise ValueError(
-                        f"All time ranges should be datetime tuples or None. Got {type(time_range)} amd {type(time_ranges[-1])}"
-                    )
             images.append(image)
-            time_ranges.append(time_range)
-
+            
             # Compute expected_timestamps from the first layer's config
             # (assuming all layers in the same DataInput have same temporal config)
             if expected_timestamps is None:
                 expected_timestamps = compute_expected_timestamps(window, layer_config)
+                
+            if timestamps is not None:
+                all_timestamps.extend(timestamps)
+            elif image.shape[1] == 1:
+                # For single-timestep RasterImage, fallback to item-level time range
+                # for this item group.
+                layer_data = layer_datas.get(layer_name)
+                time_range = read_layer_time_range(layer_data, group_idx)
+                if time_range is not None:
+                    all_timestamps.append(time_range)
+                    warnings.warn(
+                        "Falling back to item-level time range for single-timestep "
+                        "RasterImage is deprecated and will be removed after "
+                        "2026-05-01. Ensure timestamps are stored with the raster data.",
+                        FutureWarning,
+                        stacklevel=2,
+                    )
+                else:
+                    # It is okay for single-timestep RasterImage to not have timestamps.
+                    has_all_timestamps = False
+            else:
+                # Multi-timestep RasterImage must have timestamps.
+                raise ValueError(
+                    f"Expected multi-timestep RasterImage with T={image.shape[1]} to have timestamps"
+                )
 
+        stacked = torch.cat(images, dim=1)
         return RasterImage(
-            torch.stack(images, dim=1),
-            time_ranges if time_ranges[0] is not None else None,  # type: ignore
+            stacked,
+            all_timestamps if has_all_timestamps else None,
             expected_timestamps=expected_timestamps,
         )
 
@@ -769,37 +826,63 @@ class SplitConfig:
 
 
 def is_data_input_available(data_input: DataInput, window: Window) -> bool:
-    """Check if a data input's layers are available in a window.
+    """Check if a data input's required item groups are available in a window.
 
     Args:
         data_input: the data input to check.
         window: the window to check against.
 
     Returns:
-        True if the layers are available based on the data input's configuration.
+        True if the required item groups are available.
     """
-    # If load_all_layers is enabled, we should check that all the layers are
-    # present. Otherwise, we just need one layer.
-    is_any_layer_available = False
-    are_all_layers_available = True
+    # If load_all_layers is enabled, we need all entries present. Otherwise, just one.
+    is_any_available = False
+    are_all_available = True
 
-    for layer_name in data_input.layers:
-        if window.is_layer_completed(layer_name):
-            is_any_layer_available = True
+    for option in data_input.layers:
+        if data_input.load_all_item_groups:
+            # In this case the option should be a layer name directly.
+            # We can check group_idx=0 to verify there is at least one item group
+            # present in this layer (since load_all_item_groups=true, the user doesn't
+            # care how many item groups are completed).
+            layer_name = option
+            group_idx = 0
         else:
-            are_all_layers_available = False
+            # In this case it specifies an item group (like raster_layer.1).
+            layer_name, group_idx = get_layer_and_group_from_dir_name(option)
+
+        if window.is_layer_completed(layer_name, group_idx=group_idx):
+            is_any_available = True
+        else:
+            are_all_available = False
 
     if data_input.load_all_layers:
-        return are_all_layers_available
+        return are_all_available
     else:
-        return is_any_layer_available
+        return is_any_available
+
+
+@dataclasses.dataclass
+class CheckWindowResult:
+    """Aggregated counts of why windows were skipped during check_window."""
+
+    missing_data_input_counts: dict[str, int] = dataclasses.field(default_factory=dict)
+    has_output_layer_count: int = 0
+
+    def add(self, other: "CheckWindowResult") -> None:
+        """Merge another result into this one."""
+        for key, count in other.missing_data_input_counts.items():
+            self.missing_data_input_counts[key] = (
+                self.missing_data_input_counts.get(key, 0) + count
+            )
+        self.has_output_layer_count += other.has_output_layer_count
 
 
 def check_window(
     inputs: dict[str, DataInput],
     window: Window,
     output_layer_name_skip_inference_if_exists: str | None = None,
-) -> Window | None:
+) -> tuple[Window | None, CheckWindowResult]:
     """Verify that the window has the required layers based on the specified inputs.
 
     Args:
@@ -808,19 +891,20 @@ def check_window(
         output_layer_name_skip_inference_if_exists: optional name of the output layer to check for existence.
 
     Returns:
-        the window if it has all the required inputs and does not need to be skipped
-        due to an existing output layer; or None otherwise
+        a tuple of (window, result) where window is the window if it passes all
+        checks or None otherwise, and result records why the window was skipped.
     """
-    for data_input in inputs.values():
+    for key, data_input in inputs.items():
         if not data_input.required:
             continue
         if not is_data_input_available(data_input, window):
             logger.debug(
-                "Skipping window %s since check for layers %s failed",
+                "Skipping window %s since check for input '%s' (layers %s) failed",
                 window.name,
+                key,
                 data_input.layers,
             )
-            return None
+            return (None, CheckWindowResult(missing_data_input_counts={key: 1}))
 
     # Optionally skip windows that already have the specified output layer completed.
     if output_layer_name_skip_inference_if_exists is not None:
@@ -830,9 +914,9 @@ def check_window(
                 window.name,
                 output_layer_name_skip_inference_if_exists,
             )
-            return None
+            return (None, CheckWindowResult(has_output_layer_count=1))
 
-    return window
+    return (window, CheckWindowResult())
 
 
 class ModelDataset(torch.utils.data.Dataset):
@@ -1028,21 +1112,11 @@ class ModelDataset(torch.utils.data.Dataset):
             self.split_config.get_output_layer_name_skip_inference_if_exists()
         )
 
-        if workers == 0:
-            return [
-                w
-                for w in windows
-                if check_window(
-                    self.inputs,
-                    w,
-                    output_layer_name_skip_inference_if_exists=output_layer_skip,
-                )
-                is not None
-            ]
+        result = CheckWindowResult()
+        filtered = []
 
-        p = multiprocessing.Pool(workers)
-        outputs = star_imap_unordered(
-            p,
+        with make_pool_and_star_imap_unordered(
+            workers,
             check_window,
             [
                 dict(
@@ -1052,16 +1126,25 @@ class ModelDataset(torch.utils.data.Dataset):
                 )
                 for window in windows
             ],
-        )
-        filtered = []
-        for window in tqdm.tqdm(
-            outputs,
-            total=len(windows),
-            desc="Checking available layers in windows",
-        ):
-            if window is not None:
-                filtered.append(window)
-        p.close()
+        ) as outputs:
+            for window, check_result in tqdm.tqdm(
+                outputs,
+                total=len(windows),
+                desc="Checking available layers in windows",
+            ):
+                result.add(check_result)
+                if window is not None:
+                    filtered.append(window)
+
+        if result.missing_data_input_counts:
+            for key, count in sorted(result.missing_data_input_counts.items()):
+                logger.info("Skipped %d windows due to missing input '%s'", count, key)
+        if result.has_output_layer_count > 0:
+            logger.info(
+                "Skipped %d windows due to existing output layer",
+                result.has_output_layer_count,
+            )
+
         return filtered
 
     def _sort_and_limit_windows(

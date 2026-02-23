@@ -3,7 +3,9 @@
 import json
 from typing import Any
 
-from olmoearth_pretrain.data.normalize import load_computed_config
+from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.data.normalize import (
+    load_computed_config,
+)
 
 from rslearn.log_utils import get_logger
 from rslearn.train.transforms.transform import Transform, selector_exists

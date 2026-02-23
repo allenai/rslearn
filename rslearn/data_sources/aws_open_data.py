@@ -28,6 +28,7 @@ from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_EPSG, WGS84_PROJECTION
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import GridIndex, Projection, STGeometry, daterange
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 from .copernicus import get_harmonize_callback, get_sentinel2_tiles
@@ -345,7 +346,9 @@ class Naip(DataSource):
                 self.bucket.download_file(
                     item.blob_path, fname, ExtraArgs={"RequestPayer": "requester"}
                 )
-                tile_store.write_raster_file(item.name, bands, UPath(fname))
+                tile_store.write_raster_file(
+                    item.name, bands, UPath(fname), time_range=item.geometry.time_range
+                )
 
 
 class Sentinel2Modality(Enum):
@@ -726,10 +729,20 @@ class Sentinel2(
                             projection, bounds = get_raster_projection_and_bounds(src)
                         array = harmonize_callback(array)
                         tile_store.write_raster(
-                            item.name, band_names, projection, bounds, array
+                            item.name,
+                            band_names,
+                            projection,
+                            bounds,
+                            RasterArray(
+                                chw_array=array,
+                                time_range=item.geometry.time_range,
+                            ),
                         )
 
                     else:
                         tile_store.write_raster_file(
-                            item.name, band_names, UPath(local_fname)
+                            item.name,
+                            band_names,
+                            UPath(local_fname),
+                            time_range=item.geometry.time_range,
                         )

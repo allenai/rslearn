@@ -1,5 +1,7 @@
 """Unit tests for rslearn.train.dataset."""
 
+import json
+import random
 import warnings
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -7,7 +9,6 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-import shapely
 import torch
 import torch.utils.data
 from upath import UPath
@@ -22,9 +23,7 @@ from rslearn.config import (
     SpaceMode,
 )
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources.data_source import Item
 from rslearn.dataset import Dataset, Window
-from rslearn.dataset.window import WindowLayerData
 from rslearn.train.dataset import (
     DataInput,
     IndexMode,
@@ -33,11 +32,14 @@ from rslearn.train.dataset import (
     SplitConfig,
     compute_expected_timestamps,
     read_layer_time_range,
+    check_window,
+    read_data_input,
 )
 from rslearn.train.dataset_index import INDEX_DIR_NAME
+from rslearn.train.model_context import RasterImage
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.transforms.concatenate import Concatenate
-from rslearn.utils.geometry import STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
@@ -207,16 +209,16 @@ def test_load_two_layers(
     assert torch.all(inputs["image"].image[:, 1] == 2)
 
 
-def test_read_layer_time_range(tmp_path: UPath) -> None:
-    """Test that time_range is correctly read from layer_data items.
+def test_read_data_input_timestamps(tmp_path: UPath) -> None:
+    """Test that read_data_input reads timestamps from RasterArrays and stacks them.
 
-    This test verifies that when items in layer_data have time_range set,
-    the read_layer_time_range function correctly returns the min/max time
-    range from all items.
+    Creates two item groups for the same layer, each with a distinct timestamp.
+    With load_all_layers + load_all_item_groups, both should be read and the
+    timestamps should be concatenated in the returned RasterImage.
     """
     ds_path = UPath(tmp_path)
+    ds_path.mkdir(parents=True, exist_ok=True)
 
-    # Create dataset config with a raster layer
     dataset_config = {
         "layers": {
             "image": {
@@ -230,66 +232,66 @@ def test_read_layer_time_range(tmp_path: UPath) -> None:
             },
         },
     }
-    ds_path.mkdir(parents=True, exist_ok=True)
-    import json
-
     with (ds_path / "config.json").open("w") as f:
         json.dump(dataset_config, f)
 
     dataset = Dataset(ds_path)
 
-    # Create a window
     window = Window(
         storage=dataset.storage,
         name="test_window",
         group="default",
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
-        time_range=(datetime(2024, 1, 1), datetime(2024, 1, 31)),
+        time_range=None,
     )
     window.save()
 
-    # Write raster data
-    image = np.ones((1, 4, 4), dtype=np.uint8)
-    raster_dir = window.get_raster_dir("image", ["band"])
+    ts1 = (datetime(2024, 1, 5), datetime(2024, 1, 10))
+    ts2 = (datetime(2024, 1, 15), datetime(2024, 1, 20))
+
+    image1 = np.ones((1, 4, 4), dtype=np.uint8)
+    raster_dir1 = window.get_raster_dir("image", ["band"], group_idx=0)
     GeotiffRasterFormat().encode_raster(
-        raster_dir, window.projection, window.bounds, image
-    )
-    window.mark_layer_completed("image")
-
-    # Create layer data with items that have time_range set
-    item1_time_range = (datetime(2024, 1, 5), datetime(2024, 1, 10))
-    item2_time_range = (datetime(2024, 1, 15), datetime(2024, 1, 20))
-
-    item1 = Item(
-        "item1",
-        STGeometry(
-            WGS84_PROJECTION,
-            shapely.box(*window.bounds),
-            item1_time_range,
-        ),
-    )
-    item2 = Item(
-        "item2",
-        STGeometry(
-            WGS84_PROJECTION,
-            shapely.box(*window.bounds),
-            item2_time_range,
-        ),
+        raster_dir1,
+        window.projection,
+        window.bounds,
+        RasterArray(chw_array=image1, time_range=ts1),
     )
 
-    layer_data = WindowLayerData(
-        "image",
-        serialized_item_groups=[[item1.serialize(), item2.serialize()]],
+    image2 = 2 * np.ones((1, 4, 4), dtype=np.uint8)
+    raster_dir2 = window.get_raster_dir("image", ["band"], group_idx=1)
+    GeotiffRasterFormat().encode_raster(
+        raster_dir2,
+        window.projection,
+        window.bounds,
+        RasterArray(chw_array=image2, time_range=ts2),
     )
 
-    # Call the function that reads time ranges from layer data
-    time_range = read_layer_time_range(layer_data, group_idx=0)
+    window.mark_layer_completed("image", group_idx=0)
+    window.mark_layer_completed("image", group_idx=1)
 
-    # Verify the time_range is correct (min of starts, max of ends)
-    assert time_range is not None
-    assert time_range[0] == datetime(2024, 1, 5)  # min of item1 and item2 start
-    assert time_range[1] == datetime(2024, 1, 20)  # max of item1 and item2 end
+    data_input = DataInput(
+        "raster",
+        ["image"],
+        bands=["band"],
+        load_all_layers=True,
+        load_all_item_groups=True,
+    )
+
+    result = read_data_input(
+        dataset, window, window.bounds, data_input, random.Random(0)
+    )
+
+    assert isinstance(result, RasterImage)
+    assert result.image.shape == (1, 2, 4, 4)
+    # image1 was 1 everywhere.
+    assert torch.all(result.image[:, 0] == 1)
+    # image2 was 2 everywhere, it is second item group so should get stacked to the
+    # second timestep.
+    assert torch.all(result.image[:, 1] == 2)
+    # RasterArray should have the stacked timestamps as well.
+    assert result.timestamps == [ts1, ts2]
 
 
 def test_model_dataset_index_uses_cache(
@@ -894,3 +896,76 @@ def test_compute_expected_timestamps_exact_periods_returns_timestamps() -> None:
     expected_ts = compute_expected_timestamps(window, layer_config)
     assert expected_ts is not None
     assert len(expected_ts) == 2
+class TestCheckWindow:
+    """Tests for check_window and CheckWindowResult."""
+
+    def test_passes_when_all_inputs_available(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
+        """Window is returned with empty result when all required inputs are present."""
+        image = np.zeros((1, 4, 4), dtype=np.uint8)
+        window = add_window_to_basic_classification_dataset(
+            basic_classification_dataset,
+            images={("image_layer1", 0): image},
+        )
+        inputs = {
+            "image": DataInput("raster", ["image_layer1"], bands=["band"]),
+            "targets": DataInput("vector", ["vector_layer"]),
+        }
+        result_window, result = check_window(inputs, window)
+        assert result_window is window
+        assert result.missing_data_input_counts == {}
+        assert result.has_output_layer_count == 0
+
+    def test_skipped_for_missing_required_input(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
+        """Window is skipped and result reports the missing input key."""
+        image = np.zeros((1, 4, 4), dtype=np.uint8)
+        window = add_window_to_basic_classification_dataset(
+            basic_classification_dataset,
+            images={("image_layer1", 0): image},
+        )
+        inputs = {
+            "image": DataInput("raster", ["image_layer1"], bands=["band"]),
+            "missing_layer": DataInput(
+                "raster", ["nonexistent_layer"], bands=["band"], required=True
+            ),
+        }
+        result_window, result = check_window(inputs, window)
+        assert result_window is None
+        assert result.missing_data_input_counts == {"missing_layer": 1}
+        assert result.has_output_layer_count == 0
+
+    def test_skipped_for_existing_output_layer(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
+        """Window is skipped and result reports existing output layer."""
+        image = np.zeros((1, 4, 4), dtype=np.uint8)
+        window = add_window_to_basic_classification_dataset(
+            basic_classification_dataset,
+            images={("image_layer1", 0): image},
+        )
+        # Mark an output layer as completed.
+        layer_dir = window.get_layer_dir("predictions")
+        layer_dir.mkdir(parents=True, exist_ok=True)
+        window.mark_layer_completed("predictions")
+
+        inputs = {
+            "image": DataInput("raster", ["image_layer1"], bands=["band"]),
+            "targets": DataInput("vector", ["vector_layer"]),
+        }
+        result_window, result = check_window(
+            inputs,
+            window,
+            output_layer_name_skip_inference_if_exists="predictions",
+        )
+        assert result_window is None
+        assert result.missing_data_input_counts == {}
+        assert result.has_output_layer_count == 1

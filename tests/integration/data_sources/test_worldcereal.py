@@ -15,6 +15,7 @@ from rslearn.data_sources.data_source import DataSourceContext
 from rslearn.data_sources.worldcereal import WorldCereal
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 # Degrees per pixel to use in the GeoTIFF.
@@ -68,7 +69,7 @@ def _make_test_zips(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
             raster_path,
             projection,
             bounds,
-            array,
+            RasterArray(chw_array=array),
             fname=f"{seattle_aez}_{raster_path.stem}.tif",
         )
 
@@ -147,7 +148,7 @@ def test_with_worldcereal_dir(
         raster_data = tile_store.read_raster(
             layer_name, item.name, [band], seattle2020.projection, bounds
         )
-        assert raster_data.max() == 1
+        assert raster_data.get_chw_array().max() == 1
         print(f"Succeeded for {band}")
 
 
