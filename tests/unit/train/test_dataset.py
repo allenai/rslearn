@@ -30,9 +30,8 @@ from rslearn.train.dataset import (
     ModelDataset,
     RetryDataset,
     SplitConfig,
-    compute_expected_timestamps,
-    read_layer_time_range,
     check_window,
+    compute_expected_timestamps,
     read_data_input,
 )
 from rslearn.train.dataset_index import INDEX_DIR_NAME
@@ -896,6 +895,8 @@ def test_compute_expected_timestamps_exact_periods_returns_timestamps() -> None:
     expected_ts = compute_expected_timestamps(window, layer_config)
     assert expected_ts is not None
     assert len(expected_ts) == 2
+
+
 class TestCheckWindow:
     """Tests for check_window and CheckWindowResult."""
 
