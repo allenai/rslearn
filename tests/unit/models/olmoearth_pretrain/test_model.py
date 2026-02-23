@@ -2,9 +2,8 @@
 
 from datetime import datetime
 
-import pytest
 import torch
-from olmoearth_pretrain.datatypes import MaskValue
+from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import MaskValue
 
 from rslearn.models.attention_pooling import AttentionPool, SimpleAttentionPool
 from rslearn.models.olmoearth_pretrain.model import OlmoEarth
@@ -368,12 +367,14 @@ def test_batch_with_missing_modality_in_later_samples() -> None:
     ]
     context = ModelContext(inputs=inputs, metadatas=[])
 
-    # This should not raise a KeyError - the model should handle missing modalities
-    # Currently this test is expected to FAIL due to the bug in _prepare_modality_inputs
-    # which only checks context.inputs[0] for modality presence.
-    with pytest.raises(KeyError, match="sentinel1"):
-        # Once the bug is fixed, remove this pytest.raises and just call the model
-        model(context)
+    # Model should handle missing modalities gracefully - no KeyError should be raised.
+    # The model detects modalities from ANY sample and masks missing data appropriately.
+    feature_map = model(context)
+
+    # Verify we get valid output for both samples
+    assert len(feature_map.feature_maps) == 1
+    features = feature_map.feature_maps[0]
+    assert features.shape[0] == 2  # Both samples processed
 
 
 def test_batch_with_missing_modality_in_first_sample() -> None:
@@ -428,13 +429,310 @@ def test_batch_with_missing_modality_in_first_sample() -> None:
     ]
     context = ModelContext(inputs=inputs, metadatas=[])
 
-    # Check which modalities are detected - currently only checks inputs[0]
+    # Check which modalities are detected - should check ALL samples, not just inputs[0]
     _, present_modalities, _ = model._prepare_modality_inputs(context)
 
-    # BUG: Currently sentinel1 is NOT in present_modalities because it only
-    # checks inputs[0]. Once fixed, sentinel1 should be detected.
-    # For now, we document the current (buggy) behavior:
-    assert "sentinel1" not in present_modalities, (
-        "If this assertion fails, the bug has been fixed! "
-        "Update this test to expect sentinel1 in present_modalities."
+    assert "sentinel1" in present_modalities
+    assert "sentinel2_l2a" in present_modalities
+
+    # Verify the model runs successfully
+    feature_map = model(context)
+    assert len(feature_map.feature_maps) == 1
+    features = feature_map.feature_maps[0]
+    assert features.shape[0] == 2  # Both samples processed
+
+
+def test_temporal_alignment_with_expected_timestamps() -> None:
+    """Test that timestamps are properly aligned to expected positions.
+
+    When expected_timestamps is provided, missing timesteps should be inserted
+    at their correct temporal positions (not just padded at the end).
+    """
+    model = OlmoEarth(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        use_legacy_timestamps=False,
     )
+
+    H = 4
+    W = 4
+
+    # Expected timestamps: Jan, Feb, Mar, Apr (4 months)
+    expected_ts = [(datetime(2025, m, 1), datetime(2025, m, 28)) for m in range(1, 5)]
+
+    # Sample 1: Has data for Jan, Mar (missing Feb, Apr)
+    # The tensor values are non-zero so we can verify placement
+    sample1_tensor = torch.ones((12, 2, H, W), dtype=torch.float32)
+    sample1_tensor[:, 0, :, :] = 3.0  # March
+    sample1_tensor[:, 1, :, :] = 1.0  # Jan
+    sample1_timestamps = [
+        (datetime(2025, 3, 1), datetime(2025, 3, 28)),  # Mar
+        (datetime(2025, 1, 1), datetime(2025, 1, 28)),  # Jan
+    ]
+
+    # Sample 2: Has data for all 4 months
+    sample2_tensor = torch.ones((12, 4, H, W), dtype=torch.float32)
+    for i in range(4):
+        sample2_tensor[:, i, :, :] = float(i + 1)
+    sample2_timestamps = expected_ts.copy()
+
+    inputs = [
+        {
+            "sentinel2_l2a": RasterImage(
+                image=sample1_tensor,
+                timestamps=sample1_timestamps,
+                expected_timestamps=expected_ts,
+            )
+        },
+        {
+            "sentinel2_l2a": RasterImage(
+                image=sample2_tensor,
+                timestamps=sample2_timestamps,
+                expected_timestamps=expected_ts,
+            )
+        },
+    ]
+
+    context = ModelContext(inputs=inputs, metadatas=[])
+    sample, present_modalities, _ = model._prepare_modality_inputs(context)
+
+    # Should have 4 timesteps (based on expected_timestamps)
+    assert sample.sentinel2_l2a.shape == (2, H, W, 4, 12)
+
+    # Sample 1: Check that Jan is at position 0, Mar is at position 2
+    # Positions 1 (Feb) and 3 (Apr) should be zeros
+    s1_data = sample.sentinel2_l2a[0]  # H, W, T, C
+    assert torch.allclose(s1_data[0, 0, 0, :], torch.ones(12))  # Jan at pos 0
+    assert torch.allclose(s1_data[0, 0, 1, :], torch.zeros(12))  # Feb missing
+    assert torch.allclose(s1_data[0, 0, 2, :], torch.ones(12) * 3)  # Mar at pos 2
+    assert torch.allclose(s1_data[0, 0, 3, :], torch.zeros(12))  # Apr missing
+
+    # Sample 1 mask: positions 0 and 2 should be ONLINE_ENCODER, 1 and 3 should be MISSING
+    s1_mask = sample.sentinel2_l2a_mask[0]  # H, W, T, S
+    assert (s1_mask[:, :, 0, :] == MaskValue.ONLINE_ENCODER.value).all()  # Jan
+    assert (s1_mask[:, :, 1, :] == MaskValue.MISSING.value).all()  # Feb
+    assert (s1_mask[:, :, 2, :] == MaskValue.ONLINE_ENCODER.value).all()  # Mar
+    assert (s1_mask[:, :, 3, :] == MaskValue.MISSING.value).all()  # Apr
+
+    # Sample 2: All positions should have data and be marked ONLINE_ENCODER
+    s2_mask = sample.sentinel2_l2a_mask[1]
+    assert (s2_mask == MaskValue.ONLINE_ENCODER.value).all()
+
+
+def test_missing_modality_handling() -> None:
+    """Test that completely missing modalities are handled correctly.
+
+    When a sample is missing a modality entirely, it should have an all-zero
+    tensor with all timestamps marked as MISSING.
+    """
+    model = OlmoEarth(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        use_legacy_timestamps=False,
+    )
+
+    H = 4
+    W = 4
+    T = 3
+
+    timestamps = [
+        (datetime(2025, m, 1), datetime(2025, m, 28)) for m in range(1, T + 1)
+    ]
+
+    # Sample 1: Has both sentinel2 and sentinel1
+    inputs = [
+        {
+            "sentinel2_l2a": RasterImage(
+                image=torch.ones((12, T, H, W), dtype=torch.float32),
+                timestamps=timestamps,
+            ),
+            "sentinel1": RasterImage(
+                image=torch.ones((2, T, H, W), dtype=torch.float32) * 2,
+                timestamps=timestamps,
+            ),
+        },
+        # Sample 2: Only has sentinel2, missing sentinel1 entirely
+        {
+            "sentinel2_l2a": RasterImage(
+                image=torch.ones((12, T, H, W), dtype=torch.float32) * 3,
+                timestamps=timestamps,
+            ),
+            # sentinel1 is completely missing
+        },
+    ]
+
+    context = ModelContext(inputs=inputs, metadatas=[])
+    sample, present_modalities, _ = model._prepare_modality_inputs(context)
+
+    # Both modalities should be present (sentinel1 detected from sample 1)
+    assert "sentinel2_l2a" in present_modalities
+    assert "sentinel1" in present_modalities
+
+    # Shapes should be consistent
+    assert sample.sentinel2_l2a.shape == (2, H, W, T, 12)
+    assert sample.sentinel1.shape == (2, H, W, T, 2)
+
+    # Sample 1: sentinel1 should have data (value 2)
+    s1_s1_data = sample.sentinel1[0]  # H, W, T, C
+    assert torch.allclose(s1_s1_data, torch.ones(H, W, T, 2) * 2)
+    s1_s1_mask = sample.sentinel1_mask[0]
+    assert (s1_s1_mask == MaskValue.ONLINE_ENCODER.value).all()
+
+    # Sample 2: sentinel1 should be all zeros with all MISSING mask
+    s2_s1_data = sample.sentinel1[1]
+    assert torch.allclose(s2_s1_data, torch.zeros(H, W, T, 2))
+    s2_s1_mask = sample.sentinel1_mask[1]
+    assert (s2_s1_mask == MaskValue.MISSING.value).all()
+
+
+def test_mixed_batch_expected_timestamps() -> None:
+    """Test that model handles batches where some samples have expected_timestamps and some don't.
+
+    This can happen when windows have different time ranges: some may have
+    total_periods == max_matches (expected timestamps computed), while others
+    have total_periods > max_matches (expected timestamps is None, used as fallback).
+    """
+    model = OlmoEarth(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        use_legacy_timestamps=False,
+    )
+
+    H = 4
+    W = 4
+
+    # Expected timestamps for sample 0: Jan, Feb, Mar (3 months)
+    expected_ts = [(datetime(2025, m, 1), datetime(2025, m, 28)) for m in range(1, 4)]
+
+    # Sample 0: Has expected_timestamps, with data for Jan and Mar (missing Feb)
+    sample0_tensor = torch.ones((12, 2, H, W), dtype=torch.float32)
+    sample0_tensor[:, 0, :, :] = 1.0  # Jan
+    sample0_tensor[:, 1, :, :] = 3.0  # Mar
+    sample0_timestamps = [
+        (datetime(2025, 1, 1), datetime(2025, 1, 28)),  # Jan
+        (datetime(2025, 3, 1), datetime(2025, 3, 28)),  # Mar
+    ]
+
+    # Sample 1: No expected_timestamps (e.g., window with excess periods),
+    # has 2 actual timesteps
+    sample1_tensor = torch.ones((12, 2, H, W), dtype=torch.float32)
+    sample1_tensor[:, 0, :, :] = 5.0
+    sample1_tensor[:, 1, :, :] = 6.0
+    sample1_timestamps = [
+        (datetime(2025, 4, 1), datetime(2025, 4, 28)),
+        (datetime(2025, 5, 1), datetime(2025, 5, 28)),
+    ]
+
+    inputs = [
+        {
+            "sentinel2_l2a": RasterImage(
+                image=sample0_tensor,
+                timestamps=sample0_timestamps,
+                expected_timestamps=expected_ts,
+            )
+        },
+        {
+            "sentinel2_l2a": RasterImage(
+                image=sample1_tensor,
+                timestamps=sample1_timestamps,
+                expected_timestamps=None,  # No expected timestamps
+            )
+        },
+    ]
+
+    context = ModelContext(inputs=inputs, metadatas=[])
+    sample, present_modalities, _ = model._prepare_modality_inputs(context)
+
+    # max_timesteps should be max(3 from expected_ts, 2 from actual) = 3
+    assert sample.sentinel2_l2a.shape == (2, H, W, 3, 12)
+
+    # Sample 0: Aligned to expected timestamps
+    # Jan at pos 0, Feb (missing) at pos 1, Mar at pos 2
+    s0_data = sample.sentinel2_l2a[0]  # H, W, T, C
+    assert torch.allclose(s0_data[0, 0, 0, :], torch.ones(12) * 1.0)  # Jan
+    assert torch.allclose(s0_data[0, 0, 1, :], torch.zeros(12))  # Feb missing
+    assert torch.allclose(s0_data[0, 0, 2, :], torch.ones(12) * 3.0)  # Mar
+
+    # Sample 0 mask: positions 0 and 2 valid, position 1 missing
+    s0_mask = sample.sentinel2_l2a_mask[0]
+    assert (s0_mask[:, :, 0, :] == MaskValue.ONLINE_ENCODER.value).all()
+    assert (s0_mask[:, :, 1, :] == MaskValue.MISSING.value).all()
+    assert (s0_mask[:, :, 2, :] == MaskValue.ONLINE_ENCODER.value).all()
+
+    # Sample 1: Padded at end (no alignment, original behavior)
+    s1_data = sample.sentinel2_l2a[1]  # H, W, T, C
+    assert torch.allclose(s1_data[0, 0, 0, :], torch.ones(12) * 5.0)
+    assert torch.allclose(s1_data[0, 0, 1, :], torch.ones(12) * 6.0)
+    assert torch.allclose(s1_data[0, 0, 2, :], torch.zeros(12))  # Padding
+
+    # Sample 1 mask: positions 0 and 1 valid, position 2 missing (padding)
+    s1_mask = sample.sentinel2_l2a_mask[1]
+    assert (s1_mask[:, :, 0, :] == MaskValue.ONLINE_ENCODER.value).all()
+    assert (s1_mask[:, :, 1, :] == MaskValue.ONLINE_ENCODER.value).all()
+    assert (s1_mask[:, :, 2, :] == MaskValue.MISSING.value).all()
+
+    # Timestamps should work: sample 0 uses expected_ts, sample 1 uses actual
+    assert sample.timestamps.shape == (2, 3, 3)
+
+
+def test_chronological_sorting_in_alignment() -> None:
+    """Test that data is sorted chronologically during alignment.
+
+    Even if actual timestamps come in non-chronological order, the aligned
+    output should be in chronological order.
+    """
+    model = OlmoEarth(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        use_legacy_timestamps=False,
+    )
+
+    H = 4
+    W = 4
+
+    # Expected timestamps in chronological order
+    expected_ts = [
+        (datetime(2025, 1, 1), datetime(2025, 1, 28)),
+        (datetime(2025, 2, 1), datetime(2025, 2, 28)),
+        (datetime(2025, 3, 1), datetime(2025, 3, 28)),
+    ]
+
+    # Input data in NON-chronological order: Mar, Jan, Feb
+    tensor = torch.ones((12, 3, H, W), dtype=torch.float32)
+    tensor[:, 0, :, :] = 3.0  # This is March data
+    tensor[:, 1, :, :] = 1.0  # This is January data
+    tensor[:, 2, :, :] = 2.0  # This is February data
+
+    # Timestamps match the non-chronological order
+    actual_timestamps = [
+        (datetime(2025, 3, 1), datetime(2025, 3, 28)),  # Mar
+        (datetime(2025, 1, 1), datetime(2025, 1, 28)),  # Jan
+        (datetime(2025, 2, 1), datetime(2025, 2, 28)),  # Feb
+    ]
+
+    inputs = [
+        {
+            "sentinel2_l2a": RasterImage(
+                image=tensor,
+                timestamps=actual_timestamps,
+                expected_timestamps=expected_ts,
+            )
+        }
+    ]
+
+    context = ModelContext(inputs=inputs, metadatas=[])
+    sample, _, _ = model._prepare_modality_inputs(context)
+
+    # After alignment, data should be in chronological order: Jan(1), Feb(2), Mar(3)
+    data = sample.sentinel2_l2a[0]  # H, W, T, C
+    assert torch.allclose(data[0, 0, 0, :], torch.ones(12) * 1.0)  # Jan at pos 0
+    assert torch.allclose(data[0, 0, 1, :], torch.ones(12) * 2.0)  # Feb at pos 1
+    assert torch.allclose(data[0, 0, 2, :], torch.ones(12) * 3.0)  # Mar at pos 2

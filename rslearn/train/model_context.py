@@ -1,5 +1,7 @@
 """Data classes to provide various context to models."""
 
+from __future__ import annotations
+
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -8,6 +10,7 @@ from typing import Any
 import torch
 
 from rslearn.utils.geometry import PixelBounds, Projection
+from rslearn.utils.raster_array import RasterArray
 
 
 @dataclass
@@ -18,6 +21,11 @@ class RasterImage:
     image: torch.Tensor
     # if timestamps is not None, len(timestamps) must match the T dimension of the tensor
     timestamps: list[tuple[datetime, datetime]] | None = None
+    # expected_timestamps specifies the full set of expected timestamps for temporal alignment.
+    # This is computed from layer config (window time_range + query config parameters) and this
+    # is set only when PER_PERIOD_MOSAIC mode is used with max_matches == number of periods in
+    # the window time_range.
+    expected_timestamps: list[tuple[datetime, datetime]] | None = None
 
     def __post_init__(self) -> None:
         """Validate that the image tensor is 4D (CTHW)."""
@@ -66,6 +74,23 @@ class RasterImage:
                 f"Expected single timestep (T=1), got {self.image.shape[1]}"
             )
         return self.image[0, 0]
+
+    @classmethod
+    def from_raster_array(cls, ra: RasterArray) -> RasterImage:
+        """Create a RasterImage from a numpy-based RasterArray.
+
+        Converts the numpy CTHW array to a torch tensor and copies timestamps.
+
+        Args:
+            ra: the source RasterArray.
+
+        Returns:
+            a new RasterImage with the same data.
+        """
+        return cls(
+            image=torch.as_tensor(ra.array.copy()),
+            timestamps=ra.timestamps,
+        )
 
 
 @dataclass

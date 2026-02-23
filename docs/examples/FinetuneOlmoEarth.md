@@ -7,13 +7,6 @@ Cropland Data Layer. For the inputs, we use four Sentinel-2 images (one per mont
 If you are new to rslearn, you may want to read [the main README](../../README.md) or
 [CoreConcepts](../CoreConcepts.md) first.
 
-Due to license incompatibility, the `olmoearth_pretrain` package required for this
-example is not included as a dependency and must be installed explicitly:
-
-```bash
-pip install olmoearth_pretrain
-```
-
 ## Create the Dataset
 
 Create a folder like `./dataset` to store the rslearn dataset, and save this dataset
