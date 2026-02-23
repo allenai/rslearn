@@ -277,7 +277,9 @@ class RasterImporter(Importer):
 
             if tile_store.is_raster_ready(item.name, bands):
                 continue
-            tile_store.write_raster_file(item.name, bands, fname_upath)
+            tile_store.write_raster_file(
+                item.name, bands, fname_upath, time_range=item.geometry.time_range
+            )
 
 
 class VectorImporter(Importer):

@@ -26,6 +26,7 @@ from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath, open_atomic
 from rslearn.utils.geometry import STGeometry, flatten_shape, split_at_antimeridian
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 from .copernicus import get_harmonize_callback, get_sentinel2_tiles
@@ -886,12 +887,22 @@ class Sentinel2(DataSource):
                             projection, bounds = get_raster_projection_and_bounds(src)
                         array = harmonize_callback(array)
                         tile_store.write_raster(
-                            item.name, band_names, projection, bounds, array
+                            item.name,
+                            band_names,
+                            projection,
+                            bounds,
+                            RasterArray(
+                                chw_array=array,
+                                time_range=item.geometry.time_range,
+                            ),
                         )
 
                     else:
                         tile_store.write_raster_file(
-                            item.name, band_names, UPath(fname)
+                            item.name,
+                            band_names,
+                            UPath(fname),
+                            time_range=item.geometry.time_range,
                         )
 
                 logger.debug(

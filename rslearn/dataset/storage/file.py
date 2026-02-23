@@ -1,7 +1,6 @@
 """The default file-based window storage backend."""
 
 import json
-import multiprocessing
 from datetime import datetime
 
 import tqdm
@@ -18,7 +17,7 @@ from rslearn.dataset.window import (
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import iter_nonhidden_subdirs, open_atomic
 from rslearn.utils.geometry import Projection
-from rslearn.utils.mp import star_imap_unordered
+from rslearn.utils.mp import make_pool_and_star_imap_unordered
 
 from .storage import WindowStorage, WindowStorageFactory
 
@@ -135,26 +134,16 @@ class FileWindowStorage(WindowStorage):
                 for window_dir in iter_nonhidden_subdirs(group_dir):
                     window_dirs.append(window_dir)
 
-        if workers == 0:
-            windows = [load_window(self, window_dir) for window_dir in window_dirs]
-        else:
-            p = multiprocessing.Pool(workers)
-            outputs = star_imap_unordered(
-                p,
-                load_window,
-                [
-                    dict(storage=self, window_dir=window_dir)
-                    for window_dir in window_dirs
-                ],
-            )
+        with make_pool_and_star_imap_unordered(
+            workers,
+            load_window,
+            [dict(storage=self, window_dir=window_dir) for window_dir in window_dirs],
+        ) as outputs:
             if show_progress:
                 outputs = tqdm.tqdm(
                     outputs, total=len(window_dirs), desc="Loading windows"
                 )
-            windows = []
-            for window in outputs:
-                windows.append(window)
-            p.close()
+            windows = list(outputs)
 
         return windows
 
@@ -214,14 +203,14 @@ class FileWindowStorage(WindowStorage):
         if not layers_directory.exists():
             return []
 
-        completed_layers = []
+        completed_item_groups = []
         for layer_dir in iter_nonhidden_subdirs(layers_directory):
             layer_name, group_idx = get_layer_and_group_from_dir_name(layer_dir.name)
             if not self.is_layer_completed(group, name, layer_name, group_idx):
                 continue
-            completed_layers.append((layer_name, group_idx))
+            completed_item_groups.append((layer_name, group_idx))
 
-        return completed_layers
+        return completed_item_groups
 
     @override
     def is_layer_completed(
@@ -243,8 +232,8 @@ class FileWindowStorage(WindowStorage):
         self._validate_layer_name(layer_name)
         window_path = self.get_window_root(group, name)
         layer_dir = get_window_layer_dir(window_path, layer_name, group_idx)
-        # We assume the directory exists because the layer should be materialized before
-        # being marked completed.
+        # We assume the directory exists because the item group should be materialized
+        # before being marked completed.
         (layer_dir / "completed").touch()
 
 

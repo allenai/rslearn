@@ -238,4 +238,9 @@ class Planet(DataSource):
 
             with tempfile.TemporaryDirectory() as tmp_dir:
                 asset_path = asyncio.run(self._download_asset(item, Path(tmp_dir)))
-                tile_store.write_raster_file(item.name, self.bands, asset_path)
+                tile_store.write_raster_file(
+                    item.name,
+                    self.bands,
+                    asset_path,
+                    time_range=item.geometry.time_range,
+                )

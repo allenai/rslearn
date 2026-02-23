@@ -103,15 +103,19 @@ class TestSentinel2:
             seattle2020.projection,
             bounds,
             resampling=Resampling.nearest,
-        )[0, :, :]
-        red = tile_store.read_raster(
-            layer_name,
-            item.name,
-            ["R", "G", "B"],
-            seattle2020.projection,
-            bounds,
-            resampling=Resampling.nearest,
-        )[0, :, :].astype(np.uint16)
+        ).get_chw_array()[0, :, :]
+        red = (
+            tile_store.read_raster(
+                layer_name,
+                item.name,
+                ["R", "G", "B"],
+                seattle2020.projection,
+                bounds,
+                resampling=Resampling.nearest,
+            )
+            .get_chw_array()[0, :, :]
+            .astype(np.uint16)
+        )
         check_array = (b04 > red * 8) & (b04 < red * 12)
         count = np.count_nonzero((~check_array) & (b04 > 500) & (b04 < 2500))
 
