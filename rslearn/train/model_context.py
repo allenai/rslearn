@@ -19,7 +19,9 @@ class RasterImage:
     # if timestamps is not None, len(timestamps) must match the T dimension of the tensor
     timestamps: list[tuple[datetime, datetime]] | None = None
     # expected_timestamps specifies the full set of expected timestamps for temporal alignment.
-    # This is computed from layer config (window time_range + query config parameters).
+    # This is computed from layer config (window time_range + query config parameters) and this
+    # is set only when PER_PERIOD_MOSAIC mode is used with max_matches == number of periods in
+    # the window time_range.
     expected_timestamps: list[tuple[datetime, datetime]] | None = None
 
     def __post_init__(self) -> None:

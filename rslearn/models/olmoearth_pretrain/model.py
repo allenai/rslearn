@@ -332,6 +332,11 @@ class OlmoEarth(FeatureExtractor):
         Each sample is aligned to its own expected_timestamps, then padded to the
         maximum expected_timestamps length across all samples in the batch.
 
+        Note on masking behavior:
+            The actual data alignment to expected timestamps and the chronology-preserving
+            masking is only performed when PER_PERIOD_MOSAIC is set in the layer config
+            and use_legacy_timestamps is False.
+
         Args:
             context: the model context with input tensors.
 
@@ -442,7 +447,11 @@ class OlmoEarth(FeatureExtractor):
                     actual_timestamps = raster_img.timestamps
 
                     sample_expected_ts = expected_timestamps_per_sample[sample_idx]
-                    if has_any_expected and sample_expected_ts is not None:
+                    if (
+                        has_any_expected
+                        and sample_expected_ts is not None
+                        and not self.use_legacy_timestamps
+                    ):
                         # Align to this sample's expected timestamps
                         aligned, valid_mask = self._align_tensor_to_expected_timestamps(
                             tensor,
