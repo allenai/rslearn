@@ -7,6 +7,7 @@ import numpy as np
 import numpy.typing as npt
 import torch
 import torchmetrics.classification
+from einops import rearrange
 from torchmetrics import Metric, MetricCollection
 from torchvision.ops import sigmoid_focal_loss
 
@@ -311,7 +312,7 @@ class SegmentationHead(Predictor):
 
     def __init__(
         self,
-        weights: list[float] | None = None,
+        class_weights: list[float] | None = None,
         dice_loss: bool = False,
         focal_loss: bool = False,
         focal_loss_alpha: float = 0.25,
@@ -322,7 +323,7 @@ class SegmentationHead(Predictor):
         """Initialize a new SegmentationTask.
 
         Args:
-            weights: weights for cross entropy loss (Tensor of size C)
+            class_weights: weights for cross entropy loss (list of length C)
             dice_loss: whether to add dice loss to cross entropy
             focal_loss: whether to use focal loss instead of cross entropy
             focal_loss_alpha: alpha parameter for focal loss (default 0.25)
@@ -333,10 +334,10 @@ class SegmentationHead(Predictor):
                 only the predictor outputs
         """
         super().__init__()
-        if weights is not None:
-            self.register_buffer("weights", torch.Tensor(weights))
+        if class_weights is not None:
+            self.register_buffer("class_weights", torch.Tensor(class_weights))
         else:
-            self.weights = None
+            self.class_weights = None
         self.dice_loss = dice_loss
         self.focal_loss = focal_loss
         self.focal_loss_alpha = focal_loss_alpha
@@ -385,10 +386,9 @@ class SegmentationHead(Predictor):
             if self.focal_loss:
                 # Convert labels to one-hot for focal loss
                 num_classes = logits.shape[1]
-                labels_one_hot = (
-                    torch.nn.functional.one_hot(labels, num_classes)
-                    .permute(0, 3, 1, 2)
-                    .float()
+                labels_one_hot = rearrange(
+                    torch.nn.functional.one_hot(labels, num_classes).float(),
+                    "b h w c -> b c h w",
                 )
                 per_pixel_loss = sigmoid_focal_loss(
                     logits,
@@ -401,7 +401,7 @@ class SegmentationHead(Predictor):
                 per_pixel_loss = per_pixel_loss.sum(dim=1)
             else:
                 per_pixel_loss = torch.nn.functional.cross_entropy(
-                    logits, labels, weight=self.weights, reduction="none"
+                    logits, labels, weight=self.class_weights, reduction="none"
                 )
 
             mask_sum = torch.sum(mask)
@@ -782,10 +782,9 @@ class DiceLoss(torch.nn.Module):
             the mean Dicen Loss across classes
         """
         num_classes = inputs.shape[1]
-        targets_one_hot = (
-            torch.nn.functional.one_hot(targets, num_classes)
-            .permute(0, 3, 1, 2)
-            .float()
+        targets_one_hot = rearrange(
+            torch.nn.functional.one_hot(targets, num_classes).float(),
+            "b h w c -> b c h w",
         )
 
         # Expand mask to [B, C, H, W]
