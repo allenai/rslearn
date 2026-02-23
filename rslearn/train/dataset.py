@@ -111,6 +111,8 @@ def compute_expected_timestamps(
     # For PER_PERIOD_MOSAIC mode, compute periods aligned from the end backwards
     if query_config.space_mode == SpaceMode.PER_PERIOD_MOSAIC:
         period_duration = query_config.period_duration
+        if period_duration is None:
+            return None
         max_matches = query_config.max_matches
 
         # If the window has more periods than max_matches, the actual periods
@@ -540,12 +542,12 @@ def read_data_input(
                 data_input,
             )
             images.append(image)
-            
+
             # Compute expected_timestamps from the first layer's config
             # (assuming all layers in the same DataInput have same temporal config)
             if expected_timestamps is None:
                 expected_timestamps = compute_expected_timestamps(window, layer_config)
-                
+
             if timestamps is not None:
                 all_timestamps.extend(timestamps)
             elif image.shape[1] == 1:
