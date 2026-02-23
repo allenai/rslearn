@@ -271,4 +271,9 @@ class PlanetBasemap(DataSource):
                     for chunk in response.iter_content(chunk_size=8192):
                         f.write(chunk)
 
-                tile_store.write_raster_file(item.name, self.bands, UPath(local_fname))
+                tile_store.write_raster_file(
+                    item.name,
+                    self.bands,
+                    UPath(local_fname),
+                    time_range=item.geometry.time_range,
+                )

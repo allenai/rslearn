@@ -8,15 +8,17 @@ from typing import Any
 
 import torch
 from einops import rearrange
-from olmoearth_pretrain.config import Config, require_olmo_core
-from olmoearth_pretrain.data.constants import Modality
-from olmoearth_pretrain.datatypes import MaskedOlmoEarthSample, MaskValue
-from olmoearth_pretrain.model_loader import (
-    ModelID,
-    load_model_from_id,
-    load_model_from_path,
+from olmoearth_pretrain_minimal import ModelID, load_model_from_id, load_model_from_path
+from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.nn.flexi_vit import (
+    Encoder,
+    TokensAndMasks,
 )
-from olmoearth_pretrain.nn.flexihelios import Encoder, TokensAndMasks
+from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.config import Config
+from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
+from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (
+    MaskedOlmoEarthSample,
+    MaskValue,
+)
 from upath import UPath
 
 from rslearn.log_utils import get_logger
@@ -160,19 +162,31 @@ class OlmoEarth(FeatureExtractor):
         The folder should contain config.json as well as the model_and_optim folder
         that contains the distributed checkpoint. This is the format produced by
         pre-training runs in olmoearth_pretrain.
+
+        Uses the full olmoearth_pretrain package if available (to pick up architecture
+        updates), otherwise falls back to olmoearth_pretrain_minimal.
         """
+        try:
+            from olmoearth_pretrain.config import Config as FullConfig
+        except ImportError:
+            FullConfig = Config
+
         with (checkpoint_upath / "config.json").open() as f:
             config_dict = json.load(f)
-            model_config = Config.from_dict(config_dict["model"])
+            model_config = FullConfig.from_dict(config_dict["model"])
 
         model = model_config.build()
 
-        # Load the checkpoint (requires olmo_core for distributed checkpoint loading).
         if not random_initialization:
-            require_olmo_core(
-                "_load_model_from_checkpoint with random_initialization=False"
-            )
-            from olmo_core.distributed.checkpoint import load_model_and_optim_state
+            try:
+                from olmo_core.distributed.checkpoint import (
+                    load_model_and_optim_state,
+                )
+            except ImportError:
+                raise ImportError(
+                    "olmo-core is required for loading distributed checkpoints. "
+                    "Install it with: pip install olmo-core"
+                )
 
             train_module_dir = checkpoint_upath / "model_and_optim"
             load_model_and_optim_state(str(train_module_dir), model)
@@ -206,13 +220,136 @@ class OlmoEarth(FeatureExtractor):
         )
         return timestamps
 
+    @staticmethod
+    def _get_sample_expected_timestamps(
+        inp: dict[str, torch.Tensor | RasterImage],
+        present_modalities: list[str],
+    ) -> list[tuple[datetime, datetime]] | None:
+        """Get expected_timestamps for a single sample from any of its modalities.
+
+        Args:
+            inp: the input dict for this sample.
+            present_modalities: list of modality names to check.
+
+        Returns:
+            The expected_timestamps if found in any modality, or None.
+        """
+        for modality in present_modalities:
+            if modality not in inp:
+                continue
+            raster_img = inp[modality]
+            if isinstance(raster_img, RasterImage) and raster_img.expected_timestamps:
+                return raster_img.expected_timestamps
+        return None
+
+    @staticmethod
+    def _find_timestamp_position(
+        actual_ts: tuple[datetime, datetime],
+        expected_timestamps: list[tuple[datetime, datetime]],
+    ) -> int | None:
+        """Find the position of an actual timestamp in expected timestamps.
+
+        Uses midpoint matching - finds the expected timestamp whose midpoint is closest
+        to the actual timestamp's midpoint.
+
+        Args:
+            actual_ts: the actual timestamp (start, end) tuple.
+            expected_timestamps: list of expected timestamps.
+
+        Returns:
+            Index in expected_timestamps, or None if no good match found.
+        """
+        actual_mid = actual_ts[0] + (actual_ts[1] - actual_ts[0]) / 2
+
+        best_idx = None
+        best_distance = None
+
+        for idx, expected_ts in enumerate(expected_timestamps):
+            expected_mid = expected_ts[0] + (expected_ts[1] - expected_ts[0]) / 2
+            distance = abs((actual_mid - expected_mid).total_seconds())
+
+            if best_distance is None or distance < best_distance:
+                best_distance = distance
+                best_idx = idx
+
+        return best_idx
+
+    def _align_tensor_to_expected_timestamps(
+        self,
+        tensor: torch.Tensor,
+        actual_timestamps: list[tuple[datetime, datetime]] | None,
+        expected_timestamps: list[tuple[datetime, datetime]],
+        max_timesteps: int,
+        device: torch.device,
+    ) -> tuple[torch.Tensor, list[bool]]:
+        """Align a tensor's timesteps to expected timestamp positions.
+
+        The rest of the tensor (from len(expected_timestamps) to max_timesteps) is filled with zeros.
+
+        Args:
+            tensor: input tensor of shape (C, T, H, W).
+            actual_timestamps: list of actual timestamps for each timestep in tensor.
+            expected_timestamps: list of expected timestamps to align to.
+            max_timesteps: final output timesteps (for padding to batch-compatible size).
+            device: the torch device.
+
+        Returns:
+            Tuple of (aligned_tensor, valid_mask) where:
+            - aligned_tensor has shape (C, max_timesteps, H, W)
+            - valid_mask is a list of booleans indicating which positions have data
+        """
+        num_expected = len(expected_timestamps)
+        c, t, h, w = tensor.shape
+
+        # Create output tensor filled with zeros (sized to max_timesteps for batching)
+        aligned = torch.zeros(
+            (c, max_timesteps, h, w), dtype=tensor.dtype, device=device
+        )
+        valid_mask = [False] * max_timesteps
+
+        if actual_timestamps is None:
+            # No timestamps - can't align, just copy data sequentially
+            copy_count = min(t, num_expected)
+            aligned[:, :copy_count, :, :] = tensor[:, :copy_count, :, :]
+            valid_mask[:copy_count] = [True] * copy_count
+        else:
+            # Sort actual data by timestamp
+            sorted_indices = sorted(
+                range(len(actual_timestamps)), key=lambda i: actual_timestamps[i][0]
+            )
+
+            for orig_idx in sorted_indices:
+                actual_ts = actual_timestamps[orig_idx]
+                expected_idx = self._find_timestamp_position(
+                    actual_ts, expected_timestamps
+                )
+                if (
+                    expected_idx is not None
+                    and expected_idx < max_timesteps
+                    and not valid_mask[expected_idx]
+                ):
+                    aligned[:, expected_idx, :, :] = tensor[:, orig_idx, :, :]
+                    valid_mask[expected_idx] = True
+
+        return aligned, valid_mask
+
     def _prepare_modality_inputs(
         self, context: ModelContext
     ) -> tuple[MaskedOlmoEarthSample, list[str], torch.device]:
         """Prepare modality tensors and masks for the OlmoEarth model.
 
-        Uses a two-pass approach to ensure all modalities have consistent timestep
-        dimensions for position encoding.
+        Uses expected_timestamps for temporal alignment when available, ensuring that:
+        1. Missing timestamps are inserted at their correct temporal positions
+        2. Completely missing modalities are handled (all-zero tensor with all-MISSING mask)
+        3. Data is chronologically ordered (oldest first)
+
+        Each sample is aligned to its own expected_timestamps, then padded to the
+        maximum expected_timestamps length across all samples in the batch.
+
+        Note on masking behavior:
+            The actual data alignment to expected timestamps and the chronology-preserving
+            masking is only performed when PER_PERIOD_MOSAIC is set in the layer config
+            and use_legacy_timestamps is False.
 
         Args:
             context: the model context with input tensors.
@@ -221,84 +358,174 @@ class OlmoEarth(FeatureExtractor):
             tuple of (sample, present_modalities, device)
         """
         kwargs = {}
-        present_modalities = []
         device = None
+        batch_size = len(context.inputs)
 
-        # First pass: find global max_timesteps across all modalities and samples
-        # TODO: currently we assume all modalities have the same number of timesteps,
-        # which is not true for all cases, and time series time steps are assumed to
-        # be 1-month apart. It also assumes continuity between available timesteps.
-        # We'll have to fix all that.
-        max_timesteps = 1
-        modality_data = {}
-        # we will just store the longest time range
-        # per instance in the batch. This means it may not be
-        # aligned per modality
-        timestamps_per_instance: list[list[tuple[datetime, datetime]]] = [[]] * len(
-            context.inputs
-        )
+        # Determine which modalities are present in any sample
+        present_modalities: list[str] = []
         for modality in MODALITY_NAMES:
-            if modality not in context.inputs[0]:
-                continue
-            present_modalities.append(modality)
-            tensors = []
-            for idx, inp in enumerate(context.inputs):
-                assert isinstance(inp[modality], RasterImage)
-                tensors.append(inp[modality].image)
-                cur_timestamps = inp[modality].timestamps
-                if cur_timestamps is not None and len(cur_timestamps) > len(
-                    timestamps_per_instance[idx]
-                ):
-                    timestamps_per_instance[idx] = cur_timestamps
-            tensors = [inp[modality].image for inp in context.inputs]
-            device = tensors[0].device
-            max_t = max(t.shape[1] for t in tensors)
-            max_timesteps = max(max_timesteps, max_t)
-            modality_data[modality] = (
-                tensors,
-                len(Modality.get(modality).band_sets),
+            for inp in context.inputs:
+                if modality in inp:
+                    present_modalities.append(modality)
+                    # Get device from first available tensor
+                    if device is None:
+                        raster_img = inp[modality]
+                        if isinstance(raster_img, RasterImage):
+                            device = raster_img.image.device
+                    break
+
+        if device is None:
+            raise ValueError("No modality tensors found in context.inputs")
+
+        # Collect per-sample expected_timestamps
+        expected_timestamps_per_sample: list[
+            list[tuple[datetime, datetime]] | None
+        ] = []
+        for inp in context.inputs:
+            sample_expected_ts = self._get_sample_expected_timestamps(
+                inp, present_modalities
             )
+            expected_timestamps_per_sample.append(sample_expected_ts)
 
-        # Second pass: pad and process each modality with global max_timesteps
+        # Determine max_timesteps:
+        # - From expected_timestamps lengths (for samples that have them)
+        # - From actual timestep counts (for samples without expected_timestamps)
+        has_any_expected = any(ts is not None for ts in expected_timestamps_per_sample)
+        max_timesteps = 1
+        for sample_idx, inp in enumerate(context.inputs):
+            sample_expected_ts = expected_timestamps_per_sample[sample_idx]
+            if sample_expected_ts is not None:
+                max_timesteps = max(max_timesteps, len(sample_expected_ts))
+            else:
+                # Use actual timestep count for samples without expected_timestamps
+                for modality in present_modalities:
+                    if modality in inp:
+                        raster_img = inp[modality]
+                        if isinstance(raster_img, RasterImage):
+                            max_timesteps = max(
+                                max_timesteps, raster_img.image.shape[1]
+                            )
+
+        # Track timestamps per instance (aka sample) for position encoding
+        # Using expected_timestamps when available, falling back to actual timestamps
+        timestamps_per_instance: list[list[tuple[datetime, datetime]]] = []
+        for sample_idx, inp in enumerate(context.inputs):
+            sample_expected_ts = expected_timestamps_per_sample[sample_idx]
+            if sample_expected_ts is not None:
+                timestamps_per_instance.append(sample_expected_ts)
+            else:
+                # Fall back to actual timestamps for this sample
+                best_ts: list[tuple[datetime, datetime]] = []
+                for modality in present_modalities:
+                    if modality in inp:
+                        raster_img = inp[modality]
+                        if (
+                            isinstance(raster_img, RasterImage)
+                            and raster_img.timestamps
+                        ):
+                            if len(raster_img.timestamps) > len(best_ts):
+                                best_ts = list(raster_img.timestamps)
+                timestamps_per_instance.append(best_ts)
+
+        # Compute spatial dimensions once from any non-missing sample
+        spatial_h, spatial_w = None, None
+        for inp in context.inputs:
+            for modality in present_modalities:
+                if modality in inp:
+                    raster_img = inp[modality]
+                    if isinstance(raster_img, RasterImage):
+                        spatial_h, spatial_w = (
+                            raster_img.image.shape[2],
+                            raster_img.image.shape[3],
+                        )
+                        break
+            if spatial_h is not None:
+                break
+
+        if spatial_h is None or spatial_w is None:
+            raise ValueError("Cannot determine spatial dimensions from any input")
+
+        # Process each modality
         for modality in present_modalities:
-            tensors, num_band_sets = modality_data[modality]
+            num_band_sets = len(Modality.get(modality).band_sets)
+            num_channels = sum(len(bs.bands) for bs in Modality.get(modality).band_sets)
 
-            # Pad tensors to target_ch and track original timesteps for masking
-            padded = []
-            original_timesteps = []
-            for t in tensors:
-                orig_t = t.shape[1]
-                original_timesteps.append(orig_t)
-                if orig_t < max_timesteps:
-                    pad = torch.zeros(
-                        t.shape[:1] + (max_timesteps - orig_t,) + t.shape[2:],
-                        dtype=t.dtype,
+            aligned_tensors = []
+            valid_masks_per_sample = []
+
+            for sample_idx, inp in enumerate(context.inputs):
+                if modality in inp:
+                    raster_img = inp[modality]
+                    assert isinstance(raster_img, RasterImage)
+                    tensor = raster_img.image
+                    actual_timestamps = raster_img.timestamps
+
+                    sample_expected_ts = expected_timestamps_per_sample[sample_idx]
+                    if (
+                        has_any_expected
+                        and sample_expected_ts is not None
+                        and not self.use_legacy_timestamps
+                    ):
+                        # Align to this sample's expected timestamps
+                        aligned, valid_mask = self._align_tensor_to_expected_timestamps(
+                            tensor,
+                            actual_timestamps,
+                            sample_expected_ts,
+                            max_timesteps,
+                            device,
+                        )
+                    else:
+                        # No expected timestamps - pad at end (original behavior)
+                        c, t, h, w = tensor.shape
+                        if t < max_timesteps:
+                            pad = torch.zeros(
+                                (c, max_timesteps - t, h, w),
+                                dtype=tensor.dtype,
+                                device=device,
+                            )
+                            aligned = torch.cat([tensor, pad], dim=1)
+                        else:
+                            aligned = tensor
+                        valid_mask = [True] * t + [False] * (max_timesteps - t)
+
+                    aligned_tensors.append(aligned)
+                    valid_masks_per_sample.append(valid_mask)
+                else:
+                    # Modality completely missing for this sample
+                    aligned = torch.zeros(
+                        (num_channels, max_timesteps, spatial_h, spatial_w),
+                        dtype=torch.float32,
                         device=device,
                     )
-                    t = torch.cat([t, pad], dim=1)
-                padded.append(t)
+                    aligned_tensors.append(aligned)
+                    # All timesteps are missing
+                    valid_masks_per_sample.append([False] * max_timesteps)
 
-            cur = torch.stack(padded, dim=0)
+            # Stack tensors and rearrange
+            cur = torch.stack(aligned_tensors, dim=0)  # B, C, T, H, W
             cur = rearrange(cur, "b c t h w -> b h w t c")
             kwargs[modality] = cur
 
-            # Create mask: ONLINE_ENCODER for valid, MISSING for padded timesteps
+            # Create mask based on valid_masks_per_sample
             b, h, w = cur.shape[0], cur.shape[1], cur.shape[2]
             mask = torch.full(
                 (b, h, w, max_timesteps, num_band_sets),
-                fill_value=MaskValue.ONLINE_ENCODER.value,
+                fill_value=MaskValue.MISSING.value,
                 dtype=torch.int32,
                 device=device,
             )
-            for sample_idx, orig_t in enumerate(original_timesteps):
-                if orig_t < max_timesteps:
-                    mask[sample_idx, :, :, orig_t:, :] = MaskValue.MISSING.value
+            for sample_idx, valid_mask in enumerate(valid_masks_per_sample):
+                for t_idx, is_valid in enumerate(valid_mask):
+                    if is_valid:
+                        mask[sample_idx, :, :, t_idx, :] = (
+                            MaskValue.ONLINE_ENCODER.value
+                        )
             kwargs[f"{modality}_mask"] = mask
 
         if self.use_legacy_timestamps:
             # Note that only months (0 to 11) are used in OlmoEarth position encoding.
             timestamps = torch.zeros(
-                (len(context.inputs), max_timesteps, 3),
+                (batch_size, max_timesteps, 3),
                 dtype=torch.int32,
                 device=device,
             )

@@ -162,6 +162,7 @@ import tqdm
 from rslearn.dataset import Window
 from rslearn.utils.feature import Feature
 from rslearn.utils.raster_format import get_raster_projection_and_bounds, GeotiffRasterFormat
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.vector_format import GeojsonVectorFormat
 
 # This is the path to the output rslearn dataset.
@@ -206,7 +207,7 @@ for tif_fname, category in tqdm.tqdm(examples):
     raster_dir = window.get_raster_dir("sentinel2", ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B09", "B10", "B11", "B12", "B8A"])
     # The projection and bounds here are used to set the georeference metadata in the
     # GeoTIFF.
-    GeotiffRasterFormat().encode_raster(raster_dir, projection, bounds, array)
+    GeotiffRasterFormat().encode_raster(raster_dir, projection, bounds, RasterArray(chw_array=array))
     window.mark_layer_completed("sentinel2")
 
     # We manually populate the label layer with a single GeoJSON feature corresponding
@@ -322,13 +323,6 @@ management_dir: ${MANAGEMENT_DIR}
 ```
 
 Save this as `model.yaml`.
-
-Due to license incompatibility, the `olmoearth_pretrain` package required for this
-example is not included as a dependency and must be installed explicitly:
-
-```bash
-pip install olmoearth_pretrain
-```
 
 Now execute training with `model fit`:
 

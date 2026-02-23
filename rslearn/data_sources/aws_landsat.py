@@ -415,4 +415,9 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
                         fname,
                         ExtraArgs={"RequestPayer": "requester"},
                     )
-                    tile_store.write_raster_file(item.name, band_names, UPath(fname))
+                    tile_store.write_raster_file(
+                        item.name,
+                        band_names,
+                        UPath(fname),
+                        time_range=item.geometry.time_range,
+                    )

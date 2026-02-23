@@ -37,6 +37,7 @@ from rslearn.utils.geometry import (
     split_shape_at_antimeridian,
 )
 from rslearn.utils.grid_index import GridIndex
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 SENTINEL2_TILE_URL = "https://sentiwiki.copernicus.eu/__attachments/1692737/S2A_OPER_GIP_TILPAR_MPC__20151209T095117_V20150622T000000_21000101T000000_B00.zip"
@@ -602,7 +603,10 @@ class Copernicus(DataSource):
                     # Now we can ingest it.
                     logger.debug(f"Ingesting the raster for bands {band_names}")
                     tile_store.write_raster_file(
-                        item.name, band_names, UPath(local_raster_fname)
+                        item.name,
+                        band_names,
+                        UPath(local_raster_fname),
+                        time_range=item.geometry.time_range,
                     )
 
     def ingest(
@@ -834,7 +838,10 @@ class Sentinel2(Copernicus):
                         # No callback -- we can just ingest the file directly.
                         # Or it is TCI product which is not impacted by the harmonization issue.
                         tile_store.write_raster_file(
-                            item.name, band_names, UPath(local_raster_fname)
+                            item.name,
+                            band_names,
+                            UPath(local_raster_fname),
+                            time_range=item.geometry.time_range,
                         )
 
                     else:
@@ -845,7 +852,14 @@ class Sentinel2(Copernicus):
                             projection, bounds = get_raster_projection_and_bounds(src)
                         array = harmonize_callback(array)
                         tile_store.write_raster(
-                            item.name, band_names, projection, bounds, array
+                            item.name,
+                            band_names,
+                            projection,
+                            bounds,
+                            RasterArray(
+                                chw_array=array,
+                                time_range=item.geometry.time_range,
+                            ),
                         )
 
 

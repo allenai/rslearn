@@ -220,7 +220,10 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
                                 f.write(chunk)
 
                     tile_store.write_raster_file(
-                        item.name, band_names, UPath(local_fname)
+                        item.name,
+                        band_names,
+                        UPath(local_fname),
+                        time_range=item.geometry.time_range,
                     )
 
     # --- STAC loading helpers ---

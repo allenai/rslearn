@@ -1,20 +1,29 @@
 """Unit tests for rslearn.train.dataset."""
 
+import json
+import random
 import warnings
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-import shapely
 import torch
 import torch.utils.data
 from upath import UPath
 
+from rslearn.config import (
+    BandSetConfig,
+    DataSourceConfig,
+    DType,
+    LayerConfig,
+    LayerType,
+    QueryConfig,
+    SpaceMode,
+)
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources.data_source import Item
 from rslearn.dataset import Dataset, Window
-from rslearn.dataset.window import WindowLayerData
 from rslearn.train.dataset import (
     DataInput,
     IndexMode,
@@ -22,12 +31,14 @@ from rslearn.train.dataset import (
     RetryDataset,
     SplitConfig,
     check_window,
-    read_layer_time_range,
+    compute_expected_timestamps,
+    read_data_input,
 )
 from rslearn.train.dataset_index import INDEX_DIR_NAME
+from rslearn.train.model_context import RasterImage
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.transforms.concatenate import Concatenate
-from rslearn.utils.geometry import STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
@@ -197,16 +208,16 @@ def test_load_two_layers(
     assert torch.all(inputs["image"].image[:, 1] == 2)
 
 
-def test_read_layer_time_range(tmp_path: UPath) -> None:
-    """Test that time_range is correctly read from layer_data items.
+def test_read_data_input_timestamps(tmp_path: UPath) -> None:
+    """Test that read_data_input reads timestamps from RasterArrays and stacks them.
 
-    This test verifies that when items in layer_data have time_range set,
-    the read_layer_time_range function correctly returns the min/max time
-    range from all items.
+    Creates two item groups for the same layer, each with a distinct timestamp.
+    With load_all_layers + load_all_item_groups, both should be read and the
+    timestamps should be concatenated in the returned RasterImage.
     """
     ds_path = UPath(tmp_path)
+    ds_path.mkdir(parents=True, exist_ok=True)
 
-    # Create dataset config with a raster layer
     dataset_config = {
         "layers": {
             "image": {
@@ -220,66 +231,66 @@ def test_read_layer_time_range(tmp_path: UPath) -> None:
             },
         },
     }
-    ds_path.mkdir(parents=True, exist_ok=True)
-    import json
-
     with (ds_path / "config.json").open("w") as f:
         json.dump(dataset_config, f)
 
     dataset = Dataset(ds_path)
 
-    # Create a window
     window = Window(
         storage=dataset.storage,
         name="test_window",
         group="default",
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
-        time_range=(datetime(2024, 1, 1), datetime(2024, 1, 31)),
+        time_range=None,
     )
     window.save()
 
-    # Write raster data
-    image = np.ones((1, 4, 4), dtype=np.uint8)
-    raster_dir = window.get_raster_dir("image", ["band"])
+    ts1 = (datetime(2024, 1, 5), datetime(2024, 1, 10))
+    ts2 = (datetime(2024, 1, 15), datetime(2024, 1, 20))
+
+    image1 = np.ones((1, 4, 4), dtype=np.uint8)
+    raster_dir1 = window.get_raster_dir("image", ["band"], group_idx=0)
     GeotiffRasterFormat().encode_raster(
-        raster_dir, window.projection, window.bounds, image
-    )
-    window.mark_layer_completed("image")
-
-    # Create layer data with items that have time_range set
-    item1_time_range = (datetime(2024, 1, 5), datetime(2024, 1, 10))
-    item2_time_range = (datetime(2024, 1, 15), datetime(2024, 1, 20))
-
-    item1 = Item(
-        "item1",
-        STGeometry(
-            WGS84_PROJECTION,
-            shapely.box(*window.bounds),
-            item1_time_range,
-        ),
-    )
-    item2 = Item(
-        "item2",
-        STGeometry(
-            WGS84_PROJECTION,
-            shapely.box(*window.bounds),
-            item2_time_range,
-        ),
+        raster_dir1,
+        window.projection,
+        window.bounds,
+        RasterArray(chw_array=image1, time_range=ts1),
     )
 
-    layer_data = WindowLayerData(
-        "image",
-        serialized_item_groups=[[item1.serialize(), item2.serialize()]],
+    image2 = 2 * np.ones((1, 4, 4), dtype=np.uint8)
+    raster_dir2 = window.get_raster_dir("image", ["band"], group_idx=1)
+    GeotiffRasterFormat().encode_raster(
+        raster_dir2,
+        window.projection,
+        window.bounds,
+        RasterArray(chw_array=image2, time_range=ts2),
     )
 
-    # Call the function that reads time ranges from layer data
-    time_range = read_layer_time_range(layer_data, group_idx=0)
+    window.mark_layer_completed("image", group_idx=0)
+    window.mark_layer_completed("image", group_idx=1)
 
-    # Verify the time_range is correct (min of starts, max of ends)
-    assert time_range is not None
-    assert time_range[0] == datetime(2024, 1, 5)  # min of item1 and item2 start
-    assert time_range[1] == datetime(2024, 1, 20)  # max of item1 and item2 end
+    data_input = DataInput(
+        "raster",
+        ["image"],
+        bands=["band"],
+        load_all_layers=True,
+        load_all_item_groups=True,
+    )
+
+    result = read_data_input(
+        dataset, window, window.bounds, data_input, random.Random(0)
+    )
+
+    assert isinstance(result, RasterImage)
+    assert result.image.shape == (1, 2, 4, 4)
+    # image1 was 1 everywhere.
+    assert torch.all(result.image[:, 0] == 1)
+    # image2 was 2 everywhere, it is second item group so should get stacked to the
+    # second timestep.
+    assert torch.all(result.image[:, 1] == 2)
+    # RasterArray should have the stacked timestamps as well.
+    assert result.timestamps == [ts1, ts2]
 
 
 def test_model_dataset_index_uses_cache(
@@ -611,6 +622,279 @@ class TestSplitConfig:
 
         with pytest.raises(ValueError, match="overlap_pixels must be non-negative"):
             SplitConfig.merge_and_validate([config])
+
+
+def test_compute_expected_timestamps_per_period_mosaic() -> None:
+    """Test compute_expected_timestamps for PER_PERIOD_MOSAIC mode.
+
+    Should compute expected timestamps based on window time_range, period_duration,
+    and max_matches from the query config.
+    """
+    # Create a mock window with a 4-month time range
+    mock_storage = MagicMock()
+    window = Window(
+        storage=mock_storage,
+        group="test",
+        name="test_window",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 100, 100),
+        time_range=(
+            datetime(2025, 1, 1),
+            datetime(2025, 5, 1),
+        ),  # Jan 1 - May 1 (4 months)
+    )
+
+    # Create layer config with PER_PERIOD_MOSAIC mode, 30-day periods, max 4 matches
+    layer_config = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT8, bands=["band"])],
+        data_source=DataSourceConfig(
+            class_path="rslearn.data_sources.sentinel2.Sentinel2",
+            query_config=QueryConfig(
+                space_mode=SpaceMode.PER_PERIOD_MOSAIC,
+                period_duration=timedelta(days=30),
+                max_matches=4,
+            ),
+        ),
+    )
+
+    expected_ts = compute_expected_timestamps(window, layer_config)
+
+    assert expected_ts is not None
+    assert len(expected_ts) == 4  # 4 periods
+
+    # Timestamps should be in chronological order (oldest first)
+    for i in range(len(expected_ts) - 1):
+        assert expected_ts[i][0] < expected_ts[i + 1][0]
+    assert expected_ts[-1][1] == datetime(2025, 5, 1)
+
+    # Each period should be 30 days
+    for start, end in expected_ts:
+        assert (end - start).days == 30
+
+
+def test_compute_expected_timestamps_with_time_offset() -> None:
+    """Test compute_expected_timestamps applies time_offset correctly."""
+    mock_storage = MagicMock()
+    window = Window(
+        storage=mock_storage,
+        group="test",
+        name="test_window",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 100, 100),
+        time_range=(datetime(2025, 1, 1), datetime(2025, 4, 1)),
+    )
+
+    # Layer config with a 30-day time offset
+    layer_config = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT8, bands=["band"])],
+        data_source=DataSourceConfig(
+            class_path="rslearn.data_sources.sentinel2.Sentinel2",
+            query_config=QueryConfig(
+                space_mode=SpaceMode.PER_PERIOD_MOSAIC,
+                period_duration=timedelta(days=30),
+                max_matches=3,
+            ),
+            time_offset=timedelta(days=30),  # Shift 30 days into future
+        ),
+    )
+
+    expected_ts = compute_expected_timestamps(window, layer_config)
+
+    assert expected_ts is not None
+    # First timestamp should be after Jan 1 + 30 days offset
+    assert expected_ts[0][0] >= datetime(2025, 1, 31)
+    assert expected_ts[0][0] <= datetime(2025, 2, 1)
+
+
+def test_compute_expected_timestamps_with_duration_override() -> None:
+    """Test compute_expected_timestamps applies duration override correctly."""
+    mock_storage = MagicMock()
+    window = Window(
+        storage=mock_storage,
+        group="test",
+        name="test_window",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 100, 100),
+        time_range=(datetime(2025, 1, 1), datetime(2025, 12, 31)),  # Full year
+    )
+
+    # Override duration to only 60 days from start
+    layer_config = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT8, bands=["band"])],
+        data_source=DataSourceConfig(
+            class_path="rslearn.data_sources.sentinel2.Sentinel2",
+            query_config=QueryConfig(
+                space_mode=SpaceMode.PER_PERIOD_MOSAIC,
+                period_duration=timedelta(days=30),
+                max_matches=12,
+            ),
+            duration=timedelta(days=60),  # Only use 60 days
+        ),
+    )
+
+    expected_ts = compute_expected_timestamps(window, layer_config)
+
+    assert expected_ts is not None
+    # With 60-day duration and 30-day periods, should only get 2 periods
+    assert len(expected_ts) == 2
+
+
+def test_compute_expected_timestamps_no_time_range() -> None:
+    """Test compute_expected_timestamps returns None when window has no time_range."""
+    mock_storage = MagicMock()
+    window = Window(
+        storage=mock_storage,
+        group="test",
+        name="test_window",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 100, 100),
+        time_range=None,  # No time range
+    )
+
+    layer_config = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT8, bands=["band"])],
+        data_source=DataSourceConfig(
+            class_path="rslearn.data_sources.sentinel2.Sentinel2",
+            query_config=QueryConfig(
+                space_mode=SpaceMode.PER_PERIOD_MOSAIC,
+                period_duration=timedelta(days=30),
+                max_matches=4,
+            ),
+        ),
+    )
+
+    expected_ts = compute_expected_timestamps(window, layer_config)
+    assert expected_ts is None
+
+
+def test_compute_expected_timestamps_no_data_source() -> None:
+    """Test compute_expected_timestamps returns None when layer has no data_source."""
+    mock_storage = MagicMock()
+    window = Window(
+        storage=mock_storage,
+        group="test",
+        name="test_window",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 100, 100),
+        time_range=(datetime(2025, 1, 1), datetime(2025, 4, 1)),
+    )
+
+    # Layer config without data_source
+    layer_config = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT8, bands=["band"])],
+        data_source=None,
+    )
+
+    expected_ts = compute_expected_timestamps(window, layer_config)
+    assert expected_ts is None
+
+
+def test_compute_expected_timestamps_single_timestep() -> None:
+    """Test compute_expected_timestamps for single-timestep (max_matches=1) mode."""
+    mock_storage = MagicMock()
+    window = Window(
+        storage=mock_storage,
+        group="test",
+        name="test_window",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 100, 100),
+        time_range=(datetime(2025, 1, 1), datetime(2025, 2, 1)),
+    )
+
+    # MOSAIC mode with max_matches=1 (default)
+    layer_config = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT8, bands=["band"])],
+        data_source=DataSourceConfig(
+            class_path="rslearn.data_sources.sentinel2.Sentinel2",
+            query_config=QueryConfig(
+                space_mode=SpaceMode.MOSAIC,
+                max_matches=1,
+            ),
+        ),
+    )
+
+    expected_ts = compute_expected_timestamps(window, layer_config)
+
+    assert expected_ts is not None
+    assert len(expected_ts) == 1
+    assert expected_ts[0] == (datetime(2025, 1, 1), datetime(2025, 2, 1))
+
+
+def test_compute_expected_timestamps_excess_periods_returns_none() -> None:
+    """Test compute_expected_timestamps returns None when total periods exceed max_matches.
+
+    When the window time range covers more periods than max_matches, the actual
+    periods selected depend on data availability (excess periods serve as fallback).
+    In this case, expected timestamps cannot be reliably predicted, so None is returned.
+    """
+    mock_storage = MagicMock()
+    # Window covers 4 months (120 days) with 30-day periods = 4 periods
+    window = Window(
+        storage=mock_storage,
+        group="test",
+        name="test_window",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 100, 100),
+        time_range=(datetime(2025, 1, 1), datetime(2025, 5, 1)),
+    )
+
+    # max_matches=2 but window has 4 periods -> excess periods as fallback
+    layer_config = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT8, bands=["band"])],
+        data_source=DataSourceConfig(
+            class_path="rslearn.data_sources.sentinel2.Sentinel2",
+            query_config=QueryConfig(
+                space_mode=SpaceMode.PER_PERIOD_MOSAIC,
+                period_duration=timedelta(days=30),
+                max_matches=2,
+            ),
+        ),
+    )
+
+    expected_ts = compute_expected_timestamps(window, layer_config)
+    assert expected_ts is None
+
+
+def test_compute_expected_timestamps_exact_periods_returns_timestamps() -> None:
+    """Test compute_expected_timestamps returns timestamps when periods == max_matches.
+
+    When total periods exactly equals max_matches, there are no fallback periods,
+    so expected timestamps can be reliably computed.
+    """
+    mock_storage = MagicMock()
+    # Window covers exactly 2 periods (60 days with 30-day periods)
+    window = Window(
+        storage=mock_storage,
+        group="test",
+        name="test_window",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 100, 100),
+        time_range=(datetime(2025, 1, 1), datetime(2025, 3, 2)),
+    )
+
+    layer_config = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT8, bands=["band"])],
+        data_source=DataSourceConfig(
+            class_path="rslearn.data_sources.sentinel2.Sentinel2",
+            query_config=QueryConfig(
+                space_mode=SpaceMode.PER_PERIOD_MOSAIC,
+                period_duration=timedelta(days=30),
+                max_matches=2,
+            ),
+        ),
+    )
+
+    expected_ts = compute_expected_timestamps(window, layer_config)
+    assert expected_ts is not None
+    assert len(expected_ts) == 2
 
 
 class TestCheckWindow:

@@ -29,6 +29,7 @@ from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 logger = get_logger(__name__)
@@ -376,7 +377,10 @@ class EarthDaily(DataSource, TileStore):
                         asset_key,
                     )
                     tile_store.write_raster_file(
-                        item.name, band_names, UPath(local_fname)
+                        item.name,
+                        band_names,
+                        UPath(local_fname),
+                        time_range=item.geometry.time_range,
                     )
 
                 logger.debug(
@@ -515,7 +519,7 @@ class EarthDaily(DataSource, TileStore):
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Read raster data from the store.
 
         Args:
@@ -553,7 +557,7 @@ class EarthDaily(DataSource, TileStore):
                 height=bounds[3] - bounds[1],
                 resampling=resampling,
             ) as vrt:
-                return vrt.read()
+                return RasterArray(chw_array=vrt.read())
 
     def materialize(
         self,
@@ -707,25 +711,26 @@ class Sentinel2(EarthDaily):
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Read raster data from the store.
 
         Applies per-asset scale/offset metadata when apply_scale_offset=True.
         """
-        raw_data = super().read_raster(
+        raster = super().read_raster(
             layer_name, item_name, bands, projection, bounds, resampling=resampling
         )
         if not self.apply_scale_offset:
-            return raw_data
+            return raster
 
         asset_key = self._get_asset_by_band(bands)
         item = self.get_item_by_name(item_name)
-        return self._apply_scale_offsets(
-            raw_data,
+        result = self._apply_scale_offsets(
+            raster.get_chw_array(),
             scale_offsets=item.asset_scale_offsets.get(asset_key),
             item_name=item_name,
             asset_key=asset_key,
         )
+        return RasterArray(chw_array=result)
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
@@ -851,7 +856,10 @@ class Sentinel2(EarthDaily):
 
                     if not self.apply_scale_offset:
                         tile_store.write_raster_file(
-                            item.name, band_names, UPath(local_fname)
+                            item.name,
+                            band_names,
+                            UPath(local_fname),
+                            time_range=item.geometry.time_range,
                         )
                         continue
 
@@ -866,5 +874,12 @@ class Sentinel2(EarthDaily):
 
                         projection, bounds = get_raster_projection_and_bounds(src)
                     tile_store.write_raster(
-                        item.name, band_names, projection, bounds, array
+                        item.name,
+                        band_names,
+                        projection,
+                        bounds,
+                        RasterArray(
+                            chw_array=array,
+                            time_range=item.geometry.time_range,
+                        ),
                     )

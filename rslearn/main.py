@@ -7,7 +7,7 @@ import os
 import random
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 
@@ -21,13 +21,12 @@ from rslearn.data_sources import Item
 from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.dataset.add_windows import add_windows_from_box, add_windows_from_file
 from rslearn.dataset.handler_summaries import (
-    ErrorOutcome,
     IngestCounts,
     IngestDatasetJobsSummary,
     LayerIngestSummary,
     MaterializeDatasetWindowsSummary,
     PrepareDatasetWindowsSummary,
-    UnknownIngestCounts,
+    summarize_errors,
 )
 from rslearn.dataset.manage import (
     AttemptsCounter,
@@ -49,6 +48,11 @@ ItemType = TypeVar("ItemType", bound="Item")
 
 MULTIPROCESSING_CONTEXT = "forkserver"
 MP_CONTEXT_ENV_VAR = "RSLEARN_MULTIPROCESSING_CONTEXT"
+
+# Maximum number of workers when using the default workers=-1 option.
+# Many data sources have rate limits, so this is a sensible default level of maximum
+# parallelism.
+DEFAULT_MAX_WORKERS = 32
 
 
 def register_handler(category: Any, command: str) -> Callable:
@@ -332,8 +336,11 @@ def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--workers",
         type=int,
-        default=0,
-        help="Number of worker processes (default 0 to use main process only)",
+        default=-1,
+        help=(
+            "Number of worker processes (-1 to use #CPUs capped at "
+            f"{DEFAULT_MAX_WORKERS}, 0 for main process only)"
+        ),
     )
     parser.add_argument(
         "--load-workers",
@@ -366,20 +373,23 @@ def apply_on_windows(
     dataset: Dataset,
     group: str | list[str] | None = None,
     names: list[str] | None = None,
-    workers: int = 0,
+    workers: int = -1,
     load_workers: int | None = None,
     batch_size: int = 1,
     jobs_per_process: int | None = None,
     use_initial_job: bool = True,
-) -> None:
+) -> Generator[Any, None, None]:
     """A helper to apply a function on windows in a dataset.
+
+    Yields the return value of f for each batch.
 
     Args:
         f: the function to apply on lists of windows.
         dataset: the dataset.
         group: optional, only apply on windows in this group.
         names: optional, only apply on windows with these names.
-        workers: the number of parallel workers to use, default 0 (main thread only).
+        workers: the number of parallel workers to use, default -1 (use number of
+            workers equal to number of available CPUs, capped at DEFAULT_MAX_WORKERS).
         load_workers: optional different number of workers to use for loading the
             windows. If set, workers controls the number of workers to process the
             jobs, while load_workers controls the number of workers to use for reading
@@ -394,6 +404,9 @@ def apply_on_windows(
             like building indexes that should not be done in parallel. Set this false
             to disable using the initial job.
     """
+    if workers == -1:
+        workers = min(os.cpu_count() or 1, DEFAULT_MAX_WORKERS)
+
     if hasattr(f, "set_dataset"):
         f.set_dataset(dataset)
 
@@ -425,7 +438,7 @@ def apply_on_windows(
 
     if use_initial_job and len(jobs) > 0:
         # Apply directly on first window to get any initialization out of the way.
-        f([jobs[0]])
+        yield f([jobs[0]])
         jobs = jobs[1:]
 
     batches = []
@@ -434,22 +447,21 @@ def apply_on_windows(
 
     num_batches = len(batches)
     if workers == 0:
-        # Process batches sequentially but with same error handling as parallel
         for batch in tqdm.tqdm(batches, total=num_batches):
-            f(batch)
+            yield f(batch)
     else:
-        # Process batches in parallel
         p = multiprocessing.Pool(processes=workers, maxtasksperchild=jobs_per_process)
         outputs = p.imap_unordered(f, batches)
-        for _ in tqdm.tqdm(outputs, total=num_batches):
-            pass
+        yield from tqdm.tqdm(outputs, total=num_batches)
         p.close()
 
 
-def apply_on_windows_args(f: Callable[..., Any], args: argparse.Namespace) -> None:
+def apply_on_windows_args(
+    f: Callable[..., Any], args: argparse.Namespace
+) -> Generator[Any, None, None]:
     """Call apply_on_windows with arguments passed via command-line interface."""
     dataset = Dataset(UPath(args.root), disabled_layers=args.disabled_layers)
-    apply_on_windows(
+    yield from apply_on_windows(
         f=f,
         dataset=dataset,
         group=args.group,
@@ -468,6 +480,7 @@ class PrepareHandler:
     def __init__(
         self,
         force: bool,
+        ignore_errors: bool = False,
         retry_max_attempts: int = 0,
         retry_backoff: timedelta = timedelta(minutes=1),
     ) -> None:
@@ -475,11 +488,15 @@ class PrepareHandler:
 
         Args:
             force: force prepare
+            ignore_errors: if True, catch errors per-layer and continue. Note that this
+                defaults to False here in case of external use, but True in the CLI
+                argument.
             retry_max_attempts: set greater than zero to retry for this many attempts in
                 case of error.
             retry_backoff: how long to wait before retrying (see retry).
         """
         self.force = force
+        self.ignore_errors = ignore_errors
         self.dataset: Dataset | None = None
         self.retry_max_attempts = retry_max_attempts
         self.retry_backoff = retry_backoff
@@ -501,6 +518,7 @@ class PrepareHandler:
             self.dataset,
             windows,
             self.force,
+            ignore_errors=self.ignore_errors,
             retry_max_attempts=self.retry_max_attempts,
             retry_backoff=self.retry_backoff,
         )
@@ -527,6 +545,13 @@ def dataset_prepare() -> None:
         help="List of layers to disable e.g 'layer1,layer2'",
     )
     parser.add_argument(
+        "--ignore-errors",
+        type=bool,
+        default=True,
+        help="Ignore errors in individual jobs",
+        action=argparse.BooleanOptionalAction,
+    )
+    parser.add_argument(
         "--retry-max-attempts",
         type=int,
         default=0,
@@ -543,10 +568,44 @@ def dataset_prepare() -> None:
 
     fn = PrepareHandler(
         args.force,
+        ignore_errors=args.ignore_errors,
         retry_max_attempts=args.retry_max_attempts,
         retry_backoff=timedelta(seconds=args.retry_backoff_seconds),
     )
-    apply_on_windows_args(fn, args)
+
+    combined: PrepareDatasetWindowsSummary | None = None
+    for summary in apply_on_windows_args(fn, args):
+        if combined is None:
+            combined = summary
+        else:
+            combined = combined.merge(summary)
+
+    if combined is not None:
+        logger.info("=== Prepare Summary ===")
+        logger.info(
+            f"Total windows requested: {combined.total_windows_requested}, "
+            f"duration: {combined.duration_seconds:.1f}s"
+        )
+        has_errors = False
+        for ls in combined.layer_summaries.values():
+            msg = (
+                f"  Layer {ls.layer_name}: "
+                f"prepared={ls.windows_prepared}, "
+                f"skipped={ls.windows_skipped}, "
+                f"rejected={ls.windows_rejected}, "
+                f"failed={ls.windows_failed}"
+            )
+            logger.info(msg)
+            for err_msg, count in summarize_errors(ls.error_messages):
+                logger.info(f"    Error (x{count}): {err_msg}")
+            if ls.error_messages:
+                has_errors = True
+        if has_errors:
+            logger.info(
+                "Some windows failed. Consider enabling retries with: "
+                "--retry-max-attempts 5 --retry-backoff-seconds 5"
+            )
+            logger.info("Or use --no-ignore-errors to quit after the first error.")
 
 
 def _load_window_layer_datas(
@@ -593,7 +652,7 @@ class IngestHandler:
             summary of the ingest jobs operation fit for telemetry purposes.
         """
         start_time = time.monotonic()
-        layer_summaries: list[LayerIngestSummary] = []
+        layer_summaries: dict[str, LayerIngestSummary] = {}
 
         logger.info(f"Running ingest for {len(jobs)} jobs")
         import gc
@@ -619,7 +678,13 @@ class IngestHandler:
             data_source = layer_cfg.instantiate_data_source(self.dataset.path)
 
             attempts_counter = AttemptsCounter()
-            ingest_counts: IngestCounts | UnknownIngestCounts
+            ingest_counts = IngestCounts(
+                items=len(items_and_geometries),
+                geometries=sum(
+                    len(geometries) for _, geometries in items_and_geometries
+                ),
+            )
+            error_messages: list[str] = []
             try:
                 retry(
                     lambda: data_source.ingest(
@@ -633,35 +698,23 @@ class IngestHandler:
                     retry_backoff=self.retry_backoff,
                     attempts_counter=attempts_counter,
                 )
-                ingest_counts = IngestCounts(
-                    items_ingested=len(items_and_geometries),
-                    geometries_ingested=sum(
-                        len(geometries) for _, geometries in items_and_geometries
-                    ),
-                )
             except Exception as e:
                 if not self.ignore_errors:
                     raise
 
-                ingest_counts = UnknownIngestCounts(
-                    items_attempted=len(items_and_geometries),
-                    geometries_attempted=sum(
-                        len(geometries) for _, geometries in items_and_geometries
-                    ),
+                logger.exception(
+                    f"Error ingesting {len(items_and_geometries)} items "
+                    f"in layer {layer_name}"
                 )
-                logger.error(
-                    "warning: got error while ingesting "
-                    + f"{len(items_and_geometries)} items: {e}"
-                )
+                error_messages.append(str(e))
 
-            layer_summaries.append(
-                LayerIngestSummary(
-                    layer_name=layer_name,
-                    data_source_name=getattr(layer_cfg.data_source, "name", "N/A"),
-                    duration_seconds=time.monotonic() - start_time,
-                    ingest_counts=ingest_counts,
-                    ingest_attempts=attempts_counter.value,
-                )
+            layer_summaries[layer_name] = LayerIngestSummary(
+                layer_name=layer_name,
+                data_source_name=getattr(layer_cfg.data_source, "name", "N/A"),
+                duration_seconds=time.monotonic() - start_time,
+                ingest_counts=ingest_counts,
+                ingest_attempts=attempts_counter.value,
+                error_messages=error_messages,
             )
 
         gc.collect()
@@ -752,7 +805,7 @@ def dataset_ingest() -> None:
     parser.add_argument(
         "--ignore-errors",
         type=bool,
-        default=False,
+        default=True,
         help="Ignore ingestion errors in individual jobs",
         action=argparse.BooleanOptionalAction,
     )
@@ -776,7 +829,39 @@ def dataset_ingest() -> None:
         retry_max_attempts=args.retry_max_attempts,
         retry_backoff=timedelta(seconds=args.retry_backoff_seconds),
     )
-    apply_on_windows_args(fn, args)
+
+    combined: IngestDatasetJobsSummary | None = None
+    for summary in apply_on_windows_args(fn, args):
+        if combined is None:
+            combined = summary
+        else:
+            combined = combined.merge(summary)
+
+    if combined is not None:
+        logger.info("=== Ingest Summary ===")
+        logger.info(
+            f"Total jobs: {combined.num_jobs}, "
+            f"duration: {combined.duration_seconds:.1f}s"
+        )
+        has_errors = False
+        for ls in combined.layer_summaries.values():
+            failed = "FAILED" if ls.error_messages else "ok"
+            msg = (
+                f"  Layer {ls.layer_name} [{failed}]: "
+                f"items={ls.ingest_counts.items}, "
+                f"geometries={ls.ingest_counts.geometries}"
+            )
+            logger.info(msg)
+            for err_msg, count in summarize_errors(ls.error_messages):
+                logger.info(f"    Error (x{count}): {err_msg}")
+            if ls.error_messages:
+                has_errors = True
+        if has_errors:
+            logger.info(
+                "Some ingestions failed. Consider enabling retries with: "
+                "--retry-max-attempts 5 --retry-backoff-seconds 5"
+            )
+            logger.info("Or use --no-ignore-errors to quit after the first error.")
 
 
 class MaterializeHandler:
@@ -802,27 +887,18 @@ class MaterializeHandler:
         """
         self.dataset = dataset
 
-    def __call__(
-        self, windows: list[Window]
-    ) -> MaterializeDatasetWindowsSummary | ErrorOutcome:
+    def __call__(self, windows: list[Window]) -> MaterializeDatasetWindowsSummary:
         """Materializes the windows from apply_on_windows."""
         logger.info(f"Running Materialize with {len(windows)} windows")
-        start_time = time.monotonic()
         if self.dataset is None:
             raise ValueError("dataset not set")
-        try:
-            return materialize_dataset_windows(
-                self.dataset,
-                windows,
-                retry_max_attempts=self.retry_max_attempts,
-                retry_backoff=self.retry_backoff,
-            )
-        except Exception as e:
-            if not self.ignore_errors:
-                logger.error(f"Error materializing windows: {e}")
-                raise
-            logger.warning(f"Ignoring error while materializing windows: {e}")
-            return ErrorOutcome(duration_seconds=time.monotonic() - start_time)
+        return materialize_dataset_windows(
+            self.dataset,
+            windows,
+            ignore_errors=self.ignore_errors,
+            retry_max_attempts=self.retry_max_attempts,
+            retry_backoff=self.retry_backoff,
+        )
 
 
 @register_handler("dataset", "materialize")
@@ -844,7 +920,7 @@ def dataset_materialize() -> None:
     parser.add_argument(
         "--ignore-errors",
         type=bool,
-        default=False,
+        default=True,
         help="Ignore errors in individual jobs",
         action=argparse.BooleanOptionalAction,
     )
@@ -867,7 +943,38 @@ def dataset_materialize() -> None:
         retry_max_attempts=args.retry_max_attempts,
         retry_backoff=timedelta(seconds=args.retry_backoff_seconds),
     )
-    apply_on_windows_args(fn, args)
+
+    combined: MaterializeDatasetWindowsSummary | None = None
+    for summary in apply_on_windows_args(fn, args):
+        if combined is None:
+            combined = summary
+        else:
+            combined = combined.merge(summary)
+
+    if combined is not None:
+        logger.info("=== Materialize Summary ===")
+        logger.info(
+            f"Total windows requested: {combined.total_windows_requested}, "
+            f"duration: {combined.duration_seconds:.1f}s"
+        )
+        has_errors = False
+        for ls in combined.layer_summaries.values():
+            msg = (
+                f"  Layer {ls.layer_name}: "
+                f"materialized={ls.num_windows_materialized}, "
+                f"failed={ls.windows_failed}"
+            )
+            logger.info(msg)
+            for err_msg, count in summarize_errors(ls.error_messages):
+                logger.info(f"    Error (x{count}): {err_msg}")
+            if ls.error_messages:
+                has_errors = True
+        if has_errors:
+            logger.info(
+                "Some windows failed to materialize. Consider enabling retries with: "
+                "--retry-max-attempts 5 --retry-backoff-seconds 5"
+            )
+            logger.info("Or use --no-ignore-errors to quit after the first error.")
 
 
 @register_handler("model", "fit")

@@ -18,6 +18,7 @@ from rslearn.dataset.manage import (
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import Projection, STGeometry
 from rslearn.utils.get_utm_ups_crs import get_utm_ups_projection
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 from rslearn.utils.vector_format import (
     GeojsonCoordinateMode,
@@ -144,10 +145,10 @@ class TestLocalFiles:
         b1 = np.zeros((1, 8, 8), dtype=np.uint8)
         b2 = np.ones((1, 8, 8), dtype=np.uint8)
         GeotiffRasterFormat().encode_raster(
-            src_path, projection, bounds, b1, fname="b1.tif"
+            src_path, projection, bounds, RasterArray(chw_array=b1), fname="b1.tif"
         )
         GeotiffRasterFormat().encode_raster(
-            src_path, projection, bounds, b2, fname="b2.tif"
+            src_path, projection, bounds, RasterArray(chw_array=b2), fname="b2.tif"
         )
 
         # Make an rslearn dataset that uses LocalFiles to ingest the source data.
@@ -202,14 +203,9 @@ class TestLocalFiles:
         materialized_image = GeotiffRasterFormat().decode_raster(
             raster_dir, window.projection, window.bounds
         )
-        assert (
-            materialized_image[0, :, :].min() == 0
-            and materialized_image[0, :, :].max() == 0
-        )
-        assert (
-            materialized_image[1, :, :].min() == 1
-            and materialized_image[1, :, :].max() == 1
-        )
+        arr = materialized_image.get_chw_array()
+        assert arr[0, :, :].min() == 0 and arr[0, :, :].max() == 0
+        assert arr[1, :, :].min() == 1 and arr[1, :, :].max() == 1
 
 
 class TestCoordinateModes:
