@@ -3,13 +3,14 @@
 import json
 import math
 import shutil
+from datetime import datetime
 from typing import Any
 
-import numpy.typing as npt
 import rasterio.transform
 import rasterio.vrt
 import shapely
 from rasterio.enums import Resampling
+from typing_extensions import override
 from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
@@ -24,8 +25,11 @@ from rslearn.utils.fsspec import (
 )
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.get_utm_ups_crs import get_utm_ups_crs
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import (
+    METADATA_FNAME,
     GeotiffRasterFormat,
+    GeotiffRasterMetadata,
     get_bandset_dirname,
 )
 from rslearn.utils.vector_format import (
@@ -81,12 +85,8 @@ class DefaultTileStore(TileStore):
 
         self.path: UPath | None = None
 
+    @override
     def set_dataset_path(self, ds_path: UPath) -> None:
-        """Set the dataset path.
-
-        Args:
-            ds_path: the dataset path.
-        """
         self.path = join_upath(ds_path, self.path_suffix)
 
     def _get_raster_dir(
@@ -138,39 +138,22 @@ class DefaultTileStore(TileStore):
                 continue
             if fname.name == BANDS_FNAME:
                 continue
+            if fname.name == METADATA_FNAME:
+                continue
             if ".tmp." in fname.name:
                 continue
             return fname
         raise ValueError(f"no raster found in {raster_dir}")
 
+    @override
     def is_raster_ready(
         self, layer_name: str, item_name: str, bands: list[str]
     ) -> bool:
-        """Checks if this raster has been written to the store.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item.
-            bands: the list of bands identifying which specific raster to read.
-
-        Returns:
-            whether there is a raster in the store matching the source, item, and
-                bands.
-        """
         raster_dir = self._get_raster_dir(layer_name, item_name, bands)
         return (raster_dir / COMPLETED_FNAME).exists()
 
+    @override
     def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
-        """Get the sets of bands that have been stored for the specified item.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item.
-
-        Returns:
-            a list of lists of bands that are in the tile store (with one raster
-                stored corresponding to each inner list).
-        """
         assert isinstance(self.path, UPath)
         item_dir = self.path / layer_name / item_name
         if not item_dir.exists():
@@ -194,21 +177,10 @@ class DefaultTileStore(TileStore):
 
         return bands
 
+    @override
     def get_raster_bounds(
         self, layer_name: str, item_name: str, bands: list[str], projection: Projection
     ) -> PixelBounds:
-        """Get the bounds of the raster in the specified projection.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item to check.
-            bands: the list of bands identifying which specific raster to read. These
-                bands must match the bands of a stored raster.
-            projection: the projection to get the raster's bounds in.
-
-        Returns:
-            the bounds of the raster in the projection.
-        """
         raster_fname = self._get_raster_fname(layer_name, item_name, bands)
 
         with open_rasterio_upath_reader(raster_fname) as src:
@@ -226,6 +198,7 @@ class DefaultTileStore(TileStore):
                     math.ceil(max(bounds[1], bounds[3])),
                 )
 
+    @override
     def read_raster(
         self,
         layer_name: str,
@@ -234,21 +207,7 @@ class DefaultTileStore(TileStore):
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
-        """Read raster data from the store.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item to read.
-            bands: the list of bands identifying which specific raster to read. These
-                bands must match the bands of a stored raster.
-            projection: the projection to read in.
-            bounds: the bounds to read.
-            resampling: resampling method to use in case resampling is needed.
-
-        Returns:
-            the raster data
-        """
+    ) -> RasterArray:
         raster_fname = self._get_raster_fname(layer_name, item_name, bands)
         return GeotiffRasterFormat().decode_raster(
             path=raster_fname.parent,
@@ -258,6 +217,7 @@ class DefaultTileStore(TileStore):
             resampling=resampling,
         )
 
+    @override
     def write_raster(
         self,
         layer_name: str,
@@ -265,34 +225,22 @@ class DefaultTileStore(TileStore):
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
-        array: npt.NDArray[Any],
+        raster: RasterArray,
     ) -> None:
-        """Write raster data to the store.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item to write.
-            bands: the list of bands in the array.
-            projection: the projection of the array.
-            bounds: the bounds of the array.
-            array: the raster data.
-        """
         raster_dir = self._get_raster_dir(layer_name, item_name, bands, write=True)
         raster_format = GeotiffRasterFormat(geotiff_options=self.geotiff_options)
-        raster_format.encode_raster(raster_dir, projection, bounds, array)
+        raster_format.encode_raster(raster_dir, projection, bounds, raster)
         (raster_dir / COMPLETED_FNAME).touch()
 
+    @override
     def write_raster_file(
-        self, layer_name: str, item_name: str, bands: list[str], fname: UPath
+        self,
+        layer_name: str,
+        item_name: str,
+        bands: list[str],
+        fname: UPath,
+        time_range: tuple[datetime, datetime] | None = None,
     ) -> None:
-        """Write raster data to the store.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item to write.
-            bands: the list of bands in the array.
-            fname: the raster file, which must be readable by rasterio.
-        """
         raster_dir = self._get_raster_dir(layer_name, item_name, bands, write=True)
         raster_dir.mkdir(parents=True, exist_ok=True)
 
@@ -355,25 +303,31 @@ class DefaultTileStore(TileStore):
                 with open_atomic(dst_fname, "wb") as dst:
                     shutil.copyfileobj(src, dst)
 
+        if time_range is not None:
+            # Add GeotiffRasterFormat metadata file so that GeotiffRasterFormat will
+            # see it upon read and use it to obtain the time range information for the
+            # raster.
+            GeotiffRasterFormat.encode_metadata(
+                raster_dir,
+                GeotiffRasterMetadata(
+                    num_channels=len(bands),
+                    num_timesteps=1,
+                    timestamps=[(time_range[0], time_range[1])],
+                ),
+            )
+
         (raster_dir / COMPLETED_FNAME).touch()
 
     def _get_vector_dir(self, layer_name: str, item_name: str) -> UPath:
         assert self.path is not None
         return self.path / layer_name / item_name
 
+    @override
     def is_vector_ready(self, layer_name: str, item_name: str) -> bool:
-        """Checks if this vector item has been written to the store.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item.
-
-        Returns:
-            whether the vector data from the item has been stored.
-        """
         vector_dir = self._get_vector_dir(layer_name, item_name)
         return (vector_dir / COMPLETED_FNAME).exists()
 
+    @override
     def read_vector(
         self,
         layer_name: str,
@@ -381,30 +335,13 @@ class DefaultTileStore(TileStore):
         projection: Projection,
         bounds: PixelBounds,
     ) -> list[Feature]:
-        """Read vector data from the store.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item to read.
-            projection: the projection to read in.
-            bounds: the bounds within which to read.
-
-        Returns:
-            the vector data
-        """
         vector_dir = self._get_vector_dir(layer_name, item_name)
         return self.vector_format.decode_vector(vector_dir, projection, bounds)
 
+    @override
     def write_vector(
         self, layer_name: str, item_name: str, features: list[Feature]
     ) -> None:
-        """Write vector data to the store.
-
-        Args:
-            layer_name: the layer name or alias.
-            item_name: the item to write.
-            features: the vector data.
-        """
         vector_dir = self._get_vector_dir(layer_name, item_name)
         vector_dir.mkdir(parents=True, exist_ok=True)
         self.vector_format.encode_vector(vector_dir, features)

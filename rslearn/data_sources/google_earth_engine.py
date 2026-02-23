@@ -29,6 +29,7 @@ from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import (
     Resampling,
     get_raster_projection_and_bounds_from_transform,
@@ -406,13 +407,23 @@ class GEE(DataSource, TileStore):
                     )
                     blobs[0].download_to_filename(local_fname)
                     tile_store.write_raster_file(
-                        item.name, self.bands, UPath(local_fname)
+                        item.name,
+                        self.bands,
+                        UPath(local_fname),
+                        time_range=item.geometry.time_range,
                     )
 
                 else:
                     array, projection, bounds = self._merge_rasters(blobs)
                     tile_store.write_raster(
-                        item.name, self.bands, projection, bounds, array
+                        item.name,
+                        self.bands,
+                        projection,
+                        bounds,
+                        RasterArray(
+                            chw_array=array,
+                            time_range=item.geometry.time_range,
+                        ),
                     )
 
             for blob in blobs:
@@ -481,7 +492,7 @@ class GEE(DataSource, TileStore):
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Read raster data from the store.
 
         Args:
@@ -510,9 +521,11 @@ class GEE(DataSource, TileStore):
             logger.info(
                 f"No valid pixels in item {item.name} with projection={projection}, bounds={bounds}, returning empty image"
             )
-            return np.zeros(
-                (len(bands), bounds[3] - bounds[1], bounds[2] - bounds[0]),
-                dtype=np.float32,
+            return RasterArray(
+                chw_array=np.zeros(
+                    (len(bands), bounds[3] - bounds[1], bounds[2] - bounds[0]),
+                    dtype=np.float32,
+                )
             )
 
         wanted_transform = get_transform_from_projection_and_bounds(projection, bounds)
@@ -539,7 +552,7 @@ class GEE(DataSource, TileStore):
                     height=bounds[3] - bounds[1],
                     resampling=resampling,
                 ) as vrt:
-                    return vrt.read()
+                    return RasterArray(chw_array=vrt.read())
 
         else:
             # With multiple outputs, we need to merge them together.
@@ -554,13 +567,13 @@ class GEE(DataSource, TileStore):
 
             # We copy the array if its bounds don't match exactly.
             if src_bounds == bounds:
-                return src_array
+                return RasterArray(chw_array=src_array)
             dst_array = np.zeros(
                 (src_array.shape[0], bounds[3] - bounds[1], bounds[2] - bounds[0]),
                 dtype=src_array.dtype,
             )
             copy_spatial_array(src_array, dst_array, src_bounds[0:2], bounds[0:2])
-            return dst_array
+            return RasterArray(chw_array=dst_array)
 
     def materialize(
         self,

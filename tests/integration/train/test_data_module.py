@@ -12,6 +12,7 @@ from rslearn.dataset import Dataset, Window
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.dataset import DataInput, SplitConfig
 from rslearn.train.tasks.classification import ClassificationTask
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
@@ -96,7 +97,7 @@ class TestPredictLoader:
             window.get_raster_dir(self.LAYER_NAME, self.BANDS),
             window.projection,
             window.bounds,
-            image,
+            RasterArray(chw_array=image),
         )
         window.mark_layer_completed(self.LAYER_NAME)
 
