@@ -55,6 +55,7 @@ for how to setup these data sources.
 - National Agriculture Imagery Program
 - OpenStreetMap
 - Xyz (Slippy) Tiles (e.g., Mapbox tiles)
+- FIRMS active fire detections
 - Planet Labs (PlanetScope, SkySat)
 - ESA WorldCover 2021
 - ISRIC SoilGrids (WCS)

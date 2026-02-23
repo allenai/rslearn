@@ -10,9 +10,11 @@ license = {file = "LICENSE"}
 requires-python = ">=3.11"
 dependencies = [
     "boto3>=1.39",
+    "einops>=0.8.1",
     "fiona>=1.10",
     "flask>=3.0.0",
     "fsspec>=2025.10.0", # this is used both directly and indirectly (via universal_pathlib) in our code
+    "google>=3.0.0",
     "jsonargparse>=4.35.0",
     "lightning>=2.5.1.post0",
     "Pillow>=11.3",
