@@ -94,6 +94,5 @@ def read_raster_layer(
     )
 
     array = image_tensor.numpy().astype(np.float32)  # (C, T, H, W)
-    if array.ndim == 4:
-        array = array[:, 0, :, :]
+    array = array[:, 0, :, :]
     return array
