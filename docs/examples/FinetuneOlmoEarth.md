@@ -141,7 +141,7 @@ model:
             init_args:
               in_channels: [[8, 768]]
               out_channels: 256
-              conv_layers_per_resolution: 2
+              conv_layers_per_resolution: 1
               num_channels: {8: 512, 4: 512, 2: 256, 1: 128}
           # The SegmentationHead computes softmax and cross entropy loss.
           - class_path: rslearn.train.tasks.segmentation.SegmentationHead
@@ -223,6 +223,7 @@ trainer:
       init_args:
         module_selector: ["model", "encoder", 0]
         unfreeze_at_epoch: 10
+        unfreeze_lr_factor: 10
     # The RslearnWriter is used during `model predict` to save the predicted outputs to
     # the rslearn dataset.
     - class_path: rslearn.train.prediction_writer.RslearnWriter
