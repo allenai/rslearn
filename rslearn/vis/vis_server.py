@@ -278,16 +278,18 @@ def create_app(
     template_folder = Path(__file__).parent / "templates"
     app = Flask(__name__, template_folder=str(template_folder))
 
+    current_sampled_windows: list[Window] = []
+
     @app.route("/")
     def index() -> str:
         """Render the main visualization page."""
         if len(windows) > max_samples:
-            sampled_windows = random.sample(windows, max_samples)
+            current_sampled_windows[:] = random.sample(windows, max_samples)
         else:
-            sampled_windows = windows
+            current_sampled_windows[:] = windows
 
         template_data = prepare_visualization_data(
-            sampled_windows,
+            current_sampled_windows,
             dataset,
             layers,
             label_layers,
@@ -302,18 +304,18 @@ def create_app(
         """Generate and serve an image for a specific window/layer.
 
         Args:
-            window_idx: Index of the window in the windows list
+            window_idx: Index of the window in the sampled windows list
             layer_name: Name of the layer to visualize
 
         Returns:
             PNG image response or error response
         """
-        if window_idx < 0 or window_idx >= len(windows):
+        if window_idx < 0 or window_idx >= len(current_sampled_windows):
             return Response(
                 "Window index out of range", status=404, mimetype="text/plain"
             )
 
-        window = windows[window_idx]
+        window = current_sampled_windows[window_idx]
 
         layer_label_colors = None
         if label_colors_dict and layer_name in label_colors_dict:
