@@ -46,7 +46,9 @@ reads of the underlying cloud-optimized GeoTIFFs on S3.
     "metadata_cache_dir": "cache/landsat",
     // Sort by this attribute, either null (default, meaning arbitrary ordering) or
     // "cloud_cover".
-    "sort_by": null
+    "sort_by": null,
+    // Whether to show tqdm progress bars while scanning metadata (default false).
+    "show_progress": false
   }
 }
 ```

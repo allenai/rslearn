@@ -97,6 +97,7 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
         metadata_cache_dir: str,
         sort_by: str | None = None,
         context: DataSourceContext = DataSourceContext(),
+        show_progress: bool = False,
     ) -> None:
         """Initialize a new LandsatOliTirs instance.
 
@@ -105,6 +106,7 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
             context: the data source context.
+            show_progress: whether to show tqdm progress bars.
         """
         # Each band is a separate single-band asset.
         asset_bands = {band: [band] for band in self.BANDS}
@@ -118,6 +120,7 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
             self.metadata_cache_dir = UPath(metadata_cache_dir)
 
         self.sort_by = sort_by
+        self.show_progress = show_progress
 
         self.client = boto3.client("s3")
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
@@ -135,7 +138,10 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
                 images.
         """
         for year, path, row in tqdm.tqdm(
-            needed_year_pathrows, desc="Reading product infos"
+            needed_year_pathrows,
+            desc="Reading product infos",
+            disable=not self.show_progress,
+            leave=False,
         ):
             assert len(path) == 3
             assert len(row) == 3
