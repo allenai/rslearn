@@ -3,28 +3,6 @@
 This document details the built-in data sources in rslearn and how they should be
 configured in the [dataset configuration file](DatasetConfig.md).
 
-We also include source-specific recommendations for settings for the `dataset prepare`,
-`dataset ingest`, and `dataset materialize` commands below. Unless otherwise noted, it
-is generally suggested to use:
-
-```
-rslearn dataset prepare --root ... --workers NUM_WORKERS
-rslearn dataset ingest --root ... --workers NUM_WORKERS --no-use-initial-job
-rslearn dataset materialize --root ... --workers NUM_WORKERS --no-use-initial-job
-```
-
-Replace NUM_WORKERS with a number of workers depending on the available system memory
-(may require trial and error).
-
-When using multiple workers, rslearn by default first processes one task in the main
-thread before parallelizing the remaining tasks across workers, but
-`--no-use-initial-job` disables this functionality. We use the default functionality
-for `dataset prepare` since data sources often perform processing, like downloading and
-caching an index file, that should not be parallellized.
-
-If dataset operations are failing due to errors, you can enable retries by passing e.g.
-`--retry-max-attempts 5 --retry-backoff-seconds 5`.
-
 ### rslearn.data_sources.aws_landsat.LandsatOliTirs
 
 This data source is for Landsat 8/9 OLI-TIRS imagery on AWS. It uses the usgs-landsat
