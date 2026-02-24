@@ -800,7 +800,7 @@ class NumpyRasterFormat(RasterFormat):
         path: UPath,
         projection: Projection,
         bounds: PixelBounds,
-        array: npt.NDArray[Any],
+        raster: RasterArray,
     ) -> None:
         """Encodes raster data as a .npy file.
 
@@ -809,9 +809,11 @@ class NumpyRasterFormat(RasterFormat):
             projection: the projection of the raster data (stored as metadata
                 but not embedded in the file)
             bounds: the bounds of the raster data in the projection
-            array: the raster data (C, H, W)
+            raster: the raster data (CTHW RasterArray)
         """
         path.mkdir(parents=True, exist_ok=True)
+        # Store as CHW (flatten T dimension) for backward compatibility.
+        array = raster.get_chw_array()
         np.save(path / self.fname, array)
 
     def decode_raster(
@@ -820,7 +822,7 @@ class NumpyRasterFormat(RasterFormat):
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Decodes raster data from a .npy file.
 
         If the stored array is 1×1 spatially and the requested bounds are
@@ -836,11 +838,12 @@ class NumpyRasterFormat(RasterFormat):
                 is always used for 1×1 data).
 
         Returns:
-            the raster data as a [C, H, W] array.
+            the raster data as a RasterArray (CTHW).
         """
         data = np.load(path / self.fname)
         out_h = bounds[3] - bounds[1]
         out_w = bounds[2] - bounds[0]
         if data.shape[1] == 1 and data.shape[2] == 1 and (out_h != 1 or out_w != 1):
             data = np.broadcast_to(data, (data.shape[0], out_h, out_w)).copy()
-        return data
+        # Wrap CHW as CTHW with T=1.
+        return RasterArray(chw_array=data)
