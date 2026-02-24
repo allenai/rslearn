@@ -206,6 +206,14 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
 
     # --- DirectMaterializeDataSource implementation ---
 
+    def get_item_by_name(self, name: str) -> SourceItem:
+        """Gets an item by name via the STAC API.
+
+        Explicitly delegates to StacDataSource to resolve the MRO conflict with
+        DirectMaterializeDataSource (which raises NotImplementedError).
+        """
+        return StacDataSource.get_item_by_name(self, name)
+
     def get_asset_url(self, item_name: str, asset_key: str) -> str:
         """Get the signed URL to read the asset for the given item and asset key.
 
