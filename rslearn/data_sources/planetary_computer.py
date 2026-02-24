@@ -512,7 +512,7 @@ class Hls2S30(PlanetaryComputer):
         if band in cls.COMMON_NAME_TO_ASSET_KEY:
             return cls.COMMON_NAME_TO_ASSET_KEY[band]
         raise ValueError(
-            f"unknown HLS2 S30 band '{band}'. Use one of {sorted(cls.ASSET_KEY_TO_COMMON_NAME.keys())} "
+            f"unsupported HLS2 S30 band '{band}'. Use one of {sorted(cls.ASSET_KEY_TO_COMMON_NAME.keys())} "
             f"(asset keys) or {sorted(cls.COMMON_NAME_TO_ASSET_KEY.keys())} (common names)."
         )
 
