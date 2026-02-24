@@ -31,7 +31,7 @@ Quick links:
 Setup
 -----
 
-rslearn requires Python 3.10+ (Python 3.12 is recommended).
+rslearn requires Python 3.11+ (Python 3.12 is recommended).
 
 ```
 git clone https://github.com/allenai/rslearn.git
