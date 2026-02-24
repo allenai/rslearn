@@ -36,6 +36,8 @@ This data source supports direct materialization: if the "ingest" flag is set fa
 then ingestion will be skipped and windows will be directly populated from windowed
 reads of the underlying cloud-optimized GeoTIFFs on S3.
 
+Progress while scanning metadata is logged at DEBUG level.
+
 ```jsonc
 {
   "class_path": "rslearn.data_sources.aws_landsat.LandsatOliTirs",
@@ -46,9 +48,7 @@ reads of the underlying cloud-optimized GeoTIFFs on S3.
     "metadata_cache_dir": "cache/landsat",
     // Sort by this attribute, either null (default, meaning arbitrary ordering) or
     // "cloud_cover".
-    "sort_by": null,
-    // Whether to show tqdm progress bars while scanning metadata (default false).
-    "show_progress": false
+    "sort_by": null
   }
 }
 ```

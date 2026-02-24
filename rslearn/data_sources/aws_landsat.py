@@ -1,5 +1,6 @@
 """Data source for raster data in Registry of Open Data on AWS."""
 
+import logging
 import io
 import json
 import os
@@ -17,7 +18,6 @@ import fiona
 import fiona.transform
 import shapely
 import shapely.geometry
-import tqdm
 from upath import UPath
 
 import rslearn.data_sources.utils
@@ -33,6 +33,8 @@ from rslearn.utils.grid_index import GridIndex
 from .data_source import DataSourceContext, Item, QueryConfig
 
 WRS2_GRID_SIZE = 1.0
+
+logger = logging.getLogger(__name__)
 
 
 class LandsatOliTirsItem(Item):
@@ -97,7 +99,6 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
         metadata_cache_dir: str,
         sort_by: str | None = None,
         context: DataSourceContext = DataSourceContext(),
-        show_progress: bool = False,
     ) -> None:
         """Initialize a new LandsatOliTirs instance.
 
@@ -106,7 +107,6 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
             context: the data source context.
-            show_progress: whether to show tqdm progress bars.
         """
         # Each band is a separate single-band asset.
         asset_bands = {band: [band] for band in self.BANDS}
@@ -120,7 +120,6 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
             self.metadata_cache_dir = UPath(metadata_cache_dir)
 
         self.sort_by = sort_by
-        self.show_progress = show_progress
 
         self.client = boto3.client("s3")
         self.bucket = boto3.resource("s3").Bucket(self.bucket_name)
@@ -137,12 +136,16 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
             needed_year_pathrows: set of (year, path, row) where we need to search for
                 images.
         """
-        for year, path, row in tqdm.tqdm(
-            needed_year_pathrows,
-            desc="Reading product infos",
-            disable=not self.show_progress,
-            leave=False,
-        ):
+        year_pathrows = sorted(needed_year_pathrows)
+        total = len(year_pathrows)
+        for cur_idx, (year, path, row) in enumerate(year_pathrows, start=1):
+            logger.debug(
+                "Reading product infos (%s) year=%s path=%s row=%s",
+                f"{cur_idx}/{total}",
+                year,
+                path,
+                row,
+            )
             assert len(path) == 3
             assert len(row) == 3
             local_fname = self.metadata_cache_dir / f"{year}_{path}_{row}.json"
