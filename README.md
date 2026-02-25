@@ -1,25 +1,28 @@
-Overview
---------
-
-rslearn is a library and tool for developing remote sensing datasets and models.
+rslearn is a tool for developing remote sensing datasets and models.
 
 rslearn helps with:
 
 1. Developing remote sensing datasets, starting with defining spatiotemporal windows
-   (roughly equivalent to training examples) that should be annotated.
+   (3D boxes in height/width/time) that are roughly equivalent to training examples.
 2. Importing raster and vector data from various online or local data sources into the
    dataset.
-3. Annotating new categories of vector data (like points, polygons, and classification
-   labels) using integrated web-based labeling apps.
-4. Fine-tuning remote sensing foundation models on these datasets.
-5. Applying models on new locations and times.
+3. Fine-tuning remote sensing foundation models on these datasets.
+4. Applying models on new locations and times.
 
 
-Quick links:
-- [CoreConcepts](docs/CoreConcepts.md) summarizes key concepts in rslearn, including
-  datasets, windows, layers, and data sources.
-- [Examples](docs/Examples.md) contains more examples, including customizing different
-  stages of rslearn with additional code.
+Quickstart
+----------
+
+If you are new to rslearn, we suggest starting here:
+
+1. First, read [CoreConcepts.md](docs/CoreConcepts.md), which summarizes key concepts in
+   rslearn, including datasets, windows, layers, and data sources.
+2. Second, read [WorkflowOverview.md](docs/WorkflowOverview.md), which provides an overview
+   of the typical workflow in rslearn, from defining windows to training models.
+3. Finally, walk through the example below, or find an example in [Examples.md](docs/Examples.md)
+   that can most readily be adapted for your project.
+
+Other links:
 - [DatasetConfig](docs/DatasetConfig.md) documents the dataset configuration file.
 - [DataSources](docs/DataSources.md) details the built-in data sources in rslearn, from
   which raster and vector data can be imported into rslearn dataset layers.
@@ -39,28 +42,17 @@ cd rslearn
 pip install .[extra]
 ```
 
+For linting and tests:
 
-Supported Data Sources
-----------------------
-
-rslearn supports ingesting raster and vector data from the following data sources. Even
-if you don't plan to train models within rslearn, you can still use it to easily
-download, crop, and re-project data based on spatiotemporal rectangles (windows) that
-you define. See [Examples](docs/Examples.md) and [DatasetConfig](docs/DatasetConfig.md)
-for how to setup these data sources.
-
-- Sentinel-1
-- Sentinel-2 L1C and L2A
-- Landsat 8/9 OLI-TIRS
-- National Agriculture Imagery Program
-- OpenStreetMap
-- Xyz (Slippy) Tiles (e.g., Mapbox tiles)
-- Planet Labs (PlanetScope, SkySat)
-- ESA WorldCover 2021
-- ISRIC SoilGrids (WCS)
-
-rslearn can also be used to easily mosaic, crop, and re-project any sets of local
-raster and vector files you may have.
+```
+pip install .[dev]
+pre-commit install
+pre-commit run --all-files
+pytest tests/unit tests/integration
+# For online data source tests, you can store credentials in .env and they will be
+# loaded by pytest-dotenv.
+pytest tests/online
+```
 
 
 Example Usage
