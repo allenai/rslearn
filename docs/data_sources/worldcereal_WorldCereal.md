@@ -48,11 +48,11 @@ Specify one per layer, with a single-band band set:
 
 Here is an example data source configuration to obtain the maize-main and wintercereals
 classification. We configure the tile store to use the given raster files directly. We
-use SINGLE_COMPOSITE due to an issue with the data source where most bands consist of
-several sparse GeoTIFF files spanning the entire world, and so during prepare it won't
-be able to determine which files match with the window; with SINGLE_COMPOSITE, all of
-those files will be combined into one item group, and during materialization we will
-use the first one that is not NODATA.
+use SINGLE_COMPOSITE due to an issue where the items in the data source are large enough
+to cause re-projection issues, and so rslearn instead treats all of them as global, but
+this means that during prepare it won't be able to determine which files match with the
+window; with SINGLE_COMPOSITE, all of those files will be combined into one item group,
+and during materialization we will use the first one that is not NODATA.
 
 ```json
 {
