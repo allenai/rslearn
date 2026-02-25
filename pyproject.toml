@@ -41,6 +41,10 @@ extra = [
     # https://github.com/fsspec/universal_pathlib?tab=readme-ov-file#adding-universal_pathlib-to-your-project
     # https://github.com/fsspec/filesystem_spec?tab=readme-ov-file#install
     "fsspec[gcs, s3]", # for both direct use via fsspec and indirect use via universal_pathlib, docs suggest enabling specific backends like this
+    # aiobotocore pins botocore very tightly, and boto3 (a core dep) also pins
+    # botocore. Without this hint, pip backtracks through thousands of version
+    # combinations of s3fs/aiobotocore/botocore/boto3 and eventually fails.
+    "aiobotocore>=2.19.0",
     "google-cloud-bigquery>=3.35",
     "google-cloud-storage>=2.18",
     "huggingface_hub>=0.34.4",
