@@ -10,7 +10,7 @@ from rslearn.utils.geometry import WGS84_PROJECTION, STGeometry
 
 
 def test_get_items_single_item_per_geometry() -> None:
-    """FIRMS should return one item per input geometry."""
+    """FIRMS should return one item when geometry falls in one spatial bin."""
     data_source = FIRMS(map_key="dummy")
     geometry = STGeometry(
         WGS84_PROJECTION,
@@ -30,6 +30,75 @@ def test_get_items_single_item_per_geometry() -> None:
     assert isinstance(item, FIRMSItem)
     assert item.source == "VIIRS_SNPP_NRT"
     assert item.geometry.time_range == geometry.time_range
+
+
+def test_get_items_reuses_bins_across_overlapping_windows() -> None:
+    """Overlapping windows should map to the same reusable spatial-bin item."""
+    data_source = FIRMS(map_key="dummy")
+    time_range = (
+        datetime(2026, 1, 1, tzinfo=UTC),
+        datetime(2026, 1, 6, tzinfo=UTC),
+    )
+    geometry1 = STGeometry(
+        WGS84_PROJECTION,
+        shapely.box(-7.74, 33.51, -7.70, 33.54),
+        time_range,
+    )
+    geometry2 = STGeometry(
+        WGS84_PROJECTION,
+        shapely.box(-7.73, 33.52, -7.69, 33.55),
+        time_range,
+    )
+
+    groups = data_source.get_items([geometry1, geometry2], QueryConfig())
+    assert len(groups[0][0]) == 1
+    assert len(groups[1][0]) == 1
+    assert groups[0][0][0].name == groups[1][0][0].name
+
+
+def test_get_items_splits_spatial_bins() -> None:
+    """Geometry crossing bin edges still selects one centroid bin item."""
+    data_source = FIRMS(map_key="dummy")
+    geometry = STGeometry(
+        WGS84_PROJECTION,
+        shapely.box(-7.74, 33.51, -7.49, 33.54),
+        (
+            datetime(2026, 1, 1, tzinfo=UTC),
+            datetime(2026, 1, 2, tzinfo=UTC),
+        ),
+    )
+
+    groups = data_source.get_items([geometry], QueryConfig())
+    assert len(groups) == 1
+    assert len(groups[0]) == 1
+    assert len(groups[0][0]) == 1
+
+
+def test_get_items_handles_antimeridian_crossing() -> None:
+    """Geometry crossing antimeridian should resolve to one bin per side."""
+    data_source = FIRMS(map_key="dummy", spatial_bin_degrees=1.0)
+    geometry = STGeometry(
+        WGS84_PROJECTION,
+        shapely.Polygon(
+            [
+                (179.8, 10.0),
+                (-179.8, 10.0),
+                (-179.8, 10.2),
+                (179.8, 10.2),
+                (179.8, 10.0),
+            ]
+        ),
+        (
+            datetime(2026, 1, 1, tzinfo=UTC),
+            datetime(2026, 1, 2, tzinfo=UTC),
+        ),
+    )
+
+    groups = data_source.get_items([geometry], QueryConfig())
+    assert len(groups[0][0]) == 2
+    item_names = {item.name for item in groups[0][0]}
+    assert any("_c179_r10" in name for name in item_names)
+    assert any("_c-180_r10" in name for name in item_names)
 
 
 def test_get_items_requires_time_range() -> None:

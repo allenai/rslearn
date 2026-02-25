@@ -4397,6 +4397,7 @@ version = "0.0.29"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
+    { name = "einops" },
     { name = "fiona" },
     { name = "flask" },
     { name = "fsspec" },
@@ -4469,6 +4470,7 @@ requires-dist = [
     { name = "cdsapi", marker = "extra == 'extra'", specifier = ">=0.7.6" },
     { name = "earthdaily", extras = ["platform"], marker = "extra == 'extra'", specifier = ">=1.9.0" },
     { name = "earthengine-api", marker = "extra == 'extra'", specifier = ">=1.6.3" },
+    { name = "einops", specifier = ">=0.8.1" },
     { name = "einops", marker = "extra == 'extra'", specifier = ">=0.8" },
     { name = "fiona", specifier = ">=1.10" },
     { name = "flask", specifier = ">=3.0.0" },

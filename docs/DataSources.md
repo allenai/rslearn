@@ -444,6 +444,8 @@ It calls the FIRMS area CSV API and stores fire detections as vector point featu
     "source": "VIIRS_SNPP_NRT",
     // Maximum day range used for each request (clamped to FIRMS API limit 5).
     "max_days_per_request": 5,
+    // Width/height of reusable spatial bins in degrees.
+    "spatial_bin_degrees": 0.25,
     // Timeout for requests.
     "timeout": "30s"
   }
@@ -453,7 +455,8 @@ It calls the FIRMS area CSV API and stores fire detections as vector point featu
 Notes:
 - The layer type should be `"vector"`.
 - Windows must include a `time_range` since FIRMS requests are time-bounded.
-- Each item corresponds to one window bbox and one window time range.
+- Each window maps to reusable spatial bins selected from split geometry components
+  (typically one bin; antimeridian-crossing windows may map to multiple bins).
 
 ### rslearn.data_sources.copernicus.Copernicus
 
