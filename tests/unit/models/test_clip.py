@@ -1,16 +1,15 @@
-import pytest
 import torch
 
 from rslearn.models.clip import CLIP
 from rslearn.train.model_context import ModelContext, RasterImage
 
+# Test only with a small model.
+MODEL_NAME = "openai/clip-vit-base-patch32"
 
-@pytest.mark.parametrize(
-    "model_name", ["openai/clip-vit-base-patch32", "openai/clip-vit-large-patch14-336"]
-)
-def test_clip(model_name: str) -> None:
+
+def test_clip() -> None:
     # Make sure the forward pass works.
-    clip = CLIP(model_name=model_name)
+    clip = CLIP(model_name=MODEL_NAME)
     inputs = [
         {
             "image": RasterImage(torch.zeros((3, 1, 32, 32), dtype=torch.float32)),

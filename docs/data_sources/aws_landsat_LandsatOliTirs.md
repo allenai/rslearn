@@ -9,6 +9,9 @@ This data source supports direct materialization: if the "ingest" flag is set fa
 then ingestion will be skipped and windows will be directly populated from windowed
 reads of the underlying cloud-optimized GeoTIFFs on S3.
 
+Progress while scanning metadata is logged at DEBUG level; set `RSLEARN_LOGLEVEL=DEBUG`
+to enable debug logging.
+
 ### Configuration
 
 ```jsonc

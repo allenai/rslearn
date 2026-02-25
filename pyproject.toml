@@ -32,7 +32,6 @@ dependencies = [
 [project.optional-dependencies]
 # These are requirements that are specific to a subset of data sources or models.
 extra = [
-    "accelerate>=1.10",
     "cdsapi>=0.7.6",
     "earthdaily[platform]>=1.9.0",
     "earthengine-api>=1.6.3",
@@ -54,7 +53,6 @@ extra = [
     "osmium>=4.0.2",
     "planet>=3.1",
     "planetary_computer>=1.0",
-    "pycocotools>=2.0",
     "pystac_client>=0.9",
     "rtree>=1.4",
     # Needed by DINOv3.
