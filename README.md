@@ -39,6 +39,18 @@ cd rslearn
 pip install .[extra]
 ```
 
+If you're running tests or developing locally, install the dev extras:
+
+```
+pip install .[dev]
+```
+
+With `rslearn[dev]`, `pytest` will automatically load environment variables from a
+`.env` file in the current working directory (if present), which is a convenient way
+to provide credentials for online tests and cloud-backed data sources. The `rslearn`
+CLI does not load `.env` files automatically; set environment variables yourself when
+running `rslearn` commands.
+
 
 Supported Data Sources
 ----------------------
