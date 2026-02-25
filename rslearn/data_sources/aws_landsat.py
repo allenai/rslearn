@@ -1,8 +1,8 @@
 """Data source for raster data in Registry of Open Data on AWS."""
 
-import logging
 import io
 import json
+import logging
 import os
 import shutil
 import tempfile
