@@ -8,9 +8,9 @@ images.
 
 There will be three steps:
 
-1. Create the dataset.
-2. Define the model architecture.
-3. Implement the transform to randomize the image order.
+1. [Create the dataset.](#create-the-dataset)
+2. [Define the model architecture.](#define-the-model-architecture)
+3. [Implement the transform to randomize the image order.](#implement-the-reverseimageorder-transform)
 
 ## Create the Dataset
 

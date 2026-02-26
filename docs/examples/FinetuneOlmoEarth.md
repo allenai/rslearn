@@ -7,6 +7,12 @@ Cropland Data Layer. For the inputs, we use four Sentinel-2 images (one per mont
 If you are new to rslearn, you may want to read [the main README](../../README.md) or
 [CoreConcepts](../CoreConcepts.md) first.
 
+There will be three steps:
+
+1. [Create the dataset.](#create-the-dataset)
+2. [Fine-tune the model.](#fine-tune-the-model)
+3. [Apply the model.](#apply-the-model)
+
 ## Create the Dataset
 
 Create a folder like `./dataset` to store the rslearn dataset, and save this dataset
