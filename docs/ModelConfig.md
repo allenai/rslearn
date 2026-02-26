@@ -693,15 +693,6 @@ trainer:
         # generally be omitted. When using MultiTaskModel, this option should usually
         # match with the sub-task name.
         selector: ["detect"]
-    # The ModelCheckpoint callback saves model checkpoints.
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        # We keep the checkpoint that has the maximum mAP value on the detect task.
-        save_top_k: 1
-        monitor: val_detect/mAP
-        mode: max
-        # We also keep the latest checkpoint.
-        save_last: true
 ```
 
 ## Model Management Options
@@ -747,6 +738,10 @@ load_checkpoint_required: auto
 # 'no' will disable logging.
 # 'auto' will use 'yes' during fit and 'no' during val/test/predict.
 log_mode: auto
+# The metric to monitor for saving the best checkpoint.
+monitor: val_loss
+# Whether the metric being monitored should be maximized (max) or minimized (min).
+monitor_mode: min
 ```
 
 ## Using Custom Classes

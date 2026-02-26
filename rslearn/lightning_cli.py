@@ -162,6 +162,18 @@ class RslearnLightningCLI(LightningCLI):
             help="Whether to log to W&B (used with --management_dir). 'yes' will enable logging, 'no' will disable logging, and 'auto' will use 'yes' during fit and 'no' during val/test/predict.",
             default="auto",
         )
+        parser.add_argument(
+            "--monitor",
+            type=str,
+            help="The metric key to monitor for saving the best checkpoint. Set to empty string to customize the ModelCheckpoint callbacks.",
+            default="val_loss",
+        )
+        parser.add_argument(
+            "--monitor_mode",
+            type=str,
+            help="min if the metric being monitored is better when minimized, max otherwise",
+            default="min",
+        )
 
     def _get_checkpoint_path(
         self,
@@ -337,33 +349,72 @@ class RslearnLightningCLI(LightningCLI):
             )
 
         if subcommand == "fit":
-            # Set the checkpoint directory to match the project directory.
-            checkpoint_callback = None
-            if "callbacks" in c.trainer and c.trainer.callbacks:
-                for existing_callback in c.trainer.callbacks:
-                    if (
-                        existing_callback.class_path
-                        == "lightning.pytorch.callbacks.ModelCheckpoint"
-                    ):
-                        checkpoint_callback = existing_callback
-            else:
+            # Add ModelCheckpoint callbacks if they are not already present. We use one
+            # callback to save the latest checkpoint, so we can resume from it, and one
+            # to save the best checkpoint.
+            if "callbacks" not in c.trainer or not c.trainer.callbacks:
                 c.trainer.callbacks = []
 
-            if not checkpoint_callback:
-                checkpoint_callback = jsonargparse.Namespace(
+            existing_callbacks = []
+            for existing_callback in c.trainer.callbacks:
+                if (
+                    existing_callback.class_path
+                    != "lightning.pytorch.callbacks.ModelCheckpoint"
+                ):
+                    continue
+                existing_callbacks.append(existing_callback)
+
+                # Show warning if save_last is set. Usually this option does not do what
+                # the user expects and it has caused issues in the past.
+                if getattr(existing_callback.init_args, "save_last", None):
+                    logger.warning(
+                        "Warning: a ModelCheckpoint with save_last=True is configured. "
+                        "The behavior of save_last varies by Lightning version and may yield unexpected results."
+                    )
+
+            if existing_callbacks and c.monitor:
+                raise ValueError(
+                    "Custom ModelCheckpoints cannot be set when using --monitor (either remove the callbacks or use --monitor='')"
+                )
+            if not existing_callbacks and not c.monitor:
+                raise ValueError(
+                    "Custom ModelCheckpoints must be set when using --monitor=''"
+                )
+
+            if existing_callbacks:
+                for existing_callback in existing_callbacks:
+                    existing_callback.init_args.dirpath = str(project_dir)
+
+            else:
+                save_last_callback = jsonargparse.Namespace(
                     {
                         "class_path": "lightning.pytorch.callbacks.ModelCheckpoint",
                         "init_args": jsonargparse.Namespace(
                             {
-                                "save_last": True,
+                                "filename": "last",
                                 "save_top_k": 1,
-                                "monitor": "val_loss",
+                                "dirpath": str(project_dir),
                             }
                         ),
                     }
                 )
-                c.trainer.callbacks.append(checkpoint_callback)
-            checkpoint_callback.init_args.dirpath = str(project_dir)
+                c.trainer.callbacks.append(save_last_callback)
+
+                save_best_callback = jsonargparse.Namespace(
+                    {
+                        "class_path": "lightning.pytorch.callbacks.ModelCheckpoint",
+                        "init_args": jsonargparse.Namespace(
+                            {
+                                "filename": "best",
+                                "save_top_k": 1,
+                                "monitor": c.monitor,
+                                "mode": c.monitor_mode,
+                                "dirpath": str(project_dir),
+                            }
+                        ),
+                    }
+                )
+                c.trainer.callbacks.append(save_best_callback)
 
         # Load existing checkpoint.
         checkpoint_path = self._get_checkpoint_path(
