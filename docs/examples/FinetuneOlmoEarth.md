@@ -215,14 +215,6 @@ data:
 trainer:
   max_epochs: 100
   callbacks:
-    # Save the latest checkpoint (last.ckpt) as well as best one based on accuracy
-    # metric.
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        save_top_k: 1
-        save_last: true
-        monitor: val_accuracy
-        mode: max
     # We find that freezing the model for the first few epochs helps to improve the
     # performance of the fine-tuned models.
     - class_path: rslearn.train.callbacks.freeze_unfreeze.FreezeUnfreeze
@@ -249,6 +241,9 @@ trainer:
 project_name: ${PROJECT_NAME}
 run_name: ${RUN_NAME}
 management_dir: ${MANAGEMENT_DIR}
+# Save best checkpoint based on accuracy metric.
+monitor: val_accuracy
+monitor_mode: max
 ```
 
 Save this as `model.yaml` and then run `model fit`:

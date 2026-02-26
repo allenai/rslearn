@@ -330,14 +330,6 @@ trainer:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: "epoch"
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        # We keep two checkpoints, the one that has best mAP on validation set, and the
-        # latest one. They are saved to the marine_infrastructure_checkpoints folder.
-        save_top_k: 1
-        save_last: true
-        monitor: val_mAP
-        mode: max
     # We freeze the SatlasPretrain backbone for one epoch before unfreezing.
     - class_path: rslearn.train.callbacks.freeze_unfreeze.FreezeUnfreeze
       init_args:
@@ -348,6 +340,9 @@ trainer:
 project_name: marine_infrastructure
 run_name: satlaspretrain_finetune
 management_dir: ${MANAGEMENT_DIR}
+# Save the best checkpoint based on mAP on validation set.
+monitor: val_mAP
+monitor_mode: max
 ```
 
 After saving this as `model.yaml`, we can now start the fine-tuning:

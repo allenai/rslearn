@@ -240,13 +240,6 @@ data:
 trainer:
   max_epochs: 100
   callbacks:
-    # Save both the latest checkpoint (last.ckpt) and the best one (epoch=....ckpt).
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        save_top_k: 1
-        save_last: true
-        monitor: val_accuracy
-        mode: max
     # It is recommended to freeze the OlmoEarth encoder for the first few epochs.
     - class_path: rslearn.train.callbacks.freeze_unfreeze.FreezeUnfreeze
       init_args:
@@ -257,6 +250,9 @@ trainer:
 project_name: ${PROJECT_NAME}
 run_name: ${RUN_NAME}
 management_dir: ${MANAGEMENT_DIR}
+# Save best checkpoint based on accuracy metric.
+monitor: val_accuracy
+monitor_mode: max
 ```
 
 See [TasksAndModels](../TasksAndModels.md) for more details about the SimpleTimeSeries
