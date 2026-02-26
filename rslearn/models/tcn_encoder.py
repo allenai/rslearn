@@ -2,6 +2,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange
 
 from rslearn.models.component import (
@@ -20,40 +21,69 @@ def prepare_ts_modality(
     context: ModelContext,
     mod_key: str,
     in_channels: int,
-) -> torch.Tensor:
+    pad_value: float = 0.0,
+    has_mask_channel: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Extract, batch, and pre-process a time-series modality from model context.
 
-    Handles variable-length sequences across batch items by zero-padding
-    shorter sequences to the maximum length in the batch.  Spatial dimensions
-    are averaged so the output is always 3-D.
+    Handles variable-length sequences across batch items by padding shorter
+    sequences to the maximum length in the batch.  Spatial dimensions are
+    averaged so the output is always 3-D.
 
     The final reshape ensures the last dimension equals ``in_channels``.  This
     is a no-op when the data already has the correct number of channels, and
     correctly unstacks data where all timesteps were flattened into the channel
     dimension (C*T bands with T=1): [B, 1, C*T] → [B, T, C].
 
+    When ``has_mask_channel`` is True the first channel (index 0) of the raw
+    CTHW tensor is treated as a binary validity mask (1 = valid, 0 = masked)
+    produced by :class:`RandomTimeMasking` with ``append_mask_channel=True``.
+    The mask channel is stripped from the data before the reshape so that the
+    returned *data* always has exactly ``in_channels`` features, and its
+    information is merged into the returned *mask* tensor.
+
     Args:
         context: the model context containing all modality inputs.
         mod_key: key identifying the time-series modality in each input dict.
         in_channels: number of variables per timestep (must match the
-            encoder's ``in_channels``).
+            encoder's ``in_channels``).  This does **not** include the mask
+            channel even when ``has_mask_channel`` is True.
+        pad_value: value used to fill padded timesteps (default 0).
+        has_mask_channel: if True, expect a prepended binary mask channel and
+            extract it.
 
     Returns:
-        a tensor of shape [B, T, C] where T is the max sequence length in the
-        batch and shorter sequences are zero-padded.
+        A tuple ``(data, mask)`` where *data* has shape ``[B, T, C]`` (with
+        ``C == in_channels``) and *mask* is a bool tensor of shape ``[B, T]``
+        that is ``True`` for valid timesteps and ``False`` for masked / padded
+        ones.  The mask unifies both batch-padding and augmentation masking.
     """
-    ts_list = [
-        rearrange(inp[mod_key].image, "c t h w -> (h w) t c") for inp in context.inputs
-    ]
+    raw_images = [inp[mod_key].image for inp in context.inputs]  # list of [C', T, H, W]
+
+    # --- optionally extract and separate the mask channel ----
+    aug_masks: list[torch.Tensor] | None = None
+    if has_mask_channel:
+        aug_masks = []
+        stripped = []
+        for img in raw_images:
+            # Channel 0 is the binary mask: (1, T, H, W)
+            mask_ch = img[0:1]  # [1, T, H, W]
+            # Spatial-average then threshold → per-timestep bool [T]
+            aug_masks.append(mask_ch.mean(dim=(0, 2, 3)) > 0.5)
+            stripped.append(img[1:])  # remaining data channels
+        raw_images = stripped
+
+    ts_list = [rearrange(img, "c t h w -> (h w) t c") for img in raw_images]
 
     max_t = max(x.shape[1] for x in ts_list)
     padded = []
+    lengths = []
     for x in ts_list:
+        lengths.append(x.shape[1])
         if x.shape[1] < max_t:
-            pad = torch.zeros(
-                x.shape[0],
-                max_t - x.shape[1],
-                x.shape[2],
+            pad = torch.full(
+                (x.shape[0], max_t - x.shape[1], x.shape[2]),
+                pad_value,
                 dtype=x.dtype,
                 device=x.device,
             )
@@ -71,8 +101,36 @@ def prepare_ts_modality(
     # representation [B, 1, C*T] → [B, T, C] when needed.
     B = data.shape[0]
     data = data.reshape(B, -1, in_channels)
+    T = data.shape[1]
 
-    return data
+    # Build padding mask: True = real, False = padded.
+    mask = torch.ones(B, T, dtype=torch.bool, device=data.device)
+    for i, length in enumerate(lengths):
+        # After reshape, the original length may map to a different T.
+        # Scale proportionally when the reshape changed the sequence length.
+        effective_len = min(T, length * T // max_t if max_t > 0 else T)
+        mask[i, effective_len:] = False
+
+    # Merge augmentation mask (from RandomTimeMasking) into the padding mask.
+    if aug_masks is not None:
+        for i, am in enumerate(aug_masks):
+            # am is [T_orig]; pad to max_t then slice to T after reshape.
+            if am.shape[0] < max_t:
+                am = F.pad(am.float(), (0, max_t - am.shape[0])).bool()
+            # After reshape T may differ from max_t; interpolate if needed.
+            if am.shape[0] != T:
+                am = (
+                    F.interpolate(
+                        am.float().unsqueeze(0).unsqueeze(0),
+                        size=T,
+                        mode="nearest",
+                    )
+                    .squeeze()
+                    .bool()
+                )
+            mask[i] &= am.to(mask.device)
+
+    return data, mask
 
 
 class SimpleTCNEncoder(FeatureExtractor):
@@ -95,6 +153,7 @@ class SimpleTCNEncoder(FeatureExtractor):
         dropout: float = 0.1,
         mod_key: str = "era5_daily",
         output_spatial_size: int | None = None,
+        has_mask_channel: bool = False,
     ):
         """Create a new SimpleTCNEncoder.
 
@@ -110,14 +169,20 @@ class SimpleTCNEncoder(FeatureExtractor):
             mod_key: key in the input dict that holds the time series data
             output_spatial_size: if provided, upsample to a spatial grid of this size (e.g., 5 for 5x5).
                 If None, outputs a FeatureVector. If set, outputs FeatureMaps with replicated embeddings.
+            has_mask_channel: if True, expect a prepended binary mask channel
+                (from :class:`RandomTimeMasking` with ``append_mask_channel=True``)
+                and use it to ignore masked timesteps during temporal pooling.
         """
         super().__init__()
 
         self.mod_key = mod_key
         self.in_channels = in_channels
         self.output_spatial_size = output_spatial_size
+        self.num_conv_layers = num_conv_layers
+        self.has_mask_channel = has_mask_channel
 
-        # Front-end linear projection
+        # Front-end: normalize input variables and project to base_dim
+        self.input_norm = nn.LayerNorm(in_channels)
         self.input_proj = nn.Linear(in_channels, base_dim)
 
         def conv1D_block(
@@ -172,14 +237,39 @@ class SimpleTCNEncoder(FeatureExtractor):
                 where the embedding is replicated across all spatial locations.
         """
         # Extract, spatially pool, and reshape TS data: [B, T, C]
-        TS_data = prepare_ts_modality(
-            context, self.mod_key, in_channels=self.in_channels
+        TS_data, mask = prepare_ts_modality(
+            context,
+            self.mod_key,
+            in_channels=self.in_channels,
+            has_mask_channel=self.has_mask_channel,
         )
 
-        x = self.input_proj(TS_data)
-        x = x.transpose(1, 2)
-        x = self.conv_layers(x)
-        x = torch.cat([x.mean(dim=2), x.max(dim=2).values], dim=1)
+        x = self.input_norm(TS_data)
+        x = self.input_proj(x)
+
+        # Zero out masked/padded timesteps so convolutions see neutral values.
+        x = x * mask.unsqueeze(-1)  # [B, T, d_model]
+
+        x = x.transpose(1, 2)  # [B, d_model, T]
+        x = self.conv_layers(x)  # [B, width, T']
+
+        # Downsample mask to match the conv output temporal dimension.
+        T_out = x.shape[2]
+        if T_out != mask.shape[1]:
+            ds_mask = (
+                F.adaptive_max_pool1d(mask.float().unsqueeze(1), T_out).squeeze(1) > 0.5
+            )
+        else:
+            ds_mask = mask
+
+        # Masked mean + max pooling over time.
+        mask_expanded = ds_mask.unsqueeze(1)  # [B, 1, T']
+        x_masked = x * mask_expanded  # zero out invalid positions
+        valid_count = ds_mask.sum(dim=1, keepdim=True).clamp(min=1)  # [B, 1]
+        x_mean = x_masked.sum(dim=2) / valid_count  # [B, width]
+        x_max = x.masked_fill(~mask_expanded, float("-inf")).max(dim=2).values
+
+        x = torch.cat([x_mean, x_max], dim=1)  # [B, 2*width]
         x = self.mlp(x)  # [B, output_dim]
 
         # If output_spatial_size is specified, replicate across spatial dimensions
@@ -289,11 +379,17 @@ class AttentionPooling(nn.Module):
         super().__init__()
         self.attention = nn.Linear(d_model, 1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
         """Pool temporal dimension using attention.
 
         Args:
             x: input tensor of shape [B, d_model, T].
+            mask: optional bool tensor of shape [B, T] where ``True`` marks
+                valid timesteps and ``False`` marks masked/padded ones.
+                Masked positions receive ``-inf`` attention scores so they
+                cannot contribute to the pooled output.
 
         Returns:
             pooled tensor of shape [B, d_model].
@@ -301,6 +397,8 @@ class AttentionPooling(nn.Module):
         # x: [B, d_model, T]
         x_t = x.transpose(1, 2)  # [B, T, d_model]
         scores = self.attention(x_t)  # [B, T, 1]
+        if mask is not None:
+            scores = scores.masked_fill(~mask.unsqueeze(-1), float("-inf"))
         weights = torch.softmax(scores, dim=1)  # [B, T, 1]
         pooled = (x_t * weights).sum(dim=1)  # [B, d_model]
         return pooled
@@ -325,6 +423,7 @@ class TCNEncoder(FeatureExtractor):
         mod_key: str = "era5_daily",
         output_spatial_size: int | None = None,
         pooling_windows: list[int] | None = None,
+        has_mask_channel: bool = False,
     ):
         """Create a new TCNEncoder.
 
@@ -343,6 +442,9 @@ class TCNEncoder(FeatureExtractor):
             pooling_windows: list of pyramid levels where each entry is the
                 number of bins at that level. Default: [1, 2, 4, 12] for
                 whole-sequence, halves, quarters, and monthly bins.
+            has_mask_channel: if True, expect a prepended binary mask channel
+                (from :class:`RandomTimeMasking` with ``append_mask_channel=True``)
+                and use it to ignore masked timesteps during attention pooling.
         """
         super().__init__()
 
@@ -358,6 +460,7 @@ class TCNEncoder(FeatureExtractor):
         self.in_channels = in_channels
         self.output_spatial_size = output_spatial_size
         self.pooling_windows = pooling_windows
+        self.has_mask_channel = has_mask_channel
 
         # Front-end: normalize input variables and project to d_model
         self.input_norm = nn.LayerNorm(in_channels)
@@ -403,8 +506,11 @@ class TCNEncoder(FeatureExtractor):
             a FeatureVector with the embedding of shape [B, d_output].
         """
         # Extract, spatially pool, and reshape TS data: [B, T, C]
-        era5_data = prepare_ts_modality(
-            context, self.mod_key, in_channels=self.in_channels
+        era5_data, mask = prepare_ts_modality(
+            context,
+            self.mod_key,
+            in_channels=self.in_channels,
+            has_mask_channel=self.has_mask_channel,
         )
 
         B, T, C = era5_data.shape
@@ -420,20 +526,27 @@ class TCNEncoder(FeatureExtractor):
 
         x = self.input_norm(era5_data)  # [B, T, C]
         x = self.input_proj(x)  # [B, T, d_model]
+
+        # Zero out masked/padded timesteps so convolutions see neutral values.
+        x = x * mask.unsqueeze(-1)  # [B, T, d_model]
+
         x = x.transpose(1, 2)  # [B, d_model, T]
 
         for block in self.tcn_blocks:
             x = block(x)  # [B, d_model, T]
 
-        # Temporal pyramid pooling
+        # Temporal pyramid pooling (mask-aware)
         pooled_features = []
         pool_idx = 0
         for n_bins in self.pooling_windows:
             # Split into n_bins contiguous chunks (nearly equal lengths)
             chunks = torch.chunk(x, chunks=n_bins, dim=2)
+            mask_chunks = torch.chunk(mask, chunks=n_bins, dim=1)
 
-            for chunk in chunks:
-                pooled = self.pooling_modules[pool_idx](chunk)  # [B, d_model]
+            for chunk, mask_chunk in zip(chunks, mask_chunks):
+                pooled = self.pooling_modules[pool_idx](
+                    chunk, mask_chunk
+                )  # [B, d_model]
                 pooled_features.append(pooled)
                 pool_idx += 1
 
@@ -448,118 +561,3 @@ class TCNEncoder(FeatureExtractor):
             x = x.expand(B, -1, self.output_spatial_size, self.output_spatial_size)
             return FeatureMaps([x])
         return FeatureVector(feature_vector=x)
-
-
-# Commented out - incomplete implementation that references undefined Era5Encoder
-# TODO: Implement a proper dual encoder if needed, or use composition pattern
-#
-# class OlmoEarthWithEra5(FeatureExtractor):
-#     # I think this would be better as a Concat(FeatureExtractor) which takes a list[list[torch.nn.Module]] (where the lists should specify
-#     # #different encoder paths, each one is FeatureExtractor followed by IntermediateComponents), and it applies each one of them and expects
-#     # #output across all of them to either be FeatureMaps or FeatureVector and it just concatenates them all. This way it doesn't need to
-#     # be specific to one use case.
-#     """Dual encoder: OlmoEarth for S1/S2 + separate encoder for ERA5.
-#
-#     OlmoEarth processes the standard satellite modalities (sentinel2_l2a,
-#     sentinel1, etc.) while a separate CNN processes ERA5 weather data.
-#     The two sets of features are fused (concatenated or added) at the
-#     embedding level before being passed to downstream decoders.
-#     """
-#
-#     def __init__(
-#         self,
-#         # OlmoEarth config
-#         olmo_patch_size: int = 8,
-#         olmo_model_id: str = "OLMOEARTH_V1_BASE",
-#         olmo_embedding_size: int = 768,
-#         # ERA5 encoder config
-#         era5_in_channels: int = 37,
-#         era5_hidden_channels: int = 128,
-#         era5_out_channels: int = 128,
-#         era5_num_layers: int = 4,
-#         era5_key: str = "era5",
-#         # Fusion options
-#         fusion_method: str = "concat",
-#     ):
-#         """Create a new OlmoEarthWithEra5.
-#
-#         Args:
-#             olmo_patch_size: token spatial patch size for OlmoEarth.
-#             olmo_model_id: OlmoEarth model ID string (e.g. "OLMOEARTH_V1_BASE").
-#             olmo_embedding_size: embedding dimension of the OlmoEarth encoder.
-#             era5_in_channels: number of ERA5 input channels.
-#             era5_hidden_channels: hidden channels in the ERA5 CNN encoder.
-#             era5_out_channels: output channels from the ERA5 encoder.
-#             era5_num_layers: number of conv layers in the ERA5 encoder.
-#             era5_key: key in the input dict that holds ERA5 data.
-#             fusion_method: how to fuse features, one of "concat" or "add".
-#         """
-#         super().__init__()
-#
-#         from olmoearth_pretrain.model_loader import ModelID
-#
-#         self.olmo = OlmoEarth(
-#             patch_size=olmo_patch_size,
-#             model_id=getattr(ModelID, olmo_model_id),
-#             embedding_size=olmo_embedding_size,
-#         )
-#
-#         self.era5_encoder = Era5Encoder(
-#             in_channels=era5_in_channels,
-#             hidden_channels=era5_hidden_channels,
-#             out_channels=era5_out_channels,
-#             num_layers=era5_num_layers,
-#         )
-#
-#         self.era5_key = era5_key
-#         self.fusion_method = fusion_method
-#         self.olmo_embedding_size = olmo_embedding_size
-#         self.era5_out_channels = era5_out_channels
-#         self.patch_size = olmo_patch_size
-#
-#     def forward(self, context: ModelContext) -> FeatureMaps:
-#         """TBD.
-#
-#         Args:
-#             context: the model context containing all modality inputs.
-#
-#         Returns:
-#             a FeatureMaps with one fused feature map.
-#         """
-#         # Get OlmoEarth features (processes S1/S2 modalities)
-#         olmo_features = self.olmo(context)  # Returns FeatureMaps
-#         olmo_feat = olmo_features.feature_maps[0]  # BCHW
-#
-#         # Get ERA5 data and encode
-#         era5_data = torch.stack(
-#             [
-#                 rearrange(inp[self.era5_key].image, "c t h w -> (c t) h w")
-#                 for inp in context.inputs
-#             ],
-#             dim=0,
-#         )
-#
-#         target_size = (olmo_feat.shape[2], olmo_feat.shape[3])
-#         era5_feat = self.era5_encoder(era5_data, target_size)  # BCHW
-#
-#         # Fuse features
-#         if self.fusion_method == "concat":
-#             fused = torch.cat([olmo_feat, era5_feat], dim=1)
-#         elif self.fusion_method == "add":
-#             fused = olmo_feat + era5_feat
-#         else:
-#             raise ValueError(f"Unknown fusion method: {self.fusion_method}")
-#
-#         return FeatureMaps([fused])
-#
-#     def get_backbone_channels(self) -> list:
-#         """Returns the output channels of this dual encoder.
-#
-#         Returns:
-#             list of (downsample_factor, depth) tuples.
-#         """
-#         if self.fusion_method == "concat":
-#             return [
-#                 (self.patch_size, self.olmo_embedding_size + self.era5_out_channels)
-#             ]
-#         return [(self.patch_size, self.olmo_embedding_size)]

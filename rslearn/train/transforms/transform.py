@@ -142,7 +142,7 @@ class Transform(torch.nn.Module):
         input_dict: dict[str, Any],
         target_dict: dict[str, Any],
         selectors: list[str],
-        **kwargs: dict[str, Any],
+        **kwargs: Any,
     ) -> None:
         """Apply the specified function on the selectors in input/target dicts.
 
