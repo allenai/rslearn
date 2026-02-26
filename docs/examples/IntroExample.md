@@ -279,8 +279,13 @@ trainer:
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
+        filename: "last"
         save_top_k: 1
-        save_last: true
+        dirpath: ./land_cover_model_checkpoints/
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        filename: "best"
+        save_top_k: 1
         monitor: val_accuracy
         mode: max
         dirpath: ./land_cover_model_checkpoints/
