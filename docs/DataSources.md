@@ -427,6 +427,39 @@ Common EarthDaily asset key → rslearn band name mapping:
 - aot → aot
 - wvp → wvp
 
+### rslearn.data_sources.firms.FIRMS
+
+This data source is for FIRMS (Fire Information for Resource Management System) active
+fire detections.
+
+See https://firms.modaps.eosdis.nasa.gov/download/ for details.
+
+It calls the FIRMS area CSV API and stores fire detections as vector point features.
+
+```jsonc
+{
+  "class_path": "rslearn.data_sources.firms.FIRMS",
+  "init_args": {
+    // Required FIRMS MAP_KEY. It can also be set through FIRMS_MAP_KEY env variable.
+    "map_key": null,
+    // FIRMS source ID, e.g. "VIIRS_SNPP_NRT", "VIIRS_NOAA20_NRT", "MODIS_NRT".
+    "source": "VIIRS_SNPP_NRT",
+    // Maximum day range used for each request (clamped to FIRMS API limit 5).
+    "max_days_per_request": 5,
+    // Width/height of reusable spatial bins in degrees.
+    "spatial_bin_degrees": 0.25,
+    // Timeout for requests.
+    "timeout": "30s"
+  }
+}
+```
+
+Notes:
+- The layer type should be `"vector"`.
+- Windows must include a `time_range` since FIRMS requests are time-bounded.
+- Each window maps to reusable spatial bins selected from split geometry components
+  (typically one bin; antimeridian-crossing windows may map to multiple bins).
+
 ### rslearn.data_sources.copernicus.Copernicus
 
 This data source is for images from the ESA Copernicus OData API. See
