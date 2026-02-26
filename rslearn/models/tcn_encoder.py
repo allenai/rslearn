@@ -20,7 +20,6 @@ MODALITY_NAMES = [
 def prepare_ts_modality(
     context: ModelContext,
     mod_key: str,
-    in_channels: int,
     pad_value: float = 0.0,
     has_mask_channel: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -30,35 +29,34 @@ def prepare_ts_modality(
     sequences to the maximum length in the batch.  Spatial dimensions are
     averaged so the output is always 3-D.
 
-    The final reshape ensures the last dimension equals ``in_channels``.  This
-    is a no-op when the data already has the correct number of channels, and
-    correctly unstacks data where all timesteps were flattened into the channel
-    dimension (C*T bands with T=1): [B, 1, C*T] → [B, T, C].
+    The input is expected to be a proper ``[C, T, H, W]`` tensor where ``C``
+    is the number of variables and ``T`` is the number of timesteps.  If the
+    raw data stores all timesteps flattened into the channel dimension (e.g.
+    ``[C*T, 1, H, W]`` with ``passthrough: true``), apply the
+    :class:`~rslearn.train.transforms.unflatten_timesteps.UnflattenTimesteps`
+    transform first to separate channels and timesteps.
 
     When ``has_mask_channel`` is True the first channel (index 0) of the raw
     CTHW tensor is treated as a binary validity mask (1 = valid, 0 = masked)
     produced by :class:`RandomTimeMasking` with ``append_mask_channel=True``.
-    The mask channel is stripped from the data before the reshape so that the
-    returned *data* always has exactly ``in_channels`` features, and its
-    information is merged into the returned *mask* tensor.
+    The mask channel is stripped from the data so that the returned *data*
+    has the original number of features, and its information is merged into
+    the returned *mask* tensor.
 
     Args:
         context: the model context containing all modality inputs.
         mod_key: key identifying the time-series modality in each input dict.
-        in_channels: number of variables per timestep (must match the
-            encoder's ``in_channels``).  This does **not** include the mask
-            channel even when ``has_mask_channel`` is True.
         pad_value: value used to fill padded timesteps (default 0).
         has_mask_channel: if True, expect a prepended binary mask channel and
             extract it.
 
     Returns:
-        A tuple ``(data, mask)`` where *data* has shape ``[B, T, C]`` (with
-        ``C == in_channels``) and *mask* is a bool tensor of shape ``[B, T]``
-        that is ``True`` for valid timesteps and ``False`` for masked / padded
-        ones.  The mask unifies both batch-padding and augmentation masking.
+        A tuple ``(data, mask)`` where *data* has shape ``[B, T, C]`` and
+        *mask* is a bool tensor of shape ``[B, T]`` that is ``True`` for
+        valid timesteps and ``False`` for masked / padded ones.  The mask
+        unifies both batch-padding and augmentation masking.
     """
-    raw_images = [inp[mod_key].image for inp in context.inputs]  # list of [C', T, H, W]
+    raw_images = [inp[mod_key].image for inp in context.inputs]  # list of [C, T, H, W]
 
     # --- optionally extract and separate the mask channel ----
     aug_masks: list[torch.Tensor] | None = None
@@ -96,38 +94,21 @@ def prepare_ts_modality(
     if data.dim() == 4:
         data = data.mean(dim=1)
 
-    # Reshape so the last dim equals in_channels.  This is a no-op when the
-    # data is already [B, T, in_channels] and unstacks the flattened
-    # representation [B, 1, C*T] → [B, T, C] when needed.
-    B = data.shape[0]
-    data = data.reshape(B, -1, in_channels)
-    T = data.shape[1]
+    B, T, _ = data.shape
 
     # Build padding mask: True = real, False = padded.
     mask = torch.ones(B, T, dtype=torch.bool, device=data.device)
     for i, length in enumerate(lengths):
-        # After reshape, the original length may map to a different T.
-        # Scale proportionally when the reshape changed the sequence length.
-        effective_len = min(T, length * T // max_t if max_t > 0 else T)
-        mask[i, effective_len:] = False
+        mask[i, length:] = False
 
     # Merge augmentation mask (from RandomTimeMasking) into the padding mask.
     if aug_masks is not None:
         for i, am in enumerate(aug_masks):
-            # am is [T_orig]; pad to max_t then slice to T after reshape.
-            if am.shape[0] < max_t:
-                am = F.pad(am.float(), (0, max_t - am.shape[0])).bool()
-            # After reshape T may differ from max_t; interpolate if needed.
-            if am.shape[0] != T:
-                am = (
-                    F.interpolate(
-                        am.float().unsqueeze(0).unsqueeze(0),
-                        size=T,
-                        mode="nearest",
-                    )
-                    .squeeze()
-                    .bool()
-                )
+            # am is [T_orig]; pad to max_t if needed.
+            if am.shape[0] < T:
+                am = F.pad(am.float(), (0, T - am.shape[0])).bool()
+            elif am.shape[0] > T:
+                am = am[:T]
             mask[i] &= am.to(mask.device)
 
     return data, mask
@@ -236,11 +217,10 @@ class SimpleTCNEncoder(FeatureExtractor):
             If output_spatial_size is set: a FeatureMaps with shape [B, output_dim, H, W]
                 where the embedding is replicated across all spatial locations.
         """
-        # Extract, spatially pool, and reshape TS data: [B, T, C]
+        # Extract and spatially pool TS data: [B, T, C]
         TS_data, mask = prepare_ts_modality(
             context,
             self.mod_key,
-            in_channels=self.in_channels,
             has_mask_channel=self.has_mask_channel,
         )
 
@@ -505,11 +485,10 @@ class TCNEncoder(FeatureExtractor):
         Returns:
             a FeatureVector with the embedding of shape [B, d_output].
         """
-        # Extract, spatially pool, and reshape TS data: [B, T, C]
+        # Extract and spatially pool TS data: [B, T, C]
         era5_data, mask = prepare_ts_modality(
             context,
             self.mod_key,
-            in_channels=self.in_channels,
             has_mask_channel=self.has_mask_channel,
         )
 

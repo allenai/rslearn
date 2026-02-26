@@ -1,6 +1,5 @@
 """Unit tests for rslearn.models.tcn_encoder mask-channel handling."""
 
-import pytest
 import torch
 
 from rslearn.models.tcn_encoder import (
@@ -62,7 +61,7 @@ class TestPrepareModality:
     def test_basic_shape_no_mask(self) -> None:
         C, T, B = 14, 30, 3
         ctx = _make_context(C, T, B, mod_key="era5")
-        data, mask = prepare_ts_modality(ctx, "era5", in_channels=C)
+        data, mask = prepare_ts_modality(ctx, "era5")
         assert data.shape == (B, T, C)
         assert mask.shape == (B, T)
         assert mask.dtype == torch.bool
@@ -73,9 +72,7 @@ class TestPrepareModality:
         """When has_mask_channel=True the mask channel is extracted and data has C cols."""
         C, T, B = 14, 30, 2
         ctx = _make_masked_context(C, T, B, mod_key="era5", mask_ratio=0.5)
-        data, mask = prepare_ts_modality(
-            ctx, "era5", in_channels=C, has_mask_channel=True
-        )
+        data, mask = prepare_ts_modality(ctx, "era5", has_mask_channel=True)
         # Data should have exactly C channels (mask channel stripped).
         assert data.shape == (B, T, C)
         assert mask.shape == (B, T)
@@ -83,18 +80,6 @@ class TestPrepareModality:
         assert not mask.all(), "Expected some masked timesteps"
         # All mask values should be bool.
         assert mask.dtype == torch.bool
-
-    def test_mask_channel_false_with_extra_channel_errors(self) -> None:
-        """Without has_mask_channel the extra channel causes an error on reshape.
-
-        The data has C+1 channels but in_channels=C, so reshaping
-        [B, T, C+1] to [B, -1, C] fails when T*(C+1) is not divisible by C.
-        This is the correct failure mode — better than silent data corruption.
-        """
-        C, T = 14, 30
-        ctx = _make_masked_context(C, T, B=1, mod_key="era5")
-        with pytest.raises(RuntimeError):
-            prepare_ts_modality(ctx, "era5", in_channels=C)
 
 
 # ---------------------------------------------------------------------------
