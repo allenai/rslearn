@@ -172,7 +172,7 @@ We can also visualize samples using the visualization module:
 python -m rslearn.vis.vis_server \
     $DATASET_PATH \
     --layers sentinel2 \  # image modality layers
-    --label_layers label_raster \  # layer layers
+    --label_layers label_raster \  # label layers
     --bands '{"sentinel2": ["B04", "B03", "B02"]}' \  # specify bands wanted for each image modality
     --normalization '{"sentinel2": "sentinel2_rgb"}'  \  # specify normalization wanted for each image modality
     --task_type segmentation \  # segmentation, detection, or classification
@@ -308,7 +308,7 @@ rslearn dataset ingest --root $DATASET_PATH --workers 32 --no-use-initial-job --
 rslearn dataset materialize --root $DATASET_PATH --workers 32 --no-use-initial-job
 ```
 
-We also need to add an RslearnPredictionWriter to the trainer callbacks in the model
+We also need to add an RslearnWriter to the trainer callbacks in the model
 configuration file, as it will handle writing the outputs from the model to a GeoTIFF.
 
 ```yaml

@@ -362,7 +362,7 @@ If `layers` explicitly specifies all three item groups (set to
 `load_all_item_groups` are both false, then for each `__getitem__` call, rslearn will
 pick a random layer from the list, and only load that one image.
 
-If `layers` is set to `["sentinel2"]`", and `load_all_item_groups` is set, then it is
+If `layers` is set to `["sentinel2"]`, and `load_all_item_groups` is set, then it is
 equivalent to above: the layer will be expanded into its item groups, and one item
 group will be randomly picked.
 
@@ -380,7 +380,7 @@ contain all three item groups will be used for training.
 
 ### task
 
-This configures the Task object See `rslearn.train.tasks` for more details.
+This configures the Task object. See `rslearn.train.tasks` for more details.
 
 The Task object defines a supervised remote sensing task. Currently implemented tasks
 in rslearn include:
@@ -499,9 +499,9 @@ Here is an example of its usage.
           # the "targets" key. The tasks will process these into a form suitable for
           # training.
           regress:
-            # The key here must match the name of the input under the inpust section.
+            # The key here must match the name of the input under the inputs section.
             regress_input: "targets"
-            segment_input: "targets
+            segment_input: "targets"
 ```
 
 ### num_workers and init_workers
@@ -682,7 +682,7 @@ trainer:
     # It is only active during the predict stage.
     - class_path: rslearn.train.prediction_writer.RslearnWriter
       init_args:
-        # This can be left as a placehloder -- rslearn will override it with the
+        # This can be left as a placeholder -- rslearn will override it with the
         # rslearn dataset path from data.init_args.path.
         path: placeholder
         # This is the name of the layer in the rslearn dataset under which the
@@ -764,7 +764,7 @@ from torch.optim import Optimizer
 
 @dataclass
 class Adadelta(OptimizerFactory):
-    """Factory for Adadelta optimzier."""
+    """Factory for Adadelta optimizer."""
 
     lr: float = 0.001
     rho: float | None = None
@@ -782,7 +782,7 @@ class Adadelta(OptimizerFactory):
 Suppose this is in `your_pkg.optimizer`. Then, you can configure it as follows:
 
 ```yaml
-model
+model:
   class_path: rslearn.train.lightning_module.RslearnLightningModule
   init_args:
     # ...

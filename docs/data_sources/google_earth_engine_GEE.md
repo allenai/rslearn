@@ -17,7 +17,7 @@ processed into the tile store. Note that export jobs can take several minutes to
 complete depending on the size of the image.
 
 This data source does support direct materialization, which can greatly speed up
-materialization for sparse windows. Whereas exporting a 10Kx10K image make take 5000
+materialization for sparse windows. Whereas exporting a 10Kx10K image may take 5000
 EECU-seconds (and potentially several minutes), exporting a 256x256 image should take
 only a few seconds.
 

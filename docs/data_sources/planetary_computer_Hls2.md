@@ -41,7 +41,7 @@ Band names may be provided as either asset keys (B01, B02, ...) or common names
 ## rslearn.data_sources.planetary_computer.Hls2L30
 
 HLS v2 Landsat ([L30](https://planetarycomputer.microsoft.com/dataset/hls2-l30))
-ata on Microsoft Planetary Computer. Direct materialization is supported.
+data on Microsoft Planetary Computer. Direct materialization is supported.
 
 ### Configuration
 

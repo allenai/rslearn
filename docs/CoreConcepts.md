@@ -56,7 +56,7 @@ corresponds to a Sentinel-2 scene.
 When a dataset is configured with one or more layers that have data sources defined
 (see [DatasetConfig](DatasetConfig.md)), rslearn can automatically populate those
 layers with information from items in the data source that intersect spatially and
-temporally which each window in the dataset. This data materialization process takes
+temporally with each window in the dataset. This data materialization process takes
 place in three steps:
 
 1. Prepare: identify items in the data source that correspond to windows in the

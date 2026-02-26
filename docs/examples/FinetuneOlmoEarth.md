@@ -165,7 +165,7 @@ data:
       sentinel2_l2a:
         data_type: "raster"
         layers: ["sentinel2_l2a", "sentinel2_l2a.1", "sentinel2_l2a.2", "sentinel2_l2a.3"]
-        # This is the band order expected by  OlmoEarth.
+        # This is the band order expected by OlmoEarth.
         bands: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
         passthrough: true
         dtype: FLOAT32
@@ -287,5 +287,5 @@ We can then open up one of the input Sentinel-2 images, the model prediction, an
 actual CDL in qgis:
 
 ```
-qgis dataset/windows/predict/bellingham2/layers/{cdl,output,sentinel2_l2a}/*/geotiff.tif
+qgis dataset/windows/predict/bellingham/layers/{cdl,output,sentinel2_l2a}/*/geotiff.tif
 ```

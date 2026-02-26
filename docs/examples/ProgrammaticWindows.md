@@ -1,6 +1,6 @@
 ## Programmatically Creating Windows
 
-In this example, we show how to create windows programatically. This is useful when the
+In this example, we show how to create windows programmatically. This is useful when the
 `rslearn dataset add_windows` command does not offer sufficient flexibility.
 
 ### Table of Contents

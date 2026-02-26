@@ -229,7 +229,7 @@ data:
           init_args:
             band_names:
               sentinel2_l2a: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
-        # We will implement the ReversImageOrder class later!
+        # We will implement the ReverseImageOrder class later!
         - class_path: ReverseImageOrder
     train_config:
       groups: ["train"]
@@ -334,5 +334,5 @@ export MANAGEMENT_DIR=./project_data/
 python bitemporal_train.py model fit --config model.yaml
 ```
 
-The model achieves unrealistically accuracy (98%) which suggests there may be a shift
+The model achieves unrealistically high accuracy (98%) which suggests there may be a shift
 in the satellite images that the model is using to "cheat".

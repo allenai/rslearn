@@ -202,7 +202,7 @@ ImageTileRasterFormat configuration:
 {
   "class_path": "rslearn.utils.raster_format.ImageTileRasterFormat",
   "init_args": {
-    // Required format to save the images as, one off "geotiff", "png", "jpeg".
+    // Required format to save the images as, one of "geotiff", "png", "jpeg".
     // With png and jpeg, only 1-band and 3-band band sets are supported.
     "format": "png",
     // The tile size, default 512.
@@ -316,7 +316,7 @@ TileVectorFormat configuration:
     // tile_size=512 covers pixels from (0, 0) to (512, 512).
     // The default is to use the projection of the first feature passed to the
     // encode_vector function.
-    // Example: "projection": {"crs": "EPSG:3857, "x_resolution": 10, "y_resolution": 10}
+    // Example: "projection": {"crs": "EPSG:3857", "x_resolution": 10, "y_resolution": 10}
     "projection": null
   }
 }
@@ -355,7 +355,7 @@ The data source specification looks like this:
     "period_duration": null,
     // When period_duration is set, whether to return item groups in reverse temporal
     // order (most recent first). Should always be set to false when setting period_duration.
-    // The defaults is true for backwards compatibility (deprecated).
+    // The default is true for backwards compatibility (deprecated).
     "per_period_mosaic_reverse_time_order": false,
     // The compositing method to use, to handle raster item groups with more than one item.
     // It can be FIRST_VALID (default), MEAN, MEDIAN, or SPATIAL_MOSAIC_TEMPORAL_STACK.
@@ -399,7 +399,7 @@ composite across items in the group.
 For each window, the prepare stage starts with a list of items provided by the data source
 that intersect the window's spatial extent and time range. The output from matching is a
 `list[list[Item]]` (list of item groups), where each item group corresponds to the items
-that well be used to create one composite of raster or vector data.
+that will be used to create one composite of raster or vector data.
 
 #### Time Offset and Duration
 
@@ -409,8 +409,8 @@ adjusted by setting `time_offset` and/or `duration`. This is particularly useful
 the desired time range varies across layers.
 
 `time_offset` specifies a positive or negative time delta. If set, the time delta is
-added to the time range. It is parsed by [pytimeparse](https://github.com/wroberts/pytimeparse).
-For example:
+added to the time range (both the start and the end time). It is parsed by
+[pytimeparse](https://github.com/wroberts/pytimeparse). For example:
 
 - "30d" means to adjust the time range 30 days into the future.
 - "-30d" means to adjust the time range 30 days into the past.
@@ -579,7 +579,7 @@ The default window storage is file-based:
 
 [DatasetFormat.md](./DatasetFormat.md) details the file structure. `FileWindowStorage` works
 across all filesystem types (e.g. local filesystem but also object storage), and doesn't need
-a database to be setup, but it is slow when there are a lot of windows because it stores the
+a database to be set up, but it is slow when there are a lot of windows because it stores the
 information for each window in a separate file (so many files need to be read to list windows).
 
 Below, we detail other window storages.

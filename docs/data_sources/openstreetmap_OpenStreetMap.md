@@ -42,7 +42,7 @@ the TileStore will need to be deleted and re-computed.
         },
         // Optional tag properties. This is used to save properties of the OSM feature in
         // the resulting GeoJSON feature. It is a list of [tag name, prop name]. If tag
-        // tag name exists on the OSM feature, then it will be populated into the prop
+        // name exists on the OSM feature, then it will be populated into the prop
         // name property on the GeoJSON feature.
         // Example: [["aerialway:heating", "aerialway:heating"]]
         "tag_properties": null,
