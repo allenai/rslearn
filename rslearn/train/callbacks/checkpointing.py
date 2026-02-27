@@ -32,24 +32,13 @@ class BestLastCheckpoint(Callback):
         self.monitor = monitor
         self.mode = mode
         self._best_value: float | None = None
-        self._is_sanity_check = False
-
-    def on_sanity_check_start(
-        self, trainer: Trainer, pl_module: LightningModule
-    ) -> None:
-        """Mark sanity check as active."""
-        self._is_sanity_check = True
-
-    def on_sanity_check_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Mark sanity check as inactive."""
-        self._is_sanity_check = False
 
     @rank_zero_only
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
         """Save last.ckpt always, and best.ckpt when the monitored metric improves."""
-        if self._is_sanity_check:
+        if trainer.sanity_checking:
             return
 
         os.makedirs(self.dirpath, exist_ok=True)
@@ -58,16 +47,13 @@ class BestLastCheckpoint(Callback):
         trainer.save_checkpoint(last_path)
         logger.info("saved checkpoint to %s", last_path)
 
-        current = trainer.callback_metrics.get(self.monitor)
-        if current is None:
-            logger.warning(
-                "monitored metric '%s' not found in callback_metrics, "
-                "skipping best checkpoint",
-                self.monitor,
+        # Check metric value to handle best.ckpt
+        if self.monitor not in trainer.callback_metrics:
+            raise ValueError(
+                f"did not find {self.monitor} metric (keys are {trainer.callback_metrics.keys()})"
             )
-            return
+        current_val = trainer.callback_metrics[self.monitor].item()
 
-        current_val = current.item()
         is_better = self._best_value is None or (
             (self.mode == "min" and current_val < self._best_value)
             or (self.mode == "max" and current_val > self._best_value)
