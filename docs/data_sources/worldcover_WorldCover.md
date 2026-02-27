@@ -2,11 +2,13 @@
 
 This data source is for the ESA WorldCover 2021 land cover map.
 
-For details about the land cover map, see https://worldcover2021.esa.int/.
+For details about the land cover map, see
+https://registry.opendata.aws/esa-worldcover-vito/.
 
-This data source downloads the 18 zip files that contain the map. They are then
-extracted, yielding 2,651 GeoTIFF files. These are then used with
-`rslearn.data_sources.local_files.LocalFiles` to implement the data source.
+The 2,651 tiles are served as Cloud-Optimized GeoTIFFs from the public
+`s3://esa-worldcover` bucket. There is a GeoJSON index that we download and cache
+locally for use during the prepare stage. Direct materialization from the COGs is
+suppotred.
 
 ### Configuration
 
@@ -14,8 +16,8 @@ extracted, yielding 2,651 GeoTIFF files. These are then used with
 {
   "class_path": "rslearn.data_sources.worldcover.WorldCover",
   "init_args": {
-    // Required local path to store the downloaded zip files and extracted GeoTIFFs.
-    "worldcover_dir": "cache/worldcover"
+    // Directory to cache the tile grid GeoJSON index.
+    "metadata_cache_dir": "cache/worldcover"
   }
 }
 ```

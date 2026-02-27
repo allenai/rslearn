@@ -1,144 +1,235 @@
-"""Data source for ESA WorldCover 2021."""
+"""Data source for ESA WorldCover 2021 via AWS S3.
 
+The data is available as Cloud-Optimized GeoTIFFs on the ESA WorldCover S3 bucket.
+See https://registry.opendata.aws/esa-worldcover-vito/ for details.
+"""
+
+import json
 import os
-import shutil
 import tempfile
-import zipfile
+from datetime import timedelta
 
+import boto3
+import botocore
+import botocore.client
 import requests
-from fsspec.implementations.local import LocalFileSystem
+import shapely
 from upath import UPath
 
-from rslearn.config import LayerType
-from rslearn.data_sources import DataSourceContext
-from rslearn.data_sources.local_files import LocalFiles
+import rslearn.data_sources.utils
+from rslearn.const import WGS84_PROJECTION
+from rslearn.data_sources.data_source import (
+    DataSourceContext,
+    Item,
+    QueryConfig,
+)
+from rslearn.data_sources.direct_materialize_data_source import (
+    DirectMaterializeDataSource,
+)
 from rslearn.log_utils import get_logger
-from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
+from rslearn.tile_stores import TileStoreWithLayer
+from rslearn.utils.fsspec import join_upath
+from rslearn.utils.geometry import STGeometry
+from rslearn.utils.grid_index import GridIndex
 
 logger = get_logger(__name__)
 
+# These correspond to the bucket name/region for https://registry.opendata.aws/esa-worldcover-vito/
+# along with expected paths within the bucket.
+BUCKET_NAME = "esa-worldcover"
+BUCKET_REGION = "eu-central-1"
+GRID_GEOJSON_KEY = "v200/2021/esa_worldcover_grid.geojson"
+TILE_PREFIX = "v200/2021/map"
+HTTP_BASE = f"https://{BUCKET_NAME}.s3.{BUCKET_REGION}.amazonaws.com"
 
-class WorldCover(LocalFiles):
+GRID_INDEX_CELL_SIZE = 3.0
+
+
+class WorldCover(DirectMaterializeDataSource[Item]):
     """A data source for the ESA WorldCover 2021 land cover map.
 
-    For details about the land cover map, see https://worldcover2021.esa.int/.
+    The data is served as Cloud-Optimized GeoTIFFs from the public AWS S3 bucket
+    ``s3://esa-worldcover``. The bucket includes a GeoJSON index that we use for the
+    prepare stage.
 
-    This data source downloads the 18 zip files that contain the map. They are then
-    extracted, yielding 2,651 GeoTIFF files. These are then used with
-    rslearn.data_sources.local_files.LocalFiles to implement the data source.
+    See https://registry.opendata.aws/esa-worldcover-vito/ for details about the
+    dataset.
     """
-
-    BASE_URL = "https://worldcover2021.esa.int/data/archive/"
-    ZIP_FILENAMES = [
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_N30E000.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_N30E060.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_N30E120.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_N30W060.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_N30W120.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_N30W180.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_S30E000.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_S30E060.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_S30E120.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_S30W060.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_S30W120.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_S30W180.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_S90E000.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_S90E060.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_S90E120.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_S90W060.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_S90W120.zip",
-        "ESA_WorldCover_10m_2021_v200_60deg_macrotile_S90W180.zip",
-    ]
-    TIMEOUT_SECONDS = 10
 
     def __init__(
         self,
-        worldcover_dir: str,
+        metadata_cache_dir: str,
+        timeout: timedelta = timedelta(seconds=60),
         context: DataSourceContext = DataSourceContext(),
     ) -> None:
-        """Create a new WorldCover.
+        """Create a new WorldCover instance.
 
         Args:
-            config: configuration for this layer. It should specify a single band
-                called B1 which will contain the land cover class.
-            worldcover_dir: the directory to extract the WorldCover GeoTIFF files. For
-                high performance, this should be a local directory; if the dataset is
-                remote, prefix with a protocol ("file://") to use a local directory
-                instead of a path relative to the dataset path.
+            metadata_cache_dir: directory to cache the tile grid GeoJSON.
+            timeout: timeout for HTTP requests.
             context: the data source context.
         """
+        super().__init__(asset_bands={"map": ["B1"]})
+        self.timeout = timeout
+
         if context.ds_path is not None:
-            worldcover_upath = join_upath(context.ds_path, worldcover_dir)
+            self._cache_dir = join_upath(context.ds_path, metadata_cache_dir)
         else:
-            worldcover_upath = UPath(worldcover_dir)
+            self._cache_dir = UPath(metadata_cache_dir)
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
 
-        tif_dir = self.download_worldcover_data(worldcover_upath)
+        self._grid_index: GridIndex | None = None
+        self._items_by_name: dict[str, Item] | None = None
 
-        super().__init__(
-            src_dir=tif_dir.absolute().as_uri(),
-            layer_type=LayerType.RASTER,
-            context=context,
-        )
-
-    def download_worldcover_data(self, worldcover_dir: UPath) -> UPath:
-        """Download and extract the WorldCover data.
-
-        If the data was previously downloaded, this function returns quickly.
-
-        Args:
-            worldcover_dir: the directory to download to.
+    def _load_index(self) -> tuple[GridIndex, dict[str, Item]]:
+        """Load the tile grid GeoJSON, downloading from S3 if not cached.
 
         Returns:
-            the sub-directory containing GeoTIFFs
+            Tuple of (grid_index, items_by_name dict).
         """
-        # Download the zip files (if they don't already exist).
-        zip_dir = worldcover_dir / "zips"
-        zip_dir.mkdir(parents=True, exist_ok=True)
-        for fname in self.ZIP_FILENAMES:
-            src_url = self.BASE_URL + fname
-            dst_fname = zip_dir / fname
-            if dst_fname.exists():
-                logger.debug("%s has already been downloaded at %s", fname, dst_fname)
+        if self._grid_index is not None and self._items_by_name is not None:
+            return self._grid_index, self._items_by_name
+
+        cache_file = self._cache_dir / "esa_worldcover_grid.geojson"
+        if not cache_file.exists():
+            logger.info("downloading WorldCover grid index to %s", cache_file)
+            s3 = boto3.client(
+                "s3",
+                region_name=BUCKET_REGION,
+                config=botocore.client.Config(
+                    signature_version=botocore.UNSIGNED,
+                ),
+            )
+            response = s3.get_object(Bucket=BUCKET_NAME, Key=GRID_GEOJSON_KEY)
+            content = response["Body"].read()
+            with cache_file.open("wb") as f:
+                f.write(content)
+
+        with cache_file.open() as f:
+            fc = json.load(f)
+
+        grid_index = GridIndex(GRID_INDEX_CELL_SIZE)
+        items_by_name: dict[str, Item] = {}
+
+        for feature in fc["features"]:
+            ll_tile = feature["properties"]["ll_tile"]
+            shp = shapely.geometry.shape(feature["geometry"])
+            geometry = STGeometry(WGS84_PROJECTION, shp, None)
+            item = Item(name=ll_tile, geometry=geometry)
+            grid_index.insert(shp.bounds, item)
+            items_by_name[ll_tile] = item
+
+        self._grid_index = grid_index
+        self._items_by_name = items_by_name
+        return grid_index, items_by_name
+
+    # --- DataSource implementation ---
+
+    def get_items(
+        self, geometries: list[STGeometry], query_config: QueryConfig
+    ) -> list[list[list[Item]]]:
+        """Get items intersecting the given geometries.
+
+        Args:
+            geometries: the spatiotemporal geometries.
+            query_config: the query configuration.
+
+        Returns:
+            list of groups of items for each geometry.
+        """
+        grid_index, _ = self._load_index()
+
+        groups = []
+        for geometry in geometries:
+            wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
+            cur_items = []
+            for item in grid_index.query(wgs84_geometry.shp.bounds):
+                if not wgs84_geometry.shp.intersects(item.geometry.shp):
+                    continue
+                cur_items.append(item)
+
+            cur_groups: list[list[Item]] = (
+                rslearn.data_sources.utils.match_candidate_items_to_window(
+                    geometry, cur_items, query_config
+                )
+            )
+            groups.append(cur_groups)
+
+        return groups
+
+    def get_item_by_name(self, name: str) -> Item:
+        """Gets an item by name.
+
+        Args:
+            name: the tile name (ll_tile value, e.g. "N30E060").
+
+        Returns:
+            the Item.
+        """
+        _, items_by_name = self._load_index()
+        if name not in items_by_name:
+            raise ValueError(f"WorldCover tile {name} not found")
+        return items_by_name[name]
+
+    def deserialize_item(self, serialized_item: dict) -> Item:
+        """Deserializes an item from JSON-decoded data."""
+        return Item.deserialize(serialized_item)
+
+    def ingest(
+        self,
+        tile_store: TileStoreWithLayer,
+        items: list[Item],
+        geometries: list[list[STGeometry]],
+    ) -> None:
+        """Ingest items into the given tile store.
+
+        Downloads individual GeoTIFF tiles on demand rather than bulk zip files.
+
+        Args:
+            tile_store: the tile store to ingest into.
+            items: the items to ingest.
+            geometries: a list of geometries needed for each item.
+        """
+        for item in items:
+            band_names = self.asset_bands["map"]
+            if tile_store.is_raster_ready(item.name, band_names):
                 continue
-            logger.info("downloading %s to %s", src_url, dst_fname)
-            with requests.get(src_url, stream=True, timeout=self.TIMEOUT_SECONDS) as r:
-                r.raise_for_status()
-                with open_atomic(dst_fname, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
 
-        # Extract the zip files.
-        # We use a .extraction_complete file to indicate that the extraction is done.
-        tif_dir = worldcover_dir / "tifs"
-        tif_dir.mkdir(parents=True, exist_ok=True)
-        for fname in self.ZIP_FILENAMES:
-            zip_fname = zip_dir / fname
-            completed_fname = zip_dir / (fname + ".extraction_complete")
-            if completed_fname.exists():
-                logger.debug("%s has already been extracted", fname)
-                continue
-            logger.info("extracting %s to %s", fname, tif_dir)
+            url = self._tile_http_url(item.name)
+            logger.info("downloading WorldCover tile %s", url)
 
-            # If the tif_dir is remote, we need to extract to a temporary local
-            # directory first and then copy it over.
-            if isinstance(tif_dir.fs, LocalFileSystem):
-                local_dir = tif_dir.path
-            else:
-                tmp_dir = tempfile.TemporaryDirectory()
-                local_dir = tmp_dir.name
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                local_fname = os.path.join(tmp_dir, f"{item.name}.tif")
+                with requests.get(
+                    url, stream=True, timeout=self.timeout.total_seconds()
+                ) as r:
+                    r.raise_for_status()
+                    with open(local_fname, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=8192):
+                            f.write(chunk)
 
-            with get_upath_local(zip_fname) as local_fname:
-                with zipfile.ZipFile(local_fname) as zip_f:
-                    zip_f.extractall(local_dir)
+                tile_store.write_raster_file(
+                    item.name,
+                    band_names,
+                    UPath(local_fname),
+                )
 
-            # Copy it over if the tif_dir was remote.
-            if not isinstance(tif_dir.fs, LocalFileSystem):
-                for fname in os.listdir(local_dir):
-                    with open(os.path.join(local_dir, fname), "rb") as src:
-                        with (tif_dir / fname).open("wb") as dst:
-                            shutil.copyfileobj(src, dst)
+    # --- DirectMaterializeDataSource implementation ---
 
-            # Mark the extraction complete.
-            completed_fname.touch()
+    def get_asset_url(self, item_name: str, asset_key: str) -> str:
+        """Get the URL to read a WorldCover tile COG.
 
-        return tif_dir
+        Args:
+            item_name: the tile name (ll_tile, e.g. "N30E060").
+            asset_key: ignored (always "map").
+
+        Returns:
+            a /vsicurl/ URL readable by rasterio.
+        """
+        return self._tile_http_url(item_name)
+
+    @staticmethod
+    def _tile_http_url(ll_tile: str) -> str:
+        return (
+            f"{HTTP_BASE}/{TILE_PREFIX}/ESA_WorldCover_10m_2021_v200_{ll_tile}_Map.tif"
+        )
