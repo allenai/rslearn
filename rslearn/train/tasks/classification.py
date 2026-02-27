@@ -72,7 +72,8 @@ class ClassificationTask(BasicTask):
             positive_class_threshold: threshold for classifying the positive class in
                 binary classification (default 0.5).
             enable_confusion_matrix: whether to compute confusion matrix (default false).
-                If true, it requires wandb to be initialized for logging.
+                If true, it requires a wandb-compatible backend (wandb or trackio) to be
+                initialized for logging.
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)

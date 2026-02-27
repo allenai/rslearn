@@ -39,6 +39,21 @@ cd rslearn
 pip install .[extra]
 ```
 
+Experiment tracking
+-------------------
+
+rslearn supports experiment logging via the Weights & Biases API. If you prefer a local,
+wandb-compatible backend, you can install Trackio and have rslearn use it instead:
+
+```
+pip install trackio
+export RSLEARN_WANDB_BACKEND=trackio
+```
+
+Trackio is API-compatible with `wandb.init`, `wandb.log`, and `wandb.finish` (rslearn uses
+this subset). By default, rslearn uses `wandb` if it is installed, otherwise it falls
+back to `trackio` if available.
+
 
 Supported Data Sources
 ----------------------

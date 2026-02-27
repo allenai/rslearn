@@ -9,7 +9,6 @@ import tempfile
 
 import fsspec
 import jsonargparse
-import wandb
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
@@ -20,6 +19,7 @@ from rslearn.arg_parser import RslearnArgumentParser
 from rslearn.log_utils import get_logger
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
+from rslearn.utils.wandb_compat import wandb
 from rslearn.utils.fsspec import open_atomic
 from rslearn.utils.jsonargparse import init_jsonargparse
 
@@ -94,7 +94,18 @@ class SaveWandbRunIdCallback(Callback):
             trainer: the Trainer object.
             pl_module: the LightningModule object.
         """
-        wandb_id = wandb.run.id
+        # Ensure the logger has initialized its run (works for both wandb and trackio backends).
+        if getattr(trainer, "logger", None) is not None and getattr(
+            trainer.logger, "experiment", None
+        ) is not None:
+            _ = trainer.logger.experiment
+
+        run = wandb.run
+        if run is None:
+            logger.warning("Tracking backend is not initialized; skipping run ID save.")
+            return
+
+        wandb_id = str(getattr(run, "id", getattr(run, "name", "")))
 
         project_dir = UPath(self.project_dir)
         project_dir.mkdir(parents=True, exist_ok=True)
@@ -305,13 +316,46 @@ class RslearnLightningCLI(LightningCLI):
         elif c.log_mode == "auto":
             should_log = subcommand == "fit"
         if should_log:
+            backend_name = wandb.backend_name
             if not c.trainer.logger:
+                if backend_name == "wandb":
+                    logger_class_path = "lightning.pytorch.loggers.WandbLogger"
+                elif backend_name == "trackio":
+                    logger_class_path = "rslearn.train.trackio_logger.TrackioLogger"
+                else:  # backend_name == "none"
+                    raise ImportError(
+                        "Logging is enabled but no tracking backend is available. "
+                        "Install `wandb` or `trackio` (or set RSLEARN_WANDB_BACKEND=auto)."
+                    )
                 c.trainer.logger = jsonargparse.Namespace(
                     {
-                        "class_path": "lightning.pytorch.loggers.WandbLogger",
+                        "class_path": logger_class_path,
                         "init_args": jsonargparse.Namespace(),
                     }
                 )
+            elif (
+                getattr(c.trainer.logger, "class_path", None)
+                == "lightning.pytorch.loggers.WandbLogger"
+                and backend_name == "trackio"
+            ):
+                logger.warning(
+                    "Tracking backend is set to Trackio; switching logger to Trackio."
+                )
+                c.trainer.logger.class_path = "rslearn.train.trackio_logger.TrackioLogger"
+                if not getattr(c.trainer.logger, "init_args", None):
+                    c.trainer.logger.init_args = jsonargparse.Namespace()
+            elif (
+                getattr(c.trainer.logger, "class_path", None)
+                == "rslearn.train.trackio_logger.TrackioLogger"
+                and backend_name == "wandb"
+            ):
+                logger.warning(
+                    "Tracking backend is set to wandb; switching logger to WandbLogger."
+                )
+                c.trainer.logger.class_path = "lightning.pytorch.loggers.WandbLogger"
+                if not getattr(c.trainer.logger, "init_args", None):
+                    c.trainer.logger.init_args = jsonargparse.Namespace()
+
             c.trainer.logger.init_args.project = c.project_name
             c.trainer.logger.init_args.name = c.run_name
             if c.run_description:

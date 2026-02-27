@@ -84,7 +84,8 @@ class SegmentationTask(BasicTask):
             output_class_idx: if set along with output_probs, only output the probability
                 for this specific class index (single-channel output).
             enable_confusion_matrix: whether to compute confusion matrix (default false).
-                If true, it requires wandb to be initialized for logging.
+                If true, it requires a wandb-compatible backend (wandb or trackio) to be
+                initialized for logging.
             class_names: optional list of class names for labeling confusion matrix axes.
                 If not provided, classes will be labeled as "class_0", "class_1", etc.
             kwargs: additional arguments to pass to BasicTask

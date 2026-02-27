@@ -6,12 +6,12 @@ from typing import Any
 
 import lightning as L
 import torch
-import wandb
 from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
 from PIL import Image
 from upath import UPath
 
 from rslearn.log_utils import get_logger
+from rslearn.utils.wandb_compat import wandb
 
 from .metrics import NonScalarMetricOutput
 from .model_context import ModelContext, ModelOutput
@@ -231,7 +231,7 @@ class RslearnLightningModule(L.LightningModule):
         # Wandb is required for logging non-scalar metrics.
         if not wandb.run:
             logger.warning(
-                f"Weights & Biases is not initialized, skipping logging of {name}"
+                f"No wandb-compatible run is initialized, skipping logging of {name}"
             )
             return
 

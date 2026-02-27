@@ -4,10 +4,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 import torch
-import wandb
 from torchmetrics import Metric
 
 from rslearn.log_utils import get_logger
+from rslearn.utils.wandb_compat import wandb
 
 logger = get_logger(__name__)
 
@@ -17,7 +17,7 @@ class NonScalarMetricOutput(ABC):
     """Base class for non-scalar metric outputs that need special logging.
 
     Subclasses should implement the log_to_wandb method to define how the metric
-    should be logged (only supports logging to Weights & Biases).
+    should be logged (supports wandb or a wandb-compatible backend like trackio).
     """
 
     @abstractmethod
