@@ -316,9 +316,6 @@ trainer:
       ...
     - class_path: rslearn.train.prediction_writer.RslearnWriter
       init_args:
-        # We need to include this argument, but it will be overridden with the dataset
-        # path from data.init_args.path.
-        path: placeholder
         output_layer: output
 ```
 

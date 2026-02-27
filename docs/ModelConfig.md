@@ -682,9 +682,6 @@ trainer:
     # It is only active during the predict stage.
     - class_path: rslearn.train.prediction_writer.RslearnWriter
       init_args:
-        # This can be left as a placeholder -- rslearn will override it with the
-        # rslearn dataset path from data.init_args.path.
-        path: placeholder
         # This is the name of the layer in the rslearn dataset under which the
         # predictions should be saved. It must exist in the dataset config.
         output_layer: output

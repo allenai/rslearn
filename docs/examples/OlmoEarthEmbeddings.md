@@ -212,8 +212,6 @@ trainer:
    # The RslearnWriter will write our embeddings to a layer in the rslearn dataset.
     - class_path: rslearn.train.prediction_writer.RslearnWriter
       init_args:
-        # This path will be copied from data.init_args.path by rslearn.
-        path: placeholder
         # This references the "embeddings" layer that we will add to our dataset config
         # file to store the embeddings.
         output_layer: embeddings
