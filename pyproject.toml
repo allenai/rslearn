@@ -66,6 +66,7 @@ extra = [
     "transformers>=4.55",
     "wandb>=0.21",
     "timm>=0.9.7",
+    "trackio>=0.17.0"
 ]
 
 dev = [
