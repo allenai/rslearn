@@ -7,6 +7,12 @@ Cropland Data Layer. For the inputs, we use four Sentinel-2 images (one per mont
 If you are new to rslearn, you may want to read [the main README](../../README.md) or
 [CoreConcepts](../CoreConcepts.md) first.
 
+There will be three steps:
+
+1. [Create the dataset.](#create-the-dataset)
+2. [Fine-tune the model.](#fine-tune-the-model)
+3. [Apply the model.](#apply-the-model)
+
 ## Create the Dataset
 
 Create a folder like `./dataset` to store the rslearn dataset, and save this dataset
@@ -141,7 +147,7 @@ model:
             init_args:
               in_channels: [[8, 768]]
               out_channels: 256
-              conv_layers_per_resolution: 2
+              conv_layers_per_resolution: 1
               num_channels: {8: 512, 4: 512, 2: 256, 1: 128}
           # The SegmentationHead computes softmax and cross entropy loss.
           - class_path: rslearn.train.tasks.segmentation.SegmentationHead
@@ -159,7 +165,7 @@ data:
       sentinel2_l2a:
         data_type: "raster"
         layers: ["sentinel2_l2a", "sentinel2_l2a.1", "sentinel2_l2a.2", "sentinel2_l2a.3"]
-        # This is the band order expected by  OlmoEarth.
+        # This is the band order expected by OlmoEarth.
         bands: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
         passthrough: true
         dtype: FLOAT32
@@ -215,6 +221,7 @@ trainer:
       init_args:
         module_selector: ["model", "encoder", 0]
         unfreeze_at_epoch: 10
+        unfreeze_lr_factor: 10
     # The RslearnWriter is used during `model predict` to save the predicted outputs to
     # the rslearn dataset.
     - class_path: rslearn.train.prediction_writer.RslearnWriter
@@ -275,5 +282,5 @@ We can then open up one of the input Sentinel-2 images, the model prediction, an
 actual CDL in qgis:
 
 ```
-qgis dataset/windows/predict/bellingham2/layers/{cdl,output,sentinel2_l2a}/*/geotiff.tif
+qgis dataset/windows/predict/bellingham/layers/{cdl,output,sentinel2_l2a}/*/geotiff.tif
 ```
