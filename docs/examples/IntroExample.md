@@ -277,18 +277,11 @@ data:
 trainer:
   max_epochs: 10
   callbacks:
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    - class_path: rslearn.train.callbacks.checkpointing.BestLastCheckpoint
       init_args:
-        filename: "last"
-        save_top_k: 1
         dirpath: ./land_cover_model_checkpoints/
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        filename: "best"
-        save_top_k: 1
         monitor: val_accuracy
         mode: max
-        dirpath: ./land_cover_model_checkpoints/
 ```
 
 Now we can train the model:
@@ -319,7 +312,7 @@ configuration file, as it will handle writing the outputs from the model to a Ge
 ```yaml
 trainer:
   callbacks:
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    - class_path: rslearn.train.callbacks.checkpointing.BestLastCheckpoint
       ...
     - class_path: rslearn.train.prediction_writer.RslearnWriter
       init_args:
@@ -481,7 +474,7 @@ SegmentationTask and overriding the visualize function.
 ## Checkpoint and Logging Management
 
 Above, we needed to configure the checkpoint directory in the model config (the
-`dirpath` option under `lightning.pytorch.callbacks.ModelCheckpoint`), and explicitly
+`dirpath` option under `rslearn.train.callbacks.checkpointing.BestLastCheckpoint`), and explicitly
 specify the checkpoint path when applying the model. Additionally, metrics are logged
 to the local filesystem and not well organized.
 
@@ -498,7 +491,12 @@ model:
 data:
   # ...
 trainer:
-  # ...
+  callbacks:
+    # ...
+    - class_path: rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint
+      init_args:
+        monitor: val_accuracy
+        mode: max
 project_name: land_cover_model
 run_name: version_00
 # This sets the option via the MANAGEMENT_DIR environment variable.
