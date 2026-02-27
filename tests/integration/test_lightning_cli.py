@@ -105,12 +105,12 @@ def classification_dataset(tmp_path: pathlib.Path) -> Dataset:
     return dataset
 
 
-def test_save_last_checkpoint_every_epoch(
+def test_save_last_every_epoch_and_best_when_metric_improves(
     classification_dataset: Dataset,
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With model management, last checkpoint is saved on every epoch.
+    """With model manegement, save last.ckpt on every epoch and best.ckpt when the metric improves.
 
     We crash at epoch 2 to avoid on_train_end saving last.ckpt at shutdown. With lr=0
     the model never updates so val_loss is constant, so save_top_k should only save the
