@@ -200,8 +200,8 @@ class RslearnWriter(BasePredictionWriter):
 
         Args:
             output_layer: which layer to write the outputs under.
-            path: the dataset root directory. If None, resolved from
-                trainer.datamodule.path in setup().
+            path: the dataset root directory. Default is None to use the same path as
+                the configured data module.
             path_options: additional options for path to pass to fsspec
             selector: keys to access the desired output in the output dict if needed.
                 e.g ["key1", "key2"] gets output["key1"]["key2"]
