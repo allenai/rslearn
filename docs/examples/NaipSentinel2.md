@@ -8,11 +8,11 @@ e.g. for super-resolution training.
 The example highlights interacting with data sources programmatically, advanced
 programmatic window creation, and how to use the NAIP and Sentinel-2 data sources.
 
-We will proceed in two steps:
+We will proceed in three steps:
 
-1. Setup the dataset configuration.
-2. Create windows based on the timestamp of available NAIP images.
-3. Materialize NAIP and Sentinel-2 images.
+1. [Setup the dataset configuration.](#dataset-setup)
+2. [Create windows based on the timestamp of available NAIP images.](#create-windows)
+3. [Materialize NAIP and Sentinel-2 images.](#materialize-data)
 
 ## Dataset Setup
 
@@ -188,8 +188,8 @@ that match with the spatiotemporal windows we created based on the parameters we
 specified in the dataset configuration file.
 
 ```
-rslearn dataset prepare --root ./dataset --workers 32 --retry-max-attempts 5 --retry-backoff-seconds 5
-rslearn dataset materialize --root ./dataset --workers 32 --retry-max-attempts 5 --retry-backoff-seconds 5
+rslearn dataset prepare --root ./dataset --retry-max-attempts 5 --retry-backoff-seconds 5
+rslearn dataset materialize --root ./dataset --retry-max-attempts 5 --retry-backoff-seconds 5
 ```
 
 Now you can visualize these GeoTIFFs in qgis, and/or use the dataset for other

@@ -42,7 +42,7 @@ data:
             valid_range: [0, 1]
 ```
 
-The Sentinel2_X_MS expect the bands to be order and normalized as follows. This is also
+The Sentinel2_X_MS expect the bands to be in order and normalized as follows. This is also
 an example of applying the model on an image time series using SimpleTimeSeries with
 temporal max pooling, which is the recommended way:
 
