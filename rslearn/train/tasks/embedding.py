@@ -4,9 +4,10 @@ from typing import Any
 
 import numpy.typing as npt
 import torch
+from einops import rearrange
 from torchmetrics import MetricCollection
 
-from rslearn.models.component import FeatureMaps, Predictor
+from rslearn.models.component import FeatureMaps, Predictor, TokenFeatureMaps
 from rslearn.train.model_context import ModelContext, ModelOutput, SampleMetadata
 from rslearn.utils import Feature
 
@@ -99,7 +100,9 @@ class EmbeddingHead(Predictor):
 
         Args:
             intermediates: output from the previous model component, which must be a
-                FeatureMaps consisting of a single feature map.
+                FeatureMaps or TokenFeatureMaps consisting of a single feature map. For
+                TokenFeatureMaps, we will reshape the token dimension into the channel
+                dimension (BCHWN -> BCHW).
             context: the model context.
             targets: the targets (ignored).
 
@@ -107,14 +110,24 @@ class EmbeddingHead(Predictor):
             model output with the feature map that was input to this component along
                 with a dummy loss.
         """
-        if not isinstance(intermediates, FeatureMaps):
-            raise ValueError("input to EmbeddingHead must be a FeatureMaps")
-        if len(intermediates.feature_maps) != 1:
+        if isinstance(intermediates, FeatureMaps):
+            if len(intermediates.feature_maps) != 1:
+                raise ValueError(
+                    f"input to EmbeddingHead must have one feature map, but got {len(intermediates.feature_maps)}"
+                )
+            feat = intermediates.feature_maps[0]
+        elif isinstance(intermediates, TokenFeatureMaps):
+            if len(intermediates.feature_maps) != 1:
+                raise ValueError(
+                    f"input to EmbeddingHead must have one feature map, but got {len(intermediates.feature_maps)}"
+                )
+            feat = rearrange(intermediates.feature_maps[0], "b c h w n -> b (n c) h w")
+        else:
             raise ValueError(
-                f"input to EmbeddingHead must have one feature map, but got {len(intermediates.feature_maps)}"
+                "input to EmbeddingHead must be a FeatureMaps or TokenFeatureMaps"
             )
 
         return ModelOutput(
-            outputs=intermediates.feature_maps[0],
+            outputs=feat,
             loss_dict={"loss": 0},
         )
