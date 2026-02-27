@@ -105,24 +105,14 @@ def classification_dataset(tmp_path: pathlib.Path) -> Dataset:
     return dataset
 
 
-def test_save_last_every_epoch_and_best_when_metric_improves(
-    classification_dataset: Dataset,
-    tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """With model manegement, save last.ckpt on every epoch and best.ckpt when the metric improves.
-
-    We crash at epoch 2 to avoid on_train_end saving last.ckpt at shutdown. With lr=0
-    the model never updates so val_loss is constant, so save_top_k should only save the
-    epoch-0 checkpoint, but save_last should update last.ckpt every epoch.
-    """
-    init_jsonargparse()
-
-    management_dir = tmp_path / "management"
-    project_name = "test_project"
-    run_name = "test_run"
-
-    cfg = {
+def _make_classification_config(
+    management_dir: pathlib.Path,
+    callbacks: list[dict],
+    project_name: str = "test_project",
+    run_name: str = "test_run",
+) -> dict:
+    """Build a classification training config with the given callbacks."""
+    return {
         "model": {
             "class_path": "rslearn.train.lightning_module.RslearnLightningModule",
             "init_args": {
@@ -182,16 +172,7 @@ def test_save_last_every_epoch_and_best_when_metric_improves(
         "trainer": {
             "max_epochs": 3,
             "accelerator": "cpu",
-            "callbacks": [
-                {
-                    "class_path": "tests.integration.test_lightning_cli.CrashAtEpochCallback",
-                    "init_args": {"crash_at_epoch": 2},
-                },
-                {
-                    "class_path": "rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint",
-                    "init_args": {"monitor": "val_loss", "mode": "min"},
-                },
-            ],
+            "callbacks": callbacks,
         },
         "management_dir": str(management_dir),
         "project_name": project_name,
@@ -199,23 +180,60 @@ def test_save_last_every_epoch_and_best_when_metric_improves(
         "log_mode": "no",
     }
 
+
+def _run_cli_fit(
+    cfg: dict,
+    tmp_path: pathlib.Path,
+    dataset_path: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Write config to disk and run RslearnLightningCLI fit."""
+    init_jsonargparse()
     tmp_fname = tmp_path / "config.yaml"
     with tmp_fname.open("w") as f:
         json.dump(cfg, f)
+    monkeypatch.setenv("DATASET_PATH", dataset_path)
+    RslearnLightningCLI(
+        model_class=RslearnLightningModule,
+        datamodule_class=RslearnDataModule,
+        args=["fit", "--config", str(tmp_fname)],
+        subclass_mode_model=True,
+        subclass_mode_data=True,
+        save_config_kwargs={"overwrite": True},
+        parser_class=RslearnArgumentParser,
+    )
 
-    monkeypatch.setenv("DATASET_PATH", str(classification_dataset.path))
+
+def test_save_last_every_epoch_and_best_when_metric_improves(
+    classification_dataset: Dataset,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With model management, save last.ckpt on every epoch and best.ckpt when the metric improves.
+
+    We crash at epoch 2 to avoid on_train_end saving last.ckpt at shutdown. With lr=0
+    the model never updates so val_loss is constant, so save_top_k should only save the
+    epoch-0 checkpoint, but save_last should update last.ckpt every epoch.
+    """
+    management_dir = tmp_path / "management"
+    cfg = _make_classification_config(
+        management_dir,
+        callbacks=[
+            {
+                "class_path": "tests.integration.test_lightning_cli.CrashAtEpochCallback",
+                "init_args": {"crash_at_epoch": 2},
+            },
+            {
+                "class_path": "rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint",
+                "init_args": {"monitor": "val_loss", "mode": "min"},
+            },
+        ],
+    )
+
     with pytest.raises(RuntimeError, match="Intentional crash"):
-        RslearnLightningCLI(
-            model_class=RslearnLightningModule,
-            datamodule_class=RslearnDataModule,
-            args=["fit", "--config", str(tmp_fname)],
-            subclass_mode_model=True,
-            subclass_mode_data=True,
-            save_config_kwargs={"overwrite": True},
-            parser_class=RslearnArgumentParser,
-        )
+        _run_cli_fit(cfg, tmp_path, str(classification_dataset.path), monkeypatch)
 
-    project_dir = management_dir / project_name / run_name
+    project_dir = management_dir / "test_project" / "test_run"
 
     # The best checkpoint should be from epoch 0 (the first and only time the metric
     # was recorded as "best", since lr=0 means val_loss is constant).
@@ -233,3 +251,57 @@ def test_save_last_every_epoch_and_best_when_metric_improves(
     assert last_ckpt["epoch"] == 1, (
         f"last.ckpt should be from epoch 1, but got epoch {last_ckpt['epoch']}"
     )
+
+
+def test_checkpoint_monitors_validation_metric(
+    classification_dataset: Dataset,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Checkpointing on a validation metric (val_accuracy) should work.
+
+    Previously there was a bug where monitoring val_loss worked but metrics weren't
+    computed yet.
+    """
+    management_dir = tmp_path / "management"
+    cfg = _make_classification_config(
+        management_dir,
+        callbacks=[
+            {
+                "class_path": "tests.integration.test_lightning_cli.CrashAtEpochCallback",
+                "init_args": {"crash_at_epoch": 2},
+            },
+            {
+                "class_path": "rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint",
+                "init_args": {"monitor": "val_accuracy", "mode": "max"},
+            },
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="Intentional crash"):
+        _run_cli_fit(cfg, tmp_path, str(classification_dataset.path), monkeypatch)
+
+    project_dir = management_dir / "test_project" / "test_run"
+    assert (project_dir / "last.ckpt").exists(), "last.ckpt should exist"
+    assert (project_dir / "best.ckpt").exists(), "best.ckpt should exist"
+
+
+def test_checkpoint_raises_on_invalid_metric(
+    classification_dataset: Dataset,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ManagedBestLastCheckpoint should raise ValueError when the monitored metric doesn't exist."""
+    management_dir = tmp_path / "management"
+    cfg = _make_classification_config(
+        management_dir,
+        callbacks=[
+            {
+                "class_path": "rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint",
+                "init_args": {"monitor": "nonexistent_metric", "mode": "min"},
+            },
+        ],
+    )
+
+    with pytest.raises(ValueError, match="did not find nonexistent_metric metric"):
+        _run_cli_fit(cfg, tmp_path, str(classification_dataset.path), monkeypatch)

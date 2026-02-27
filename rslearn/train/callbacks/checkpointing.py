@@ -34,9 +34,7 @@ class BestLastCheckpoint(Callback):
         self._best_value: float | None = None
 
     @rank_zero_only
-    def on_validation_epoch_end(
-        self, trainer: Trainer, pl_module: LightningModule
-    ) -> None:
+    def on_validation_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Save last.ckpt always, and best.ckpt when the monitored metric improves."""
         if trainer.sanity_checking:
             return

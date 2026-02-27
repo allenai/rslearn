@@ -117,10 +117,10 @@ qgis $DATASET_PATH/windows/default/seattle_54912_-527360/layers/sentinel2/R_G_B/
 Before we can train a land cover prediction model, we need labels. Here, we will use
 the ESA WorldCover land cover map as labels.
 
-Start by downloading the WorldCover data from https://worldcover2021.esa.int
+Start by downloading the WorldCover data from the [ESA WorldCover S3 bucket](https://registry.opendata.aws/esa-worldcover-vito/):
 
 ```
-wget https://worldcover2021.esa.int/data/archive/ESA_WorldCover_10m_2021_v200_60deg_macrotile_N30W180.zip
+wget https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/macrotiles/ESA_WorldCover_10m_2021_v200_60deg_macrotile_N30W180.zip
 mkdir world_cover_tifs
 unzip ESA_WorldCover_10m_2021_v200_60deg_macrotile_N30W180.zip -d world_cover_tifs/
 ```
