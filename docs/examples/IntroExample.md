@@ -346,9 +346,7 @@ dataset configuration so it specifies the layer:
 Now we can apply the model:
 
 ```
-# Find model checkpoint in lightning_logs dir.
-ls lightning_logs/*/checkpoints/last.ckpt
-rslearn model predict --config land_cover_model.yaml --ckpt_path land_cover_model_checkpoints/last.ckpt
+rslearn model predict --config land_cover_model.yaml --ckpt_path land_cover_model_checkpoints/best.ckpt
 ```
 
 And visualize the Sentinel-2 image and output in qgis:
@@ -460,7 +458,7 @@ the `model test` command:
 
 ```
 mkdir ./vis
-rslearn model test --config land_cover_model.yaml --ckpt_path land_cover_model_checkpoints/last.ckpt --model.init_args.visualize_dir=./vis/
+rslearn model test --config land_cover_model.yaml --ckpt_path land_cover_model_checkpoints/best.ckpt --model.init_args.visualize_dir=./vis/
 ```
 
 This will produce PNGs in the vis directory. The visualizations are produced by the
