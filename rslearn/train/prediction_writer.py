@@ -275,7 +275,7 @@ class RslearnWriter(BasePredictionWriter):
             raise ValueError(f"invalid layer type {self.layer_config.type}")
 
         # If the merger was not set, initialize it based on the layer type.
-        if self._merger is None:
+        if self.merger is None:
             if self.layer_config.type == LayerType.RASTER:
                 self.merger = RasterMerger()
             elif self.layer_config.type == LayerType.VECTOR:

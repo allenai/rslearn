@@ -291,6 +291,8 @@ def test_write_raster(tmp_path: pathlib.Path) -> None:
     from unittest.mock import Mock
 
     mock_trainer = Mock(spec=Trainer)
+    mock_trainer.datamodule = Mock()
+    mock_trainer.datamodule.path = UPath(ds_path)
     writer.setup(mock_trainer, pl_module, stage="predict")
 
     writer.write_on_batch_end(
@@ -383,6 +385,8 @@ def test_write_raster_with_custom_output_path(tmp_path: pathlib.Path) -> None:
     from unittest.mock import Mock
 
     mock_trainer = Mock(spec=Trainer)
+    mock_trainer.datamodule = Mock()
+    mock_trainer.datamodule.path = UPath(ds_path)
     writer.setup(mock_trainer, pl_module, stage="predict")
 
     writer.write_on_batch_end(
@@ -479,6 +483,8 @@ def test_write_raster_with_layer_config(tmp_path: pathlib.Path) -> None:
     from unittest.mock import Mock
 
     mock_trainer = Mock(spec=Trainer)
+    mock_trainer.datamodule = Mock()
+    mock_trainer.datamodule.path = UPath(tmp_path)
     writer.setup(mock_trainer, pl_module, stage="predict")
 
     writer.write_on_batch_end(
@@ -573,6 +579,8 @@ def test_selector_with_dictionary_output(tmp_path: pathlib.Path) -> None:
     from unittest.mock import Mock
 
     mock_trainer = Mock(spec=Trainer)
+    mock_trainer.datamodule = Mock()
+    mock_trainer.datamodule.path = UPath(tmp_path)
     writer.setup(mock_trainer, pl_module, stage="predict")
 
     writer.write_on_batch_end(
@@ -701,6 +709,8 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
     from unittest.mock import Mock
 
     mock_trainer = Mock(spec=Trainer)
+    mock_trainer.datamodule = Mock()
+    mock_trainer.datamodule.path = UPath(tmp_path)
     writer.setup(mock_trainer, pl_module, stage="predict")
 
     writer.write_on_batch_end(

@@ -17,6 +17,7 @@ class TestBestLastCheckpoint:
         cb = BestLastCheckpoint(dirpath=dirpath, monitor="val_loss", mode="min")
 
         trainer = MagicMock()
+        trainer.sanity_checking = False
         trainer.callback_metrics = {"val_loss": torch.tensor(0.5)}
         pl_module = MagicMock()
 
@@ -29,6 +30,7 @@ class TestBestLastCheckpoint:
         cb = BestLastCheckpoint(dirpath=dirpath, monitor="val_loss", mode="min")
 
         trainer = MagicMock()
+        trainer.sanity_checking = False
         pl_module = MagicMock()
 
         # First call: val_loss=0.5, should save best
@@ -55,6 +57,7 @@ class TestBestLastCheckpoint:
         cb = BestLastCheckpoint(dirpath=dirpath, monitor="val_acc", mode="max")
 
         trainer = MagicMock()
+        trainer.sanity_checking = False
         pl_module = MagicMock()
 
         # First: 0.8 -> save best
