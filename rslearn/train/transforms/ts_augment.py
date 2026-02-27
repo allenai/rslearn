@@ -1,4 +1,4 @@
-"""Time-series augmentation transforms: masking, shift, noise, and mixup."""
+"""Time-series augmentation transforms: masking and shift."""
 
 import random
 from typing import Any
@@ -13,6 +13,7 @@ from .transform import Transform
 class RandomTimeMasking(Transform):
     """Randomly mask entire timesteps in a CTHW tensor.
 
+    #TODO: to remove in the future as RandomTimeDropping should be used instead.
     After normalization, 0 equals the mean, so masking to 0 makes missing data
     indistinguishable from real mean-valued data.  Set ``mask_value`` to a
     sentinel outside the normal range (e.g. -9999) and/or enable
@@ -138,38 +139,4 @@ class TemporalShift(Transform):
         self.apply_fn(
             self.apply_image, input_dict, target_dict, self.selectors, shift=shift
         )
-        return input_dict, target_dict
-
-
-class GaussianNoise(Transform):
-    """Add Gaussian noise to inputs."""
-
-    def __init__(
-        self,
-        selectors: list[str] = ["image"],
-        std: float = 0.01,
-        skip_missing: bool = False,
-    ):
-        """Initialize GaussianNoise.
-
-        Args:
-            selectors: inputs to augment.
-            std: standard deviation of the noise.
-            skip_missing: skip missing selectors.
-        """
-        super().__init__()
-        self.selectors = selectors
-        self.std = std
-        self.skip_missing = skip_missing
-
-    def apply_image(self, image: RasterImage) -> RasterImage:
-        """Add noise."""
-        image.image = image.image + torch.randn_like(image.image) * self.std
-        return image
-
-    def forward(
-        self, input_dict: dict[str, Any], target_dict: dict[str, Any]
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Apply transform."""
-        self.apply_fn(self.apply_image, input_dict, target_dict, self.selectors)
         return input_dict, target_dict

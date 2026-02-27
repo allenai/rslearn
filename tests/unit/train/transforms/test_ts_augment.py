@@ -1,10 +1,7 @@
-"""Unit tests for rslearn.train.transforms.ts_augment."""
-
 import torch
 
 from rslearn.train.model_context import RasterImage
 from rslearn.train.transforms.ts_augment import (
-    GaussianNoise,
     RandomTimeMasking,
     TemporalShift,
 )
@@ -98,23 +95,3 @@ def test_temporal_shift_preserves_shape_and_values() -> None:
     # All output values come from the original tensor (edge repeats existing values).
     values_after = set(inp["image"].image.flatten().tolist())
     assert values_after.issubset(values_before)
-
-
-def test_gaussian_noise_changes_tensor() -> None:
-    torch.manual_seed(42)
-    t = GaussianNoise(std=0.1)
-    inp = _make_input()
-    orig = inp["image"].image.clone()
-    inp, _ = t(inp, {})
-    assert not torch.equal(inp["image"].image, orig)
-
-
-def test_gaussian_noise_magnitude() -> None:
-    torch.manual_seed(42)
-    std = 0.05
-    t = GaussianNoise(std=std)
-    inp = _make_input(C=1, T=1, H=64, W=64)
-    orig = inp["image"].image.clone()
-    inp, _ = t(inp, {})
-    diff_std = (inp["image"].image - orig).std().item()
-    assert abs(diff_std - std) < 0.02
