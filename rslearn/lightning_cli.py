@@ -109,14 +109,26 @@ class RslearnLightningCLI(LightningCLI):
     """LightningCLI that links data.tasks to model.tasks and supports environment variables."""
 
     def add_arguments_to_parser(self, parser: LightningArgumentParser) -> None:
-        """Link data.tasks to model.tasks.
+        """Link data.tasks to model.tasks and set sensible defaults.
 
         Args:
             parser: the argument parser
         """
-        # Link data.tasks to model.tasks
         parser.link_arguments(
             "data.init_args.task", "model.init_args.task", apply_on="instantiate"
+        )
+
+        parser.set_defaults(
+            {
+                # Disable the sampler replacement, since the rslearn data module will set the
+                # sampler as needed.
+                "trainer.use_distributed_sampler": False,
+                # Default to DDP with find_unused_parameters, since it works in most settings.
+                "trainer.strategy": {
+                    "class_path": "lightning.pytorch.strategies.DDPStrategy",
+                    "init_args": {"find_unused_parameters": True},
+                },
+            }
         )
 
         # Project management option to have rslearn manage checkpoints and W&B run.
@@ -161,18 +173,6 @@ class RslearnLightningCLI(LightningCLI):
             type=str,
             help="Whether to log to W&B (used with --management_dir). 'yes' will enable logging, 'no' will disable logging, and 'auto' will use 'yes' during fit and 'no' during val/test/predict.",
             default="auto",
-        )
-        parser.add_argument(
-            "--monitor",
-            type=str,
-            help="The metric key to monitor for saving the best checkpoint. Set to empty string to customize the ModelCheckpoint callbacks.",
-            default="val_loss",
-        )
-        parser.add_argument(
-            "--monitor_mode",
-            type=str,
-            help="min if the metric being monitored is better when minimized, max otherwise",
-            default="min",
         )
 
     def _get_checkpoint_path(
@@ -283,6 +283,9 @@ class RslearnLightningCLI(LightningCLI):
     def enable_project_management(self, management_dir: str) -> None:
         """Enable project management in the specified directory.
 
+        Sets default_root_dir on the trainer (used by ManagedBestLastCheckpoint),
+        configures W&B logging, and handles checkpoint loading/resuming.
+
         Args:
             management_dir: the directory to store checkpoints and W&B.
         """
@@ -298,12 +301,16 @@ class RslearnLightningCLI(LightningCLI):
         # Get project directory within the project management directory.
         project_dir = UPath(management_dir) / c.project_name / c.run_name
 
-        # Add the W&B logger if it isn't already set, and (re-)configure it.
+        # Set default_root_dir so ManagedBestLastCheckpoint can resolve it.
+        c.trainer.default_root_dir = str(project_dir)
+
+        # Configure W&B logging.
         should_log = False
         if c.log_mode == "yes":
             should_log = True
         elif c.log_mode == "auto":
             should_log = subcommand == "fit"
+
         if should_log:
             if not c.trainer.logger:
                 c.trainer.logger = jsonargparse.Namespace(
@@ -317,104 +324,35 @@ class RslearnLightningCLI(LightningCLI):
             if c.run_description:
                 c.trainer.logger.init_args.notes = c.run_description
 
-            # Add callback to save config to W&B.
-            upload_wandb_callback = None
-            if "callbacks" in c.trainer and c.trainer.callbacks:
-                for existing_callback in c.trainer.callbacks:
-                    if existing_callback.class_path == "SaveWandbRunIdCallback":
-                        upload_wandb_callback = existing_callback
-            else:
-                c.trainer.callbacks = []
-
-            if not upload_wandb_callback:
-                config_str = json.dumps(
-                    c.as_dict(), default=lambda _: "<not serializable>"
-                )
-                upload_wandb_callback = jsonargparse.Namespace(
-                    {
-                        "class_path": "SaveWandbRunIdCallback",
-                        "init_args": jsonargparse.Namespace(
-                            {
-                                "project_dir": str(project_dir),
-                                "config_str": config_str,
-                            }
-                        ),
-                    }
-                )
-                c.trainer.callbacks.append(upload_wandb_callback)
-        elif c.trainer.logger:
-            logger.warning(
-                "Model management is enabled and logging should be off, but the model config specifies a logger. "
-                + "The logger should be removed from the model config, since it will not be automatically disabled."
-            )
-
-        if subcommand == "fit":
-            # Add ModelCheckpoint callbacks if they are not already present. We use one
-            # callback to save the latest checkpoint, so we can resume from it, and one
-            # to save the best checkpoint.
+            # Add callback to save W&B run ID for resume.
             if "callbacks" not in c.trainer or not c.trainer.callbacks:
                 c.trainer.callbacks = []
 
-            existing_callbacks = []
-            for existing_callback in c.trainer.callbacks:
-                if (
-                    existing_callback.class_path
-                    != "lightning.pytorch.callbacks.ModelCheckpoint"
-                ):
-                    continue
-                existing_callbacks.append(existing_callback)
-
-                # Show warning if save_last is set. Usually this option does not do what
-                # the user expects and it has caused issues in the past.
-                if getattr(existing_callback.init_args, "save_last", None):
-                    logger.warning(
-                        "Warning: a ModelCheckpoint with save_last=True is configured. "
-                        "The behavior of save_last varies by Lightning version and may yield unexpected results."
+            has_wandb_callback = any(
+                cb.class_path == "SaveWandbRunIdCallback" for cb in c.trainer.callbacks
+            )
+            if not has_wandb_callback:
+                config_str = json.dumps(
+                    c.as_dict(), default=lambda _: "<not serializable>"
+                )
+                c.trainer.callbacks.append(
+                    jsonargparse.Namespace(
+                        {
+                            "class_path": "SaveWandbRunIdCallback",
+                            "init_args": jsonargparse.Namespace(
+                                {
+                                    "project_dir": str(project_dir),
+                                    "config_str": config_str,
+                                }
+                            ),
+                        }
                     )
-
-            if existing_callbacks and c.monitor:
-                raise ValueError(
-                    "Custom ModelCheckpoints cannot be set when using --monitor (either remove the callbacks or use --monitor='')"
                 )
-            if not existing_callbacks and not c.monitor:
-                raise ValueError(
-                    "Custom ModelCheckpoints must be set when using --monitor=''"
-                )
-
-            if existing_callbacks:
-                for existing_callback in existing_callbacks:
-                    existing_callback.init_args.dirpath = str(project_dir)
-
-            else:
-                save_last_callback = jsonargparse.Namespace(
-                    {
-                        "class_path": "lightning.pytorch.callbacks.ModelCheckpoint",
-                        "init_args": jsonargparse.Namespace(
-                            {
-                                "filename": "last",
-                                "save_top_k": 1,
-                                "dirpath": str(project_dir),
-                            }
-                        ),
-                    }
-                )
-                c.trainer.callbacks.append(save_last_callback)
-
-                save_best_callback = jsonargparse.Namespace(
-                    {
-                        "class_path": "lightning.pytorch.callbacks.ModelCheckpoint",
-                        "init_args": jsonargparse.Namespace(
-                            {
-                                "filename": "best",
-                                "save_top_k": 1,
-                                "monitor": c.monitor,
-                                "mode": c.monitor_mode,
-                                "dirpath": str(project_dir),
-                            }
-                        ),
-                    }
-                )
-                c.trainer.callbacks.append(save_best_callback)
+        elif c.trainer.logger:
+            logger.warning(
+                "Model management is enabled and logging should be off, but the model config specifies a logger. "
+                "The logger should be removed from the model config, since it will not be automatically disabled."
+            )
 
         # Load existing checkpoint.
         checkpoint_path = self._get_checkpoint_path(
@@ -438,10 +376,7 @@ class RslearnLightningCLI(LightningCLI):
                     c.trainer.logger.init_args.id = wandb_id
 
     def before_instantiate_classes(self) -> None:
-        """Called before Lightning class initialization.
-
-        Sets the dataset path for any configured RslearnPredictionWriter callbacks.
-        """
+        """Called before Lightning class initialization."""
         if not hasattr(self.config, "subcommand"):
             logger.warning(
                 "Config does not have subcommand attribute, assuming we are in run=False mode"
@@ -452,39 +387,11 @@ class RslearnLightningCLI(LightningCLI):
             subcommand = self.config.subcommand
             c = self.config[subcommand]
 
-        # If there is a RslearnPredictionWriter, set its path.
-        prediction_writer_callback = None
-        if "callbacks" in c.trainer and c.trainer.callbacks:
-            for existing_callback in c.trainer.callbacks:
-                if (
-                    existing_callback.class_path
-                    == "rslearn.train.prediction_writer.RslearnWriter"
-                ):
-                    prediction_writer_callback = existing_callback
-        if prediction_writer_callback:
-            prediction_writer_callback.init_args.path = c.data.init_args.path
-
-        # Disable the sampler replacement, since the rslearn data module will set the
-        # sampler as needed.
-        c.trainer.use_distributed_sampler = False
-
         # For predict, make sure that return_predictions is False.
         # Otherwise all the predictions would be stored in memory which can lead to
         # high memory consumption.
         if subcommand == "predict":
             c.return_predictions = False
-
-        # Default to DDP with find_unused_parameters. Likely won't get called with unified config
-        if subcommand == "fit":
-            if not c.trainer.strategy:
-                c.trainer.strategy = jsonargparse.Namespace(
-                    {
-                        "class_path": "lightning.pytorch.strategies.DDPStrategy",
-                        "init_args": jsonargparse.Namespace(
-                            {"find_unused_parameters": True}
-                        ),
-                    }
-                )
 
         if c.management_dir:
             self.enable_project_management(c.management_dir)

@@ -187,8 +187,8 @@ class RslearnWriter(BasePredictionWriter):
 
     def __init__(
         self,
-        path: str,
         output_layer: str,
+        path: str | None = None,
         path_options: dict[str, Any] | None = None,
         selector: list[str] | None = None,
         merger: CropPredictionMerger | None = None,
@@ -199,8 +199,9 @@ class RslearnWriter(BasePredictionWriter):
         """Create a new RslearnWriter.
 
         Args:
-            path: the dataset root directory.
             output_layer: which layer to write the outputs under.
+            path: the dataset root directory. If None, resolved from
+                trainer.datamodule.path in setup().
             path_options: additional options for path to pass to fsspec
             selector: keys to access the desired output in the output dict if needed.
                 e.g ["key1", "key2"] gets output["key1"]["key2"]
@@ -216,16 +217,44 @@ class RslearnWriter(BasePredictionWriter):
         super().__init__(write_interval="batch")
         self.output_layer = output_layer
         self.selector = selector or []
-        ds_upath = UPath(path, **path_options or {})
+
+        # Save args for use in self._initialize, which is called from setup function.
+        self._path = path
+        self._path_options = path_options
+        self._output_path = output_path
+        self._layer_config_arg = layer_config
+        self._storage_config_arg = storage_config
+
+        self._merger_arg = merger
+        # Map from window name to pending data to write.
+        # This is used when windows are split up into crops, so the data from all the
+        # crops of each window need to be reconstituted.
+        self.pending_outputs: dict[str, list[PendingCropOutput]] = {}
+        self._initialized = False
+
+    def _initialize(self, ds_upath: UPath) -> None:
+        """Initialize storage, format, and merger from the resolved dataset path.
+
+        Args:
+            ds_upath: the resolved dataset UPath.
+
+        Raises:
+            ValueError: if already initialized.
+        """
+        if self._initialized:
+            raise ValueError("RslearnWriter._initialize called twice")
+
+        # Output to provided path if set, otherwise we default to writing predictions
+        # to the dataset path.
         output_upath = (
-            UPath(output_path, **path_options or {})
-            if output_path is not None
+            UPath(self._output_path, **self._path_options or {})
+            if self._output_path is not None
             else ds_upath
         )
 
         self.layer_config, self.dataset_storage = (
             self._get_layer_config_and_dataset_storage(
-                ds_upath, output_upath, layer_config, storage_config
+                ds_upath, output_upath, self._layer_config_arg, self._storage_config_arg
             )
         )
 
@@ -238,17 +267,31 @@ class RslearnWriter(BasePredictionWriter):
         else:
             raise ValueError(f"invalid layer type {self.layer_config.type}")
 
-        if merger is not None:
-            self.merger = merger
+        if self._merger_arg is not None:
+            self.merger = self._merger_arg
         elif self.layer_config.type == LayerType.RASTER:
             self.merger = RasterMerger()
         elif self.layer_config.type == LayerType.VECTOR:
             self.merger = VectorMerger()
 
-        # Map from window name to pending data to write.
-        # This is used when windows are split up into crops, so the data from all the
-        # crops of each window need to be reconstituted.
-        self.pending_outputs: dict[str, list[PendingCropOutput]] = {}
+        self._initialized = True
+
+    def setup(
+        self, trainer: Trainer, pl_module: LightningModule, stage: str | None = None
+    ) -> None:
+        """Resolve path and initialize storage/format.
+
+        Args:
+            trainer: the trainer.
+            pl_module: the LightningModule.
+            stage: the stage (fit/validate/test/predict).
+        """
+        if self._path is not None:
+            ds_upath = UPath(self._path, **self._path_options or {})
+        else:
+            ds_upath = trainer.datamodule.path
+
+        self._initialize(ds_upath)
 
     def _get_layer_config_and_dataset_storage(
         self,

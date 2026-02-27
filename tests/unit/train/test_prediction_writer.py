@@ -291,6 +291,7 @@ def test_write_raster(tmp_path: pathlib.Path) -> None:
     from unittest.mock import Mock
 
     mock_trainer = Mock(spec=Trainer)
+    writer.setup(mock_trainer, pl_module, stage="predict")
 
     writer.write_on_batch_end(
         trainer=mock_trainer,
@@ -382,6 +383,7 @@ def test_write_raster_with_custom_output_path(tmp_path: pathlib.Path) -> None:
     from unittest.mock import Mock
 
     mock_trainer = Mock(spec=Trainer)
+    writer.setup(mock_trainer, pl_module, stage="predict")
 
     writer.write_on_batch_end(
         trainer=mock_trainer,
@@ -477,6 +479,7 @@ def test_write_raster_with_layer_config(tmp_path: pathlib.Path) -> None:
     from unittest.mock import Mock
 
     mock_trainer = Mock(spec=Trainer)
+    writer.setup(mock_trainer, pl_module, stage="predict")
 
     writer.write_on_batch_end(
         trainer=mock_trainer,
@@ -570,6 +573,7 @@ def test_selector_with_dictionary_output(tmp_path: pathlib.Path) -> None:
     from unittest.mock import Mock
 
     mock_trainer = Mock(spec=Trainer)
+    writer.setup(mock_trainer, pl_module, stage="predict")
 
     writer.write_on_batch_end(
         trainer=mock_trainer,
@@ -697,6 +701,7 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
     from unittest.mock import Mock
 
     mock_trainer = Mock(spec=Trainer)
+    writer.setup(mock_trainer, pl_module, stage="predict")
 
     writer.write_on_batch_end(
         trainer=mock_trainer,
@@ -721,4 +726,82 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
         window.get_raster_dir(output_layer_name, output_bands, 0) / "geotiff.tif"
     )
     assert expected_fname.exists(), "Nested selector should successfully write output"
+    assert window.is_layer_completed(output_layer_name)
+
+
+def test_write_raster_with_path_from_datamodule(tmp_path: pathlib.Path) -> None:
+    """Test that RslearnWriter resolves path from trainer.datamodule when path=None."""
+    output_layer_name = "output"
+    output_bands = ["value"]
+
+    ds_path = UPath(tmp_path)
+    ds_config = {
+        "layers": {
+            output_layer_name: {
+                "type": "raster",
+                "band_sets": [{"dtype": "uint8", "bands": output_bands}],
+            }
+        }
+    }
+    with (ds_path / "config.json").open("w") as f:
+        json.dump(ds_config, f)
+    dataset = Dataset(ds_path)
+
+    window_name = "default"
+    window_group = "default"
+    window = Window(
+        storage=dataset.storage,
+        group=window_group,
+        name=window_name,
+        projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
+        bounds=(0, 0, 1, 1),
+        time_range=None,
+    )
+    window.save()
+
+    task = SegmentationTask(num_classes=2)
+    pl_module = RslearnLightningModule(
+        model=torch.nn.Identity(),
+        task=task,
+    )
+
+    # Create writer without path — it should resolve from the datamodule.
+    writer = RslearnWriter(output_layer=output_layer_name)
+
+    metadata = SampleMetadata(
+        window_group=window.group,
+        window_name=window.name,
+        window_bounds=window.bounds,
+        crop_bounds=window.bounds,
+        crop_idx=0,
+        num_crops_in_window=1,
+        time_range=window.time_range,
+        projection=window.projection,
+        dataset_source=None,
+    )
+    batch = ([None], [None], [metadata])
+    output = torch.zeros((2, 5, 5), dtype=torch.float32)
+
+    from unittest.mock import Mock
+
+    mock_trainer = Mock(spec=Trainer)
+    mock_trainer.datamodule = Mock()
+    mock_trainer.datamodule.path = ds_path
+
+    writer.setup(mock_trainer, pl_module, stage="predict")
+
+    writer.write_on_batch_end(
+        trainer=mock_trainer,
+        pl_module=pl_module,
+        prediction=ModelOutput(outputs=[output], loss_dict={}),
+        batch_indices=[0],
+        batch=batch,
+        batch_idx=0,
+        dataloader_idx=0,
+    )
+
+    expected_fname = (
+        window.get_raster_dir(output_layer_name, output_bands, 0) / "geotiff.tif"
+    )
+    assert expected_fname.exists()
     assert window.is_layer_completed(output_layer_name)
