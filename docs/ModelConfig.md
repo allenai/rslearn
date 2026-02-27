@@ -702,13 +702,18 @@ it, when running `model test` and `model predict`, the checkpoint needs to be
 explicitly specified using `--ckpt_path`.
 
 If enabled, model management will:
-1. Adjust the `dirpath` of any `ModelCheckpoint` callbacks to save checkpoints in
-   a project directory at `{management_dir}/{project_name}/{run_name}/`.
+1. Set `trainer.default_root_dir` to `{management_dir}/{project_name}/{run_name}/`.
+   This is used by `ManagedBestLastCheckpoint` to resolve its checkpoint directory.
 2. If training is restarted, resume from the last checkpoint.
 3. During test/predict, automatically load the best checkpoint.
 4. Enable W&B logging and save the W&B run ID to the save project directory (so it can
    be reused when resuming training).
 5. Save the model config with the W&B run.
+
+To save checkpoints, add a `ManagedBestLastCheckpoint` callback to `trainer.callbacks`.
+This callback automatically determines its checkpoint directory from
+`trainer.default_root_dir` (set by model management), and saves both `last.ckpt` and
+`best.ckpt` based on the monitored metric.
 
 Common options are summarized below:
 
@@ -738,10 +743,14 @@ load_checkpoint_required: auto
 # 'no' will disable logging.
 # 'auto' will use 'yes' during fit and 'no' during val/test/predict.
 log_mode: auto
-# The metric to monitor for saving the best checkpoint.
-monitor: val_loss
-# Whether the metric being monitored should be maximized (max) or minimized (min).
-monitor_mode: min
+trainer:
+  callbacks:
+    # Saves last.ckpt every validation epoch and best.ckpt when the metric improves.
+    # dirpath is automatically set from management_dir/project_name/run_name.
+    - class_path: rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint
+      init_args:
+        monitor: val_loss
+        mode: min
 ```
 
 ## Using Custom Classes

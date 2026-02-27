@@ -308,14 +308,16 @@ trainer:
       init_args:
         module_selector: ["model", "encoder", 0]
         unfreeze_at_epoch: 10
+    # Save best checkpoint based on accuracy metric.
+    - class_path: rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint
+      init_args:
+        monitor: val_accuracy
+        mode: max
 # Here we enable automatic checkpoint management and logging to W&B.
 # Set WANDB_MODE=offline to disable online logging.
 project_name: ${PROJECT_NAME}
 run_name: ${RUN_NAME}
 management_dir: ${MANAGEMENT_DIR}
-# Save best checkpoint based on accuracy metric.
-monitor: val_accuracy
-monitor_mode: max
 ```
 
 Save this as `model.yaml`.
