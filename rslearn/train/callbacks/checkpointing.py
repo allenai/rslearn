@@ -13,11 +13,7 @@ logger = get_logger(__name__)
 
 
 class BestLastCheckpoint(Callback):
-    """Saves both last.ckpt (every validation) and best.ckpt (when metric improves).
-
-    Replaces the common pattern of configuring two separate ModelCheckpoint callbacks.
-    Uses trainer.save_checkpoint() which handles distributed saving and cloud paths.
-    """
+    """Saves both last.ckpt (every validation) and best.ckpt (when metric improves)."""
 
     def __init__(
         self,
@@ -91,8 +87,9 @@ class BestLastCheckpoint(Callback):
 class ManagedBestLastCheckpoint(BestLastCheckpoint):
     """BestLastCheckpoint that resolves dirpath from trainer.default_root_dir.
 
-    Use with project management: the CLI sets trainer.default_root_dir to the
-    project directory, and this callback picks it up at setup time.
+    Use with project management: the CLI sets trainer.default_root_dir to the project
+    directory ({MANAGEMENT_DIR}/{PROJECT_NAME}/{RUN_NAME}), and this callback picks it
+    up at setup time.
     """
 
     def __init__(
