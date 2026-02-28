@@ -60,8 +60,6 @@ class BestLastCheckpoint(Callback):
         )
         if is_better:
             self._best_value = current_val
-
-        if is_better:
             best_path = os.path.join(self.dirpath, "best.ckpt")
             trainer.save_checkpoint(best_path)
             logger.info(
