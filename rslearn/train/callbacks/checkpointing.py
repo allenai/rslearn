@@ -1,7 +1,7 @@
 """Checkpoint callbacks for rslearn."""
 
 import os
-from typing import Literal
+from typing import Any, Literal
 
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
@@ -33,19 +33,21 @@ class BestLastCheckpoint(Callback):
         self.mode = mode
         self._best_value: float | None = None
 
+    def state_dict(self) -> dict[str, Any]:
+        """Persist best value so it survives checkpoint resume."""
+        return {"best_value": self._best_value}
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Restore best value from checkpoint on resume."""
+        self._best_value = state_dict.get("best_value")
+
     @rank_zero_only
     def on_validation_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Save last.ckpt always, and best.ckpt when the monitored metric improves."""
         if trainer.sanity_checking:
             return
 
-        os.makedirs(self.dirpath, exist_ok=True)
-
-        last_path = os.path.join(self.dirpath, "last.ckpt")
-        trainer.save_checkpoint(last_path)
-        logger.info("saved checkpoint to %s", last_path)
-
-        # Check metric value to handle best.ckpt
+        # Check metric value to handle best.ckpt.
         if self.monitor not in trainer.callback_metrics:
             raise ValueError(
                 f"did not find {self.monitor} metric (keys are {trainer.callback_metrics.keys()})"
@@ -58,6 +60,8 @@ class BestLastCheckpoint(Callback):
         )
         if is_better:
             self._best_value = current_val
+
+        if is_better:
             best_path = os.path.join(self.dirpath, "best.ckpt")
             trainer.save_checkpoint(best_path)
             logger.info(
@@ -66,6 +70,16 @@ class BestLastCheckpoint(Callback):
                 self.monitor,
                 current_val,
             )
+
+        # Save last.ckpt after best.ckpt so that auto-resuming from last.ckpt is always
+        # correct.
+        # - If we crash after writing best.ckpt, we will auto-resume from previous epoch
+        #   and write the same best.ckpt again.
+        # - If we crash after writing last.ckpt, we will restore the correct
+        #   self._best_value and won't override the checkpoint incorrectly.
+        last_path = os.path.join(self.dirpath, "last.ckpt")
+        trainer.save_checkpoint(last_path)
+        logger.info("saved checkpoint to %s", last_path)
 
 
 class ManagedBestLastCheckpoint(BestLastCheckpoint):

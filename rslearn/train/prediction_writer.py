@@ -242,7 +242,10 @@ class RslearnWriter(BasePredictionWriter):
             ValueError: if already initialized.
         """
         if self._initialized:
-            raise ValueError("RslearnWriter._initialize called twice")
+            logger.info(
+                "_initialize called but RslearnWriter already initialized, skipping"
+            )
+            return
 
         # Resolve the dataset path: we use self._path if set, otherwise we use the
         # datamodule_path.
@@ -374,6 +377,10 @@ class RslearnWriter(BasePredictionWriter):
             batch_idx: the batch index.
             dataloader_idx: the index in the dataloader.
         """
+        if not self._initialized:
+            raise ValueError(
+                "RslearnWriter not initialized; setup() must be called before write_on_batch_end"
+            )
         assert isinstance(pl_module, RslearnLightningModule)
         task = pl_module.task
         _, _, metadatas = batch
