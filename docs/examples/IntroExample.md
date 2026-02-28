@@ -117,10 +117,10 @@ qgis $DATASET_PATH/windows/default/seattle_54912_-527360/layers/sentinel2/R_G_B/
 Before we can train a land cover prediction model, we need labels. Here, we will use
 the ESA WorldCover land cover map as labels.
 
-Start by downloading the WorldCover data from https://worldcover2021.esa.int
+Start by downloading the WorldCover data from the [ESA WorldCover S3 bucket](https://registry.opendata.aws/esa-worldcover-vito/):
 
 ```
-wget https://worldcover2021.esa.int/data/archive/ESA_WorldCover_10m_2021_v200_60deg_macrotile_N30W180.zip
+wget https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/macrotiles/ESA_WorldCover_10m_2021_v200_60deg_macrotile_N30W180.zip
 mkdir world_cover_tifs
 unzip ESA_WorldCover_10m_2021_v200_60deg_macrotile_N30W180.zip -d world_cover_tifs/
 ```
@@ -277,18 +277,11 @@ data:
 trainer:
   max_epochs: 10
   callbacks:
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    - class_path: rslearn.train.callbacks.checkpointing.BestLastCheckpoint
       init_args:
-        filename: "last"
-        save_top_k: 1
         dirpath: ./land_cover_model_checkpoints/
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        filename: "best"
-        save_top_k: 1
         monitor: val_accuracy
         mode: max
-        dirpath: ./land_cover_model_checkpoints/
 ```
 
 Now we can train the model:
@@ -319,13 +312,10 @@ configuration file, as it will handle writing the outputs from the model to a Ge
 ```yaml
 trainer:
   callbacks:
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    - class_path: rslearn.train.callbacks.checkpointing.BestLastCheckpoint
       ...
     - class_path: rslearn.train.prediction_writer.RslearnWriter
       init_args:
-        # We need to include this argument, but it will be overridden with the dataset
-        # path from data.init_args.path.
-        path: placeholder
         output_layer: output
 ```
 
@@ -356,9 +346,7 @@ dataset configuration so it specifies the layer:
 Now we can apply the model:
 
 ```
-# Find model checkpoint in lightning_logs dir.
-ls lightning_logs/*/checkpoints/last.ckpt
-rslearn model predict --config land_cover_model.yaml --ckpt_path land_cover_model_checkpoints/last.ckpt
+rslearn model predict --config land_cover_model.yaml --ckpt_path land_cover_model_checkpoints/best.ckpt
 ```
 
 And visualize the Sentinel-2 image and output in qgis:
@@ -470,7 +458,7 @@ the `model test` command:
 
 ```
 mkdir ./vis
-rslearn model test --config land_cover_model.yaml --ckpt_path land_cover_model_checkpoints/last.ckpt --model.init_args.visualize_dir=./vis/
+rslearn model test --config land_cover_model.yaml --ckpt_path land_cover_model_checkpoints/best.ckpt --model.init_args.visualize_dir=./vis/
 ```
 
 This will produce PNGs in the vis directory. The visualizations are produced by the
@@ -481,7 +469,7 @@ SegmentationTask and overriding the visualize function.
 ## Checkpoint and Logging Management
 
 Above, we needed to configure the checkpoint directory in the model config (the
-`dirpath` option under `lightning.pytorch.callbacks.ModelCheckpoint`), and explicitly
+`dirpath` option under `rslearn.train.callbacks.checkpointing.BestLastCheckpoint`), and explicitly
 specify the checkpoint path when applying the model. Additionally, metrics are logged
 to the local filesystem and not well organized.
 
@@ -498,7 +486,12 @@ model:
 data:
   # ...
 trainer:
-  # ...
+  callbacks:
+    # ...
+    - class_path: rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint
+      init_args:
+        monitor: val_accuracy
+        mode: max
 project_name: land_cover_model
 run_name: version_00
 # This sets the option via the MANAGEMENT_DIR environment variable.

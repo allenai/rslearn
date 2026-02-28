@@ -335,14 +335,16 @@ trainer:
       init_args:
         module_selector: ["model", "encoder", 0, "model"]
         unfreeze_at_epoch: 1
+    # Save the best checkpoint based on mAP on validation set.
+    - class_path: rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint
+      init_args:
+        monitor: val_mAP
+        mode: max
 # Here we enable automatic checkpoint management and logging to W&B.
 # Set WANDB_MODE=offline to disable online logging.
 project_name: marine_infrastructure
 run_name: satlaspretrain_finetune
 management_dir: ${MANAGEMENT_DIR}
-# Save the best checkpoint based on mAP on validation set.
-monitor: val_mAP
-monitor_mode: max
 ```
 
 After saving this as `model.yaml`, we can now start the fine-tuning:

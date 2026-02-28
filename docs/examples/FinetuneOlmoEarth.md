@@ -226,8 +226,6 @@ trainer:
     # the rslearn dataset.
     - class_path: rslearn.train.prediction_writer.RslearnWriter
       init_args:
-        # This path will be copied from data.init_args.path by rslearn.
-        path: placeholder
         output_layer: output
         merger:
           class_path: rslearn.train.prediction_writer.RasterMerger
@@ -236,14 +234,16 @@ trainer:
             # So we keep the center 116x116 of each 128x128 output, since there are
             # 12 pixels of overlap between adjacent inference crops.
             overlap_pixels: 12
+    # Save best checkpoint based on accuracy metric.
+    - class_path: rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint
+      init_args:
+        monitor: val_accuracy
+        mode: max
 # Here we enable automatic checkpoint management and logging to W&B.
 # Set WANDB_MODE=offline to disable online logging.
 project_name: ${PROJECT_NAME}
 run_name: ${RUN_NAME}
 management_dir: ${MANAGEMENT_DIR}
-# Save best checkpoint based on accuracy metric.
-monitor: val_accuracy
-monitor_mode: max
 ```
 
 Save this as `model.yaml` and then run `model fit`:

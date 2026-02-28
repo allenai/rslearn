@@ -187,8 +187,8 @@ class RslearnWriter(BasePredictionWriter):
 
     def __init__(
         self,
-        path: str,
         output_layer: str,
+        path: str | None = None,
         path_options: dict[str, Any] | None = None,
         selector: list[str] | None = None,
         merger: CropPredictionMerger | None = None,
@@ -199,8 +199,9 @@ class RslearnWriter(BasePredictionWriter):
         """Create a new RslearnWriter.
 
         Args:
-            path: the dataset root directory.
             output_layer: which layer to write the outputs under.
+            path: the dataset root directory. Default is None to use the same path as
+                the configured data module.
             path_options: additional options for path to pass to fsspec
             selector: keys to access the desired output in the output dict if needed.
                 e.g ["key1", "key2"] gets output["key1"]["key2"]
@@ -216,19 +217,57 @@ class RslearnWriter(BasePredictionWriter):
         super().__init__(write_interval="batch")
         self.output_layer = output_layer
         self.selector = selector or []
-        ds_upath = UPath(path, **path_options or {})
+
+        # Save args for use in self._initialize, which is called from setup function.
+        self._path = path
+        self._path_options = path_options
+        self._output_path = output_path
+        self.layer_config = layer_config
+        self.storage_config = storage_config
+        self.merger = merger
+
+        # Map from window name to pending data to write.
+        # This is used when windows are split up into crops, so the data from all the
+        # crops of each window need to be reconstituted.
+        self.pending_outputs: dict[str, list[PendingCropOutput]] = {}
+        self._initialized = False
+
+    def _initialize(self, datamodule_path: UPath) -> None:
+        """Initialize storage, format, and merger from the resolved dataset path.
+
+        Args:
+            datamodule_path: the UPath configured in the data module.
+
+        Raises:
+            ValueError: if already initialized.
+        """
+        if self._initialized:
+            logger.info(
+                "_initialize called but RslearnWriter already initialized, skipping"
+            )
+            return
+
+        # Resolve the dataset path: we use self._path if set, otherwise we use the
+        # datamodule_path.
+        if self._path is not None:
+            ds_upath = UPath(self._path, **self._path_options or {})
+        else:
+            ds_upath = datamodule_path
+
+        # Resolve the output path. We output to a provided path if set, otherwise we
+        # default to writing predictions to the dataset path.
         output_upath = (
-            UPath(output_path, **path_options or {})
-            if output_path is not None
+            UPath(self._output_path, **self._path_options or {})
+            if self._output_path is not None
             else ds_upath
         )
 
-        self.layer_config, self.dataset_storage = (
-            self._get_layer_config_and_dataset_storage(
-                ds_upath, output_upath, layer_config, storage_config
-            )
-        )
+        # Now we can use ds_path and output_upath to set the layer config and dataset
+        # storage.
+        self._set_layer_config_and_dataset_storage(ds_upath, output_upath)
+        assert self.layer_config is not None
 
+        # Determine if we are outputting raster or vector data.
         self.format: RasterFormat | VectorFormat
         if self.layer_config.type == LayerType.RASTER:
             band_cfg = self.layer_config.band_sets[0]
@@ -238,59 +277,63 @@ class RslearnWriter(BasePredictionWriter):
         else:
             raise ValueError(f"invalid layer type {self.layer_config.type}")
 
-        if merger is not None:
-            self.merger = merger
-        elif self.layer_config.type == LayerType.RASTER:
-            self.merger = RasterMerger()
-        elif self.layer_config.type == LayerType.VECTOR:
-            self.merger = VectorMerger()
+        # If the merger was not set, initialize it based on the layer type.
+        if self.merger is None:
+            if self.layer_config.type == LayerType.RASTER:
+                self.merger = RasterMerger()
+            elif self.layer_config.type == LayerType.VECTOR:
+                self.merger = VectorMerger()
 
-        # Map from window name to pending data to write.
-        # This is used when windows are split up into crops, so the data from all the
-        # crops of each window need to be reconstituted.
-        self.pending_outputs: dict[str, list[PendingCropOutput]] = {}
+        self._initialized = True
 
-    def _get_layer_config_and_dataset_storage(
+    def setup(
+        self, trainer: Trainer, pl_module: LightningModule, stage: str | None = None
+    ) -> None:
+        """Resolve path and initialize storage/format.
+
+        Args:
+            trainer: the trainer.
+            pl_module: the LightningModule.
+            stage: the stage (fit/validate/test/predict).
+        """
+        self._initialize(trainer.datamodule.path)
+
+    def _set_layer_config_and_dataset_storage(
         self,
         ds_upath: UPath,
         output_upath: UPath,
-        layer_config: LayerConfig | None,
-        storage_config: StorageConfig | None,
-    ) -> tuple[LayerConfig, WindowStorage]:
-        """Get the layer config and dataset storage to use.
+    ) -> None:
+        """Set the layer config and dataset storage fields.
 
-        This is a helper function for the init method.
+        This is a helper function for _initialize. self.layer_config and
+        self.storage_config should be populated with the argument to __init__.
 
-        If layer_config is set, we use that. If storage_config is set, we use it to
-        instantiate a WindowStorage using the output_upath.
+        If self.layer_config is set, we keep it as is. If self.storage_config is set,
+        we use it to instantiate self.storage as a WindowStorage using the output_upath.
 
-        If one of them is not set, we load the config from the ds_upath. Otherwise, we
-        avoid reading the dataset config; this way, RslearnWriter can be used with
-        output directories that do not contain the dataset config, as long as
-        layer_config and storage_config are both provided.
+        If one of them is not set, we load the dataset config from the ds_upath and use
+        it to populate the field(s). Otherwise, we avoid reading the dataset config;
+        this way, RslearnWriter can be used with output directories that do not contain
+        the dataset config, as long as layer_config and storage_config are both provided.
 
         Args:
             ds_upath: the dataset path, where a dataset config can be loaded from if
                 layer_config or storage_config is not provided.
             output_upath: the output directory, which could be different from the
                 dataset path.
-            layer_config: optional LayerConfig to provide.
-            storage_config: optional StorageConfig to provide.
 
-        Returns:
-            a tuple (layer_config, dataset_storage)
         """
         dataset_storage: WindowStorage | None = None
 
         # Instantiate the WindowStorage from the storage_config if provided.
-        if storage_config:
+        if self.storage_config:
             dataset_storage = (
-                storage_config.instantiate_window_storage_factory().get_storage(
+                self.storage_config.instantiate_window_storage_factory().get_storage(
                     output_upath
                 )
             )
 
-        if not layer_config or not dataset_storage:
+        if not self.layer_config or not dataset_storage:
             # Need to load dataset config since one of LayerConfig/StorageConfig is missing.
             # We use DatasetConfig.model_validate instead of initializing the Dataset
             # because we want to get a WindowStorage that has the dataset path set to
@@ -298,19 +341,19 @@ class RslearnWriter(BasePredictionWriter):
             with (ds_upath / "config.json").open() as f:
                 dataset_config = DatasetConfig.model_validate(json.load(f))
 
-            if not layer_config:
+            if not self.layer_config:
                 if self.output_layer not in dataset_config.layers:
                     raise KeyError(
                         f"Output layer '{self.output_layer}' not found in dataset layers."
                     )
-                layer_config = dataset_config.layers[self.output_layer]
+                self.layer_config = dataset_config.layers[self.output_layer]
 
             if not dataset_storage:
                 dataset_storage = dataset_config.storage.instantiate_window_storage_factory().get_storage(
                     output_upath
                 )
 
-        return (layer_config, dataset_storage)
+        self.dataset_storage: WindowStorage = dataset_storage
 
     def write_on_batch_end(
         self,
@@ -334,6 +377,10 @@ class RslearnWriter(BasePredictionWriter):
             batch_idx: the batch index.
             dataloader_idx: the index in the dataloader.
         """
+        if not self._initialized:
+            raise ValueError(
+                "RslearnWriter not initialized; setup() must be called before write_on_batch_end"
+            )
         assert isinstance(pl_module, RslearnLightningModule)
         task = pl_module.task
         _, _, metadatas = batch
@@ -419,6 +466,7 @@ class RslearnWriter(BasePredictionWriter):
 
         # Merge outputs from overlapped crops if merger is set.
         logger.debug(f"Merging and writing for window {window.name}")
+        assert self.layer_config is not None and self.merger is not None
         merged_output = self.merger.merge(window, pending_output, self.layer_config)
 
         if self.layer_config.type == LayerType.RASTER:
