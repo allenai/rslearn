@@ -3,6 +3,7 @@
 import json
 import pathlib
 from typing import Any
+from unittest.mock import Mock
 
 import numpy as np
 import numpy.typing as npt
@@ -83,8 +84,6 @@ class MockDictionaryTask(Task):
 
     def get_metrics(self) -> MetricCollection:
         """Get metrics (not used in tests)."""
-        from torchmetrics import MetricCollection
-
         return MetricCollection({})
 
 
@@ -288,8 +287,6 @@ def test_write_raster(tmp_path: pathlib.Path) -> None:
     # probabilities.
     output = torch.zeros((2, 5, 5), dtype=torch.float32)
     # Create a mock trainer to satisfy type requirements
-    from unittest.mock import Mock
-
     mock_trainer = Mock(spec=Trainer)
     mock_trainer.datamodule = Mock()
     mock_trainer.datamodule.path = UPath(ds_path)
@@ -382,8 +379,6 @@ def test_write_raster_with_custom_output_path(tmp_path: pathlib.Path) -> None:
     batch = ([None], [None], [metadata])
     output = torch.zeros((2, 5, 5), dtype=torch.float32)
     # Create a mock trainer to satisfy type requirements
-    from unittest.mock import Mock
-
     mock_trainer = Mock(spec=Trainer)
     mock_trainer.datamodule = Mock()
     mock_trainer.datamodule.path = UPath(ds_path)
@@ -480,8 +475,6 @@ def test_write_raster_with_layer_config(tmp_path: pathlib.Path) -> None:
     batch = ([None], [None], [metadata])
     output = torch.zeros((2, 5, 5), dtype=torch.float32)
     # Create a mock trainer to satisfy type requirements
-    from unittest.mock import Mock
-
     mock_trainer = Mock(spec=Trainer)
     mock_trainer.datamodule = Mock()
     mock_trainer.datamodule.path = UPath(tmp_path)
@@ -576,8 +569,6 @@ def test_selector_with_dictionary_output(tmp_path: pathlib.Path) -> None:
     # Write predictions through the full pipeline
     batch = ([None], [None], [metadata])
     # Create a mock trainer to satisfy type requirements
-    from unittest.mock import Mock
-
     mock_trainer = Mock(spec=Trainer)
     mock_trainer.datamodule = Mock()
     mock_trainer.datamodule.path = UPath(tmp_path)
@@ -706,8 +697,6 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
 
     batch = ([None], [None], [metadata])
     # Create a mock trainer to satisfy type requirements
-    from unittest.mock import Mock
-
     mock_trainer = Mock(spec=Trainer)
     mock_trainer.datamodule = Mock()
     mock_trainer.datamodule.path = UPath(tmp_path)
@@ -791,8 +780,6 @@ def test_write_raster_with_path_from_datamodule(tmp_path: pathlib.Path) -> None:
     )
     batch = ([None], [None], [metadata])
     output = torch.zeros((2, 5, 5), dtype=torch.float32)
-
-    from unittest.mock import Mock
 
     mock_trainer = Mock(spec=Trainer)
     mock_trainer.datamodule = Mock()
