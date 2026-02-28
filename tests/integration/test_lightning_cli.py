@@ -286,6 +286,62 @@ def test_checkpoint_monitors_validation_metric(
     assert (project_dir / "best.ckpt").exists(), "best.ckpt should exist"
 
 
+def test_best_checkpointing_remembers_best_metric_across_resume(
+    classification_dataset: Dataset,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Checkpointing should be stable across resumes.
+
+    With lr=0 the loss is constant, so best.ckpt is saved once at epoch 0.
+    On resume the callback's _best_value must be restored from the checkpoint
+    so that it doesn't re-save best.ckpt at a later epoch.
+    """
+    management_dir = tmp_path / "management"
+    project_dir = management_dir / "test_project" / "test_run"
+
+    def make_cfg(crash_at_epoch: int) -> dict:
+        cfg = _make_classification_config(
+            management_dir,
+            callbacks=[
+                {
+                    "class_path": "tests.integration.test_lightning_cli.CrashAtEpochCallback",
+                    "init_args": {"crash_at_epoch": crash_at_epoch},
+                },
+                {
+                    "class_path": "rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint",
+                    "init_args": {"monitor": "val_loss", "mode": "min"},
+                },
+            ],
+        )
+        cfg["trainer"]["max_epochs"] = 3
+        return cfg
+
+    # Run 1: train epoch 0, crash at epoch 1.
+    cfg1 = make_cfg(crash_at_epoch=1)
+    with pytest.raises(RuntimeError, match="Intentional crash"):
+        _run_cli_fit(cfg1, tmp_path, str(classification_dataset.path), monkeypatch)
+
+    best_ckpt = torch.load(
+        project_dir / "best.ckpt", map_location="cpu", weights_only=False
+    )
+    assert best_ckpt["epoch"] == 0
+
+    # Run 2: resume from last.ckpt (auto), train epoch 1, crash at epoch 2.
+    cfg2 = make_cfg(crash_at_epoch=2)
+    with pytest.raises(RuntimeError, match="Intentional crash"):
+        _run_cli_fit(cfg2, tmp_path, str(classification_dataset.path), monkeypatch)
+
+    # best.ckpt must still be from epoch 0 (loss is constant with lr=0, so no
+    # later epoch should be considered "better").
+    best_ckpt = torch.load(
+        project_dir / "best.ckpt", map_location="cpu", weights_only=False
+    )
+    assert best_ckpt["epoch"] == 0, (
+        f"best.ckpt was incorrectly overwritten after resume: expected epoch 0, got epoch {best_ckpt['epoch']}"
+    )
+
+
 def test_checkpoint_raises_on_invalid_metric(
     classification_dataset: Dataset,
     tmp_path: pathlib.Path,
