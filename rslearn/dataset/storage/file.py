@@ -15,7 +15,7 @@ from rslearn.dataset.window import (
     get_window_layer_dir,
 )
 from rslearn.log_utils import get_logger
-from rslearn.utils.fsspec import iter_nonhidden_subdirs, open_atomic
+from rslearn.utils.fsspec import iter_nonhidden, iter_nonhidden_subdirs, open_atomic
 from rslearn.utils.geometry import Projection
 from rslearn.utils.mp import make_pool_and_star_imap_unordered
 
@@ -24,7 +24,7 @@ from .storage import WindowStorage, WindowStorageFactory
 logger = get_logger(__name__)
 
 
-def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window:
+def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window | None:
     """Load the window from its directory by reading metadata.json.
 
     The group and window name are derived from the filesystem path.
@@ -34,8 +34,11 @@ def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window:
         window_dir: the path where the window is stored.
 
     Returns:
-        the window object.
+        the window object, or None if window_dir is not a directory.
     """
+    if not window_dir.is_dir():
+        return None
+
     metadata_fname = window_dir / "metadata.json"
     with metadata_fname.open() as f:
         metadata = json.load(f)
@@ -131,7 +134,12 @@ class FileWindowStorage(WindowStorage):
                         continue
                     window_dirs.append(window_dir)
             else:
-                for window_dir in iter_nonhidden_subdirs(group_dir):
+                # We use iter_nonhidden here instead of iter_nonhidden_subdirs since
+                # iter_nonhidden_subdirs is slow for large directories, and the group
+                # directories could contain many windows. Instead we handle ensuring it
+                # is directory in the load_window function (which is faster when
+                # workers > 1).
+                for window_dir in iter_nonhidden(group_dir):
                     window_dirs.append(window_dir)
 
         with make_pool_and_star_imap_unordered(
@@ -143,7 +151,13 @@ class FileWindowStorage(WindowStorage):
                 outputs = tqdm.tqdm(
                     outputs, total=len(window_dirs), desc="Loading windows"
                 )
-            windows = list(outputs)
+            windows = []
+            for window in outputs:
+                if window is None:
+                    # This means the window directory was invalid, e.g. it was a file
+                    # instead of a directory.
+                    continue
+                windows.append(window)
 
         return windows
 
