@@ -8,7 +8,7 @@ https://registry.opendata.aws/esa-worldcover-vito/.
 The 2,651 tiles are served as Cloud-Optimized GeoTIFFs from the public
 `s3://esa-worldcover` bucket. There is a GeoJSON index that we download and cache
 locally for use during the prepare stage. Direct materialization from the COGs is
-suppotred.
+supported.
 
 ### Configuration
 

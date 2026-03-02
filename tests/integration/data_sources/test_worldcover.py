@@ -23,16 +23,15 @@ from rslearn.utils.geometry import STGeometry
 from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
-SEATTLE_POINT = shapely.Point(-122.33, 47.61)
 PIXEL_VALUE = 40  # "Cropland" class
 
-# The 3x3 degree WorldCover tile covering Seattle.
+# The 3x3 degree WorldCover tile covering the seattle2020 fixture.
 TILE_NAME = "N45W123"
 TILE_BOUNDS = (-123, 45, -120, 48)
 
 
 @pytest.fixture
-def test_geotiff(tmp_path: pathlib.Path) -> pathlib.Path:
+def test_geotiff(tmp_path: pathlib.Path) -> UPath:
     """Create a 3x3 pixel uint8 GeoTIFF at 1 degree/pixel matching TILE_BOUNDS."""
     bounds = TILE_BOUNDS
     array = np.full((1, 3, 3), PIXEL_VALUE, dtype=np.uint8)
@@ -88,7 +87,7 @@ def test_get_items(
 def test_ingest(
     tmp_path: pathlib.Path,
     seattle2020: STGeometry,
-    test_geotiff: pathlib.Path,
+    test_geotiff: UPath,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Test ingesting a WorldCover tile into a tile store."""

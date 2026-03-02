@@ -14,6 +14,7 @@ import botocore
 import botocore.client
 import requests
 import shapely
+from typing_extensions import override
 from upath import UPath
 
 import rslearn.data_sources.utils
@@ -21,6 +22,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import (
     DataSourceContext,
     Item,
+    ItemLookupDataSource,
     QueryConfig,
 )
 from rslearn.data_sources.direct_materialize_data_source import (
@@ -28,7 +30,7 @@ from rslearn.data_sources.direct_materialize_data_source import (
 )
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
-from rslearn.utils.fsspec import join_upath
+from rslearn.utils.fsspec import join_upath, open_atomic
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.grid_index import GridIndex
 
@@ -45,7 +47,7 @@ HTTP_BASE = f"https://{BUCKET_NAME}.s3.{BUCKET_REGION}.amazonaws.com"
 GRID_INDEX_CELL_SIZE = 3.0
 
 
-class WorldCover(DirectMaterializeDataSource[Item]):
+class WorldCover(DirectMaterializeDataSource[Item], ItemLookupDataSource):
     """A data source for the ESA WorldCover 2021 land cover map.
 
     The data is served as Cloud-Optimized GeoTIFFs from the public AWS S3 bucket
@@ -102,7 +104,7 @@ class WorldCover(DirectMaterializeDataSource[Item]):
             )
             response = s3.get_object(Bucket=BUCKET_NAME, Key=GRID_GEOJSON_KEY)
             content = response["Body"].read()
-            with cache_file.open("wb") as f:
+            with open_atomic(cache_file, "wb") as f:
                 f.write(content)
 
         with cache_file.open() as f:
@@ -125,18 +127,10 @@ class WorldCover(DirectMaterializeDataSource[Item]):
 
     # --- DataSource implementation ---
 
+    @override
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
     ) -> list[list[list[Item]]]:
-        """Get items intersecting the given geometries.
-
-        Args:
-            geometries: the spatiotemporal geometries.
-            query_config: the query configuration.
-
-        Returns:
-            list of groups of items for each geometry.
-        """
         grid_index, _ = self._load_index()
 
         groups = []
@@ -157,6 +151,7 @@ class WorldCover(DirectMaterializeDataSource[Item]):
 
         return groups
 
+    @override
     def get_item_by_name(self, name: str) -> Item:
         """Gets an item by name.
 
@@ -171,31 +166,23 @@ class WorldCover(DirectMaterializeDataSource[Item]):
             raise ValueError(f"WorldCover tile {name} not found")
         return items_by_name[name]
 
+    @override
     def deserialize_item(self, serialized_item: dict) -> Item:
-        """Deserializes an item from JSON-decoded data."""
         return Item.deserialize(serialized_item)
 
+    @override
     def ingest(
         self,
         tile_store: TileStoreWithLayer,
         items: list[Item],
         geometries: list[list[STGeometry]],
     ) -> None:
-        """Ingest items into the given tile store.
-
-        Downloads individual GeoTIFF tiles on demand rather than bulk zip files.
-
-        Args:
-            tile_store: the tile store to ingest into.
-            items: the items to ingest.
-            geometries: a list of geometries needed for each item.
-        """
         for item in items:
             band_names = self.asset_bands["map"]
             if tile_store.is_raster_ready(item.name, band_names):
                 continue
 
-            url = self._tile_http_url(item.name)
+            url = self.get_asset_url(item.name, "map")
             logger.info("downloading WorldCover tile %s", url)
 
             with tempfile.TemporaryDirectory() as tmp_dir:
@@ -216,20 +203,7 @@ class WorldCover(DirectMaterializeDataSource[Item]):
 
     # --- DirectMaterializeDataSource implementation ---
 
+    @override
     def get_asset_url(self, item_name: str, asset_key: str) -> str:
-        """Get the URL to read a WorldCover tile COG.
-
-        Args:
-            item_name: the tile name (ll_tile, e.g. "N30E060").
-            asset_key: ignored (always "map").
-
-        Returns:
-            a /vsicurl/ URL readable by rasterio.
-        """
-        return self._tile_http_url(item_name)
-
-    @staticmethod
-    def _tile_http_url(ll_tile: str) -> str:
-        return (
-            f"{HTTP_BASE}/{TILE_PREFIX}/ESA_WorldCover_10m_2021_v200_{ll_tile}_Map.tif"
-        )
+        # Item name is the ll_tile that goes into the filename.
+        return f"{HTTP_BASE}/{TILE_PREFIX}/ESA_WorldCover_10m_2021_v200_{item_name}_Map.tif"
