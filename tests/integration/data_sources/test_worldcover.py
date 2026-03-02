@@ -145,7 +145,7 @@ def test_ingest(
 def test_direct_materialize(
     tmp_path: pathlib.Path,
     seattle2020: STGeometry,
-    test_geotiff: pathlib.Path,
+    test_geotiff: UPath,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Test read_raster (direct materialization) by redirecting COG reads to local file."""

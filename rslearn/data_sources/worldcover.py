@@ -22,7 +22,6 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import (
     DataSourceContext,
     Item,
-    ItemLookupDataSource,
     QueryConfig,
 )
 from rslearn.data_sources.direct_materialize_data_source import (
@@ -47,7 +46,7 @@ HTTP_BASE = f"https://{BUCKET_NAME}.s3.{BUCKET_REGION}.amazonaws.com"
 GRID_INDEX_CELL_SIZE = 3.0
 
 
-class WorldCover(DirectMaterializeDataSource[Item], ItemLookupDataSource):
+class WorldCover(DirectMaterializeDataSource[Item]):
     """A data source for the ESA WorldCover 2021 land cover map.
 
     The data is served as Cloud-Optimized GeoTIFFs from the public AWS S3 bucket
@@ -205,5 +204,6 @@ class WorldCover(DirectMaterializeDataSource[Item], ItemLookupDataSource):
 
     @override
     def get_asset_url(self, item_name: str, asset_key: str) -> str:
+        assert asset_key == "map", f"Unknown asset key: {asset_key}"
         # Item name is the ll_tile that goes into the filename.
         return f"{HTTP_BASE}/{TILE_PREFIX}/ESA_WorldCover_10m_2021_v200_{item_name}_Map.tif"
