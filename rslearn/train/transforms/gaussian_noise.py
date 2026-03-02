@@ -14,8 +14,8 @@ class GaussianNoise(Transform):
 
     def __init__(
         self,
+        std: float,
         selectors: list[str] = ["image"],
-        std: float = 0.01,
         skip_missing: bool = False,
     ):
         """Initialize GaussianNoise.
@@ -25,10 +25,9 @@ class GaussianNoise(Transform):
             std: standard deviation of the noise.
             skip_missing: skip missing selectors.
         """
-        super().__init__()
+        super().__init__(skip_missing=skip_missing)
         self.selectors = selectors
         self.std = std
-        self.skip_missing = skip_missing
 
     def apply_image(self, image: RasterImage) -> RasterImage:
         """Add noise."""

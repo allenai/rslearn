@@ -30,12 +30,11 @@ class Flip(Transform):
             skip_missing: if True, skip selectors that don't exist in the input/target
                 dicts. Useful when working with optional inputs.
         """
-        super().__init__()
+        super().__init__(skip_missing=skip_missing)
         self.horizontal = horizontal
         self.vertical = vertical
         self.image_selectors = image_selectors
         self.box_selectors = box_selectors
-        self.skip_missing = skip_missing
 
     def sample_state(self) -> dict[str, bool]:
         """Randomly decide how to transform the input.

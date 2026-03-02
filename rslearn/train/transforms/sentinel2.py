@@ -35,7 +35,7 @@ class Sentinel2SCLToMask(Transform):
                 cloud/cloud-shadow/cirrus values).
             skip_missing: if True, skip when scl_selector is missing.
         """
-        super().__init__()
+        super().__init__(skip_missing=skip_missing)
         self.scl_selector = scl_selector
         self.output_selector = output_selector
         self.exclude_scl_values = (
@@ -43,7 +43,6 @@ class Sentinel2SCLToMask(Transform):
             if exclude_scl_values is None
             else list(exclude_scl_values)
         )
-        self.skip_missing = skip_missing
 
     def _to_mask(self, scl: RasterImage) -> RasterImage:
         scl_tensor = scl.image
