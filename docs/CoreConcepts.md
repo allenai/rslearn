@@ -37,7 +37,7 @@ Most projects that use rslearn for end-to-end dataset and model development foll
 workflow like this:
 
 1. Create a dataset and populate windows.
-2. Ingest data for layers that reference a data source.
+2. Materialize data for layers that reference a data source.
 3. Import or annotate data in other layers.
 4. Train a model that inputs one or more layers and outputs one or more other layers.
 5. Use the model to make predictions on new windows.
@@ -46,7 +46,7 @@ workflow like this:
 Data Sources
 ------------
 
-A core feature of rslearn is its ability to obtain ingest aligned raster and vector
+A core feature of rslearn is its ability to materialize aligned raster and vector
 data across many built-in data sources.
 
 Data sources share a unified API. A data source is a collection of items that generally
@@ -56,7 +56,7 @@ corresponds to a Sentinel-2 scene.
 When a dataset is configured with one or more layers that have data sources defined
 (see [DatasetConfig](DatasetConfig.md)), rslearn can automatically populate those
 layers with information from items in the data source that intersect spatially and
-temporally which each window in the dataset. This data materialization process takes
+temporally with each window in the dataset. This data materialization process takes
 place in three steps:
 
 1. Prepare: identify items in the data source that correspond to windows in the
@@ -69,24 +69,14 @@ place in three steps:
 
 The first step is to match items in the data source with each window in the dataset.
 The output of matching is a list of *item groups* for each window, where each group
-specifies a different list of items that should be mosaiced to form a different
-composite for that window.
+specifies a different list of items that should be composited to form a different
+vector or raster file for that window.
 
-There are a number of options in the [dataset configuration](DatasetConfig.md) that can
+There are a number of options in the [DataSourceConfig](dataset_config/DataSourceConfig.md) that can
 control how this matching is performed. The default is to create one mosaic that covers
 the window's spatial extent. In this case, we iterate over items that intersect the
 window spatiotemporally, and continue adding items until the window is spatially
 covered, skipping items that add zero additional spatial coverage.
-
-The `max_matches` option can be set to create more than one mosaic. For example, if
-`max_matches` is 3, then we create up to three mosaics (but potentially fewer if there
-are not enough items in the data source). Each mosaic is a different item group, and
-once materialized, the data corresponding to each mosaic will be accessed separately.
-
-Instead of surfacing mosaics, the `spatial_mode` can be set to surface individual items
-that contain or intersect the window. In these modes, each item group consists of a
-single item, so the resulting data will always correspond directly to one data source
-item rather than being a mosaic.
 
 ### Ingest
 
@@ -103,20 +93,5 @@ materialize are parallelized over dataset windows.
 The third step is to crop, re-project, and mosaic the items to extract portions aligned
 with the windows. For raster data, this means the source GeoTIFFs are merged and
 cropped to correspond to the projection and bounds of the window. For vector data,
-features are concatenated across items in the same group, and then items that do not
+features are concatenated across items in the same group, and then features that do not
 intersect the window bounds are filtered.
-
-Some data sources represent APIs that already support random access, like collections
-of cloud-optimized GeoTIFFs. In this case, these data sources may support skipping the
-ingestion step and directly materializing the items into the window-aligned portions;
-the user must still explicitly enable this functionality by setting `ingest` to false
-in the dataset configuration. Note that this means the same data may be downloaded
-multiple times if there are overlapping windows that reference the same items.
-
-In some cases, when data in a data source cannot be broken up into distinct items, a
-data source may only support direct materialization, not implementing ingestion at all.
-For example, the XYZ tiles data source only supports direct materialization since the
-tiles are small enough that ingesting them individually does not make sense, but the
-collection of tiles is too large to download all of them. In direct materialization, it
-will download the subset of tiles that intersect each window's bounds (projected into
-the projection of the tiles, typically WebMercator).

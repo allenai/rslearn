@@ -47,6 +47,11 @@ arbitrarily by the user to group together different subsets of the dataset, and 
 datasets contain a single group. The second level (under the group subfolders) consists
 of the per-window folders.
 
+Note: if the dataset config sets a [window storage](./dataset_config/WindowStorageConfig.md)
+other than the default file-based storage, the information in the `metadata.json`,
+`items.json`, and `completed` files will be stored elsewhere, e.g. in an sqlite database.
+The `layers` folder will still be used for storing materialized raster and vector data.
+
 ### `metadata.json`
 
 In the per-window folders, `metadata.json` specifies the spatial bounds and time range
@@ -82,7 +87,7 @@ time range of the window.
 
 The `bounds` key specifies the bounds of the window in pixel coordinates. This can be
 multiplied by the resolution to get the bounds in projection units. Here, the bounds in
-EPSG:32612 projection units (meters) is `(358550, 3830010, 358870, 3829690)`.
+EPSG:32612 projection units (meters) are `(358550, 3830010, 358870, 3829690)`.
 
 The `options` key stores arbitrary user-specified key-value pairs. Oftentimes, windows
 are assigned to training and validation splits via an option here, although this can

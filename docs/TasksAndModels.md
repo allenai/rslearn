@@ -51,7 +51,7 @@ data:
           regress:
             regress_label: "targets"
           segment:
-            segment_label: "targets
+            segment_label: "targets"
 ```
 
 See [ModelConfig.md](./ModelConfig.md#inputs) for details about how to configure the
@@ -83,7 +83,7 @@ The configuration snippet below summarizes the most common options. See
         # ground truth for the classification task, then you can enable this: if you
         # ensure the window contains the vector layer but does not contain any features
         # with the property_name, then instead of raising an exception, the task will
-        # mark that target invalid so it is excluded from the classfication loss.
+        # mark that target invalid so it is excluded from the classification loss.
         allow_invalid: false
         # ClassificationTask will always compute an accuracy metric. A per-category F1
         # metric can also be enabled.
@@ -888,7 +888,7 @@ convolved with each feature map.
               in_channels: 128
               # The number of output channels.
               out_channels: 64
-              # The kernel size, stride, and padding. See torch.nn.Conv2D.
+              # The kernel size, stride, and padding. See torch.nn.Conv2d.
               # The stride defaults to 1 and the padding defaults to "same", while
               # kernel_size must be configured. "same" padding keeps the same
               # resolution as the input. If stride is not 1, then padding must be set
