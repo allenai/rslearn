@@ -24,7 +24,7 @@ from .storage import WindowStorage, WindowStorageFactory
 logger = get_logger(__name__)
 
 
-def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window | None:
+def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window:
     """Load the window from its directory by reading metadata.json.
 
     The group and window name are derived from the filesystem path.
@@ -34,14 +34,8 @@ def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window | Non
         window_dir: the path where the window is stored.
 
     Returns:
-        the window object, or None if window_dir is not a directory.
+        the window object.
     """
-    if not window_dir.is_dir():
-        logger.debug(
-            f"Skipping window candidate {window_dir} since it is not a directory"
-        )
-        return None
-
     metadata_fname = window_dir / "metadata.json"
     with metadata_fname.open() as f:
         metadata = json.load(f)
@@ -139,9 +133,8 @@ class FileWindowStorage(WindowStorage):
             else:
                 # We use iter_nonhidden here instead of iter_nonhidden_subdirs since
                 # iter_nonhidden_subdirs is slow for large directories, and the group
-                # directories could contain many windows. Instead we handle ensuring it
-                # is directory in the load_window function (which is faster when
-                # workers > 1).
+                # directories could contain many windows. There should not be
+                # non-hidden files in the group directory anyway.
                 for window_dir in iter_nonhidden(group_dir):
                     window_dirs.append(window_dir)
 
@@ -154,13 +147,7 @@ class FileWindowStorage(WindowStorage):
                 outputs = tqdm.tqdm(
                     outputs, total=len(window_dirs), desc="Loading windows"
                 )
-            windows = []
-            for window in outputs:
-                if window is None:
-                    # This means the window directory was invalid, e.g. it was a file
-                    # instead of a directory.
-                    continue
-                windows.append(window)
+            windows = list(outputs)
 
         return windows
 
