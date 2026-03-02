@@ -58,7 +58,7 @@ def iter_nonhidden_subdirs(path: UPath) -> Iterator[UPath]:
 def iter_nonhidden_files(path: UPath) -> Iterator[UPath]:
     """Iterate over non-hidden files in a directory.
 
-    Note that this will check is_dir() on each path so it will yield poor performance
+    Note that this will check is_file() on each path so it will yield poor performance
     for directories with many entries.
 
     Args:
