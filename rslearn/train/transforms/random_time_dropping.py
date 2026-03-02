@@ -33,13 +33,15 @@ class RandomTimeDropping(Transform):
             skip_missing: skip missing selectors.
         """
         super().__init__(skip_missing=skip_missing)
+        if not 0 <= drop_ratio <= 1:
+            raise ValueError(f"drop_ratio must be between 0 and 1, got {drop_ratio}")
         self.selectors = selectors
         self.drop_ratio = drop_ratio
         self.min_keep = max(min_keep, 1)
 
     def apply_image(self, image: RasterImage) -> RasterImage:
         """Drop random timesteps from the image."""
-        C, T, H, W = image.shape
+        T = image.shape[1]
         if T <= self.min_keep:
             return image
 
