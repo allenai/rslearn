@@ -37,6 +37,9 @@ def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window | Non
         the window object, or None if window_dir is not a directory.
     """
     if not window_dir.is_dir():
+        logger.debug(
+            f"Skipping window candidate {window_dir} since it is not a directory"
+        )
         return None
 
     metadata_fname = window_dir / "metadata.json"
