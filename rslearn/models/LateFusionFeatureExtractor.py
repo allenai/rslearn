@@ -46,6 +46,7 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         gate_activation: str = "sigmoid",
         gate_init_bias: float = 2.0,
         gate_dropout: float = 0.0,
+        path_output_channels: list[int] | None = None,
     ):
         """Create a new LateFusionFeatureExtractor.
 
@@ -71,13 +72,18 @@ class LateFusionFeatureExtractor(FeatureExtractor):
                 (``"mixing"`` uses softmax internally).
             gate_init_bias: initial bias value for gate projection layers.
                 A positive value (e.g. 1.0–2.0) keeps gates more "open" at
-                the start of training, which can improve stability.  Applied
-                after lazy parameter materialisation on the first forward pass.
+                the start of training, which can improve stability.
                 Default ``0.0`` (no special init).
             gate_dropout: dropout probability applied to the concatenated
                 input before it enters the gating / gate+value layers.  Can
                 prevent the model from collapsing to "always ignore one
                 modality".  Default ``0.0`` (no dropout).
+            path_output_channels: required when ``fusion_mode`` is ``"gated"``
+                or ``"mixing"``.  A list with one entry per path giving the
+                output channel dimension of that path.  For multi-scale
+                ``FeatureMaps`` the same channel count is assumed at every
+                scale.  Example: ``[768, 128]`` for a 768-channel S2 path
+                and a 128-channel ERA5 path.
         """
         super().__init__()
 
@@ -121,6 +127,15 @@ class LateFusionFeatureExtractor(FeatureExtractor):
                     f"gated_output_channels is required when "
                     f"fusion_mode='{fusion_mode}'"
                 )
+            if path_output_channels is None:
+                raise ValueError(
+                    f"path_output_channels is required when fusion_mode='{fusion_mode}'"
+                )
+            if len(path_output_channels) != len(paths):
+                raise ValueError(
+                    f"path_output_channels must have one entry per path "
+                    f"({len(paths)}), got {len(path_output_channels)}"
+                )
 
             # Validate list contents.
             if isinstance(gated_output_channels, list):
@@ -133,6 +148,8 @@ class LateFusionFeatureExtractor(FeatureExtractor):
                             f"int, got {ch!r}"
                         )
 
+            total_in_channels = sum(path_output_channels)
+
             if isinstance(gated_output_channels, int):
                 self._gated_is_spatial = False
             else:
@@ -140,12 +157,15 @@ class LateFusionFeatureExtractor(FeatureExtractor):
                 self._gated_num_scales = len(gated_output_channels)
 
             if fusion_mode == "gated":
-                self._build_glu_layers(gated_output_channels)
+                self._build_glu_layers(gated_output_channels, total_in_channels)
             else:
-                self._build_mixing_layers(gated_output_channels, len(paths))
+                self._build_mixing_layers(
+                    gated_output_channels, len(paths), path_output_channels
+                )
 
             self._gated_output_validated = False
             self._gate_bias_initialized = False
+            self._maybe_init_gate_bias()
 
         elif fusion_mode != "concat":
             raise ValueError(
@@ -157,36 +177,62 @@ class LateFusionFeatureExtractor(FeatureExtractor):
     # Layer builders (called from __init__)
     # ------------------------------------------------------------------
 
-    def _build_glu_layers(self, gated_output_channels: int | list[int]) -> None:
-        """Build value and gate projection layers for GLU-style fusion."""
+    def _build_glu_layers(
+        self, gated_output_channels: int | list[int], total_in_channels: int
+    ) -> None:
+        """Build value and gate projection layers for GLU-style fusion.
+
+        Args:
+            gated_output_channels: output channel dimension(s).
+            total_in_channels: (i.e. the concatenated channel count).
+        """
         if isinstance(gated_output_channels, int):
-            self.gated_value = torch.nn.LazyLinear(gated_output_channels)
-            self.gated_gate = torch.nn.LazyLinear(gated_output_channels)
+            self.gated_value = torch.nn.Linear(total_in_channels, gated_output_channels)
+            self.gated_gate = torch.nn.Linear(total_in_channels, gated_output_channels)
         else:
             self.gated_value = torch.nn.ModuleList(
-                [torch.nn.LazyConv2d(c, kernel_size=1) for c in gated_output_channels]
+                [
+                    torch.nn.Conv2d(total_in_channels, c, kernel_size=1)
+                    for c in gated_output_channels
+                ]
             )
             self.gated_gate = torch.nn.ModuleList(
-                [torch.nn.LazyConv2d(c, kernel_size=1) for c in gated_output_channels]
+                [
+                    torch.nn.Conv2d(total_in_channels, c, kernel_size=1)
+                    for c in gated_output_channels
+                ]
             )
 
     def _build_mixing_layers(
-        self, gated_output_channels: int | list[int], n_paths: int
+        self,
+        gated_output_channels: int | list[int],
+        n_paths: int,
+        path_output_channels: list[int],
     ) -> None:
         """Build per-path projection and per-channel gate layers for mixing.
 
         The gate outputs ``n_paths * out_channels`` and is reshaped to
         ``B × n_paths × out_channels [× H × W]`` so that softmax is applied
         over the path dimension independently for each channel.
+
+        Args:
+            gated_output_channels: output channel dimension(s).
+            n_paths: number of encoder paths.
+            path_output_channels: output channel dimension of each path.
         """
         self._n_paths = n_paths
 
         if isinstance(gated_output_channels, int):
             self._mixing_out_channels = [gated_output_channels]
             self.mixing_projs = torch.nn.ModuleList(
-                [torch.nn.LazyLinear(gated_output_channels) for _ in range(n_paths)]
+                [
+                    torch.nn.Linear(path_output_channels[p], gated_output_channels)
+                    for p in range(n_paths)
+                ]
             )
-            self.mixing_gate = torch.nn.LazyLinear(n_paths * gated_output_channels)
+            self.mixing_gate = torch.nn.Linear(
+                n_paths * gated_output_channels, n_paths * gated_output_channels
+            )
         else:
             self._mixing_out_channels = list(gated_output_channels)
             # mixing_projs[path_idx][scale_idx]
@@ -194,17 +240,17 @@ class LateFusionFeatureExtractor(FeatureExtractor):
                 [
                     torch.nn.ModuleList(
                         [
-                            torch.nn.LazyConv2d(c, kernel_size=1)
+                            torch.nn.Conv2d(path_output_channels[p], c, kernel_size=1)
                             for c in gated_output_channels
                         ]
                     )
-                    for _ in range(n_paths)
+                    for p in range(n_paths)
                 ]
             )
             # mixing_gate[scale_idx] → outputs n_paths * out_ch channels
             self.mixing_gate = torch.nn.ModuleList(
                 [
-                    torch.nn.LazyConv2d(n_paths * c, kernel_size=1)
+                    torch.nn.Conv2d(n_paths * c, n_paths * c, kernel_size=1)
                     for c in gated_output_channels
                 ]
             )
@@ -214,11 +260,9 @@ class LateFusionFeatureExtractor(FeatureExtractor):
     # ------------------------------------------------------------------
 
     def _maybe_init_gate_bias(self) -> None:
-        """Set gate biases to ``gate_init_bias`` after lazy params materialise.
+        """Set gate biases to ``gate_init_bias`` if not already done.
 
-        Called once after the first forward pass through the gating layers.
-        The very first batch will use the default (zero) bias; all subsequent
-        batches use the configured bias.
+        Called from ``__init__`` after the gating layers are built.
         """
         if self._gate_bias_initialized or self.gate_init_bias == 0.0:
             return
@@ -396,10 +440,12 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         """Apply per-channel modality mixing to a list of FeatureMaps.
 
         At each scale:
-            1. Gate conv on concat → ``B × (N·C_out) × H × W``, reshaped to
+            1. Project each path to the common output dimension ``C_out``
+               via a learned 1×1 conv.
+            2. Concatenate projected maps and feed through the gate conv:
+               ``B × (N·C_out) × H × W`` → reshaped to
                ``B × N × C_out × H × W``, then softmax over paths (dim 1).
-            2. Project each path independently via a learned 1×1 conv.
-            3. Weighted sum: ``z = Σ_i weights_i ⊙ proj_i(x_i)``.
+            3. Weighted sum: ``z = Σ_i weights_i ⊙ proj_i``.
         """
         n_scales = self._validate_feature_map_scales(outputs)
 
@@ -415,7 +461,13 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         for s in range(n_scales):
             out_ch = self._mixing_out_channels[s]
             maps_at_scale = [o.feature_maps[s] for o in outputs]
-            concat = torch.cat(maps_at_scale, dim=1)
+
+            # Project each path to the common output dimension.
+            projs = [self.mixing_projs[p][s](maps_at_scale[p]) for p in range(n_paths)]
+            proj_stack = torch.stack(projs, dim=1)  # B × N × C_out × H × W
+
+            # Gate operates on projected (uniform-dim) features.
+            concat = torch.cat(projs, dim=1)  # B × (N·C_out) × H × W
             concat = self._apply_gate_dropout(concat)
 
             b, _, h, w = concat.shape
@@ -424,11 +476,6 @@ class LateFusionFeatureExtractor(FeatureExtractor):
             gate_logits = gate_logits.view(b, n_paths, out_ch, h, w)
             gate_weights = torch.softmax(gate_logits, dim=1)
 
-            # B × N × C_out × H × W
-            proj_stack = torch.stack(
-                [self.mixing_projs[p][s](maps_at_scale[p]) for p in range(n_paths)],
-                dim=1,
-            )
             fused_maps.append((gate_weights * proj_stack).sum(dim=1))
 
         return FeatureMaps(fused_maps)
@@ -436,13 +483,23 @@ class LateFusionFeatureExtractor(FeatureExtractor):
     def _mixing_feature_vectors(self, outputs: list[FeatureVector]) -> FeatureVector:
         """Apply per-channel modality mixing to a list of FeatureVectors.
 
-        Gate linear on concat → ``B × (N·C_out)``, reshaped to
-        ``B × N × C_out``, then softmax over paths (dim 1).
+        Steps:
+            1. Project each path to the common output dimension ``C_out``.
+            2. Concatenate projected vectors and feed through the gate linear
+               layer: ``B × (N·C_out)`` → reshaped to ``B × N × C_out``,
+               then softmax over paths (dim 1).
+            3. Weighted sum: ``z = Σ_i weights_i ⊙ proj_i``.
         """
         n_paths = self._n_paths
         out_ch = self._mixing_out_channels[0]
         vecs = [o.feature_vector for o in outputs]
-        concat = torch.cat(vecs, dim=1)
+
+        # Project each path to the common output dimension.
+        projs = [self.mixing_projs[p](vecs[p]) for p in range(n_paths)]
+        proj_stack = torch.stack(projs, dim=1)  # B × N × C_out
+
+        # Gate operates on projected (uniform-dim) features.
+        concat = torch.cat(projs, dim=1)  # B × (N·C_out)
         concat = self._apply_gate_dropout(concat)
 
         b = concat.shape[0]
@@ -450,10 +507,6 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         gate_logits = self.mixing_gate(concat).view(b, n_paths, out_ch)
         gate_weights = torch.softmax(gate_logits, dim=1)
 
-        # B × N × C_out
-        proj_stack = torch.stack(
-            [self.mixing_projs[p](vecs[p]) for p in range(n_paths)], dim=1
-        )
         fused = (gate_weights * proj_stack).sum(dim=1)
 
         return FeatureVector(feature_vector=fused)
@@ -500,9 +553,6 @@ class LateFusionFeatureExtractor(FeatureExtractor):
                 f"LateFusionFeatureExtractor only supports FeatureMaps and "
                 f"FeatureVector outputs, got {first_type.__name__}."
             )
-
-        if self.fusion_mode in _GATED_MODES and not self._gate_bias_initialized:
-            self._maybe_init_gate_bias()
 
         return result
 
