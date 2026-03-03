@@ -346,6 +346,20 @@ class EarthDaily(DataSource, TileStore):
         assert isinstance(serialized_item, dict)
         return EarthDailyItem.deserialize(serialized_item)
 
+    def _download_asset_to_tmp(
+        self, asset_url: str, tmp_dir: str, asset_key: str, item_name: str
+    ) -> str:
+        """Download an asset URL to a temporary GeoTIFF path."""
+        local_fname = os.path.join(tmp_dir, f"{item_name}_{asset_key}.tif")
+        with requests.get(
+            asset_url, stream=True, timeout=self.timeout.total_seconds()
+        ) as r:
+            r.raise_for_status()
+            with open(local_fname, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+        return local_fname
+
     def ingest(
         self,
         tile_store: TileStoreWithLayer,
@@ -368,20 +382,15 @@ class EarthDaily(DataSource, TileStore):
 
                 asset_url = item.asset_urls[asset_key]
                 with tempfile.TemporaryDirectory() as tmp_dir:
-                    local_fname = os.path.join(tmp_dir, f"{asset_key}.tif")
+                    local_fname = self._download_asset_to_tmp(
+                        asset_url, tmp_dir, asset_key, item.name
+                    )
                     logger.debug(
                         "EarthDaily download item %s asset %s to %s",
                         item.name,
                         asset_key,
                         local_fname,
                     )
-                    with requests.get(
-                        asset_url, stream=True, timeout=self.timeout.total_seconds()
-                    ) as r:
-                        r.raise_for_status()
-                        with open(local_fname, "wb") as f:
-                            for chunk in r.iter_content(chunk_size=8192):
-                                f.write(chunk)
 
                     logger.debug(
                         "EarthDaily ingest item %s asset %s",
@@ -829,19 +838,6 @@ class Sentinel2(EarthDaily):
             groups.append(cur_groups)
 
         return groups
-
-    def _download_asset_to_tmp(
-        self, asset_url: str, tmp_dir: str, asset_key: str, item_name: str
-    ) -> str:
-        local_fname = os.path.join(tmp_dir, f"{item_name}_{asset_key}.tif")
-        with requests.get(
-            asset_url, stream=True, timeout=self.timeout.total_seconds()
-        ) as r:
-            r.raise_for_status()
-            with open(local_fname, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-        return local_fname
 
     def ingest(
         self,
