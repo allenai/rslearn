@@ -40,10 +40,9 @@ class OlmoEarthNormalize(Transform):
             skip_missing: if True, skip modalities that don't exist in the input dict.
                 Useful when working with optional inputs.
         """
-        super().__init__()
+        super().__init__(skip_missing=skip_missing)
         self.band_names = band_names
         self.std_multiplier = std_multiplier
-        self.skip_missing = skip_missing
 
         if config_fname is None:
             self.norm_config = load_computed_config()
