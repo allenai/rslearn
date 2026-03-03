@@ -603,15 +603,19 @@ class GeotiffRasterFormat(RasterFormat):
         # Construct the transform to use for the warped dataset.
         wanted_transform = get_transform_from_projection_and_bounds(projection, bounds)
         with open_rasterio_upath_reader(path / fname) as src:
-            with rasterio.vrt.WarpedVRT(
-                src,
+            vrt_kwargs: dict = dict(
                 crs=projection.crs,
                 transform=wanted_transform,
                 width=bounds[2] - bounds[0],
                 height=bounds[3] - bounds[1],
                 resampling=resampling,
-                src_nodata=nodata_val,
-            ) as vrt:
+            )
+            # Only pass src_nodata if nodata_val is None, since src_nodata=None is
+            # treated as setting it to 0 (overriding the actual src nodata value) in
+            # rasterio.
+            if nodata_val is not None:
+                vrt_kwargs["src_nodata"] = nodata_val
+            with rasterio.vrt.WarpedVRT(src, **vrt_kwargs) as vrt:
                 raw = vrt.read()  # (bands, H, W)
 
         # Reshape from (C*T, H, W) -> (C, T, H, W).
