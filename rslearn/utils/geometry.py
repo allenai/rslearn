@@ -643,14 +643,13 @@ def safely_reproject_within_valid_area(
 
         # Clip in WGS84 to the buffered valid area so we only reproject a small piece.
         clipped_shp = src_wgs84.shp.intersection(get_clip_region())
-        if clipped_shp.is_empty or clipped_shp.area == 0:
+        if clipped_shp.is_empty:
             results.append(None)
             continue
 
         clipped_geom = STGeometry(WGS84_PROJECTION, clipped_shp, src_geom.time_range)
         reprojected = clipped_geom.to_projection(valid_geom.projection)
-
-        if reprojected.shp.is_empty or reprojected.shp.area == 0:
+        if reprojected.shp.is_empty:
             results.append(None)
             continue
 
