@@ -244,6 +244,8 @@ dataset configuration file:
     "embeddings": {
       "band_sets": [{
           "dtype": "float32",
+          // Set this to the embedding size for your chosen OlmoEarth `model_id`.
+          // For example: NANO=128, TINY=192, BASE=768, LARGE=1024.
           "num_bands": 768
       }],
       "type": "raster"
@@ -262,4 +264,68 @@ You can visualize the output embeddings in qgis:
 
 ```
 qgis $DATASET_PATH/windows/default/default/layers/embeddings/*/geotiff.tif
+```
+
+## Fit a Downstream Head From Saved Embeddings
+
+Once the embeddings are written to the `"embeddings"` layer, you can train a
+lightweight head model using those precomputed features.
+
+The key is that you usually do **not** want to list every embedding band in the model
+config (e.g. 768 for `OLMOEARTH_V1_BASE`). Instead, set
+`use_all_bands_in_layer_config_order: true` to use the band names from the dataset
+layer config:
+
+```yaml
+data:
+  class_path: rslearn.train.data_module.RslearnDataModule
+  init_args:
+    path: ${DATASET_PATH}
+    inputs:
+      embeddings:
+        data_type: "raster"
+        layers: ["embeddings"]
+        use_all_bands_in_layer_config_order: true
+        passthrough: true
+        dtype: FLOAT32
+      targets:
+        data_type: "vector"
+        layers: ["label"]
+        required: true
+        is_target: true
+```
+
+If your `"embeddings"` layer has multiple band sets, set `band_set_index` as well to
+select which band set to use.
+
+For example, if your dataset config defines multiple band sets for the same layer:
+
+```jsonc
+{
+  "layers": {
+    "embeddings": {
+      "type": "raster",
+      "band_sets": [
+        { "dtype": "float32", "num_bands": 768 },  // band_set_index: 0
+        { "dtype": "float32", "num_bands": 192 }   // band_set_index: 1
+      ]
+    }
+  }
+}
+```
+
+…then select the one you want in the training config (0-based index):
+
+```yaml
+data:
+  class_path: rslearn.train.data_module.RslearnDataModule
+  init_args:
+    inputs:
+      embeddings:
+        data_type: "raster"
+        layers: ["embeddings"]
+        use_all_bands_in_layer_config_order: true
+        band_set_index: 1
+        passthrough: true
+        dtype: FLOAT32
 ```

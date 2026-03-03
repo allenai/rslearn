@@ -293,6 +293,178 @@ def test_read_data_input_timestamps(tmp_path: UPath) -> None:
     assert result.timestamps == [ts1, ts2]
 
 
+def test_read_data_input_auto_bands_single_band_set(tmp_path: UPath) -> None:
+    """bands: auto should resolve bands from the dataset layer config when unambiguous."""
+    ds_path = UPath(tmp_path)
+    ds_path.mkdir(parents=True, exist_ok=True)
+
+    dataset_config = {
+        "layers": {
+            "embeddings": {
+                "type": "raster",
+                "band_sets": [
+                    {
+                        "dtype": "float32",
+                        "num_bands": 3,
+                    }
+                ],
+            },
+        },
+    }
+    with (ds_path / "config.json").open("w") as f:
+        json.dump(dataset_config, f)
+
+    dataset = Dataset(ds_path)
+    window = Window(
+        storage=dataset.storage,
+        name="test_window",
+        group="default",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 4, 4),
+        time_range=None,
+    )
+    window.save()
+
+    raster = np.stack(
+        [
+            0 * np.ones((4, 4), dtype=np.float32),
+            1 * np.ones((4, 4), dtype=np.float32),
+            2 * np.ones((4, 4), dtype=np.float32),
+        ],
+        axis=0,
+    )
+    raster_dir = window.get_raster_dir("embeddings", ["B0", "B1", "B2"], group_idx=0)
+    GeotiffRasterFormat().encode_raster(
+        raster_dir,
+        window.projection,
+        window.bounds,
+        RasterArray(chw_array=raster),
+    )
+    window.mark_layer_completed("embeddings", group_idx=0)
+
+    data_input = DataInput(
+        "raster",
+        ["embeddings"],
+        bands="auto",
+        dtype=DType.FLOAT32,
+    )
+
+    result = read_data_input(
+        dataset, window, window.bounds, data_input, random.Random(0)
+    )
+    assert isinstance(result, RasterImage)
+    assert result.image.shape == (3, 1, 4, 4)
+    torch.testing.assert_close(result.image[:, 0], torch.as_tensor(raster))
+
+
+def test_read_data_input_auto_bands_requires_band_set_index_when_ambiguous(
+    tmp_path: UPath,
+) -> None:
+    """Auto band resolution should fail clearly when a layer has multiple band sets."""
+    ds_path = UPath(tmp_path)
+    ds_path.mkdir(parents=True, exist_ok=True)
+
+    dataset_config = {
+        "layers": {
+            "embeddings": {
+                "type": "raster",
+                "band_sets": [
+                    {"dtype": "float32", "bands": ["a"]},
+                    {"dtype": "float32", "bands": ["b"]},
+                ],
+            },
+        },
+    }
+    with (ds_path / "config.json").open("w") as f:
+        json.dump(dataset_config, f)
+
+    dataset = Dataset(ds_path)
+    window = Window(
+        storage=dataset.storage,
+        name="test_window",
+        group="default",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 4, 4),
+        time_range=None,
+    )
+    window.save()
+    window.get_layer_dir("embeddings", group_idx=0).mkdir(parents=True, exist_ok=True)
+    window.mark_layer_completed("embeddings", group_idx=0)
+
+    data_input = DataInput(
+        "raster",
+        ["embeddings"],
+        use_all_bands_in_layer_config_order=True,
+        dtype=DType.FLOAT32,
+    )
+
+    with pytest.raises(ValueError, match=r"band_set_index"):
+        _ = read_data_input(dataset, window, window.bounds, data_input, random.Random(0))
+
+
+def test_read_data_input_auto_bands_with_band_set_index(tmp_path: UPath) -> None:
+    """band_set_index should select a specific band set for auto resolution."""
+    ds_path = UPath(tmp_path)
+    ds_path.mkdir(parents=True, exist_ok=True)
+
+    dataset_config = {
+        "layers": {
+            "embeddings": {
+                "type": "raster",
+                "band_sets": [
+                    {"dtype": "float32", "bands": ["unused"]},
+                    {"dtype": "float32", "num_bands": 3},
+                ],
+            },
+        },
+    }
+    with (ds_path / "config.json").open("w") as f:
+        json.dump(dataset_config, f)
+
+    dataset = Dataset(ds_path)
+    window = Window(
+        storage=dataset.storage,
+        name="test_window",
+        group="default",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 4, 4),
+        time_range=None,
+    )
+    window.save()
+
+    raster = np.stack(
+        [
+            10 * np.ones((4, 4), dtype=np.float32),
+            20 * np.ones((4, 4), dtype=np.float32),
+            30 * np.ones((4, 4), dtype=np.float32),
+        ],
+        axis=0,
+    )
+    raster_dir = window.get_raster_dir("embeddings", ["B0", "B1", "B2"], group_idx=0)
+    GeotiffRasterFormat().encode_raster(
+        raster_dir,
+        window.projection,
+        window.bounds,
+        RasterArray(chw_array=raster),
+    )
+    window.mark_layer_completed("embeddings", group_idx=0)
+
+    data_input = DataInput(
+        "raster",
+        ["embeddings"],
+        use_all_bands_in_layer_config_order=True,
+        band_set_index=1,
+        dtype=DType.FLOAT32,
+    )
+
+    result = read_data_input(
+        dataset, window, window.bounds, data_input, random.Random(0)
+    )
+    assert isinstance(result, RasterImage)
+    assert result.image.shape == (3, 1, 4, 4)
+    torch.testing.assert_close(result.image[:, 0], torch.as_tensor(raster))
+
+
 def test_model_dataset_index_uses_cache(
     basic_classification_dataset: Dataset,
     add_window_to_basic_classification_dataset: Callable,

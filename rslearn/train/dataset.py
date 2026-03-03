@@ -242,7 +242,9 @@ class DataInput:
         self,
         data_type: str,
         layers: list[str],
-        bands: list[str] | None = None,
+        bands: list[str] | str | None = None,
+        use_all_bands_in_layer_config_order: bool = False,
+        band_set_index: int | None = None,
         required: bool = True,
         passthrough: bool = False,
         is_target: bool = False,
@@ -297,7 +299,18 @@ class DataInput:
         """
         self.data_type = data_type
         self.layers = layers
+        if isinstance(bands, str):
+            if bands != "auto":
+                raise ValueError(
+                    f"Invalid value for bands='{bands}'. Expected a list of band names or 'auto'."
+                )
+            # Allow `bands: auto` as a shorthand for selecting a band set from the
+            # dataset layer config.
+            bands = None
+            use_all_bands_in_layer_config_order = True
         self.bands = bands
+        self.use_all_bands_in_layer_config_order = use_all_bands_in_layer_config_order
+        self.band_set_index = band_set_index
         self.required = required
         self.passthrough = passthrough
         self.is_target = is_target
@@ -306,6 +319,62 @@ class DataInput:
         self.load_all_item_groups = load_all_item_groups
         self.resolution_factor = resolution_factor
         self.resampling = resampling
+
+
+def resolve_raster_data_input_bands(
+    *,
+    data_input: DataInput,
+    layer_name: str,
+    layer_config: LayerConfig,
+) -> list[str]:
+    """Resolve the band list for a raster DataInput.
+
+    If data_input.bands is explicitly provided, it is returned as-is. Otherwise, if
+    use_all_bands_in_layer_config_order is enabled, the band list is resolved from the
+    dataset's LayerConfig band_sets.
+    """
+    if data_input.bands is not None:
+        return data_input.bands
+
+    if not data_input.use_all_bands_in_layer_config_order:
+        raise ValueError(
+            f"No bands specified for raster input when reading layer '{layer_name}'. "
+            "Set `bands: [...]`, or set `use_all_bands_in_layer_config_order: true` "
+            "(or `bands: auto`) to use band names from the dataset layer config."
+        )
+
+    if len(layer_config.band_sets) == 0:
+        raise ValueError(
+            f"Layer '{layer_name}' has no band_sets in the dataset config, "
+            "so bands cannot be resolved automatically."
+        )
+
+    if data_input.band_set_index is None:
+        if len(layer_config.band_sets) != 1:
+            summaries = ", ".join(
+                f"{i}({len(band_set.bands)} bands)"
+                for i, band_set in enumerate(layer_config.band_sets)
+            )
+            raise ValueError(
+                f"Layer '{layer_name}' has {len(layer_config.band_sets)} band sets ({summaries}). "
+                "Set `band_set_index` to select which band set to use, or specify `bands` explicitly."
+            )
+        band_set_index = 0
+    else:
+        band_set_index = data_input.band_set_index
+
+    if band_set_index < 0 or band_set_index >= len(layer_config.band_sets):
+        raise ValueError(
+            f"Invalid band_set_index={band_set_index} for layer '{layer_name}'. "
+            f"Expected a value in [0, {len(layer_config.band_sets) - 1}]."
+        )
+
+    bands = layer_config.band_sets[band_set_index].bands
+    if not bands:
+        raise ValueError(
+            f"Band set {band_set_index} for layer '{layer_name}' has no bands."
+        )
+    return list(bands)
 
 
 def read_raster_layer_for_data_input(
@@ -335,9 +404,11 @@ def read_raster_layer_for_data_input(
     """
     # See what different sets of bands we need to read to get all the
     # configured bands.
-    needed_bands = data_input.bands
-    if needed_bands is None:
-        raise ValueError(f"No bands specified for {layer_name}")
+    needed_bands = resolve_raster_data_input_bands(
+        data_input=data_input,
+        layer_name=layer_name,
+        layer_config=layer_config,
+    )
     needed_band_indexes = {}
     for i, band in enumerate(needed_bands):
         needed_band_indexes[band] = i
