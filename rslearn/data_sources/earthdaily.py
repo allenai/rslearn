@@ -194,15 +194,27 @@ class EarthDaily(DataSource, TileStore):
         asset_urls: dict[str, str] = {}
         asset_scale_offsets: dict[str, list[dict[str, float]]] = {}
         for asset_key, asset_obj in stac_item.assets.items():
-            if (
-                "alternate" not in asset_obj.extra_fields
-                or "download" not in asset_obj.extra_fields["alternate"]
-                or "href" not in asset_obj.extra_fields["alternate"]["download"]
-            ):
+            href: str | None = None
+            alt = asset_obj.extra_fields.get("alternate")
+            if isinstance(alt, dict):
+                download = alt.get("download")
+                if isinstance(download, dict):
+                    raw_href = download.get("href")
+                    if isinstance(raw_href, str) and raw_href:
+                        href = raw_href
+
+            if href is None:
+                # Some items include assets (e.g. thumbnails) that are not relevant to
+                # the configured asset_bands. Ignore those, but require downloadable
+                # URLs for any configured asset keys.
+                if asset_key in self.asset_bands:
+                    raise ValueError(
+                        f"item {stac_item.id} asset {asset_key} is missing "
+                        "alternate.download.href"
+                    )
                 continue
-            asset_urls[asset_key] = asset_obj.extra_fields["alternate"]["download"][
-                "href"
-            ]
+
+            asset_urls[asset_key] = href
 
             raster_bands = asset_obj.extra_fields.get("raster:bands", [])
             if not isinstance(raster_bands, list) or not raster_bands:
@@ -862,6 +874,156 @@ class Sentinel2(EarthDaily):
                             time_range=item.geometry.time_range,
                         )
                         continue
+
+                    with rasterio.open(local_fname) as src:
+                        array = src.read()
+                        array = self._apply_scale_offsets(
+                            array,
+                            scale_offsets=item.asset_scale_offsets.get(asset_key),
+                            item_name=item.name,
+                            asset_key=asset_key,
+                        )
+
+                        projection, bounds = get_raster_projection_and_bounds(src)
+                    tile_store.write_raster(
+                        item.name,
+                        band_names,
+                        projection,
+                        bounds,
+                        RasterArray(
+                            chw_array=array,
+                            time_range=item.geometry.time_range,
+                        ),
+                    )
+
+
+class Biophysical(EarthDaily):
+    """Biophysical variables on EarthDaily platform (EDAgro layers).
+
+    Supported variables (each maps to its own EarthDaily STAC collection + asset key):
+    - `lai` → collection `lai-layer-edagro`, asset `lai`
+    - `fapar` → collection `fapar-layer-edagro`, asset `fapar`
+    - `fcover` → collection `fcover-layer-edagro`, asset `fcover`
+    """
+
+    VARIABLES: dict[str, dict[str, str]] = {
+        "lai": {"collection": "lai-layer-edagro", "asset": "lai"},
+        "fapar": {"collection": "fapar-layer-edagro", "asset": "fapar"},
+        "fcover": {"collection": "fcover-layer-edagro", "asset": "fcover"},
+    }
+
+    def __init__(
+        self,
+        variable: Literal["lai", "fapar", "fcover"],
+        *,
+        apply_scale_offset: bool = True,
+        query: dict[str, Any] | None = None,
+        sort_by: str | None = None,
+        sort_ascending: bool = True,
+        timeout: timedelta = timedelta(seconds=10),
+        cache_dir: str | None = None,
+        max_retries: int = 3,
+        retry_backoff_factor: float = 5.0,
+        context: DataSourceContext = DataSourceContext(),
+    ) -> None:
+        """Initialize an EarthDaily biophysical variable data source.
+
+        Args:
+            variable: one of `lai`, `fapar`, or `fcover`.
+            apply_scale_offset: apply per-asset scale/offset metadata from STAC
+                `raster:bands` (defaults to True). Set to False to use raw values.
+            query: optional STAC API `query` filter passed to searches.
+            sort_by: optional STAC item property to sort by before grouping/matching.
+            sort_ascending: whether to sort ascending when sort_by is set.
+            timeout: timeout for HTTP asset downloads (when ingesting).
+            cache_dir: optional directory to cache item metadata by item id.
+            max_retries: max retries for EarthDaily API client (search/get item).
+            retry_backoff_factor: backoff factor for EarthDaily API client retries.
+            context: rslearn data source context.
+        """
+        if variable not in self.VARIABLES:
+            raise ValueError(
+                f"unknown biophysical variable {variable}; supported variables are "
+                f"{sorted(self.VARIABLES.keys())}"
+            )
+        cfg = self.VARIABLES[variable]
+        self.variable = variable
+        self.apply_scale_offset = apply_scale_offset
+
+        asset_key = cfg["asset"]
+        super().__init__(
+            collection_name=cfg["collection"],
+            asset_bands={asset_key: [asset_key]},
+            query=query,
+            sort_by=sort_by,
+            sort_ascending=sort_ascending,
+            timeout=timeout,
+            skip_items_missing_assets=True,
+            cache_dir=cache_dir,
+            max_retries=max_retries,
+            retry_backoff_factor=retry_backoff_factor,
+            context=context,
+        )
+
+    def read_raster(
+        self,
+        layer_name: str,
+        item_name: str,
+        bands: list[str],
+        projection: Projection,
+        bounds: PixelBounds,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> RasterArray:
+        """Read raster data from the store.
+
+        Applies per-asset scale/offset metadata when apply_scale_offset=True.
+        """
+        raster = super().read_raster(
+            layer_name, item_name, bands, projection, bounds, resampling=resampling
+        )
+        if not self.apply_scale_offset:
+            return raster
+
+        asset_key = self._get_asset_by_band(bands)
+        item = self.get_item_by_name(item_name)
+        result = self._apply_scale_offsets(
+            raster.get_chw_array(),
+            scale_offsets=item.asset_scale_offsets.get(asset_key),
+            item_name=item_name,
+            asset_key=asset_key,
+        )
+        return RasterArray(chw_array=result)
+
+    def ingest(
+        self,
+        tile_store: TileStoreWithLayer,
+        items: list[EarthDailyItem],
+        geometries: list[list[STGeometry]],
+    ) -> None:
+        """Ingest biophysical variable items into the provided tile store.
+
+        Applies per-asset scale/offset metadata (when present).
+        """
+        if not self.apply_scale_offset:
+            return super().ingest(tile_store, items, geometries)
+
+        for item in items:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                for asset_key, band_names in self.asset_bands.items():
+                    asset_url = item.asset_urls.get(asset_key)
+                    if asset_url is None:
+                        continue
+                    if tile_store.is_raster_ready(item.name, band_names):
+                        continue
+
+                    local_fname = os.path.join(tmp_dir, f"{item.name}_{asset_key}.tif")
+                    with requests.get(
+                        asset_url, stream=True, timeout=self.timeout.total_seconds()
+                    ) as r:
+                        r.raise_for_status()
+                        with open(local_fname, "wb") as f:
+                            for chunk in r.iter_content(chunk_size=8192):
+                                f.write(chunk)
 
                     with rasterio.open(local_fname) as src:
                         array = src.read()
