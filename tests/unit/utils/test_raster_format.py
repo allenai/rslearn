@@ -47,7 +47,9 @@ def test_geotiff_tiling(tmp_path: pathlib.Path) -> None:
             assert raster.profile["tiled"]
 
 
-class TestGeotiffInOrOutOfBounds:
+class TestGeotiffBoundsAndNodata:
+    """Test GeotiffRasterFormat bounds and nodata handling."""
+
     PROJECTION = Projection(CRS.from_epsg(3857), 1, -1)
 
     @pytest.fixture
@@ -60,6 +62,7 @@ class TestGeotiffInOrOutOfBounds:
         return path
 
     def test_geotiff_in_bounds(self, encoded_raster_path: UPath) -> None:
+        """In-bounds read from GeoTIFF of 1s should yield 1s."""
         ra = GeotiffRasterFormat().decode_raster(
             encoded_raster_path, self.PROJECTION, (2, 2, 6, 6)
         )
@@ -67,6 +70,7 @@ class TestGeotiffInOrOutOfBounds:
         assert np.all(ra.array == 1)
 
     def test_geotiff_partial_overlap(self, encoded_raster_path: UPath) -> None:
+        """Read with partial overlap should yield nodata (0) for out of bounds pixels."""
         ra = GeotiffRasterFormat().decode_raster(
             encoded_raster_path, self.PROJECTION, (4, 4, 12, 12)
         )
@@ -75,11 +79,121 @@ class TestGeotiffInOrOutOfBounds:
         assert np.all(ra.array[:, :, 0:8, 4:8] == 0)
 
     def test_geotiff_out_of_bounds(self, encoded_raster_path: UPath) -> None:
+        """Fully out-of-bounds read should yield nodata (0) for all pixels."""
         ra = GeotiffRasterFormat().decode_raster(
             encoded_raster_path, self.PROJECTION, (8, 8, 12, 12)
         )
         assert ra.array.shape == (1, 1, 4, 4)
         assert np.all(ra.array == 0)
+
+    def test_geotiff_write_nodata_val(self, tmp_path: pathlib.Path) -> None:
+        """Test that nodata_val is correctly set when writing a GeoTIFF."""
+        path = UPath(tmp_path)
+        projection = Projection(CRS.from_epsg(3857), 1, -1)
+        array = np.zeros((1, 4, 4), dtype=np.float32)
+        nodata_val = -9999.0
+
+        GeotiffRasterFormat().encode_raster(
+            path,
+            projection,
+            (0, 0, 4, 4),
+            RasterArray(chw_array=array),
+            nodata_val=nodata_val,
+        )
+
+        with rasterio.open(path / "geotiff.tif") as raster:
+            assert raster.nodata == nodata_val
+
+    def test_geotiff_out_of_bounds_uses_source_nodata(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Out-of-bounds pixels should use the source file's nodata value when nodata_val is not set.
+
+        This verifies the source nodata value is honored even when it is non-zero.
+        """
+        # Create a GeoTIFF that is 42 in (0, 0, 4, 4), with nodata value 255.
+        path = UPath(tmp_path)
+        projection = Projection(CRS.from_epsg(3857), 1, -1)
+        array = np.full((1, 4, 4), 42, dtype=np.uint8)
+        GeotiffRasterFormat().encode_raster(
+            path, projection, (0, 0, 4, 4), RasterArray(chw_array=array), nodata_val=255
+        )
+
+        # Read partially out of bounds without specifying nodata_val.
+        raster = GeotiffRasterFormat().decode_raster(path, projection, (2, 2, 8, 8))
+        result = raster.get_chw_array()
+        assert result.shape == (1, 6, 6)
+        # In-bounds region should keep original data.
+        assert np.all(result[:, 0:2, 0:2] == 42)
+        # Out-of-bounds region should be filled with the source nodata (255).
+        assert np.all(result[:, 2:6, :] == 255)
+        assert np.all(result[:, :, 2:6] == 255)
+
+    def test_geotiff_read_nodata_val_out_of_bounds(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Test that nodata_val is used to fill pixels outside source bounds when reading."""
+        path = UPath(tmp_path)
+        projection = Projection(CRS.from_epsg(3857), 1, -1)
+        nodata_val = -9999.0
+
+        # Create a raster with value 1 and nodata=0.
+        array = np.ones((1, 4, 4), dtype=np.float32)
+        GeotiffRasterFormat().encode_raster(
+            path, projection, (0, 0, 4, 4), RasterArray(chw_array=array), nodata_val=0
+        )
+
+        # Read a region that partially overlaps the source raster.
+        # We override the nodata_val to -9999.
+        # In the out-of-bounds portions it should be filled in as -9999.
+        raster_array = GeotiffRasterFormat().decode_raster(
+            path, projection, (2, 2, 8, 8), nodata_val=nodata_val
+        )
+
+        assert raster_array.array.shape == (1, 1, 6, 6)
+        result = raster_array.get_chw_array()
+        # Top-left 2x2 region overlaps source and should have value 1.
+        assert np.all(result[:, 0:2, 0:2] == 1)
+        # Pixels outside source bounds should be filled with nodata_val.
+        assert np.all(result[:, 2:6, :] == nodata_val)
+        assert np.all(result[:, :, 2:6] == nodata_val)
+
+    def test_geotiff_read_nodata_val_orig_nodata(self, tmp_path: pathlib.Path) -> None:
+        """Test reading from GeoTIFF that has nodata values, but we set different nodata_val.
+
+        Since we override the nodata value in the read operation, the source pixels that
+        were a different nodata value should still have the original value.
+        """
+        path = UPath(tmp_path)
+        projection = Projection(CRS.from_epsg(3857), 1, -1)
+        original_nodata = -9999.0
+        new_nodata = -1.0
+
+        # Create a raster where some pixels have the nodata value -9999.
+        # Other pixels are valid (1).
+        array = np.ones((1, 4, 4), dtype=np.float32)
+        array[:, 2:4, 2:4] = original_nodata
+        GeotiffRasterFormat().encode_raster(
+            path,
+            projection,
+            (0, 0, 4, 4),
+            RasterArray(chw_array=array),
+            nodata_val=original_nodata,
+        )
+
+        # Decode with a different nodata_val.
+        # The pixels that were originally nodata should be unchanged.
+        raster_array = GeotiffRasterFormat().decode_raster(
+            path, projection, (0, 0, 4, 4), nodata_val=new_nodata
+        )
+
+        assert raster_array.array.shape == (1, 1, 4, 4)
+        result = raster_array.get_chw_array()
+        # Valid data pixels should still have value 1.
+        assert np.all(result[:, 0:2, :] == 1)
+        assert np.all(result[:, :, 0:2] == 1)
+        # Original nodata pixels should still be as they were.
+        assert np.all(result[:, 2:4, 2:4] == original_nodata)
 
 
 def test_geotiff_compress_zstd(tmp_path: pathlib.Path) -> None:
@@ -97,113 +211,6 @@ def test_geotiff_compress_zstd(tmp_path: pathlib.Path) -> None:
     )
     with rasterio.open(path / "geotiff.tif") as raster:
         assert raster.profile["compress"] == "zstd"
-
-
-def test_geotiff_write_nodata_val(tmp_path: pathlib.Path) -> None:
-    """Test that nodata_val is correctly set when writing a GeoTIFF."""
-    path = UPath(tmp_path)
-    projection = Projection(CRS.from_epsg(3857), 1, -1)
-    array = np.zeros((1, 4, 4), dtype=np.float32)
-    nodata_val = -9999.0
-
-    GeotiffRasterFormat().encode_raster(
-        path,
-        projection,
-        (0, 0, 4, 4),
-        RasterArray(chw_array=array),
-        nodata_val=nodata_val,
-    )
-
-    with rasterio.open(path / "geotiff.tif") as raster:
-        assert raster.nodata == nodata_val
-
-
-def test_geotiff_read_nodata_val_out_of_bounds(tmp_path: pathlib.Path) -> None:
-    """Test that nodata_val is used to fill pixels outside source bounds when reading."""
-    path = UPath(tmp_path)
-    projection = Projection(CRS.from_epsg(3857), 1, -1)
-    nodata_val = -9999.0
-
-    # Create a raster with value 1 and nodata=0.
-    array = np.ones((1, 4, 4), dtype=np.float32)
-    GeotiffRasterFormat().encode_raster(
-        path, projection, (0, 0, 4, 4), RasterArray(chw_array=array), nodata_val=0
-    )
-
-    # Read a region that partially overlaps the source raster.
-    # We override the nodata_val to -9999.
-    # In the out-of-bounds portions it should be filled in as -9999.
-    raster_array = GeotiffRasterFormat().decode_raster(
-        path, projection, (2, 2, 8, 8), nodata_val=nodata_val
-    )
-
-    assert raster_array.array.shape == (1, 1, 6, 6)
-    result = raster_array.get_chw_array()
-    # Top-left 2x2 region overlaps source and should have value 1.
-    assert np.all(result[:, 0:2, 0:2] == 1)
-    # Pixels outside source bounds should be filled with nodata_val.
-    assert np.all(result[:, 2:6, :] == nodata_val)
-    assert np.all(result[:, :, 2:6] == nodata_val)
-
-
-def test_geotiff_read_nodata_val_orig_nodata(tmp_path: pathlib.Path) -> None:
-    """Test reading from GeoTIFF that has nodata values, but we set different nodata_val.
-
-    Since we override the nodata value in the read operation, the source pixels that
-    were a different nodata value should still have the original value.
-    """
-    path = UPath(tmp_path)
-    projection = Projection(CRS.from_epsg(3857), 1, -1)
-    original_nodata = -9999.0
-    new_nodata = -1.0
-
-    # Create a raster where some pixels have the nodata value -9999.
-    # Other pixels are valid (1).
-    array = np.ones((1, 4, 4), dtype=np.float32)
-    array[:, 2:4, 2:4] = original_nodata
-    GeotiffRasterFormat().encode_raster(
-        path,
-        projection,
-        (0, 0, 4, 4),
-        RasterArray(chw_array=array),
-        nodata_val=original_nodata,
-    )
-
-    # Decode with a different nodata_val.
-    # The pixels that were originally nodata should be unchanged.
-    raster_array = GeotiffRasterFormat().decode_raster(
-        path, projection, (0, 0, 4, 4), nodata_val=new_nodata
-    )
-
-    assert raster_array.array.shape == (1, 1, 4, 4)
-    result = raster_array.get_chw_array()
-    # Valid data pixels should still have value 1.
-    assert np.all(result[:, 0:2, :] == 1)
-    assert np.all(result[:, :, 0:2] == 1)
-    # Original nodata pixels should still be as they were.
-    assert np.all(result[:, 2:4, 2:4] == original_nodata)
-
-
-def test_geotiff_out_of_bounds_uses_source_nodata(tmp_path: pathlib.Path) -> None:
-    """Out-of-bounds pixels should use the source file's nodata value when nodata_val is not set."""
-    path = UPath(tmp_path)
-    projection = Projection(CRS.from_epsg(3857), 1, -1)
-
-    # Create an array that is 42 in (0, 0, 4, 4).
-    array = np.full((1, 4, 4), 42, dtype=np.uint8)
-    GeotiffRasterFormat().encode_raster(
-        path, projection, (0, 0, 4, 4), RasterArray(chw_array=array), nodata_val=255
-    )
-
-    # Read partially out of bounds without specifying nodata_val.
-    raster = GeotiffRasterFormat().decode_raster(path, projection, (2, 2, 8, 8))
-    result = raster.get_chw_array()
-    assert result.shape == (1, 6, 6)
-    # In-bounds region should keep original data.
-    assert np.all(result[:, 0:2, 0:2] == 42)
-    # Out-of-bounds region should be filled with the source nodata (255).
-    assert np.all(result[:, 2:6, :] == 255)
-    assert np.all(result[:, :, 2:6] == 255)
 
 
 def test_geotiff_multi_timestep_roundtrip(tmp_path: pathlib.Path) -> None:
