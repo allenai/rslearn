@@ -22,11 +22,6 @@ RESOLUTION_EPSILON = 1e-6
 WGS84_EPSG = 4326
 WGS84_BOUNDS: PixelBounds = (-180, -90, 180, 90)
 
-# Threshold in degrees above which a geometry is probably not going to re-project
-# correctly due to projections with limited validity and other issues.
-# 6 degrees corresponds to the UTM zone interval.
-MAX_GEOMETRY_DEGREES = 6
-
 
 def is_same_resolution(res1: float, res2: float) -> bool:
     """Returns whether the two resolutions are the same."""
@@ -300,18 +295,6 @@ class STGeometry:
             return False
         return True
 
-    def is_too_large(self) -> bool:
-        """Returns whether this geometry's spatial coverage is too large.
-
-        This means that it will likely have issues during re-projections and such.
-        """
-        wgs84_bounds = self.to_projection(WGS84_PROJECTION).shp.bounds
-        if wgs84_bounds[2] - wgs84_bounds[0] > MAX_GEOMETRY_DEGREES:
-            return True
-        if wgs84_bounds[3] - wgs84_bounds[1] > MAX_GEOMETRY_DEGREES:
-            return True
-        return False
-
     def intersects(self, other: "STGeometry") -> bool:
         """Returns whether this box intersects the other box."""
         # Check temporal.
@@ -324,11 +307,20 @@ class STGeometry:
             return True
         # Need to reproject if projections don't match.
         if other.projection != self.projection:
-            other = other.to_projection(self.projection)
-        if not self.shp.intersects(other.shp):
-            return False
+            # Check the intersection in WGS84 so we can be sure to handle the
+            # anti-meridian properly. Re-projection is required anyway so it shouldn't
+            # be any less reliable to re-project to WGS84 (versus re-projecting one
+            # geometry to the other's projection), and this allows us to have uniform
+            # anti-meridian handling.
+            self_wgs84 = self.to_projection(WGS84_PROJECTION)
+            if self.projection.crs != CRS.from_epsg(WGS84_EPSG):
+                self_wgs84 = split_at_antimeridian(self_wgs84)
+            other_wgs84 = other.to_projection(WGS84_PROJECTION)
+            if other.projection.crs != CRS.from_epsg(WGS84_EPSG):
+                other_wgs84 = split_at_antimeridian(other_wgs84)
+            return shp_intersects(self_wgs84.shp, other_wgs84.shp)
 
-        return True
+        return shp_intersects(self.shp, other.shp)
 
     def to_projection(self, projection: Projection) -> "STGeometry":
         """Transforms this geometry to the specified projection."""
@@ -365,6 +357,13 @@ class STGeometry:
         if self.projection.crs != projection.crs:
             shp = rasterio.warp.transform_geom(self.projection.crs, projection.crs, shp)
             shp = shapely.geometry.shape(shp)
+
+            # Sometimes the geometry becomes invalid after re-projection, e.g. if there
+            # were near-duplicate vertices that crossed over or became the same after
+            # transform_geom. So we apply make_valid to fix simple problems.
+            if not shp.is_valid:
+                shp = shapely.make_valid(shp)
+
         # Apply new resolution.
         shp = shapely.transform(
             shp,
@@ -568,56 +567,89 @@ def split_at_antimeridian(geometry: STGeometry, epsilon: float = 1e-6) -> STGeom
     return STGeometry(geometry.projection, new_shp, geometry.time_range)
 
 
-def safely_reproject_and_clip(
-    src_geoms: Sequence[STGeometry], dst_geom: STGeometry
+WGS84_CLIP_BUFFER_DEGREES = 1.0
+
+
+def safely_reproject_within_valid_area(
+    src_geoms: Sequence[STGeometry], valid_geom: STGeometry
 ) -> Sequence[STGeometry | None]:
-    """Re-project src_geoms into the projection of dst_geom.
+    """Re-project src_geoms into the projection of valid_geom.
 
-    The resulting geometries will be clipped to dst_geom. If there is no intersection
-    for an src_geom, then the result will be None. The list of results is returned.
+    Unlike direct to_projection(), this clips each source geometry in WGS84 to a
+    buffered area around valid_geom before reprojecting. This minimizes distortions in
+    case valid_geom is small but src_geoms may be large. It works best if src_geoms are
+    also natively in WGS84; otherwise, there could be distortion issues re-projecting
+    them to WGS84.
 
-    This function addresses issues with direct re-projection (e.g. using
-    src_geom.to_projection(dst_geom.projection)), which may fail if the source geometry
-    is outside the area of use of the destination projection.
-
-    It will first check for compatibility in WGS84, and only proceed with re-projection
-    if the geometries intersect.
-
-    This function may produce unexpected results if the geometries span more than 90
-    degrees on either dimension.
+    Returns None for source geometries that don't intersect valid_geom in WGS84.
     """
 
-    # We cache re-projecting the destination geometry to WGS84 since the re-projection
-    # can be costly. This also avoids re-projecting in case all the src_geoms are
-    # already in the same projection as dst_geom.
-    @functools.cache
-    def get_dst_geom_wgs84() -> STGeometry:
-        """Lazily compute and cache dst_geom in WGS84 projection."""
-        return split_at_antimeridian(dst_geom.to_projection(WGS84_PROJECTION))
+    def _to_wgs84(geom: STGeometry) -> STGeometry:
+        """Convert to WGS84, splitting at antimeridian only for non-WGS84 sources.
 
-    def intersects_in_wgs84(src_geom: STGeometry) -> bool:
-        """Return False if there is no intersection."""
-        src_geom_wgs84 = split_at_antimeridian(src_geom.to_projection(WGS84_PROJECTION))
-        return src_geom_wgs84.intersects(get_dst_geom_wgs84())
+        We don't apply split_at_antimeridian if it is already WGS84 since we trust that the
+        given coordinates are intentional, e.g. a (-179, 0, 179, 1) box is preserved.
+        """
+        wgs84 = geom.to_projection(WGS84_PROJECTION)
+        if geom.projection.crs != WGS84_PROJECTION.crs:
+            wgs84 = split_at_antimeridian(wgs84)
+        return wgs84
+
+    # We compute valid_geom lazily so we don't re-project it to WGS84 if the src_geoms
+    # are already in valid_geom.projection.
+    @functools.cache
+    def get_valid_geom_wgs84() -> STGeometry:
+        return _to_wgs84(valid_geom)
+
+    @functools.cache
+    def get_clip_region() -> shapely.Geometry:
+        """Buffered WGS84 region around valid_geom for clipping large sources.
+
+        Buffers each component of the geometry individually and takes the union (This
+        avoids issues with MultiPolygons coming from antimeridian splitting, where
+        using shp.bounds directly would result in a big box).
+        """
+        shp = get_valid_geom_wgs84().shp
+        parts = shp.geoms if hasattr(shp, "geoms") else [shp]
+        boxes = []
+        for part in parts:
+            b = part.bounds
+            boxes.append(
+                shapely.box(
+                    b[0] - WGS84_CLIP_BUFFER_DEGREES,
+                    b[1] - WGS84_CLIP_BUFFER_DEGREES,
+                    b[2] + WGS84_CLIP_BUFFER_DEGREES,
+                    b[3] + WGS84_CLIP_BUFFER_DEGREES,
+                )
+            )
+        return shapely.unary_union(boxes)
 
     results: list[STGeometry | None] = []
     for src_geom in src_geoms:
-        # Only do the extra check in WGS84 if the projections don't already match.
-        if (
-            src_geom.projection.crs != dst_geom.projection.crs
-            and not intersects_in_wgs84(src_geom)
-        ):
+        if src_geom.projection == valid_geom.projection:
+            results.append(src_geom)
+            continue
+
+        src_wgs84 = _to_wgs84(src_geom)
+        valid_wgs84 = get_valid_geom_wgs84()
+
+        if not shp_intersects(src_wgs84.shp, valid_wgs84.shp):
             results.append(None)
             continue
 
-        src_geom_in_dst_projection = src_geom.to_projection(dst_geom.projection)
-        if not shp_intersects(src_geom_in_dst_projection.shp, dst_geom.shp):
+        # Clip in WGS84 to the buffered valid area so we only reproject a small piece.
+        clipped_shp = src_wgs84.shp.intersection(get_clip_region())
+        if clipped_shp.is_empty or clipped_shp.area == 0:
             results.append(None)
             continue
-        intersect_shp = src_geom_in_dst_projection.shp.intersection(dst_geom.shp)
-        intersect_geom = STGeometry(
-            dst_geom.projection, intersect_shp, src_geom.time_range
-        )
-        results.append(intersect_geom)
+
+        clipped_geom = STGeometry(WGS84_PROJECTION, clipped_shp, src_geom.time_range)
+        reprojected = clipped_geom.to_projection(valid_geom.projection)
+
+        if reprojected.shp.is_empty or reprojected.shp.area == 0:
+            results.append(None)
+            continue
+
+        results.append(reprojected)
 
     return results
