@@ -184,6 +184,28 @@ def test_geotiff_read_nodata_val_orig_nodata(tmp_path: pathlib.Path) -> None:
     assert np.all(result[:, 2:4, 2:4] == original_nodata)
 
 
+def test_geotiff_out_of_bounds_uses_source_nodata(tmp_path: pathlib.Path) -> None:
+    """Out-of-bounds pixels should use the source file's nodata value when nodata_val is not set."""
+    path = UPath(tmp_path)
+    projection = Projection(CRS.from_epsg(3857), 1, -1)
+
+    # Create an array that is 42 in (0, 0, 4, 4).
+    array = np.full((1, 4, 4), 42, dtype=np.uint8)
+    GeotiffRasterFormat().encode_raster(
+        path, projection, (0, 0, 4, 4), RasterArray(chw_array=array), nodata_val=255
+    )
+
+    # Read partially out of bounds without specifying nodata_val.
+    raster = GeotiffRasterFormat().decode_raster(path, projection, (2, 2, 8, 8))
+    result = raster.get_chw_array()
+    assert result.shape == (1, 6, 6)
+    # In-bounds region should keep original data.
+    assert np.all(result[:, 0:2, 0:2] == 42)
+    # Out-of-bounds region should be filled with the source nodata (255).
+    assert np.all(result[:, 2:6, :] == 255)
+    assert np.all(result[:, :, 2:6] == 255)
+
+
 def test_geotiff_multi_timestep_roundtrip(tmp_path: pathlib.Path) -> None:
     """Test encoding and decoding a multi-timestep CTHW raster."""
     path = UPath(tmp_path)
