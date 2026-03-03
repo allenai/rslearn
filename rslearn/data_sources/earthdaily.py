@@ -194,6 +194,8 @@ class EarthDaily(DataSource, TileStore):
         asset_urls: dict[str, str] = {}
         asset_scale_offsets: dict[str, list[dict[str, float]]] = {}
         for asset_key, asset_obj in stac_item.assets.items():
+            if asset_key not in self.asset_bands:
+                continue
             href: str | None = None
             alt = asset_obj.extra_fields.get("alternate")
             if isinstance(alt, dict):
@@ -204,15 +206,10 @@ class EarthDaily(DataSource, TileStore):
                         href = raw_href
 
             if href is None:
-                # Some items include assets (e.g. thumbnails) that are not relevant to
-                # the configured asset_bands. Ignore those, but require downloadable
-                # URLs for any configured asset keys.
-                if asset_key in self.asset_bands:
-                    raise ValueError(
-                        f"item {stac_item.id} asset {asset_key} is missing "
-                        "alternate.download.href"
-                    )
-                continue
+                raise ValueError(
+                    f"item {stac_item.id} asset {asset_key} is missing "
+                    "alternate.download.href"
+                )
 
             asset_urls[asset_key] = href
 
