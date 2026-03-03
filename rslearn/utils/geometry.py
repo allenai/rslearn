@@ -295,6 +295,18 @@ class STGeometry:
             return False
         return True
 
+    def to_wgs84(self) -> "STGeometry":
+        """Convert to WGS84 with antimeridian splitting handling.
+
+        For geometries already in WGS84, this is a no-op.
+        """
+        if self.projection.crs == CRS.from_epsg(WGS84_EPSG):
+            if self.projection == WGS84_PROJECTION:
+                return self
+            return self.to_projection(WGS84_PROJECTION)
+        wgs84 = self.to_projection(WGS84_PROJECTION)
+        return split_at_antimeridian(wgs84)
+
     def intersects(self, other: "STGeometry") -> bool:
         """Returns whether this box intersects the other box."""
         # Check temporal.
@@ -312,18 +324,16 @@ class STGeometry:
             # be any less reliable to re-project to WGS84 (versus re-projecting one
             # geometry to the other's projection), and this allows us to have uniform
             # anti-meridian handling.
-            self_wgs84 = self.to_projection(WGS84_PROJECTION)
-            if self.projection.crs != CRS.from_epsg(WGS84_EPSG):
-                self_wgs84 = split_at_antimeridian(self_wgs84)
-            other_wgs84 = other.to_projection(WGS84_PROJECTION)
-            if other.projection.crs != CRS.from_epsg(WGS84_EPSG):
-                other_wgs84 = split_at_antimeridian(other_wgs84)
-            return shp_intersects(self_wgs84.shp, other_wgs84.shp)
+            return shp_intersects(self.to_wgs84().shp, other.to_wgs84().shp)
 
         return shp_intersects(self.shp, other.shp)
 
     def to_projection(self, projection: Projection) -> "STGeometry":
-        """Transforms this geometry to the specified projection."""
+        """Transforms this geometry to the specified projection.
+
+        Note that this does not handle antimeridian splitting. Use to_wgs84 when
+        re-projecting to WGS84 to get antimeridian splitting handling.
+        """
 
         def apply_resolution(
             array: np.ndarray,
@@ -584,22 +594,9 @@ def safely_reproject_within_valid_area(
     Returns None for source geometries that don't intersect valid_geom in WGS84.
     """
 
-    def _to_wgs84(geom: STGeometry) -> STGeometry:
-        """Convert to WGS84, splitting at antimeridian only for non-WGS84 sources.
-
-        We don't apply split_at_antimeridian if it is already WGS84 since we trust that the
-        given coordinates are intentional, e.g. a (-179, 0, 179, 1) box is preserved.
-        """
-        wgs84 = geom.to_projection(WGS84_PROJECTION)
-        if geom.projection.crs != WGS84_PROJECTION.crs:
-            wgs84 = split_at_antimeridian(wgs84)
-        return wgs84
-
-    # We compute valid_geom lazily so we don't re-project it to WGS84 if the src_geoms
-    # are already in valid_geom.projection.
     @functools.cache
     def get_valid_geom_wgs84() -> STGeometry:
-        return _to_wgs84(valid_geom)
+        return valid_geom.to_wgs84()
 
     @functools.cache
     def get_clip_region() -> shapely.Geometry:
@@ -630,7 +627,7 @@ def safely_reproject_within_valid_area(
             results.append(src_geom)
             continue
 
-        src_wgs84 = _to_wgs84(src_geom)
+        src_wgs84 = src_geom.to_wgs84()
         valid_wgs84 = get_valid_geom_wgs84()
 
         if not shp_intersects(src_wgs84.shp, valid_wgs84.shp):

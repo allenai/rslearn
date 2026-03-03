@@ -137,6 +137,24 @@ class TestSTGeometry:
         )
         assert not distant_item.intersects(utm_geometry_crossing_antimeridian)
 
+    def test_to_wgs84_noop_for_wgs84(self) -> None:
+        """to_wgs84() on a WGS84 geometry should return self."""
+        geom = STGeometry(WGS84_PROJECTION, shapely.box(10, 20, 11, 21), None)
+        assert geom.to_wgs84() is geom
+
+    def test_to_wgs84_antimeridian_split(
+        self, utm_geometry_crossing_antimeridian: STGeometry
+    ) -> None:
+        """to_wgs84() on an antimeridian-crossing UTM geometry should produce a compact MultiPolygon."""
+        wgs84 = utm_geometry_crossing_antimeridian.to_wgs84()
+        assert wgs84.projection == WGS84_PROJECTION
+        # The result should be a MultiPolygon with two small components near +/-180,
+        # not a single polygon spanning -180 to +180.
+        assert wgs84.shp.geom_type == "MultiPolygon"
+        for part in wgs84.shp.geoms:
+            lon_extent = part.bounds[2] - part.bounds[0]
+            assert lon_extent < 1.0  # each component < 1 degree wide
+
     def test_to_projection_double(self, geom: STGeometry) -> None:
         # Halve the unit/pixel -> double the coordinates.
         # New box should be 20, 20 to 22, 22.

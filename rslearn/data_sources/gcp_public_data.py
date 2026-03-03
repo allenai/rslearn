@@ -684,7 +684,9 @@ class Sentinel2(DataSource):
                 )
             if self.rtree_index is None:
                 raise ValueError("rtree_index is required")
-            encoded_items = self.rtree_index.query(geometry.shp.bounds)
+            encoded_items = set()
+            for shp in flatten_shape(geometry.shp):
+                encoded_items.update(self.rtree_index.query(shp.bounds))
             for encoded_item in encoded_items:
                 item = Sentinel2Item.deserialize(json.loads(encoded_item))
                 if not item.geometry.intersects_time_range(time_range):
@@ -762,27 +764,28 @@ class Sentinel2(DataSource):
         """
         candidates: list[list[Sentinel2Item]] = [[] for _ in wgs84_geometries]
         for idx, geometry in enumerate(wgs84_geometries):
-            wgs84_bbox = geometry.shp.bounds
-            for item in self._read_bigquery(
-                time_range=geometry.time_range, wgs84_bbox=wgs84_bbox
-            ):
-                # Get the item from XML to get its exact geometry (BigQuery only knows
-                # the bounding box of the item).
-                try:
-                    item = self.get_item_by_name(item.name)
-                except CorruptItemException as e:
-                    logger.warning("skipping corrupt item %s: %s", item.name, e.message)
-                    continue
-                except MissingXMLException:
-                    # Sometimes a scene that appears in the BigQuery index does not
-                    # actually have an XML file on GCS. Since we know this happens
-                    # occasionally, we ignore the error here.
-                    logger.warning(
-                        "skipping item %s that is missing XML file", item.name
-                    )
-                    continue
+            seen_names: set[str] = set()
+            for shp in flatten_shape(geometry.shp):
+                for item in self._read_bigquery(
+                    time_range=geometry.time_range, wgs84_bbox=shp.bounds
+                ):
+                    if item.name in seen_names:
+                        continue
+                    seen_names.add(item.name)
+                    try:
+                        item = self.get_item_by_name(item.name)
+                    except CorruptItemException as e:
+                        logger.warning(
+                            "skipping corrupt item %s: %s", item.name, e.message
+                        )
+                        continue
+                    except MissingXMLException:
+                        logger.warning(
+                            "skipping item %s that is missing XML file", item.name
+                        )
+                        continue
 
-                candidates[idx].append(item)
+                    candidates[idx].append(item)
 
         return candidates
 
@@ -798,9 +801,7 @@ class Sentinel2(DataSource):
         Returns:
             List of groups of items that should be retrieved for each geometry.
         """
-        wgs84_geometries = [
-            geometry.to_projection(WGS84_PROJECTION) for geometry in geometries
-        ]
+        wgs84_geometries = [geometry.to_wgs84() for geometry in geometries]
 
         if self.rtree_index:
             candidates = self._get_candidate_items_index(wgs84_geometries)

@@ -209,7 +209,7 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
         for geometry in geometries:
             # Get potentially relevant items from the collection by performing one search
             # for each requested geometry.
-            wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
+            wgs84_geometry = geometry.to_wgs84()
             logger.debug("performing STAC search for geometry %s", wgs84_geometry)
             search_time_range = self._get_search_time_range(wgs84_geometry)
             stac_items = self.client.search(

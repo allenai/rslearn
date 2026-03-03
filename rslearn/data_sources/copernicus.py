@@ -222,11 +222,10 @@ def get_sentinel2_tiles(geometry: STGeometry, cache_dir: UPath) -> list[str]:
         list of Sentinel-2 tile names that intersect the geometry.
     """
     tile_index = load_sentinel2_tile_index(cache_dir)
-    wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
+    wgs84_geometry = geometry.to_wgs84()
     # If the shape is a collection, it could be cutting across antimeridian.
     # So we query each component shape separately and collect the results to avoid
     # issues.
-    # We assume the caller has already applied split_at_antimeridian.
     results = set()
     for shp in flatten_shape(wgs84_geometry.shp):
         for result in tile_index.query(shp.bounds):
@@ -492,7 +491,7 @@ class Copernicus(DataSource):
             # Perform a spatial + temporal search.
             # We use EPSG:4326 (WGS84) for the spatial search; the API expects WKT in
             # addition to the EPSG identifier.
-            wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
+            wgs84_geometry = geometry.to_wgs84()
             wgs84_wkt = wgs84_geometry.shp.wkt
             filter_string = (
                 f"OData.CSC.Intersects(area=geography'SRID=4326;{wgs84_wkt}')"
