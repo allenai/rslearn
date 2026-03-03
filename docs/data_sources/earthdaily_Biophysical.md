@@ -4,11 +4,6 @@ Biophysical variables on [EarthDaily](https://earthdaily.com/) platform (EDAgro 
 
 See [EarthDaily Setup](earthdaily.md) for required dependency/credentials.
 
-By default, this data source applies per-asset scale/offset values from STAC
-`raster:bands` metadata (`apply_scale_offset: true`) to convert raw pixel values into
-physical units using `physical = raw * scale + offset`. Set `apply_scale_offset: false`
-to keep raw values.
-
 ### Configuration
 
 ```jsonc
@@ -18,9 +13,6 @@ to keep raw values.
     // Required: which biophysical variable to fetch.
     // One of: "lai", "fapar", "fcover".
     "variable": "lai",
-    // Whether to apply STAC `raster:bands` scale/offset (default true). Set to false to
-    // keep raw values.
-    "apply_scale_offset": true,
     // Optional: STAC API `query` filter passed to searches.
     "query": null,
     // Optional: STAC item property to sort by before grouping/matching (default null).
