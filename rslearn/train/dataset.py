@@ -11,7 +11,7 @@ import uuid
 import warnings
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 import torch
 import tqdm
@@ -242,7 +242,7 @@ class DataInput:
         self,
         data_type: str,
         layers: list[str],
-        bands: list[str] | str | None = None,
+        bands: list[str] | Literal["auto"] | None = None,
         use_all_bands_in_layer_config_order: bool = False,
         band_set_index: int | None = None,
         required: bool = True,
