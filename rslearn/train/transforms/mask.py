@@ -28,11 +28,10 @@ class Mask(Transform):
             skip_missing: if True, skip selectors that don't exist in the input/target
                 dicts. Useful when working with optional inputs.
         """
-        super().__init__()
+        super().__init__(skip_missing=skip_missing)
         self.selectors = selectors
         self.mask_selector = mask_selector
         self.mask_value = mask_value
-        self.skip_missing = skip_missing
 
     def apply_image(self, image: RasterImage, mask: RasterImage) -> RasterImage:
         """Apply the mask on the image.
