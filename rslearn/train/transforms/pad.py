@@ -35,7 +35,7 @@ class Pad(Transform):
             skip_missing: if True, skip selectors that don't exist in the input/target
                 dicts. Useful when working with optional inputs.
         """
-        super().__init__()
+        super().__init__(skip_missing=skip_missing)
         if isinstance(size, int):
             self.size = (size, size + 1)
         else:
@@ -44,7 +44,6 @@ class Pad(Transform):
         self.mode = mode
         self.image_selectors = image_selectors
         self.box_selectors = box_selectors
-        self.skip_missing = skip_missing
 
     def sample_state(self) -> dict[str, Any]:
         """Randomly decide how to transform the input.

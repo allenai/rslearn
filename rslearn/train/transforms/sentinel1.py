@@ -31,11 +31,10 @@ class Sentinel1ToDecibels(Transform):
             skip_missing: if True, skip selectors that don't exist in the input/target
                 dicts. Useful when working with optional inputs.
         """
-        super().__init__()
+        super().__init__(skip_missing=skip_missing)
         self.selectors = selectors
         self.from_decibels = from_decibels
         self.epsilon = epsilon
-        self.skip_missing = skip_missing
 
     def apply_image(self, image: RasterImage) -> RasterImage:
         """Normalize the specified image.
