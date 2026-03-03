@@ -577,6 +577,11 @@ def split_at_antimeridian(geometry: STGeometry, epsilon: float = 1e-6) -> STGeom
     return STGeometry(geometry.projection, new_shp, geometry.time_range)
 
 
+# Amount to buffer valid_geom in WGS84 for clipping source geometries.
+# We set to 1 degree since that should be sufficient to handle distortion in
+# re-projecting the valid geometry to WGS84. It could fail if the valid geometry spans
+# much larger than 1 degree, but the intention of safely_reproject_within_valid_area
+# is for valid_geom to be small window geometries.
 WGS84_CLIP_BUFFER_DEGREES = 1.0
 
 
@@ -591,7 +596,9 @@ def safely_reproject_within_valid_area(
     also natively in WGS84; otherwise, there could be distortion issues re-projecting
     them to WGS84.
 
-    Returns None for source geometries that don't intersect valid_geom in WGS84.
+    Returns a list with one entry per source geometry. The entry is either the
+    re-projected geometry, or it may be (but is not guaranteed to be) None if the
+    source geometry doesn't intersect valid_geom.
     """
 
     @functools.cache
