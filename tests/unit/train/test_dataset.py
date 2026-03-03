@@ -293,8 +293,8 @@ def test_read_data_input_timestamps(tmp_path: UPath) -> None:
     assert result.timestamps == [ts1, ts2]
 
 
-def test_read_data_input_auto_bands_single_band_set(tmp_path: UPath) -> None:
-    """bands: auto should resolve bands from the dataset layer config when unambiguous."""
+def test_read_data_input_use_all_bands_single_band_set(tmp_path: UPath) -> None:
+    """use_all_bands_in_layer_config_order should resolve bands when unambiguous."""
     ds_path = UPath(tmp_path)
     ds_path.mkdir(parents=True, exist_ok=True)
 
@@ -345,7 +345,7 @@ def test_read_data_input_auto_bands_single_band_set(tmp_path: UPath) -> None:
     data_input = DataInput(
         "raster",
         ["embeddings"],
-        bands="auto",
+        use_all_bands_in_layer_config_order=True,
         dtype=DType.FLOAT32,
     )
 

@@ -11,7 +11,7 @@ import uuid
 import warnings
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any
 
 import torch
 import tqdm
@@ -242,7 +242,7 @@ class DataInput:
         self,
         data_type: str,
         layers: list[str],
-        bands: list[str] | Literal["auto"] | None = None,
+        bands: list[str] | None = None,
         use_all_bands_in_layer_config_order: bool = False,
         band_set_index: int | None = None,
         required: bool = True,
@@ -299,15 +299,14 @@ class DataInput:
         """
         self.data_type = data_type
         self.layers = layers
-        if isinstance(bands, str):
-            if bands != "auto":
+        if bands is not None:
+            if not isinstance(bands, (list, tuple)) or not all(
+                isinstance(band, str) for band in bands
+            ):
                 raise ValueError(
-                    f"Invalid value for bands='{bands}'. Expected a list of band names or 'auto'."
+                    f"bands must be a list of strings, got {type(bands).__name__}"
                 )
-            # Allow `bands: auto` as a shorthand for selecting a band set from the
-            # dataset layer config.
-            bands = None
-            use_all_bands_in_layer_config_order = True
+            bands = list(bands)
         self.bands = bands
         self.use_all_bands_in_layer_config_order = use_all_bands_in_layer_config_order
         self.band_set_index = band_set_index
@@ -340,7 +339,7 @@ def resolve_raster_data_input_bands(
         raise ValueError(
             f"No bands specified for raster input when reading layer '{layer_name}'. "
             "Set `bands: [...]`, or set `use_all_bands_in_layer_config_order: true` "
-            "(or `bands: auto`) to use band names from the dataset layer config."
+            "to use band names from the dataset layer config."
         )
 
     if len(layer_config.band_sets) == 0:
