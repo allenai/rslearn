@@ -25,7 +25,7 @@ def test_read_raster(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
     )
     array = data_source.read_raster(
         layer_name="worldcover",
-        item_name=item.name,
+        item=item,
         bands=["B1"],
         projection=seattle2020.projection,
         bounds=bounds,

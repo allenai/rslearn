@@ -49,7 +49,7 @@ def test_edc_preview(tmp_path: pathlib.Path, edc_preview_geometry: STGeometry) -
         item_groups[0],
         [[edc_preview_geometry]],
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+    assert tile_store.is_raster_ready(layer_name, item, [band_name])
 
 
 def test_cache_dir(tmp_path: pathlib.Path, edc_preview_geometry: STGeometry) -> None:

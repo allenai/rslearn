@@ -361,7 +361,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         ds = self._get_dataset()
 
         for item, item_geoms in zip(items, geometries):
-            if tile_store.is_raster_ready(item.name, self.band_names):
+            if tile_store.is_raster_ready(item, self.band_names):
                 continue
 
             if item.geometry.time_range is None:
@@ -421,7 +421,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                 local_tif_fname = os.path.join(tmp_dir, f"{item.name}.tif")
                 self._write_geotiff(local_tif_fname, lat, lon, band_arrays)
                 tile_store.write_raster_file(
-                    item.name,
+                    item,
                     self.band_names,
                     UPath(local_tif_fname),
                     time_range=item.geometry.time_range,

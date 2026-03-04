@@ -55,7 +55,7 @@ class TestCopernicus:
         data_source.ingest(
             TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
         )
-        assert tile_store.is_raster_ready(layer_name, item.name, band_names)
+        assert tile_store.is_raster_ready(layer_name, item, band_names)
 
 
 class TestSentinel2:
@@ -98,7 +98,7 @@ class TestSentinel2:
         )
         b04 = tile_store.read_raster(
             layer_name,
-            item.name,
+            item,
             ["B04"],
             seattle2020.projection,
             bounds,
@@ -107,7 +107,7 @@ class TestSentinel2:
         red = (
             tile_store.read_raster(
                 layer_name,
-                item.name,
+                item,
                 ["R", "G", "B"],
                 seattle2020.projection,
                 bounds,
@@ -148,5 +148,5 @@ class TestSentinel1:
         data_source.ingest(
             TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
         )
-        assert tile_store.is_raster_ready(layer_name, item.name, ["vv"])
-        assert tile_store.is_raster_ready(layer_name, item.name, ["vh"])
+        assert tile_store.is_raster_ready(layer_name, item, ["vv"])
+        assert tile_store.is_raster_ready(layer_name, item, ["vh"])
