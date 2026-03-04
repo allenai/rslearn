@@ -172,6 +172,15 @@ class RslearnDataModule(L.LightningDataModule):
                     kwargs.pop("world_size")
                     all_crops_cls = InMemoryAllCropsDataset  # type: ignore
 
+                    # In memory should not be enabled for prediction since it will
+                    # split the same window across different ranks, which means the
+                    # RslearnWriter won't be able to merge those outputs.
+                    if split == "predict":
+                        logger.warning(
+                            "use_in_memory_all_crops_dataset is enabled for prediction, "
+                            "but this may split windows across ranks leading to incomplete prediction outputs"
+                        )
+
                 dataset = all_crops_cls(**kwargs)  # type: ignore
 
             if self.retries > 0:
@@ -212,8 +221,30 @@ class RslearnDataModule(L.LightningDataModule):
         if (
             split_config.get_load_all_crops()
             and len(dataset.get_dataset_examples()) > 0
+            and not self.use_in_memory_all_crops_dataset
         ):
-            num_workers = min(num_workers, len(dataset.get_dataset_examples()))
+            num_windows = len(dataset.get_dataset_examples())
+            if num_windows == 0:
+                raise ValueError(
+                    "load_all_crops requires at least one window per rank, but got zero windows"
+                )
+
+            if self.trainer.world_size is not None and self.trainer.world_size > 1:
+                num_windows_per_rank = num_windows // self.trainer.world_size
+                if num_windows_per_rank == 0:
+                    raise ValueError(
+                        "load_all_crops requires at least one window per rank, "
+                        f"but got {num_windows} windows and {self.trainer.world_size} GPUs. "
+                        "(You can try to hide GPUs, e.g. with CUDA_VISIBLE_DEVICES.)"
+                    )
+            else:
+                num_windows_per_rank = num_windows
+
+            if num_windows_per_rank < num_workers:
+                logger.warning(
+                    f"Limiting num_workers to {num_windows_per_rank} since we only have {num_windows_per_rank} windows per rank"
+                )
+                num_workers = num_windows_per_rank
 
         kwargs: dict[str, Any] = dict(
             dataset=dataset,
