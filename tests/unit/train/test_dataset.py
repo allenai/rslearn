@@ -294,7 +294,7 @@ def test_read_data_input_timestamps(tmp_path: UPath) -> None:
 
 
 def test_read_data_input_use_all_bands_single_band_set(tmp_path: UPath) -> None:
-    """use_all_bands_in_layer_config_order should resolve bands when unambiguous."""
+    """Band set index option should resolve all bands from that band set."""
     ds_path = UPath(tmp_path)
     ds_path.mkdir(parents=True, exist_ok=True)
 
@@ -345,7 +345,7 @@ def test_read_data_input_use_all_bands_single_band_set(tmp_path: UPath) -> None:
     data_input = DataInput(
         "raster",
         ["embeddings"],
-        use_all_bands_in_layer_config_order=True,
+        use_all_bands_in_order_of_band_set_idx=0,
         dtype=DType.FLOAT32,
     )
 
@@ -357,10 +357,10 @@ def test_read_data_input_use_all_bands_single_band_set(tmp_path: UPath) -> None:
     torch.testing.assert_close(result.image[:, 0], torch.as_tensor(raster))
 
 
-def test_read_data_input_auto_bands_requires_band_set_index_when_ambiguous(
+def test_read_data_input_use_all_bands_requires_band_set_idx(
     tmp_path: UPath,
 ) -> None:
-    """Auto band resolution should fail clearly when a layer has multiple band sets."""
+    """Missing both explicit bands and band-set index should fail clearly."""
     ds_path = UPath(tmp_path)
     ds_path.mkdir(parents=True, exist_ok=True)
 
@@ -394,16 +394,17 @@ def test_read_data_input_auto_bands_requires_band_set_index_when_ambiguous(
     data_input = DataInput(
         "raster",
         ["embeddings"],
-        use_all_bands_in_layer_config_order=True,
         dtype=DType.FLOAT32,
     )
 
-    with pytest.raises(ValueError, match=r"band_set_index"):
+    with pytest.raises(
+        ValueError, match=r"use_all_bands_in_order_of_band_set_idx"
+    ):
         _ = read_data_input(dataset, window, window.bounds, data_input, random.Random(0))
 
 
-def test_read_data_input_auto_bands_with_band_set_index(tmp_path: UPath) -> None:
-    """band_set_index should select a specific band set for auto resolution."""
+def test_read_data_input_use_all_bands_with_band_set_index(tmp_path: UPath) -> None:
+    """Band set index should select a specific band set."""
     ds_path = UPath(tmp_path)
     ds_path.mkdir(parents=True, exist_ok=True)
 
@@ -452,8 +453,7 @@ def test_read_data_input_auto_bands_with_band_set_index(tmp_path: UPath) -> None
     data_input = DataInput(
         "raster",
         ["embeddings"],
-        use_all_bands_in_layer_config_order=True,
-        band_set_index=1,
+        use_all_bands_in_order_of_band_set_idx=1,
         dtype=DType.FLOAT32,
     )
 

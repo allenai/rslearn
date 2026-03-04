@@ -273,8 +273,8 @@ lightweight head model using those precomputed features.
 
 The key is that you usually do **not** want to list every embedding band in the model
 config (e.g. 768 for `OLMOEARTH_V1_BASE`). Instead, set
-`use_all_bands_in_layer_config_order: true` to use the band names from the dataset
-layer config:
+`use_all_bands_in_order_of_band_set_idx` to the target band set index so rslearn uses
+all band names from that band set in dataset-config order:
 
 ```yaml
 data:
@@ -285,7 +285,7 @@ data:
       embeddings:
         data_type: "raster"
         layers: ["embeddings"]
-        use_all_bands_in_layer_config_order: true
+        use_all_bands_in_order_of_band_set_idx: 0
         passthrough: true
         dtype: FLOAT32
       targets:

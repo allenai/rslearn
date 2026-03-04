@@ -243,8 +243,7 @@ class DataInput:
         data_type: str,
         layers: list[str],
         bands: list[str] | None = None,
-        use_all_bands_in_layer_config_order: bool = False,
-        band_set_index: int | None = None,
+        use_all_bands_in_order_of_band_set_idx: int | None = None,
         required: bool = True,
         passthrough: bool = False,
         is_target: bool = False,
@@ -267,6 +266,10 @@ class DataInput:
                 set layers=["sentinel2", "sentinel2.1", "sentinel2.2"]; with
                 load_all_item_groups=True, set layers=["sentinel2"].
             bands: the bands to read, if this is a raster.
+            use_all_bands_in_order_of_band_set_idx: if set, read all bands from the
+                specified layer_config band_set index (ordered as listed in that
+                band_set). This is useful for large embedding layers where listing all
+                band names in model config is cumbersome.
             required: whether examples lacking one of these layers should be skipped
             passthrough: whether to expose this to the model even if it isn't returned
                 by any task
@@ -308,8 +311,16 @@ class DataInput:
                 )
             bands = list(bands)
         self.bands = bands
-        self.use_all_bands_in_layer_config_order = use_all_bands_in_layer_config_order
-        self.band_set_index = band_set_index
+        if use_all_bands_in_order_of_band_set_idx is not None and (
+            isinstance(use_all_bands_in_order_of_band_set_idx, bool)
+            or not isinstance(use_all_bands_in_order_of_band_set_idx, int)
+        ):
+            raise ValueError(
+                "use_all_bands_in_order_of_band_set_idx must be an int or None"
+            )
+        self.use_all_bands_in_order_of_band_set_idx = (
+            use_all_bands_in_order_of_band_set_idx
+        )
         self.required = required
         self.passthrough = passthrough
         self.is_target = is_target
@@ -329,17 +340,18 @@ def resolve_raster_data_input_bands(
     """Resolve the band list for a raster DataInput.
 
     If data_input.bands is explicitly provided, it is returned as-is. Otherwise, if
-    use_all_bands_in_layer_config_order is enabled, the band list is resolved from the
-    dataset's LayerConfig band_sets.
+    use_all_bands_in_order_of_band_set_idx is set, all bands are taken from that
+    specific band set in the dataset's LayerConfig.
     """
     if data_input.bands is not None:
         return data_input.bands
 
-    if not data_input.use_all_bands_in_layer_config_order:
+    band_set_index = data_input.use_all_bands_in_order_of_band_set_idx
+    if band_set_index is None:
         raise ValueError(
             f"No bands specified for raster input when reading layer '{layer_name}'. "
-            "Set `bands: [...]`, or set `use_all_bands_in_layer_config_order: true` "
-            "to use band names from the dataset layer config."
+            "Set `bands: [...]`, or set `use_all_bands_in_order_of_band_set_idx` "
+            "to a band set index to use all band names from the dataset layer config."
         )
 
     if len(layer_config.band_sets) == 0:
@@ -348,23 +360,11 @@ def resolve_raster_data_input_bands(
             "so bands cannot be resolved automatically."
         )
 
-    if data_input.band_set_index is None:
-        if len(layer_config.band_sets) != 1:
-            summaries = ", ".join(
-                f"{i}({len(band_set.bands)} bands)"
-                for i, band_set in enumerate(layer_config.band_sets)
-            )
-            raise ValueError(
-                f"Layer '{layer_name}' has {len(layer_config.band_sets)} band sets ({summaries}). "
-                "Set `band_set_index` to select which band set to use, or specify `bands` explicitly."
-            )
-        band_set_index = 0
-    else:
-        band_set_index = data_input.band_set_index
-
     if band_set_index < 0 or band_set_index >= len(layer_config.band_sets):
         raise ValueError(
-            f"Invalid band_set_index={band_set_index} for layer '{layer_name}'. "
+            "Invalid "
+            f"use_all_bands_in_order_of_band_set_idx={band_set_index} "
+            f"for layer '{layer_name}'. "
             f"Expected a value in [0, {len(layer_config.band_sets) - 1}]."
         )
 

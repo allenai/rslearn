@@ -311,10 +311,10 @@ Here is an example for a simple single-task training setup that inputs one modal
         # The bands to read. These should correspond to band names in the dataset
         # config.json for each of the layers above.
         bands: ["B04", "B03", "B02", "B05", "B06", "B07", "B08", "B11", "B12"]
-        # Alternatively, omit `bands` and set `use_all_bands_in_layer_config_order: true`
-        # to automatically use band names from the dataset layer
-        # config. If the layer has multiple band sets, you must also set
-        # `band_set_index`.
+        # Alternatively, omit `bands` and set
+        # `use_all_bands_in_order_of_band_set_idx` to a band_set index to
+        # automatically use all bands from that band_set in dataset-config order.
+        use_all_bands_in_order_of_band_set_idx: 0
         # If true, examples not containing the layers needed to read this input are
         # skipped. This should generally be left enabled (default).
         required: true
@@ -350,8 +350,8 @@ Here is an example for a simple single-task training setup that inputs one modal
 ```
 
 For raster data, `dtype` is required. `bands` is required unless you set
-`use_all_bands_in_layer_config_order: true` to use the band names from the dataset
-layer config. For vector data, omit `bands` and `dtype`.
+`use_all_bands_in_order_of_band_set_idx` to use all band names from the selected
+band set in the dataset layer config. For vector data, omit `bands` and `dtype`.
 
 Time series in rslearn are represented as (T*C, H, W) tensors, where the timesteps (T)
 are concatenated on the channel dimension (C), and the other two dimensions are
