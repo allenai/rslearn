@@ -6,4 +6,3 @@ EarthDaily credentials in the environment:
 - `EDS_SECRET`
 - `EDS_AUTH_URL`
 - `EDS_API_URL`
-

@@ -24,6 +24,5 @@ def test_stac_item_to_item_raises_without_alternate_download_href() -> None:
     # href present but alternate.download.href is missing -> should raise.
     item.add_asset("lai", pystac.Asset(href="https://example.com/lai.tif"))
 
-    with pytest.raises(ValueError, match=r"alternate\\.download\\.href"):
+    with pytest.raises(ValueError, match="alternate.download.href"):
         ds._stac_item_to_item(item)
-
