@@ -331,7 +331,6 @@ class DataInput:
 
 
 def resolve_raster_data_input_bands(
-    *,
     data_input: DataInput,
     layer_name: str,
     layer_config: LayerConfig,
@@ -353,12 +352,6 @@ def resolve_raster_data_input_bands(
             "to a band set index to use all band names from the dataset layer config."
         )
 
-    if len(layer_config.band_sets) == 0:
-        raise ValueError(
-            f"Layer '{layer_name}' has no band_sets in the dataset config, "
-            "so bands cannot be resolved automatically."
-        )
-
     if band_set_index < 0 or band_set_index >= len(layer_config.band_sets):
         raise ValueError(
             "Invalid "
@@ -367,12 +360,7 @@ def resolve_raster_data_input_bands(
             f"Expected a value in [0, {len(layer_config.band_sets) - 1}]."
         )
 
-    bands = layer_config.band_sets[band_set_index].bands
-    if not bands:
-        raise ValueError(
-            f"Band set {band_set_index} for layer '{layer_name}' has no bands."
-        )
-    return list(bands)
+    return layer_config.band_sets[band_set_index].bands
 
 
 def read_raster_layer_for_data_input(

@@ -357,49 +357,13 @@ def test_read_data_input_use_all_bands_single_band_set(tmp_path: UPath) -> None:
     torch.testing.assert_close(result.image[:, 0], torch.as_tensor(raster))
 
 
-def test_read_data_input_use_all_bands_requires_band_set_idx(
-    tmp_path: UPath,
-) -> None:
+def test_data_input_requires_bands_or_band_set_idx() -> None:
     """Missing both explicit bands and band-set index should fail clearly."""
-    ds_path = UPath(tmp_path)
-    ds_path.mkdir(parents=True, exist_ok=True)
-
-    dataset_config = {
-        "layers": {
-            "embeddings": {
-                "type": "raster",
-                "band_sets": [
-                    {"dtype": "float32", "bands": ["a"]},
-                    {"dtype": "float32", "bands": ["b"]},
-                ],
-            },
-        },
-    }
-    with (ds_path / "config.json").open("w") as f:
-        json.dump(dataset_config, f)
-
-    dataset = Dataset(ds_path)
-    window = Window(
-        storage=dataset.storage,
-        name="test_window",
-        group="default",
-        projection=WGS84_PROJECTION,
-        bounds=(0, 0, 4, 4),
-        time_range=None,
-    )
-    window.save()
-    window.get_layer_dir("embeddings", group_idx=0).mkdir(parents=True, exist_ok=True)
-    window.mark_layer_completed("embeddings", group_idx=0)
-
-    data_input = DataInput(
-        "raster",
-        ["embeddings"],
-        dtype=DType.FLOAT32,
-    )
-
-    with pytest.raises(ValueError, match=r"use_all_bands_in_order_of_band_set_idx"):
-        _ = read_data_input(
-            dataset, window, window.bounds, data_input, random.Random(0)
+    with pytest.raises(ValueError, match="one of"):
+        DataInput(
+            data_type="raster",
+            layers=["embeddings"],
+            dtype=DType.FLOAT32,
         )
 
 
