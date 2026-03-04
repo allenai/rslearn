@@ -154,18 +154,16 @@ class SoilGrids(DataSource, TileStore):
             "SoilGrids is intended for direct materialization; set data_source.ingest=false."
         )
 
-    def is_raster_ready(
-        self, layer_name: str, item_name: str, bands: list[str]
-    ) -> bool:
+    def is_raster_ready(self, layer_name: str, item: Item, bands: list[str]) -> bool:
         """Return whether the requested raster is ready (always true for direct reads)."""
         return True
 
-    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
+    def get_raster_bands(self, layer_name: str, item: Item) -> list[list[str]]:
         """Return the band sets available for this coverage."""
         return [self.band_names]
 
     def get_raster_bounds(
-        self, layer_name: str, item_name: str, bands: list[str], projection: Projection
+        self, layer_name: str, item: Item, bands: list[str], projection: Projection
     ) -> PixelBounds:
         """Return (approximate) bounds for this raster in the requested projection."""
         # We don't know bounds without an extra metadata request; treat as "very large"
@@ -212,7 +210,7 @@ class SoilGrids(DataSource, TileStore):
     def read_raster(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,

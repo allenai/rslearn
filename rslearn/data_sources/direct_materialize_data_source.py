@@ -3,7 +3,7 @@
 from abc import abstractmethod
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Generic
+from typing import Any, Generic, cast
 
 import affine
 import numpy.typing as npt
@@ -14,7 +14,7 @@ from typing_extensions import override
 from upath import UPath
 
 from rslearn.config import LayerConfig
-from rslearn.data_sources.data_source import ItemLookupDataSource, ItemType
+from rslearn.data_sources.data_source import DataSource, Item, ItemType
 from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
@@ -23,9 +23,7 @@ from rslearn.utils.geometry import PixelBounds, Projection
 from rslearn.utils.raster_array import RasterArray
 
 
-class DirectMaterializeDataSource(
-    ItemLookupDataSource[ItemType], TileStore, Generic[ItemType]
-):
+class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
     """Base class for data sources that support direct materialization via TileStore.
 
     This class provides common TileStore functionality for data sources that can read
@@ -33,11 +31,9 @@ class DirectMaterializeDataSource(
     first ingesting into a local tile store.
 
     Subclasses must implement:
-        - get_asset_url(): Get the URL for an asset given item name and bands
+        - get_asset_url(): Get the URL for an asset given item and bands
 
     Subclasses may optionally override:
-        - get_item_by_name(): Inherited from ItemLookupDataSource. If also inheriting
-            from a class that provides it (e.g., StacDataSource), no override needed.
         - get_raster_bands(): By default, we assume that items have all assets. If
             items may have a subset of assets, override get_raster_bands to return
             the sets of bands available for that item.
@@ -73,11 +69,11 @@ class DirectMaterializeDataSource(
     # --- Methods that subclasses must implement ---
 
     @abstractmethod
-    def get_asset_url(self, item_name: str, asset_key: str) -> str:
+    def get_asset_url(self, item: ItemType, asset_key: str) -> str:
         """Get the URL to read the asset for the given item and asset key.
 
         Args:
-            item_name: the name of the item.
+            item: the item.
             asset_key: the key identifying which asset to get.
 
         Returns:
@@ -88,7 +84,7 @@ class DirectMaterializeDataSource(
     # --- Optional hooks for subclasses ---
 
     def get_read_callback(
-        self, item_name: str, asset_key: str
+        self, item: ItemType, asset_key: str
     ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
         """Return a callback to post-process raster data (e.g., harmonization).
 
@@ -96,7 +92,7 @@ class DirectMaterializeDataSource(
         after reading, such as harmonization for Sentinel-2 data.
 
         Args:
-            item_name: the name of the item being read.
+            item: the item being read.
             asset_key: the key identifying which asset is being read.
 
         Returns:
@@ -108,9 +104,7 @@ class DirectMaterializeDataSource(
     # --- TileStore implementation ---
 
     @override
-    def is_raster_ready(
-        self, layer_name: str, item_name: str, bands: list[str]
-    ) -> bool:
+    def is_raster_ready(self, layer_name: str, item: Item, bands: list[str]) -> bool:
         """Checks if this raster has been written to the store.
 
         For remote-backed tile stores, this always returns True since data is
@@ -118,7 +112,7 @@ class DirectMaterializeDataSource(
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item.
+            item: the item.
             bands: the list of bands identifying which specific raster to read.
 
         Returns:
@@ -127,7 +121,7 @@ class DirectMaterializeDataSource(
         return True
 
     @override
-    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
+    def get_raster_bands(self, layer_name: str, item: Item) -> list[list[str]]:
         """Get the sets of bands that have been stored for the specified item.
 
         By default, returns all band sets from the asset_bands configuration.
@@ -135,7 +129,7 @@ class DirectMaterializeDataSource(
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item.
+            item: the item.
 
         Returns:
             a list of lists of bands available for this item.
@@ -144,9 +138,8 @@ class DirectMaterializeDataSource(
 
     @override
     def get_raster_bounds(
-        self, layer_name: str, item_name: str, bands: list[str], projection: Projection
+        self, layer_name: str, item: Item, bands: list[str], projection: Projection
     ) -> PixelBounds:
-        item = self.get_item_by_name(item_name)
         geom = item.geometry.to_projection(projection)
         return (
             int(geom.shp.bounds[0]),
@@ -201,23 +194,27 @@ class DirectMaterializeDataSource(
     def read_raster(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
     ) -> RasterArray:
+        # Cast to ItemType -- callers must always pass the correct subtype
+        # (deserialized via the data source's deserialize_item).
+        typed_item = cast(ItemType, item)
+
         # Get the asset key for the requested bands
         asset_key = self._get_asset_key_by_bands(bands)
 
         # Get the asset URL from the subclass
-        asset_url = self.get_asset_url(item_name, asset_key)
+        asset_url = self.get_asset_url(typed_item, asset_key)
 
         # Read the raster data
         raw_data = self._read_raster_from_url(asset_url, projection, bounds, resampling)
 
         # Apply any post-processing callback
-        callback = self.get_read_callback(item_name, asset_key)
+        callback = self.get_read_callback(typed_item, asset_key)
         if callback is not None:
             raw_data = callback(raw_data)
 
@@ -252,7 +249,7 @@ class DirectMaterializeDataSource(
     def write_raster(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
@@ -266,7 +263,7 @@ class DirectMaterializeDataSource(
     def write_raster_file(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         fname: UPath,
         time_range: tuple[datetime, datetime] | None = None,
@@ -276,7 +273,7 @@ class DirectMaterializeDataSource(
         )
 
     @override
-    def is_vector_ready(self, layer_name: str, item_name: str) -> bool:
+    def is_vector_ready(self, layer_name: str, item: Item) -> bool:
         raise NotImplementedError(
             "DirectMaterializeDataSource does not support vector operations"
         )
@@ -285,7 +282,7 @@ class DirectMaterializeDataSource(
     def read_vector(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         projection: Projection,
         bounds: PixelBounds,
     ) -> list[Feature]:
@@ -295,7 +292,7 @@ class DirectMaterializeDataSource(
 
     @override
     def write_vector(
-        self, layer_name: str, item_name: str, features: list[Feature]
+        self, layer_name: str, item: Item, features: list[Feature]
     ) -> None:
         raise NotImplementedError(
             "DirectMaterializeDataSource does not support vector operations"

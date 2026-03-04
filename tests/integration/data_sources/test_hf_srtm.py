@@ -81,7 +81,7 @@ def test_srtm_ingest(
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, ["dem"])
+    assert tile_store.is_raster_ready(layer_name, item, ["dem"])
 
 
 def test_srtm_cache_dir(

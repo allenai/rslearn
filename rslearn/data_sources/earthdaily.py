@@ -5,7 +5,7 @@ import json
 import os
 import tempfile
 from datetime import timedelta
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import affine
 import numpy as np
@@ -351,7 +351,7 @@ class EarthDaily(DataSource, TileStore):
             for asset_key, band_names in self.asset_bands.items():
                 if asset_key not in item.asset_urls:
                     continue
-                if tile_store.is_raster_ready(item.name, band_names):
+                if tile_store.is_raster_ready(item, band_names):
                     continue
 
                 asset_url = item.asset_urls[asset_key]
@@ -377,7 +377,7 @@ class EarthDaily(DataSource, TileStore):
                         asset_key,
                     )
                     tile_store.write_raster_file(
-                        item.name,
+                        item,
                         band_names,
                         UPath(local_fname),
                         time_range=item.geometry.time_range,
@@ -389,14 +389,12 @@ class EarthDaily(DataSource, TileStore):
                     asset_key,
                 )
 
-    def is_raster_ready(
-        self, layer_name: str, item_name: str, bands: list[str]
-    ) -> bool:
+    def is_raster_ready(self, layer_name: str, item: Item, bands: list[str]) -> bool:
         """Checks if this raster has been written to the store.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item.
+            item: the item.
             bands: the list of bands identifying which specific raster to read.
 
         Returns:
@@ -406,23 +404,17 @@ class EarthDaily(DataSource, TileStore):
         # Always ready since we wrap accesses to EarthDaily.
         return True
 
-    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
+    def get_raster_bands(self, layer_name: str, item: Item) -> list[list[str]]:
         """Get the sets of bands that have been stored for the specified item.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item.
+            item: the item.
         """
-        if self.skip_items_missing_assets:
-            # In this case we can assume that the item has all of the assets.
-            return list(self.asset_bands.values())
-
-        # Otherwise we have to lookup the STAC item to see which assets it has.
-        # Here we use get_item_by_name since it handles caching.
-        item = self.get_item_by_name(item_name)
+        ed_item = cast(EarthDailyItem, item)
         all_bands = []
         for asset_key, band_names in self.asset_bands.items():
-            if asset_key not in item.asset_urls:
+            if asset_key not in ed_item.asset_urls:
                 continue
             all_bands.append(band_names)
         return all_bands
@@ -488,13 +480,13 @@ class EarthDaily(DataSource, TileStore):
         return array * scales + offsets
 
     def get_raster_bounds(
-        self, layer_name: str, item_name: str, bands: list[str], projection: Projection
+        self, layer_name: str, item: Item, bands: list[str], projection: Projection
     ) -> PixelBounds:
         """Get the bounds of the raster in the specified projection.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item to check.
+            item: the item to check.
             bands: the list of bands identifying which specific raster to read. These
                 bands must match the bands of a stored raster.
             projection: the projection to get the raster's bounds in.
@@ -502,7 +494,6 @@ class EarthDaily(DataSource, TileStore):
         Returns:
             the bounds of the raster in the projection.
         """
-        item = self.get_item_by_name(item_name)
         geom = item.geometry.to_projection(projection)
         return (
             int(geom.shp.bounds[0]),
@@ -514,7 +505,7 @@ class EarthDaily(DataSource, TileStore):
     def read_raster(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
@@ -524,7 +515,7 @@ class EarthDaily(DataSource, TileStore):
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item to read.
+            item: the item to read.
             bands: the list of bands identifying which specific raster to read. These
                 bands must match the bands of a stored raster.
             projection: the projection to read in.
@@ -534,9 +525,9 @@ class EarthDaily(DataSource, TileStore):
         Returns:
             the raster data
         """
+        ed_item = cast(EarthDailyItem, item)
         asset_key = self._get_asset_by_band(bands)
-        item = self.get_item_by_name(item_name)
-        asset_url = item.asset_urls[asset_key]
+        asset_url = ed_item.asset_urls[asset_key]
 
         # Construct the transform to use for the warped dataset.
         wanted_transform = affine.Affine(
@@ -706,7 +697,7 @@ class Sentinel2(EarthDaily):
     def read_raster(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
@@ -717,17 +708,17 @@ class Sentinel2(EarthDaily):
         Applies per-asset scale/offset metadata when apply_scale_offset=True.
         """
         raster = super().read_raster(
-            layer_name, item_name, bands, projection, bounds, resampling=resampling
+            layer_name, item, bands, projection, bounds, resampling=resampling
         )
         if not self.apply_scale_offset:
             return raster
 
+        ed_item = cast(EarthDailyItem, item)
         asset_key = self._get_asset_by_band(bands)
-        item = self.get_item_by_name(item_name)
         result = self._apply_scale_offsets(
             raster.get_chw_array(),
-            scale_offsets=item.asset_scale_offsets.get(asset_key),
-            item_name=item_name,
+            scale_offsets=ed_item.asset_scale_offsets.get(asset_key),
+            item_name=item.name,
             asset_key=asset_key,
         )
         return RasterArray(chw_array=result)
@@ -847,7 +838,7 @@ class Sentinel2(EarthDaily):
                     asset_url = item.asset_urls.get(asset_key)
                     if asset_url is None:
                         continue
-                    if tile_store.is_raster_ready(item.name, band_names):
+                    if tile_store.is_raster_ready(item, band_names):
                         continue
 
                     local_fname = self._download_asset_to_tmp(
@@ -856,7 +847,7 @@ class Sentinel2(EarthDaily):
 
                     if not self.apply_scale_offset:
                         tile_store.write_raster_file(
-                            item.name,
+                            item,
                             band_names,
                             UPath(local_fname),
                             time_range=item.geometry.time_range,
@@ -874,7 +865,7 @@ class Sentinel2(EarthDaily):
 
                         projection, bounds = get_raster_projection_and_bounds(src)
                     tile_store.write_raster(
-                        item.name,
+                        item,
                         band_names,
                         projection,
                         bounds,

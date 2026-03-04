@@ -479,7 +479,7 @@ class OpenStreetMap(DataSource[OsmItem]):
             geometries: a list of geometries needed for each item
         """
         for cur_item, cur_geometries in zip(items, geometries):
-            if tile_store.is_vector_ready(cur_item.name):
+            if tile_store.is_vector_ready(cur_item):
                 continue
 
             logger.info(
@@ -490,4 +490,4 @@ class OpenStreetMap(DataSource[OsmItem]):
             with get_upath_local(UPath(cur_item.path_uri)) as local_fname:
                 handler.apply_file(local_fname)
 
-            tile_store.write_vector(cur_item.name, handler.features)
+            tile_store.write_vector(cur_item, handler.features)

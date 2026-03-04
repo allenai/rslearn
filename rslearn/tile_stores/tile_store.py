@@ -1,12 +1,18 @@
 """Base class for tile stores."""
 
+from __future__ import annotations
+
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from rasterio.enums import Resampling
 from upath import UPath
 
 from rslearn.utils import Feature, PixelBounds, Projection
 from rslearn.utils.raster_array import RasterArray
+
+if TYPE_CHECKING:
+    from rslearn.data_sources.data_source import Item
 
 
 class TileStore:
@@ -26,14 +32,12 @@ class TileStore:
         """
         pass
 
-    def is_raster_ready(
-        self, layer_name: str, item_name: str, bands: list[str]
-    ) -> bool:
+    def is_raster_ready(self, layer_name: str, item: Item, bands: list[str]) -> bool:
         """Checks if this raster has been written to the store.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item.
+            item: the item.
             bands: the list of bands identifying which specific raster to read.
 
         Returns:
@@ -42,12 +46,12 @@ class TileStore:
         """
         raise NotImplementedError
 
-    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
+    def get_raster_bands(self, layer_name: str, item: Item) -> list[list[str]]:
         """Get the sets of bands that have been stored for the specified item.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item.
+            item: the item.
 
         Returns:
             a list of lists of bands that are in the tile store (with one raster
@@ -57,13 +61,13 @@ class TileStore:
         raise NotImplementedError
 
     def get_raster_bounds(
-        self, layer_name: str, item_name: str, bands: list[str], projection: Projection
+        self, layer_name: str, item: Item, bands: list[str], projection: Projection
     ) -> PixelBounds:
         """Get the bounds of the raster in the specified projection.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item to check.
+            item: the item to check.
             bands: the list of bands identifying which specific raster to read. These
                 bands must match the bands of a stored raster.
             projection: the projection to get the raster's bounds in.
@@ -76,7 +80,7 @@ class TileStore:
     def read_raster(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
@@ -86,7 +90,7 @@ class TileStore:
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item to read.
+            item: the item to read.
             bands: the list of bands identifying which specific raster to read. These
                 bands must match the bands of a stored raster.
             projection: the projection to read in.
@@ -101,7 +105,7 @@ class TileStore:
     def write_raster(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
@@ -111,7 +115,7 @@ class TileStore:
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item to write.
+            item: the item to write.
             bands: the list of bands in the array.
             projection: the projection of the array.
             bounds: the bounds of the array.
@@ -122,7 +126,7 @@ class TileStore:
     def write_raster_file(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         fname: UPath,
         time_range: tuple[datetime, datetime] | None = None,
@@ -131,19 +135,19 @@ class TileStore:
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item to write.
+            item: the item to write.
             bands: the list of bands in the array.
             fname: the raster file.
             time_range: optional time range for the raster.
         """
         raise NotImplementedError
 
-    def is_vector_ready(self, layer_name: str, item_name: str) -> bool:
+    def is_vector_ready(self, layer_name: str, item: Item) -> bool:
         """Checks if this vector item has been written to the store.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item.
+            item: the item.
 
         Returns:
             whether the vector data from the item has been stored.
@@ -153,7 +157,7 @@ class TileStore:
     def read_vector(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         projection: Projection,
         bounds: PixelBounds,
     ) -> list[Feature]:
@@ -161,7 +165,7 @@ class TileStore:
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item to read.
+            item: the item to read.
             projection: the projection to read in.
             bounds: the bounds within which to read.
 
@@ -171,13 +175,13 @@ class TileStore:
         raise NotImplementedError
 
     def write_vector(
-        self, layer_name: str, item_name: str, features: list[Feature]
+        self, layer_name: str, item: Item, features: list[Feature]
     ) -> None:
         """Write vector data to the store.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item to write.
+            item: the item to write.
             features: the vector data.
         """
         raise NotImplementedError
@@ -196,39 +200,39 @@ class TileStoreWithLayer:
         self.tile_store = tile_store
         self.layer_name = layer_name
 
-    def is_raster_ready(self, item_name: str, bands: list[str]) -> bool:
+    def is_raster_ready(self, item: Item, bands: list[str]) -> bool:
         """Checks if this raster has been written to the store.
 
         Args:
-            item_name: the item.
+            item: the item.
             bands: the list of bands identifying which specific raster to read.
 
         Returns:
             whether there is a raster in the store matching the source, item, and
                 bands.
         """
-        return self.tile_store.is_raster_ready(self.layer_name, item_name, bands)
+        return self.tile_store.is_raster_ready(self.layer_name, item, bands)
 
-    def get_raster_bands(self, item_name: str) -> list[list[str]]:
+    def get_raster_bands(self, item: Item) -> list[list[str]]:
         """Get the sets of bands that have been stored for the specified item.
 
         Args:
-            item_name: the item.
+            item: the item.
 
         Returns:
             a list of lists of bands that are in the tile store (with one raster
                 stored corresponding to each inner list). If no rasters are ready for
                 this item, returns empty list.
         """
-        return self.tile_store.get_raster_bands(self.layer_name, item_name)
+        return self.tile_store.get_raster_bands(self.layer_name, item)
 
     def get_raster_bounds(
-        self, item_name: str, bands: list[str], projection: Projection
+        self, item: Item, bands: list[str], projection: Projection
     ) -> PixelBounds:
         """Get the bounds of the raster in the specified projection.
 
         Args:
-            item_name: the item to check.
+            item: the item to check.
             bands: the list of bands identifying which specific raster to read. These
                 bands must match the bands of a stored raster.
             projection: the projection to get the raster's bounds in.
@@ -237,12 +241,12 @@ class TileStoreWithLayer:
             the bounds of the raster in the projection.
         """
         return self.tile_store.get_raster_bounds(
-            self.layer_name, item_name, bands, projection
+            self.layer_name, item, bands, projection
         )
 
     def read_raster(
         self,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
@@ -251,7 +255,7 @@ class TileStoreWithLayer:
         """Read raster data from the store.
 
         Args:
-            item_name: the item to read.
+            item: the item to read.
             bands: the list of bands identifying which specific raster to read. These
                 bands must match the bands of a stored raster.
             projection: the projection to read in.
@@ -262,12 +266,12 @@ class TileStoreWithLayer:
             the raster data
         """
         return self.tile_store.read_raster(
-            self.layer_name, item_name, bands, projection, bounds, resampling
+            self.layer_name, item, bands, projection, bounds, resampling
         )
 
     def write_raster(
         self,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
@@ -276,19 +280,19 @@ class TileStoreWithLayer:
         """Write raster data to the store.
 
         Args:
-            item_name: the item to write.
+            item: the item to write.
             bands: the list of bands in the array.
             projection: the projection of the array.
             bounds: the bounds of the array.
             raster: the raster data.
         """
         self.tile_store.write_raster(
-            self.layer_name, item_name, bands, projection, bounds, raster
+            self.layer_name, item, bands, projection, bounds, raster
         )
 
     def write_raster_file(
         self,
-        item_name: str,
+        item: Item,
         bands: list[str],
         fname: UPath,
         time_range: tuple[datetime, datetime] | None = None,
@@ -296,48 +300,46 @@ class TileStoreWithLayer:
         """Write raster data to the store.
 
         Args:
-            item_name: the item to write.
+            item: the item to write.
             bands: the list of bands in the array.
             fname: the raster file.
             time_range: optional time range for the raster.
         """
         self.tile_store.write_raster_file(
-            self.layer_name, item_name, bands, fname, time_range=time_range
+            self.layer_name, item, bands, fname, time_range=time_range
         )
 
-    def is_vector_ready(self, item_name: str) -> bool:
+    def is_vector_ready(self, item: Item) -> bool:
         """Checks if this vector item has been written to the store.
 
         Args:
-            item_name: the item.
+            item: the item.
 
         Returns:
             whether the vector data from the item has been stored.
         """
-        return self.tile_store.is_vector_ready(self.layer_name, item_name)
+        return self.tile_store.is_vector_ready(self.layer_name, item)
 
     def read_vector(
-        self, item_name: str, projection: Projection, bounds: PixelBounds
+        self, item: Item, projection: Projection, bounds: PixelBounds
     ) -> list[Feature]:
         """Read vector data from the store.
 
         Args:
-            item_name: the item to read.
+            item: the item to read.
             projection: the projection to read in.
             bounds: the bounds within which to read.
 
         Returns:
             the vector data
         """
-        return self.tile_store.read_vector(
-            self.layer_name, item_name, projection, bounds
-        )
+        return self.tile_store.read_vector(self.layer_name, item, projection, bounds)
 
-    def write_vector(self, item_name: str, features: list[Feature]) -> None:
+    def write_vector(self, item: Item, features: list[Feature]) -> None:
         """Write vector data to the store.
 
         Args:
-            item_name: the item to write.
+            item: the item to write.
             features: the vector data.
         """
-        self.tile_store.write_vector(self.layer_name, item_name, features)
+        self.tile_store.write_vector(self.layer_name, item, features)

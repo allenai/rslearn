@@ -22,6 +22,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import (
     DataSourceContext,
     Item,
+    ItemLookupDataSource,
     QueryConfig,
 )
 from rslearn.data_sources.direct_materialize_data_source import (
@@ -46,7 +47,7 @@ HTTP_BASE = f"https://{BUCKET_NAME}.s3.{BUCKET_REGION}.amazonaws.com"
 GRID_INDEX_CELL_SIZE = 3.0
 
 
-class WorldCover(DirectMaterializeDataSource[Item]):
+class WorldCover(DirectMaterializeDataSource[Item], ItemLookupDataSource[Item]):
     """A data source for the ESA WorldCover 2021 land cover map.
 
     The data is served as Cloud-Optimized GeoTIFFs from the public AWS S3 bucket
@@ -178,10 +179,10 @@ class WorldCover(DirectMaterializeDataSource[Item]):
     ) -> None:
         for item in items:
             band_names = self.asset_bands["map"]
-            if tile_store.is_raster_ready(item.name, band_names):
+            if tile_store.is_raster_ready(item, band_names):
                 continue
 
-            url = self.get_asset_url(item.name, "map")
+            url = self.get_asset_url(item, "map")
             logger.info("downloading WorldCover tile %s", url)
 
             with tempfile.TemporaryDirectory() as tmp_dir:
@@ -195,7 +196,7 @@ class WorldCover(DirectMaterializeDataSource[Item]):
                             f.write(chunk)
 
                 tile_store.write_raster_file(
-                    item.name,
+                    item,
                     band_names,
                     UPath(local_fname),
                 )
@@ -203,7 +204,7 @@ class WorldCover(DirectMaterializeDataSource[Item]):
     # --- DirectMaterializeDataSource implementation ---
 
     @override
-    def get_asset_url(self, item_name: str, asset_key: str) -> str:
+    def get_asset_url(self, item: Item, asset_key: str) -> str:
         assert asset_key == "map", f"Unknown asset key: {asset_key}"
         # Item name is the ll_tile that goes into the filename.
-        return f"{HTTP_BASE}/{TILE_PREFIX}/ESA_WorldCover_10m_2021_v200_{item_name}_Map.tif"
+        return f"{HTTP_BASE}/{TILE_PREFIX}/ESA_WorldCover_10m_2021_v200_{item.name}_Map.tif"

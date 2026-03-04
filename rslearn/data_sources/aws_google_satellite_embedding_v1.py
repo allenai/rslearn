@@ -4,7 +4,7 @@ import os
 import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import boto3
 import numpy as np
@@ -269,7 +269,7 @@ class GoogleSatelliteEmbeddingV1(
             geometries: a list of geometries needed for each item
         """
         for item in items:
-            if tile_store.is_raster_ready(item.name, BANDS):
+            if tile_store.is_raster_ready(item, BANDS):
                 continue
 
             # Download the TIFF file directly to disk
@@ -284,7 +284,7 @@ class GoogleSatelliteEmbeddingV1(
                         projection, bounds = get_raster_projection_and_bounds(src)
                     array = self._dequantize(array)
                     tile_store.write_raster(
-                        item.name,
+                        item,
                         BANDS,
                         projection,
                         bounds,
@@ -295,7 +295,7 @@ class GoogleSatelliteEmbeddingV1(
                     )
                 else:
                     tile_store.write_raster_file(
-                        item.name,
+                        item,
                         BANDS,
                         UPath(local_path),
                         time_range=item.geometry.time_range,
@@ -303,15 +303,13 @@ class GoogleSatelliteEmbeddingV1(
 
     # --- DirectMaterializeDataSource implementation ---
 
-    def get_asset_url(self, item_name: str, asset_key: str) -> str:
-        """Get the HTTP URL to read the asset.
-
-        Returns a /vsicurl/ URL that rasterio can read directly over HTTP.
-        """
-        item = self.get_item_by_name(item_name)
+    def get_asset_url(
+        self, item: GoogleSatelliteEmbeddingV1Item, asset_key: str
+    ) -> str:
+        """Get the HTTP URL to read the asset."""
         # Convert s3://bucket/path to HTTP URL
         key = item.s3_path.replace(f"s3://{BUCKET_NAME}/", "")
-        return f"/vsicurl/{HTTP_URL_BASE}/{key}"
+        return f"{HTTP_URL_BASE}/{key}"
 
     def _dequantize(self, data: npt.NDArray[Any]) -> npt.NDArray[np.float32]:
         """Apply de-quantization to convert int8 values to float32.
@@ -333,7 +331,7 @@ class GoogleSatelliteEmbeddingV1(
         return result
 
     def get_read_callback(
-        self, item_name: str, asset_key: str
+        self, item: GoogleSatelliteEmbeddingV1Item, asset_key: str
     ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
         """Return a callback to apply de-quantization if enabled."""
         if not self.apply_dequantization:
@@ -343,7 +341,7 @@ class GoogleSatelliteEmbeddingV1(
     def read_raster(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
@@ -353,7 +351,8 @@ class GoogleSatelliteEmbeddingV1(
 
         Overrides base class to handle band selection (the base class reads all bands).
         """
-        asset_url = self.get_asset_url(item_name, "image")
+        typed_item = cast(GoogleSatelliteEmbeddingV1Item, item)
+        asset_url = self.get_asset_url(typed_item, "image")
 
         # Determine which band indices to read (1-indexed for rasterio)
         if bands == BANDS:
@@ -382,8 +381,7 @@ class GoogleSatelliteEmbeddingV1(
             ) as vrt:
                 data = vrt.read(indexes=band_indices)
 
-        # Apply callback if dequantization is enabled
-        callback = self.get_read_callback(item_name, "image")
+        callback = self.get_read_callback(typed_item, "image")
         if callback is not None:
             data = callback(data)
 

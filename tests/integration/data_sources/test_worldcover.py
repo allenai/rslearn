@@ -128,7 +128,7 @@ def test_ingest(
         item_groups[0],
         [[seattle2020]],
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, ["B1"])
+    assert tile_store.is_raster_ready(layer_name, item, ["B1"])
 
     bounds = (
         int(seattle2020.shp.bounds[0]),
@@ -137,7 +137,7 @@ def test_ingest(
         int(seattle2020.shp.bounds[3]),
     )
     raster_data = tile_store.read_raster(
-        layer_name, item.name, ["B1"], seattle2020.projection, bounds
+        layer_name, item, ["B1"], seattle2020.projection, bounds
     )
     assert (raster_data.get_chw_array() == PIXEL_VALUE).all()
 
@@ -174,7 +174,7 @@ def test_direct_materialize(
     )
     array = data_source.read_raster(
         layer_name="fake",
-        item_name=item.name,
+        item=item,
         bands=["B1"],
         projection=seattle2020.projection,
         bounds=bounds,

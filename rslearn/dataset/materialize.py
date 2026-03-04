@@ -85,7 +85,7 @@ def read_raster_window_from_tiles(
         return dst
 
     for src_bands, src_indexes, dst_indexes in needed:
-        src_bounds = tile_store.get_raster_bounds(item.name, src_bands, projection)
+        src_bounds = tile_store.get_raster_bounds(item, src_bands, projection)
         intersection = (
             max(bounds[0], src_bounds[0]),
             max(bounds[1], src_bounds[1]),
@@ -96,7 +96,7 @@ def read_raster_window_from_tiles(
             continue
 
         raster_array = tile_store.read_raster(
-            item.name, src_bands, projection, intersection, resampling=resampling
+            item, src_bands, projection, intersection, resampling=resampling
         )
 
         if (
@@ -184,7 +184,7 @@ def get_needed_band_sets_and_indexes(
     for i, band in enumerate(bands):
         wanted_band_indexes[band] = i
 
-    available_bands = tile_store.get_raster_bands(item.name)
+    available_bands = tile_store.get_raster_bands(item)
     needed_band_sets_and_indexes = []
 
     for src_bands in available_bands:
@@ -755,7 +755,7 @@ class VectorMaterializer(Materializer):
 
             for item in group:
                 cur_features = tile_store.read_vector(
-                    item.name, window.projection, window.bounds
+                    item, window.projection, window.bounds
                 )
                 features.extend(cur_features)
 
