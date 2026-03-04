@@ -1,10 +1,11 @@
-"""Late-fusion feature extractor supporting concatenation, GLU-style gating, and modality mixing."""
+"""Late-fusion feature extractor supporting concatenation, GLU-style gating, modality mixing, and FiLM conditioning."""
 
 from collections.abc import Callable
 from typing import Any
 
 import torch
 import torch.nn.functional as F
+from einops import rearrange
 
 from rslearn.train.model_context import ModelContext
 
@@ -27,7 +28,7 @@ _GATED_MODES = ("gated", "mixing")
 class LateFusionFeatureExtractor(FeatureExtractor):
     """Late-fusion feature extractor that runs parallel encoder paths and fuses their outputs.
 
-    Supports three fusion modes:
+    Supports four fusion modes:
 
     - ``"concat"`` (default): simple concatenation along the channel dimension.
     - ``"gated"`` (GLU-style): learns to gate the fused representation via
@@ -36,6 +37,13 @@ class LateFusionFeatureExtractor(FeatureExtractor):
     - ``"mixing"``: learns per-path soft weights via softmax and mixes
       independently projected modalities.
       This variant offers "choose modality A vs B" interpretability.
+    - ``"film"`` (Feature-wise Linear Modulation): path 0 is the *primary*
+      (spatial) modality; all other paths are *context*.  Context features are
+      global-average-pooled to a vector and mapped through learned MLPs to
+      produce per-channel scale (γ) and shift (β) parameters that modulate the
+      primary features: ``output = (1 + γ) ⊙ primary + β``.  Initialised so that
+      γ ≈ 0 and β ≈ 0 (identity at start), meaning training begins from the
+      primary-only baseline.
     """
 
     def __init__(
@@ -47,6 +55,10 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         gate_init_bias: float = 2.0,
         gate_dropout: float = 0.0,
         path_output_channels: list[int] | None = None,
+        mixing_gate_hidden_dim: int | None = None,
+        film_hidden_dim: int | None = None,
+        pre_fusion_norm: bool = False,
+        pre_fusion_dropout: float = 0.0,
     ):
         """Create a new LateFusionFeatureExtractor.
 
@@ -57,8 +69,9 @@ class LateFusionFeatureExtractor(FeatureExtractor):
                 Every path is applied to the same ``ModelContext`` and the
                 results are fused.
             fusion_mode: ``"concat"`` for simple channel-wise concatenation,
-                ``"gated"`` for GLU-style gated fusion, or ``"mixing"`` for
-                modality-weighted mixing gated fusion.
+                ``"gated"`` for GLU-style gated fusion, ``"mixing"`` for
+                modality-weighted mixing gated fusion, or ``"film"`` for
+                Feature-wise Linear Modulation conditioning.
             gated_output_channels: required when ``fusion_mode`` is
                 ``"gated"`` or ``"mixing"``.  Specifies the output channel
                 dimension of the gating / projection layers.
@@ -77,13 +90,29 @@ class LateFusionFeatureExtractor(FeatureExtractor):
             gate_dropout: dropout probability applied to the concatenated
                 input before it enters the gating / gate+value layers.  Can
                 prevent the model from collapsing to "always ignore one
-                modality".  Default ``0.0`` (no dropout).
-            path_output_channels: required when ``fusion_mode`` is ``"gated"``
-                or ``"mixing"``.  A list with one entry per path giving the
-                output channel dimension of that path.  For multi-scale
+                modality".  Default ``0.0`` (no dropout).  Also used as
+                dropout on the FiLM context vector when ``fusion_mode="film"``.
+            path_output_channels: required when ``fusion_mode`` is ``"gated"``,
+                ``"mixing"``, or ``"film"``, or when ``pre_fusion_norm`` is
+                ``True``.  A list with one entry per path giving the output
+                channel dimension of that path.  For multi-scale
                 ``FeatureMaps`` the same channel count is assumed at every
-                scale.  Example: ``[768, 128]`` for a 768-channel S2 path
-                and a 128-channel ERA5 path.
+                scale.  Example: ``[768, 128]`` for a 768-channel S2 path and
+                a 128-channel ERA5 path.
+            mixing_gate_hidden_dim: hidden dimension for the mixing gate
+                bottleneck MLP (and 1x1-conv bottleneck for spatial mixing).
+                If ``None``, a small value is chosen automatically from the
+                input dimension. Only relevant when ``fusion_mode="mixing"``.
+            film_hidden_dim: optional hidden dimension for the FiLM gamma/beta
+                MLPs.  If ``None`` (default), a single linear layer is used.
+                Only relevant when ``fusion_mode="film"``.
+            pre_fusion_norm: if ``True``, apply a learned ``LayerNorm`` to
+                each path's output before fusion (requires
+                ``path_output_channels``).  Default ``False``.
+            pre_fusion_dropout: dropout probability applied to each path output
+                right before fusion (after optional ``pre_fusion_norm``).
+                Applied to both ``FeatureMaps`` and ``FeatureVector`` outputs.
+                Default ``0.0`` (no dropout).
         """
         super().__init__()
 
@@ -113,6 +142,7 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         self.fusion_mode = fusion_mode
         self.gate_init_bias = gate_init_bias
         self.gate_dropout = gate_dropout
+        self.mixing_gate_hidden_dim = mixing_gate_hidden_dim
 
         if gate_activation not in _GATE_ACTIVATIONS:
             raise ValueError(
@@ -160,17 +190,48 @@ class LateFusionFeatureExtractor(FeatureExtractor):
                 self._build_glu_layers(gated_output_channels, total_in_channels)
             else:
                 self._build_mixing_layers(
-                    gated_output_channels, len(paths), path_output_channels
+                    gated_output_channels,
+                    len(paths),
+                    path_output_channels,
+                    self.mixing_gate_hidden_dim,
                 )
 
             self._gated_output_validated = False
             self._gate_bias_initialized = False
             self._maybe_init_gate_bias()
 
+        elif fusion_mode == "film":
+            if path_output_channels is None:
+                raise ValueError(
+                    f"path_output_channels is required when fusion_mode='{fusion_mode}'"
+                )
+            if len(path_output_channels) != len(paths):
+                raise ValueError(
+                    f"path_output_channels must have one entry per path "
+                    f"({len(paths)}), got {len(path_output_channels)}"
+                )
+            self._build_film_layers(path_output_channels, film_hidden_dim)
+
         elif fusion_mode != "concat":
             raise ValueError(
                 f"Unknown fusion_mode '{fusion_mode}'. "
-                f"Expected 'concat', 'gated', or 'mixing'."
+                f"Expected 'concat', 'gated', 'mixing', or 'film'."
+            )
+
+        # -- Pre-fusion normalisation -----------------------------------------
+        self.pre_fusion_norm = pre_fusion_norm
+        if not 0.0 <= pre_fusion_dropout < 1.0:
+            raise ValueError(
+                f"pre_fusion_dropout must be in [0, 1), got {pre_fusion_dropout!r}"
+            )
+        self.pre_fusion_dropout = pre_fusion_dropout
+        if pre_fusion_norm:
+            if path_output_channels is None:
+                raise ValueError(
+                    "path_output_channels required when pre_fusion_norm=True"
+                )
+            self._pre_norm_layers = torch.nn.ModuleList(
+                [torch.nn.LayerNorm(ch) for ch in path_output_channels]
             )
 
     # ------------------------------------------------------------------
@@ -208,6 +269,7 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         gated_output_channels: int | list[int],
         n_paths: int,
         path_output_channels: list[int],
+        mixing_gate_hidden_dim: int | None,
     ) -> None:
         """Build per-path projection and per-channel gate layers for mixing.
 
@@ -219,6 +281,8 @@ class LateFusionFeatureExtractor(FeatureExtractor):
             gated_output_channels: output channel dimension(s).
             n_paths: number of encoder paths.
             path_output_channels: output channel dimension of each path.
+            mixing_gate_hidden_dim: optional hidden dimension for the mixing
+                gate bottleneck. If ``None``, an automatic size is used.
         """
         self._n_paths = n_paths
 
@@ -230,8 +294,12 @@ class LateFusionFeatureExtractor(FeatureExtractor):
                     for p in range(n_paths)
                 ]
             )
-            self.mixing_gate = torch.nn.Linear(
-                n_paths * gated_output_channels, n_paths * gated_output_channels
+            in_dim = n_paths * gated_output_channels
+            hidden_dim = self._resolve_mixing_hidden_dim(in_dim, mixing_gate_hidden_dim)
+            self.mixing_gate = torch.nn.Sequential(
+                torch.nn.Linear(in_dim, hidden_dim),
+                torch.nn.ReLU(inplace=True),
+                torch.nn.Linear(hidden_dim, in_dim),
             )
         else:
             self._mixing_out_channels = list(gated_output_channels)
@@ -250,10 +318,106 @@ class LateFusionFeatureExtractor(FeatureExtractor):
             # mixing_gate[scale_idx] → outputs n_paths * out_ch channels
             self.mixing_gate = torch.nn.ModuleList(
                 [
-                    torch.nn.Conv2d(n_paths * c, n_paths * c, kernel_size=1)
+                    torch.nn.Sequential(
+                        torch.nn.Conv2d(
+                            n_paths * c,
+                            self._resolve_mixing_hidden_dim(
+                                n_paths * c, mixing_gate_hidden_dim
+                            ),
+                            kernel_size=1,
+                        ),
+                        torch.nn.ReLU(inplace=True),
+                        torch.nn.Conv2d(
+                            self._resolve_mixing_hidden_dim(
+                                n_paths * c, mixing_gate_hidden_dim
+                            ),
+                            n_paths * c,
+                            kernel_size=1,
+                        ),
+                    )
                     for c in gated_output_channels
                 ]
             )
+
+    @staticmethod
+    def _resolve_mixing_hidden_dim(in_dim: int, configured: int | None) -> int:
+        """Return a small hidden size for mixing-gate bottlenecks."""
+        if configured is not None:
+            if configured <= 0:
+                raise ValueError(
+                    f"mixing_gate_hidden_dim must be a positive int, got {configured!r}"
+                )
+            return min(configured, in_dim)
+        # Default: conservative bottleneck that scales with input size.
+        return max(1, min(in_dim, max(8, min(128, in_dim // 4))))
+
+    def _build_film_layers(
+        self,
+        path_output_channels: list[int],
+        film_hidden_dim: int | None,
+    ) -> None:
+        """Build FiLM gamma (scale) and beta (shift) projection layers.
+
+        Path 0 is the *primary* modality whose features are modulated.
+        Paths 1+ are *context*; their features are global-average-pooled to
+        vectors and concatenated to form the FiLM conditioning input.
+
+        The output dimensionality equals ``path_output_channels[0]`` (the
+        primary path's channel count).
+
+        Args:
+            path_output_channels: output channel dimension of each path.
+            film_hidden_dim: if not None, use a two-layer MLP with this hidden
+                dimension; otherwise use a single Linear layer.
+        """
+        self._film_primary_channels = path_output_channels[0]
+        self._film_context_channels = sum(path_output_channels[1:])
+
+        if film_hidden_dim is not None and film_hidden_dim > 0:
+            self.film_gamma = torch.nn.Sequential(
+                torch.nn.Linear(self._film_context_channels, film_hidden_dim),
+                torch.nn.ReLU(inplace=True),
+                torch.nn.Linear(film_hidden_dim, self._film_primary_channels),
+            )
+            self.film_beta = torch.nn.Sequential(
+                torch.nn.Linear(self._film_context_channels, film_hidden_dim),
+                torch.nn.ReLU(inplace=True),
+                torch.nn.Linear(film_hidden_dim, self._film_primary_channels),
+            )
+        else:
+            self.film_gamma = torch.nn.Linear(
+                self._film_context_channels, self._film_primary_channels
+            )
+            self.film_beta = torch.nn.Linear(
+                self._film_context_channels, self._film_primary_channels
+            )
+
+        self._init_film_weights()
+
+    def _init_film_weights(self) -> None:
+        """Initialise FiLM layers so that γ ≈ 0 and β ≈ 0 at the start."""
+
+        def _get_last_linear(module: torch.nn.Module) -> torch.nn.Linear:
+            """Return the last Linear layer in a module (or the module itself)."""
+            if isinstance(module, torch.nn.Linear):
+                return module
+            # Sequential: walk in reverse to find the last Linear
+            for child in reversed(list(module.children())):
+                if isinstance(child, torch.nn.Linear):
+                    return child
+            raise RuntimeError("Could not find a Linear layer in the FiLM module")
+
+        # Gamma: output ≈ 0  →  zero weights, bias = 0
+        gamma_last = _get_last_linear(self.film_gamma)
+        torch.nn.init.zeros_(gamma_last.weight)
+        if gamma_last.bias is not None:
+            torch.nn.init.zeros_(gamma_last.bias)
+
+        # Beta: output ≈ 0  →  zero weights, bias = 0
+        beta_last = _get_last_linear(self.film_beta)
+        torch.nn.init.zeros_(beta_last.weight)
+        if beta_last.bias is not None:
+            torch.nn.init.zeros_(beta_last.bias)
 
     # ------------------------------------------------------------------
     # Gate bias initialisation (after lazy materialisation)
@@ -279,8 +443,16 @@ class LateFusionFeatureExtractor(FeatureExtractor):
             return
 
         for layer in layers:
-            if hasattr(layer, "bias") and layer.bias is not None:
-                torch.nn.init.constant_(layer.bias, self.gate_init_bias)
+            layer_to_init = layer
+            if isinstance(layer, torch.nn.Sequential):
+                # For bottleneck gates, biasing the final projection preserves
+                # the original "open gate" initialization intent.
+                for child in reversed(list(layer.children())):
+                    if hasattr(child, "bias"):
+                        layer_to_init = child
+                        break
+            if hasattr(layer_to_init, "bias") and layer_to_init.bias is not None:
+                torch.nn.init.constant_(layer_to_init.bias, self.gate_init_bias)
 
         self._gate_bias_initialized = True
 
@@ -304,6 +476,40 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         if self.gate_dropout > 0.0 and self.training:
             return F.dropout(x, p=self.gate_dropout, training=True)
         return x
+
+    def _normalize_outputs(self, outputs: list[Any]) -> list[Any]:
+        """Apply optional per-path LayerNorm + pre-fusion dropout."""
+
+        def _ln(x: torch.Tensor, idx: int) -> torch.Tensor:
+            ln = self._pre_norm_layers[idx]
+            if x.dim() == 4:
+                x = rearrange(x, "b c h w -> b h w c")
+                x = ln(x)
+                return rearrange(x, "b h w c -> b c h w")
+            return ln(x)
+
+        def _drop(x: torch.Tensor) -> torch.Tensor:
+            if self.pre_fusion_dropout > 0.0 and self.training:
+                return F.dropout(x, p=self.pre_fusion_dropout, training=True)
+            return x
+
+        result: list[Any] = []
+        for i, out in enumerate(outputs):
+            if isinstance(out, FeatureMaps):
+                maps = out.feature_maps
+                if self.pre_fusion_norm:
+                    maps = [_ln(fm, i) for fm in maps]
+                maps = [_drop(fm) for fm in maps]
+                result.append(FeatureMaps(maps))
+            elif isinstance(out, FeatureVector):
+                vec = out.feature_vector
+                if self.pre_fusion_norm:
+                    vec = _ln(vec, i)
+                vec = _drop(vec)
+                result.append(FeatureVector(feature_vector=vec))
+            else:
+                result.append(out)
+        return result
 
     # ------------------------------------------------------------------
     # Validation
@@ -512,6 +718,69 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         return FeatureVector(feature_vector=fused)
 
     # ------------------------------------------------------------------
+    # FiLM (Feature-wise Linear Modulation) fusion
+    # ------------------------------------------------------------------
+
+    def _extract_context_vector(self, outputs: list[FeatureMaps]) -> torch.Tensor:
+        """Global-average-pool all context paths (1+) and concatenate to a vector.
+
+        Args:
+            outputs: list of FeatureMaps from all paths.
+
+        Returns:
+            context vector of shape ``[B, sum(context_channels)]``.
+        """
+        context_vecs: list[torch.Tensor] = []
+        for o in outputs[1:]:
+            for fmap in o.feature_maps:
+                # [B, C, H, W] → [B, C]
+                context_vecs.append(fmap.mean(dim=[2, 3]))
+        return torch.cat(context_vecs, dim=1)
+
+    def _film_feature_maps(self, outputs: list[FeatureMaps]) -> FeatureMaps:
+        """Apply FiLM conditioning to the primary path's FeatureMaps.
+
+        Path 0 is modulated by context derived from paths 1+:
+            ``output = (1 + γ(context)) ⊙ primary + β(context)``
+
+        where γ and β are per-channel scalars broadcast over spatial dims.
+        """
+        self._validate_feature_map_scales(outputs)
+        primary = outputs[0]
+
+        context = self._extract_context_vector(outputs)
+        context = self._apply_gate_dropout(context)
+
+        gamma = self.film_gamma(context)  # [B, C_primary]
+        beta = self.film_beta(context)  # [B, C_primary]
+
+        fused_maps: list[torch.Tensor] = []
+        for fmap in primary.feature_maps:
+            # fmap: [B, C, H, W]; gamma/beta: [B, C] → broadcast to [B, C, 1, 1]
+            modulated = (1 + gamma).unsqueeze(-1).unsqueeze(-1) * fmap + beta.unsqueeze(
+                -1
+            ).unsqueeze(-1)
+            fused_maps.append(modulated)
+
+        return FeatureMaps(fused_maps)
+
+    def _film_feature_vectors(self, outputs: list[FeatureVector]) -> FeatureVector:
+        """Apply FiLM conditioning to the primary path's FeatureVector.
+
+        Path 0 is modulated by context derived from paths 1+:
+            ``output = (1 + γ(context)) ⊙ primary + β(context)``
+        """
+        primary_vec = outputs[0].feature_vector
+        context_vecs = [o.feature_vector for o in outputs[1:]]
+        context = torch.cat(context_vecs, dim=1)  # [B, sum(context_channels)]
+        context = self._apply_gate_dropout(context)
+
+        gamma = self.film_gamma(context)  # [B, C_primary]
+        beta = self.film_beta(context)  # [B, C_primary]
+
+        return FeatureVector(feature_vector=(1 + gamma) * primary_vec + beta)
+
+    # ------------------------------------------------------------------
     # Forward
     # ------------------------------------------------------------------
 
@@ -531,6 +800,9 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         """
         outputs = [self._run_path(path, context) for path in self.paths]
 
+        # Normalise each path's output before fusion (no-op when disabled).
+        outputs = self._normalize_outputs(outputs)
+
         # All outputs must be the same type.
         first_type = type(outputs[0])
         for i, o in enumerate(outputs):
@@ -543,6 +815,7 @@ class LateFusionFeatureExtractor(FeatureExtractor):
 
         if self.fusion_mode in _GATED_MODES and not self._gated_output_validated:
             self._validate_gated_output_type(outputs[0])
+        # FiLM mode: no gated-output validation needed (output dim = primary path dim)
 
         if isinstance(outputs[0], FeatureMaps):
             result: FeatureMaps | FeatureVector = self._fuse_feature_maps(outputs)  # type: ignore[arg-type]
@@ -562,6 +835,8 @@ class LateFusionFeatureExtractor(FeatureExtractor):
             return self._concat_feature_maps(outputs)
         if self.fusion_mode == "gated":
             return self._gated_feature_maps(outputs)
+        if self.fusion_mode == "film":
+            return self._film_feature_maps(outputs)
         return self._mixing_feature_maps(outputs)
 
     def _fuse_feature_vectors(self, outputs: list[FeatureVector]) -> FeatureVector:
@@ -570,4 +845,6 @@ class LateFusionFeatureExtractor(FeatureExtractor):
             return self._concat_feature_vectors(outputs)
         if self.fusion_mode == "gated":
             return self._gated_feature_vectors(outputs)
+        if self.fusion_mode == "film":
+            return self._film_feature_vectors(outputs)
         return self._mixing_feature_vectors(outputs)
