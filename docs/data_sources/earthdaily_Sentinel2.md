@@ -13,6 +13,8 @@ By default, this data source applies per-asset scale/offset values from STAC
 `raster:bands` metadata (`apply_scale_offset: true`) to convert raw pixel values into
 physical units using `physical = raw * scale + offset`. Set `apply_scale_offset: false`
 to keep raw values.
+For Sentinel-2 spectral bands, this physical unit is reflectance (typically BOA
+reflectance for L2A products), e.g. raw `10000` with scale `0.0001` maps to `1.0`.
 
 When `apply_scale_offset: true`, configure the target `band_sets[].dtype` as `float32`.
 rslearn will raise during initialization if a non-float dtype is configured through the
