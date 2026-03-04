@@ -411,7 +411,8 @@ class EarthDaily(DataSource, TileStore):
             layer_name: the layer name or alias.
             item: the item.
         """
-        assert isinstance(item, EarthDailyItem)
+        if not isinstance(item, EarthDailyItem):
+            raise TypeError(f"expected EarthDailyItem, got {type(item)}")
         all_bands = []
         for asset_key, band_names in self.asset_bands.items():
             if asset_key not in item.asset_urls:
@@ -525,7 +526,8 @@ class EarthDaily(DataSource, TileStore):
         Returns:
             the raster data
         """
-        assert isinstance(item, EarthDailyItem)
+        if not isinstance(item, EarthDailyItem):
+            raise TypeError(f"expected EarthDailyItem, got {type(item)}")
         asset_key = self._get_asset_by_band(bands)
         asset_url = item.asset_urls[asset_key]
 
@@ -715,7 +717,8 @@ class Sentinel2(EarthDaily):
         if not self.apply_scale_offset:
             return raster
 
-        assert isinstance(item, EarthDailyItem)
+        if not isinstance(item, EarthDailyItem):
+            raise TypeError(f"expected EarthDailyItem, got {type(item)}")
         asset_key = self._get_asset_by_band(bands)
         result = self._apply_scale_offsets(
             raster.get_chw_array(),

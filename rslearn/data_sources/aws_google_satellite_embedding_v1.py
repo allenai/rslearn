@@ -353,7 +353,10 @@ class GoogleSatelliteEmbeddingV1(
 
         Overrides base class to handle band selection (the base class reads all bands).
         """
-        assert isinstance(item, GoogleSatelliteEmbeddingV1Item)
+        if not isinstance(item, GoogleSatelliteEmbeddingV1Item):
+            raise TypeError(
+                f"expected GoogleSatelliteEmbeddingV1Item, got {type(item)}"
+            )
         asset_url = self.get_asset_url(item, "image")
 
         # Determine which band indices to read (1-indexed for rasterio)

@@ -231,7 +231,8 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
                 stored corresponding to each inner list). If no rasters are ready for
                 this item, returns empty list.
         """
-        assert isinstance(item, SourceItem)
+        if not isinstance(item, SourceItem):
+            raise TypeError(f"expected SourceItem, got {type(item)}")
         all_bands = []
         for asset_key, band_names in self.asset_bands.items():
             if asset_key not in item.asset_urls:
