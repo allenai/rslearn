@@ -14,6 +14,11 @@ By default, this data source applies per-asset scale/offset values from STAC
 physical units using `physical = raw * scale + offset`. Set `apply_scale_offset: false`
 to keep raw values.
 
+When `apply_scale_offset: true`, configure the target `band_sets[].dtype` as `float32`.
+rslearn will raise during initialization if a non-float dtype is configured through the
+layer context. Nodata is read from STAC `raster:bands` metadata and preserved during
+scale/offset application (for this collection, nodata is typically `0`).
+
 Note: EarthDaily may include a preview `thumbnail` asset; rslearn does not ingest/materialize it.
 
 ### Configuration
@@ -66,6 +71,26 @@ Note: EarthDaily may include a preview `thumbnail` asset; rslearn does not inges
     // Retry settings for EarthDaily API client requests (search/get item).
     "max_retries": 3,
     "retry_backoff_factor": 5.0
+  }
+}
+```
+
+Example layer snippet:
+
+```jsonc
+{
+  "type": "raster",
+  "band_sets": [{
+    "bands": ["B02", "B03", "B04"],
+    "dtype": "float32",
+    // Optional: override nodata explicitly if needed.
+    // "nodata_vals": [0, 0, 0]
+  }],
+  "data_source": {
+    "class_path": "rslearn.data_sources.earthdaily.Sentinel2",
+    "init_args": {
+      "apply_scale_offset": true
+    }
   }
 }
 ```
