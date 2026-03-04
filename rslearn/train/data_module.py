@@ -229,7 +229,11 @@ class RslearnDataModule(L.LightningDataModule):
                     "load_all_crops requires at least one window per rank, but got zero windows"
                 )
 
-            if self.trainer.world_size is not None and self.trainer.world_size > 1:
+            if (
+                self.trainer is not None
+                and self.trainer.world_size is not None
+                and self.trainer.world_size > 1
+            ):
                 num_windows_per_rank = num_windows // self.trainer.world_size
                 if num_windows_per_rank == 0:
                     raise ValueError(
