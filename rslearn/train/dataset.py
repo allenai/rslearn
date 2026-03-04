@@ -302,25 +302,6 @@ class DataInput:
         """
         self.data_type = data_type
         self.layers = layers
-        if bands is not None:
-            if not isinstance(bands, (list, tuple)) or not all(
-                isinstance(band, str) for band in bands
-            ):
-                raise ValueError(
-                    f"bands must be a list of strings, got {type(bands).__name__}"
-                )
-            bands = list(bands)
-        self.bands = bands
-        if use_all_bands_in_order_of_band_set_idx is not None and (
-            isinstance(use_all_bands_in_order_of_band_set_idx, bool)
-            or not isinstance(use_all_bands_in_order_of_band_set_idx, int)
-        ):
-            raise ValueError(
-                "use_all_bands_in_order_of_band_set_idx must be an int or None"
-            )
-        self.use_all_bands_in_order_of_band_set_idx = (
-            use_all_bands_in_order_of_band_set_idx
-        )
         self.required = required
         self.passthrough = passthrough
         self.is_target = is_target
@@ -329,6 +310,24 @@ class DataInput:
         self.load_all_item_groups = load_all_item_groups
         self.resolution_factor = resolution_factor
         self.resampling = resampling
+
+        if bands is not None and use_all_bands_in_order_of_band_set_idx is not None:
+            raise ValueError(
+                "only one of bands and use_all_bands_in_order_of_band_set_idx should be set"
+            )
+        if (
+            self.data_type == "raster"
+            and bands is None
+            and use_all_bands_in_order_of_band_set_idx is None
+        ):
+            raise ValueError(
+                "for raster DataInputs, one of bands and use_all_bands_in_order_of_band_set_idx must be set"
+            )
+
+        self.bands = bands
+        self.use_all_bands_in_order_of_band_set_idx = (
+            use_all_bands_in_order_of_band_set_idx
+        )
 
 
 def resolve_raster_data_input_bands(

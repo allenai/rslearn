@@ -397,10 +397,10 @@ def test_read_data_input_use_all_bands_requires_band_set_idx(
         dtype=DType.FLOAT32,
     )
 
-    with pytest.raises(
-        ValueError, match=r"use_all_bands_in_order_of_band_set_idx"
-    ):
-        _ = read_data_input(dataset, window, window.bounds, data_input, random.Random(0))
+    with pytest.raises(ValueError, match=r"use_all_bands_in_order_of_band_set_idx"):
+        _ = read_data_input(
+            dataset, window, window.bounds, data_input, random.Random(0)
+        )
 
 
 def test_read_data_input_use_all_bands_with_band_set_index(tmp_path: UPath) -> None:
