@@ -228,7 +228,7 @@ class EuroCrops(DataSource[EuroCropsItem]):
             geometries: a list of geometries needed for each item
         """
         for item in items:
-            if tile_store.is_vector_ready(item.name):
+            if tile_store.is_vector_ready(item):
                 continue
 
             # Get features across all shapefiles.
@@ -238,4 +238,4 @@ class EuroCrops(DataSource[EuroCropsItem]):
                 features.extend(self._extract_features(fname))
 
             logger.debug(f"Writing features for {item.name} to the tile store")
-            tile_store.write_vector(item.name, features)
+            tile_store.write_vector(item, features)

@@ -35,7 +35,8 @@ jobs:
             -e CI="true" \
             rslearn-test \
             pytest -n auto tests/unit/ tests/integration/ -vv \
-            --ignore tests/unit/models/test_molmo.py
+            --ignore tests/unit/models/test_molmo.py \
+            --ignore tests/unit/models/test_clay.py
 
       - name: Clean up
         if: always()

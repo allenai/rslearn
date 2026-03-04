@@ -137,7 +137,7 @@ def test_with_worldcereal_dir(
             [[seattle2020]],
         )
         print(list(tile_store_dir.glob("layer/1/*")))
-        assert tile_store.is_raster_ready(layer_name, item.name, [band])
+        assert tile_store.is_raster_ready(layer_name, item, [band])
         # Double check that the data intersected our example GeoTIFF and isn't just all 0.
         bounds = (
             int(seattle2020.shp.bounds[0]),
@@ -146,7 +146,7 @@ def test_with_worldcereal_dir(
             int(seattle2020.shp.bounds[3]),
         )
         raster_data = tile_store.read_raster(
-            layer_name, item.name, [band], seattle2020.projection, bounds
+            layer_name, item, [band], seattle2020.projection, bounds
         )
         assert raster_data.get_chw_array().max() == 1
         print(f"Succeeded for {band}")
@@ -202,4 +202,4 @@ def test_with_context_ds_path(
         item_groups[0][0],
         [[seattle2020]],
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, [band])
+    assert tile_store.is_raster_ready(layer_name, item, [band])

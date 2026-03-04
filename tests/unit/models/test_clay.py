@@ -14,8 +14,10 @@ def test_clay(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
     # Redirect HF Hub cache to tmpdir so model/metadata are downloaded there.
     monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(tmp_path))
 
-    # Build Clay model
-    clay = Clay(model_size=ClaySize.LARGE, modality="sentinel-2-l2a", do_resizing=True)
+    # Build Clay model.
+    # Use do_resizing=False to avoid memory issue when running this test on small
+    # machines.
+    clay = Clay(model_size=ClaySize.LARGE, modality="sentinel-2-l2a", do_resizing=False)
 
     # One input sample, Sentinel-2 L2A modality, 10 bands x 32 x 32
     inputs = [
@@ -38,8 +40,8 @@ def test_clay(tmp_path: pathlib.Path, monkeypatch: Any) -> None:
     assert len(feature_list.feature_maps) == 1
     features = feature_list.feature_maps[0]
 
-    # Check feature shape: (B, D, H', W') with B=1, D=1024, H'=W'=16 (128/8)
-    assert features.shape == (1, 1024, 16, 16)
+    # Check feature shape: (B, D, H', W') with B=1, D=1024, H'=W'=4 (32/8)
+    assert features.shape == (1, 1024, 4, 4)
 
     # Backbone channels should match patch size and depth
     assert clay.get_backbone_channels() == [(8, 1024)]

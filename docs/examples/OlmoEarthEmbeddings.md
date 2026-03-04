@@ -7,12 +7,10 @@ to the OlmoEarth encoder. For an introduction to rslearn, see
 
 We proceed in three steps:
 
-1. Create windows in an rslearn dataset that define the spatiotemporal boxes for which
-   we want to compute embeddings.
-
-2. Materialize satellite images in the rslearn dataset.
-
-3. Initialize the OlmoEarth pre-trained model and compute and save embeddings.
+1. [Create windows](#create-windows): create an rslearn dataset and add windows that define the spatiotemporal
+   boxes for which we want to compute embeddings.
+2. [Materialize](#materialize-satellite-images): download, re-project, and crop satellite images to align with the windows.
+3. [Compute embeddings](#compute-and-save-embeddings): initialize the OlmoEarth pre-trained model and compute and save embeddings.
 
 ## Create Windows
 
@@ -214,8 +212,6 @@ trainer:
    # The RslearnWriter will write our embeddings to a layer in the rslearn dataset.
     - class_path: rslearn.train.prediction_writer.RslearnWriter
       init_args:
-        # This path will be copied from data.init_args.path by rslearn.
-        path: placeholder
         # This references the "embeddings" layer that we will add to our dataset config
         # file to store the embeddings.
         output_layer: embeddings
@@ -248,6 +244,8 @@ dataset configuration file:
     "embeddings": {
       "band_sets": [{
           "dtype": "float32",
+          // Set this to the embedding size for your chosen OlmoEarth `model_id`.
+          // For example: NANO=128, TINY=192, BASE=768, LARGE=1024.
           "num_bands": 768
       }],
       "type": "raster"
@@ -266,4 +264,33 @@ You can visualize the output embeddings in qgis:
 
 ```
 qgis $DATASET_PATH/windows/default/default/layers/embeddings/*/geotiff.tif
+```
+
+## Fit a Downstream Head From Saved Embeddings
+
+Once the embeddings are written to the `"embeddings"` layer, you can train a
+lightweight head model using those precomputed features.
+
+The key is that you usually do **not** want to list every embedding band in the model
+config (e.g. 768 for `OLMOEARTH_V1_BASE`). Instead, set
+`use_all_bands_in_order_of_band_set_idx` to the target band set index so rslearn uses
+all band names from that band set in dataset-config order:
+
+```yaml
+data:
+  class_path: rslearn.train.data_module.RslearnDataModule
+  init_args:
+    path: ${DATASET_PATH}
+    inputs:
+      embeddings:
+        data_type: "raster"
+        layers: ["embeddings"]
+        use_all_bands_in_order_of_band_set_idx: 0
+        passthrough: true
+        dtype: FLOAT32
+      targets:
+        data_type: "vector"
+        layers: ["label"]
+        required: true
+        is_target: true
 ```

@@ -1,7 +1,15 @@
 ## Programmatically Creating Windows
 
-In this example, we show how to create windows programatically. This is useful when the
+In this example, we show how to create windows programmatically. This is useful when the
 `rslearn dataset add_windows` command does not offer sufficient flexibility.
+
+### Table of Contents
+
+1. [Quickstart: Create One Window](#quickstart-create-one-window)
+2. [EuroSAT Conversion Example](#eurosat-conversion-example)
+   1. [Convert EuroSAT to an rslearn Dataset](#convert-eurosat-to-an-rslearn-dataset)
+   2. [Fine-tune OlmoEarth on EuroSAT](#fine-tune-olmoearth-on-eurosat)
+   3. [Test with More Sentinel-2 Images](#test-with-more-sentinel-2-images)
 
 ## Quickstart: Create One Window
 
@@ -97,12 +105,14 @@ rslearn dataset materialize --root ./dataset
 qgis ./dataset/windows/default/my_window/layers/sentinel2/R_G_B/geotiff.tif
 ```
 
-## Converting EuroSAT to rslearn Format
+## EuroSAT Conversion Example
 
 We now walk through a more advanced example where we convert the
 [EuroSAT dataset](https://zenodo.org/records/7711810#.ZAm3k-zMKEA)
 into an rslearn dataset. EuroSAT is a land use and land cover classification dataset
 based on Sentinel-2 satellite imagery.
+
+### Convert EuroSAT to an rslearn Dataset
 
 We will assume the multispectral version of the dataset has been downloaded and
 extracted, so `./EuroSAT_MS` contains one subfolder per category, and each of those
@@ -220,7 +230,7 @@ for tif_fname, category in tqdm.tqdm(examples):
     window.mark_layer_completed("label")
 ```
 
-## Fine-tune OlmoEarth
+### Fine-tune OlmoEarth on EuroSAT
 
 Now that we have the rslearn dataset, we can easily fine-tune remote sensing foundation
 models like OlmoEarth model on it.
@@ -303,18 +313,16 @@ data:
 trainer:
   max_epochs: 100
   callbacks:
-    # Save both the latest checkpoint (last.ckpt) and the best one (epoch=....ckpt).
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        save_top_k: 1
-        save_last: true
-        monitor: val_accuracy
-        mode: max
     # It is recommended to freeze the OlmoEarth encoder for the first few epochs.
     - class_path: rslearn.train.callbacks.freeze_unfreeze.FreezeUnfreeze
       init_args:
         module_selector: ["model", "encoder", 0]
         unfreeze_at_epoch: 10
+    # Save best checkpoint based on accuracy metric.
+    - class_path: rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint
+      init_args:
+        monitor: val_accuracy
+        mode: max
 # Here we enable automatic checkpoint management and logging to W&B.
 # Set WANDB_MODE=offline to disable online logging.
 project_name: ${PROJECT_NAME}
@@ -335,7 +343,7 @@ export MANAGEMENT_DIR=./project_data
 rslearn model fit --config model.yaml
 ```
 
-## Test with More Sentinel-2 Images
+### Test with More Sentinel-2 Images
 
 Using a satellite image time series often improves performance. To this end, we can
 experiment with applying OlmoEarth to predict EuroSAT categories with four input
