@@ -218,7 +218,7 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
         if callback is not None:
             raw_data = callback(raw_data)
 
-        return RasterArray(chw_array=raw_data)
+        return RasterArray(chw_array=raw_data, time_range=item.geometry.time_range)
 
     def materialize(
         self,

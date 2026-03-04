@@ -521,7 +521,8 @@ class GEE(DataSource, TileStore):
                 chw_array=np.zeros(
                     (len(bands), bounds[3] - bounds[1], bounds[2] - bounds[0]),
                     dtype=np.float32,
-                )
+                ),
+                time_range=item.geometry.time_range,
             )
 
         wanted_transform = get_transform_from_projection_and_bounds(projection, bounds)
@@ -548,7 +549,9 @@ class GEE(DataSource, TileStore):
                     height=bounds[3] - bounds[1],
                     resampling=resampling,
                 ) as vrt:
-                    return RasterArray(chw_array=vrt.read())
+                    return RasterArray(
+                        chw_array=vrt.read(), time_range=item.geometry.time_range
+                    )
 
         else:
             # With multiple outputs, we need to merge them together.
@@ -563,13 +566,15 @@ class GEE(DataSource, TileStore):
 
             # We copy the array if its bounds don't match exactly.
             if src_bounds == bounds:
-                return RasterArray(chw_array=src_array)
+                return RasterArray(
+                    chw_array=src_array, time_range=item.geometry.time_range
+                )
             dst_array = np.zeros(
                 (src_array.shape[0], bounds[3] - bounds[1], bounds[2] - bounds[0]),
                 dtype=src_array.dtype,
             )
             copy_spatial_array(src_array, dst_array, src_bounds[0:2], bounds[0:2])
-            return RasterArray(chw_array=dst_array)
+            return RasterArray(chw_array=dst_array, time_range=item.geometry.time_range)
 
     def materialize(
         self,

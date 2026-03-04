@@ -205,3 +205,4 @@ def test_materialize(
         bounds=bounds,
     )
     assert array.get_chw_array().max() == expected_value
+    assert array.timestamps == [item.geometry.time_range]

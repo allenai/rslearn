@@ -98,23 +98,6 @@ def read_raster_window_from_tiles(
         raster_array = tile_store.read_raster(
             item, src_bands, projection, intersection, resampling=resampling
         )
-
-        if (
-            raster_array.timestamps is None
-            and raster_array.array.shape[1] == 1
-            and item.geometry.time_range is not None
-        ):
-            # The TileStore returned a single-timestep raster and the item had a time
-            # range, but it didn't make it into the RasterArray.
-            # This can happen with data sources implementing TileStore interface that
-            # omit the time range for efficiency, since they just see the item name and
-            # would need to perform a lookup to get the time range.
-            # We add it in here.
-            raster_array = RasterArray(
-                array=raster_array.array,
-                timestamps=[item.geometry.time_range],
-            )
-
         src = raster_array.array  # (C_src, T, H_int, W_int)
 
         if dst is None:

@@ -6,7 +6,7 @@ import warnings
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -231,10 +231,10 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
                 stored corresponding to each inner list). If no rasters are ready for
                 this item, returns empty list.
         """
-        source_item = cast(SourceItem, item)
+        assert isinstance(item, SourceItem)
         all_bands = []
         for asset_key, band_names in self.asset_bands.items():
-            if asset_key not in source_item.asset_urls:
+            if asset_key not in item.asset_urls:
                 continue
             all_bands.append(band_names)
         return all_bands

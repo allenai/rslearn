@@ -310,7 +310,7 @@ class SoilGrids(DataSource, TileStore):
                     dst_nodata=dst_nodata,
                     resampling=resampling,
                 )
-                return RasterArray(chw_array=dst)
+                return RasterArray(chw_array=dst, time_range=item.geometry.time_range)
 
     def materialize(
         self,

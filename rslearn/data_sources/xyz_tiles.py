@@ -341,7 +341,7 @@ class XyzTiles(DataSource, TileStore):
             dst_transform=dst_transform,
             resampling=resampling,
         )
-        return RasterArray(chw_array=dst_array)
+        return RasterArray(chw_array=dst_array, time_range=item.geometry.time_range)
 
     def materialize(
         self,

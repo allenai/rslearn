@@ -5,7 +5,7 @@ import json
 import os
 import tempfile
 from datetime import timedelta
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 import affine
 import numpy as np
@@ -411,10 +411,10 @@ class EarthDaily(DataSource, TileStore):
             layer_name: the layer name or alias.
             item: the item.
         """
-        ed_item = cast(EarthDailyItem, item)
+        assert isinstance(item, EarthDailyItem)
         all_bands = []
         for asset_key, band_names in self.asset_bands.items():
-            if asset_key not in ed_item.asset_urls:
+            if asset_key not in item.asset_urls:
                 continue
             all_bands.append(band_names)
         return all_bands
@@ -525,9 +525,9 @@ class EarthDaily(DataSource, TileStore):
         Returns:
             the raster data
         """
-        ed_item = cast(EarthDailyItem, item)
+        assert isinstance(item, EarthDailyItem)
         asset_key = self._get_asset_by_band(bands)
-        asset_url = ed_item.asset_urls[asset_key]
+        asset_url = item.asset_urls[asset_key]
 
         # Construct the transform to use for the warped dataset.
         wanted_transform = affine.Affine(
@@ -548,7 +548,9 @@ class EarthDaily(DataSource, TileStore):
                 height=bounds[3] - bounds[1],
                 resampling=resampling,
             ) as vrt:
-                return RasterArray(chw_array=vrt.read())
+                return RasterArray(
+                    chw_array=vrt.read(), time_range=item.geometry.time_range
+                )
 
     def materialize(
         self,
@@ -713,15 +715,15 @@ class Sentinel2(EarthDaily):
         if not self.apply_scale_offset:
             return raster
 
-        ed_item = cast(EarthDailyItem, item)
+        assert isinstance(item, EarthDailyItem)
         asset_key = self._get_asset_by_band(bands)
         result = self._apply_scale_offsets(
             raster.get_chw_array(),
-            scale_offsets=ed_item.asset_scale_offsets.get(asset_key),
+            scale_offsets=item.asset_scale_offsets.get(asset_key),
             item_name=item.name,
             asset_key=asset_key,
         )
-        return RasterArray(chw_array=result)
+        return RasterArray(chw_array=result, time_range=item.geometry.time_range)
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig

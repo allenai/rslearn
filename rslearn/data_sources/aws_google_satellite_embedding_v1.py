@@ -4,7 +4,7 @@ import os
 import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
 import boto3
 import numpy as np
@@ -24,6 +24,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import (
     DataSourceContext,
     Item,
+    ItemLookupDataSource,
     QueryConfig,
 )
 from rslearn.data_sources.direct_materialize_data_source import (
@@ -87,7 +88,8 @@ class GoogleSatelliteEmbeddingV1Item(Item):
 
 
 class GoogleSatelliteEmbeddingV1(
-    DirectMaterializeDataSource[GoogleSatelliteEmbeddingV1Item]
+    DirectMaterializeDataSource[GoogleSatelliteEmbeddingV1Item],
+    ItemLookupDataSource[GoogleSatelliteEmbeddingV1Item],
 ):
     """Data source for Google Satellite Embedding V1 on AWS Open Data.
 
@@ -351,8 +353,8 @@ class GoogleSatelliteEmbeddingV1(
 
         Overrides base class to handle band selection (the base class reads all bands).
         """
-        typed_item = cast(GoogleSatelliteEmbeddingV1Item, item)
-        asset_url = self.get_asset_url(typed_item, "image")
+        assert isinstance(item, GoogleSatelliteEmbeddingV1Item)
+        asset_url = self.get_asset_url(item, "image")
 
         # Determine which band indices to read (1-indexed for rasterio)
         if bands == BANDS:
@@ -381,8 +383,8 @@ class GoogleSatelliteEmbeddingV1(
             ) as vrt:
                 data = vrt.read(indexes=band_indices)
 
-        callback = self.get_read_callback(typed_item, "image")
+        callback = self.get_read_callback(item, "image")
         if callback is not None:
             data = callback(data)
 
-        return RasterArray(chw_array=data)
+        return RasterArray(chw_array=data, time_range=item.geometry.time_range)

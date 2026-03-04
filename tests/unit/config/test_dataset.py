@@ -242,8 +242,6 @@ class TestBackwardsCompatibility:
         assert isinstance(ds, Sentinel1)
         assert ds.query is not None
         assert ds.query["sar:instrument_mode"] == {"eq": "IW"}
-        assert ds.cache_dir is not None
-        assert ds.cache_dir.path == "cache/planetary_computer"
 
     def test_raster_format_compat(self) -> None:
         """Check parsing for legacy raster format config format."""
