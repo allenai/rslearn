@@ -8,20 +8,12 @@ This class uses the same Sentinel-2 asset keys as
 `rslearn.data_sources.planetary_computer.Sentinel2` (`B01`-`B12` except `B10`, plus
 `B8A` and `visual`).
 
-This data source requires the optional `earthdaily[platform]` dependency and EarthDaily
-credentials in the environment. The following environment variables must be set:
-- `EDS_CLIENT_ID`
-- `EDS_SECRET`
-- `EDS_AUTH_URL`
-- `EDS_API_URL`
+Authentication and dependency requirements are the same as
+`rslearn.data_sources.earthdaily.Sentinel2` (optional `earthdaily[platform]`,
+`EDS_CLIENT_ID`, `EDS_SECRET`, `EDS_AUTH_URL`, `EDS_API_URL`).
 
-### Collection Status
-
-The Earth Search project notes that `sentinel-2-c1-l2a` is intended to eventually
-replace this `sentinel-2-l2a` collection. As of April 2024, the full ESA reprocessing
-to baseline 5.0 was still incomplete, with gaps for Nov 2016 to Nov 2019 and for 2022.
-
-Source: <https://github.com/Element84/earth-search>
+For collection lifecycle context (`sentinel-2-c1-l2a` replacing `sentinel-2-l2a`) and
+known archive gaps, see [earthdaily.Sentinel2](earthdaily_Sentinel2.md#collection-status).
 
 ### Configuration
 
