@@ -218,6 +218,71 @@ def test_sentinel2_ingest_applies_scale_offset_when_apply_scale_offset_true(
     assert out[0, 0, 0] == pytest.approx(11.0)
 
 
+def test_sentinel2_l2a_ingest_harmonizes_non_visual_band(
+    tmp_path: Path,
+    httpserver: HTTPServer,
+) -> None:
+    pytest.importorskip("earthdaily")
+
+    from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2L2A
+
+    projection = Projection(WGS84_PROJECTION.crs, 0.0001, -0.0001)
+    bounds = (0, 0, 4, 4)
+    transform = affine.Affine(
+        projection.x_resolution,
+        0,
+        bounds[0] * projection.x_resolution,
+        0,
+        projection.y_resolution,
+        bounds[1] * projection.y_resolution,
+    )
+
+    raw = np.full((1, 4, 4), 1200, dtype=np.uint16)
+    b04_bytes = _make_geotiff_bytes(raw, projection.crs, transform, nodata=0)
+    xml_bytes = b"<root><BOA_ADD_OFFSET>-1000</BOA_ADD_OFFSET></root>"
+
+    httpserver.expect_request("/B04.tif", method="GET").respond_with_data(
+        b04_bytes, content_type="image/tiff"
+    )
+    httpserver.expect_request("/product.xml", method="GET").respond_with_data(
+        xml_bytes, content_type="application/xml"
+    )
+
+    item_geom = STGeometry(
+        WGS84_PROJECTION,
+        shapely.box(-1, -1, 1, 1),
+        (datetime(2020, 1, 1), datetime(2020, 1, 1)),
+    )
+    item = EarthDailyItem(
+        name="S2_TEST_ITEM",
+        geometry=item_geom,
+        asset_urls={
+            "B04": httpserver.url_for("/B04.tif"),
+            "product_metadata": httpserver.url_for("/product.xml"),
+        },
+    )
+
+    data_source = Sentinel2L2A(assets=["B04"], harmonize=True)
+
+    ds_path = UPath(tmp_path / "ds")
+    tile_store = DefaultTileStore(convert_rasters_to_cogs=False)
+    tile_store.set_dataset_path(ds_path)
+    layer_tile_store = TileStoreWithLayer(tile_store, "sentinel2")
+
+    data_source.ingest(
+        tile_store=layer_tile_store,
+        items=[item],
+        geometries=[[item_geom]],
+    )
+
+    out = tile_store.read_raster(
+        "sentinel2", item.name, ["B04"], projection, bounds
+    ).get_chw_array()
+    assert out.dtype == np.uint16
+    assert out.shape == raw.shape
+    np.testing.assert_array_equal(out, np.full_like(raw, 200))
+
+
 def test_sentinel2_get_items_passes_query_to_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

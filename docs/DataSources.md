@@ -21,6 +21,7 @@ detailed page with configuration options and available bands. See
 | [aws_sentinel2_element84.Sentinel2](data_sources/aws_sentinel2_element84_Sentinel2.md) | AWS (Element 84) | L2A COGs, direct materialization |
 | [copernicus.Sentinel2](data_sources/copernicus.md#rslearndatasourcescopernicussentinel2) | ESA Copernicus OData API | L1C and L2A |
 | [earthdaily.Sentinel2](data_sources/earthdaily_Sentinel2.md) | EarthDaily | L2A, requires EarthDaily credentials |
+| [earthdaily.Sentinel2L2A](data_sources/earthdaily_Sentinel2L2A.md) | EarthDaily | `sentinel-2-l2a` (PC-style assets), optional harmonization |
 | [gcp_public_data.Sentinel2](data_sources/gcp_public_data_Sentinel2.md) | Google Cloud Storage | L1C scenes |
 
 #### Sentinel-1
