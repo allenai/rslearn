@@ -44,7 +44,7 @@ def test_sentinel2_ingest_does_not_apply_scl_cloud_mask(
 ) -> None:
     pytest.importorskip("earthdaily")
 
-    from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2C1L2A
+    from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2
 
     # Create a tiny georeferenced raster and an aligned SCL mask.
     projection = Projection(WGS84_PROJECTION.crs, 0.0001, -0.0001)
@@ -86,7 +86,7 @@ def test_sentinel2_ingest_does_not_apply_scl_cloud_mask(
         },
     )
 
-    data_source = Sentinel2C1L2A(assets=["red", "scl"], apply_scale_offset=False)
+    data_source = Sentinel2(assets=["red", "scl"], apply_scale_offset=False)
 
     ds_path = UPath(tmp_path / "ds")
     tile_store = DefaultTileStore(convert_rasters_to_cogs=False)
@@ -119,7 +119,7 @@ def test_sentinel2_read_raster_applies_scale_offset_when_apply_scale_offset_true
 ) -> None:
     pytest.importorskip("earthdaily")
 
-    from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2C1L2A
+    from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2
 
     projection = Projection(WGS84_PROJECTION.crs, 0.0001, -0.0001)
     bounds = (0, 0, 4, 4)
@@ -149,7 +149,7 @@ def test_sentinel2_read_raster_applies_scale_offset_when_apply_scale_offset_true
         asset_scale_offsets={"red": [{"scale": 0.1, "offset": 1.0}]},
     )
 
-    data_source = Sentinel2C1L2A(assets=["red"], apply_scale_offset=True)
+    data_source = Sentinel2(assets=["red"], apply_scale_offset=True)
     monkeypatch.setattr(data_source, "get_item_by_name", lambda name: item)
 
     out = data_source.read_raster(
@@ -166,7 +166,7 @@ def test_sentinel2_ingest_applies_scale_offset_when_apply_scale_offset_true(
 ) -> None:
     pytest.importorskip("earthdaily")
 
-    from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2C1L2A
+    from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2
 
     projection = Projection(WGS84_PROJECTION.crs, 0.0001, -0.0001)
     bounds = (0, 0, 4, 4)
@@ -197,7 +197,7 @@ def test_sentinel2_ingest_applies_scale_offset_when_apply_scale_offset_true(
         asset_scale_offsets={"red": [{"scale": 0.1, "offset": 1.0}]},
     )
 
-    data_source = Sentinel2C1L2A(assets=["red"], apply_scale_offset=True)
+    data_source = Sentinel2(assets=["red"], apply_scale_offset=True)
 
     ds_path = UPath(tmp_path / "ds")
     tile_store = DefaultTileStore(convert_rasters_to_cogs=False)
@@ -276,7 +276,7 @@ def test_sentinel2_l2a_ingest_harmonizes_non_visual_band(
     )
 
     out = tile_store.read_raster(
-        "sentinel2", item.name, ["B04"], projection, bounds
+        "sentinel2", item, ["B04"], projection, bounds
     ).get_chw_array()
     assert out.dtype == np.uint16
     assert out.shape == raw.shape
@@ -288,7 +288,7 @@ def test_sentinel2_get_items_passes_query_to_helper(
 ) -> None:
     pytest.importorskip("earthdaily")
 
-    from rslearn.data_sources.earthdaily import Sentinel2C1L2A
+    from rslearn.data_sources.earthdaily import Sentinel2
 
     captured: dict[str, object] = {}
 
@@ -301,7 +301,7 @@ def test_sentinel2_get_items_passes_query_to_helper(
             captured.update(kwargs)
             return StubSearchResult()
 
-    data_source = Sentinel2C1L2A(
+    data_source = Sentinel2(
         assets=["red"],
         cloud_cover_max=15.0,
         query={"s2:product_type": {"eq": "S2MSI2A"}},
@@ -331,7 +331,7 @@ def test_sentinel2_ingest_raises_on_download_failure(
 ) -> None:
     pytest.importorskip("earthdaily")
 
-    from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2C1L2A
+    from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2
 
     httpserver.expect_request("/red.tif", method="GET").respond_with_data(
         b"nope", status=500
@@ -348,7 +348,7 @@ def test_sentinel2_ingest_raises_on_download_failure(
         asset_urls={"red": httpserver.url_for("/red.tif")},
     )
 
-    data_source = Sentinel2C1L2A(assets=["red"])
+    data_source = Sentinel2(assets=["red"])
 
     ds_path = UPath(tmp_path / "ds")
     tile_store = DefaultTileStore(convert_rasters_to_cogs=False)

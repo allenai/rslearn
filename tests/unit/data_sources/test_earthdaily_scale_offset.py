@@ -12,11 +12,11 @@ from datetime import UTC, datetime
 
 import shapely
 
-from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2C1L2A
+from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2
 from rslearn.utils.geometry import Projection, STGeometry
 
 
-class _FakeSentinel2(Sentinel2C1L2A):
+class _FakeSentinel2(Sentinel2):
     def __init__(self, item: EarthDailyItem, *, apply_scale_offset: bool = True):
         super().__init__(
             apply_scale_offset=apply_scale_offset, assets=["red"], cache_dir=None

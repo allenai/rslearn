@@ -58,7 +58,7 @@ def test_read_raster_harmonizes_non_visual_band(
 
     out = ds.read_raster(
         layer_name="layer",
-        item_name=item.name,
+        item=item,
         bands=["B04"],
         projection=Projection(CRS.from_epsg(3857), 1, -1),
         bounds=(0, 0, 2, 2),
@@ -108,7 +108,7 @@ def test_read_raster_does_not_harmonize_visual(
 
     out = ds.read_raster(
         layer_name="layer",
-        item_name=item.name,
+        item=item,
         bands=["R", "G", "B"],
         projection=Projection(CRS.from_epsg(3857), 1, -1),
         bounds=(0, 0, 2, 2),
@@ -153,7 +153,7 @@ def test_read_raster_harmonizes_with_date_fallback_when_metadata_missing(
 
     out = ds.read_raster(
         layer_name="layer",
-        item_name=item.name,
+        item=item,
         bands=["B04"],
         projection=Projection(CRS.from_epsg(3857), 1, -1),
         bounds=(0, 0, 2, 2),
@@ -194,7 +194,7 @@ def test_read_raster_no_date_fallback_before_cutoff(
 
     out = ds.read_raster(
         layer_name="layer",
-        item_name=item.name,
+        item=item,
         bands=["B04"],
         projection=Projection(CRS.from_epsg(3857), 1, -1),
         bounds=(0, 0, 2, 2),
