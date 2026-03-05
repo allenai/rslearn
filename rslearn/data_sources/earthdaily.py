@@ -988,12 +988,11 @@ class Sentinel2L2A(EarthDaily):
         return dt.astimezone(UTC).replace(tzinfo=None)
 
     def _resolve_metadata_url(self, item: EarthDailyItem) -> str:
-        for metadata_key in ("product-metadata", "product_metadata", "granule_metadata"):
+        for metadata_key in ("product_metadata",):
             if metadata_key in item.asset_urls:
                 return item.asset_urls[metadata_key]
         raise KeyError(
-            "missing metadata asset URL (expected one of: "
-            "product-metadata, product_metadata, granule_metadata)"
+            "missing metadata asset URL (expected: product_metadata)"
         )
 
     def _get_product_xml(self, item: EarthDailyItem) -> ET.Element:

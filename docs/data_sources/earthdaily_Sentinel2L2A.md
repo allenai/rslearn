@@ -70,8 +70,7 @@ These bands are available:
 ### Harmonization
 
 Harmonization first tries to build the callback from Sentinel-2 metadata XML
-(`product_metadata`, `product-metadata`, or `granule_metadata`) using
-`get_harmonize_callback(...)`.
+(`product_metadata`) using `get_harmonize_callback(...)` when that asset is present.
 
 If metadata is unavailable or cannot be read, rslearn falls back to date-based
 harmonization:
