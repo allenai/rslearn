@@ -1,4 +1,4 @@
-## rslearn.data_sources.earthdaily.Sentinel2
+## rslearn.data_sources.earthdaily.Sentinel2C1L2A
 
 Sentinel-2 L2A data on [EarthDaily](https://earthdaily.com/) platform (collection: `sentinel-2-c1-l2a`).
 For EarthDaily collection `sentinel-2-l2a` with Planetary Computer-style asset keys and
@@ -32,7 +32,7 @@ Source: <https://github.com/Element84/earth-search>
 
 ```jsonc
 {
-  "class_path": "rslearn.data_sources.earthdaily.Sentinel2",
+  "class_path": "rslearn.data_sources.earthdaily.Sentinel2C1L2A",
   "init_args": {
     // Whether to apply STAC `raster:bands` scale/offset (default true). Set to false to
     // keep raw values.

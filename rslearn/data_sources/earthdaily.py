@@ -600,7 +600,7 @@ class EarthDaily(DataSource, TileStore):
         )
 
 
-class Sentinel2(EarthDaily):
+class Sentinel2C1L2A(EarthDaily):
     """Sentinel-2 L2A on EarthDaily platform.
 
     Uses the `sentinel-2-c1-l2a` collection and applies per-asset scale/offset metadata
@@ -648,7 +648,7 @@ class Sentinel2(EarthDaily):
         retry_backoff_factor: float = 5.0,
         context: DataSourceContext = DataSourceContext(),
     ) -> None:
-        """Initialize an EarthDaily Sentinel-2 data source.
+        """Initialize an EarthDaily Sentinel-2 C1 L2A data source.
 
         Args:
             assets: optional list of EarthDaily Sentinel-2 asset keys (e.g. ["red",

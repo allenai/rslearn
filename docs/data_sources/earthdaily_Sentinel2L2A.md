@@ -9,11 +9,11 @@ This class uses the same Sentinel-2 asset keys as
 `B8A` and `visual`).
 
 Authentication and dependency requirements are the same as
-`rslearn.data_sources.earthdaily.Sentinel2` (optional `earthdaily[platform]`,
+`rslearn.data_sources.earthdaily.Sentinel2C1L2A` (optional `earthdaily[platform]`,
 `EDS_CLIENT_ID`, `EDS_SECRET`, `EDS_AUTH_URL`, `EDS_API_URL`).
 
 For collection lifecycle context (`sentinel-2-c1-l2a` replacing `sentinel-2-l2a`) and
-known archive gaps, see [earthdaily.Sentinel2](earthdaily_Sentinel2.md#collection-status).
+known archive gaps, see [earthdaily.Sentinel2C1L2A](earthdaily_Sentinel2C1L2A.md#collection-status).
 
 ### Configuration
 
