@@ -38,6 +38,7 @@ class SegmentationTask(BasicTask):
         enable_miou_metric: bool = False,
         enable_f1_metric: bool = False,
         report_metric_per_class: bool = False,
+        report_best_threshold: bool = False,
         f1_metric_thresholds: list[list[float]] = [[0.5]],
         metric_kwargs: dict[str, Any] = {},
         miou_metric_kwargs: dict[str, Any] = {},
@@ -65,6 +66,10 @@ class SegmentationTask(BasicTask):
             enable_f1_metric: whether to enable the F1 metric (default false).
             report_metric_per_class: whether to report chosen metrics for each class, in
                 addition to the average score across classes.
+            report_best_threshold: whether to include the best threshold per class in
+                the F1 metric output. When true, report_metric_per_class has to be true too.
+                It adds "f1/cls_N_best_thr" keys to the reported dict. Useful for model
+                evaluation (test mode).
             enable_miou_metric: whether to enable the mean IoU metric (default false).
             f1_metric_thresholds: list of list of thresholds to apply for F1 metric.
                 Each inner list is used to initialize a separate F1 metric where the
@@ -107,6 +112,11 @@ class SegmentationTask(BasicTask):
         self.enable_f1_metric = enable_f1_metric
         self.enable_miou_metric = enable_miou_metric
         self.report_metric_per_class = report_metric_per_class
+        self.report_best_threshold = report_best_threshold
+        if self.report_best_threshold and not self.report_metric_per_class:
+            raise ValueError(
+                "report_best_threshold requires report_metric_per_class to be True"
+            )
         self.f1_metric_thresholds = f1_metric_thresholds
         self.metric_kwargs = metric_kwargs
         self.miou_metric_kwargs = miou_metric_kwargs
@@ -260,6 +270,7 @@ class SegmentationTask(BasicTask):
                         num_classes=self.num_classes,
                         score_thresholds=thresholds,
                         report_per_class=self.report_metric_per_class,
+                        report_best_threshold=self.report_best_threshold,
                     ),
                 )
                 metrics["precision" + suffix] = SegmentationMetric(
@@ -268,6 +279,7 @@ class SegmentationTask(BasicTask):
                         score_thresholds=thresholds,
                         metric_mode="precision",
                         report_per_class=self.report_metric_per_class,
+                        report_best_threshold=self.report_best_threshold,
                     ),
                 )
                 metrics["recall" + suffix] = SegmentationMetric(
@@ -276,6 +288,7 @@ class SegmentationTask(BasicTask):
                         score_thresholds=thresholds,
                         metric_mode="recall",
                         report_per_class=self.report_metric_per_class,
+                        report_best_threshold=self.report_best_threshold,
                     ),
                 )
 
@@ -536,6 +549,7 @@ class F1Metric(Metric):
         score_thresholds: list[float],
         metric_mode: str = "f1",
         report_per_class: bool = False,
+        report_best_threshold: bool = False,
     ):
         """Create a new F1Metric.
 
@@ -547,12 +561,17 @@ class F1Metric(Metric):
                 (default "f1")
             report_per_class: whether to return a dict with per-class scores and "avg"
                 score instead of just returning the scalar average score.
+            report_best_threshold: whether to include the best threshold per class in
+                the returned dict. When True, compute() returns a dict with keys like
+                "f1/cls_N_best_thr" for each class. This is typically enabled only for
+                test metrics so threshold info appears in the test table and JSON only
         """
         super().__init__()
         self.num_classes = num_classes
         self.score_thresholds = score_thresholds
         self.metric_mode = metric_mode
         self.report_per_class = report_per_class
+        self.report_best_threshold = report_best_threshold
 
         assert self.metric_mode in ["f1", "precision", "recall"]
 
@@ -599,11 +618,14 @@ class F1Metric(Metric):
         Returns:
             the average F1 score, or, if report_per_class is True, a dict with "f1/avg"
                 key containing the average score and "f1/cls_N" keys for each class N.
+                Optionally adds "f1/cls_N_best_thr" keys for each class N (when report_best_threshold).
         """
         cls_best_scores = {}
+        cls_best_thresholds: dict[int, float] = {}
 
         for cls_idx in range(self.num_classes):
             best_score = None
+            best_thr = self.score_thresholds[0]
 
             for thr_idx in range(len(self.score_thresholds)):
                 cur_prefix = self._get_state_prefix(cls_idx, thr_idx)
@@ -636,14 +658,21 @@ class F1Metric(Metric):
 
                 if best_score is None or score > best_score:
                     best_score = score
+                    best_thr = self.score_thresholds[thr_idx]
 
             cls_best_scores[f"f1/cls_{cls_idx}"] = best_score
+            cls_best_thresholds[cls_idx] = best_thr
 
         average_score = torch.mean(torch.stack(list(cls_best_scores.values())))
 
         if self.report_per_class:
             report_scores = {"f1/avg": average_score}
             report_scores.update(cls_best_scores)
+            if self.report_best_threshold:
+                for cls_idx, thr in cls_best_thresholds.items():
+                    report_scores[f"f1/cls_{cls_idx}_best_thr"] = torch.tensor(
+                        thr, dtype=torch.float32, device=device
+                    )
             return report_scores
         else:
             return average_score
