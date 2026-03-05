@@ -71,11 +71,26 @@ class CosineAnnealingScheduler(SchedulerFactory):
 
     T_max: int
     eta_min: float | None = None
+    eta_min_factor: float | None = None
 
     def build(self, optimizer: Optimizer) -> LRScheduler:
         """Build the CosineAnnealingLR scheduler."""
         super().build(optimizer)
-        return CosineAnnealingLR(optimizer, **self.get_kwargs())
+        kwargs = self.get_kwargs()
+        if self.eta_min is not None and self.eta_min_factor is not None:
+            raise ValueError("Cannot specify both eta_min and eta_min_factor.")
+        if self.eta_min_factor is not None:
+            # Derive eta_min as a factor of the optimizer's base learning rate.
+            base_lr = optimizer.defaults["lr"]
+            kwargs["eta_min"] = base_lr * self.eta_min_factor
+            kwargs.pop("eta_min_factor", None)
+            logger.info(
+                f"CosineAnnealingScheduler: eta_min set to {kwargs['eta_min']} "
+                f"(base_lr={base_lr} * factor={self.eta_min_factor})"
+            )
+        else:
+            kwargs.pop("eta_min_factor", None)
+        return CosineAnnealingLR(optimizer, **kwargs)
 
 
 @dataclass
