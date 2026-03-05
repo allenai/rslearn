@@ -114,6 +114,15 @@ class BasicTask(Task):
         inter_x1 = min(window_x1, crop_x1)
         inter_y1 = min(window_y1, crop_y1)
 
+        # If effective_bounds is set, further restrict to the non-overlapping
+        # region so that pixels shared with adjacent crops are not counted twice.
+        if metadata.effective_bounds is not None:
+            eff_x0, eff_y0, eff_x1, eff_y1 = metadata.effective_bounds
+            inter_x0 = max(inter_x0, eff_x0)
+            inter_y0 = max(inter_y0, eff_y0)
+            inter_x1 = min(inter_x1, eff_x1)
+            inter_y1 = min(inter_y1, eff_y1)
+
         window_valid = torch.zeros(
             reference_hw.shape, dtype=torch.float32, device=reference_hw.device
         )

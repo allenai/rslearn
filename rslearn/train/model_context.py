@@ -109,6 +109,11 @@ class SampleMetadata:
     # Task name to differentiate different tasks.
     dataset_source: str | None
 
+    # Non-overlapping region this crop uniquely "owns". When set,
+    # _get_window_valid_mask restricts the valid mask to this region so that
+    # overlapping pixels (e.g. from the last-crop shift) are not counted twice.
+    effective_bounds: PixelBounds | None = None
+
 
 @dataclass
 class ModelContext:

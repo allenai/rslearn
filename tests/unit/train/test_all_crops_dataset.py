@@ -3,21 +3,24 @@
 from collections.abc import Callable
 
 import numpy as np
+import torch
 
 from rslearn.dataset import Dataset
 from rslearn.train.all_crops_dataset import (
     InMemoryAllCropsDataset,
     IterableAllCropsDataset,
+    get_window_crop_options,
 )
 from rslearn.train.dataset import (
     DataInput,
     ModelDataset,
     SplitConfig,
 )
-from rslearn.train.model_context import RasterImage
+from rslearn.train.model_context import RasterImage, SampleMetadata
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.tasks.segmentation import SegmentationTask
-from rslearn.utils.geometry import PixelBounds, ResolutionFactor
+from rslearn.train.tasks.task import BasicTask
+from rslearn.utils.geometry import PixelBounds, Projection, ResolutionFactor
 
 
 class TestIterableAllCropsDataset:
@@ -454,3 +457,165 @@ class TestInMemoryAllCropsDataset:
             # Target patch should have half the resolution of the input patch
             assert inputs["image"].shape[-2:] == (4, 4)
             assert targets["classes"].get_hw_tensor().shape == (2, 2)
+
+
+def _make_metadata(
+    window_bounds: PixelBounds,
+    crop_bounds: PixelBounds,
+    effective_bounds: PixelBounds | None = None,
+) -> SampleMetadata:
+    """Helper to create a SampleMetadata for testing."""
+    return SampleMetadata(
+        window_group="test",
+        window_name="w",
+        window_bounds=window_bounds,
+        crop_bounds=crop_bounds,
+        crop_idx=0,
+        num_crops_in_window=1,
+        time_range=None,
+        projection=Projection("EPSG:3857", 1, 1),
+        dataset_source=None,
+        effective_bounds=effective_bounds,
+    )
+
+
+class TestEffectiveBoundsInCropOptions:
+    """Tests for effective_bounds returned by get_window_crop_options."""
+
+    def test_no_overlap(self) -> None:
+        """When window is an exact multiple of crop_size, effective == crop bounds."""
+        result = get_window_crop_options((50, 50), (0, 0), (0, 0, 200, 200))
+        for crop, eff in result:
+            assert eff == crop
+
+    def test_last_crop_overlap_trimmed(self) -> None:
+        """The last crop's effective start is pushed past the previous crop's end."""
+        # 260px window, 50px crop, stride 50 → last crop shifted back to 210
+        result = get_window_crop_options((50, 50), (0, 0), (0, 0, 260, 260))
+
+        eff_list = [eff for _, eff in result]
+        # Collect effective col/row starts per crop
+        eff_col_starts = sorted(set(e[0] for e in eff_list))
+        eff_row_starts = sorted(set(e[1] for e in eff_list))
+        # Last effective col start should be 250 (prev crop ends at 200+50=250)
+        assert eff_col_starts[-1] == 250
+        assert eff_row_starts[-1] == 250
+
+        # No two crops should share any pixel.
+        # Build a coverage grid and verify each pixel is covered exactly once.
+        coverage = np.zeros((260, 260), dtype=int)
+        for ex0, ey0, ex1, ey1 in eff_list:
+            coverage[ey0:ey1, ex0:ex1] += 1
+        assert (coverage == 1).all(), "Some pixels are covered more than once or missed"
+
+    def test_single_crop(self) -> None:
+        """A single crop that fills the window should be unchanged."""
+        result = get_window_crop_options((50, 50), (0, 0), (0, 0, 50, 50))
+        assert len(result) == 1
+        crop, eff = result[0]
+        assert crop == (0, 0, 50, 50)
+        assert eff == (0, 0, 50, 50)
+
+    def test_with_intentional_overlap(self) -> None:
+        """With overlap_size > 0, effective bounds still avoid double-counting."""
+        result = get_window_crop_options((8, 8), (2, 2), (0, 0, 15, 15))
+
+        # Each pixel should be covered exactly once by effective bounds.
+        coverage = np.zeros((15, 15), dtype=int)
+        for _, (ex0, ey0, ex1, ey1) in result:
+            # Clip to window since crops can extend beyond
+            cx0, cy0 = max(0, ex0), max(0, ey0)
+            cx1, cy1 = min(15, ex1), min(15, ey1)
+            coverage[cy0:cy1, cx0:cx1] += 1
+        assert (coverage == 1).all()
+
+
+class TestWindowValidMaskWithEffectiveBounds:
+    """Tests that _get_window_valid_mask honours effective_bounds."""
+
+    def test_without_effective_bounds(self) -> None:
+        """Without effective_bounds the entire crop is valid."""
+        meta = _make_metadata(
+            window_bounds=(0, 0, 260, 260),
+            crop_bounds=(200, 200, 250, 250),
+        )
+        ref = torch.zeros(50, 50)
+        mask = BasicTask._get_window_valid_mask(ref, meta)
+        assert mask.sum().item() == 50 * 50
+
+    def test_with_effective_bounds_restricts_valid(self) -> None:
+        """With effective_bounds, only the non-overlapping region is valid."""
+        meta = _make_metadata(
+            window_bounds=(0, 0, 260, 260),
+            crop_bounds=(210, 210, 260, 260),
+            effective_bounds=(250, 250, 260, 260),
+        )
+        ref = torch.zeros(50, 50)
+        mask = BasicTask._get_window_valid_mask(ref, meta)
+        # Only 10×10 pixels should be valid
+        assert mask.sum().item() == 10 * 10
+        # Valid region should be bottom-right corner of the crop
+        assert mask[40:, 40:].sum().item() == 10 * 10
+        assert mask[:40, :].sum().item() == 0
+
+    def test_effective_bounds_intersects_window_bounds(self) -> None:
+        """effective_bounds and window_bounds are both applied."""
+        # effective_bounds extends past window_bounds — should be clipped
+        meta = _make_metadata(
+            window_bounds=(0, 0, 255, 255),
+            crop_bounds=(210, 210, 260, 260),
+            effective_bounds=(250, 250, 260, 260),
+        )
+        ref = torch.zeros(50, 50)
+        mask = BasicTask._get_window_valid_mask(ref, meta)
+        # window ends at 255, effective starts at 250 → only 5×5 valid
+        assert mask.sum().item() == 5 * 5
+
+
+class TestEffectiveBoundsPropagation:
+    """Verify that effective_bounds is set on metadata from AllCropsDatasets."""
+
+    def test_iterable_sets_effective_bounds(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
+        """IterableAllCropsDataset should set effective_bounds on each sample."""
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset,
+            name="window0",
+            bounds=(0, 0, 6, 6),
+        )
+        model_dataset = ModelDataset(
+            basic_classification_dataset,
+            split_config=SplitConfig(),
+            task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+            workers=1,
+            inputs={"targets": DataInput("vector", ["vector_layer"])},
+        )
+        ds = IterableAllCropsDataset(model_dataset, crop_size=(4, 4))
+        for _, _, meta in ds:
+            assert meta.effective_bounds is not None
+
+    def test_in_memory_sets_effective_bounds(
+        self,
+        basic_classification_dataset: Dataset,
+        add_window_to_basic_classification_dataset: Callable,
+    ) -> None:
+        """InMemoryAllCropsDataset should set effective_bounds on each sample."""
+        add_window_to_basic_classification_dataset(
+            basic_classification_dataset,
+            name="window0",
+            bounds=(0, 0, 6, 6),
+        )
+        model_dataset = ModelDataset(
+            basic_classification_dataset,
+            split_config=SplitConfig(),
+            task=ClassificationTask("label", ["cls0", "cls1"], read_class_id=True),
+            workers=1,
+            inputs={"targets": DataInput("vector", ["vector_layer"])},
+        )
+        ds = InMemoryAllCropsDataset(model_dataset, crop_size=(4, 4))
+        for i in range(len(ds)):
+            _, _, meta = ds[i]
+            assert meta.effective_bounds is not None
