@@ -4347,7 +4347,7 @@ wheels = [
 
 [[package]]
 name = "rslearn"
-version = "0.0.29"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },

@@ -18,7 +18,7 @@ from upath import UPath
 
 from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources.data_source import DataSourceContext
+from rslearn.data_sources.data_source import DataSourceContext, ItemLookupDataSource
 from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
@@ -77,7 +77,7 @@ SOILDB_DEFAULT_ASSET_KEY_CANDIDATES: dict[str, list[str]] = {
 }
 
 
-class SoilDB(DirectMaterializeDataSource[SourceItem]):
+class SoilDB(DirectMaterializeDataSource[SourceItem], ItemLookupDataSource[SourceItem]):
     """Read SoilDB rasters from the OpenLandMap static STAC catalog."""
 
     DEFAULT_CATALOG_URL = (
@@ -153,12 +153,11 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
 
     # --- DirectMaterializeDataSource implementation ---
 
-    def get_asset_url(self, item_name: str, asset_key: str) -> str:
+    def get_asset_url(self, item: SourceItem, asset_key: str) -> str:
         """Get the URL to read the requested asset from."""
-        item = self.get_item_by_name(item_name)
         if asset_key not in item.asset_urls:
             raise KeyError(
-                f"asset_key {asset_key!r} not available for item {item_name!r}; "
+                f"asset_key {asset_key!r} not available for item {item.name!r}; "
                 f"available={sorted(item.asset_urls.keys())}"
             )
         return item.asset_urls[asset_key]
@@ -198,10 +197,10 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
         """Download the configured GeoTIFF asset and write it into the tile store."""
         for item in items:
             for asset_key, band_names in self.asset_bands.items():
-                if tile_store.is_raster_ready(item.name, band_names):
+                if tile_store.is_raster_ready(item, band_names):
                     continue
 
-                asset_url = self.get_asset_url(item.name, asset_key)
+                asset_url = self.get_asset_url(item, asset_key)
 
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     local_fname = os.path.join(tmp_dir, f"{asset_key}.tif")
@@ -220,7 +219,7 @@ class SoilDB(DirectMaterializeDataSource[SourceItem]):
                                 f.write(chunk)
 
                     tile_store.write_raster_file(
-                        item.name,
+                        item,
                         band_names,
                         UPath(local_fname),
                         time_range=item.geometry.time_range,

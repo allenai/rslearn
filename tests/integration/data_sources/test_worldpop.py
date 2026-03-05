@@ -131,7 +131,7 @@ def test_worldpop(
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, [TEST_BAND])
+    assert tile_store.is_raster_ready(layer_name, item, [TEST_BAND])
 
     # Double check that the data intersected our example GeoTIFF and isn't just all 0.
     bounds = (
@@ -141,6 +141,6 @@ def test_worldpop(
         int(seattle2020.shp.bounds[3]),
     )
     raster_data = tile_store.read_raster(
-        layer_name, item.name, [TEST_BAND], seattle2020.projection, bounds
+        layer_name, item, [TEST_BAND], seattle2020.projection, bounds
     )
     assert raster_data.get_chw_array().max() == 1

@@ -41,7 +41,7 @@ def test_sentinel1(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+    assert tile_store.is_raster_ready(layer_name, item, [band_name])
 
 
 def test_sentinel2(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
@@ -63,7 +63,7 @@ def test_sentinel2(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+    assert tile_store.is_raster_ready(layer_name, item, [band_name])
 
 
 def test_cache_dir(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
@@ -149,4 +149,4 @@ def test_cop_dem_glo_30(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+    assert tile_store.is_raster_ready(layer_name, item, [band_name])
