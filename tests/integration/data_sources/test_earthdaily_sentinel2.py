@@ -100,14 +100,14 @@ def test_sentinel2_ingest_does_not_apply_scl_cloud_mask(
     )
 
     out = tile_store.read_raster(
-        "sentinel2", item.name, ["B04"], projection, bounds
+        "sentinel2", item, ["B04"], projection, bounds
     ).get_chw_array()
     assert out.shape == red.shape
     assert out[0, 0, 0] == 100
     assert out[0, 1, 1] == 100
 
     out_scl = tile_store.read_raster(
-        "sentinel2", item.name, ["scl"], projection, bounds
+        "sentinel2", item, ["scl"], projection, bounds
     ).get_chw_array()
     assert out_scl.shape == scl.shape
     assert out_scl[0, 1, 1] == 8
@@ -153,7 +153,7 @@ def test_sentinel2_read_raster_applies_scale_offset_when_apply_scale_offset_true
     monkeypatch.setattr(data_source, "get_item_by_name", lambda name: item)
 
     out = data_source.read_raster(
-        "sentinel2", item.name, ["B04"], projection, bounds
+        "sentinel2", item, ["B04"], projection, bounds
     ).get_chw_array()
     assert out.dtype == np.float32
     assert out.shape == raw.shape
@@ -211,7 +211,7 @@ def test_sentinel2_ingest_applies_scale_offset_when_apply_scale_offset_true(
     )
 
     out = tile_store.read_raster(
-        "sentinel2", item.name, ["B04"], projection, bounds
+        "sentinel2", item, ["B04"], projection, bounds
     ).get_chw_array()
     assert out.dtype == np.float32
     assert out.shape == raw.shape

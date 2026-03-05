@@ -62,7 +62,7 @@ def test_read_raster_applies_asset_scale_offset(tmp_path: Path) -> None:
     projection = Projection(crs, 1, -1)
     out = ds.read_raster(
         layer_name="layer",
-        item_name="item1",
+        item=item,
         bands=["B04"],
         projection=projection,
         bounds=(0, 0, 2, 2),
@@ -108,7 +108,7 @@ def test_read_raster_no_apply_scale_offset_returns_raw(tmp_path: Path) -> None:
     projection = Projection(crs, 1, -1)
     out = ds.read_raster(
         layer_name="layer",
-        item_name="item1",
+        item=item,
         bands=["B04"],
         projection=projection,
         bounds=(0, 0, 2, 2),

@@ -107,7 +107,7 @@ def test_ingest(
         item_groups[0],
         [[seattle2020]],
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, ["B04"])
+    assert tile_store.is_raster_ready(layer_name, item, ["B04"])
 
 
 def test_materialize(

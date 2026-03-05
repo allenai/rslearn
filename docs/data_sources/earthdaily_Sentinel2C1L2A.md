@@ -4,12 +4,7 @@ Sentinel-2 L2A data on [EarthDaily](https://earthdaily.com/) platform (collectio
 For EarthDaily collection `sentinel-2-l2a` with Planetary Computer-style asset keys and
 optional harmonization, use `rslearn.data_sources.earthdaily.Sentinel2L2A`.
 
-This data source requires the optional `earthdaily[platform]` dependency and EarthDaily
-credentials in the environment. The following environment variables must be set:
-- `EDS_CLIENT_ID`
-- `EDS_SECRET`
-- `EDS_AUTH_URL`
-- `EDS_API_URL`
+See [EarthDaily Setup](earthdaily.md) for required dependency/credentials.
 
 By default, this data source applies per-asset scale/offset values from STAC
 `raster:bands` metadata (`apply_scale_offset: true`) to convert raw pixel values into

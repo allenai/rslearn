@@ -203,12 +203,12 @@ class TestERA5LandMonthlyMeans:
         tile_store_layer = TileStoreWithLayer(tile_store, layer_name)
 
         data_source.ingest(tile_store_layer, [item], [[query_geom]])
-        assert tile_store_layer.is_raster_ready(item.name, TEST_BANDS)
+        assert tile_store_layer.is_raster_ready(item, TEST_BANDS)
 
         # Read raster at the native 0.1 deg projection.
         read_proj = Projection(CRS.from_epsg(WGS84_EPSG), PIXEL_SIZE, -PIXEL_SIZE)
-        bounds = tile_store_layer.get_raster_bounds(item.name, TEST_BANDS, read_proj)
-        raster = tile_store_layer.read_raster(item.name, TEST_BANDS, read_proj, bounds)
+        bounds = tile_store_layer.get_raster_bounds(item, TEST_BANDS, read_proj)
+        raster = tile_store_layer.read_raster(item, TEST_BANDS, read_proj, bounds)
 
         # Shape should be (2 bands, 1 timestep, 10 height, 10 width).
         assert raster.array.shape == (2, 1, 10, 10)
@@ -302,12 +302,12 @@ class TestERA5LandHourlyTimeseries:
         ts = TileStoreWithLayer(tile_store, layer_name)
 
         data_source.ingest(ts, [item], [[query_geom]])
-        assert ts.is_raster_ready(item.name, TEST_BANDS)
+        assert ts.is_raster_ready(item, TEST_BANDS)
 
         # Read raster at the native 0.1 deg projection.
         read_proj = Projection(CRS.from_epsg(WGS84_EPSG), PIXEL_SIZE, -PIXEL_SIZE)
-        bounds = ts.get_raster_bounds(item.name, TEST_BANDS, read_proj)
-        raster = ts.read_raster(item.name, TEST_BANDS, read_proj, bounds)
+        bounds = ts.get_raster_bounds(item, TEST_BANDS, read_proj)
+        raster = ts.read_raster(item, TEST_BANDS, read_proj, bounds)
 
         # Shape: (2 bands, 744 hours, H=1, W=1).
         assert raster.array.shape == (2, self.NUM_HOURS, 1, 1)

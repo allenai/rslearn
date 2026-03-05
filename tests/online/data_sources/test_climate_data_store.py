@@ -46,8 +46,8 @@ class TestERA5LandMonthlyMeans:
         data_source.ingest(
             TileStoreWithLayer(tile_store, layer_name), item_groups[1], [[seattle2020]]
         )
-        assert tile_store.is_raster_ready(layer_name, item_0.name, self.TEST_BANDS)
-        assert tile_store.is_raster_ready(layer_name, item_1.name, self.TEST_BANDS)
+        assert tile_store.is_raster_ready(layer_name, item_0, self.TEST_BANDS)
+        assert tile_store.is_raster_ready(layer_name, item_1, self.TEST_BANDS)
 
 
 class TestERA5LandHourly:
@@ -81,8 +81,8 @@ class TestERA5LandHourly:
         data_source.ingest(
             TileStoreWithLayer(tile_store, layer_name), item_groups[1], [[seattle2020]]
         )
-        assert tile_store.is_raster_ready(layer_name, item_0.name, self.TEST_BANDS)
-        assert tile_store.is_raster_ready(layer_name, item_1.name, self.TEST_BANDS)
+        assert tile_store.is_raster_ready(layer_name, item_0, self.TEST_BANDS)
+        assert tile_store.is_raster_ready(layer_name, item_1, self.TEST_BANDS)
 
 
 class TestERA5LandHourlyTimeseries:
@@ -115,14 +115,14 @@ class TestERA5LandHourlyTimeseries:
         ts = TileStoreWithLayer(tile_store, layer_name)
         data_source.ingest(ts, item_groups[0], [[seattle2020]])
         data_source.ingest(ts, item_groups[1], [[seattle2020]])
-        assert tile_store.is_raster_ready(layer_name, item_0.name, self.TEST_BANDS)
-        assert tile_store.is_raster_ready(layer_name, item_1.name, self.TEST_BANDS)
+        assert tile_store.is_raster_ready(layer_name, item_0, self.TEST_BANDS)
+        assert tile_store.is_raster_ready(layer_name, item_1, self.TEST_BANDS)
 
         # Read back rasters and verify timestamps span each month's hours.
         read_proj = Projection(CRS.from_epsg(WGS84_EPSG), 0.1, -0.1)
         for item, expected_month in [(item_0, 7), (item_1, 8)]:
-            bounds = ts.get_raster_bounds(item.name, self.TEST_BANDS, read_proj)
-            raster = ts.read_raster(item.name, self.TEST_BANDS, read_proj, bounds)
+            bounds = ts.get_raster_bounds(item, self.TEST_BANDS, read_proj)
+            raster = ts.read_raster(item, self.TEST_BANDS, read_proj, bounds)
 
             # Verify shape.
             assert raster.timestamps is not None

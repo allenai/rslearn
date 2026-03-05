@@ -64,6 +64,7 @@ detailed page with configuration options and available bands. See
 | [google_earth_engine.GoogleSatelliteEmbeddings](data_sources/google_earth_engine_GoogleSatelliteEmbeddings.md) | Google Earth Engine | Google Satellite Embedding v1, requires GEE credentials |
 | [planetary_computer.PlanetaryComputer](data_sources/planetary_computer_PlanetaryComputer.md) | Microsoft Planetary Computer | Generic collection access |
 | [planetary_computer.Sentinel3SlstrLST](data_sources/planetary_computer_Sentinel3SlstrLST.md) | Microsoft Planetary Computer | Land Surface Temperature, requires ingestion |
+| [earthdaily.Biophysical](data_sources/earthdaily_Biophysical.md) | EarthDaily | LAI/FAPAR/FCOVER, requires EarthDaily credentials |
 | [xyz_tiles.XyzTiles](data_sources/xyz_tiles_XyzTiles.md) | Any XYZ tile server | Web slippy tiles |
 
 ### Experimental

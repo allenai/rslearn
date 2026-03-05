@@ -154,7 +154,7 @@ class CDL(DataSource):
             geometries: a list of geometries needed for each item
         """
         for item in items:
-            if tile_store.is_raster_ready(item.name, [self.band_name]):
+            if tile_store.is_raster_ready(item, [self.band_name]):
                 continue
 
             # Download the zip file.
@@ -189,7 +189,7 @@ class CDL(DataSource):
                 # Now we can ingest it.
                 logger.debug(f"Ingesting data for {item.name}")
                 tile_store.write_raster_file(
-                    item.name,
+                    item,
                     [self.band_name],
                     UPath(local_fname),
                     time_range=item.geometry.time_range,
