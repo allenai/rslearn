@@ -289,7 +289,7 @@ class EarthDaily(DataSource, TileStore):
         for geometry in geometries:
             # Get potentially relevant items from the collection by performing one search
             # for each requested geometry.
-            wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
+            wgs84_geometry = geometry.to_wgs84()
             logger.debug("performing STAC search for geometry %s", wgs84_geometry)
             result = client.search(
                 collections=[self.collection_name],
@@ -758,7 +758,7 @@ class Sentinel2(EarthDaily):
 
         groups = []
         for geometry in geometries:
-            wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
+            wgs84_geometry = geometry.to_wgs84()
             if wgs84_geometry.time_range is None:
                 raise ValueError(
                     "EarthDaily Sentinel-2 requires geometry time ranges to be set"

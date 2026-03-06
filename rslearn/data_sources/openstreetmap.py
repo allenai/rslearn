@@ -19,6 +19,7 @@ from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import Feature, GridIndex, STGeometry
 from rslearn.utils.fsspec import get_upath_local, join_upath
+from rslearn.utils.geometry import flatten_shape
 
 logger = get_logger(__name__)
 
@@ -129,22 +130,18 @@ class OsmHandler(osmium.SimpleHandler):
 
         self.categories = categories
 
-        geometries = [
-            geometry.to_projection(WGS84_PROJECTION) for geometry in geometries
-        ]
+        wgs84_geometries = [geometry.to_wgs84() for geometry in geometries]
         self.grid_index = GridIndex(grid_size)
-        for geometry in geometries:
-            bounds = geometry.shp.bounds
-            # Add some padding so that vertices that are relevant to an object
-            # intersecting a geometry are included even if the vertex is outside the
-            # geometry.
-            bounds = (
-                bounds[0] - padding,
-                bounds[1] - padding,
-                bounds[2] + padding,
-                bounds[3] + padding,
-            )
-            self.grid_index.insert(bounds, 1)
+        for geometry in wgs84_geometries:
+            for shp in flatten_shape(geometry.shp):
+                bounds = shp.bounds
+                bounds = (
+                    bounds[0] - padding,
+                    bounds[1] - padding,
+                    bounds[2] + padding,
+                    bounds[3] + padding,
+                )
+                self.grid_index.insert(bounds, 1)
 
         self.cached_nodes: dict = {}
         self.cached_ways: dict = {}
@@ -452,9 +449,7 @@ class OpenStreetMap(DataSource[OsmItem]):
                 )
             )
 
-        wgs84_geometries = [
-            geometry.to_projection(WGS84_PROJECTION) for geometry in geometries
-        ]
+        wgs84_geometries = [geometry.to_wgs84() for geometry in geometries]
         groups = []
         for geometry in wgs84_geometries:
             cur_groups = match_candidate_items_to_window(geometry, items, query_config)

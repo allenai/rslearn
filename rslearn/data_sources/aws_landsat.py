@@ -27,7 +27,7 @@ from rslearn.data_sources.direct_materialize_data_source import (
 )
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
-from rslearn.utils.geometry import STGeometry
+from rslearn.utils.geometry import STGeometry, flatten_shape
 from rslearn.utils.grid_index import GridIndex
 
 from .data_source import DataSourceContext, Item, ItemLookupDataSource, QueryConfig
@@ -291,18 +291,17 @@ class LandsatOliTirs(
         """
         wrs2_index = self._get_wrs2_index()
         needed_year_pathrows = set()
-        wgs84_geometries = [
-            geometry.to_projection(WGS84_PROJECTION) for geometry in geometries
-        ]
+        wgs84_geometries = [geometry.to_wgs84() for geometry in geometries]
         for wgs84_geometry in wgs84_geometries:
             if wgs84_geometry.time_range is None:
                 raise ValueError(
                     "Landsat on AWS requires geometry time ranges to be set"
                 )
             cur_pathrows = set()
-            for polygon, path, row in wrs2_index.query(wgs84_geometry.shp.bounds):
-                if wgs84_geometry.shp.intersects(polygon):
-                    cur_pathrows.add((path, row))
+            for shp in flatten_shape(wgs84_geometry.shp):
+                for polygon, path, row in wrs2_index.query(shp.bounds):
+                    if wgs84_geometry.shp.intersects(polygon):
+                        cur_pathrows.add((path, row))
             for path, row in cur_pathrows:
                 for year in range(
                     wgs84_geometry.time_range[0].year,
