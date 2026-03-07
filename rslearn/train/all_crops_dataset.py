@@ -18,7 +18,7 @@ def get_window_crop_options(
     crop_size: tuple[int, int],
     overlap_size: tuple[int, int],
     bounds: PixelBounds,
-) -> list[PixelBounds]:
+) -> list[tuple[PixelBounds, PixelBounds]]:
     """Get the bounds of each input crop within the window bounds.
 
     This is used when running inference on all crops of a large window, to
@@ -30,8 +30,11 @@ def get_window_crop_options(
         bounds: the window bounds to divide up into smaller crops.
 
     Returns:
-        a list of crop bounds within the overall bounds. The rightmost and
-            bottommost crops may extend beyond the provided bounds.
+        a list of (crop_bounds, effective_bounds) tuples. crop_bounds is what
+        to feed the model (The rightmost and bottommost crops may extend beyond
+        the provided bounds); effective_bounds is the non-overlapping sub-region
+        this crop uniquely "owns" (for metrics / loss masking so that
+        overlapping pixels from the last-crop shift are not counted twice).
     """
     # We stride the crops by (crop_size - overlap_size) until the last crop.
     # The first crop always starts at bounds[0]/bounds[1]. It's okay if it extends
@@ -65,11 +68,26 @@ def get_window_crop_options(
     if bounds[3] - crop_size[1] > bounds[1]:
         rows.append(bounds[3] - crop_size[1])
 
-    crop_bounds: list[PixelBounds] = []
-    for col in cols:
-        for row in rows:
-            crop_bounds.append((col, row, col + crop_size[0], row + crop_size[1]))
-    return crop_bounds
+    # Effective starts: assign each pixel to the earliest crop covering it.
+    eff_col_starts = [cols[0]] + [
+        max(cols[i], cols[i - 1] + crop_size[0]) for i in range(1, len(cols))
+    ]
+    eff_row_starts = [rows[0]] + [
+        max(rows[i], rows[i - 1] + crop_size[1]) for i in range(1, len(rows))
+    ]
+
+    result: list[tuple[PixelBounds, PixelBounds]] = []
+    for ci, col in enumerate(cols):
+        for ri, row in enumerate(rows):
+            crop = (col, row, col + crop_size[0], row + crop_size[1])
+            eff = (
+                eff_col_starts[ci],
+                eff_row_starts[ri],
+                col + crop_size[0],
+                row + crop_size[1],
+            )
+            result.append((crop, eff))
+    return result
 
 
 def pad_slice_protect(
@@ -304,7 +322,7 @@ class IterableAllCropsDataset(torch.utils.data.IterableDataset):
                 crops = get_window_crop_options(
                     self.crop_size, self.overlap_size, bounds
                 )
-                for crop_idx, crop_bounds in enumerate(crops):
+                for crop_idx, (crop_bounds, eff_bounds) in enumerate(crops):
                     cur_geom = STGeometry(
                         metadata.projection, shapely.box(*crop_bounds), None
                     )
@@ -365,6 +383,7 @@ class IterableAllCropsDataset(torch.utils.data.IterableDataset):
                         crop_bounds=crop_bounds,
                         crop_idx=crop_idx,
                         num_crops_in_window=len(crops),
+                        effective_bounds=eff_bounds,
                     )
 
                     # Now we can compute input and target dicts via the task.
@@ -429,11 +448,13 @@ class InMemoryAllCropsDataset(torch.utils.data.Dataset):
         # Precompute the batch boundaries for each window
         self.crops = []
         for window_id, window in enumerate(self.windows):
-            window_crop_bounds = get_window_crop_options(
+            window_crops = get_window_crop_options(
                 self.crop_size, self.overlap_size, window.bounds
             )
-            for i, crop_bound in enumerate(window_crop_bounds):
-                self.crops.append((window_id, crop_bound, (i, len(window_crop_bounds))))
+            for i, (crop_bound, eff_bound) in enumerate(window_crops):
+                self.crops.append(
+                    (window_id, crop_bound, eff_bound, (i, len(window_crops)))
+                )
 
     def get_raw_inputs(
         self, index: int
@@ -508,7 +529,7 @@ class InMemoryAllCropsDataset(torch.utils.data.Dataset):
         self, index: int
     ) -> tuple[dict[str, Any], dict[str, Any], SampleMetadata]:
         """Return (input_dict, target_dict, metadata) for a single flattened crop."""
-        (window_id, crop_bounds, (crop_idx, num_crops)) = self.crops[index]
+        (window_id, crop_bounds, eff_bounds, (crop_idx, num_crops)) = self.crops[index]
         raw_inputs, passthrough_inputs, metadata = self.get_raw_inputs(window_id)
         bounds = metadata.crop_bounds
 
@@ -529,6 +550,7 @@ class InMemoryAllCropsDataset(torch.utils.data.Dataset):
             crop_bounds=crop_bounds,
             crop_idx=crop_idx,
             num_crops_in_window=num_crops,
+            effective_bounds=eff_bounds,
         )
 
         # Now we can compute input and target dicts via the task.
