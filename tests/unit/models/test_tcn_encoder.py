@@ -239,6 +239,51 @@ class TestTCNEncoder:
         out = enc(ctx)
         assert out.feature_maps[0].shape == (2, 16, 3, 3)
 
+    def test_input_dropout_changes_train_output(self) -> None:
+        """Input channel dropout should alter outputs in train mode."""
+        torch.manual_seed(0)
+        C, T = 14, 64
+        enc = TCNEncoder(
+            in_channels=C,
+            d_model=32,
+            d_output=16,
+            dilations=[1, 2, 4],
+            pooling_windows=[1, 2],
+            mod_key="era5",
+            num_groups=8,
+            input_dropout=0.5,  # high rate to ensure visible effect
+        )
+        enc.train()
+        ctx = _make_context(C, T, B=2, mod_key="era5")
+
+        # Two forward passes with the same input should differ due to dropout.
+        torch.manual_seed(1)
+        out1 = enc(ctx).feature_vector.detach()
+        torch.manual_seed(2)
+        out2 = enc(ctx).feature_vector.detach()
+        assert not torch.allclose(out1, out2, atol=1e-5)
+
+    def test_input_dropout_noop_in_eval(self) -> None:
+        """Input channel dropout should be disabled in eval mode."""
+        torch.manual_seed(0)
+        C, T = 14, 64
+        enc = TCNEncoder(
+            in_channels=C,
+            d_model=32,
+            d_output=16,
+            dilations=[1, 2, 4],
+            pooling_windows=[1, 2],
+            mod_key="era5",
+            num_groups=8,
+            input_dropout=0.5,
+        )
+        enc.eval()
+        ctx = _make_context(C, T, B=2, mod_key="era5")
+
+        out1 = enc(ctx).feature_vector.detach()
+        out2 = enc(ctx).feature_vector.detach()
+        assert torch.allclose(out1, out2, atol=1e-6)
+
     def test_masked_timesteps_suppressed_in_attention(self) -> None:
         """Verify that fully masked chunks produce different output than unmasked."""
         torch.manual_seed(123)

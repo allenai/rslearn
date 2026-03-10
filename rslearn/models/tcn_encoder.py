@@ -399,6 +399,7 @@ class TCNEncoder(FeatureExtractor):
         kernel_size: int = 3,
         dilations: list[int] | None = None,
         dropout: float = 0.1,
+        input_dropout: float = 0.0,
         num_groups: int = 8,
         mod_key: str = "era5_daily",
         output_spatial_size: int | None = None,
@@ -415,6 +416,10 @@ class TCNEncoder(FeatureExtractor):
             dilations: list of dilation factors for residual blocks.
                 Default: [1, 2, 4, 8, 16, 32, 64, 128].
             dropout: dropout probability.
+            input_dropout: channel-wise dropout probability applied to input
+                variables before projection. Drops entire variables across all
+                timesteps, forcing the model to not rely on any single input
+                channel. Default: 0.0 (disabled).
             num_groups: number of groups for GroupNorm.
             mod_key: key in the input dict that holds the time series data.
             output_spatial_size: if provided, upsample to a spatial grid of this size (e.g., 5 for 5x5).
@@ -444,6 +449,9 @@ class TCNEncoder(FeatureExtractor):
 
         # Front-end: normalize input variables and project to d_model
         self.input_norm = nn.LayerNorm(in_channels)
+        # Channel-wise dropout on input variables (drops entire channels across
+        # all timesteps).  Dropout1d expects [B, C, T] and drops along dim-1.
+        self.input_dropout = nn.Dropout1d(p=input_dropout)
         self.input_proj = nn.Linear(in_channels, d_model)
 
         # TCN backbone: stack of dilated residual blocks
@@ -504,6 +512,9 @@ class TCNEncoder(FeatureExtractor):
             )
 
         x = self.input_norm(era5_data)  # [B, T, C]
+        # Channel-wise input dropout: transpose to [B, C, T] for Dropout1d,
+        # which drops entire channels, then transpose back.
+        x = self.input_dropout(x.transpose(1, 2)).transpose(1, 2)  # [B, T, C]
         x = self.input_proj(x)  # [B, T, d_model]
 
         # Zero out masked/padded timesteps so convolutions see neutral values.
