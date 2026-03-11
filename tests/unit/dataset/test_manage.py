@@ -2,12 +2,14 @@
 
 import json
 import pathlib
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
+from rslearn.data_sources import Item
 from rslearn.data_sources.local_files import LocalFiles
 from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.dataset.handler_summaries import IngestCounts
@@ -505,6 +507,96 @@ class TestPrepareDatasetWindows:
         assert layer_summary2.windows_prepared == 0
         assert layer_summary2.windows_skipped == 0
         assert layer_summary2.windows_rejected == 1  # Still rejected, not skipped
+
+    def test_period_duration_stores_exact_group_time_ranges_for_temporal_reducers(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Prepare should store exact sub-period bounds for temporal reducers."""
+        ds_path = UPath(tmp_path)
+        src_data_dir = tmp_path / "src_data"
+        src_data_dir.mkdir()
+
+        dataset_config = {
+            "layers": {
+                "climate": {
+                    "type": "raster",
+                    "band_sets": [
+                        {
+                            "bands": ["B1"],
+                            "dtype": "float32",
+                        }
+                    ],
+                    "compositing_method": "TEMPORAL_MEAN",
+                    "data_source": {
+                        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                        "init_args": {
+                            "src_dir": str(src_data_dir),
+                        },
+                        "query_config": {
+                            "space_mode": "MOSAIC",
+                            "min_matches": 0,
+                            "max_matches": 2,
+                            "period_duration": "14d",
+                            "per_period_mosaic_reverse_time_order": False,
+                        },
+                    },
+                },
+            },
+        }
+        with (ds_path / "config.json").open("w") as f:
+            json.dump(dataset_config, f)
+
+        dataset = Dataset(ds_path)
+        storage = dataset.storage
+        window = Window(
+            storage=storage,
+            group="default",
+            name="window1",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 10, 10),
+            time_range=(
+                datetime(2024, 1, 1, tzinfo=UTC),
+                datetime(2024, 2, 26, tzinfo=UTC),
+            ),
+        )
+        window.save()
+
+        expected_periods = [
+            (
+                datetime(2024, 1, 1, tzinfo=UTC),
+                datetime(2024, 1, 15, tzinfo=UTC),
+            ),
+            (
+                datetime(2024, 1, 29, tzinfo=UTC),
+                datetime(2024, 2, 12, tzinfo=UTC),
+            ),
+        ]
+
+        def fake_get_items(self: Any, geometries: Any, query_config: Any) -> Any:
+            assert query_config.period_duration is None
+            assert query_config.max_matches == 1
+            results = []
+            for geometry in geometries:
+                assert geometry.time_range is not None
+                if geometry.time_range in expected_periods:
+                    item = Item("match", geometry)
+                    results.append([[item]])
+                else:
+                    results.append([])
+            return results
+
+        monkeypatch.setattr(LocalFiles, "get_items", fake_get_items)
+
+        windows = dataset.load_windows()
+        summary = prepare_dataset_windows(dataset, windows)
+
+        layer_summary = summary.layer_summaries["climate"]
+        assert layer_summary.windows_prepared == 1
+        assert layer_summary.windows_rejected == 0
+
+        layer_data = windows[0].load_layer_datas()["climate"]
+        assert layer_data.group_time_ranges == expected_periods
+        assert len(layer_data.serialized_item_groups) == 2
 
     def test_get_items_error_captured(
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
