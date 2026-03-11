@@ -178,10 +178,10 @@ def test_cross_attention_alpha_defaults_to_scalar_zero() -> None:
     assert float(model.cross_attn_alpha.detach().cpu().item()) == 0.0
 
 
-def test_context_path_dropout_masks_context_vectors(
+def test_context_path_dropout_returns_missing_context_mask(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Context path dropout should mask path 1+ and keep path 0 unchanged."""
+    """Context path dropout should return per-sample missing-context flags."""
     primary = torch.randn(2, 6)
     context = torch.randn(2, 4)
     model = CrossAttentionFusionExtractor(
@@ -198,19 +198,14 @@ def test_context_path_dropout_masks_context_vectors(
         lambda size, device=None: torch.zeros(size, device=device),
     )
 
-    dropped, masks = model._apply_context_path_dropout(
+    missing_context = model._apply_context_path_dropout(
         [
             FeatureVector(feature_vector=primary.clone()),
             FeatureVector(feature_vector=context.clone()),
         ]
     )
-    assert isinstance(dropped[0], FeatureVector)
-    assert isinstance(dropped[1], FeatureVector)
-    torch.testing.assert_close(dropped[0].feature_vector, primary)
-    torch.testing.assert_close(dropped[1].feature_vector, torch.zeros_like(context))
-    assert masks is not None
-    assert len(masks) == 1
-    assert torch.equal(masks[0], torch.zeros(2, dtype=torch.bool))
+    assert missing_context is not None
+    assert torch.equal(missing_context, torch.ones(2, dtype=torch.bool))
 
 
 def test_forward_stores_path0_intermediate_in_context() -> None:
@@ -229,3 +224,28 @@ def test_forward_stores_path0_intermediate_in_context() -> None:
     stored = context.context_dict["path0_intermediate"]
     assert isinstance(stored, FeatureVector)
     torch.testing.assert_close(stored.feature_vector, primary)
+
+
+def test_cross_attend_skips_attention_residual_when_context_missing() -> None:
+    """Missing-context mask should zero the cross-attention residual branch."""
+    primary = torch.randn(2, 6)
+    context = torch.randn(2, 4)
+    model = CrossAttentionFusionExtractor(
+        paths=[[_FixedVectorExtractor(primary)], [_FixedVectorExtractor(context)]],
+        path_output_channels=[6, 4],
+        attention_dim=8,
+        num_heads=4,
+    )
+    model.eval()
+    with torch.no_grad():
+        model.cross_attn_alpha.fill_(1.0)
+
+    primary_tokens = torch.randn(2, 3, 6)
+    context_vec = torch.randn(2, 4)
+    missing_context = torch.ones(2, dtype=torch.bool)
+
+    out = model._cross_attend(
+        primary_tokens, context_vec, missing_context=missing_context
+    )
+    expected = model.query_out_proj(model.query_in_proj(primary_tokens))
+    torch.testing.assert_close(out, expected)

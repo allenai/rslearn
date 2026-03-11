@@ -127,3 +127,39 @@ def test_conv_with_stride() -> None:
         feature_h // 2,
         feature_w // 2,
     )
+
+
+def test_conv_context_key_applies_same_weights() -> None:
+    """context_key entry is decoded with the same Conv2d weights as the main input."""
+    aux = FeatureMaps([torch.randn(2, 8, 8, 8)])
+    conv = Conv(in_channels=8, out_channels=4, kernel_size=3, context_key="p0")
+    ctx = ModelContext(inputs=[], metadatas=[])
+    ctx.context_dict["p0"] = aux
+
+    conv(FeatureMaps([torch.randn(2, 8, 8, 8)]), ctx)
+
+    with torch.no_grad():
+        expected = conv.activation(conv.layer(aux.feature_maps[0]))
+    torch.testing.assert_close(ctx.context_dict["p0"].feature_maps[0], expected)
+
+
+def test_conv_context_key_chains_two_layers() -> None:
+    """Two Convs with the same context_key produce matching main/aux output shapes."""
+    main = FeatureMaps([torch.randn(2, 16, 10, 10)])
+    aux = FeatureMaps([torch.randn(2, 16, 10, 10)])
+    conv1 = Conv(in_channels=16, out_channels=8, kernel_size=1, context_key="p0")
+    conv2 = Conv(
+        in_channels=8,
+        out_channels=2,
+        kernel_size=2,
+        padding=0,
+        stride=2,
+        activation=torch.nn.Identity(),
+        context_key="p0",
+    )
+    ctx = ModelContext(inputs=[], metadatas=[])
+    ctx.context_dict["p0"] = aux
+
+    result = conv2(conv1(main, ctx), ctx)
+
+    assert ctx.context_dict["p0"].feature_maps[0].shape == result.feature_maps[0].shape

@@ -49,11 +49,9 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         ffn_expansion: float = 2.0,
         ffn_activation: Literal["gelu", "swiglu"] = "gelu",
         ffn_dropout: float = 0.0,
-        pre_fusion_norm: bool = False,
+        pre_fusion_norm: bool = True,
         pre_fusion_dropout: float = 0.0,
         path_dropout_prob: float = 0.0,
-        path_dropout_mode: Literal["zero"] = "zero",
-        path_dropout_rescale: bool = False,
         path0_context_key: str = "path0_intermediate",
     ):
         """Create a CrossAttentionFusionExtractor.
@@ -85,11 +83,6 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
             path_dropout_prob: branch-level dropout probability applied
                 independently to each context path (paths 1+) per sample during
                 training. Path 0 is never dropped. Default ``0.0`` (disabled).
-            path_dropout_mode: branch dropout mode. Currently only ``"zero"``
-                is supported (dropped branches are zeroed).
-            path_dropout_rescale: if ``True``, surviving context branches are
-                scaled by ``1 / (1 - path_dropout_prob)`` during training to
-                preserve expectation. Default ``False``.
             path0_context_key: key used to store path0 intermediate output in
                 ``context.context_dict`` for optional downstream auxiliary
                 supervision.
@@ -158,10 +151,6 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
             raise ValueError(
                 f"path_dropout_prob must be in [0, 1), got {path_dropout_prob!r}"
             )
-        if path_dropout_mode != "zero":
-            raise ValueError(
-                f"Unknown path_dropout_mode '{path_dropout_mode}'. Expected 'zero'."
-            )
         if memory_hidden_dim is not None and memory_hidden_dim <= 0:
             raise ValueError(
                 f"memory_hidden_dim must be a positive int when set, got {memory_hidden_dim!r}"
@@ -191,8 +180,6 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         self.post_fusion_mode = post_fusion_mode
         self.ffn_dropout = ffn_dropout
         self.path_dropout_prob = path_dropout_prob
-        self.path_dropout_mode = path_dropout_mode
-        self.path_dropout_rescale = path_dropout_rescale
         self.path0_context_key = path0_context_key
 
         self.query_in_proj = torch.nn.Linear(self._primary_channels, attention_dim)
@@ -294,56 +281,42 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
                 result.append(out)
         return result
 
-    def _apply_context_path_dropout(
-        self, outputs: list[Any]
-    ) -> tuple[list[Any], list[torch.Tensor] | None]:
-        """Apply branch-level dropout to paths 1+ and return per-path keep masks.
+    def _apply_context_path_dropout(self, outputs: list[Any]) -> torch.Tensor | None:
+        """Return per-sample indicator for missing context after path dropout.
 
-        Returns:
-            A tuple ``(outputs_after_dropout, masks)`` where ``masks`` is either
-            ``None`` (dropout inactive) or one boolean tensor per context path
-            (paths 1+) with shape ``[B]`` indicating which samples kept that path.
+        ``missing_context[b]`` is ``True`` when all context paths (1+) are dropped
+        for sample ``b``. Path outputs are left unchanged; the mask is consumed in
+        ``_cross_attend`` to gate off the attention residual in missing-context cases.
         """
-        if (
-            not self.training
-            or self.path_dropout_prob <= 0.0
-            or len(outputs) <= 1
-            or self.path_dropout_mode != "zero"
-        ):
-            return outputs, None
+        if not self.training or self.path_dropout_prob <= 0.0 or len(outputs) <= 1:
+            return None
 
-        keep_prob = 1.0 - self.path_dropout_prob
-        scale = (
-            1.0 / keep_prob if (self.path_dropout_rescale and keep_prob > 0.0) else 1.0
-        )
-        dropped: list[Any] = [outputs[0]]
-        path_masks: list[torch.Tensor] = []
+        if isinstance(outputs[0], FeatureVector):
+            batch_size = outputs[0].feature_vector.shape[0]
+            device = outputs[0].feature_vector.device
+        elif isinstance(outputs[0], FeatureMaps):
+            batch_size = outputs[0].feature_maps[0].shape[0]
+            device = outputs[0].feature_maps[0].device
+        else:
+            return None
+
+        any_context_present = torch.zeros(batch_size, device=device, dtype=torch.bool)
         for out in outputs[1:]:
             if isinstance(out, FeatureVector):
                 vec = out.feature_vector
                 keep_mask = (
-                    torch.rand((vec.shape[0], 1), device=vec.device)
+                    torch.rand((vec.shape[0],), device=vec.device)
                     >= self.path_dropout_prob
-                ).to(vec.dtype)
-                dropped.append(FeatureVector(feature_vector=vec * keep_mask * scale))
-                path_masks.append(keep_mask[:, 0].to(torch.bool))
+                )
+                any_context_present |= keep_mask
             elif isinstance(out, FeatureMaps):
                 ref = out.feature_maps[0]
                 keep_mask = (
-                    torch.rand((ref.shape[0], 1, 1, 1), device=ref.device)
+                    torch.rand((ref.shape[0],), device=ref.device)
                     >= self.path_dropout_prob
-                ).to(ref.dtype)
-                dropped.append(
-                    FeatureMaps(
-                        feature_maps=[
-                            fmap * keep_mask * scale for fmap in out.feature_maps
-                        ]
-                    )
                 )
-                path_masks.append(keep_mask[:, 0, 0, 0].to(torch.bool))
-            else:
-                dropped.append(out)
-        return dropped, path_masks
+                any_context_present |= keep_mask
+        return ~any_context_present
 
     @staticmethod
     def _validate_feature_map_scales(outputs: list[FeatureMaps]) -> int:
@@ -409,13 +382,18 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         return self.ffn(x)
 
     def _cross_attend(
-        self, primary_tokens: torch.Tensor, context_vec: torch.Tensor
+        self,
+        primary_tokens: torch.Tensor,
+        context_vec: torch.Tensor,
+        missing_context: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Apply cross-attn and optional post-fusion transformer-style blocks.
 
         Args:
             primary_tokens: tensor of shape [B, T, C_primary].
             context_vec: tensor of shape [B, C_context].
+            missing_context: optional boolean tensor of shape [B] where ``True``
+                indicates no context is available for that sample.
         """
         x = self.query_in_proj(primary_tokens)
 
@@ -425,6 +403,9 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         v = self.value_norm(v)
         attn_out, _ = self.cross_attn(q_norm, k, v, need_weights=False)
         attn_out = F.dropout(attn_out, p=self.residual_dropout, training=self.training)
+        if missing_context is not None:
+            context_present = (~missing_context).to(attn_out.dtype).view(-1, 1, 1)
+            attn_out = attn_out * context_present
         x = x + self.cross_attn_alpha * attn_out
 
         if self.post_fusion_mode == "self_attn_ffn":
@@ -443,37 +424,40 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
 
         return self.query_out_proj(x)
 
-    def _context_vector_from_maps(self, outputs: list[FeatureMaps]) -> torch.Tensor:
-        """Aggregate context FeatureMaps into one vector per path, then concatenate."""
+    def _fuse_feature_vectors(
+        self,
+        outputs: list[FeatureVector],
+        missing_context: torch.Tensor | None = None,
+    ) -> FeatureVector:
+        """Fuse FeatureVector outputs using cross-attention over memory tokens."""
+        primary = outputs[0].feature_vector
+        context = torch.cat([o.feature_vector for o in outputs[1:]], dim=1)
+        fused = self._cross_attend(
+            primary.unsqueeze(1), context, missing_context=missing_context
+        ).squeeze(1)
+        return FeatureVector(feature_vector=fused)
+
+    def _fuse_feature_maps(
+        self,
+        outputs: list[FeatureMaps],
+        missing_context: torch.Tensor | None = None,
+    ) -> FeatureMaps:
+        """Fuse FeatureMaps outputs using per-token cross-attention over memory tokens."""
+        self._validate_feature_map_scales(outputs)
+        primary = outputs[0].feature_maps
         context_vectors: list[torch.Tensor] = []
         for out in outputs[1:]:
             per_scale = [fmap.mean(dim=[2, 3]) for fmap in out.feature_maps]
             context_vectors.append(torch.stack(per_scale, dim=0).mean(dim=0))
-        return torch.cat(context_vectors, dim=1)
-
-    @staticmethod
-    def _context_vector_from_vectors(outputs: list[FeatureVector]) -> torch.Tensor:
-        """Concatenate context FeatureVectors from paths 1+."""
-        return torch.cat([o.feature_vector for o in outputs[1:]], dim=1)
-
-    def _fuse_feature_vectors(self, outputs: list[FeatureVector]) -> FeatureVector:
-        """Fuse FeatureVector outputs using cross-attention over memory tokens."""
-        primary = outputs[0].feature_vector
-        context = self._context_vector_from_vectors(outputs)
-        fused = self._cross_attend(primary.unsqueeze(1), context).squeeze(1)
-        return FeatureVector(feature_vector=fused)
-
-    def _fuse_feature_maps(self, outputs: list[FeatureMaps]) -> FeatureMaps:
-        """Fuse FeatureMaps outputs using per-token cross-attention over memory tokens."""
-        self._validate_feature_map_scales(outputs)
-        primary = outputs[0].feature_maps
-        context = self._context_vector_from_maps(outputs)
+        context = torch.cat(context_vectors, dim=1)
 
         fused_maps: list[torch.Tensor] = []
         for fmap in primary:
             _, _, h, w = fmap.shape
             primary_tokens = rearrange(fmap, "b c h w -> b (h w) c")
-            fused_tokens = self._cross_attend(primary_tokens, context)
+            fused_tokens = self._cross_attend(
+                primary_tokens, context, missing_context=missing_context
+            )
             fused_maps.append(rearrange(fused_tokens, "b (h w) c -> b c h w", h=h, w=w))
         return FeatureMaps(feature_maps=fused_maps)
 
@@ -481,8 +465,7 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         """Run all paths and fuse path outputs with context-memory cross-attention."""
         outputs = [self._run_path(path, context) for path in self.paths]
         outputs = self._normalize_outputs(outputs)
-        outputs, path_dropout_masks = self._apply_context_path_dropout(outputs)
-        context.context_dict["path_dropout_masks"] = path_dropout_masks
+        missing_context = self._apply_context_path_dropout(outputs)
         context.context_dict[self.path0_context_key] = outputs[0]
 
         first_type = type(outputs[0])
@@ -497,9 +480,9 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         self._validate_channels(outputs)
 
         if isinstance(outputs[0], FeatureVector):
-            return self._fuse_feature_vectors(outputs)  # type: ignore[arg-type]
+            return self._fuse_feature_vectors(outputs, missing_context=missing_context)  # type: ignore[arg-type]
         if isinstance(outputs[0], FeatureMaps):
-            return self._fuse_feature_maps(outputs)  # type: ignore[arg-type]
+            return self._fuse_feature_maps(outputs, missing_context=missing_context)  # type: ignore[arg-type]
 
         raise TypeError(
             f"CrossAttentionFusionExtractor only supports FeatureMaps and "

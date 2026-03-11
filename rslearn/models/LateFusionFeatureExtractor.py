@@ -1,7 +1,7 @@
 """Late-fusion feature extractor supporting concatenation, GLU-style gating, modality mixing, and FiLM conditioning."""
 
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -60,7 +60,6 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         pre_fusion_norm: bool = False,
         pre_fusion_dropout: float = 0.0,
         path_dropout_prob: float = 0.0,
-        path_dropout_mode: Literal["zero"] = "zero",
         path_dropout_rescale: bool = False,
         path0_context_key: str = "path0_intermediate",
     ):
@@ -120,8 +119,6 @@ class LateFusionFeatureExtractor(FeatureExtractor):
             path_dropout_prob: branch-level dropout probability applied
                 independently to each context path (paths 1+) per sample during
                 training. Path 0 is never dropped. Default ``0.0`` (disabled).
-            path_dropout_mode: branch dropout mode. Currently only ``"zero"``
-                is supported (dropped branches are zeroed).
             path_dropout_rescale: if ``True``, surviving context branches are
                 scaled by ``1 / (1 - path_dropout_prob)`` during training to
                 preserve expectation. Default ``False``.
@@ -244,12 +241,7 @@ class LateFusionFeatureExtractor(FeatureExtractor):
             raise ValueError(
                 f"path_dropout_prob must be in [0, 1), got {path_dropout_prob!r}"
             )
-        if path_dropout_mode != "zero":
-            raise ValueError(
-                f"Unknown path_dropout_mode '{path_dropout_mode}'. Expected 'zero'."
-            )
         self.path_dropout_prob = path_dropout_prob
-        self.path_dropout_mode = path_dropout_mode
         self.path_dropout_rescale = path_dropout_rescale
         self.path0_context_key = path0_context_key
         if pre_fusion_norm:
@@ -552,12 +544,7 @@ class LateFusionFeatureExtractor(FeatureExtractor):
             ``None`` (dropout inactive) or one boolean tensor per context path
             (paths 1+) with shape ``[B]`` indicating which samples kept that path.
         """
-        if (
-            not self.training
-            or self.path_dropout_prob <= 0.0
-            or len(outputs) <= 1
-            or self.path_dropout_mode != "zero"
-        ):
+        if not self.training or self.path_dropout_prob <= 0.0 or len(outputs) <= 1:
             return outputs, None
 
         keep_prob = 1.0 - self.path_dropout_prob
