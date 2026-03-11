@@ -381,6 +381,73 @@ def test_segmentation_head_temperature_confidence() -> None:
     assert max_prob_cold > max_prob_hot
 
 
+def test_segmentation_head_path0_aux_loss_added_when_enabled() -> None:
+    """Segmentation head should emit path0 auxiliary loss when configured and present."""
+    fused_logits = torch.tensor(
+        [[[[2.0, 0.0]], [[0.5, 1.5]]]], dtype=torch.float32
+    )  # [1, 2, 1, 2]
+    path0_logits = torch.tensor(
+        [[[[1.0, 1.0]], [[1.2, 0.8]]]], dtype=torch.float32
+    )  # [1, 2, 1, 2]
+    targets = [
+        {
+            "classes": RasterImage(
+                torch.tensor([[[[0, 1]]]], dtype=torch.long), timestamps=None
+            ),
+            "valid": RasterImage(
+                torch.tensor([[[[1.0, 1.0]]]], dtype=torch.float32), timestamps=None
+            ),
+        }
+    ]
+    aux_weight = 0.25
+    head = SegmentationHead(path0_aux_weight=aux_weight)
+    context = ModelContext(
+        inputs=[],
+        metadatas=[],
+        context_dict={"path0_intermediate": FeatureMaps([path0_logits])},
+    )
+    out = head(
+        intermediates=FeatureMaps([fused_logits]),
+        context=context,
+        targets=targets,
+    )
+
+    labels = torch.tensor([[[0, 1]]], dtype=torch.long)
+    expected_cls = torch.nn.functional.cross_entropy(
+        fused_logits, labels, reduction="none"
+    ).mean()
+    expected_aux = torch.nn.functional.cross_entropy(
+        path0_logits, labels, reduction="none"
+    ).mean()
+
+    assert out.loss_dict["cls"] == pytest.approx(float(expected_cls))
+    assert out.loss_dict["path0_aux_cls"] == pytest.approx(
+        float(expected_aux * aux_weight)
+    )
+
+
+def test_segmentation_head_path0_aux_loss_skipped_when_missing() -> None:
+    """Segmentation head should skip path0 auxiliary loss when key is absent."""
+    logits = torch.tensor([[[[2.0, 0.0]], [[0.5, 1.5]]]], dtype=torch.float32)
+    targets = [
+        {
+            "classes": RasterImage(
+                torch.tensor([[[[0, 1]]]], dtype=torch.long), timestamps=None
+            ),
+            "valid": RasterImage(
+                torch.tensor([[[[1.0, 1.0]]]], dtype=torch.float32), timestamps=None
+            ),
+        }
+    ]
+    head = SegmentationHead(path0_aux_weight=0.5)
+    out = head(
+        intermediates=FeatureMaps([logits]),
+        context=ModelContext(inputs=[], metadatas=[]),
+        targets=targets,
+    )
+    assert "path0_aux_cls" not in out.loss_dict
+
+
 class TestSegmentationMetrics:
     """Tests for SegmentationTask.get_metrics() and metric computation.
 

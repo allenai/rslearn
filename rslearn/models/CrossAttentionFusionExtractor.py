@@ -51,6 +51,10 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         ffn_dropout: float = 0.0,
         pre_fusion_norm: bool = False,
         pre_fusion_dropout: float = 0.0,
+        path_dropout_prob: float = 0.0,
+        path_dropout_mode: Literal["zero"] = "zero",
+        path_dropout_rescale: bool = False,
+        path0_context_key: str = "path0_intermediate",
     ):
         """Create a CrossAttentionFusionExtractor.
 
@@ -78,6 +82,17 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
                 path output before fusion.
             pre_fusion_dropout: dropout probability applied to each path output
                 right before fusion.
+            path_dropout_prob: branch-level dropout probability applied
+                independently to each context path (paths 1+) per sample during
+                training. Path 0 is never dropped. Default ``0.0`` (disabled).
+            path_dropout_mode: branch dropout mode. Currently only ``"zero"``
+                is supported (dropped branches are zeroed).
+            path_dropout_rescale: if ``True``, surviving context branches are
+                scaled by ``1 / (1 - path_dropout_prob)`` during training to
+                preserve expectation. Default ``False``.
+            path0_context_key: key used to store path0 intermediate output in
+                ``context.context_dict`` for optional downstream auxiliary
+                supervision.
         """
         super().__init__()
 
@@ -139,6 +154,14 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
             raise ValueError(
                 f"pre_fusion_dropout must be in [0, 1), got {pre_fusion_dropout!r}"
             )
+        if not 0.0 <= path_dropout_prob < 1.0:
+            raise ValueError(
+                f"path_dropout_prob must be in [0, 1), got {path_dropout_prob!r}"
+            )
+        if path_dropout_mode != "zero":
+            raise ValueError(
+                f"Unknown path_dropout_mode '{path_dropout_mode}'. Expected 'zero'."
+            )
         if memory_hidden_dim is not None and memory_hidden_dim <= 0:
             raise ValueError(
                 f"memory_hidden_dim must be a positive int when set, got {memory_hidden_dim!r}"
@@ -167,6 +190,10 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         self.residual_dropout = residual_dropout
         self.post_fusion_mode = post_fusion_mode
         self.ffn_dropout = ffn_dropout
+        self.path_dropout_prob = path_dropout_prob
+        self.path_dropout_mode = path_dropout_mode
+        self.path_dropout_rescale = path_dropout_rescale
+        self.path0_context_key = path0_context_key
 
         self.query_in_proj = torch.nn.Linear(self._primary_channels, attention_dim)
         self.cross_attn_norm = torch.nn.LayerNorm(attention_dim)
@@ -266,6 +293,57 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
             else:
                 result.append(out)
         return result
+
+    def _apply_context_path_dropout(
+        self, outputs: list[Any]
+    ) -> tuple[list[Any], list[torch.Tensor] | None]:
+        """Apply branch-level dropout to paths 1+ and return per-path keep masks.
+
+        Returns:
+            A tuple ``(outputs_after_dropout, masks)`` where ``masks`` is either
+            ``None`` (dropout inactive) or one boolean tensor per context path
+            (paths 1+) with shape ``[B]`` indicating which samples kept that path.
+        """
+        if (
+            not self.training
+            or self.path_dropout_prob <= 0.0
+            or len(outputs) <= 1
+            or self.path_dropout_mode != "zero"
+        ):
+            return outputs, None
+
+        keep_prob = 1.0 - self.path_dropout_prob
+        scale = (
+            1.0 / keep_prob if (self.path_dropout_rescale and keep_prob > 0.0) else 1.0
+        )
+        dropped: list[Any] = [outputs[0]]
+        path_masks: list[torch.Tensor] = []
+        for out in outputs[1:]:
+            if isinstance(out, FeatureVector):
+                vec = out.feature_vector
+                keep_mask = (
+                    torch.rand((vec.shape[0], 1), device=vec.device)
+                    >= self.path_dropout_prob
+                ).to(vec.dtype)
+                dropped.append(FeatureVector(feature_vector=vec * keep_mask * scale))
+                path_masks.append(keep_mask[:, 0].to(torch.bool))
+            elif isinstance(out, FeatureMaps):
+                ref = out.feature_maps[0]
+                keep_mask = (
+                    torch.rand((ref.shape[0], 1, 1, 1), device=ref.device)
+                    >= self.path_dropout_prob
+                ).to(ref.dtype)
+                dropped.append(
+                    FeatureMaps(
+                        feature_maps=[
+                            fmap * keep_mask * scale for fmap in out.feature_maps
+                        ]
+                    )
+                )
+                path_masks.append(keep_mask[:, 0, 0, 0].to(torch.bool))
+            else:
+                dropped.append(out)
+        return dropped, path_masks
 
     @staticmethod
     def _validate_feature_map_scales(outputs: list[FeatureMaps]) -> int:
@@ -403,6 +481,9 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         """Run all paths and fuse path outputs with context-memory cross-attention."""
         outputs = [self._run_path(path, context) for path in self.paths]
         outputs = self._normalize_outputs(outputs)
+        outputs, path_dropout_masks = self._apply_context_path_dropout(outputs)
+        context.context_dict["path_dropout_masks"] = path_dropout_masks
+        context.context_dict[self.path0_context_key] = outputs[0]
 
         first_type = type(outputs[0])
         for i, out in enumerate(outputs):

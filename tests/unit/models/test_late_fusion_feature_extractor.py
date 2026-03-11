@@ -1,5 +1,6 @@
 """Tests for the rslearn.models.LateFusionFeatureExtractor module."""
 
+import pytest
 import torch
 
 from rslearn.models.component import FeatureExtractor, FeatureMaps, FeatureVector
@@ -158,3 +159,59 @@ def test_film_feature_maps_identity_at_init() -> None:
     assert isinstance(out, FeatureMaps)
     assert len(out.feature_maps) == 1
     torch.testing.assert_close(out.feature_maps[0], primary[0])
+
+
+def test_context_path_dropout_masks_context_vectors_and_preserves_path0(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Context path dropout should mask path 1+ and keep path 0 unchanged."""
+    vec_a = torch.randn(2, 3)
+    vec_b = torch.randn(2, 4)
+    model = LateFusionFeatureExtractor(
+        paths=[[_FixedVectorExtractor(vec_a)], [_FixedVectorExtractor(vec_b)]],
+        fusion_mode="concat",
+        path_dropout_prob=0.5,
+    )
+    model.train()
+    monkeypatch.setattr(
+        torch,
+        "rand",
+        lambda size, device=None: torch.zeros(size, device=device),
+    )
+
+    context = _dummy_context(batch_size=2)
+    out = model(context)
+    assert isinstance(out, FeatureVector)
+    torch.testing.assert_close(out.feature_vector[:, :3], vec_a)
+    torch.testing.assert_close(out.feature_vector[:, 3:], torch.zeros_like(vec_b))
+
+    stored = context.context_dict["path0_intermediate"]
+    assert isinstance(stored, FeatureVector)
+    torch.testing.assert_close(stored.feature_vector, vec_a)
+    masks = context.context_dict["path_dropout_masks"]
+    assert masks is not None
+    assert len(masks) == 1
+    assert torch.equal(masks[0], torch.zeros(2, dtype=torch.bool))
+
+
+def test_context_path_dropout_disabled_in_eval_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Context path dropout should be disabled when the module is in eval mode."""
+    vec_a = torch.randn(2, 3)
+    vec_b = torch.randn(2, 4)
+    model = LateFusionFeatureExtractor(
+        paths=[[_FixedVectorExtractor(vec_a)], [_FixedVectorExtractor(vec_b)]],
+        fusion_mode="concat",
+        path_dropout_prob=0.5,
+    )
+    model.eval()
+    monkeypatch.setattr(
+        torch,
+        "rand",
+        lambda size, device=None: torch.zeros(size, device=device),
+    )
+
+    out = model(_dummy_context(batch_size=2))
+    assert isinstance(out, FeatureVector)
+    torch.testing.assert_close(out.feature_vector, torch.cat([vec_a, vec_b], dim=1))

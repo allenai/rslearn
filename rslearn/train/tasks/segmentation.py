@@ -331,6 +331,8 @@ class SegmentationHead(Predictor):
         focal_loss_gamma: float = 2.0,
         loss_weights: tuple[float, float] = (1.0, 1.0),
         temperature: float = 1.0,
+        path0_aux_weight: float = 0.0,
+        path0_aux_context_key: str = "path0_intermediate",
     ):
         """Initialize a new SegmentationTask.
 
@@ -344,6 +346,10 @@ class SegmentationHead(Predictor):
                 classification loss (cross-entropy or focal) and dice loss
             temperature: temperature scaling for softmax, does not affect the loss,
                 only the predictor outputs
+            path0_aux_weight: optional weight for an auxiliary segmentation loss
+                computed from path0 logits stored in ``context.context_dict``.
+            path0_aux_context_key: key used to read path0 intermediates from
+                ``context.context_dict``.
         """
         super().__init__()
         if weights is not None:
@@ -356,6 +362,52 @@ class SegmentationHead(Predictor):
         self.focal_loss_gamma = focal_loss_gamma
         self.loss_weights = loss_weights
         self.temperature = temperature
+        if path0_aux_weight < 0.0:
+            raise ValueError(f"path0_aux_weight must be >= 0, got {path0_aux_weight!r}")
+        self.path0_aux_weight = path0_aux_weight
+        self.path0_aux_context_key = path0_aux_context_key
+
+    def _compute_segmentation_losses(
+        self,
+        logits: torch.Tensor,
+        labels: torch.Tensor,
+        mask: torch.Tensor,
+        key_prefix: str = "",
+    ) -> dict[str, torch.Tensor]:
+        """Compute segmentation loss dict for one logits tensor."""
+        losses: dict[str, torch.Tensor] = {}
+        if self.focal_loss:
+            num_classes = logits.shape[1]
+            labels_one_hot = (
+                torch.nn.functional.one_hot(labels, num_classes)
+                .permute(0, 3, 1, 2)
+                .float()
+            )
+            per_pixel_loss = sigmoid_focal_loss(
+                logits,
+                labels_one_hot,
+                alpha=self.focal_loss_alpha,
+                gamma=self.focal_loss_gamma,
+                reduction="none",
+            ).sum(dim=1)
+        else:
+            per_pixel_loss = torch.nn.functional.cross_entropy(
+                logits, labels, weight=self.weights, reduction="none"
+            )
+
+        mask_sum = torch.sum(mask)
+        if mask_sum > 0:
+            cls_loss = torch.sum(per_pixel_loss * mask) / mask_sum
+        else:
+            cls_loss = torch.sum(per_pixel_loss * mask)
+        losses[f"{key_prefix}cls"] = cls_loss * self.loss_weights[0]
+
+        if self.dice_loss:
+            softmax_woT = torch.nn.functional.softmax(logits, dim=1)
+            dice_loss = DiceLoss()(softmax_woT, labels, mask)
+            losses[f"{key_prefix}dice"] = dice_loss * self.loss_weights[1]
+
+        return losses
 
     def forward(
         self,
@@ -394,43 +446,35 @@ class SegmentationHead(Predictor):
             mask = torch.stack(
                 [target["valid"].get_hw_tensor() for target in targets], dim=0
             )
+            losses.update(self._compute_segmentation_losses(logits, labels, mask))
 
-            if self.focal_loss:
-                # Convert labels to one-hot for focal loss
-                num_classes = logits.shape[1]
-                labels_one_hot = (
-                    torch.nn.functional.one_hot(labels, num_classes)
-                    .permute(0, 3, 1, 2)
-                    .float()
+            if self.path0_aux_weight > 0.0:
+                path0_intermediate = context.context_dict.get(
+                    self.path0_aux_context_key
                 )
-                per_pixel_loss = sigmoid_focal_loss(
-                    logits,
-                    labels_one_hot,
-                    alpha=self.focal_loss_alpha,
-                    gamma=self.focal_loss_gamma,
-                    reduction="none",
-                )
-                # Sum over classes dimension to get per-pixel loss
-                per_pixel_loss = per_pixel_loss.sum(dim=1)
-            else:
-                per_pixel_loss = torch.nn.functional.cross_entropy(
-                    logits, labels, weight=self.weights, reduction="none"
-                )
-
-            mask_sum = torch.sum(mask)
-            if mask_sum > 0:
-                # Compute average loss over valid pixels.
-                cls_loss = torch.sum(per_pixel_loss * mask) / torch.sum(mask)
-            else:
-                # If there are no valid pixels, we avoid dividing by zero and just let
-                # the summed mask loss be zero.
-                cls_loss = torch.sum(per_pixel_loss * mask)
-            losses["cls"] = cls_loss * self.loss_weights[0]
-
-            if self.dice_loss:
-                softmax_woT = torch.nn.functional.softmax(logits, dim=1)
-                dice_loss = DiceLoss()(softmax_woT, labels, mask)
-                losses["dice"] = dice_loss * self.loss_weights[1]
+                if path0_intermediate is not None:
+                    if not isinstance(path0_intermediate, FeatureMaps):
+                        raise ValueError(
+                            "Expected path0 auxiliary intermediate to be FeatureMaps, "
+                            f"got {type(path0_intermediate).__name__}."
+                        )
+                    if len(path0_intermediate.feature_maps) != 1:
+                        raise ValueError(
+                            "Path0 auxiliary intermediate for segmentation must contain "
+                            "exactly one feature map."
+                        )
+                    path0_logits = path0_intermediate.feature_maps[0]
+                    if path0_logits.shape != logits.shape:
+                        raise ValueError(
+                            "Path0 auxiliary logits shape must match fused logits shape. "
+                            f"Got path0 {tuple(path0_logits.shape)} vs "
+                            f"fused {tuple(logits.shape)}."
+                        )
+                    aux_losses = self._compute_segmentation_losses(
+                        path0_logits, labels, mask, key_prefix="path0_aux_"
+                    )
+                    for loss_name, loss_value in aux_losses.items():
+                        losses[loss_name] = loss_value * self.path0_aux_weight
 
         return ModelOutput(
             outputs=outputs,

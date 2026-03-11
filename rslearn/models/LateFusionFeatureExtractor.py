@@ -1,7 +1,7 @@
 """Late-fusion feature extractor supporting concatenation, GLU-style gating, modality mixing, and FiLM conditioning."""
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 import torch
 import torch.nn.functional as F
@@ -59,6 +59,10 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         film_hidden_dim: int | None = None,
         pre_fusion_norm: bool = False,
         pre_fusion_dropout: float = 0.0,
+        path_dropout_prob: float = 0.0,
+        path_dropout_mode: Literal["zero"] = "zero",
+        path_dropout_rescale: bool = False,
+        path0_context_key: str = "path0_intermediate",
     ):
         """Create a new LateFusionFeatureExtractor.
 
@@ -113,6 +117,17 @@ class LateFusionFeatureExtractor(FeatureExtractor):
                 right before fusion (after optional ``pre_fusion_norm``).
                 Applied to both ``FeatureMaps`` and ``FeatureVector`` outputs.
                 Default ``0.0`` (no dropout).
+            path_dropout_prob: branch-level dropout probability applied
+                independently to each context path (paths 1+) per sample during
+                training. Path 0 is never dropped. Default ``0.0`` (disabled).
+            path_dropout_mode: branch dropout mode. Currently only ``"zero"``
+                is supported (dropped branches are zeroed).
+            path_dropout_rescale: if ``True``, surviving context branches are
+                scaled by ``1 / (1 - path_dropout_prob)`` during training to
+                preserve expectation. Default ``False``.
+            path0_context_key: key used to store path0 intermediate output in
+                ``context.context_dict`` for optional downstream auxiliary
+                supervision.
         """
         super().__init__()
 
@@ -225,6 +240,18 @@ class LateFusionFeatureExtractor(FeatureExtractor):
                 f"pre_fusion_dropout must be in [0, 1), got {pre_fusion_dropout!r}"
             )
         self.pre_fusion_dropout = pre_fusion_dropout
+        if not 0.0 <= path_dropout_prob < 1.0:
+            raise ValueError(
+                f"path_dropout_prob must be in [0, 1), got {path_dropout_prob!r}"
+            )
+        if path_dropout_mode != "zero":
+            raise ValueError(
+                f"Unknown path_dropout_mode '{path_dropout_mode}'. Expected 'zero'."
+            )
+        self.path_dropout_prob = path_dropout_prob
+        self.path_dropout_mode = path_dropout_mode
+        self.path_dropout_rescale = path_dropout_rescale
+        self.path0_context_key = path0_context_key
         if pre_fusion_norm:
             if path_output_channels is None:
                 raise ValueError(
@@ -372,24 +399,28 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         """
         self._film_primary_channels = path_output_channels[0]
         self._film_context_channels = sum(path_output_channels[1:])
+        self._film_num_context_paths = max(0, len(path_output_channels) - 1)
+        self._film_conditioning_dim = (
+            self._film_context_channels + self._film_num_context_paths
+        )
 
         if film_hidden_dim is not None and film_hidden_dim > 0:
             self.film_gamma = torch.nn.Sequential(
-                torch.nn.Linear(self._film_context_channels, film_hidden_dim),
+                torch.nn.Linear(self._film_conditioning_dim, film_hidden_dim),
                 torch.nn.ReLU(inplace=True),
                 torch.nn.Linear(film_hidden_dim, self._film_primary_channels),
             )
             self.film_beta = torch.nn.Sequential(
-                torch.nn.Linear(self._film_context_channels, film_hidden_dim),
+                torch.nn.Linear(self._film_conditioning_dim, film_hidden_dim),
                 torch.nn.ReLU(inplace=True),
                 torch.nn.Linear(film_hidden_dim, self._film_primary_channels),
             )
         else:
             self.film_gamma = torch.nn.Linear(
-                self._film_context_channels, self._film_primary_channels
+                self._film_conditioning_dim, self._film_primary_channels
             )
             self.film_beta = torch.nn.Linear(
-                self._film_context_channels, self._film_primary_channels
+                self._film_conditioning_dim, self._film_primary_channels
             )
 
         self._init_film_weights()
@@ -510,6 +541,59 @@ class LateFusionFeatureExtractor(FeatureExtractor):
             else:
                 result.append(out)
         return result
+
+    def _apply_context_path_dropout(
+        self, outputs: list[Any]
+    ) -> tuple[list[Any], list[torch.Tensor] | None]:
+        """Apply branch-level dropout to paths 1+ and return per-path keep masks.
+
+        Returns:
+            A tuple ``(outputs_after_dropout, masks)`` where ``masks`` is either
+            ``None`` (dropout inactive) or one boolean tensor per context path
+            (paths 1+) with shape ``[B]`` indicating which samples kept that path.
+        """
+        if (
+            not self.training
+            or self.path_dropout_prob <= 0.0
+            or len(outputs) <= 1
+            or self.path_dropout_mode != "zero"
+        ):
+            return outputs, None
+
+        keep_prob = 1.0 - self.path_dropout_prob
+        scale = (
+            1.0 / keep_prob if (self.path_dropout_rescale and keep_prob > 0.0) else 1.0
+        )
+        out_after_drop: list[Any] = [outputs[0]]
+        path_masks: list[torch.Tensor] = []
+        for out in outputs[1:]:
+            if isinstance(out, FeatureVector):
+                vec = out.feature_vector
+                keep_mask = (
+                    torch.rand((vec.shape[0], 1), device=vec.device)
+                    >= self.path_dropout_prob
+                ).to(vec.dtype)
+                out_after_drop.append(
+                    FeatureVector(feature_vector=vec * keep_mask * scale)
+                )
+                path_masks.append(keep_mask[:, 0].to(torch.bool))
+            elif isinstance(out, FeatureMaps):
+                ref = out.feature_maps[0]
+                keep_mask = (
+                    torch.rand((ref.shape[0], 1, 1, 1), device=ref.device)
+                    >= self.path_dropout_prob
+                ).to(ref.dtype)
+                out_after_drop.append(
+                    FeatureMaps(
+                        feature_maps=[
+                            fmap * keep_mask * scale for fmap in out.feature_maps
+                        ]
+                    )
+                )
+                path_masks.append(keep_mask[:, 0, 0, 0].to(torch.bool))
+            else:
+                out_after_drop.append(out)
+        return out_after_drop, path_masks
 
     # ------------------------------------------------------------------
     # Validation
@@ -642,7 +726,11 @@ class LateFusionFeatureExtractor(FeatureExtractor):
     # Modality-weighted mixing fusion
     # ------------------------------------------------------------------
 
-    def _mixing_feature_maps(self, outputs: list[FeatureMaps]) -> FeatureMaps:
+    def _mixing_feature_maps(
+        self,
+        outputs: list[FeatureMaps],
+        path_dropout_masks: list[torch.Tensor] | None = None,
+    ) -> FeatureMaps:
         """Apply per-channel modality mixing to a list of FeatureMaps.
 
         At each scale:
@@ -670,6 +758,12 @@ class LateFusionFeatureExtractor(FeatureExtractor):
 
             # Project each path to the common output dimension.
             projs = [self.mixing_projs[p][s](maps_at_scale[p]) for p in range(n_paths)]
+            if path_dropout_masks is not None:
+                for p in range(1, n_paths):
+                    m = path_dropout_masks[p - 1].to(
+                        device=projs[p].device, dtype=projs[p].dtype
+                    )
+                    projs[p] = projs[p] * m[:, None, None, None]
             proj_stack = torch.stack(projs, dim=1)  # B × N × C_out × H × W
 
             # Gate operates on projected (uniform-dim) features.
@@ -680,13 +774,26 @@ class LateFusionFeatureExtractor(FeatureExtractor):
             # B × (N·C_out) × H × W → B × N × C_out × H × W
             gate_logits = self.mixing_gate[s](concat)
             gate_logits = gate_logits.view(b, n_paths, out_ch, h, w)
+            path_presence = self._path_presence_mask(
+                batch_size=b,
+                n_paths=n_paths,
+                device=gate_logits.device,
+                path_dropout_masks=path_dropout_masks,
+            )
+            gate_logits = gate_logits.masked_fill(
+                ~path_presence.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1), -1e9
+            )
             gate_weights = torch.softmax(gate_logits, dim=1)
 
             fused_maps.append((gate_weights * proj_stack).sum(dim=1))
 
         return FeatureMaps(fused_maps)
 
-    def _mixing_feature_vectors(self, outputs: list[FeatureVector]) -> FeatureVector:
+    def _mixing_feature_vectors(
+        self,
+        outputs: list[FeatureVector],
+        path_dropout_masks: list[torch.Tensor] | None = None,
+    ) -> FeatureVector:
         """Apply per-channel modality mixing to a list of FeatureVectors.
 
         Steps:
@@ -702,6 +809,12 @@ class LateFusionFeatureExtractor(FeatureExtractor):
 
         # Project each path to the common output dimension.
         projs = [self.mixing_projs[p](vecs[p]) for p in range(n_paths)]
+        if path_dropout_masks is not None:
+            for p in range(1, n_paths):
+                m = path_dropout_masks[p - 1].to(
+                    device=projs[p].device, dtype=projs[p].dtype
+                )
+                projs[p] = projs[p] * m.unsqueeze(1)
         proj_stack = torch.stack(projs, dim=1)  # B × N × C_out
 
         # Gate operates on projected (uniform-dim) features.
@@ -711,6 +824,13 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         b = concat.shape[0]
         # B × (N·C_out) → B × N × C_out
         gate_logits = self.mixing_gate(concat).view(b, n_paths, out_ch)
+        path_presence = self._path_presence_mask(
+            batch_size=b,
+            n_paths=n_paths,
+            device=gate_logits.device,
+            path_dropout_masks=path_dropout_masks,
+        )
+        gate_logits = gate_logits.masked_fill(~path_presence.unsqueeze(-1), -1e9)
         gate_weights = torch.softmax(gate_logits, dim=1)
 
         fused = (gate_weights * proj_stack).sum(dim=1)
@@ -737,7 +857,11 @@ class LateFusionFeatureExtractor(FeatureExtractor):
                 context_vecs.append(fmap.mean(dim=[2, 3]))
         return torch.cat(context_vecs, dim=1)
 
-    def _film_feature_maps(self, outputs: list[FeatureMaps]) -> FeatureMaps:
+    def _film_feature_maps(
+        self,
+        outputs: list[FeatureMaps],
+        path_dropout_masks: list[torch.Tensor] | None = None,
+    ) -> FeatureMaps:
         """Apply FiLM conditioning to the primary path's FeatureMaps.
 
         Path 0 is modulated by context derived from paths 1+:
@@ -749,6 +873,10 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         primary = outputs[0]
 
         context = self._extract_context_vector(outputs)
+        context = self._append_context_presence_flags(
+            context=context,
+            path_dropout_masks=path_dropout_masks,
+        )
         context = self._apply_gate_dropout(context)
 
         gamma = self.film_gamma(context)  # [B, C_primary]
@@ -764,7 +892,11 @@ class LateFusionFeatureExtractor(FeatureExtractor):
 
         return FeatureMaps(fused_maps)
 
-    def _film_feature_vectors(self, outputs: list[FeatureVector]) -> FeatureVector:
+    def _film_feature_vectors(
+        self,
+        outputs: list[FeatureVector],
+        path_dropout_masks: list[torch.Tensor] | None = None,
+    ) -> FeatureVector:
         """Apply FiLM conditioning to the primary path's FeatureVector.
 
         Path 0 is modulated by context derived from paths 1+:
@@ -773,6 +905,10 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         primary_vec = outputs[0].feature_vector
         context_vecs = [o.feature_vector for o in outputs[1:]]
         context = torch.cat(context_vecs, dim=1)  # [B, sum(context_channels)]
+        context = self._append_context_presence_flags(
+            context=context,
+            path_dropout_masks=path_dropout_masks,
+        )
         context = self._apply_gate_dropout(context)
 
         gamma = self.film_gamma(context)  # [B, C_primary]
@@ -783,6 +919,49 @@ class LateFusionFeatureExtractor(FeatureExtractor):
     # ------------------------------------------------------------------
     # Forward
     # ------------------------------------------------------------------
+
+    def _path_presence_mask(
+        self,
+        batch_size: int,
+        n_paths: int,
+        device: torch.device,
+        path_dropout_masks: list[torch.Tensor] | None,
+    ) -> torch.Tensor:
+        """Build a boolean mask [B, N] indicating which paths are present."""
+        path_presence = torch.ones(
+            (batch_size, n_paths), device=device, dtype=torch.bool
+        )
+        if path_dropout_masks is None:
+            return path_presence
+        for context_path_idx, mask in enumerate(path_dropout_masks, start=1):
+            path_presence[:, context_path_idx] = mask.to(
+                device=device, dtype=torch.bool
+            )
+        return path_presence
+
+    def _append_context_presence_flags(
+        self,
+        context: torch.Tensor,
+        path_dropout_masks: list[torch.Tensor] | None,
+    ) -> torch.Tensor:
+        """Append one 0/1 presence flag per context path to the FiLM context vector."""
+        b = context.shape[0]
+        n_context = len(self.paths) - 1
+        if n_context == 0:
+            return context
+        if path_dropout_masks is None:
+            flags = torch.ones(
+                (b, n_context), device=context.device, dtype=context.dtype
+            )
+        else:
+            flags = torch.stack(
+                [
+                    m.to(device=context.device, dtype=context.dtype)
+                    for m in path_dropout_masks
+                ],
+                dim=1,
+            )
+        return torch.cat([context, flags], dim=1)
 
     def forward(self, context: ModelContext) -> FeatureMaps | FeatureVector:
         """Run all encoder paths and fuse their outputs.
@@ -802,6 +981,9 @@ class LateFusionFeatureExtractor(FeatureExtractor):
 
         # Normalise each path's output before fusion (no-op when disabled).
         outputs = self._normalize_outputs(outputs)
+        outputs, path_dropout_masks = self._apply_context_path_dropout(outputs)
+        context.context_dict["path_dropout_masks"] = path_dropout_masks
+        context.context_dict[self.path0_context_key] = outputs[0]
 
         # All outputs must be the same type.
         first_type = type(outputs[0])
@@ -818,9 +1000,13 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         # FiLM mode: no gated-output validation needed (output dim = primary path dim)
 
         if isinstance(outputs[0], FeatureMaps):
-            result: FeatureMaps | FeatureVector = self._fuse_feature_maps(outputs)  # type: ignore[arg-type]
+            result: FeatureMaps | FeatureVector = self._fuse_feature_maps(
+                outputs, path_dropout_masks=path_dropout_masks
+            )
         elif isinstance(outputs[0], FeatureVector):
-            result = self._fuse_feature_vectors(outputs)  # type: ignore[arg-type]
+            result = self._fuse_feature_vectors(
+                outputs, path_dropout_masks=path_dropout_masks
+            )
         else:
             raise TypeError(
                 f"LateFusionFeatureExtractor only supports FeatureMaps and "
@@ -829,22 +1015,36 @@ class LateFusionFeatureExtractor(FeatureExtractor):
 
         return result
 
-    def _fuse_feature_maps(self, outputs: list[FeatureMaps]) -> FeatureMaps:
+    def _fuse_feature_maps(
+        self,
+        outputs: list[FeatureMaps],
+        path_dropout_masks: list[torch.Tensor] | None = None,
+    ) -> FeatureMaps:
         """Dispatch to the correct FeatureMaps fusion method."""
         if self.fusion_mode == "concat":
             return self._concat_feature_maps(outputs)
         if self.fusion_mode == "gated":
             return self._gated_feature_maps(outputs)
         if self.fusion_mode == "film":
-            return self._film_feature_maps(outputs)
-        return self._mixing_feature_maps(outputs)
+            return self._film_feature_maps(
+                outputs, path_dropout_masks=path_dropout_masks
+            )
+        return self._mixing_feature_maps(outputs, path_dropout_masks=path_dropout_masks)
 
-    def _fuse_feature_vectors(self, outputs: list[FeatureVector]) -> FeatureVector:
+    def _fuse_feature_vectors(
+        self,
+        outputs: list[FeatureVector],
+        path_dropout_masks: list[torch.Tensor] | None = None,
+    ) -> FeatureVector:
         """Dispatch to the correct FeatureVector fusion method."""
         if self.fusion_mode == "concat":
             return self._concat_feature_vectors(outputs)
         if self.fusion_mode == "gated":
             return self._gated_feature_vectors(outputs)
         if self.fusion_mode == "film":
-            return self._film_feature_vectors(outputs)
-        return self._mixing_feature_vectors(outputs)
+            return self._film_feature_vectors(
+                outputs, path_dropout_masks=path_dropout_masks
+            )
+        return self._mixing_feature_vectors(
+            outputs, path_dropout_masks=path_dropout_masks
+        )

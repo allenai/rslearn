@@ -176,3 +176,56 @@ def test_cross_attention_alpha_defaults_to_scalar_zero() -> None:
     )
     assert model.cross_attn_alpha.ndim == 0
     assert float(model.cross_attn_alpha.detach().cpu().item()) == 0.0
+
+
+def test_context_path_dropout_masks_context_vectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Context path dropout should mask path 1+ and keep path 0 unchanged."""
+    primary = torch.randn(2, 6)
+    context = torch.randn(2, 4)
+    model = CrossAttentionFusionExtractor(
+        paths=[[_FixedVectorExtractor(primary)], [_FixedVectorExtractor(context)]],
+        path_output_channels=[6, 4],
+        attention_dim=8,
+        num_heads=4,
+        path_dropout_prob=0.5,
+    )
+    model.train()
+    monkeypatch.setattr(
+        torch,
+        "rand",
+        lambda size, device=None: torch.zeros(size, device=device),
+    )
+
+    dropped, masks = model._apply_context_path_dropout(
+        [
+            FeatureVector(feature_vector=primary.clone()),
+            FeatureVector(feature_vector=context.clone()),
+        ]
+    )
+    assert isinstance(dropped[0], FeatureVector)
+    assert isinstance(dropped[1], FeatureVector)
+    torch.testing.assert_close(dropped[0].feature_vector, primary)
+    torch.testing.assert_close(dropped[1].feature_vector, torch.zeros_like(context))
+    assert masks is not None
+    assert len(masks) == 1
+    assert torch.equal(masks[0], torch.zeros(2, dtype=torch.bool))
+
+
+def test_forward_stores_path0_intermediate_in_context() -> None:
+    """Forward should store the path0 intermediate in context.context_dict."""
+    primary = torch.randn(2, 6)
+    context_vec = torch.randn(2, 4)
+    model = CrossAttentionFusionExtractor(
+        paths=[[_FixedVectorExtractor(primary)], [_FixedVectorExtractor(context_vec)]],
+        path_output_channels=[6, 4],
+        attention_dim=8,
+        num_heads=4,
+    )
+
+    context = _dummy_context(batch_size=2)
+    _ = model(context)
+    stored = context.context_dict["path0_intermediate"]
+    assert isinstance(stored, FeatureVector)
+    torch.testing.assert_close(stored.feature_vector, primary)
