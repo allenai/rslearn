@@ -28,7 +28,7 @@ _GATED_MODES = ("gated", "mixing")
 class LateFusionFeatureExtractor(FeatureExtractor):
     """Late-fusion feature extractor that runs parallel encoder paths and fuses their outputs.
 
-    Supports four fusion modes:
+    Supports five fusion modes:
 
     - ``"concat"`` (default): simple concatenation along the channel dimension.
     - ``"gated"`` (GLU-style): learns to gate the fused representation via
@@ -44,6 +44,12 @@ class LateFusionFeatureExtractor(FeatureExtractor):
       primary features: ``output = (1 + γ) ⊙ primary + β``.  Initialised so that
       γ ≈ 0 and β ≈ 0 (identity at start), meaning training begins from the
       primary-only baseline.
+    - ``"logit_residual"``: conservative residual fusion for binary/multi-logit
+      or feature-map settings where path 0 is a strong baseline (e.g. S2-only)
+      and path 1 predicts a correction.  The fused output is
+      ``z_final = z_primary + alpha * delta_z``.
+      Supports both ``FeatureVector`` and ``FeatureMaps`` outputs (channel
+      dimensions must match across paths).
     """
 
     def __init__(
@@ -57,6 +63,7 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         path_output_channels: list[int] | None = None,
         mixing_gate_hidden_dim: int | None = None,
         film_hidden_dim: int | None = None,
+        logit_residual_alpha: float = 0.1,
         pre_fusion_norm: bool = False,
         pre_fusion_dropout: float = 0.0,
         path_dropout_prob: float = 0.0,
@@ -109,6 +116,9 @@ class LateFusionFeatureExtractor(FeatureExtractor):
             film_hidden_dim: optional hidden dimension for the FiLM gamma/beta
                 MLPs.  If ``None`` (default), a single linear layer is used.
                 Only relevant when ``fusion_mode="film"``.
+            logit_residual_alpha: scalar multiplier applied to the correction
+                logit in ``"logit_residual"`` mode:
+                ``z_final = z_primary + alpha * delta_z``.
             pre_fusion_norm: if ``True``, apply a learned ``LayerNorm`` to
                 each path's output before fusion (requires
                 ``path_output_channels``).  Default ``False``.
@@ -155,6 +165,11 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         self.gate_init_bias = gate_init_bias
         self.gate_dropout = gate_dropout
         self.mixing_gate_hidden_dim = mixing_gate_hidden_dim
+        if logit_residual_alpha < 0.0:
+            raise ValueError(
+                f"logit_residual_alpha must be >= 0, got {logit_residual_alpha!r}"
+            )
+        self.logit_residual_alpha = float(logit_residual_alpha)
 
         if gate_activation not in _GATE_ACTIVATIONS:
             raise ValueError(
@@ -224,10 +239,17 @@ class LateFusionFeatureExtractor(FeatureExtractor):
                 )
             self._build_film_layers(path_output_channels, film_hidden_dim)
 
+        elif fusion_mode == "logit_residual":
+            if len(paths) != 2:
+                raise ValueError(
+                    "fusion_mode='logit_residual' requires exactly two paths: "
+                    "path 0 for baseline logits and path 1 for residual logits."
+                )
+
         elif fusion_mode != "concat":
             raise ValueError(
                 f"Unknown fusion_mode '{fusion_mode}'. "
-                f"Expected 'concat', 'gated', 'mixing', or 'film'."
+                f"Expected 'concat', 'gated', 'mixing', 'film', or 'logit_residual'."
             )
 
         # -- Pre-fusion normalisation -----------------------------------------
@@ -1008,6 +1030,8 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         path_dropout_masks: list[torch.Tensor] | None = None,
     ) -> FeatureMaps:
         """Dispatch to the correct FeatureMaps fusion method."""
+        if self.fusion_mode == "logit_residual":
+            return self._logit_residual_feature_maps(outputs)
         if self.fusion_mode == "concat":
             return self._concat_feature_maps(outputs)
         if self.fusion_mode == "gated":
@@ -1024,6 +1048,8 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         path_dropout_masks: list[torch.Tensor] | None = None,
     ) -> FeatureVector:
         """Dispatch to the correct FeatureVector fusion method."""
+        if self.fusion_mode == "logit_residual":
+            return self._logit_residual_feature_vectors(outputs)
         if self.fusion_mode == "concat":
             return self._concat_feature_vectors(outputs)
         if self.fusion_mode == "gated":
@@ -1035,3 +1061,52 @@ class LateFusionFeatureExtractor(FeatureExtractor):
         return self._mixing_feature_vectors(
             outputs, path_dropout_masks=path_dropout_masks
         )
+
+    def _logit_residual_feature_vectors(
+        self,
+        outputs: list[FeatureVector],
+    ) -> FeatureVector:
+        """Conservative residual-logit fusion: ``z = z_primary + alpha * delta``."""
+        if len(outputs) != 2:
+            raise ValueError(
+                "fusion_mode='logit_residual' expects exactly two FeatureVector "
+                "outputs (primary, residual)."
+            )
+        primary = outputs[0].feature_vector
+        residual = outputs[1].feature_vector
+        if primary.shape != residual.shape:
+            raise ValueError(
+                "fusion_mode='logit_residual' requires matching vector shapes for "
+                f"primary and residual logits, got {tuple(primary.shape)} and "
+                f"{tuple(residual.shape)}."
+            )
+        fused = primary + self.logit_residual_alpha * residual
+        return FeatureVector(feature_vector=fused)
+
+    def _logit_residual_feature_maps(
+        self,
+        outputs: list[FeatureMaps],
+    ) -> FeatureMaps:
+        """Conservative residual fusion for FeatureMaps: ``z = z_primary + alpha * delta``.
+
+        Both paths must produce feature maps with identical spatial dimensions
+        **and** channel counts at every scale.
+        """
+        if len(outputs) != 2:
+            raise ValueError(
+                "fusion_mode='logit_residual' expects exactly two FeatureMaps "
+                "outputs (primary, residual)."
+            )
+        n_scales = self._validate_feature_map_scales(outputs)
+        fused_maps: list[torch.Tensor] = []
+        for s in range(n_scales):
+            primary = outputs[0].feature_maps[s]
+            residual = outputs[1].feature_maps[s]
+            if primary.shape[1] != residual.shape[1]:
+                raise ValueError(
+                    "fusion_mode='logit_residual' requires matching channel "
+                    f"dimensions at scale {s}, got {primary.shape[1]} and "
+                    f"{residual.shape[1]}."
+                )
+            fused_maps.append(primary + self.logit_residual_alpha * residual)
+        return FeatureMaps(fused_maps)

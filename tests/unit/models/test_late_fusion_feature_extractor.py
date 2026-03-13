@@ -161,6 +161,39 @@ def test_film_feature_maps_identity_at_init() -> None:
     torch.testing.assert_close(out.feature_maps[0], primary[0])
 
 
+def test_logit_residual_feature_vectors_applies_scaled_correction() -> None:
+    """Logit residual mode should implement z_final = z_primary + alpha * delta."""
+    primary = torch.tensor([[1.0], [-2.0]])
+    delta = torch.tensor([[0.5], [4.0]])
+    alpha = 0.2
+    model = LateFusionFeatureExtractor(
+        paths=[[_FixedVectorExtractor(primary)], [_FixedVectorExtractor(delta)]],
+        fusion_mode="logit_residual",
+        logit_residual_alpha=alpha,
+    )
+
+    out = model(_dummy_context(batch_size=2))
+    assert isinstance(out, FeatureVector)
+    expected = primary + alpha * delta
+    torch.testing.assert_close(out.feature_vector, expected)
+
+
+def test_logit_residual_feature_maps_applies_scaled_correction() -> None:
+    """Logit residual mode should implement z_final = z_primary + alpha * delta on FeatureMaps."""
+    primary = [torch.randn(2, 4, 8, 8)]
+    delta = [torch.randn(2, 4, 8, 8)]
+    alpha = 0.1
+    model = LateFusionFeatureExtractor(
+        paths=[[_FixedMapsExtractor(primary)], [_FixedMapsExtractor(delta)]],
+        fusion_mode="logit_residual",
+        logit_residual_alpha=alpha,
+    )
+    out = model(_dummy_context(batch_size=2))
+    assert isinstance(out, FeatureMaps)
+    expected = primary[0] + alpha * delta[0]
+    torch.testing.assert_close(out.feature_maps[0], expected)
+
+
 def test_context_path_dropout_masks_context_vectors_and_preserves_path0(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
