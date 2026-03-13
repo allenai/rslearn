@@ -3,28 +3,24 @@
 from __future__ import annotations
 
 import base64
-import json
 import math
 import os
-import tempfile
-import time as time_mod
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import rasterio
 import shapely
 import xarray as xr
-from rasterio.transform import from_origin
-from upath import UPath
+from rasterio.crs import CRS
 
 from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_EPSG, WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
-from rslearn.utils.geometry import STGeometry
+from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
+from rslearn.utils.raster_array import RasterArray
 
 logger = get_logger(__name__)
 
@@ -66,9 +62,13 @@ def _snap_bounds_outward(
 ) -> tuple[float, float, float, float]:
     """Snap lon/lat bounds outward to a fixed grid.
 
-    ERA5(-Land) datasets are provided on a regular 0.1° lat/lon grid. When a window is
-    much smaller than the grid spacing, its geographic bounds may not contain any grid
-    *centers*, which leads to empty `xarray.sel(..., slice(...))` selections.
+    ERA5-Land values are defined on a regular 0.1-degree lat/lon grid, while each
+    source chunk typically spans a much larger spatial extent. Chunk overlap is
+    determined by first finding overlapping grid-cell centers and then mapping those
+    cell indices to chunk IDs.
+
+    When a request window is much smaller than the grid spacing, its geographic bounds
+    may not contain any grid centers exactly.
 
     Snapping outward ensures at least one grid cell is selected when there is any
     overlap.
@@ -91,11 +91,24 @@ def _snap_bounds_outward(
     return (min_lon, min_lat, max_lon, max_lat)
 
 
+def _np_datetime64_to_utc(ts: np.datetime64) -> datetime:
+    """Convert a numpy datetime64 to a timezone-aware Python datetime (UTC)."""
+    return pd.Timestamp(ts).to_pydatetime().replace(tzinfo=UTC)
+
+
 class ERA5LandDailyUTCv1(DataSource[Item]):
     """ERA5-Land daily UTC (v1) hosted on EarthDataHub.
 
-    This data source reads from the EarthDataHub Zarr store and writes daily GeoTIFFs
-    into the dataset tile store.
+    This data source reads from the EarthDataHub Zarr store and writes
+    multi-timestep GeoTIFFs into the dataset tile store.  Each item corresponds
+    to exactly one Zarr chunk (time × lat × lon), so only the chunks needed for
+    each window are fetched.
+
+    The recommended configuration uses ``SINGLE_COMPOSITE`` space mode with
+    ``SPATIAL_MOSAIC_TEMPORAL_STACK`` compositing method.  Materialization reads
+    all chunk items in a group, mosaics them spatially, stacks them temporally,
+    clips to the request time range, and produces a single ``(C, T, H, W)``
+    raster.
 
     Supported bands:
     - d2m: 2m dewpoint temperature (units: K)
@@ -142,8 +155,6 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
     }
     PIXEL_SIZE_DEGREES = 0.1
     DEFAULT_TIME_CHUNK_SIZE = 75
-    STALE_LOCK_TIMEOUT_SECONDS = 1800  # 30 minutes
-    LOCK_POLL_INTERVAL_SECONDS = 5
 
     def __init__(
         self,
@@ -161,14 +172,14 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                 provided via context, bands are inferred from that layer's band sets.
             zarr_url: URL/path to the EarthDataHub Zarr store.
             bounds: optional bounding box as [min_lon, min_lat, max_lon, max_lat]
-                in degrees (WGS84). For best performance, set bounds to your area of
-                interest.
+                in degrees (WGS84).  Currently accepted for backward compatibility
+                but not used; each window's geometry determines which chunks to
+                fetch.
             temperature_unit: units to return for `t2m` ("celsius" or "kelvin").
             trust_env: if True (default), allow the underlying HTTP client to read
                 environment configuration (including netrc) for auth/proxies.
             context: rslearn data source context.
         """
-        self._ds_path = context.ds_path
         self.zarr_url = zarr_url
         if bounds is not None:
             if len(bounds) != 4:
@@ -187,7 +198,6 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                     "ERA5LandDailyUTCv1 bounds must have min_lat <= max_lat "
                     f"(got bounds min_lat={min_lat}, max_lat={max_lat})."
                 )
-        self.bounds = bounds
         self.temperature_unit = temperature_unit
         self.trust_env = trust_env
 
@@ -259,120 +269,189 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
 
         return self._ds
 
-    # ------------------------------------------------------------------
-    # Chunk-level lock helpers
-    # ------------------------------------------------------------------
+    def _get_chunk_sizes(self) -> tuple[int, int, int]:
+        """Return ``(time, lat, lon)`` chunk sizes from the Zarr encoding.
 
-    def _chunk_lock_dir(self) -> UPath | None:
-        """Return the directory for chunk lock files, creating it if needed.
-
-        Returns ``None`` when ``ds_path`` is unavailable (e.g. external usage).
+        Raises:
+            ValueError: if the Zarr store does not expose 3-element chunk
+                metadata for the reference band.
         """
-        if self._ds_path is None:
+        ds = self._get_dataset()
+        ref_band = self.band_names[0]
+        chunks = ds[ref_band].encoding.get("chunks")
+
+        if chunks is None or len(chunks) != 3:
+            raise ValueError(
+                f"Expected 3D chunk encoding (time, lat, lon) for band "
+                f"'{ref_band}', got {chunks!r}. Ensure the Zarr store has "
+                f"explicit chunk metadata for all three dimensions."
+            )
+
+        return (int(chunks[0]), int(chunks[1]), int(chunks[2]))
+
+    # ------------------------------------------------------------------
+    # Spatial / temporal chunk overlap helpers
+    # ------------------------------------------------------------------
+
+    def _find_overlapping_time_chunks(
+        self,
+        time_vals: np.ndarray,
+        n_times: int,
+        time_cs: int,
+        start: datetime,
+        end: datetime,
+    ) -> range:
+        """Return the range of time-chunk IDs that overlap ``[start, end)``."""
+        start_floor = _floor_to_utc_day(start)
+        start_np = np.datetime64(start_floor.replace(tzinfo=None), "ns")
+        end_np = np.datetime64(end.replace(tzinfo=None), "ns")
+
+        start_idx = int(np.searchsorted(time_vals, start_np))
+        end_idx = int(np.searchsorted(time_vals, end_np, side="right"))
+        start_idx = max(0, min(start_idx, n_times - 1))
+        end_idx = max(start_idx + 1, min(end_idx, n_times))
+
+        first_chunk = start_idx // time_cs
+        last_chunk = (end_idx - 1) // time_cs
+        return range(first_chunk, last_chunk + 1)
+
+    def _find_overlapping_lat_chunks(
+        self,
+        lat_vals: np.ndarray,
+        lat_cs: int,
+        snap_min_lat: float,
+        snap_max_lat: float,
+    ) -> range | None:
+        """Return the range of lat-chunk IDs that overlap the latitude band.
+
+        Returns ``None`` if no grid cells fall within the band.
+        """
+        lat_mask = (lat_vals >= snap_min_lat) & (lat_vals <= snap_max_lat)
+        lat_indices = np.where(lat_mask)[0]
+        if len(lat_indices) == 0:
             return None
-        lock_dir = self._ds_path / ".era5_chunk_locks"
-        lock_dir.mkdir(parents=True, exist_ok=True)
-        return lock_dir
+        first = int(lat_indices[0]) // lat_cs
+        last = int(lat_indices[-1]) // lat_cs
+        return range(first, last + 1)
 
-    def _try_acquire_chunk_lock(self, chunk_id: int) -> bool:
-        """Try to atomically claim a chunk for downloading.
+    def _find_overlapping_lon_chunks(
+        self,
+        lon_vals: np.ndarray,
+        lon_cs: int,
+        snapped_bounds: tuple[float, float, float, float],
+    ) -> list[int]:
+        """Return sorted list of lon-chunk IDs that overlap the longitude range.
 
-        Uses ``os.open`` with ``O_CREAT | O_EXCL`` so that exactly one process
-        wins the race.  A timestamp is written inside the lock file to allow
-        stale-lock detection (see ``STALE_LOCK_TIMEOUT_SECONDS``).
-
-        Returns ``True`` if the lock was acquired (caller must download the
-        chunk and then call ``_release_chunk_lock``).  Returns ``True`` also
-        when locking is unavailable (no ``ds_path``, or the filesystem does not
-        support ``O_EXCL``), in which case the caller should just proceed.
+        Handles the [-180, 180) → [0, 360) conversion internally.
         """
-        lock_dir = self._chunk_lock_dir()
-        if lock_dir is None:
-            return True  # No coordination possible, just proceed.
+        lon_ranges = _bounds_to_lon_ranges_0_360(snapped_bounds)
+        chunk_ids: set[int] = set()
+        for lo, hi in lon_ranges:
+            lon_mask = (lon_vals >= lo) & (lon_vals <= hi)
+            lon_indices = np.where(lon_mask)[0]
+            if len(lon_indices) == 0:
+                continue
+            first = int(lon_indices[0]) // lon_cs
+            last = int(lon_indices[-1]) // lon_cs
+            for lc in range(first, last + 1):
+                chunk_ids.add(lc)
+        return sorted(chunk_ids)
 
-        lock_file = lock_dir / f"chunk_{chunk_id}.lock"
-        lock_path_str = str(lock_file)
-        try:
-            fd = os.open(lock_path_str, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(fd, str(time_mod.time()).encode())
-            os.close(fd)
-            return True
-        except FileExistsError:
-            # Another worker holds the lock.  Check for staleness.
-            try:
-                with open(lock_path_str) as f:
-                    ts = float(f.read().strip())
-                if time_mod.time() - ts > self.STALE_LOCK_TIMEOUT_SECONDS:
-                    logger.warning("Removing stale chunk lock: %s", lock_file)
-                    os.unlink(lock_path_str)
-                    return self._try_acquire_chunk_lock(chunk_id)
-            except (OSError, ValueError):
-                pass
-            return False
-        except OSError:
-            # Lock mechanism not supported (e.g. cloud storage).
-            logger.debug("Chunk locking not available, proceeding without coordination")
-            return True
-
-    def _release_chunk_lock(self, chunk_id: int) -> None:
-        """Delete the lock file for *chunk_id*."""
-        lock_dir = self._chunk_lock_dir()
-        if lock_dir is None:
-            return
-        lock_file = lock_dir / f"chunk_{chunk_id}.lock"
-        try:
-            os.unlink(str(lock_file))
-        except OSError:
-            pass
+    # ------------------------------------------------------------------
+    # get_items / ingest
+    # ------------------------------------------------------------------
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
     ) -> list[list[list[Item]]]:
-        """Get daily items intersecting the given geometries.
+        """Get chunk-level items intersecting the given geometries.
 
-        Returns one item per UTC day that intersects each requested geometry time
-        range.
+        Each item maps 1-to-1 to a single Zarr chunk identified by a
+        ``(time, lat, lon)`` chunk index triple.  Only the chunks that
+        spatially and temporally overlap each geometry are returned.
+
+        Use with ``SINGLE_COMPOSITE`` space mode and
+        ``SPATIAL_MOSAIC_TEMPORAL_STACK`` compositing so that
+        materialization can mosaic spatially and stack temporally.
         """
-        if query_config.space_mode != SpaceMode.MOSAIC:
-            raise ValueError("expected mosaic space mode in the query configuration")
+        if query_config.space_mode != SpaceMode.SINGLE_COMPOSITE:
+            raise ValueError(
+                "ERA5LandDailyUTCv1 requires SINGLE_COMPOSITE space mode "
+                f"(got {query_config.space_mode})"
+            )
 
-        # If bounds were not explicitly configured, compute them once from
-        # the union of all window geometries and persist to ds_path so that
-        # ingest() (which runs on a separate instance) can read them back.
-        if self.bounds is None:
-            min_lon = 180.0
-            min_lat = 90.0
-            max_lon = -180.0
-            max_lat = -90.0
-            for geom in geometries:
-                wgs84 = geom.to_projection(WGS84_PROJECTION)
-                b = wgs84.shp.bounds
-                min_lon = min(min_lon, b[0])
-                min_lat = min(min_lat, b[1])
-                max_lon = max(max_lon, b[2])
-                max_lat = max(max_lat, b[3])
-            self.bounds = [min_lon, min_lat, max_lon, max_lat]
-            self._persist_bounds()
+        ds = self._get_dataset()
+        time_vals = ds["valid_time"].values
+        lat_vals = ds["latitude"].values
+        lon_vals = ds["longitude"].values
+        n_times = len(time_vals)
+        n_lat = len(lat_vals)
+        n_lon = len(lon_vals)
+        time_cs, lat_cs, lon_cs = self._get_chunk_sizes()
 
-        min_lon, min_lat, max_lon, max_lat = self.bounds
-        item_shp = shapely.box(min_lon, min_lat, max_lon, max_lat)
+        dx = dy = self.PIXEL_SIZE_DEGREES
 
         all_groups: list[list[list[Item]]] = []
         for geometry in geometries:
             if geometry.time_range is None:
                 raise ValueError("expected all geometries to have a time range")
 
-            start, end = geometry.time_range
-            cur_day = _floor_to_utc_day(start)
-            cur_groups: list[list[Item]] = []
-            while cur_day < end:
-                next_day = cur_day + timedelta(days=1)
-                item_name = f"era5land_dailyutc_v1_{cur_day.year:04d}{cur_day.month:02d}{cur_day.day:02d}"
-                item_geom = STGeometry(WGS84_PROJECTION, item_shp, (cur_day, next_day))
-                cur_groups.append([Item(item_name, item_geom)])
-                cur_day = next_day
+            # --- temporal overlap ---
+            time_chunks = self._find_overlapping_time_chunks(
+                time_vals, n_times, time_cs, *geometry.time_range
+            )
 
-            all_groups.append(cur_groups)
+            # --- spatial overlap ---
+            wgs84 = geometry.to_projection(WGS84_PROJECTION)
+            bbox = wgs84.shp.bounds  # (min_lon, min_lat, max_lon, max_lat)
+            snapped = _snap_bounds_outward(bbox, dx)
+
+            lat_chunks = self._find_overlapping_lat_chunks(
+                lat_vals, lat_cs, snapped[1], snapped[3]
+            )
+            lon_chunk_ids = self._find_overlapping_lon_chunks(lon_vals, lon_cs, snapped)
+
+            if lat_chunks is None or not lon_chunk_ids:
+                all_groups.append([[]])
+                continue
+
+            # --- build items for every (t, lat, lon) triple ---
+            items: list[Item] = []
+            for tc in time_chunks:
+                tc_start = tc * time_cs
+                tc_end = min((tc + 1) * time_cs, n_times)
+                chunk_start_dt = _np_datetime64_to_utc(time_vals[tc_start])
+                chunk_last_dt = _np_datetime64_to_utc(time_vals[tc_end - 1])
+                chunk_end_dt = chunk_last_dt + timedelta(days=1)
+
+                for latc in lat_chunks:
+                    latc_start = latc * lat_cs
+                    latc_end = min((latc + 1) * lat_cs, n_lat)
+                    chunk_lats = lat_vals[latc_start:latc_end]
+
+                    for lonc in lon_chunk_ids:
+                        lonc_start = lonc * lon_cs
+                        lonc_end = min((lonc + 1) * lon_cs, n_lon)
+                        chunk_lons = lon_vals[lonc_start:lonc_end]
+
+                        # Convert lon to [-180, 180) for the item geometry.
+                        lons_180 = ((chunk_lons + 180) % 360) - 180
+                        item_shp = shapely.box(
+                            float(lons_180.min()) - dx / 2,
+                            float(chunk_lats.min()) - dy / 2,
+                            float(lons_180.max()) + dx / 2,
+                            float(chunk_lats.max()) + dy / 2,
+                        )
+
+                        item_name = f"era5land_v1_t{tc}_y{latc}_x{lonc}"
+                        item_geom = STGeometry(
+                            WGS84_PROJECTION,
+                            item_shp,
+                            (chunk_start_dt, chunk_end_dt),
+                        )
+                        items.append(Item(item_name, item_geom))
+
+            all_groups.append([items])
 
         return all_groups
 
@@ -382,172 +461,42 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         return Item.deserialize(serialized_item)
 
     # ------------------------------------------------------------------
-    # Bounds persistence (across prepare / ingest instances)
+    # Projection / bounds helper (used by ingest)
     # ------------------------------------------------------------------
 
-    def _bounds_file(self) -> UPath | None:
-        """Path to the persisted bounds file, or None if ds_path is unavailable."""
-        if self._ds_path is None:
-            return None
-        return self._ds_path / ".era5_bounds.json"
-
-    def _persist_bounds(self) -> None:
-        """Write ``self.bounds`` to disk so a future instance can read them."""
-        bounds_file = self._bounds_file()
-        if bounds_file is None or self.bounds is None:
-            return
-        bounds_file.parent.mkdir(parents=True, exist_ok=True)
-        bounds_file.write_text(json.dumps(self.bounds))
-
-    def _load_persisted_bounds(self) -> list[float] | None:
-        """Read bounds previously saved by ``_persist_bounds``, if available."""
-        bounds_file = self._bounds_file()
-        if bounds_file is None or not bounds_file.exists():
-            return None
-        try:
-            return json.loads(bounds_file.read_text())
-        except (json.JSONDecodeError, OSError):
-            return None
-
-    def _write_geotiff(
-        self,
-        tif_path: str,
-        lat: np.ndarray,
-        lon: np.ndarray,
-        band_arrays: list[np.ndarray],
-    ) -> None:
-        """Write a GeoTIFF with WGS84 georeferencing from ERA5(-Land) arrays.
+    def _compute_projection_and_bounds(
+        self, lat: np.ndarray, lon: np.ndarray
+    ) -> tuple[Projection, PixelBounds]:
+        """Compute rslearn Projection and PixelBounds from ERA5 lat/lon grids.
 
         Args:
-            tif_path: destination GeoTIFF path.
-            lat: 1D latitude coordinate (expected descending, north-to-south).
-            lon: 1D longitude coordinate (0..360 in the source dataset).
-            band_arrays: band arrays with shape (lat, lon), one per output band.
+            lat: 1-D latitude array (descending, north-to-south).
+            lon: 1-D longitude array (ascending, in [-180, 180)).
+
+        Returns:
+            ``(projection, pixel_bounds)`` suitable for ``tile_store.write_raster``.
         """
-        if lat.ndim != 1 or lon.ndim != 1:
-            raise ValueError("expected 1D latitude/longitude coordinates")
-        if len(band_arrays) == 0:
-            raise ValueError("expected at least one band array")
+        dx = self.PIXEL_SIZE_DEGREES
+        dy = self.PIXEL_SIZE_DEGREES
 
-        # Convert longitude to [-180, 180) and reorder so GeoTIFF coordinates match
-        # common WGS84 conventions and rslearn windows.
-        lon = ((lon + 180) % 360) - 180
-        lon_sort_idx = np.argsort(lon)
-        lon = lon[lon_sort_idx]
-        band_arrays = [a[:, lon_sort_idx] for a in band_arrays]
+        projection = Projection(CRS.from_epsg(WGS84_EPSG), dx, -dy)
 
-        if len(lon) > 1:
-            dx = float(lon[1] - lon[0])
-        else:
-            dx = self.PIXEL_SIZE_DEGREES
-        if len(lat) > 1:
-            dy = float(abs(lat[1] - lat[0]))
-        else:
-            dy = self.PIXEL_SIZE_DEGREES
-
-        # ERA5-Land latitude is descending (north to south). This matches GeoTIFF row order.
-        if len(lat) > 1 and lat[1] > lat[0]:
-            raise ValueError("expected latitude coordinate to be descending")
-
-        west = float(lon.min() - dx / 2)
-        north = float(lat.max() + dy / 2)
-        transform = from_origin(west, north, dx, dy)
-        crs = f"EPSG:{WGS84_EPSG}"
-
-        array = np.stack(band_arrays, axis=0).astype(np.float32)
-        with rasterio.open(
-            tif_path,
-            "w",
-            driver="GTiff",
-            height=array.shape[1],
-            width=array.shape[2],
-            count=array.shape[0],
-            dtype=array.dtype,
-            crs=crs,
-            transform=transform,
-        ) as dst:
-            dst.write(array)
-
-    def _fetch_and_write_chunk(
-        self,
-        tile_store: TileStoreWithLayer,
-        ds: xr.Dataset,
-        chunk_start_idx: int,
-        chunk_end_idx: int,
-        bounds: tuple[float, float, float, float],
-    ) -> None:
-        """Fetch an entire time-chunk from the Zarr store and write daily GeoTIFFs.
-
-        Args:
-            tile_store: the tile store to write into.
-            ds: the opened xarray Dataset.
-            chunk_start_idx: first time index (inclusive) of the chunk.
-            chunk_end_idx: last time index (exclusive) of the chunk.
-            bounds: WGS84 bounding box ``(min_lon, min_lat, max_lon, max_lat)``.
-        """
-        time_vals = ds["valid_time"].values
-
-        snapped_bounds = _snap_bounds_outward(
-            bounds, step_degrees=self.PIXEL_SIZE_DEGREES
+        west = float(lon.min()) - dx / 2
+        north = float(lat.max()) + dy / 2
+        col_off = round(west / dx)
+        row_off = round(north / (-dy))
+        pixel_bounds: PixelBounds = (
+            col_off,
+            row_off,
+            col_off + len(lon),
+            row_off + len(lat),
         )
-        lon_ranges_0_360 = _bounds_to_lon_ranges_0_360(snapped_bounds)
-        min_lat = snapped_bounds[1]
-        max_lat = snapped_bounds[3]
 
-        time_slice = slice(chunk_start_idx, chunk_end_idx)
+        return projection, pixel_bounds
 
-        # Select only the needed bands and subset time + space in one go.
-        subset = (
-            ds[self.band_names]
-            .isel(valid_time=time_slice)
-            .sel(
-                latitude=slice(max_lat, min_lat),
-            )
-        )
-        if len(lon_ranges_0_360) == 1:
-            subset = subset.sel(
-                longitude=slice(lon_ranges_0_360[0][0], lon_ranges_0_360[0][1]),
-            )
-        else:
-            subset = xr.concat(
-                [subset.sel(longitude=slice(lo, hi)) for lo, hi in lon_ranges_0_360],
-                dim="longitude",
-            )
-        subset = subset.load()
-
-        lat = subset["latitude"].to_numpy()
-        lon = subset["longitude"].to_numpy()
-        if lat.size == 0 or lon.size == 0:
-            raise ValueError(
-                "ERA5LandDailyUTCv1 chunk selection returned empty grid "
-                f"(bounds={snapped_bounds})"
-            )
-
-        # Write one GeoTIFF per day in the chunk.
-        n_times = chunk_end_idx - chunk_start_idx
-        for t_offset in range(n_times):
-            day_ts = pd.Timestamp(time_vals[chunk_start_idx + t_offset])
-            item_name = (
-                f"era5land_dailyutc_v1_"
-                f"{day_ts.year:04d}{day_ts.month:02d}{day_ts.day:02d}"
-            )
-
-            if tile_store.is_raster_ready(item_name, self.band_names):
-                continue
-
-            band_arrays: list[np.ndarray] = []
-            for band in self.band_names:
-                arr = subset[band].values[t_offset]  # (n_lat, n_lon)
-                if band == "t2m" and self.temperature_unit == "celsius":
-                    arr = arr - 273.15
-                band_arrays.append(arr)
-
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                local_tif_fname = os.path.join(tmp_dir, f"{item_name}.tif")
-                self._write_geotiff(local_tif_fname, lat, lon, band_arrays)
-                tile_store.write_raster_file(
-                    item_name, self.band_names, UPath(local_tif_fname)
-                )
+    # ------------------------------------------------------------------
+    # Ingest
+    # ------------------------------------------------------------------
 
     def ingest(
         self,
@@ -555,104 +504,94 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         items: list[Item],
         geometries: list[list[STGeometry]],
     ) -> None:
-        """Ingest daily ERA5-Land rasters for the requested items/geometries.
+        """Ingest ERA5-Land chunk items into the tile store.
 
-        Instead of fetching one day at a time (which redundantly downloads the
-        same Zarr time-chunk for every day in the chunk), this method:
-
-        1. Groups the requested day-items by their underlying Zarr time-chunk.
-        2. Uses a lock file so that only one worker downloads a given chunk.
-        3. Fetches the entire chunk once and writes *all* daily GeoTIFFs from
-           that chunk into the tile store.
-
-        Workers that lose the lock wait for their specific day(s) to appear
-        in the tile store.
+        Each item corresponds to exactly one Zarr chunk identified by a
+        ``(time, lat, lon)`` index triple.  The chunk is fetched with a
+        single ``isel`` call and stored as a multi-timestep ``RasterArray``.
         """
         ds = self._get_dataset()
         time_vals = ds["valid_time"].values
-        time_chunk_size = self.DEFAULT_TIME_CHUNK_SIZE
         n_times = len(time_vals)
-
-        # Resolve spatial bounds.  Priority:
-        # 1. Explicitly configured bounds (from dataset config).
-        # 2. Bounds persisted by get_items() during prepare (full window union).
-        # 3. Fallback: compute from this batch's geometries (partial).
-        if self.bounds is None:
-            persisted = self._load_persisted_bounds()
-            if persisted is not None:
-                self.bounds = persisted
-        if self.bounds is not None:
-            bounds = (
-                float(self.bounds[0]),
-                float(self.bounds[1]),
-                float(self.bounds[2]),
-                float(self.bounds[3]),
-            )
-        else:
-            all_geoms = [g for geom_list in geometries for g in geom_list]
-            min_lon = 180.0
-            min_lat = 90.0
-            max_lon = -180.0
-            max_lat = -90.0
-            for geom in all_geoms:
-                wgs84 = geom.to_projection(WGS84_PROJECTION)
-                b = wgs84.shp.bounds
-                min_lon = min(min_lon, b[0])
-                min_lat = min(min_lat, b[1])
-                max_lon = max(max_lon, b[2])
-                max_lat = max(max_lat, b[3])
-            bounds = (min_lon, min_lat, max_lon, max_lat)
-
-        # Group items by chunk ID.
-        items_by_chunk: dict[int, list[Item]] = {}
+        n_lat = len(ds["latitude"])
+        n_lon = len(ds["longitude"])
+        time_cs, lat_cs, lon_cs = self._get_chunk_sizes()
 
         for item in items:
             if tile_store.is_raster_ready(item.name, self.band_names):
                 continue
 
-            if item.geometry.time_range is None:
-                raise ValueError("expected item to have a time range")
+            # Parse chunk indices from item name: era5land_v1_t{tc}_y{latc}_x{lonc}
+            parts = item.name.split("_")
+            tc = int(parts[2][1:])
+            latc = int(parts[3][1:])
+            lonc = int(parts[4][1:])
 
-            day_start = _floor_to_utc_day(item.geometry.time_range[0])
-            # Build a timezone-naive datetime64 to avoid numpy timezone warnings.
-            day_np = np.datetime64(day_start.replace(tzinfo=None), "ns")
-            time_idx = int(np.searchsorted(time_vals, day_np))
-            time_idx = min(time_idx, n_times - 1)
-            chunk_id = time_idx // time_chunk_size
+            tc_start = tc * time_cs
+            tc_end = min((tc + 1) * time_cs, n_times)
+            latc_start = latc * lat_cs
+            latc_end = min((latc + 1) * lat_cs, n_lat)
+            lonc_start = lonc * lon_cs
+            lonc_end = min((lonc + 1) * lon_cs, n_lon)
 
-            if chunk_id not in items_by_chunk:
-                items_by_chunk[chunk_id] = []
-            items_by_chunk[chunk_id].append(item)
+            logger.info(
+                "Fetching ERA5 chunk t=%d lat=%d lon=%d "
+                "(time %d..%d, lat %d..%d, lon %d..%d)",
+                tc,
+                latc,
+                lonc,
+                tc_start,
+                tc_end - 1,
+                latc_start,
+                latc_end - 1,
+                lonc_start,
+                lonc_end - 1,
+            )
 
-        # Process each chunk.
-        for chunk_id in items_by_chunk:
-            chunk_start = chunk_id * time_chunk_size
-            chunk_end = min((chunk_id + 1) * time_chunk_size, n_times)
-
-            if self._try_acquire_chunk_lock(chunk_id):
-                try:
-                    logger.info(
-                        "Fetching ERA5 chunk %d (time indices %d..%d) "
-                        "for %d requested item(s)",
-                        chunk_id,
-                        chunk_start,
-                        chunk_end - 1,
-                        len(items_by_chunk[chunk_id]),
-                    )
-                    self._fetch_and_write_chunk(
-                        tile_store, ds, chunk_start, chunk_end, bounds
-                    )
-                finally:
-                    self._release_chunk_lock(chunk_id)
-            else:
-                # Another worker is handling this chunk — poll until our
-                # items are ready.
-                logger.info(
-                    "Chunk %d is being processed by another worker, "
-                    "waiting for %d item(s)...",
-                    chunk_id,
-                    len(items_by_chunk[chunk_id]),
+            # Fetch exactly one Zarr chunk by index.
+            subset = (
+                ds[self.band_names]
+                .isel(
+                    valid_time=slice(tc_start, tc_end),
+                    latitude=slice(latc_start, latc_end),
+                    longitude=slice(lonc_start, lonc_end),
                 )
-                for item in items_by_chunk[chunk_id]:
-                    while not tile_store.is_raster_ready(item.name, self.band_names):
-                        time_mod.sleep(self.LOCK_POLL_INTERVAL_SECONDS)
+                .load()
+            )
+
+            lat = subset["latitude"].to_numpy()
+            lon = subset["longitude"].to_numpy()
+
+            # Convert longitude to [-180, 180) and sort ascending.
+            lon = ((lon + 180) % 360) - 180
+            lon_sort_idx = np.argsort(lon)
+            lon = lon[lon_sort_idx]
+
+            # Build (C, T, H, W) array with lon reordered.
+            band_arrays: list[np.ndarray] = []
+            for band in self.band_names:
+                arr = subset[band].values  # (T, H, W)
+                if band == "t2m" and self.temperature_unit == "celsius":
+                    arr = arr - 273.15
+                arr = arr[:, :, lon_sort_idx]
+                band_arrays.append(arr)
+
+            array = np.stack(band_arrays, axis=0).astype(np.float32)  # (C, T, H, W)
+
+            # Build timestamps: one (start, end) per day in the chunk.
+            n_chunk_times = tc_end - tc_start
+            timestamps: list[tuple[datetime, datetime]] = []
+            for t_offset in range(n_chunk_times):
+                day_dt = _np_datetime64_to_utc(time_vals[tc_start + t_offset])
+                timestamps.append((day_dt, day_dt + timedelta(days=1)))
+
+            projection, pixel_bounds = self._compute_projection_and_bounds(lat, lon)
+
+            raster = RasterArray(array=array, timestamps=timestamps)
+            tile_store.write_raster(
+                item.name,
+                self.band_names,
+                projection,
+                pixel_bounds,
+                raster,
+            )
