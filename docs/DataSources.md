@@ -286,7 +286,7 @@ machine data.earthdatahub.destine.eu
 ```
 
 Supported bands:
-- `d2m`: 2m dewpoint temperature (units: K)
+- `d2m`: 2m dewpoint temperature (units: K or °C; see `temperature_unit`)
 - `e`: evaporation (units: m of water equivalent)
 - `pev`: potential evaporation (units: m)
 - `ro`: runoff (units: m)
@@ -307,11 +307,7 @@ Supported bands:
   "init_args": {
     // Optional: URL/path to the EarthDataHub Zarr store.
     "zarr_url": "https://data.earthdatahub.destine.eu/era5/era5-land-daily-utc-v1.zarr",
-    // Optional bounding box as [min_lon, min_lat, max_lon, max_lat] (WGS84).
-    // Recommended for performance. Dateline-crossing bounds (min_lon > max_lon) are not
-    // supported.
-    "bounds": null,
-    // Units to return for `t2m` (default "kelvin"): "celsius" or "kelvin".
+    // Units for temperature bands `t2m` and `d2m` (default "kelvin"): "celsius" or "kelvin".
     "temperature_unit": "kelvin",
     // Whether to allow the underlying HTTP client to read environment configuration
     // (including netrc) for auth/proxies (default true).

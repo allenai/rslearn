@@ -3,7 +3,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
-import pytest
 import rasterio
 import shapely
 import xarray as xr
@@ -206,18 +205,6 @@ def test_era5land_dailyutc_v1_ingest_negative_longitude_bounds(tmp_path: Path) -
     array = out.reshape(2, 2, 2, 2)
     np.testing.assert_allclose(array[0], t2m)
     np.testing.assert_allclose(array[1], tp)
-
-
-def test_era5land_dailyutc_v1_bounds_cross_dateline_error_message(
-    tmp_path: Path,
-) -> None:
-    with pytest.raises(ValueError, match=r"does not yet support .* cross the dateline"):
-        ERA5LandDailyUTCv1(
-            band_names=["t2m"],
-            zarr_url=str(tmp_path / "unused.zarr"),
-            bounds=[170.0, 0.0, -170.0, 1.0],
-            trust_env=False,
-        )
 
 
 def test_era5land_dailyutc_v1_spatial_chunk_ingest(tmp_path: Path) -> None:

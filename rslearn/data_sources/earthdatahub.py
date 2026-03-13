@@ -93,7 +93,7 @@ def _snap_bounds_outward(
 
 def _np_datetime64_to_utc(ts: np.datetime64) -> datetime:
     """Convert a numpy datetime64 to a timezone-aware Python datetime (UTC)."""
-    return pd.Timestamp(ts).to_pydatetime().replace(tzinfo=UTC)
+    return pd.Timestamp(ts).to_pydatetime(warn=False).replace(tzinfo=UTC)
 
 
 class ERA5LandDailyUTCv1(DataSource[Item]):
@@ -111,7 +111,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
     raster.
 
     Supported bands:
-    - d2m: 2m dewpoint temperature (units: K)
+    - d2m: 2m dewpoint temperature (units: K or °C; see ``temperature_unit``)
     - e: evaporation (units: m of water equivalent)
     - pev: potential evaporation (units: m)
     - ro: runoff (units: m)
@@ -121,7 +121,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
     - str: surface net long-wave (thermal) radiation (units: J m-2)
     - swvl1: volumetric soil water layer 1 (units: m3 m-3)
     - swvl2: volumetric soil water layer 2 (units: m3 m-3)
-    - t2m: 2m temperature (units: K)
+    - t2m: 2m temperature (units: K or °C; see ``temperature_unit``)
     - tp: total precipitation (units: m)
     - u10: 10m U wind component (units: m s-1)
     - v10: 10m V wind component (units: m s-1)
@@ -160,7 +160,6 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         self,
         band_names: list[str] | None = None,
         zarr_url: str = DEFAULT_ZARR_URL,
-        bounds: list[float] | None = None,
         temperature_unit: Literal["celsius", "kelvin"] = "kelvin",
         trust_env: bool = True,
         context: DataSourceContext = DataSourceContext(),
@@ -171,33 +170,13 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
             band_names: list of bands to ingest. If omitted and a LayerConfig is
                 provided via context, bands are inferred from that layer's band sets.
             zarr_url: URL/path to the EarthDataHub Zarr store.
-            bounds: optional bounding box as [min_lon, min_lat, max_lon, max_lat]
-                in degrees (WGS84).  Currently accepted for backward compatibility
-                but not used; each window's geometry determines which chunks to
-                fetch.
-            temperature_unit: units to return for `t2m` ("celsius" or "kelvin").
+            temperature_unit: units for temperature bands `t2m` and `d2m`
+                ("celsius" or "kelvin").
             trust_env: if True (default), allow the underlying HTTP client to read
                 environment configuration (including netrc) for auth/proxies.
             context: rslearn data source context.
         """
         self.zarr_url = zarr_url
-        if bounds is not None:
-            if len(bounds) != 4:
-                raise ValueError(
-                    "ERA5LandDailyUTCv1 bounds must be [min_lon, min_lat, max_lon, max_lat] "
-                    f"(got {bounds!r})."
-                )
-            min_lon, min_lat, max_lon, max_lat = bounds
-            if min_lon > max_lon:
-                raise ValueError(
-                    "ERA5LandDailyUTCv1 does not yet support longitude ranges that cross the dateline "
-                    f"(got bounds min_lon={min_lon}, max_lon={max_lon})."
-                )
-            if min_lat > max_lat:
-                raise ValueError(
-                    "ERA5LandDailyUTCv1 bounds must have min_lat <= max_lat "
-                    f"(got bounds min_lat={min_lat}, max_lat={max_lat})."
-                )
         self.temperature_unit = temperature_unit
         self.trust_env = trust_env
 
@@ -262,10 +241,11 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
             ref_band = self.band_names[0]
             chunks = self._ds[ref_band].encoding.get("chunks")
             if chunks is not None and len(chunks) > 0:
-                assert int(chunks[0]) == self.DEFAULT_TIME_CHUNK_SIZE, (
-                    f"Expected time chunk size {self.DEFAULT_TIME_CHUNK_SIZE}, "
-                    f"got {chunks[0]}"
-                )
+                if int(chunks[0]) != self.DEFAULT_TIME_CHUNK_SIZE:
+                    raise ValueError(
+                        f"Expected time chunk size {self.DEFAULT_TIME_CHUNK_SIZE}, "
+                        f"got {chunks[0]}"
+                    )
 
         return self._ds
 
@@ -455,9 +435,8 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
 
         return all_groups
 
-    def deserialize_item(self, serialized_item: Any) -> Item:
+    def deserialize_item(self, serialized_item: dict) -> Item:
         """Deserialize an `Item` previously produced by this data source."""
-        assert isinstance(serialized_item, dict)
         return Item.deserialize(serialized_item)
 
     # ------------------------------------------------------------------
@@ -571,11 +550,15 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
             band_arrays: list[np.ndarray] = []
             for band in self.band_names:
                 arr = subset[band].values  # (T, H, W)
-                if band == "t2m" and self.temperature_unit == "celsius":
+                if band in ("t2m", "d2m") and self.temperature_unit == "celsius":
                     arr = arr - 273.15
                 arr = arr[:, :, lon_sort_idx]
                 band_arrays.append(arr)
 
+            # NaN values (e.g. ocean cells in land-only variables) are preserved as
+            # float32 NaN in the GeoTIFF.  Downstream readers (rasterio, the tile
+            # store mosaic/stack logic) already handle NaN correctly, so we
+            # intentionally do *not* replace NaN with a sentinel nodata value here.
             array = np.stack(band_arrays, axis=0).astype(np.float32)  # (C, T, H, W)
 
             # Build timestamps: one (start, end) per day in the chunk.
