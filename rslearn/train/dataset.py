@@ -459,8 +459,8 @@ def read_raster_layer_for_data_input(
                 (
                     len(needed_bands),
                     t,
-                    final_bounds[3] - final_bounds[1],
-                    final_bounds[2] - final_bounds[0],
+                    src.shape[2],
+                    src.shape[3],
                 ),
                 dtype=get_torch_dtype(data_input.dtype),
             )
