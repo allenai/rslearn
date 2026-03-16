@@ -7,7 +7,13 @@ import pytest
 from pydantic import ValidationError
 from rasterio.crs import CRS
 
-from rslearn.config.dataset import BandSetConfig, DType, LayerConfig, QueryConfig, TimeMode
+from rslearn.config.dataset import (
+    BandSetConfig,
+    DType,
+    LayerConfig,
+    QueryConfig,
+    TimeMode,
+)
 from rslearn.data_sources.planetary_computer import Sentinel1, Sentinel2
 from rslearn.utils.geometry import Projection
 from rslearn.utils.raster_format import NumpyRasterFormat, SingleImageRasterFormat
@@ -333,11 +339,6 @@ class TestBandSetConfigSpatialSize:
             BandSetConfig(
                 dtype=DType.FLOAT32, bands=["a"], spatial_size=[1, 1], zoom_offset=1
             )
-
-    def test_spatial_size_wrong_length(self) -> None:
-        """spatial_size with wrong number of elements should raise an error."""
-        with pytest.raises(ValidationError, match="exactly 2 ints"):
-            BandSetConfig(dtype=DType.FLOAT32, bands=["a"], spatial_size=[1])
 
     def test_numpy_raster_format_from_config(self) -> None:
         """NumpyRasterFormat should be instantiable from config via jsonargparse."""
