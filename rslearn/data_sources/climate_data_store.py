@@ -353,7 +353,7 @@ class ERA5LandMonthlyMeans(ERA5Land):
         variable_names = [band.replace("-", "_") for band in self.band_names]
 
         for item in items:
-            if tile_store.is_raster_ready(item.name, self.band_names):
+            if tile_store.is_raster_ready(item, self.band_names):
                 continue
 
             # Send the request to the CDS API
@@ -385,7 +385,7 @@ class ERA5LandMonthlyMeans(ERA5Land):
                     UPath(local_nc_fname)
                 )
                 tile_store.write_raster(
-                    item.name,
+                    item,
                     self.band_names,
                     projection,
                     bounds,
@@ -444,7 +444,7 @@ class ERA5LandHourly(ERA5Land):
         variable_names = [band.replace("-", "_") for band in self.band_names]
 
         for item in items:
-            if tile_store.is_raster_ready(item.name, self.band_names):
+            if tile_store.is_raster_ready(item, self.band_names):
                 continue
 
             # Send the request to the CDS API
@@ -498,7 +498,7 @@ class ERA5LandHourly(ERA5Land):
                     UPath(local_nc_fname)
                 )
                 tile_store.write_raster(
-                    item.name,
+                    item,
                     self.band_names,
                     projection,
                     bounds,
@@ -817,7 +817,7 @@ class ERA5LandHourlyTimeseries(DataSource):
         variable_names = [band.replace("-", "_") for band in self.band_names]
 
         for item in items:
-            if tile_store.is_raster_ready(item.name, self.band_names):
+            if tile_store.is_raster_ready(item, self.band_names):
                 continue
 
             time_range = item.geometry.time_range
@@ -868,7 +868,7 @@ class ERA5LandHourlyTimeseries(DataSource):
                     local_nc_paths, lon, lat
                 )
                 tile_store.write_raster(
-                    item.name,
+                    item,
                     self.band_names,
                     projection,
                     bounds,

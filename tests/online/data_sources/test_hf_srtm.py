@@ -28,7 +28,7 @@ def test_hf_srtm_use_srtm1(tmp_path: pathlib.Path, seattle2020: STGeometry) -> N
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+    assert tile_store.is_raster_ready(layer_name, item, [band_name])
 
 
 def test_hf_srtm_use_srtm3(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
@@ -51,7 +51,7 @@ def test_hf_srtm_use_srtm3(tmp_path: pathlib.Path, seattle2020: STGeometry) -> N
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+    assert tile_store.is_raster_ready(layer_name, item, [band_name])
 
 
 def test_hf_srtm_with_cache_dir(
@@ -74,5 +74,5 @@ def test_hf_srtm_with_cache_dir(
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+    assert tile_store.is_raster_ready(layer_name, item, [band_name])
     assert (cache_dir / data_source.FILE_LIST_FILENAME).exists()

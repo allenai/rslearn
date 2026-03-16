@@ -855,7 +855,7 @@ class Sentinel2(DataSource):
         """
         for item in items:
             for suffix, band_names in self.needed_bands:
-                if tile_store.is_raster_ready(item.name, band_names):
+                if tile_store.is_raster_ready(item, band_names):
                     continue
 
                 with tempfile.TemporaryDirectory() as tmp_dir:
@@ -887,7 +887,7 @@ class Sentinel2(DataSource):
                             projection, bounds = get_raster_projection_and_bounds(src)
                         array = harmonize_callback(array)
                         tile_store.write_raster(
-                            item.name,
+                            item,
                             band_names,
                             projection,
                             bounds,
@@ -899,7 +899,7 @@ class Sentinel2(DataSource):
 
                     else:
                         tile_store.write_raster_file(
-                            item.name,
+                            item,
                             band_names,
                             UPath(fname),
                             time_range=item.geometry.time_range,

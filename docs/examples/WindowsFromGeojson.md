@@ -1,5 +1,4 @@
-Example: Windows from GeoJSON
------------------------------
+## Example: Windows from GeoJSON
 
 In this example, we will create windows that contain point features in a GeoJSON file.
 We will then acquire Sentinel-2 images in those windows, and train a model to predict
@@ -10,7 +9,14 @@ should be able to substitute any GeoJSON (although model performance will vary):
 
 https://pub-956f3eb0f5974f37b9228e0a62f449bf.r2.dev/outputs/marine/latest.geojson
 
-### Add Windows
+### Table of Contents
+
+1. [Create the Dataset and Add Windows](#create-the-dataset-and-add-windows)
+2. [Add Labels to the Dataset](#add-labels-to-the-dataset)
+3. [Train a Model](#train-a-model)
+4. [Evaluate and Visualize Outputs](#evaluate-and-visualize-outputs)
+
+## Create the Dataset and Add Windows
 
 We will start by creating a new dataset: create a directory `/path/to/dataset` and
 create the dataset configuration file at `/path/to/dataset/config.json` as follows:
@@ -84,7 +90,7 @@ rslearn dataset ingest --root $DATASET_PATH --workers 8 --no-use-initial-job --j
 rslearn dataset materialize --root $DATASET_PATH --workers 8 --no-use-initial-job
 ```
 
-### Add Labels
+## Add Labels to the Dataset
 
 We now use the
 [LocalFiles data source](../DatasetConfig.md#rslearndata_sourceslocal_fileslocalfiles)
@@ -133,7 +139,7 @@ Sentinel-2 images using qgis.
 
 ![Screenshot from qgis showing the Sentinel-2 image computed for a window along with the label GeoJSON containing marine infrastructure points](./WindowsFromGeojson/marine_infra_sentinel2_qgis.png)
 
-### Train Model
+## Train a Model
 
 Now we can create a model configuration for fine-tuning SatlasPretrain to predict
 marine infrastructure. Although our labels are points, we treat it as a bounding box
@@ -324,19 +330,16 @@ trainer:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: "epoch"
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        # We keep two checkpoints, the one that has best mAP on validation set, and the
-        # latest one. They are saved to the marine_infrastructure_checkpoints folder.
-        save_top_k: 1
-        save_last: true
-        monitor: val_mAP
-        mode: max
     # We freeze the SatlasPretrain backbone for one epoch before unfreezing.
     - class_path: rslearn.train.callbacks.freeze_unfreeze.FreezeUnfreeze
       init_args:
         module_selector: ["model", "encoder", 0, "model"]
         unfreeze_at_epoch: 1
+    # Save the best checkpoint based on mAP on validation set.
+    - class_path: rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint
+      init_args:
+        monitor: val_mAP
+        mode: max
 # Here we enable automatic checkpoint management and logging to W&B.
 # Set WANDB_MODE=offline to disable online logging.
 project_name: marine_infrastructure
@@ -351,7 +354,7 @@ export MANAGEMENT_DIR=./project_data
 rslearn model fit --config model.yaml
 ```
 
-### Evaluate and Visualize Outputs
+## Evaluate and Visualize Outputs
 
 We can evaluate the model on the validation set, and visualize its outputs as well.
 

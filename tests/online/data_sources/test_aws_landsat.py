@@ -55,7 +55,7 @@ class TestLandsatOliTirs:
         landsat_data_source.ingest(
             TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
         )
-        assert tile_store.is_raster_ready(layer_name, item.name, [TEST_BAND])
+        assert tile_store.is_raster_ready(layer_name, item, [TEST_BAND])
 
     def test_materialize(
         self,

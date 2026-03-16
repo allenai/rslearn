@@ -275,10 +275,10 @@ class RasterImporter(Importer):
                 else:
                     bands = [f"B{band_idx + 1}" for band_idx in range(src.count)]
 
-            if tile_store.is_raster_ready(item.name, bands):
+            if tile_store.is_raster_ready(item, bands):
                 continue
             tile_store.write_raster_file(
-                item.name, bands, fname_upath, time_range=item.geometry.time_range
+                item, bands, fname_upath, time_range=item.geometry.time_range
             )
 
 
@@ -366,7 +366,7 @@ class VectorImporter(Importer):
             item: the Item to ingest
             cur_geometries: the geometries where the item is needed.
         """
-        if tile_store.is_vector_ready(item.name):
+        if tile_store.is_vector_ready(item):
             return
 
         assert isinstance(item, VectorItem)
@@ -399,7 +399,7 @@ class VectorImporter(Importer):
                         )
                     )
 
-                tile_store.write_vector(item.name, features)
+                tile_store.write_vector(item, features)
 
 
 class LocalFiles(DataSource):

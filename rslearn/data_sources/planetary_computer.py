@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+import warnings
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -17,13 +18,13 @@ from typing_extensions import override
 from upath import UPath
 
 from rslearn.data_sources import DataSourceContext
+from rslearn.data_sources.data_source import Item
 from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
 from rslearn.data_sources.stac import SourceItem, StacDataSource
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
-from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.interpolation import NODATA_VALUE, interpolate_to_grid
 from rslearn.utils.raster_array import RasterArray
@@ -168,25 +169,22 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
             timeout: timeout for API requests.
             skip_items_missing_assets: skip STAC items that are missing any of the
                 assets in asset_bands during get_items.
-            cache_dir: optional directory to cache items by name, including asset URLs.
-                If not set, there will be no cache and instead STAC requests will be
-                needed each time.
+            cache_dir: deprecated, no longer used. Item data is now passed to
+                materialization functions so caching in the data source is unnecessary.
             context: the data source context.
         """
+        if cache_dir is not None:
+            warnings.warn(
+                "cache_dir is deprecated and no longer used. "
+                "Item data is now passed directly during materialization.",
+                FutureWarning,
+                stacklevel=2,
+            )
+
         # Initialize the DirectMaterializeDataSource with asset_bands
         DirectMaterializeDataSource.__init__(self, asset_bands=asset_bands)
 
-        # Determine the cache_dir to use.
-        cache_upath: UPath | None = None
-        if cache_dir is not None:
-            if context.ds_path is not None:
-                cache_upath = join_upath(context.ds_path, cache_dir)
-            else:
-                cache_upath = UPath(cache_dir)
-
-            cache_upath.mkdir(parents=True, exist_ok=True)
-
-        # We pass required_assets to StacDataSource of skip_items_missing_assets is set.
+        # We pass required_assets to StacDataSource if skip_items_missing_assets is set.
         required_assets: list[str] | None = None
         if skip_items_missing_assets:
             required_assets = list(asset_bands.keys())
@@ -199,7 +197,6 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
             sort_by=sort_by,
             sort_ascending=sort_ascending,
             required_assets=required_assets,
-            cache_dir=cache_upath,
         )
 
         # Replace the client with PlanetaryComputerStacClient to handle PC's pagination limits.
@@ -210,38 +207,32 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
 
     # --- DirectMaterializeDataSource implementation ---
 
-    def get_asset_url(self, item_name: str, asset_key: str) -> str:
+    def get_asset_url(self, item: SourceItem, asset_key: str) -> str:
         """Get the signed URL to read the asset for the given item and asset key.
 
         Args:
-            item_name: the name of the item.
+            item: the item.
             asset_key: the key identifying which asset to get.
 
         Returns:
             the signed URL to read the asset from.
         """
-        item = self.get_item_by_name(item_name)
         return planetary_computer.sign(item.asset_urls[asset_key])
 
-    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
+    def get_raster_bands(self, layer_name: str, item: Item) -> list[list[str]]:
         """Get the sets of bands that have been stored for the specified item.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item.
+            item: the item.
 
         Returns:
             a list of lists of bands that are in the tile store (with one raster
                 stored corresponding to each inner list). If no rasters are ready for
                 this item, returns empty list.
         """
-        if self.skip_items_missing_assets:
-            # In this case we can assume that the item has all of the assets.
-            return list(self.asset_bands.values())
-
-        # Otherwise we have to lookup the STAC item to see which assets it has.
-        # Here we use get_item_by_name since it handles caching.
-        item = self.get_item_by_name(item_name)
+        if not isinstance(item, SourceItem):
+            raise TypeError(f"expected SourceItem, got {type(item)}")
         all_bands = []
         for asset_key, band_names in self.asset_bands.items():
             if asset_key not in item.asset_urls:
@@ -268,7 +259,7 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
             for asset_key, band_names in self.asset_bands.items():
                 if asset_key not in item.asset_urls:
                     continue
-                if tile_store.is_raster_ready(item.name, band_names):
+                if tile_store.is_raster_ready(item, band_names):
                     continue
 
                 asset_url = planetary_computer.sign(item.asset_urls[asset_key])
@@ -295,7 +286,7 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
                         asset_key,
                     )
                     tile_store.write_raster_file(
-                        item.name,
+                        item,
                         band_names,
                         UPath(local_fname),
                         time_range=item.geometry.time_range,
@@ -397,7 +388,7 @@ class Sentinel2(PlanetaryComputer):
         """
         for item in items:
             for asset_key, band_names in self.asset_bands.items():
-                if tile_store.is_raster_ready(item.name, band_names):
+                if tile_store.is_raster_ready(item, band_names):
                     continue
 
                 asset_url = planetary_computer.sign(item.asset_urls[asset_key])
@@ -440,7 +431,7 @@ class Sentinel2(PlanetaryComputer):
                             projection, bounds = get_raster_projection_and_bounds(src)
                         array = harmonize_callback(array)
                         tile_store.write_raster(
-                            item.name,
+                            item,
                             band_names,
                             projection,
                             bounds,
@@ -452,7 +443,7 @@ class Sentinel2(PlanetaryComputer):
 
                     else:
                         tile_store.write_raster_file(
-                            item.name,
+                            item,
                             band_names,
                             UPath(local_fname),
                             time_range=item.geometry.time_range,
@@ -465,12 +456,12 @@ class Sentinel2(PlanetaryComputer):
                 )
 
     def get_read_callback(
-        self, item_name: str, asset_key: str
+        self, item: SourceItem, asset_key: str
     ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
         """Return a callback to harmonize Sentinel-2 data if needed.
 
         Args:
-            item_name: the name of the item being read.
+            item: the item being read.
             asset_key: the key identifying which asset is being read.
 
         Returns:
@@ -480,8 +471,177 @@ class Sentinel2(PlanetaryComputer):
         if not self.harmonize or asset_key == "visual":
             return None
 
-        item = self.get_item_by_name(item_name)
         return get_harmonize_callback(self._get_product_xml(item))
+
+
+class Hls2S30(PlanetaryComputer):
+    """A data source for HLS v2 Sentinel-2 (S30) data on Planetary Computer."""
+
+    COLLECTION_NAME = "hls2-s30"
+    DEFAULT_PLATFORMS = ["sentinel-2a", "sentinel-2b", "sentinel-2c"]
+    # Asset keys exposed by the collection.
+    ASSET_KEY_TO_COMMON_NAME = {
+        "B01": "coastal",
+        "B02": "blue",
+        "B03": "green",
+        "B04": "red",
+        "B08": "nir",
+        "B10": "cirrus",
+        "B11": "swir16",
+        "B12": "swir22",
+    }
+    COMMON_NAME_TO_ASSET_KEY = {
+        common: asset for asset, common in ASSET_KEY_TO_COMMON_NAME.items()
+    }
+    DEFAULT_BANDS = list(ASSET_KEY_TO_COMMON_NAME.keys())
+
+    @classmethod
+    def _normalize_band_name(cls, band: str) -> str:
+        if band in cls.ASSET_KEY_TO_COMMON_NAME:
+            return band
+        if band in cls.COMMON_NAME_TO_ASSET_KEY:
+            return cls.COMMON_NAME_TO_ASSET_KEY[band]
+        raise ValueError(
+            f"unsupported HLS2 S30 band '{band}'. Use one of {sorted(cls.ASSET_KEY_TO_COMMON_NAME.keys())} "
+            f"(asset keys) or {sorted(cls.COMMON_NAME_TO_ASSET_KEY.keys())} (common names)."
+        )
+
+    def __init__(
+        self,
+        band_names: list[str] | None = None,
+        platforms: list[str] | None = None,
+        query: dict[str, Any] | None = None,
+        context: DataSourceContext = DataSourceContext(),
+        **kwargs: Any,
+    ):
+        """Initialize a new Hls2S30 instance.
+
+        Args:
+            band_names: optional list of bands to expose. If not provided and a layer
+                config is present, bands are inferred from the band sets. Otherwise
+                defaults to the HLS S30 reflectance bands.
+            platforms: optional list of Sentinel-2 platform identifiers to include.
+                Defaults to ["sentinel-2a", "sentinel-2b", "sentinel-2c"].
+            query: optional STAC query filter to use. If not set, this defaults to a
+                platform filter for the configured platforms.
+            context: the data source context.
+            kwargs: additional arguments to pass to PlanetaryComputer.
+        """
+        if context.layer_config is not None:
+            requested_bands = {
+                band
+                for band_set in context.layer_config.band_sets
+                for band in band_set.bands
+            }
+            band_names = [self._normalize_band_name(band) for band in requested_bands]
+        elif band_names is None:
+            band_names = self.DEFAULT_BANDS
+        else:
+            band_names = [self._normalize_band_name(band) for band in band_names]
+
+        if platforms is None:
+            platforms = self.DEFAULT_PLATFORMS
+
+        if query is None:
+            query = {"platform": {"in": platforms}}
+
+        # Assets are keyed by band name; each asset is a single band.
+        asset_bands = {band: [band] for band in band_names}
+
+        super().__init__(
+            collection_name=self.COLLECTION_NAME,
+            asset_bands=asset_bands,
+            query=query,
+            # Skip per-item asset checks; required assets are derived from asset_bands.
+            skip_items_missing_assets=True,
+            context=context,
+            **kwargs,
+        )
+
+
+class Hls2L30(PlanetaryComputer):
+    """A data source for HLS v2 Landsat (L30) data on Planetary Computer."""
+
+    COLLECTION_NAME = "hls2-l30"
+    DEFAULT_PLATFORMS = ["landsat-8", "landsat-9"]
+    ASSET_KEY_TO_COMMON_NAME = {
+        "B01": "coastal",
+        "B02": "blue",
+        "B03": "green",
+        "B04": "red",
+        "B05": "nir",
+        "B06": "swir16",
+        "B07": "swir22",
+        "B09": "cirrus",
+        "B10": "lwir11",
+        "B11": "lwir12",
+    }
+    COMMON_NAME_TO_ASSET_KEY = {
+        common: asset for asset, common in ASSET_KEY_TO_COMMON_NAME.items()
+    }
+    DEFAULT_BANDS = list(ASSET_KEY_TO_COMMON_NAME.keys())
+
+    @classmethod
+    def _normalize_band_name(cls, band: str) -> str:
+        if band in cls.ASSET_KEY_TO_COMMON_NAME:
+            return band
+        if band in cls.COMMON_NAME_TO_ASSET_KEY:
+            return cls.COMMON_NAME_TO_ASSET_KEY[band]
+        raise ValueError(
+            f"unknown HLS2 L30 band '{band}'. Use one of {sorted(cls.ASSET_KEY_TO_COMMON_NAME.keys())} "
+            f"(asset keys) or {sorted(cls.COMMON_NAME_TO_ASSET_KEY.keys())} (common names)."
+        )
+
+    def __init__(
+        self,
+        band_names: list[str] | None = None,
+        platforms: list[str] | None = None,
+        query: dict[str, Any] | None = None,
+        context: DataSourceContext = DataSourceContext(),
+        **kwargs: Any,
+    ):
+        """Initialize a new Hls2L30 instance.
+
+        Args:
+            band_names: optional list of bands to expose. If not provided and a layer
+                config is present, bands are inferred from the band sets. Otherwise
+                defaults to the HLS L30 reflectance bands.
+            platforms: optional list of Landsat platform identifiers to include.
+                Defaults to ["landsat-8", "landsat-9"].
+            query: optional STAC query filter to use. If not set, this defaults to a
+                platform filter for the configured platforms.
+            context: the data source context.
+            kwargs: additional arguments to pass to PlanetaryComputer.
+        """
+        if context.layer_config is not None:
+            requested_bands = {
+                band
+                for band_set in context.layer_config.band_sets
+                for band in band_set.bands
+            }
+            band_names = [self._normalize_band_name(band) for band in requested_bands]
+        elif band_names is None:
+            band_names = self.DEFAULT_BANDS
+        else:
+            band_names = [self._normalize_band_name(band) for band in band_names]
+
+        if platforms is None:
+            platforms = self.DEFAULT_PLATFORMS
+
+        if query is None:
+            query = {"platform": {"in": platforms}}
+
+        asset_bands = {band: [band] for band in band_names}
+
+        super().__init__(
+            collection_name=self.COLLECTION_NAME,
+            asset_bands=asset_bands,
+            query=query,
+            # Skip per-item asset checks; required assets are derived from asset_bands.
+            skip_items_missing_assets=True,
+            context=context,
+            **kwargs,
+        )
 
 
 class LandsatC2L2(PlanetaryComputer):
@@ -831,7 +991,7 @@ class Sentinel3SlstrLST(PlanetaryComputer):
     ) -> None:
         """Ingest items into the given tile store."""
         for item in items:
-            if tile_store.is_raster_ready(item.name, self.band_names):
+            if tile_store.is_raster_ready(item, self.band_names):
                 continue
 
             if self.LST_ASSET_KEY not in item.asset_urls:
@@ -910,7 +1070,7 @@ class Sentinel3SlstrLST(PlanetaryComputer):
                         )
 
                 tile_store.write_raster(
-                    item.name,
+                    item,
                     self.band_names,
                     projection,
                     bounds,
@@ -923,7 +1083,7 @@ class Sentinel3SlstrLST(PlanetaryComputer):
     def read_raster(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Any,
         bounds: Any,

@@ -1,10 +1,12 @@
 """Default TileStore implementation."""
 
+from __future__ import annotations
+
 import json
 import math
 import shutil
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import rasterio.transform
 import rasterio.vrt
@@ -38,6 +40,9 @@ from rslearn.utils.vector_format import (
 )
 
 from .tile_store import TileStore
+
+if TYPE_CHECKING:
+    from rslearn.data_sources.data_source import Item
 
 # Special filename to indicate writing is done.
 COMPLETED_FNAME = "completed"
@@ -146,16 +151,14 @@ class DefaultTileStore(TileStore):
         raise ValueError(f"no raster found in {raster_dir}")
 
     @override
-    def is_raster_ready(
-        self, layer_name: str, item_name: str, bands: list[str]
-    ) -> bool:
-        raster_dir = self._get_raster_dir(layer_name, item_name, bands)
+    def is_raster_ready(self, layer_name: str, item: Item, bands: list[str]) -> bool:
+        raster_dir = self._get_raster_dir(layer_name, item.name, bands)
         return (raster_dir / COMPLETED_FNAME).exists()
 
     @override
-    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
+    def get_raster_bands(self, layer_name: str, item: Item) -> list[list[str]]:
         assert isinstance(self.path, UPath)
-        item_dir = self.path / layer_name / item_name
+        item_dir = self.path / layer_name / item.name
         if not item_dir.exists():
             return []
 
@@ -179,9 +182,9 @@ class DefaultTileStore(TileStore):
 
     @override
     def get_raster_bounds(
-        self, layer_name: str, item_name: str, bands: list[str], projection: Projection
+        self, layer_name: str, item: Item, bands: list[str], projection: Projection
     ) -> PixelBounds:
-        raster_fname = self._get_raster_fname(layer_name, item_name, bands)
+        raster_fname = self._get_raster_fname(layer_name, item.name, bands)
 
         with open_rasterio_upath_reader(raster_fname) as src:
             with rasterio.vrt.WarpedVRT(src, crs=projection.crs) as vrt:
@@ -202,13 +205,13 @@ class DefaultTileStore(TileStore):
     def read_raster(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
     ) -> RasterArray:
-        raster_fname = self._get_raster_fname(layer_name, item_name, bands)
+        raster_fname = self._get_raster_fname(layer_name, item.name, bands)
         return GeotiffRasterFormat().decode_raster(
             path=raster_fname.parent,
             fname=raster_fname.name,
@@ -221,13 +224,13 @@ class DefaultTileStore(TileStore):
     def write_raster(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
         raster: RasterArray,
     ) -> None:
-        raster_dir = self._get_raster_dir(layer_name, item_name, bands, write=True)
+        raster_dir = self._get_raster_dir(layer_name, item.name, bands, write=True)
         raster_format = GeotiffRasterFormat(geotiff_options=self.geotiff_options)
         raster_format.encode_raster(raster_dir, projection, bounds, raster)
         (raster_dir / COMPLETED_FNAME).touch()
@@ -236,12 +239,12 @@ class DefaultTileStore(TileStore):
     def write_raster_file(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         fname: UPath,
         time_range: tuple[datetime, datetime] | None = None,
     ) -> None:
-        raster_dir = self._get_raster_dir(layer_name, item_name, bands, write=True)
+        raster_dir = self._get_raster_dir(layer_name, item.name, bands, write=True)
         raster_dir.mkdir(parents=True, exist_ok=True)
 
         if self.convert_rasters_to_cogs:
@@ -323,26 +326,26 @@ class DefaultTileStore(TileStore):
         return self.path / layer_name / item_name
 
     @override
-    def is_vector_ready(self, layer_name: str, item_name: str) -> bool:
-        vector_dir = self._get_vector_dir(layer_name, item_name)
+    def is_vector_ready(self, layer_name: str, item: Item) -> bool:
+        vector_dir = self._get_vector_dir(layer_name, item.name)
         return (vector_dir / COMPLETED_FNAME).exists()
 
     @override
     def read_vector(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         projection: Projection,
         bounds: PixelBounds,
     ) -> list[Feature]:
-        vector_dir = self._get_vector_dir(layer_name, item_name)
+        vector_dir = self._get_vector_dir(layer_name, item.name)
         return self.vector_format.decode_vector(vector_dir, projection, bounds)
 
     @override
     def write_vector(
-        self, layer_name: str, item_name: str, features: list[Feature]
+        self, layer_name: str, item: Item, features: list[Feature]
     ) -> None:
-        vector_dir = self._get_vector_dir(layer_name, item_name)
+        vector_dir = self._get_vector_dir(layer_name, item.name)
         vector_dir.mkdir(parents=True, exist_ok=True)
         self.vector_format.encode_vector(vector_dir, features)
         (vector_dir / COMPLETED_FNAME).touch()

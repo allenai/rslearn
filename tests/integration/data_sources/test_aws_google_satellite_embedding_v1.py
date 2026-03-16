@@ -136,7 +136,7 @@ def test_ingest(
         item_groups[0],
         [[seattle2020]],
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, BANDS)
+    assert tile_store.is_raster_ready(layer_name, item, BANDS)
 
     # Read back and verify pixel values.
     bounds = (
@@ -146,7 +146,7 @@ def test_ingest(
         int(seattle2020.shp.bounds[3]),
     )
     array = tile_store.read_raster(
-        layer_name, item.name, BANDS, seattle2020.projection, bounds
+        layer_name, item, BANDS, seattle2020.projection, bounds
     )
     assert array.get_chw_array().max() == expected_value
 
@@ -179,12 +179,12 @@ def test_materialize(
     item_groups = data_source.get_items([seattle2020], query_config)[0]
     item = item_groups[0][0]
 
-    # read_raster uses rasterio to open a /vsicurl/ URL.
+    # read_raster uses rasterio to open an HTTP URL.
     # Redirect it to the local test file instead.
     original_rasterio_open = rasterio.open
 
     def mock_rasterio_open(url: Any, *args: Any, **kwargs: Any) -> Any:
-        if "/vsicurl/" in str(url):
+        if "s3.us-west-2.amazonaws.com" in str(url):
             return original_rasterio_open(str(test_geotiff), *args, **kwargs)
         return original_rasterio_open(url, *args, **kwargs)
 
@@ -199,9 +199,10 @@ def test_materialize(
 
     array = data_source.read_raster(
         layer_name="fake",
-        item_name=item.name,
+        item=item,
         bands=BANDS,
         projection=seattle2020.projection,
         bounds=bounds,
     )
     assert array.get_chw_array().max() == expected_value
+    assert array.timestamps == [item.geometry.time_range]
