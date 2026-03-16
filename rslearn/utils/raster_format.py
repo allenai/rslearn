@@ -783,6 +783,8 @@ class NumpyRasterMetadata(pydantic.BaseModel):
     dtype: str
     num_channels: int
     num_timesteps: int
+    height: int
+    width: int
     timestamps: list[tuple[datetime, datetime]] | None = None
 
 
@@ -834,6 +836,8 @@ class NumpyRasterFormat(RasterFormat):
             dtype=raster.array.dtype.name,
             num_channels=c,
             num_timesteps=t,
+            height=h,
+            width=w,
             timestamps=raster.timestamps,
         )
         with (path / METADATA_FNAME).open("w") as f:
@@ -855,8 +859,8 @@ class NumpyRasterFormat(RasterFormat):
 
         Args:
             path: directory to read from.
-            projection: ignored (kept for interface conformance).
-            bounds: ignored (kept for interface conformance).
+            projection: used to verify consistency with stored projection.
+            bounds: used to verify consistency with stored bounds.
             resampling: ignored (kept for interface conformance).
 
         Returns:
@@ -865,20 +869,37 @@ class NumpyRasterFormat(RasterFormat):
         with (path / METADATA_FNAME).open() as f:
             metadata = NumpyRasterMetadata.model_validate_json(f.read())
 
+        # Warn if the requested bounds/projection differ from what was stored,
+        # since NumpyRasterFormat does not perform reprojection or cropping.
+        if metadata.bounds != tuple(bounds):
+            logger.warning(
+                "NumpyRasterFormat: requested bounds %s differ from stored "
+                "bounds %s — returning stored data as-is",
+                bounds,
+                metadata.bounds,
+            )
+
         with (path / self.data_fname).open("rb") as f:
             array = np.load(f)
 
-        # Validate shape consistency.
+        # Validate array shape against all four metadata dimensions.
         expected_shape = (
             metadata.num_channels,
             metadata.num_timesteps,
-            array.shape[2],
-            array.shape[3],
+            metadata.height,
+            metadata.width,
         )
         if array.shape != expected_shape:
             raise ValueError(
                 f"NumpyRasterFormat: stored array shape {array.shape} does not "
                 f"match metadata (expected {expected_shape})"
+            )
+
+        # Validate dtype consistency.
+        if array.dtype.name != metadata.dtype:
+            raise ValueError(
+                f"NumpyRasterFormat: stored array dtype '{array.dtype.name}' "
+                f"does not match metadata dtype '{metadata.dtype}'"
             )
 
         return RasterArray(array=array, timestamps=metadata.timestamps)
