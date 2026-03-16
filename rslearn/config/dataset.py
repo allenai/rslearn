@@ -213,7 +213,9 @@ class BandSetConfig(BaseModel):
             )
 
         if self.spatial_size is not None and len(self.spatial_size) != 2:
-            raise ValueError("spatial_size must be a list of exactly 2 ints [height, width]")
+            raise ValueError(
+                "spatial_size must be a list of exactly 2 ints [height, width]"
+            )
 
         return self
 
