@@ -58,6 +58,7 @@ detailed page with configuration options and available bands. See
 | Data Source | Provider | Notes |
 |---|---|---|
 | [copernicus.Copernicus](data_sources/copernicus.md) | ESA Copernicus OData API | Generic product access |
+| [alphaearth.AlphaEarth](data_sources/alphaearth_AlphaEarth.md) | Source Cooperative | AlphaEarth annual embeddings, direct materialization |
 | [google_earth_engine.GEE](data_sources/google_earth_engine_GEE.md) | Google Earth Engine | Generic ee.ImageCollection access |
 | [aws_google_satellite_embedding_v1.GoogleSatelliteEmbeddingV1](data_sources/aws_google_satellite_embedding_v1.md) | AWS Open Data | Google Satellite Embedding v1 |
 | [google_earth_engine.GoogleSatelliteEmbeddings](data_sources/google_earth_engine_GoogleSatelliteEmbeddings.md) | Google Earth Engine | Google Satellite Embedding v1, requires GEE credentials |
