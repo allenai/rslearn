@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import math
 import os
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -201,7 +202,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                 f"supported: {sorted(self.ALLOWED_BANDS)}"
             )
 
-        self._ds: Any | None = None
+        self._ds: xr.Dataset | None = None
 
     def _resolve_token(self) -> str | None:
         """Resolve the EarthDataHub token from the environment.
@@ -247,6 +248,9 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                         f"got {chunks[0]}"
                     )
 
+        # Eagerly validate chunk metadata so callers get a clear error at open time
+        self._get_chunk_sizes()
+
         return self._ds
 
     def _get_chunk_sizes(self) -> tuple[int, int, int]:
@@ -288,6 +292,11 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
 
         start_idx = int(np.searchsorted(time_vals, start_np))
         end_idx = int(np.searchsorted(time_vals, end_np, side="right"))
+
+        # If the query range falls entirely outside the dataset, return empty.
+        if start_idx >= n_times or end_idx == 0:
+            return range(0, 0)
+
         start_idx = max(0, min(start_idx, n_times - 1))
         end_idx = max(start_idx + 1, min(end_idx, n_times))
 
@@ -449,7 +458,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         """Compute rslearn Projection and PixelBounds from ERA5 lat/lon grids.
 
         Args:
-            lat: 1-D latitude array (descending, north-to-south).
+            lat: 1-D latitude array (any ordering; min/max are used).
             lon: 1-D longitude array (ascending, in [-180, 180)).
 
         Returns:
@@ -501,10 +510,12 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                 continue
 
             # Parse chunk indices from item name: era5land_v1_t{tc}_y{latc}_x{lonc}
-            parts = item.name.split("_")
-            tc = int(parts[2][1:])
-            latc = int(parts[3][1:])
-            lonc = int(parts[4][1:])
+            m = re.fullmatch(r"era5land_v1_t(\d+)_y(\d+)_x(\d+)", item.name)
+            if m is None:
+                raise ValueError(
+                    f"Cannot parse chunk indices from item name: {item.name!r}"
+                )
+            tc, latc, lonc = int(m.group(1)), int(m.group(2)), int(m.group(3))
 
             tc_start = tc * time_cs
             tc_end = min((tc + 1) * time_cs, n_times)
