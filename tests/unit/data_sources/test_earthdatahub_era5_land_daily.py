@@ -78,7 +78,7 @@ def test_era5land_dailyutc_v1_chunk_items_and_ingest(tmp_path: Path) -> None:
     )
 
     bands = ["t2m", "tp"]
-    assert layer_tile_store.is_raster_ready(items[0].name, bands)
+    assert layer_tile_store.is_raster_ready(items[0], bands)
 
 
 def test_era5land_dailyutc_v1_requires_single_composite(tmp_path: Path) -> None:
@@ -199,7 +199,7 @@ def test_era5land_dailyutc_v1_spatial_chunk_splitting(tmp_path: Path) -> None:
     )
 
     for item in items:
-        assert layer_tile_store.is_raster_ready(item.name, ["t2m"])
+        assert layer_tile_store.is_raster_ready(item, ["t2m"])
 
 
 def test_era5land_dailyutc_v1_temperature_celsius(tmp_path: Path) -> None:
@@ -283,7 +283,7 @@ def test_era5land_dailyutc_v1_temperature_celsius(tmp_path: Path) -> None:
     )
 
     bands = ["t2m", "d2m"]
-    assert layer_tile_store.is_raster_ready(items[0].name, bands)
+    assert layer_tile_store.is_raster_ready(items[0], bands)
 
     raster_dir = ds_path / "tiles" / "era5" / items[0].name / get_bandset_dirname(bands)
     tif_files = [p for p in raster_dir.iterdir() if p.suffix == ".tif"]
