@@ -506,7 +506,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         time_cs, lat_cs, lon_cs = self._get_chunk_sizes()
 
         for item in items:
-            if tile_store.is_raster_ready(item.name, self.band_names):
+            if tile_store.is_raster_ready(item, self.band_names):
                 continue
 
             # Parse chunk indices from item name: era5land_v1_t{tc}_y{latc}_x{lonc}
@@ -583,7 +583,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
 
             raster = RasterArray(array=array, timestamps=timestamps)
             tile_store.write_raster(
-                item.name,
+                item,
                 self.band_names,
                 projection,
                 pixel_bounds,
