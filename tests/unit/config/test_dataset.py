@@ -340,6 +340,16 @@ class TestBandSetConfigSpatialSize:
                 dtype=DType.FLOAT32, bands=["a"], spatial_size=[1, 1], zoom_offset=1
             )
 
+    def test_spatial_size_zero_rejected(self) -> None:
+        """spatial_size with zero value should raise an error."""
+        with pytest.raises(ValidationError, match="positive integers"):
+            BandSetConfig(dtype=DType.FLOAT32, bands=["a"], spatial_size=[0, 1])
+
+    def test_spatial_size_negative_rejected(self) -> None:
+        """spatial_size with negative value should raise an error."""
+        with pytest.raises(ValidationError, match="positive integers"):
+            BandSetConfig(dtype=DType.FLOAT32, bands=["a"], spatial_size=[-1, 1])
+
     def test_numpy_raster_format_from_config(self) -> None:
         """NumpyRasterFormat should be instantiable from config via jsonargparse."""
         bs = BandSetConfig(

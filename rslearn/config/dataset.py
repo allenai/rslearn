@@ -217,6 +217,9 @@ class BandSetConfig(BaseModel):
                 "spatial_size must be a list of exactly 2 ints [height, width]"
             )
 
+        if self.spatial_size is not None and any(v <= 0 for v in self.spatial_size):
+            raise ValueError("spatial_size values must be positive integers")
+
         return self
 
     def get_final_projection_and_bounds(
@@ -230,6 +233,12 @@ class BandSetConfig(BaseModel):
         When ``spatial_size`` is set, the projection resolution is scaled so that the
         window's geographic extent maps to exactly ``spatial_size`` pixels. The returned
         bounds will have width = spatial_size[1] and height = spatial_size[0].
+
+        Note: the ``spatial_size`` path uses ``round()`` to compute the new pixel-space
+        origin, which can shift the geographic origin by up to half of the new
+        (coarser) pixel size. This is the same rounding behaviour used by
+        ``ResolutionFactor.multiply_bounds`` and is negligible for coarse-resolution
+        layers (e.g. ERA5 at 0.1 deg) where sub-pixel shifts are irrelevant.
 
         Args:
             projection: the window's projection
