@@ -115,6 +115,10 @@ class DataSource(ABC, Generic[ItemType]):
         """
         raise NotImplementedError
 
+    def get_default_nodata_vals(self, bands: list[str]) -> list[float] | None:
+        """Get default nodata values for the specified bands, if the source has any."""
+        return None
+
 
 class ItemLookupDataSource(DataSource[ItemType]):
     """A data source that can look up items by name."""

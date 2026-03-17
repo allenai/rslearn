@@ -429,6 +429,74 @@ def test_read_data_input_use_all_bands_with_band_set_index(tmp_path: UPath) -> N
     torch.testing.assert_close(result.image[:, 0], torch.as_tensor(raster))
 
 
+def test_read_data_input_use_all_bands_with_generated_alphaearth_names(
+    tmp_path: UPath,
+) -> None:
+    """Band set index should work with generated AlphaEarth-style band names."""
+    ds_path = UPath(tmp_path)
+    ds_path.mkdir(parents=True, exist_ok=True)
+
+    dataset_config = {
+        "layers": {
+            "embeddings": {
+                "type": "raster",
+                "band_sets": [
+                    {
+                        "dtype": "float32",
+                        "num_bands": 3,
+                        "band_prefix": "A",
+                        "band_zero_pad": 2,
+                    }
+                ],
+            },
+        },
+    }
+    with (ds_path / "config.json").open("w") as f:
+        json.dump(dataset_config, f)
+
+    dataset = Dataset(ds_path)
+    window = Window(
+        storage=dataset.storage,
+        name="test_window",
+        group="default",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 4, 4),
+        time_range=None,
+    )
+    window.save()
+
+    raster = np.stack(
+        [
+            10 * np.ones((4, 4), dtype=np.float32),
+            20 * np.ones((4, 4), dtype=np.float32),
+            30 * np.ones((4, 4), dtype=np.float32),
+        ],
+        axis=0,
+    )
+    raster_dir = window.get_raster_dir("embeddings", ["A00", "A01", "A02"], group_idx=0)
+    GeotiffRasterFormat().encode_raster(
+        raster_dir,
+        window.projection,
+        window.bounds,
+        RasterArray(chw_array=raster),
+    )
+    window.mark_layer_completed("embeddings", group_idx=0)
+
+    data_input = DataInput(
+        "raster",
+        ["embeddings"],
+        use_all_bands_in_order_of_band_set_idx=0,
+        dtype=DType.FLOAT32,
+    )
+
+    result = read_data_input(
+        dataset, window, window.bounds, data_input, random.Random(0)
+    )
+    assert isinstance(result, RasterImage)
+    assert result.image.shape == (3, 1, 4, 4)
+    torch.testing.assert_close(result.image[:, 0], torch.as_tensor(raster))
+
+
 def test_model_dataset_index_uses_cache(
     basic_classification_dataset: Dataset,
     add_window_to_basic_classification_dataset: Callable,

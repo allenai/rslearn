@@ -424,6 +424,7 @@ def materialize_window(
                 layer_name,
                 layer_cfg,
                 item_groups,
+                data_source=data_source,
             ),
             retry_max_attempts=retry_max_attempts,
             retry_backoff=retry_backoff,
