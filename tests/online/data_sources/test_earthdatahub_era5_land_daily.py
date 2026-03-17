@@ -87,7 +87,7 @@ def test_era5land_dailyutc_v1_ingest_from_local_zarr(tmp_path: Path) -> None:
     )
 
     bands = ["t2m", "tp"]
-    assert layer_tile_store.is_raster_ready(items[0].name, bands)
+    assert layer_tile_store.is_raster_ready(items[0], bands)
 
     # Read the GeoTIFF directly to verify shape and values.
     raster_dir = ds_path / "tiles" / "era5" / items[0].name / get_bandset_dirname(bands)
@@ -185,7 +185,7 @@ def test_era5land_dailyutc_v1_ingest_negative_longitude_bounds(tmp_path: Path) -
     )
 
     bands = ["t2m", "tp"]
-    assert layer_tile_store.is_raster_ready(items[0].name, bands)
+    assert layer_tile_store.is_raster_ready(items[0], bands)
 
     # Read the GeoTIFF directly to verify shape and values.
     raster_dir = ds_path / "tiles" / "era5" / items[0].name / get_bandset_dirname(bands)
@@ -257,7 +257,7 @@ def test_era5land_dailyutc_v1_spatial_chunk_ingest(tmp_path: Path) -> None:
 
     # Each item should be stored as a (1*2, 2, 2) = (2, 2, 2) GeoTIFF
     for item in items:
-        assert layer_tile_store.is_raster_ready(item.name, ["t2m"])
+        assert layer_tile_store.is_raster_ready(item, ["t2m"])
         raster_dir = (
             ds_path / "tiles" / "era5" / item.name / get_bandset_dirname(["t2m"])
         )
