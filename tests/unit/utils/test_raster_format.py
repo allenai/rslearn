@@ -9,7 +9,7 @@ from upath import UPath
 
 from rslearn.utils.geometry import Projection
 from rslearn.utils.raster_array import RasterArray
-from rslearn.utils.raster_format import GeotiffRasterFormat
+from rslearn.utils.raster_format import GeotiffRasterFormat, NumpyRasterFormat
 
 
 def test_geotiff_tiling(tmp_path: pathlib.Path) -> None:
@@ -290,3 +290,67 @@ def test_raster_image_from_raster_array() -> None:
     assert ri.image.shape == (3, 2, 8, 8)
     assert ri.timestamps == ts
     assert ri.image.dtype.is_floating_point
+
+
+class TestNumpyRasterFormat:
+    """Tests for NumpyRasterFormat."""
+
+    PROJECTION = Projection(CRS.from_epsg(3857), 1, -1)
+
+    def test_single_timestep_roundtrip(self, tmp_path: pathlib.Path) -> None:
+        """Encode then decode a single-timestep (C, 1, H, W) array."""
+        path = UPath(tmp_path)
+        data = np.random.rand(3, 1, 4, 4).astype(np.float32)
+        raster = RasterArray(array=data)
+
+        fmt = NumpyRasterFormat()
+        fmt.encode_raster(path, self.PROJECTION, (0, 0, 4, 4), raster)
+        decoded = fmt.decode_raster(path, self.PROJECTION, (0, 0, 4, 4))
+
+        assert decoded.array.shape == (3, 1, 4, 4)
+        np.testing.assert_array_equal(decoded.array, data)
+        assert decoded.timestamps is None
+
+    def test_multi_timestep_roundtrip(self, tmp_path: pathlib.Path) -> None:
+        """Encode then decode a multi-timestep (C, T, H, W) array with timestamps."""
+        path = UPath(tmp_path)
+        c, t, h, w = 2, 10, 1, 1
+        data = np.arange(c * t * h * w, dtype=np.float32).reshape(c, t, h, w)
+        timestamps = [
+            (
+                datetime(2024, 1, i + 1, tzinfo=UTC),
+                datetime(2024, 1, i + 2, tzinfo=UTC),
+            )
+            for i in range(t)
+        ]
+        raster = RasterArray(array=data, timestamps=timestamps)
+
+        fmt = NumpyRasterFormat()
+        fmt.encode_raster(path, self.PROJECTION, (0, 0, w, h), raster)
+        decoded = fmt.decode_raster(path, self.PROJECTION, (0, 0, w, h))
+
+        assert decoded.array.shape == (c, t, h, w)
+        np.testing.assert_array_equal(decoded.array, data)
+        assert decoded.timestamps == timestamps
+
+    def test_dtype_preserved(self, tmp_path: pathlib.Path) -> None:
+        """Test that the stored dtype is preserved on decode."""
+        path = UPath(tmp_path)
+        data = np.array([[[[1, 2], [3, 4]]]], dtype=np.int16)  # (1, 1, 2, 2)
+        raster = RasterArray(array=data)
+
+        fmt = NumpyRasterFormat()
+        fmt.encode_raster(path, self.PROJECTION, (0, 0, 2, 2), raster)
+        decoded = fmt.decode_raster(path, self.PROJECTION, (0, 0, 2, 2))
+
+        assert decoded.array.dtype == np.int16
+        np.testing.assert_array_equal(decoded.array, data)
+
+    def test_files_created(self, tmp_path: pathlib.Path) -> None:
+        """Test that encode creates data.npy and metadata.json."""
+        path = UPath(tmp_path)
+        data = np.zeros((1, 1, 2, 2), dtype=np.float32)
+        fmt = NumpyRasterFormat()
+        fmt.encode_raster(path, self.PROJECTION, (0, 0, 2, 2), RasterArray(array=data))
+        assert (path / "data.npy").exists()
+        assert (path / "metadata.json").exists()

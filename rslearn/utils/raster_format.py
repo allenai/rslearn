@@ -773,3 +773,133 @@ class SingleImageRasterFormat(RasterFormat):
             array=array[:, np.newaxis, :, :],
             timestamps=image_metadata.timestamps,
         )
+
+
+class NumpyRasterMetadata(pydantic.BaseModel):
+    """Metadata sidecar for NumpyRasterFormat."""
+
+    projection: dict[str, Any]
+    bounds: PixelBounds
+    dtype: str
+    num_channels: int
+    num_timesteps: int
+    height: int
+    width: int
+    timestamps: list[tuple[datetime, datetime]] | None = None
+
+
+class NumpyRasterFormat(RasterFormat):
+    """A raster format that stores data as a NumPy ``.npy`` file.
+
+    This avoids GeoTIFF overhead for small spatial arrays (e.g. 1x1 pixels)
+    and/or arrays with many bands (e.g. C*T > 1000).
+
+    The directory contains two files:
+    - ``data.npy``: the raw (C, T, H, W) array.
+    - ``metadata.json``: projection, bounds, dtype, channel/timestep counts,
+      and optional timestamps.
+
+    ``decode_raster`` returns the stored array as-is without any reprojection
+    or resampling -- data is assumed to have been materialized at the target
+    resolution already.
+    """
+
+    data_fname = "data.npy"
+
+    def encode_raster(
+        self,
+        path: UPath,
+        projection: Projection,
+        bounds: PixelBounds,
+        raster: RasterArray,
+    ) -> None:
+        """Encode a RasterArray to ``data.npy`` + ``metadata.json``.
+
+        Args:
+            path: directory to write into.
+            projection: the projection of the raster data.
+            bounds: the bounds of the raster data in the projection.
+            raster: the (C, T, H, W) RasterArray to store.
+        """
+        c, t, h, w = raster.array.shape
+
+        path.mkdir(parents=True, exist_ok=True)
+
+        # Write the raw array.
+        with (path / self.data_fname).open("wb") as f:
+            np.save(f, raster.array)
+
+        # Write the metadata sidecar.
+        metadata = NumpyRasterMetadata(
+            projection=projection.serialize(),
+            bounds=bounds,
+            dtype=raster.array.dtype.name,
+            num_channels=c,
+            num_timesteps=t,
+            height=h,
+            width=w,
+            timestamps=raster.timestamps,
+        )
+        with (path / METADATA_FNAME).open("w") as f:
+            f.write(metadata.model_dump_json())
+
+    def decode_raster(
+        self,
+        path: UPath,
+        projection: Projection,
+        bounds: PixelBounds,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> RasterArray:
+        """Decode a previously stored ``data.npy`` + ``metadata.json``.
+
+        The returned array is the stored array *as-is* -- no reprojection or
+        resampling is performed. The ``projection``, ``bounds``, and
+        ``resampling`` parameters are accepted for interface conformance but
+        are not used for spatial transformation.
+
+        Args:
+            path: directory to read from.
+            projection: used to verify consistency with stored projection.
+            bounds: used to verify consistency with stored bounds.
+            resampling: ignored (kept for interface conformance).
+
+        Returns:
+            the (C, T, H, W) RasterArray.
+        """
+        with (path / METADATA_FNAME).open() as f:
+            metadata = NumpyRasterMetadata.model_validate_json(f.read())
+
+        # Warn if the requested bounds/projection differ from what was stored,
+        # since NumpyRasterFormat does not perform reprojection or cropping.
+        if metadata.bounds != tuple(bounds):
+            logger.warning(
+                "NumpyRasterFormat: requested bounds %s differ from stored "
+                "bounds %s — returning stored data as-is",
+                bounds,
+                metadata.bounds,
+            )
+
+        with (path / self.data_fname).open("rb") as f:
+            array = np.load(f)
+
+        # Validate array shape against all four metadata dimensions.
+        expected_shape = (
+            metadata.num_channels,
+            metadata.num_timesteps,
+            metadata.height,
+            metadata.width,
+        )
+        if array.shape != expected_shape:
+            raise ValueError(
+                f"NumpyRasterFormat: stored array shape {array.shape} does not "
+                f"match metadata (expected {expected_shape})"
+            )
+
+        # Validate dtype consistency.
+        if array.dtype.name != metadata.dtype:
+            raise ValueError(
+                f"NumpyRasterFormat: stored array dtype '{array.dtype.name}' "
+                f"does not match metadata dtype '{metadata.dtype}'"
+            )
+
+        return RasterArray(array=array, timestamps=metadata.timestamps)
