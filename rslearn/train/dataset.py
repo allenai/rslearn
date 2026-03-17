@@ -243,7 +243,7 @@ class DataInput:
         data_type: str,
         layers: list[str],
         bands: list[str] | None = None,
-        num_bands: int | None = None,
+        use_all_bands_in_order_of_band_set_idx: int | None = None,
         required: bool = True,
         passthrough: bool = False,
         is_target: bool = False,
@@ -265,12 +265,11 @@ class DataInput:
                 "sentinel2" with three item groups: with load_all_item_groups=False,
                 set layers=["sentinel2", "sentinel2.1", "sentinel2.2"]; with
                 load_all_item_groups=True, set layers=["sentinel2"].
-            bands: the bands to read, if this is a raster. Exactly one of bands
-                and num_bands must be set for raster inputs.
-            num_bands: the number of bands in this input. The bands will be named
-                B0, B1, B2, etc. Useful for layers with many bands where listing
-                them explicitly is impractical. Exactly one of bands and num_bands
-                must be set for raster inputs.
+            bands: the bands to read, if this is a raster.
+            use_all_bands_in_order_of_band_set_idx: if set, read all bands from the
+                specified layer_config band_set index (ordered as listed in that
+                band_set). This is useful for large embedding layers where listing all
+                band names in model config is cumbersome.
             required: whether examples lacking one of these layers should be skipped
             passthrough: whether to expose this to the model even if it isn't returned
                 by any task
@@ -303,13 +302,6 @@ class DataInput:
         """
         self.data_type = data_type
         self.layers = layers
-
-        self.bands: list[str] | None
-        if num_bands is not None and bands is None:
-            self.bands = [f"B{i}" for i in range(num_bands)]
-        else:
-            self.bands = bands
-
         self.required = required
         self.passthrough = passthrough
         self.is_target = is_target
@@ -318,6 +310,57 @@ class DataInput:
         self.load_all_item_groups = load_all_item_groups
         self.resolution_factor = resolution_factor
         self.resampling = resampling
+
+        if bands is not None and use_all_bands_in_order_of_band_set_idx is not None:
+            raise ValueError(
+                "only one of bands and use_all_bands_in_order_of_band_set_idx should be set"
+            )
+        if (
+            self.data_type == "raster"
+            and bands is None
+            and use_all_bands_in_order_of_band_set_idx is None
+        ):
+            raise ValueError(
+                "for raster DataInputs, one of bands and use_all_bands_in_order_of_band_set_idx must be set"
+            )
+
+        self.bands = bands
+        self.use_all_bands_in_order_of_band_set_idx = (
+            use_all_bands_in_order_of_band_set_idx
+        )
+
+
+def resolve_raster_data_input_bands(
+    data_input: DataInput,
+    layer_name: str,
+    layer_config: LayerConfig,
+) -> list[str]:
+    """Resolve the band list for a raster DataInput.
+
+    If data_input.bands is explicitly provided, it is returned as-is. Otherwise, if
+    use_all_bands_in_order_of_band_set_idx is set, all bands are taken from that
+    specific band set in the dataset's LayerConfig.
+    """
+    if data_input.bands is not None:
+        return data_input.bands
+
+    band_set_index = data_input.use_all_bands_in_order_of_band_set_idx
+    if band_set_index is None:
+        raise ValueError(
+            f"No bands specified for raster input when reading layer '{layer_name}'. "
+            "Set `bands: [...]`, or set `use_all_bands_in_order_of_band_set_idx` "
+            "to a band set index to use all band names from the dataset layer config."
+        )
+
+    if band_set_index < 0 or band_set_index >= len(layer_config.band_sets):
+        raise ValueError(
+            "Invalid "
+            f"use_all_bands_in_order_of_band_set_idx={band_set_index} "
+            f"for layer '{layer_name}'. "
+            f"Expected a value in [0, {len(layer_config.band_sets) - 1}]."
+        )
+
+    return layer_config.band_sets[band_set_index].bands
 
 
 def read_raster_layer_for_data_input(
@@ -347,9 +390,11 @@ def read_raster_layer_for_data_input(
     """
     # See what different sets of bands we need to read to get all the
     # configured bands.
-    needed_bands = data_input.bands
-    if needed_bands is None:
-        raise ValueError(f"No bands specified for {layer_name}")
+    needed_bands = resolve_raster_data_input_bands(
+        data_input=data_input,
+        layer_name=layer_name,
+        layer_config=layer_config,
+    )
     needed_band_indexes = {}
     for i, band in enumerate(needed_bands):
         needed_band_indexes[band] = i
@@ -414,8 +459,8 @@ def read_raster_layer_for_data_input(
                 (
                     len(needed_bands),
                     t,
-                    final_bounds[3] - final_bounds[1],
-                    final_bounds[2] - final_bounds[0],
+                    src.shape[2],
+                    src.shape[3],
                 ),
                 dtype=get_torch_dtype(data_input.dtype),
             )

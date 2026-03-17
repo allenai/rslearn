@@ -134,7 +134,15 @@ class Transform(torch.nn.Module):
             will be silently skipped. Useful when working with optional inputs.
     """
 
-    skip_missing: bool = False
+    def __init__(self, skip_missing: bool = False):
+        """Initialize Transform.
+
+        Args:
+            skip_missing: If True, selectors that don't exist in the input/target dicts
+                will be silently skipped. Useful when working with optional inputs.
+        """
+        super().__init__()
+        self.skip_missing = skip_missing
 
     def apply_fn(
         self,

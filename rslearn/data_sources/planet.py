@@ -233,13 +233,13 @@ class Planet(DataSource):
             geometries: a list of geometries needed for each item
         """
         for item in items:
-            if tile_store.is_raster_ready(item.name, self.bands):
+            if tile_store.is_raster_ready(item, self.bands):
                 continue
 
             with tempfile.TemporaryDirectory() as tmp_dir:
                 asset_path = asyncio.run(self._download_asset(item, Path(tmp_dir)))
                 tile_store.write_raster_file(
-                    item.name,
+                    item,
                     self.bands,
                     asset_path,
                     time_range=item.geometry.time_range,

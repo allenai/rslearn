@@ -38,11 +38,10 @@ class Resize(Transform):
             skip_missing: if True, skip selectors that don't exist in the input/target
                 dicts. Useful when working with optional inputs.
         """
-        super().__init__()
+        super().__init__(skip_missing=skip_missing)
         self.target_size = target_size
         self.selectors = selectors
         self.interpolation = INTERPOLATION_MODES[interpolation]
-        self.skip_missing = skip_missing
 
     def apply_resize(self, image: RasterImage) -> RasterImage:
         """Apply resizing on the specified image.
@@ -93,10 +92,9 @@ class MaxPoolResize(Transform):
             skip_missing: if True, skip selectors that don't exist in the
                 input/target dicts.
         """
-        super().__init__()
+        super().__init__(skip_missing=skip_missing)
         self.target_size = target_size
         self.selectors = selectors
-        self.skip_missing = skip_missing
 
     def apply_max_pool_resize(self, image: RasterImage) -> RasterImage:
         """Apply adaptive max-pool resizing on the specified image.

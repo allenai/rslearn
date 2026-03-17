@@ -37,7 +37,7 @@ def test_read_raster_subset_bands(
     subset_bands = ["A00", "A01", "A02"]
     data = data_source.read_raster(
         layer_name=layer_name,
-        item_name=item.name,
+        item=item,
         bands=subset_bands,
         projection=projection,
         bounds=bounds,
@@ -78,7 +78,7 @@ def test_read_raster_no_dequantization(
 
     data = data_source.read_raster(
         layer_name=layer_name,
-        item_name=item.name,
+        item=item,
         bands=BANDS,
         projection=projection,
         bounds=bounds,

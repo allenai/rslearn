@@ -251,7 +251,7 @@ class LandsatOliTirs(DataSource):
 
             for band in self.bands:
                 band_names = [band]
-                if tile_store.is_raster_ready(item.name, band_names):
+                if tile_store.is_raster_ready(item, band_names):
                     continue
 
                 with tempfile.TemporaryDirectory() as tmp_dir:
@@ -267,7 +267,7 @@ class LandsatOliTirs(DataSource):
                             shutil.copyfileobj(r.raw, f)
 
                     tile_store.write_raster_file(
-                        item.name,
+                        item,
                         band_names,
                         UPath(local_filename),
                         time_range=item.geometry.time_range,

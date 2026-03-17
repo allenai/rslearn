@@ -99,4 +99,4 @@ def test_ingest(
         [mock_item],
         [[seattle2020]],
     )
-    assert tile_store.is_raster_ready(layer_name, mock_item.name, ["B04"])
+    assert tile_store.is_raster_ready(layer_name, mock_item, ["B04"])

@@ -252,7 +252,7 @@ class PlanetBasemap(DataSource):
             geometries: a list of geometries needed for each item
         """
         for item in items:
-            if tile_store.is_raster_ready(item.name, self.bands):
+            if tile_store.is_raster_ready(item, self.bands):
                 continue
 
             assert isinstance(item, PlanetItem)
@@ -272,7 +272,7 @@ class PlanetBasemap(DataSource):
                         f.write(chunk)
 
                 tile_store.write_raster_file(
-                    item.name,
+                    item,
                     self.bands,
                     UPath(local_fname),
                     time_range=item.geometry.time_range,

@@ -2,10 +2,14 @@
 
 from datetime import UTC, datetime, timedelta
 
+import shapely
 from rasterio.crs import CRS
 
+from rslearn.const import WGS84_PROJECTION
+from rslearn.data_sources.data_source import Item
 from rslearn.data_sources.xyz_tiles import XyzTiles
 from rslearn.utils import Projection
+from rslearn.utils.geometry import STGeometry
 
 
 class TestXyzTilesGetRasterBounds:
@@ -46,9 +50,15 @@ class TestXyzTilesGetRasterBounds:
         for utm_epsg_code in utm_epsg_codes:
             utm_projection = Projection(CRS.from_epsg(utm_epsg_code), 10, -10)
 
+            item = Item(
+                name="https://example.com/{z}/{x}/{y}.png",
+                geometry=STGeometry(
+                    WGS84_PROJECTION, shapely.box(-180, -90, 180, 90), time_range
+                ),
+            )
             bounds = data_source.get_raster_bounds(
                 layer_name="test",
-                item_name="https://example.com/{z}/{x}/{y}.png",
+                item=item,
                 bands=["R", "G", "B"],
                 projection=utm_projection,
             )

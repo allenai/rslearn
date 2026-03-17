@@ -30,7 +30,7 @@ from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.grid_index import GridIndex
 
-from .data_source import DataSourceContext, Item, QueryConfig
+from .data_source import DataSourceContext, Item, ItemLookupDataSource, QueryConfig
 
 WRS2_GRID_SIZE = 1.0
 
@@ -77,7 +77,10 @@ class LandsatOliTirsItem(Item):
         )
 
 
-class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
+class LandsatOliTirs(
+    DirectMaterializeDataSource[LandsatOliTirsItem],
+    ItemLookupDataSource[LandsatOliTirsItem],
+):
     """A data source for Landsat 8/9 OLI-TIRS imagery on AWS.
 
     Specifically, uses the usgs-landsat S3 bucket maintained by USGS. The data includes
@@ -353,19 +356,16 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
 
     # --- DirectMaterializeDataSource implementation ---
 
-    def get_asset_url(self, item_name: str, asset_key: str) -> str:
+    def get_asset_url(self, item: LandsatOliTirsItem, asset_key: str) -> str:
         """Get the presigned URL to read the asset for the given item and asset key.
 
         Args:
-            item_name: the name of the item.
+            item: the item.
             asset_key: the key identifying which asset to get (the band name).
 
         Returns:
             the presigned URL to read the asset from.
         """
-        # Get the item since it has the blob path.
-        item = self.get_item_by_name(item_name)
-
         # For Landsat, the asset_key is the band name (e.g., "B1", "B2", etc.).
         blob_key = item.blob_path + f"{asset_key}.TIF"
         return self.client.generate_presigned_url(
@@ -414,7 +414,7 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
         for item, cur_geometries in zip(items, geometries):
             for band in self.BANDS:
                 band_names = [band]
-                if tile_store.is_raster_ready(item.name, band_names):
+                if tile_store.is_raster_ready(item, band_names):
                     continue
 
                 with tempfile.TemporaryDirectory() as tmp_dir:
@@ -425,7 +425,7 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
                         ExtraArgs={"RequestPayer": "requester"},
                     )
                     tile_store.write_raster_file(
-                        item.name,
+                        item,
                         band_names,
                         UPath(fname),
                         time_range=item.geometry.time_range,

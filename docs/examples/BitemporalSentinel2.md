@@ -8,9 +8,9 @@ images.
 
 There will be three steps:
 
-1. Create the dataset.
-2. Define the model architecture.
-3. Implement the transform to randomize the image order.
+1. [Create the dataset.](#create-the-dataset)
+2. [Define the model architecture.](#define-the-model-architecture)
+3. [Implement the transform to randomize the image order.](#implement-the-reverseimageorder-transform)
 
 ## Create the Dataset
 
@@ -229,7 +229,7 @@ data:
           init_args:
             band_names:
               sentinel2_l2a: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
-        # We will implement the ReversImageOrder class later!
+        # We will implement the ReverseImageOrder class later!
         - class_path: ReverseImageOrder
     train_config:
       groups: ["train"]
@@ -245,14 +245,16 @@ trainer:
       init_args:
         module_selector: ["model", "encoder", 0]
         unfreeze_at_epoch: 10
+    # Save best checkpoint based on accuracy metric.
+    - class_path: rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint
+      init_args:
+        monitor: val_accuracy
+        mode: max
 # Here we enable automatic checkpoint management and logging to W&B.
 # Set WANDB_MODE=offline to disable online logging.
 project_name: ${PROJECT_NAME}
 run_name: ${RUN_NAME}
 management_dir: ${MANAGEMENT_DIR}
-# Save best checkpoint based on accuracy metric.
-monitor: val_accuracy
-monitor_mode: max
 ```
 
 See [TasksAndModels](../TasksAndModels.md) for more details about the SimpleTimeSeries
@@ -272,24 +274,25 @@ Here is the `ReverseImageOrder` transform:
 import random
 
 import torch
+from rslearn.train.model_context import RasterImage
 from rslearn.train.transforms.transform import Transform
 
 class ReverseImageOrder(Transform):
     def forward(
         self, input_dict: dict, target_dict: dict
     ) -> tuple[dict, dict]:
-        # Randomly decide whether reverse the order.
+        # Randomly decide whether to reverse the order.
         if random.random() < 0.5:
             # Do nothing.
             return input_dict, target_dict
 
-        # input_dict["sentinel2_l2a"] will contain the old and new images stacked on
-        # the channel axis. So we just need to reverse them.
-        assert input_dict["sentinel2_l2a"].shape[0] == 24
-        input_dict["sentinel2_l2a"] = torch.cat([
-            input_dict["sentinel2_l2a"][12:24],
-            input_dict["sentinel2_l2a"][0:12],
-        ])
+        # input_dict["sentinel2_l2a"] is a RasterImage with CTHW tensor where T=2.
+        # Flip the time dimension to reverse old/new order.
+        ri = input_dict["sentinel2_l2a"]
+        input_dict["sentinel2_l2a"] = RasterImage(
+            image=ri.image[:, [1, 0], :, :],
+            timestamps=list(reversed(ri.timestamps)) if ri.timestamps else None,
+        )
 
         # We also reverse the classification label.
         target_dict["class"] = torch.tensor(1, dtype=torch.int64)
@@ -312,6 +315,7 @@ import random
 
 import torch
 from rslearn.main import main
+from rslearn.train.model_context import RasterImage
 from rslearn.train.transforms.transform import Transform
 
 class ReverseImageOrder(Transform):
@@ -330,5 +334,5 @@ export MANAGEMENT_DIR=./project_data/
 python bitemporal_train.py model fit --config model.yaml
 ```
 
-The model achieves unrealistically accuracy (98%) which suggests there may be a shift
+The model achieves unrealistically high accuracy (98%) which suggests there may be a shift
 in the satellite images that the model is using to "cheat".

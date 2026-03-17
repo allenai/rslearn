@@ -603,15 +603,19 @@ class GeotiffRasterFormat(RasterFormat):
         # Construct the transform to use for the warped dataset.
         wanted_transform = get_transform_from_projection_and_bounds(projection, bounds)
         with open_rasterio_upath_reader(path / fname) as src:
-            with rasterio.vrt.WarpedVRT(
-                src,
+            vrt_kwargs: dict = dict(
                 crs=projection.crs,
                 transform=wanted_transform,
                 width=bounds[2] - bounds[0],
                 height=bounds[3] - bounds[1],
                 resampling=resampling,
-                src_nodata=nodata_val,
-            ) as vrt:
+            )
+            # Only pass src_nodata if nodata_val is None, since src_nodata=None is
+            # treated as setting it to 0 (overriding the actual src nodata value) in
+            # rasterio.
+            if nodata_val is not None:
+                vrt_kwargs["src_nodata"] = nodata_val
+            with rasterio.vrt.WarpedVRT(src, **vrt_kwargs) as vrt:
                 raw = vrt.read()  # (bands, H, W)
 
         # Reshape from (C*T, H, W) -> (C, T, H, W).
@@ -771,29 +775,34 @@ class SingleImageRasterFormat(RasterFormat):
         )
 
 
+class NumpyRasterMetadata(pydantic.BaseModel):
+    """Metadata sidecar for NumpyRasterFormat."""
+
+    projection: dict[str, Any]
+    bounds: PixelBounds
+    dtype: str
+    num_channels: int
+    num_timesteps: int
+    timestamps: list[tuple[datetime, datetime]] | None = None
+
+
 class NumpyRasterFormat(RasterFormat):
-    """A raster format that stores data as a raw NumPy .npy file.
+    """A raster format that stores data as a NumPy ``.npy`` file.
 
-    This is optimized for layers with many bands (e.g., 5000+) where GeoTIFF's
-    per-band IFD overhead makes reading extremely slow. A 5110-band GeoTIFF
-    takes ~1s to open due to per-band metadata parsing; the same data in .npy
-    format loads in <1ms.
+    This avoids GeoTIFF overhead for small spatial arrays (e.g. 1x1 pixels)
+    and/or arrays with many bands (e.g. C*T > 1000).
 
-    The data is stored without spatial metadata (CRS/transform), so this format
-    is best suited for layers where the spatial dimensions are trivial (e.g.,
-    1×1) and no reprojection is needed during reading.
+    The directory contains two files:
+    - ``data.npy``: the raw (C, T, H, W) array.
+    - ``metadata.json``: projection, bounds, dtype, channel/timestep counts,
+      and optional timestamps.
 
-    The stored array must be [C, H, W]. On decode, if the stored spatial size
-    is 1×1 and larger bounds are requested, the data is broadcast to match.
+    ``decode_raster`` returns the stored array as-is without any reprojection
+    or resampling -- data is assumed to have been materialized at the target
+    resolution already.
     """
 
-    def __init__(self, fname: str = "data.npy"):
-        """Initialize a NumpyRasterFormat.
-
-        Args:
-            fname: filename for the numpy array file.
-        """
-        self.fname = fname
+    data_fname = "data.npy"
 
     def encode_raster(
         self,
@@ -802,19 +811,33 @@ class NumpyRasterFormat(RasterFormat):
         bounds: PixelBounds,
         raster: RasterArray,
     ) -> None:
-        """Encodes raster data as a .npy file.
+        """Encode a RasterArray to ``data.npy`` + ``metadata.json``.
 
         Args:
-            path: the directory to write to
-            projection: the projection of the raster data (stored as metadata
-                but not embedded in the file)
-            bounds: the bounds of the raster data in the projection
-            raster: the raster data (CTHW RasterArray)
+            path: directory to write into.
+            projection: the projection of the raster data.
+            bounds: the bounds of the raster data in the projection.
+            raster: the (C, T, H, W) RasterArray to store.
         """
+        c, t, h, w = raster.array.shape
+
         path.mkdir(parents=True, exist_ok=True)
-        # Store as CHW (flatten T dimension) for backward compatibility.
-        array = raster.get_chw_array()
-        np.save(path / self.fname, array)
+
+        # Write the raw array.
+        with (path / self.data_fname).open("wb") as f:
+            np.save(f, raster.array)
+
+        # Write the metadata sidecar.
+        metadata = NumpyRasterMetadata(
+            projection=projection.serialize(),
+            bounds=bounds,
+            dtype=raster.array.dtype.name,
+            num_channels=c,
+            num_timesteps=t,
+            timestamps=raster.timestamps,
+        )
+        with (path / METADATA_FNAME).open("w") as f:
+            f.write(metadata.model_dump_json())
 
     def decode_raster(
         self,
@@ -823,27 +846,39 @@ class NumpyRasterFormat(RasterFormat):
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
     ) -> RasterArray:
-        """Decodes raster data from a .npy file.
+        """Decode a previously stored ``data.npy`` + ``metadata.json``.
 
-        If the stored array is 1×1 spatially and the requested bounds are
-        larger, the single pixel is broadcast (replicated) to the requested
-        size.
+        The returned array is the stored array *as-is* -- no reprojection or
+        resampling is performed. The ``projection``, ``bounds``, and
+        ``resampling`` parameters are accepted for interface conformance but
+        are not used for spatial transformation.
 
         Args:
-            path: the directory to read from
-            projection: the projection to read the raster in (ignored; no
-                reprojection is performed).
-            bounds: the bounds to read in the given projection.
-            resampling: resampling method (ignored; nearest-neighbor broadcast
-                is always used for 1×1 data).
+            path: directory to read from.
+            projection: ignored (kept for interface conformance).
+            bounds: ignored (kept for interface conformance).
+            resampling: ignored (kept for interface conformance).
 
         Returns:
-            the raster data as a RasterArray (CTHW).
+            the (C, T, H, W) RasterArray.
         """
-        data = np.load(path / self.fname)
-        out_h = bounds[3] - bounds[1]
-        out_w = bounds[2] - bounds[0]
-        if data.shape[1] == 1 and data.shape[2] == 1 and (out_h != 1 or out_w != 1):
-            data = np.broadcast_to(data, (data.shape[0], out_h, out_w)).copy()
-        # Wrap CHW as CTHW with T=1.
-        return RasterArray(chw_array=data)
+        with (path / METADATA_FNAME).open() as f:
+            metadata = NumpyRasterMetadata.model_validate_json(f.read())
+
+        with (path / self.data_fname).open("rb") as f:
+            array = np.load(f)
+
+        # Validate shape consistency.
+        expected_shape = (
+            metadata.num_channels,
+            metadata.num_timesteps,
+            array.shape[2],
+            array.shape[3],
+        )
+        if array.shape != expected_shape:
+            raise ValueError(
+                f"NumpyRasterFormat: stored array shape {array.shape} does not "
+                f"match metadata (expected {expected_shape})"
+            )
+
+        return RasterArray(array=array, timestamps=metadata.timestamps)

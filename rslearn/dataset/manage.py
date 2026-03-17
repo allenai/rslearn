@@ -256,6 +256,7 @@ def ingest_dataset_windows(
         data_source = layer_cfg.instantiate_data_source(dataset.path)
 
         geometries_by_item: dict = {}
+        seen_items: dict[str, Item] = {}
         for window in windows:
             layer_datas = window.load_layer_datas()
             if layer_name not in layer_datas:
@@ -264,10 +265,12 @@ def ingest_dataset_windows(
             layer_data = layer_datas[layer_name]
             for group in layer_data.serialized_item_groups:
                 for serialized_item in group:
-                    item = data_source.deserialize_item(serialized_item)
-                    if item not in geometries_by_item:
+                    item_name = serialized_item["name"]
+                    if item_name not in seen_items:
+                        item = data_source.deserialize_item(serialized_item)
+                        seen_items[item_name] = item
                         geometries_by_item[item] = []
-                    geometries_by_item[item].append(geometry)
+                    geometries_by_item[seen_items[item_name]].append(geometry)
 
         print(f"Ingesting {len(geometries_by_item)} items in layer {layer_name}")
         geometries_and_items = list(geometries_by_item.items())
@@ -319,7 +322,7 @@ def is_window_ingested(
                     for band_set in layer_cfg.band_sets:
                         # Make sure that layers exist containing each configured band.
                         # And that those layers are marked completed.
-                        available_bands = layer_tile_store.get_raster_bands(item.name)
+                        available_bands = layer_tile_store.get_raster_bands(item)
                         wanted_bands = {band for band in band_set.bands}
                         for cur_bands in available_bands:
                             is_needed = False

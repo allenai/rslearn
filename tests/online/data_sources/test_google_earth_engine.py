@@ -60,7 +60,7 @@ class TestGEE:
         data_source.ingest(
             TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
         )
-        assert tile_store.is_raster_ready(layer_name, item.name, [self.TEST_BAND])
+        assert tile_store.is_raster_ready(layer_name, item, [self.TEST_BAND])
 
     def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         """Test ingesting to local filesystem."""

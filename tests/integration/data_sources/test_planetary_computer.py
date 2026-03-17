@@ -172,7 +172,7 @@ def test_sentinel2_ingest(
         item_groups[0],
         [[seattle2020]],
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, ["B04"])
+    assert tile_store.is_raster_ready(layer_name, item, ["B04"])
 
     # Read back and verify pixel values based on harmonization.
     bounds = (
@@ -182,7 +182,7 @@ def test_sentinel2_ingest(
         int(seattle2020.shp.bounds[3]),
     )
     array = tile_store.read_raster(
-        layer_name, item.name, ["B04"], seattle2020.projection, bounds
+        layer_name, item, ["B04"], seattle2020.projection, bounds
     )
     assert array.get_chw_array().max() == expected_value
 

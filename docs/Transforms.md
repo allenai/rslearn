@@ -89,7 +89,7 @@ Here is a summary of the configuration options:
             image_selectors: ["image"]
             # Selectors for DetectionTask targets that should be flipped. Note that the
             # DetectionTask targets are a dict with keys for boxes, labels, etc., but
-            # the selectors here should correspond to the overall dict. There example
+            # the selectors here should correspond to the overall dict. The example
             # here would work for single-task training; if using MultiTask, then if the
             # detection task name is "detect", you can set box_selectors to
             # ["target/detect"] (not ["target/detect/boxes"]).
