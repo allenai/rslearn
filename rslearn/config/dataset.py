@@ -540,6 +540,15 @@ class CompositingMethod(StrEnum):
     clipped to the window time range.
     """
 
+    TEMPORAL_MEAN = "TEMPORAL_MEAN"
+    """Reduce a multi-temporal raster stack to one timestep via temporal mean."""
+
+    TEMPORAL_MAX = "TEMPORAL_MAX"
+    """Reduce a multi-temporal raster stack to one timestep via temporal max."""
+
+    TEMPORAL_MIN = "TEMPORAL_MIN"
+    """Reduce a multi-temporal raster stack to one timestep via temporal min."""
+
 
 class LayerConfig(BaseModel):
     """Configuration of a layer in a dataset."""

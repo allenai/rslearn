@@ -3,12 +3,15 @@
 import random
 import time
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from rslearn.config import (
+    CompositingMethod,
     LayerConfig,
     LayerType,
+    QueryConfig,
+    SpaceMode,
 )
 from rslearn.data_sources import DataSource, Item
 from rslearn.dataset.handler_summaries import (
@@ -20,12 +23,20 @@ from rslearn.dataset.handler_summaries import (
 )
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, get_tile_store_with_layer
+from rslearn.utils import STGeometry
 
 from .dataset import Dataset
 from .materialize import Materializer, RasterMaterializer, VectorMaterializer
 from .window import Window, WindowLayerData
 
 logger = get_logger(__name__)
+
+TEMPORAL_TIME_RANGE_COMPOSITING_METHODS = {
+    CompositingMethod.SPATIAL_MOSAIC_TEMPORAL_STACK,
+    CompositingMethod.TEMPORAL_MEAN,
+    CompositingMethod.TEMPORAL_MAX,
+    CompositingMethod.TEMPORAL_MIN,
+}
 
 
 class AttemptsCounter:
@@ -38,6 +49,43 @@ class AttemptsCounter:
     def increment(self) -> None:
         """Increment the counter by 1."""
         self.value += 1
+
+
+def _get_effective_period_duration(query_config: QueryConfig) -> timedelta | None:
+    """Return the period duration that will be applied during matching, if any."""
+    period_duration = query_config.period_duration
+    if (
+        query_config.space_mode == SpaceMode.PER_PERIOD_MOSAIC
+        and period_duration is None
+    ):
+        return timedelta(days=30)
+    return period_duration
+
+
+def _split_geometry_into_periods(
+    geometry: STGeometry, period_duration: timedelta
+) -> list[STGeometry]:
+    """Split a geometry into fixed-width periods aligned from the end backwards."""
+    if geometry.time_range is None:
+        raise ValueError("period_duration is set but geometry has no time_range")
+
+    periods: list[STGeometry] = []
+    period_end = geometry.time_range[1]
+    while period_end - period_duration >= geometry.time_range[0]:
+        period_start = period_end - period_duration
+        periods.append(
+            STGeometry(geometry.projection, geometry.shp, (period_start, period_end))
+        )
+        period_end = period_start
+    return periods
+
+
+def _needs_exact_group_time_ranges(layer_cfg: LayerConfig) -> bool:
+    """Whether materialization needs the exact request time range for each group."""
+    return (
+        layer_cfg.type == LayerType.RASTER
+        and layer_cfg.compositing_method in TEMPORAL_TIME_RANGE_COMPOSITING_METHODS
+    )
 
 
 def retry(
@@ -152,37 +200,122 @@ def prepare_dataset_windows(
         # if there are no windows to prepare.
         data_source = layer_cfg.instantiate_data_source(dataset.path)
 
-        # Get STGeometry for each window.
-        geometries = []
-        for window in needed_windows:
-            geometry = window.get_geometry()
-
-            # Apply time_offset/duration temporal modifiers from the layer config.
-            geometry.time_range = data_source_cfg.get_request_time_range(
-                geometry.time_range
-            )
-
-            geometries.append(geometry)
-
         attempts_counter = AttemptsCounter()
         try:
-            results = retry(
-                fn=lambda: data_source.get_items(
-                    geometries, data_source_cfg.query_config
-                ),
-                retry_max_attempts=retry_max_attempts,
-                retry_backoff=retry_backoff,
-                attempts_counter=attempts_counter,
-            )
+            query_config = data_source_cfg.query_config
+            period_duration = _get_effective_period_duration(query_config)
+
+            results: list[list[list[Item]]]
+            group_time_ranges_by_window: list[
+                list[tuple[datetime, datetime]] | None
+            ]
+            if (
+                period_duration is not None
+                and _needs_exact_group_time_ranges(layer_cfg)
+            ):
+                period_geometries: list[STGeometry] = []
+                period_window_indexes: list[int] = []
+                period_time_ranges: list[tuple[datetime, datetime]] = []
+                for window_idx, window in enumerate(needed_windows):
+                    geometry = window.get_geometry()
+                    geometry.time_range = data_source_cfg.get_request_time_range(
+                        geometry.time_range
+                    )
+                    for period_geometry in _split_geometry_into_periods(
+                        geometry, period_duration
+                    ):
+                        period_geometries.append(period_geometry)
+                        period_window_indexes.append(window_idx)
+                        assert period_geometry.time_range is not None
+                        period_time_ranges.append(period_geometry.time_range)
+
+                period_query_config = query_config.model_copy(
+                    update={
+                        "space_mode": (
+                            SpaceMode.MOSAIC
+                            if query_config.space_mode == SpaceMode.PER_PERIOD_MOSAIC
+                            else query_config.space_mode
+                        ),
+                        "period_duration": None,
+                        "min_matches": 0,
+                        "max_matches": 1,
+                    }
+                )
+                if period_geometries:
+                    period_results = retry(
+                        fn=lambda: data_source.get_items(
+                            period_geometries, period_query_config
+                        ),
+                        retry_max_attempts=retry_max_attempts,
+                        retry_backoff=retry_backoff,
+                        attempts_counter=attempts_counter,
+                    )
+                else:
+                    period_results = []
+
+                results = [[] for _ in needed_windows]
+                group_time_ranges_by_window = [[] for _ in needed_windows]
+                for window_idx, period_time_range, period_result in zip(
+                    period_window_indexes, period_time_ranges, period_results
+                ):
+                    if not period_result:
+                        continue
+                    results[window_idx].append(
+                        [item for group in period_result for item in group]
+                    )
+                    assert group_time_ranges_by_window[window_idx] is not None
+                    group_time_ranges_by_window[window_idx].append(period_time_range)
+
+                for window_idx in range(len(needed_windows)):
+                    if query_config.max_matches < len(results[window_idx]):
+                        results[window_idx] = results[window_idx][: query_config.max_matches]
+                        assert group_time_ranges_by_window[window_idx] is not None
+                        group_time_ranges_by_window[window_idx] = (
+                            group_time_ranges_by_window[window_idx][
+                                : query_config.max_matches
+                            ]
+                        )
+
+                    if not query_config.per_period_mosaic_reverse_time_order:
+                        results[window_idx].reverse()
+                        assert group_time_ranges_by_window[window_idx] is not None
+                        group_time_ranges_by_window[window_idx].reverse()
+            else:
+                # Get STGeometry for each window.
+                geometries = []
+                for window in needed_windows:
+                    geometry = window.get_geometry()
+
+                    # Apply time_offset/duration temporal modifiers from the layer config.
+                    geometry.time_range = data_source_cfg.get_request_time_range(
+                        geometry.time_range
+                    )
+
+                    geometries.append(geometry)
+
+                results = retry(
+                    fn=lambda: data_source.get_items(geometries, query_config),
+                    retry_max_attempts=retry_max_attempts,
+                    retry_backoff=retry_backoff,
+                    attempts_counter=attempts_counter,
+                )
+                group_time_ranges_by_window = [None for _ in needed_windows]
 
             windows_prepared = 0
-            for window, result in zip(needed_windows, results):
+            for window, result, group_time_ranges in zip(
+                needed_windows, results, group_time_ranges_by_window
+            ):
+                if len(result) < min_matches:
+                    result = []
+                    group_time_ranges = []
+
                 layer_datas = window.load_layer_datas()
                 layer_datas[layer_name] = WindowLayerData(
                     layer_name=layer_name,
                     serialized_item_groups=[
                         [item.serialize() for item in group] for group in result
                     ],
+                    group_time_ranges=group_time_ranges,
                 )
                 window.save_layer_datas(layer_datas)
 
@@ -424,6 +557,7 @@ def materialize_window(
                 layer_name,
                 layer_cfg,
                 item_groups,
+                layer_data.group_time_ranges,
             ),
             retry_max_attempts=retry_max_attempts,
             retry_backoff=retry_backoff,

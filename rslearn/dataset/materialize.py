@@ -32,6 +32,7 @@ class Materializer:
         layer_name: str,
         layer_cfg: LayerConfig,
         item_groups: list[list[ItemType]],
+        group_time_ranges: list[tuple[datetime, datetime] | None] | None = None,
     ) -> None:
         """Materialize portions of items corresponding to this window into the dataset.
 
@@ -41,6 +42,7 @@ class Materializer:
             layer_name: the name of the layer to materialize
             layer_cfg: the configuration of the layer to materialize
             item_groups: the items associated with this window and layer
+            group_time_ranges: optional request time range for each item group
         """
         raise NotImplementedError
 
@@ -591,11 +593,149 @@ def build_temporal_stack_composite(
     return RasterArray(array=output, timestamps=sorted_timestamps)
 
 
+def _reduce_temporal_stack(
+    group: list[ItemType],
+    nodata_vals: list[Any],
+    bands: list[str],
+    bounds: PixelBounds,
+    band_dtype: npt.DTypeLike,
+    tile_store: TileStoreWithLayer,
+    projection: Projection,
+    remapper: Remapper | None,
+    reducer: str,
+    resampling_method: Resampling = Resampling.bilinear,
+    request_time_range: tuple[datetime, datetime] | None = None,
+) -> RasterArray:
+    """Reduce a temporally stacked raster along the T dimension."""
+    stacked = build_temporal_stack_composite(
+        group=group,
+        nodata_vals=nodata_vals,
+        bands=bands,
+        bounds=bounds,
+        band_dtype=band_dtype,
+        tile_store=tile_store,
+        projection=projection,
+        remapper=remapper,
+        resampling_method=resampling_method,
+        request_time_range=request_time_range,
+    )
+
+    nodata_arr = np.array(nodata_vals, dtype=band_dtype).reshape(-1, 1, 1, 1)
+    masked_data = np.ma.masked_where(stacked.array == nodata_arr, stacked.array)
+    if reducer == "mean":
+        reduced = np.ma.mean(masked_data, axis=1)
+    elif reducer == "max":
+        reduced = np.ma.max(masked_data, axis=1)
+    elif reducer == "min":
+        reduced = np.ma.min(masked_data, axis=1)
+    else:
+        raise ValueError(f"unknown temporal reducer {reducer}")
+
+    fill_vals = np.array(nodata_vals, dtype=band_dtype).reshape(-1, 1, 1)
+    chw = np.ma.filled(reduced, fill_value=fill_vals).astype(band_dtype)
+
+    output_time_range = request_time_range
+    if output_time_range is None and stacked.timestamps:
+        output_time_range = (
+            min(time_range[0] for time_range in stacked.timestamps),
+            max(time_range[1] for time_range in stacked.timestamps),
+        )
+
+    return RasterArray(chw_array=chw, time_range=output_time_range)
+
+
+def build_temporal_mean_composite(
+    group: list[ItemType],
+    nodata_vals: list[Any],
+    bands: list[str],
+    bounds: PixelBounds,
+    band_dtype: npt.DTypeLike,
+    tile_store: TileStoreWithLayer,
+    projection: Projection,
+    remapper: Remapper | None,
+    resampling_method: Resampling = Resampling.bilinear,
+    request_time_range: tuple[datetime, datetime] | None = None,
+) -> RasterArray:
+    """Reduce a multi-timestep raster group by temporal mean."""
+    return _reduce_temporal_stack(
+        group=group,
+        nodata_vals=nodata_vals,
+        bands=bands,
+        bounds=bounds,
+        band_dtype=band_dtype,
+        tile_store=tile_store,
+        projection=projection,
+        remapper=remapper,
+        reducer="mean",
+        resampling_method=resampling_method,
+        request_time_range=request_time_range,
+    )
+
+
+def build_temporal_max_composite(
+    group: list[ItemType],
+    nodata_vals: list[Any],
+    bands: list[str],
+    bounds: PixelBounds,
+    band_dtype: npt.DTypeLike,
+    tile_store: TileStoreWithLayer,
+    projection: Projection,
+    remapper: Remapper | None,
+    resampling_method: Resampling = Resampling.bilinear,
+    request_time_range: tuple[datetime, datetime] | None = None,
+) -> RasterArray:
+    """Reduce a multi-timestep raster group by temporal max."""
+    return _reduce_temporal_stack(
+        group=group,
+        nodata_vals=nodata_vals,
+        bands=bands,
+        bounds=bounds,
+        band_dtype=band_dtype,
+        tile_store=tile_store,
+        projection=projection,
+        remapper=remapper,
+        reducer="max",
+        resampling_method=resampling_method,
+        request_time_range=request_time_range,
+    )
+
+
+def build_temporal_min_composite(
+    group: list[ItemType],
+    nodata_vals: list[Any],
+    bands: list[str],
+    bounds: PixelBounds,
+    band_dtype: npt.DTypeLike,
+    tile_store: TileStoreWithLayer,
+    projection: Projection,
+    remapper: Remapper | None,
+    resampling_method: Resampling = Resampling.bilinear,
+    request_time_range: tuple[datetime, datetime] | None = None,
+) -> RasterArray:
+    """Reduce a multi-timestep raster group by temporal min."""
+    return _reduce_temporal_stack(
+        group=group,
+        nodata_vals=nodata_vals,
+        bands=bands,
+        bounds=bounds,
+        band_dtype=band_dtype,
+        tile_store=tile_store,
+        projection=projection,
+        remapper=remapper,
+        reducer="min",
+        resampling_method=resampling_method,
+        request_time_range=request_time_range,
+    )
+
+
 compositing_methods = {
     CompositingMethod.FIRST_VALID: build_first_valid_composite,
     CompositingMethod.MEAN: build_mean_composite,
     CompositingMethod.MEDIAN: build_median_composite,
     CompositingMethod.SPATIAL_MOSAIC_TEMPORAL_STACK: build_temporal_stack_composite,
+    CompositingMethod.TEMPORAL_MEAN: build_temporal_mean_composite,
+    CompositingMethod.TEMPORAL_MAX: build_temporal_max_composite,
+    CompositingMethod.TEMPORAL_MIN: build_temporal_min_composite,
 }
 
 
@@ -654,6 +794,7 @@ class RasterMaterializer(Materializer):
         layer_name: str,
         layer_cfg: LayerConfig,
         item_groups: list[list[ItemType]],
+        group_time_ranges: list[tuple[datetime, datetime] | None] | None = None,
     ) -> None:
         """Materialize portions of items corresponding to this window into the dataset.
 
@@ -663,15 +804,21 @@ class RasterMaterializer(Materializer):
             layer_name: name of the layer to materialize
             layer_cfg: the configuration of the layer to materialize
             item_groups: the items associated with this window and layer
+            group_time_ranges: optional request time range for each item group
         """
-        # Compute the request time range: the window time range adjusted by
+        if group_time_ranges is not None and len(group_time_ranges) != len(item_groups):
+            raise ValueError(
+                "group_time_ranges length must match item_groups length during materialization"
+            )
+
+        # Compute the default request time range: the window time range adjusted by
         # time_offset/duration from the data source config.
         if layer_cfg.data_source is not None:
-            request_time_range = layer_cfg.data_source.get_request_time_range(
+            default_request_time_range = layer_cfg.data_source.get_request_time_range(
                 window.time_range
             )
         else:
-            request_time_range = window.time_range
+            default_request_time_range = window.time_range
 
         for band_cfg in layer_cfg.band_sets:
             # band_cfg could specify zoom_offset and maybe other parameters that affect
@@ -688,6 +835,11 @@ class RasterMaterializer(Materializer):
             raster_format = band_cfg.instantiate_raster_format()
 
             for group_id, group in enumerate(item_groups):
+                request_time_range = (
+                    group_time_ranges[group_id]
+                    if group_time_ranges is not None
+                    else default_request_time_range
+                )
                 raster = build_composite(
                     group=group,
                     compositing_method=layer_cfg.compositing_method,
@@ -721,6 +873,7 @@ class VectorMaterializer(Materializer):
         layer_name: str,
         layer_cfg: LayerConfig,
         item_groups: list[list[ItemType]],
+        group_time_ranges: list[tuple[datetime, datetime] | None] | None = None,
     ) -> None:
         """Materialize portions of items corresponding to this window into the dataset.
 
@@ -730,6 +883,7 @@ class VectorMaterializer(Materializer):
             layer_name: the layer to materialize
             layer_cfg: the configuration of the layer to materialize
             item_groups: the items associated with this window and layer
+            group_time_ranges: unused for vector materialization
         """
         vector_format = layer_cfg.instantiate_vector_format()
 
