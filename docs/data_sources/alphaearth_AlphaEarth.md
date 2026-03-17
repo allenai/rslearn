@@ -60,6 +60,9 @@ If `nodata_vals` is omitted in the layer band set, AlphaEarth supplies a default
 - `-2` when `apply_dequantization` is true
 - `-128` when `apply_dequantization` is false
 
+You usually do not need to set `nodata_vals` for AlphaEarth explicitly. Leave it
+unset unless you intentionally want to override these datasource defaults.
+
 `-2` is used for the dequantized path because it lies outside the valid embedding
 range and avoids colliding with legitimate values near or at `-1` that may arise in
 downstream normalization or post-processing workflows.
