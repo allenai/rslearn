@@ -8,19 +8,32 @@ import pytest
 from shapely.geometry import Polygon
 from upath import UPath
 
+from rslearn.config import BandSetConfig, DType
 from rslearn.const import WGS84_PROJECTION
+from rslearn.data_sources.alphaearth import AlphaEarth
 from rslearn.data_sources.data_source import Item
 from rslearn.dataset.materialize import (
     build_first_valid_composite,
     build_mean_composite,
     build_median_composite,
     build_temporal_stack_composite,
+    get_nodata_vals,
     read_raster_window_from_tiles,
 )
 from rslearn.tile_stores.default import DefaultTileStore
 from rslearn.tile_stores.tile_store import TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.raster_array import RasterArray
+
+
+def test_get_nodata_vals_uses_data_source_default() -> None:
+    """Band sets should use a data source default nodata value when available."""
+    band_cfg = BandSetConfig(
+        dtype=DType.FLOAT32,
+        bands=["A00", "A01"],
+    )
+    data_source = AlphaEarth(metadata_cache_dir="cache/alphaearth")
+    assert get_nodata_vals(band_cfg, data_source) == [-2.0, -2.0]
 
 
 class TestReadRasterWindowFromTiles:

@@ -100,8 +100,19 @@ Raster layers have additional configuration:
     {
       // Required data type, one of "uint8", "uint16", "uint32", "int32", "float32".
       "dtype": "uint8",
-      // Required list of band names.
+      // Required list of band names. Set this, or set num_bands below.
       "bands": ["R", "G", "B"],
+      // Optional shorthand for generating consecutive band names instead of listing
+      // them explicitly. If set, `bands` must be omitted.
+      "num_bands": null,
+      // Optional prefix for generated band names when num_bands is used. Default "B".
+      "band_prefix": "B",
+      // Optional start index for generated band names when num_bands is used.
+      // Default 0.
+      "band_start_idx": 0,
+      // Optional zero-padding width for generated band names when num_bands is used.
+      // Default 0, meaning no padding.
+      "band_zero_pad": 0,
       // Optional raster format, defaults to GeoTIFF without additional options.
       // Example: {"class_path": "rslearn.utils.raster_format.SingleImageRasterFormat", "init_args": {"format": "png"}}
       "format": {
@@ -113,6 +124,9 @@ Raster layers have additional configuration:
       // Optional remap configuration for remapping pixel values during
       // materialization (default is to not perform any remapping).
       "remap": null,
+      // Optional nodata value for each band. If omitted, most layers default to 0.
+      // Some data sources may set a more appropriate default.
+      "nodata_vals": null,
     },
     // ... (additional band sets)
   ]
@@ -121,6 +135,21 @@ Raster layers have additional configuration:
 
 Below, we document the `format`, `zoom_offset`, and `remap` arguments within the band
 set config.
+
+If `num_bands` is used, band names are generated as
+`{band_prefix}{index}` in order, starting at `band_start_idx`. If `band_zero_pad` is
+greater than zero, the index is zero-padded to that width. For example:
+
+```jsonc
+{
+  "dtype": "float32",
+  "num_bands": 4,
+  "band_prefix": "A",
+  "band_zero_pad": 2
+}
+```
+
+produces the band names `["A00", "A01", "A02", "A03"]`.
 
 ### Raster Format
 

@@ -12,7 +12,7 @@ from rslearn.config import (
     CompositingMethod,
     LayerConfig,
 )
-from rslearn.data_sources.data_source import ItemType
+from rslearn.data_sources.data_source import DataSource, ItemType
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, Projection
@@ -32,6 +32,7 @@ class Materializer:
         layer_name: str,
         layer_cfg: LayerConfig,
         item_groups: list[list[ItemType]],
+        data_source: DataSource[ItemType] | None = None,
     ) -> None:
         """Materialize portions of items corresponding to this window into the dataset.
 
@@ -41,6 +42,7 @@ class Materializer:
             layer_name: the name of the layer to materialize
             layer_cfg: the configuration of the layer to materialize
             item_groups: the items associated with this window and layer
+            data_source: optional data source that produced the items
         """
         raise NotImplementedError
 
@@ -609,6 +611,7 @@ def build_composite(
     bounds: PixelBounds,
     remapper: Remapper | None,
     request_time_range: tuple[datetime, datetime] | None = None,
+    data_source: DataSource[ItemType] | None = None,
 ) -> RasterArray:
     """Build a composite for specified bands from items in the group.
 
@@ -622,13 +625,12 @@ def build_composite(
         bounds: pixel bounds defining the spatial extent of the composite
         remapper: remapper to apply to pixel values, or None
         request_time_range: optional request time range, passed through to compositing method.
+        data_source: optional data source that produced the items.
 
     Returns:
         A RasterArray produced by the chosen compositing method.
     """
-    nodata_vals = band_cfg.nodata_vals
-    if nodata_vals is None:
-        nodata_vals = [0 for _ in band_cfg.bands]
+    nodata_vals = get_nodata_vals(band_cfg, data_source)
 
     return compositing_methods[compositing_method](
         group=group,
@@ -644,6 +646,22 @@ def build_composite(
     )
 
 
+def get_nodata_vals(
+    band_cfg: BandSetConfig,
+    data_source: DataSource[Any] | None = None,
+) -> list[float]:
+    """Get nodata values for a band set, consulting the data source if needed."""
+    if band_cfg.nodata_vals is not None:
+        return band_cfg.nodata_vals
+
+    if data_source is not None:
+        nodata_vals = data_source.get_default_nodata_vals(band_cfg.bands)
+        if nodata_vals is not None:
+            return nodata_vals
+
+    return [0 for _ in band_cfg.bands]
+
+
 class RasterMaterializer(Materializer):
     """A Materializer for raster data."""
 
@@ -654,6 +672,7 @@ class RasterMaterializer(Materializer):
         layer_name: str,
         layer_cfg: LayerConfig,
         item_groups: list[list[ItemType]],
+        data_source: DataSource[ItemType] | None = None,
     ) -> None:
         """Materialize portions of items corresponding to this window into the dataset.
 
@@ -663,6 +682,7 @@ class RasterMaterializer(Materializer):
             layer_name: name of the layer to materialize
             layer_cfg: the configuration of the layer to materialize
             item_groups: the items associated with this window and layer
+            data_source: optional data source that produced the items
         """
         # Compute the request time range: the window time range adjusted by
         # time_offset/duration from the data source config.
@@ -698,6 +718,7 @@ class RasterMaterializer(Materializer):
                     bounds=bounds,
                     remapper=remapper,
                     request_time_range=request_time_range,
+                    data_source=data_source,
                 )
 
                 raster_format.encode_raster(
@@ -721,6 +742,7 @@ class VectorMaterializer(Materializer):
         layer_name: str,
         layer_cfg: LayerConfig,
         item_groups: list[list[ItemType]],
+        data_source: DataSource[ItemType] | None = None,
     ) -> None:
         """Materialize portions of items corresponding to this window into the dataset.
 
@@ -730,6 +752,7 @@ class VectorMaterializer(Materializer):
             layer_name: the layer to materialize
             layer_cfg: the configuration of the layer to materialize
             item_groups: the items associated with this window and layer
+            data_source: optional data source that produced the items
         """
         vector_format = layer_cfg.instantiate_vector_format()
 

@@ -36,6 +36,8 @@ from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 BANDS = [f"A{idx:02d}" for idx in range(64)]
+RAW_NODATA_VALUE = -128
+DEQUANTIZED_NODATA_VALUE = -2.0
 
 DEFAULT_INDEX_URL = (
     "https://data.source.coop/tge-labs/aef/v1/annual/"
@@ -121,8 +123,9 @@ class AlphaEarth(
             metadata_cache_dir: directory to cache the GeoParquet index.
             index_url: URL or local path to the GeoParquet STAC index.
             apply_dequantization: whether to convert raw int8 values to float32 in
-                [-1, 1]. The raw data uses -128 as nodata, which becomes -1.0 after
-                dequantization.
+                [-1, 1]. The raw data uses -128 as nodata, which becomes -2.0 after
+                dequantization so the nodata sentinel remains outside the valid
+                embedding range.
             context: the data source context.
         """
         super().__init__(asset_bands={"image": BANDS})
@@ -263,7 +266,11 @@ class AlphaEarth(
         items: list[AlphaEarthItem],
         geometries: list[list[STGeometry]],
     ) -> None:
-        """Ingest items into the given tile store."""
+        """Ingest items into the given tile store.
+
+        This is supported, but direct materialization is recommended instead since
+        annual AlphaEarth TIFFs are large, around 3 GB each.
+        """
         for item in items:
             if tile_store.is_raster_ready(item, BANDS):
                 continue
@@ -299,12 +306,24 @@ class AlphaEarth(
         """Get the HTTPS URL for an AlphaEarth asset."""
         return s3_to_https(item.data_href)
 
+    def get_default_nodata_value(self) -> float:
+        """Get the default nodata value for AlphaEarth rasters."""
+        if self.apply_dequantization:
+            return DEQUANTIZED_NODATA_VALUE
+        return float(RAW_NODATA_VALUE)
+
+    def get_default_nodata_vals(self, bands: list[str]) -> list[float] | None:
+        """Get default nodata values for AlphaEarth bands."""
+        if not set(bands).issubset(BANDS):
+            return None
+        return [self.get_default_nodata_value() for _ in bands]
+
     def _dequantize(self, data: npt.NDArray[Any]) -> npt.NDArray[np.float32]:
         """Apply de-quantization to convert int8 values to float32."""
-        nodata_mask = data == -128
+        nodata_mask = data == RAW_NODATA_VALUE
         float_data = data.astype(np.float32)
         result = ((float_data / 127.5) ** 2) * np.sign(float_data)
-        result[nodata_mask] = -1.0
+        result[nodata_mask] = DEQUANTIZED_NODATA_VALUE
         return result
 
     def get_read_callback(

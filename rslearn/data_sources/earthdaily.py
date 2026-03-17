@@ -593,6 +593,7 @@ class EarthDaily(DataSource, TileStore):
             layer_name,
             layer_cfg,
             item_groups,
+            data_source=self,
         )
 
 

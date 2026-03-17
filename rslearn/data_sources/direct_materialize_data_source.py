@@ -241,6 +241,7 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
             layer_name,
             layer_cfg,
             item_groups,
+            data_source=self,
         )
 
     # --- TileStore methods that are not supported ---

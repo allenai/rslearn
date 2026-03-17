@@ -146,6 +146,18 @@ class BandSetConfig(BaseModel):
         default=None,
         description="The number of bands in this band set. The bands will be named B0, B1, B2, etc.",
     )
+    band_prefix: str = Field(
+        default="B",
+        description="Prefix to use when generating band names from num_bands.",
+    )
+    band_start_idx: int = Field(
+        default=0,
+        description="Starting index to use when generating band names from num_bands.",
+    )
+    band_zero_pad: int = Field(
+        default=0,
+        description="Zero-padding width to use when generating band names from num_bands.",
+    )
     format: dict[str, Any] = Field(
         default_factory=lambda: {
             "class_path": "rslearn.utils.raster_format.GeotiffRasterFormat"
@@ -193,11 +205,40 @@ class BandSetConfig(BaseModel):
         ):
             raise ValueError("exactly one of bands and num_bands must be specified")
 
+        if self.num_bands is None and (
+            self.band_prefix != "B"
+            or self.band_start_idx != 0
+            or self.band_zero_pad != 0
+        ):
+            raise ValueError(
+                "band_prefix, band_start_idx, and band_zero_pad may only be set "
+                "when num_bands is specified"
+            )
+
+        if self.band_start_idx < 0:
+            raise ValueError("band_start_idx must be non-negative")
+        if self.band_zero_pad < 0:
+            raise ValueError("band_zero_pad must be non-negative")
+
         if self.num_bands is not None:
-            self.bands = [f"B{band_idx}" for band_idx in range(self.num_bands)]
+            self.bands = [
+                self._format_generated_band_name(band_idx)
+                for band_idx in range(
+                    self.band_start_idx, self.band_start_idx + self.num_bands
+                )
+            ]
             self.num_bands = None
+            self.band_prefix = "B"
+            self.band_start_idx = 0
+            self.band_zero_pad = 0
 
         return self
+
+    def _format_generated_band_name(self, band_idx: int) -> str:
+        """Formats a generated band name for the specified index."""
+        if self.band_zero_pad > 0:
+            return f"{self.band_prefix}{band_idx:0{self.band_zero_pad}d}"
+        return f"{self.band_prefix}{band_idx}"
 
     def get_final_projection_and_bounds(
         self, projection: Projection, bounds: PixelBounds

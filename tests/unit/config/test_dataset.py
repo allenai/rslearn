@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from rslearn.config.dataset import DType, LayerConfig, QueryConfig, TimeMode
+from rslearn.data_sources.alphaearth import AlphaEarth
 from rslearn.data_sources.planetary_computer import Sentinel1, Sentinel2
 from rslearn.utils.raster_format import SingleImageRasterFormat
 from rslearn.utils.vector_format import TileVectorFormat
@@ -103,6 +104,117 @@ class TestLayerConfig:
         """An error should be raised if band sets are missing for a raster layer."""
         with pytest.raises(ValidationError):
             LayerConfig.model_validate({"type": "raster"})
+
+    def test_generated_band_names(self) -> None:
+        """Band names should be generated from num_bands and naming options."""
+        layer_config = LayerConfig.model_validate(
+            {
+                "type": "raster",
+                "band_sets": [
+                    {
+                        "dtype": "float32",
+                        "num_bands": 3,
+                        "band_prefix": "A",
+                        "band_zero_pad": 2,
+                    }
+                ],
+            }
+        )
+        assert layer_config.band_sets[0].bands == ["A00", "A01", "A02"]
+
+    def test_generated_band_names_with_start_idx(self) -> None:
+        """Generated band names should respect band_start_idx."""
+        layer_config = LayerConfig.model_validate(
+            {
+                "type": "raster",
+                "band_sets": [
+                    {
+                        "dtype": "float32",
+                        "num_bands": 3,
+                        "band_prefix": "A",
+                        "band_start_idx": 10,
+                        "band_zero_pad": 2,
+                    }
+                ],
+            }
+        )
+        assert layer_config.band_sets[0].bands == ["A10", "A11", "A12"]
+
+    def test_generated_band_name_options_require_num_bands(self) -> None:
+        """Band generation options should fail if num_bands is not set."""
+        with pytest.raises(ValidationError, match="may only be set"):
+            LayerConfig.model_validate(
+                {
+                    "type": "raster",
+                    "band_sets": [
+                        {
+                            "dtype": "float32",
+                            "bands": ["A00", "A01"],
+                            "band_prefix": "A",
+                        }
+                    ],
+                }
+            )
+
+    def test_alphaearth_default_nodata(self) -> None:
+        """AlphaEarth should set a sensible default nodata value for embeddings."""
+        layer_config = LayerConfig.model_validate(
+            {
+                "type": "raster",
+                "band_sets": [
+                    {
+                        "dtype": "float32",
+                        "num_bands": 3,
+                        "band_prefix": "A",
+                        "band_zero_pad": 2,
+                    }
+                ],
+                "data_source": {
+                    "class_path": "rslearn.data_sources.alphaearth.AlphaEarth",
+                    "init_args": {
+                        "metadata_cache_dir": "cache/alphaearth",
+                    },
+                },
+            }
+        )
+
+        data_source = layer_config.instantiate_data_source()
+        assert isinstance(data_source, AlphaEarth)
+        assert data_source.get_default_nodata_vals(layer_config.band_sets[0].bands) == [
+            -2.0,
+            -2.0,
+            -2.0,
+        ]
+
+    def test_alphaearth_raw_default_nodata(self) -> None:
+        """AlphaEarth raw mode should default nodata to -128."""
+        layer_config = LayerConfig.model_validate(
+            {
+                "type": "raster",
+                "band_sets": [
+                    {
+                        "dtype": "int8",
+                        "num_bands": 2,
+                        "band_prefix": "A",
+                        "band_zero_pad": 2,
+                    }
+                ],
+                "data_source": {
+                    "class_path": "rslearn.data_sources.alphaearth.AlphaEarth",
+                    "init_args": {
+                        "metadata_cache_dir": "cache/alphaearth",
+                        "apply_dequantization": False,
+                    },
+                },
+            }
+        )
+
+        data_source = layer_config.instantiate_data_source()
+        assert isinstance(data_source, AlphaEarth)
+        assert data_source.get_default_nodata_vals(layer_config.band_sets[0].bands) == [
+            -128.0,
+            -128.0,
+        ]
 
 
 class TestBackwardsCompatibility:
