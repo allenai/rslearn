@@ -22,7 +22,7 @@ from rslearn.utils.fsspec import (
     join_upath,
     open_rasterio_upath_reader,
 )
-from rslearn.utils.geometry import Projection, STGeometry, get_global_geometry
+from rslearn.utils.geometry import Projection, STGeometry
 
 from .data_source import DataSource, DataSourceContext, Item, QueryConfig
 
@@ -229,17 +229,6 @@ class RasterImporter(Importer):
                 projection = Projection(crs, x_resolution, y_resolution)
                 geometry = STGeometry(projection, shp, None)
 
-            if geometry.is_too_large():
-                geometry = get_global_geometry(time_range=None)
-                logger.warning(
-                    "Global geometry detected: this geometry will be matched against all "
-                    "windows in the rslearn dataset. When using settings like "
-                    "max_matches=1 and space_mode=MOSAIC, this may cause windows outside "
-                    "the geometry’s valid bounds to be materialized from the global raster "
-                    "instead of a more appropriate source. Consider increasing max_matches"
-                    "if this behavior is unintended."
-                )
-
             if spec.name:
                 item_name = spec.name
             else:
@@ -334,14 +323,6 @@ class VectorImporter(Importer):
                         shapely.box(*bounds).buffer(self.item_buffer_epsilon),
                         None,
                     )
-
-                    # There can be problems with GeoJSON files that have large spatial
-                    # coverage, since the bounds may not re-project correctly to match
-                    # windows that are using projections with limited validity.
-                    # We check if there is a large spatial coverage here, and mark the
-                    # item's geometry as having global coverage if so.
-                    if geometry.is_too_large():
-                        geometry = get_global_geometry(time_range=None)
 
             logger.debug(
                 "VectorImporter.list_items: got bounds of %s: %s", path, geometry

@@ -28,6 +28,7 @@ from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_EPSG, WGS84_PROJECTION
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import GridIndex, Projection, STGeometry, daterange
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
+from rslearn.utils.geometry import flatten_shape
 from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
@@ -286,14 +287,14 @@ class Naip(DataSource):
         Returns:
             List of groups of items that should be retrieved for each geometry.
         """
-        wgs84_geometries = [
-            geometry.to_projection(WGS84_PROJECTION) for geometry in geometries
-        ]
+        wgs84_geometries = [geometry.to_wgs84() for geometry in geometries]
 
         items: list = [[] for _ in geometries]
         if self.rtree_index:
             for idx, geometry in enumerate(wgs84_geometries):
-                encoded_items = self.rtree_index.query(geometry.shp.bounds)
+                encoded_items: set = set()
+                for shp in flatten_shape(geometry.shp):
+                    encoded_items.update(self.rtree_index.query(shp.bounds))
                 for encoded_item in encoded_items:
                     item = NaipItem.deserialize(json.loads(encoded_item))
                     if not item.geometry.shp.intersects(geometry.shp):
@@ -302,7 +303,8 @@ class Naip(DataSource):
         else:
             index = GridIndex(0.01)
             for idx, geometry in enumerate(wgs84_geometries):
-                index.insert(geometry.shp.bounds, idx)
+                for shp in flatten_shape(geometry.shp):
+                    index.insert(shp.bounds, idx)
             for item in self._read_index_shapefiles():
                 results = index.query(item.geometry.shp.bounds)
                 for idx in results:
@@ -574,9 +576,7 @@ class Sentinel2(
         # To do so, we iterate over the geometries and figure out all the MGRS cells
         # that they intersect.
         needed_cell_months = set()
-        wgs84_geometries = [
-            geometry.to_projection(WGS84_PROJECTION) for geometry in geometries
-        ]
+        wgs84_geometries = [geometry.to_wgs84() for geometry in geometries]
         for wgs84_geometry in wgs84_geometries:
             if wgs84_geometry.time_range is None:
                 raise ValueError(

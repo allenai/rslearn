@@ -33,7 +33,7 @@ from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath, open_atomic
-from rslearn.utils.geometry import STGeometry
+from rslearn.utils.geometry import STGeometry, flatten_shape
 from rslearn.utils.m2m_api import M2MAPIClient
 from rslearn.utils.mp import make_pool_and_star_imap_unordered
 from rslearn.utils.retry_session import create_retry_session
@@ -265,20 +265,21 @@ class SRTM(DataSource):
 
         groups = []
         for geometry in geometries:
-            wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
-            shp_bounds = wgs84_geometry.shp.bounds
-            cell_bounds = (
-                math.floor(shp_bounds[0]),
-                math.floor(shp_bounds[1]),
-                math.ceil(shp_bounds[2]),
-                math.ceil(shp_bounds[3]),
-            )
+            wgs84_geometry = geometry.to_wgs84()
             items = []
-            for lon_min in range(cell_bounds[0], cell_bounds[2]):
-                for lat_min in range(cell_bounds[1], cell_bounds[3]):
-                    if (lon_min, lat_min) not in self._tile_to_item:
-                        continue
-                    items.append(self._tile_to_item[(lon_min, lat_min)])
+            for shp in flatten_shape(wgs84_geometry.shp):
+                shp_bounds = shp.bounds
+                cell_bounds = (
+                    math.floor(shp_bounds[0]),
+                    math.floor(shp_bounds[1]),
+                    math.ceil(shp_bounds[2]),
+                    math.ceil(shp_bounds[3]),
+                )
+                for lon_min in range(cell_bounds[0], cell_bounds[2]):
+                    for lat_min in range(cell_bounds[1], cell_bounds[3]):
+                        if (lon_min, lat_min) not in self._tile_to_item:
+                            continue
+                        items.append(self._tile_to_item[(lon_min, lat_min)])
 
             logger.debug(f"Got {len(items)} items (grid cells) for geometry")
             groups.append([items])
