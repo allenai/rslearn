@@ -273,18 +273,23 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                     )
 
         # Eagerly validate chunk metadata so callers get a clear error at open time
-        self._get_chunk_sizes()
+        self._get_chunk_sizes(self._ds)
 
         return self._ds
 
-    def _get_chunk_sizes(self) -> tuple[int, int, int]:
+    def _get_chunk_sizes(self, ds: xr.Dataset | None = None) -> tuple[int, int, int]:
         """Return ``(time, lat, lon)`` chunk sizes from the Zarr encoding.
+
+        Args:
+            ds: Dataset to inspect. Falls back to ``_get_dataset()`` when
+                not provided (convenience for callers that already have it).
 
         Raises:
             ValueError: if the Zarr store does not expose 3-element chunk
                 metadata for the reference band.
         """
-        ds = self._get_dataset()
+        if ds is None:
+            ds = self._get_dataset()
         ref_band = self.band_names[0]
         chunks = ds[ref_band].encoding.get("chunks")
 
@@ -440,7 +445,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         n_times = len(time_vals)
         n_lat = len(lat_vals)
         n_lon = len(lon_vals)
-        time_cs, lat_cs, lon_cs = self._get_chunk_sizes()
+        time_cs, lat_cs, lon_cs = self._get_chunk_sizes(ds)
 
         dx = dy = self.ERA5L_PIXEL_SIZE_DEGREES
 
@@ -581,7 +586,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         n_times = len(time_vals)
         n_lat = len(ds["latitude"])
         n_lon = len(ds["longitude"])
-        time_cs, lat_cs, lon_cs = self._get_chunk_sizes()
+        time_cs, lat_cs, lon_cs = self._get_chunk_sizes(ds)
 
         for item in items:
             if tile_store.is_raster_ready(item, self.band_names):

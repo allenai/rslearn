@@ -349,3 +349,49 @@ def test_era5land_dailyutc_v1_time_range_after_dataset(tmp_path: Path) -> None:
     assert len(groups) == 1
     assert len(groups[0]) == 1
     assert len(groups[0][0]) == 0
+
+
+def test_era5land_dailyutc_v1_time_range_before_dataset(tmp_path: Path) -> None:
+    """get_items returns no items when the time range is entirely before the dataset."""
+    import xarray as xr
+    import zarr  # noqa: F401
+
+    from rslearn.config import QueryConfig, SpaceMode
+    from rslearn.const import WGS84_PROJECTION
+    from rslearn.data_sources.earthdatahub import ERA5LandDailyUTCv1
+    from rslearn.utils.geometry import STGeometry
+
+    valid_time = np.array(["2020-01-01", "2020-01-02"], dtype="datetime64[ns]")
+    latitude = np.array([1.0, 0.9], dtype=np.float64)
+    longitude = np.array([0.0, 0.1], dtype=np.float64)
+    t2m = np.zeros((2, 2, 2), dtype=np.float32)
+
+    ds = xr.Dataset(
+        data_vars=dict(t2m=(("valid_time", "latitude", "longitude"), t2m)),
+        coords=dict(valid_time=valid_time, latitude=latitude, longitude=longitude),
+    )
+    zarr_path = tmp_path / "era5_time_before.zarr"
+    ds.to_zarr(
+        zarr_path,
+        mode="w",
+        encoding={"t2m": {"chunks": (2, 2, 2)}},
+    )
+
+    data_source = ERA5LandDailyUTCv1(
+        band_names=["t2m"],
+        zarr_url=str(zarr_path),
+        trust_env=False,
+    )
+
+    # Time range entirely before the dataset (1900).
+    window_geom = STGeometry(
+        WGS84_PROJECTION,
+        shapely.box(-0.05, 0.85, 0.15, 1.05),
+        (datetime(1900, 1, 1, 0, tzinfo=UTC), datetime(1900, 2, 1, 0, tzinfo=UTC)),
+    )
+    query_config = QueryConfig(space_mode=SpaceMode.SINGLE_COMPOSITE)
+    groups = data_source.get_items([window_geom], query_config=query_config)
+
+    assert len(groups) == 1
+    assert len(groups[0]) == 1
+    assert len(groups[0][0]) == 0
