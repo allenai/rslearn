@@ -31,6 +31,12 @@ def _floor_to_utc_day(t: datetime) -> datetime:
 
     If `t` is naive, it is treated as UTC. If `t` is timezone-aware, it is converted
     to UTC before flooring.
+
+    Args:
+        t: Input datetime, either naive or timezone-aware.
+
+    Returns:
+        Timezone-aware datetime snapped to 00:00 UTC on the same UTC calendar day.
     """
     if t.tzinfo is None:
         t = t.replace(tzinfo=UTC)
@@ -40,13 +46,21 @@ def _floor_to_utc_day(t: datetime) -> datetime:
 
 
 def _bounds_to_lon_ranges_0_360(
-    bounds: tuple[float, float, float, float],
+    snap_min_lon: float,
+    snap_max_lon: float,
 ) -> list[tuple[float, float]]:
     """Convert lon bounds to one or two non-wrapping ranges in [0, 360].
 
-    Expects non-wrapping bounds where min_lon <= max_lon.
+    Expects non-wrapping bounds where snap_min_lon <= snap_max_lon.
+
+    Args:
+        snap_min_lon: Snapped minimum longitude bound in [-180, 180].
+        snap_max_lon: Snapped maximum longitude bound in [-180, 180].
+
+    Returns:
+        One or two longitude intervals in [0, 360] that cover the input bounds.
     """
-    min_lon, _, max_lon, _ = bounds
+    min_lon, max_lon = snap_min_lon, snap_max_lon
 
     if min_lon >= 0 and max_lon >= 0:
         return [(min_lon, max_lon)]
@@ -61,18 +75,20 @@ def _snap_bounds_outward(
     bounds: tuple[float, float, float, float],
     step_degrees: float,
 ) -> tuple[float, float, float, float]:
-    """Snap lon/lat bounds outward to a fixed grid.
+    """Snap lon/lat bounds outward to the enclosing ERA5-Land grid edges.
 
-    ERA5-Land values are defined on a regular 0.1-degree lat/lon grid, while each
-    source chunk typically spans a much larger spatial extent. Chunk overlap is
-    determined by first finding overlapping grid-cell centers and then mapping those
-    cell indices to chunk IDs.
+    A request window may be smaller than the 0.1° ERA5-Land grid spacing and
+    fit entirely within a single grid cell. Snapping the bounds outward to the
+    enclosing grid-aligned edges ensures the window always covers at least the
+    surrounding grid cell(s), so downstream overlap logic can identify the
+    correct chunks to fetch.
 
-    When a request window is much smaller than the grid spacing, its geographic bounds
-    may not contain any grid centers exactly.
+    Args:
+        bounds: Bounding box ``(min_lon, min_lat, max_lon, max_lat)``.
+        step_degrees: Grid spacing in degrees for lon/lat snapping.
 
-    Snapping outward ensures at least one grid cell is selected when there is any
-    overlap.
+    Returns:
+        Bounding box expanded to enclosing grid-aligned edges.
     """
     min_lon, min_lat, max_lon, max_lat = bounds
     if min_lon > max_lon or min_lat > max_lat:
@@ -93,7 +109,14 @@ def _snap_bounds_outward(
 
 
 def _np_datetime64_to_utc(ts: np.datetime64) -> datetime:
-    """Convert a numpy datetime64 to a timezone-aware Python datetime (UTC)."""
+    """Convert a numpy datetime64 to a timezone-aware Python datetime (UTC).
+
+    Args:
+        ts: Numpy datetime value interpreted as UTC.
+
+    Returns:
+        Python datetime with ``tzinfo=UTC``.
+    """
     return pd.Timestamp(ts).to_pydatetime(warn=False).replace(tzinfo=UTC)
 
 
@@ -154,8 +177,9 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         "u10",
         "v10",
     }
-    PIXEL_SIZE_DEGREES = 0.1
+    ERA5L_PIXEL_SIZE_DEGREES = 0.1
     DEFAULT_TIME_CHUNK_SIZE = 75
+    NODATA_VALUE: float = -9999.0
 
     def __init__(
         self,
@@ -249,18 +273,23 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                     )
 
         # Eagerly validate chunk metadata so callers get a clear error at open time
-        self._get_chunk_sizes()
+        self._get_chunk_sizes(self._ds)
 
         return self._ds
 
-    def _get_chunk_sizes(self) -> tuple[int, int, int]:
+    def _get_chunk_sizes(self, ds: xr.Dataset | None = None) -> tuple[int, int, int]:
         """Return ``(time, lat, lon)`` chunk sizes from the Zarr encoding.
+
+        Args:
+            ds: Dataset to inspect. Falls back to ``_get_dataset()`` when
+                not provided (convenience for callers that already have it).
 
         Raises:
             ValueError: if the Zarr store does not expose 3-element chunk
                 metadata for the reference band.
         """
-        ds = self._get_dataset()
+        if ds is None:
+            ds = self._get_dataset()
         ref_band = self.band_names[0]
         chunks = ds[ref_band].encoding.get("chunks")
 
@@ -285,24 +314,35 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         start: datetime,
         end: datetime,
     ) -> range:
-        """Return the range of time-chunk IDs that overlap ``[start, end)``."""
+        """Return the range of time-chunk IDs that temporally overlap the query range ``[start, end)``.
+
+        Args:
+            time_vals: All dataset available time steps (days)
+            n_times: Total number of time steps (days) in dataset.
+            time_cs: Time chunk size (in days), should be = DEFAULT_TIME_CHUNK_SIZE = 75
+            start: Inclusive query start time.
+            end: Exclusive query end time.
+
+        Returns:
+            Range of overlapping time chunk indices. May be empty.
+        """
         start_floor = _floor_to_utc_day(start)
         start_np = np.datetime64(start_floor.replace(tzinfo=None), "ns")
         end_np = np.datetime64(end.replace(tzinfo=None), "ns")
 
-        start_idx = int(np.searchsorted(time_vals, start_np))
-        end_idx = int(np.searchsorted(time_vals, end_np, side="right"))
+        start_day_idx = int(np.searchsorted(time_vals, start_np))
+        end_day_idx = int(np.searchsorted(time_vals, end_np, side="right"))
 
         # If the query range falls entirely outside the dataset, return empty.
-        if start_idx >= n_times or end_idx == 0:
+        if start_day_idx >= n_times or end_day_idx == 0:
             return range(0, 0)
 
-        start_idx = max(0, min(start_idx, n_times - 1))
-        end_idx = max(start_idx + 1, min(end_idx, n_times))
+        start_day_idx = max(0, min(start_day_idx, n_times - 1))
+        end_day_idx = max(start_day_idx + 1, min(end_day_idx, n_times))
 
-        first_chunk = start_idx // time_cs
-        last_chunk = (end_idx - 1) // time_cs
-        return range(first_chunk, last_chunk + 1)
+        first_chunk_idx = start_day_idx // time_cs
+        last_chunk_idx = (end_day_idx - 1) // time_cs
+        return range(first_chunk_idx, last_chunk_idx + 1)
 
     def _find_overlapping_lat_chunks(
         self,
@@ -314,37 +354,59 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         """Return the range of lat-chunk IDs that overlap the latitude band.
 
         Returns ``None`` if no grid cells fall within the band.
+
+        Args:
+            lat_vals: All dataset available latitude coordinate values.
+            lat_cs: Latitude chunk size.
+            snap_min_lat: Snapped minimum latitude bound.
+            snap_max_lat: Snapped maximum latitude bound.
+
+        Returns:
+            Range of overlapping latitude chunk indices, or ``None`` when no overlap.
         """
         lat_mask = (lat_vals >= snap_min_lat) & (lat_vals <= snap_max_lat)
-        lat_indices = np.where(lat_mask)[0]
-        if len(lat_indices) == 0:
+        lat_grid_indices = np.where(lat_mask)[0]
+        if len(lat_grid_indices) == 0:
             return None
-        first = int(lat_indices[0]) // lat_cs
-        last = int(lat_indices[-1]) // lat_cs
-        return range(first, last + 1)
+        first_chunk_lat_idx = int(lat_grid_indices[0]) // lat_cs
+        last_chunk_lat_idx = int(lat_grid_indices[-1]) // lat_cs
+        return range(first_chunk_lat_idx, last_chunk_lat_idx + 1)
 
     def _find_overlapping_lon_chunks(
         self,
         lon_vals: np.ndarray,
         lon_cs: int,
-        snapped_bounds: tuple[float, float, float, float],
+        snap_min_lon: float,
+        snap_max_lon: float,
     ) -> list[int]:
         """Return sorted list of lon-chunk IDs that overlap the longitude range.
 
         Handles the [-180, 180) → [0, 360) conversion internally.
+
+        Args:
+            lon_vals: Dataset longitude coordinate values in [0, 360).
+            lon_cs: Longitude chunk size.
+            snap_min_lon: Snapped minimum longitude bound.
+            snap_max_lon: Snapped maximum longitude bound.
+
+        Returns:
+            Sorted list of overlapping longitude chunk indices.
+            Returning a list instead of a range (like _find_overlapping_lat_chunks) because
+            longitude can wrap around the antimeridian (180°/-180° boundary),
+            which means the overlapping chunks may not be contiguous.
         """
-        lon_ranges = _bounds_to_lon_ranges_0_360(snapped_bounds)
-        chunk_ids: set[int] = set()
+        lon_ranges = _bounds_to_lon_ranges_0_360(snap_min_lon, snap_max_lon)
+        chunk_idx_set: set[int] = set()
         for lo, hi in lon_ranges:
             lon_mask = (lon_vals >= lo) & (lon_vals <= hi)
-            lon_indices = np.where(lon_mask)[0]
-            if len(lon_indices) == 0:
+            lon_grid_indices = np.where(lon_mask)[0]
+            if len(lon_grid_indices) == 0:
                 continue
-            first = int(lon_indices[0]) // lon_cs
-            last = int(lon_indices[-1]) // lon_cs
-            for lc in range(first, last + 1):
-                chunk_ids.add(lc)
-        return sorted(chunk_ids)
+            first_chunk_lon_idx = int(lon_grid_indices[0]) // lon_cs
+            last_chunk_lon_idx = int(lon_grid_indices[-1]) // lon_cs
+            for chunk_idx in range(first_chunk_lon_idx, last_chunk_lon_idx + 1):
+                chunk_idx_set.add(chunk_idx)
+        return sorted(chunk_idx_set)
 
     # ------------------------------------------------------------------
     # get_items / ingest
@@ -362,6 +424,13 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         Use with ``SINGLE_COMPOSITE`` space mode and
         ``SPATIAL_MOSAIC_TEMPORAL_STACK`` compositing so that
         materialization can mosaic spatially and stack temporally.
+
+        Args:
+            geometries: Query geometries with time ranges.
+            query_config: Query configuration controlling grouping/compositing modes.
+
+        Returns:
+            Nested item groups as expected by rslearn materialization.
         """
         if query_config.space_mode != SpaceMode.SINGLE_COMPOSITE:
             raise ValueError(
@@ -376,9 +445,9 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         n_times = len(time_vals)
         n_lat = len(lat_vals)
         n_lon = len(lon_vals)
-        time_cs, lat_cs, lon_cs = self._get_chunk_sizes()
+        time_cs, lat_cs, lon_cs = self._get_chunk_sizes(ds)
 
-        dx = dy = self.PIXEL_SIZE_DEGREES
+        dx = dy = self.ERA5L_PIXEL_SIZE_DEGREES
 
         all_groups: list[list[list[Item]]] = []
         for geometry in geometries:
@@ -386,7 +455,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                 raise ValueError("expected all geometries to have a time range")
 
             # --- temporal overlap ---
-            time_chunks = self._find_overlapping_time_chunks(
+            time_chunks_idx = self._find_overlapping_time_chunks(
                 time_vals, n_times, time_cs, *geometry.time_range
             )
 
@@ -395,30 +464,32 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
             bbox = wgs84.shp.bounds  # (min_lon, min_lat, max_lon, max_lat)
             snapped = _snap_bounds_outward(bbox, dx)
 
-            lat_chunks = self._find_overlapping_lat_chunks(
+            lat_chunk_indices = self._find_overlapping_lat_chunks(
                 lat_vals, lat_cs, snapped[1], snapped[3]
             )
-            lon_chunk_ids = self._find_overlapping_lon_chunks(lon_vals, lon_cs, snapped)
+            lon_chunk_indices = self._find_overlapping_lon_chunks(
+                lon_vals, lon_cs, snapped[0], snapped[2]
+            )
 
-            if lat_chunks is None or not lon_chunk_ids:
+            if lat_chunk_indices is None or not lon_chunk_indices:
                 all_groups.append([[]])
                 continue
 
             # --- build items for every (t, lat, lon) triple ---
             items: list[Item] = []
-            for tc in time_chunks:
-                tc_start = tc * time_cs
-                tc_end = min((tc + 1) * time_cs, n_times)
+            for tc_idx in time_chunks_idx:
+                tc_start = tc_idx * time_cs
+                tc_end = min((tc_idx + 1) * time_cs, n_times)
                 chunk_start_dt = _np_datetime64_to_utc(time_vals[tc_start])
                 chunk_last_dt = _np_datetime64_to_utc(time_vals[tc_end - 1])
                 chunk_end_dt = chunk_last_dt + timedelta(days=1)
 
-                for latc in lat_chunks:
+                for latc in lat_chunk_indices:
                     latc_start = latc * lat_cs
                     latc_end = min((latc + 1) * lat_cs, n_lat)
                     chunk_lats = lat_vals[latc_start:latc_end]
 
-                    for lonc in lon_chunk_ids:
+                    for lonc in lon_chunk_indices:
                         lonc_start = lonc * lon_cs
                         lonc_end = min((lonc + 1) * lon_cs, n_lon)
                         chunk_lons = lon_vals[lonc_start:lonc_end]
@@ -432,7 +503,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                             float(chunk_lats.max()) + dy / 2,
                         )
 
-                        item_name = f"era5land_v1_t{tc}_y{latc}_x{lonc}"
+                        item_name = f"era5land_v1_t{tc_idx}_y{latc}_x{lonc}"
                         item_geom = STGeometry(
                             WGS84_PROJECTION,
                             item_shp,
@@ -445,7 +516,14 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         return all_groups
 
     def deserialize_item(self, serialized_item: dict) -> Item:
-        """Deserialize an `Item` previously produced by this data source."""
+        """Deserialize an `Item` previously produced by this data source.
+
+        Args:
+            serialized_item: Serialized item dictionary.
+
+        Returns:
+            Deserialized rslearn ``Item``.
+        """
         return Item.deserialize(serialized_item)
 
     # ------------------------------------------------------------------
@@ -464,8 +542,8 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         Returns:
             ``(projection, pixel_bounds)`` suitable for ``tile_store.write_raster``.
         """
-        dx = self.PIXEL_SIZE_DEGREES
-        dy = self.PIXEL_SIZE_DEGREES
+        dx = self.ERA5L_PIXEL_SIZE_DEGREES
+        dy = self.ERA5L_PIXEL_SIZE_DEGREES
 
         projection = Projection(CRS.from_epsg(WGS84_EPSG), dx, -dy)
 
@@ -497,13 +575,18 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         Each item corresponds to exactly one Zarr chunk identified by a
         ``(time, lat, lon)`` index triple.  The chunk is fetched with a
         single ``isel`` call and stored as a multi-timestep ``RasterArray``.
+
+        Args:
+            tile_store: Target tile store used to persist rasters.
+            items: Chunk-level items to ingest.
+            geometries: Grouped request geometries provided by the ingest pipeline.
         """
         ds = self._get_dataset()
         time_vals = ds["valid_time"].values
         n_times = len(time_vals)
         n_lat = len(ds["latitude"])
         n_lon = len(ds["longitude"])
-        time_cs, lat_cs, lon_cs = self._get_chunk_sizes()
+        time_cs, lat_cs, lon_cs = self._get_chunk_sizes(ds)
 
         for item in items:
             if tile_store.is_raster_ready(item, self.band_names):
@@ -566,11 +649,8 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                 arr = arr[:, :, lon_sort_idx]
                 band_arrays.append(arr)
 
-            # NaN values (e.g. ocean cells in land-only variables) are preserved as
-            # float32 NaN in the GeoTIFF.  Downstream readers (rasterio, the tile
-            # store mosaic/stack logic) already handle NaN correctly, so we
-            # intentionally do *not* replace NaN with a sentinel nodata value here.
             array = np.stack(band_arrays, axis=0).astype(np.float32)  # (C, T, H, W)
+            np.nan_to_num(array, nan=self.NODATA_VALUE, copy=False)
 
             # Build timestamps: one (start, end) per day in the chunk.
             n_chunk_times = tc_end - tc_start
@@ -588,4 +668,5 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                 projection,
                 pixel_bounds,
                 raster,
+                nodata_val=self.NODATA_VALUE,
             )
