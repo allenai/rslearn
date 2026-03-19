@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import cdsapi
 import netCDF4
 import numpy as np
+import pyproj
 import pytest
 import shapely
 from rasterio.crs import CRS
@@ -20,6 +21,7 @@ from rslearn.config import (
 )
 from rslearn.const import WGS84_EPSG, WGS84_PROJECTION
 from rslearn.data_sources.climate_data_store import (
+    CERRASingleLevels,
     ERA5LandHourlyTimeseries,
     ERA5LandMonthlyMeans,
 )
@@ -35,6 +37,7 @@ from rslearn.utils.geometry import Projection, STGeometry
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 PIXEL_SIZE = 0.1
+CERRA_PIXEL_SIZE = 5500.0
 TEST_BANDS = ["2m-temperature", "total-precipitation"]
 
 
@@ -140,6 +143,67 @@ def _make_timeseries_nc(
     ds.close()
 
 
+def _make_projected_nc(
+    nc_path: pathlib.Path,
+    year: int,
+    month: int,
+) -> CRS:
+    """Create a NetCDF file mimicking a projected CERRA-style raster product."""
+    ds = netCDF4.Dataset(str(nc_path), "w", format="NETCDF4")
+    ds.createDimension("valid_time", 2)
+    ds.createDimension("y", 2)
+    ds.createDimension("x", 3)
+
+    vt = ds.createVariable("valid_time", "f8", ("valid_time",))
+    vt.units = "hours since 1900-01-01 00:00:00"
+    ref = datetime(1900, 1, 1, tzinfo=UTC)
+    start = datetime(year, month, 1, tzinfo=UTC)
+    start_offset = (start - ref).total_seconds() / 3600.0
+    vt[:] = [start_offset, start_offset + 3]
+
+    # Use descending x and ascending y so the parser has to reorder both axes.
+    x_var = ds.createVariable("x", "f8", ("x",))
+    x_var[:] = np.array([16500.0, 11000.0, 5500.0], dtype=np.float64)
+
+    y_var = ds.createVariable("y", "f8", ("y",))
+    y_var[:] = np.array([5500.0, 11000.0], dtype=np.float64)
+
+    lambert = ds.createVariable("lambert_conformal_conic", "i4")
+    lambert.grid_mapping_name = "lambert_conformal_conic"
+    lambert.latitude_of_projection_origin = 50.0
+    lambert.longitude_of_central_meridian = 8.0
+    lambert.standard_parallel = 50.0
+    lambert.false_easting = 0.0
+    lambert.false_northing = 0.0
+    lambert.earth_radius = 6371229.0
+
+    t2m = ds.createVariable("t2m", "f4", ("valid_time", "y", "x"))
+    t2m.grid_mapping = "lambert_conformal_conic"
+    t2m[0, :, :] = np.array([[0, 1, 2], [3, 4, 5]], dtype=np.float32)
+    t2m[1, :, :] = np.array([[10, 11, 12], [13, 14, 15]], dtype=np.float32)
+
+    tp = ds.createVariable("tp", "f4", ("valid_time", "y", "x"))
+    tp.grid_mapping = "lambert_conformal_conic"
+    tp[0, :, :] = np.array([[100, 101, 102], [103, 104, 105]], dtype=np.float32)
+    tp[1, :, :] = np.array([[110, 111, 112], [113, 114, 115]], dtype=np.float32)
+
+    ds.close()
+
+    return CRS.from_wkt(
+        pyproj.CRS.from_cf(
+            {
+                "grid_mapping_name": "lambert_conformal_conic",
+                "latitude_of_projection_origin": 50.0,
+                "longitude_of_central_meridian": 8.0,
+                "standard_parallel": 50.0,
+                "false_easting": 0.0,
+                "false_northing": 0.0,
+                "earth_radius": 6371229.0,
+            }
+        ).to_wkt()
+    )
+
+
 class TestERA5LandMonthlyMeans:
     """Mock integration test for ERA5LandMonthlyMeans.
 
@@ -226,6 +290,100 @@ class TestERA5LandMonthlyMeans:
         band1 = raster.array[1, 0, :, :]
         assert band1[0, 0] == 1000.0
         assert band1[9, 9] == 1099.0
+
+
+class TestCERRASingleLevels:
+    """Mock integration test for the CERRA single-level CDS datasource."""
+
+    YEAR = 2025
+    MONTH = 6
+
+    def test_ingest_projected_grid_and_request_shape(
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        nc_path = tmp_path / "cerra.nc"
+        expected_crs = _make_projected_nc(nc_path, self.YEAR, self.MONTH)
+        captured_request: dict[str, object] = {}
+
+        def fake_retrieve(dataset: str, request: dict, target: str) -> None:
+            captured_request["dataset"] = dataset
+            captured_request["request"] = request
+            shutil.copy(str(nc_path), target)
+
+        mock_client = MagicMock()
+        mock_client.retrieve.side_effect = fake_retrieve
+        monkeypatch.setattr(cdsapi, "Client", lambda **kwargs: mock_client)
+
+        data_source = CERRASingleLevels(
+            band_names=TEST_BANDS,
+            bounds=[-1.0, 45.0, 1.0, 46.0],
+        )
+
+        query_geom = STGeometry(
+            WGS84_PROJECTION,
+            shapely.box(-0.5, 45.2, 0.5, 45.8),
+            (
+                datetime(self.YEAR, self.MONTH, 1, tzinfo=UTC),
+                datetime(self.YEAR, self.MONTH, 30, tzinfo=UTC),
+            ),
+        )
+
+        item_groups = data_source.get_items([query_geom], QueryConfig(max_matches=1))[0]
+        assert len(item_groups) == 1
+        item = item_groups[0][0]
+        assert item.name == "cerra_single_levels_2025_6"
+
+        tile_store_dir = UPath(tmp_path / "tiles")
+        tile_store = DefaultTileStore(str(tile_store_dir))
+        tile_store.set_dataset_path(tile_store_dir)
+        tile_store_layer = TileStoreWithLayer(tile_store, "cerra")
+
+        data_source.ingest(tile_store_layer, [item], [[query_geom]])
+        assert tile_store_layer.is_raster_ready(item, TEST_BANDS)
+
+        assert captured_request["dataset"] == "reanalysis-cerra-single-levels"
+        request = captured_request["request"]
+        assert isinstance(request, dict)
+        assert request["product_type"] == ["analysis"]
+        assert request["level_type"] == "surface_or_atmosphere"
+        assert request["data_type"] == ["reanalysis"]
+        assert request["year"] == ["2025"]
+        assert request["month"] == ["06"]
+        assert len(request["day"]) == 30
+        assert request["time"] == [
+            "00:00",
+            "03:00",
+            "06:00",
+            "09:00",
+            "12:00",
+            "15:00",
+            "18:00",
+            "21:00",
+        ]
+        assert request["data_format"] == "netcdf"
+        assert "download_format" not in request
+        assert request["area"] == [46.0, -1.0, 45.0, 1.0]
+
+        read_proj = Projection(expected_crs, CERRA_PIXEL_SIZE, -CERRA_PIXEL_SIZE)
+        bounds = tile_store_layer.get_raster_bounds(item, TEST_BANDS, read_proj)
+        raster = tile_store_layer.read_raster(item, TEST_BANDS, read_proj, bounds)
+
+        assert raster.array.shape == (2, 2, 2, 3)
+        assert raster.timestamps is not None
+        assert raster.timestamps[0][0] == datetime(self.YEAR, self.MONTH, 1, tzinfo=UTC)
+        assert raster.timestamps[1][0] == datetime(
+            self.YEAR, self.MONTH, 1, 3, tzinfo=UTC
+        )
+        assert np.array_equal(
+            raster.array[0, 0, :, :],
+            np.array([[5, 4, 3], [2, 1, 0]], dtype=np.float32),
+        )
+        assert np.array_equal(
+            raster.array[1, 1, :, :],
+            np.array([[115, 114, 113], [112, 111, 110]], dtype=np.float32),
+        )
 
 
 class TestERA5LandHourlyTimeseries:

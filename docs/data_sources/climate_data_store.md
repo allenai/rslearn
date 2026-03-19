@@ -51,3 +51,15 @@ and usage information. **Note:** The `bounds` parameter is especially important 
 data to avoid very slow global downloads.
 
 Valid bands: See the [CDS dataset page](https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land?tab=download).
+
+## rslearn.data_sources.climate_data_store.CERRASingleLevels
+
+This data source is for ingesting CERRA single-level reanalysis data from the Copernicus
+Climate Data Store. This corresponds to the `reanalysis-cerra-single-levels` dataset.
+
+It uses the same configuration pattern as `ERA5LandHourly`, but requests 3-hourly
+analysis data and accepts the regional CERRA single-level variables exposed by CDS.
+If `bounds` is omitted, the request will omit the CDS `area` parameter and download the
+full CERRA domain.
+
+Valid bands: See the [CDS dataset page](https://cds.climate.copernicus.eu/datasets/reanalysis-cerra-single-levels?tab=download).

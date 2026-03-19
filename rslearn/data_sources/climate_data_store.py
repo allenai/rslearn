@@ -9,6 +9,7 @@ from typing import Any
 import cdsapi
 import netCDF4
 import numpy as np
+import pyproj
 import shapely
 from dateutil.relativedelta import relativedelta
 from rasterio.crs import CRS
@@ -47,6 +48,7 @@ class ERA5Land(DataSource):
     DOWNLOAD_FORMAT = "unarchived"
     PIXEL_SIZE = 0.1  # degrees, native resolution is 9km
     NODATA_VALUE = 0.0
+    ITEM_NAME_PREFIX = "era5land_monthlyaveraged"
 
     def __init__(
         self,
@@ -93,6 +95,72 @@ class ERA5Land(DataSource):
         self.client = cdsapi.Client(
             url=self.api_url,
             key=api_key,
+        )
+
+    def _get_item_name(self, item_date: datetime) -> str:
+        """Get the item name for data covering the month containing item_date."""
+        return f"{self.ITEM_NAME_PREFIX}_{item_date.year}_{item_date.month}"
+
+    def _get_request_area(self) -> list[float] | None:
+        """Get the CDS request area in north/west/south/east order."""
+        if self.bounds is None:
+            return [90, -180, -90, 180]
+
+        min_lon, min_lat, max_lon, max_lat = self.bounds
+        return [max_lat, min_lon, min_lat, max_lon]
+
+    def _get_extra_request_fields(self) -> dict[str, Any]:
+        """Get extra request fields required by a specific CDS dataset."""
+        return {}
+
+    def _get_request_times(self) -> list[str]:
+        """Get time values to request for hourly-style products."""
+        return [f"{hour:02d}:00" for hour in range(24)]
+
+    def _finalize_request(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Add shared CDS request parameters to a request payload."""
+        area = self._get_request_area()
+        if area is not None:
+            request["area"] = area
+
+        request["data_format"] = self.DATA_FORMAT
+        if self.DOWNLOAD_FORMAT is not None:
+            request["download_format"] = self.DOWNLOAD_FORMAT
+        request.update(self._get_extra_request_fields())
+        return request
+
+    def _get_uniform_spacing(self, coords: np.ndarray, axis_name: str) -> float:
+        """Get the absolute spacing between coordinates on a regular grid."""
+        if coords.ndim != 1:
+            raise ValueError(f"expected 1D {axis_name} coordinates")
+        if len(coords) < 2:
+            return float(abs(self.PIXEL_SIZE))
+
+        diffs = np.diff(coords)
+        if not np.allclose(diffs, diffs[0]):
+            raise ValueError(f"{axis_name} spacing is not uniform: {diffs}")
+
+        spacing = float(abs(diffs[0]))
+        if np.isclose(spacing, abs(self.PIXEL_SIZE)):
+            return float(abs(self.PIXEL_SIZE))
+        return spacing
+
+    def _get_projected_crs(
+        self, nc: netCDF4.Dataset, band_variable: Any, nc_path: UPath
+    ) -> CRS:
+        """Extract a projected CRS from a CF-compliant NetCDF variable."""
+        grid_mapping_name = getattr(band_variable, "grid_mapping", None)
+        if grid_mapping_name is not None and grid_mapping_name in nc.variables:
+            grid_mapping_var = nc.variables[grid_mapping_name]
+            cf_attrs = {
+                attr_name: getattr(grid_mapping_var, attr_name)
+                for attr_name in grid_mapping_var.ncattrs()
+            }
+            if cf_attrs:
+                return CRS.from_wkt(pyproj.CRS.from_cf(cf_attrs).to_wkt())
+
+        raise ValueError(
+            f"Unable to determine projection for projected NetCDF file {nc_path}"
         )
 
     def get_items(
@@ -144,7 +212,7 @@ class ERA5Land(DataSource):
             bounds = self.bounds if self.bounds is not None else [-180, -90, 180, 90]
             items = []
             for cur_date in month_dates:
-                item_name = f"era5land_monthlyaveraged_{cur_date.year}_{cur_date.month}"
+                item_name = self._get_item_name(cur_date)
                 start_date = datetime(cur_date.year, cur_date.month, 1, tzinfo=UTC)
                 time_range = (
                     start_date,
@@ -195,12 +263,22 @@ class ERA5Land(DataSource):
         # will be 3D while the others will be scalars or 1D.
 
         band_arrays = []
+        band_variables = []
+        band_dimensions: tuple[str, str, str] | None = None
         num_time_steps = None
         for band_name in nc.variables:
             band_data = nc.variables[band_name]
             if len(band_data.shape) != 3:
                 # This should be one of those variables that we want to skip.
                 continue
+
+            if band_dimensions is None:
+                band_dimensions = tuple(band_data.dimensions)
+            elif tuple(band_data.dimensions) != band_dimensions:
+                raise ValueError(
+                    f"Variable {band_name} has dimensions {band_data.dimensions}, "
+                    f"but expected {band_dimensions}"
+                )
 
             logger.debug(
                 f"NC file {nc_path} has variable {band_name} with shape {band_data.shape}"
@@ -217,6 +295,10 @@ class ERA5Land(DataSource):
             # Original shape: (time, height, width)
             band_array = np.array(band_data[:])
             band_arrays.append(band_array)
+            band_variables.append(band_data)
+
+        if not band_arrays or band_dimensions is None:
+            raise ValueError(f"No 3D variables found in NetCDF file {nc_path}")
 
         # After stacking: (num_variables, time, height, width)
         array = np.stack(band_arrays, axis=0)
@@ -224,11 +306,16 @@ class ERA5Land(DataSource):
         # Replace NaN values with nodata value
         array = np.where(np.isnan(array), self.NODATA_VALUE, array)
 
-        # Build timestamps from valid_time.
-        valid_time_var = nc.variables["valid_time"]
+        # Build timestamps from the time dimension of the 3D band variables.
+        time_dim_name, y_dim_name, x_dim_name = band_dimensions
+        valid_time_var = nc.variables[time_dim_name]
         datetimes = [
             datetime(d.year, d.month, d.day, d.hour, d.minute, d.second, tzinfo=UTC)
-            for d in netCDF4.num2date(valid_time_var[:], units=valid_time_var.units)
+            for d in netCDF4.num2date(
+                valid_time_var[:],
+                units=valid_time_var.units,
+                calendar=getattr(valid_time_var, "calendar", "standard"),
+            )
         ]
         timestamps: list[tuple[datetime, datetime]] = []
         for i, start in enumerate(datetimes):
@@ -245,40 +332,40 @@ class ERA5Land(DataSource):
                 timestamps.append((start, start + spacing))
 
         # Build projection and bounds.
-        lat = nc.variables["latitude"][:]
-        lon = nc.variables["longitude"][:]
-        # Convert longitude from 0–360 to -180–180 and sort
-        lon = (lon + 180) % 360 - 180
-        sorted_indices = lon.argsort()
-        lon = lon[sorted_indices]
+        y_coords = np.asarray(nc.variables[y_dim_name][:], dtype=np.float64)
+        x_coords = np.asarray(nc.variables[x_dim_name][:], dtype=np.float64)
 
-        # Reorder the data array to match the new longitude order
-        array = array[:, :, :, sorted_indices]
+        if x_dim_name == "longitude" and y_dim_name == "latitude":
+            # Convert longitude from 0-360 to -180-180 and sort west-to-east.
+            x_coords = (x_coords + 180) % 360 - 180
+            x_sorted_indices = x_coords.argsort()
+            x_coords = x_coords[x_sorted_indices]
+            array = array[:, :, :, x_sorted_indices]
+            projection_crs = CRS.from_epsg(WGS84_EPSG)
+        else:
+            x_sorted_indices = x_coords.argsort()
+            x_coords = x_coords[x_sorted_indices]
+            array = array[:, :, :, x_sorted_indices]
+            projection_crs = self._get_projected_crs(nc, band_variables[0], nc_path)
 
-        # Check the spacing of the grid, make sure it's uniform
-        for i in range(len(lon) - 1):
-            if round(lon[i + 1] - lon[i], 1) != self.PIXEL_SIZE:
-                raise ValueError(
-                    f"Longitude spacing is not uniform: {lon[i + 1] - lon[i]}"
-                )
-        for i in range(len(lat) - 1):
-            if round(lat[i + 1] - lat[i], 1) != -self.PIXEL_SIZE:
-                raise ValueError(
-                    f"Latitude spacing is not uniform: {lat[i + 1] - lat[i]}"
-                )
+        # Keep rows north-to-south to match rslearn's raster convention.
+        y_sorted_indices = np.argsort(y_coords)[::-1]
+        y_coords = y_coords[y_sorted_indices]
+        array = array[:, :, y_sorted_indices, :]
 
-        projection = Projection(
-            CRS.from_epsg(WGS84_EPSG), self.PIXEL_SIZE, -self.PIXEL_SIZE
-        )
-        west = lon.min() - self.PIXEL_SIZE / 2
-        north = lat.max() + self.PIXEL_SIZE / 2
-        col_off = round(west / self.PIXEL_SIZE)
-        row_off = round(north / (-self.PIXEL_SIZE))
+        x_resolution = self._get_uniform_spacing(x_coords, x_dim_name)
+        y_resolution = self._get_uniform_spacing(y_coords, y_dim_name)
+
+        projection = Projection(projection_crs, x_resolution, -y_resolution)
+        west = float(x_coords.min()) - x_resolution / 2
+        north = float(y_coords.max()) + y_resolution / 2
+        col_off = round(west / x_resolution)
+        row_off = round(north / y_resolution)
         bounds: PixelBounds = (
             col_off,
             row_off,
-            col_off + len(lon),
-            row_off + len(lat),
+            col_off + len(x_coords),
+            row_off + len(y_coords),
         )
 
         nc.close()
@@ -356,27 +443,19 @@ class ERA5LandMonthlyMeans(ERA5Land):
             if tile_store.is_raster_ready(item, self.band_names):
                 continue
 
-            # Send the request to the CDS API
-            if self.bounds is not None:
-                min_lon, min_lat, max_lon, max_lat = self.bounds
-                area = [max_lat, min_lon, min_lat, max_lon]
-            else:
-                area = [90, -180, -90, 180]  # Whole globe
-
-            request = {
-                "product_type": [self.product_type],
-                "variable": variable_names,
-                "year": [f"{item.geometry.time_range[0].year}"],  # type: ignore
-                "month": [
-                    f"{item.geometry.time_range[0].month:02d}"  # type: ignore
-                ],
-                "time": ["00:00"],
-                "area": area,
-                "data_format": self.DATA_FORMAT,
-                "download_format": self.DOWNLOAD_FORMAT,
-            }
+            request = self._finalize_request(
+                {
+                    "product_type": [self.product_type],
+                    "variable": variable_names,
+                    "year": [f"{item.geometry.time_range[0].year}"],  # type: ignore
+                    "month": [
+                        f"{item.geometry.time_range[0].month:02d}"  # type: ignore
+                    ],
+                    "time": ["00:00"],
+                }
+            )
             logger.debug(
-                f"CDS API request for year={request['year']} month={request['month']} area={area}"
+                f"CDS API request for year={request['year']} month={request['month']} area={request.get('area')}"
             )
             with tempfile.TemporaryDirectory() as tmp_dir:
                 local_nc_fname = os.path.join(tmp_dir, f"{item.name}.nc")
@@ -468,28 +547,18 @@ class ERA5LandHourly(ERA5Land):
 
             days = [f"{day:02d}" for day in range(1, last_day + 1)]
 
-            # Get all 24 hours
-            hours = [f"{hour:02d}:00" for hour in range(24)]
-
-            if self.bounds is not None:
-                min_lon, min_lat, max_lon, max_lat = self.bounds
-                area = [max_lat, min_lon, min_lat, max_lon]
-            else:
-                area = [90, -180, -90, 180]  # Whole globe
-
-            request = {
-                "product_type": [self.product_type],
-                "variable": variable_names,
-                "year": [f"{year}"],
-                "month": [f"{month:02d}"],
-                "day": days,
-                "time": hours,
-                "area": area,
-                "data_format": self.DATA_FORMAT,
-                "download_format": self.DOWNLOAD_FORMAT,
-            }
+            request = self._finalize_request(
+                {
+                    "product_type": [self.product_type],
+                    "variable": variable_names,
+                    "year": [f"{year}"],
+                    "month": [f"{month:02d}"],
+                    "day": days,
+                    "time": self._get_request_times(),
+                }
+            )
             logger.debug(
-                f"CDS API request for year={request['year']} month={request['month']} days={len(days)} hours={len(hours)} area={area}"
+                f"CDS API request for year={request['year']} month={request['month']} days={len(days)} hours={len(request['time'])} area={request.get('area')}"
             )
             with tempfile.TemporaryDirectory() as tmp_dir:
                 local_nc_fname = os.path.join(tmp_dir, f"{item.name}.nc")
@@ -504,6 +573,62 @@ class ERA5LandHourly(ERA5Land):
                     bounds,
                     RasterArray(array=array, timestamps=timestamps),
                 )
+
+
+class CERRASingleLevels(ERA5LandHourly):
+    """A data source for ingesting CERRA single-level reanalysis data from CDS.
+
+    This data source corresponds to the reanalysis-cerra-single-levels product.
+    """
+
+    DOWNLOAD_FORMAT = None
+    PIXEL_SIZE = 5500.0
+    ITEM_NAME_PREFIX = "cerra_single_levels"
+
+    def __init__(
+        self,
+        band_names: list[str] | None = None,
+        api_key: str | None = None,
+        bounds: list[float] | None = None,
+        context: DataSourceContext = DataSourceContext(),
+    ):
+        """Initialize a new CERRASingleLevels instance.
+
+        Args:
+            band_names: list of band names to acquire. These should correspond to CDS
+                variable names but with "_" replaced with "-". This will only be used
+                if the layer config is missing from the context.
+            api_key: the API key. If not set, it should be set via the CDSAPI_KEY
+                environment variable.
+            bounds: optional bounding box as [min_lon, min_lat, max_lon, max_lat].
+                If omitted, CDS will return the full CERRA regional domain.
+            context: the data source context.
+        """
+        super().__init__(
+            band_names=band_names,
+            api_key=api_key,
+            bounds=bounds,
+            context=context,
+        )
+        self.dataset = "reanalysis-cerra-single-levels"
+        self.product_type = "analysis"
+
+    def _get_request_area(self) -> list[float] | None:
+        """Get the CDS request area, omitting it for full-domain CERRA downloads."""
+        if self.bounds is None:
+            return None
+        return super()._get_request_area()
+
+    def _get_extra_request_fields(self) -> dict[str, Any]:
+        """Get extra request fields required by the CERRA single-level dataset."""
+        return {
+            "level_type": "surface_or_atmosphere",
+            "data_type": ["reanalysis"],
+        }
+
+    def _get_request_times(self) -> list[str]:
+        """Get the 3-hourly analysis timestamps exposed by CERRA."""
+        return [f"{hour:02d}:00" for hour in range(0, 24, 3)]
 
 
 class ERA5LandHourlyTimeseries(DataSource):
