@@ -164,7 +164,11 @@ def test_read_raster_raises_when_metadata_missing(
     monkeypatch.setattr(ds, "get_item_by_name", lambda _name: item)
 
     with pytest.raises(
-        KeyError, match="missing metadata asset URL \\(expected: product_metadata\\)"
+        KeyError,
+        match=(
+            "missing metadata asset URL \\(expected one of: "
+            "product_metadata, granule_metadata\\)"
+        ),
     ):
         ds.read_raster(
             layer_name="layer",
@@ -173,6 +177,20 @@ def test_read_raster_raises_when_metadata_missing(
             projection=Projection(CRS.from_epsg(3857), 1, -1),
             bounds=(0, 0, 2, 2),
         )
+
+
+def test_resolve_metadata_url_uses_granule_metadata() -> None:
+    item = _make_item(
+        {
+            "B04": "https://example.com/B04.tif",
+            "granule_metadata": "https://example.com/granule_metadata.xml",
+        }
+    )
+    ds = Sentinel2L2A(harmonize=True, assets=["B04"], cache_dir=None)
+
+    assert (
+        ds._resolve_metadata_url(item) == "https://example.com/granule_metadata.xml"
+    )
 
 
 def test_read_raster_no_date_fallback_before_cutoff(

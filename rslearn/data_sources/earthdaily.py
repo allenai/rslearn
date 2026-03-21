@@ -99,6 +99,8 @@ class EarthDaily(DataSource, TileStore):
     - EDS_API_URL
     """
 
+    METADATA_ASSET_KEYS = frozenset({"product_metadata", "granule_metadata"})
+
     def __init__(
         self,
         collection_name: str,
@@ -209,8 +211,8 @@ class EarthDaily(DataSource, TileStore):
         asset_urls: dict[str, str] = {}
         asset_scale_offsets: dict[str, list[dict[str, float]]] = {}
         for asset_key, asset_obj in stac_item.assets.items():
-            is_product_metadata = asset_key == "product_metadata"
-            if asset_key not in self.asset_bands and not is_product_metadata:
+            is_metadata_asset = asset_key in self.METADATA_ASSET_KEYS
+            if asset_key not in self.asset_bands and not is_metadata_asset:
                 continue
 
             href: str | None = None
@@ -223,7 +225,7 @@ class EarthDaily(DataSource, TileStore):
                         href = raw_href
 
             if href is None:
-                if is_product_metadata and isinstance(asset_obj.href, str):
+                if is_metadata_asset and isinstance(asset_obj.href, str):
                     href = asset_obj.href
                 else:
                     raise ValueError(
@@ -233,7 +235,7 @@ class EarthDaily(DataSource, TileStore):
 
             asset_urls[asset_key] = href
 
-            if is_product_metadata or not self.read_scale_offsets:
+            if is_metadata_asset or not self.read_scale_offsets:
                 continue
 
             raster_bands = asset_obj.extra_fields.get("raster:bands", [])
@@ -257,9 +259,12 @@ class EarthDaily(DataSource, TileStore):
             if scale_offsets:
                 asset_scale_offsets[asset_key] = scale_offsets
 
-        product_id = stac_item.properties.get("sentinel:product_id")
-        if not isinstance(product_id, str):
-            product_id = None
+        product_id = None
+        for property_key in ("sentinel:product_id", "s2:product_uri", "s2:product_id"):
+            raw_product_id = stac_item.properties.get(property_key)
+            if isinstance(raw_product_id, str) and raw_product_id:
+                product_id = raw_product_id
+                break
 
         return EarthDailyItem(
             stac_item.id,
@@ -990,9 +995,13 @@ class Sentinel2L2A(EarthDaily):
         return dt.astimezone(UTC).replace(tzinfo=None)
 
     def _resolve_metadata_url(self, item: EarthDailyItem) -> str:
-        if "product_metadata" in item.asset_urls:
-            return item.asset_urls["product_metadata"]
-        raise KeyError("missing metadata asset URL (expected: product_metadata)")
+        for asset_key in self.METADATA_ASSET_KEYS:
+            if asset_key in item.asset_urls:
+                return item.asset_urls[asset_key]
+        raise KeyError(
+            "missing metadata asset URL (expected one of: "
+            "product_metadata, granule_metadata)"
+        )
 
     def _get_product_xml(self, item: EarthDailyItem) -> ET.Element:
         asset_url = self._resolve_metadata_url(item)
