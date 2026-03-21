@@ -1041,21 +1041,7 @@ class Sentinel2L2A(EarthDaily):
         if item.name in self._harmonize_callback_cache:
             return self._harmonize_callback_cache[item.name]
 
-        callback: Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None = None
-        try:
-            callback = get_harmonize_callback(self._get_product_xml(item))
-        except (
-            KeyError,
-            ValueError,
-            ET.ParseError,
-            requests.RequestException,
-        ) as exc:
-            logger.debug(
-                "EarthDaily Sentinel2L2A unable to load harmonization metadata for %s: %s",
-                item.name,
-                exc,
-            )
-
+        callback = get_harmonize_callback(self._get_product_xml(item))
         if callback is None:
             callback = self._fallback_harmonize_callback(item)
             if callback is not None:

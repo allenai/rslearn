@@ -140,7 +140,7 @@ def test_sentinel2_l2a_disables_scale_offset_parsing() -> None:
     assert ds.read_scale_offsets is False
 
 
-def test_read_raster_harmonizes_with_date_fallback_when_metadata_missing(
+def test_read_raster_raises_when_metadata_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -163,17 +163,16 @@ def test_read_raster_harmonizes_with_date_fallback_when_metadata_missing(
     ds = Sentinel2L2A(harmonize=True, assets=["B04"], cache_dir=None)
     monkeypatch.setattr(ds, "get_item_by_name", lambda _name: item)
 
-    out = ds.read_raster(
-        layer_name="layer",
-        item=item,
-        bands=["B04"],
-        projection=Projection(CRS.from_epsg(3857), 1, -1),
-        bounds=(0, 0, 2, 2),
-    ).get_chw_array()
-
-    expected = np.clip(raw, 1000, None) - 1000
-    assert out.dtype == np.uint16
-    np.testing.assert_array_equal(out, expected)
+    with pytest.raises(
+        KeyError, match="missing metadata asset URL \\(expected: product_metadata\\)"
+    ):
+        ds.read_raster(
+            layer_name="layer",
+            item=item,
+            bands=["B04"],
+            projection=Projection(CRS.from_epsg(3857), 1, -1),
+            bounds=(0, 0, 2, 2),
+        )
 
 
 def test_read_raster_no_date_fallback_before_cutoff(
@@ -200,9 +199,17 @@ def test_read_raster_no_date_fallback_before_cutoff(
         shapely.box(0, 0, 2, 2),
         (datetime(2021, 1, 1, tzinfo=UTC), datetime(2021, 1, 2, tzinfo=UTC)),
     )
-    item = EarthDailyItem(name="item1", geometry=geom, asset_urls={"B04": str(tif_path)})
+    item = EarthDailyItem(
+        name="item1",
+        geometry=geom,
+        asset_urls={
+            "B04": str(tif_path),
+            "product_metadata": "https://example.com/meta.xml",
+        },
+    )
     ds = Sentinel2L2A(harmonize=True, assets=["B04"], cache_dir=None)
     monkeypatch.setattr(ds, "get_item_by_name", lambda _name: item)
+    monkeypatch.setattr(ds, "_get_product_xml", lambda _item: ET.fromstring("<root />"))
 
     out = ds.read_raster(
         layer_name="layer",
@@ -236,13 +243,14 @@ def test_read_raster_harmonizes_with_processing_baseline_fallback_before_cutoff(
         dst.write(raw)
 
     item = _make_item(
-        {"B04": str(tif_path)},
+        {"B04": str(tif_path), "product_metadata": "https://example.com/meta.xml"},
         name="S2A_MSIL2A_20210101T000000_N0400_R080_T15CWM_20210101T150509",
         start_time=datetime(2021, 1, 1, tzinfo=UTC),
         end_time=datetime(2021, 1, 2, tzinfo=UTC),
     )
     ds = Sentinel2L2A(harmonize=True, assets=["B04"], cache_dir=None)
     monkeypatch.setattr(ds, "get_item_by_name", lambda _name: item)
+    monkeypatch.setattr(ds, "_get_product_xml", lambda _item: ET.fromstring("<root />"))
 
     out = ds.read_raster(
         layer_name="layer",
@@ -277,11 +285,12 @@ def test_read_raster_processing_baseline_fallback_overrides_geometry_date(
         dst.write(raw)
 
     item = _make_item(
-        {"B04": str(tif_path)},
+        {"B04": str(tif_path), "product_metadata": "https://example.com/meta.xml"},
         name="S2A_MSIL2A_20240101T000000_N0399_R080_T15CWM_20240101T150509",
     )
     ds = Sentinel2L2A(harmonize=True, assets=["B04"], cache_dir=None)
     monkeypatch.setattr(ds, "get_item_by_name", lambda _name: item)
+    monkeypatch.setattr(ds, "_get_product_xml", lambda _item: ET.fromstring("<root />"))
 
     out = ds.read_raster(
         layer_name="layer",
@@ -315,7 +324,7 @@ def test_read_raster_uses_product_id_processing_baseline_before_item_name(
         dst.write(raw)
 
     item = _make_item(
-        {"B04": str(tif_path)},
+        {"B04": str(tif_path), "product_metadata": "https://example.com/meta.xml"},
         name="earthdaily-item-id-without-baseline",
         product_id="S2A_MSIL2A_20210101T000000_N0400_R080_T15CWM_20210101T150509",
         start_time=datetime(2021, 1, 1, tzinfo=UTC),
@@ -323,6 +332,7 @@ def test_read_raster_uses_product_id_processing_baseline_before_item_name(
     )
     ds = Sentinel2L2A(harmonize=True, assets=["B04"], cache_dir=None)
     monkeypatch.setattr(ds, "get_item_by_name", lambda _name: item)
+    monkeypatch.setattr(ds, "_get_product_xml", lambda _item: ET.fromstring("<root />"))
 
     out = ds.read_raster(
         layer_name="layer",

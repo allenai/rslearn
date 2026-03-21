@@ -64,9 +64,13 @@ These bands are available:
 Harmonization first tries to build the callback from Sentinel-2 metadata XML
 (`product_metadata`) using `get_harmonize_callback(...)` when that asset is present.
 
-If metadata is unavailable or cannot be read, rslearn falls back to the
-processing baseline encoded in STAC `properties["sentinel:product_id"]` when
-available, then to the item ID, and otherwise to the acquisition date:
+If metadata is missing or cannot be read while `harmonize=true`, rslearn raises
+that error instead of silently skipping harmonization.
+
+If metadata XML is available but does not itself indicate whether an offset is
+present, rslearn falls back to the processing baseline encoded in STAC
+`properties["sentinel:product_id"]` when available, then to the item ID, and
+otherwise to the acquisition date:
 
 - scenes with baseline 04.00+ include a +1000 DN offset for non-visual bands,
 - harmonization undoes this by subtracting 1000 DN (with clipping at zero),
