@@ -3,6 +3,7 @@
 import copy
 import json
 import os
+import re
 import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
@@ -48,6 +49,7 @@ class EarthDailyItem(Item):
         geometry: STGeometry,
         asset_urls: dict[str, str],
         asset_scale_offsets: dict[str, list[dict[str, float]]] | None = None,
+        product_id: str | None = None,
     ):
         """Creates a new EarthDailyItem.
 
@@ -58,16 +60,20 @@ class EarthDailyItem(Item):
             asset_scale_offsets: optional per-asset scale/offset metadata. Each asset key
                 maps to a list of dictionaries (one per raster band) with keys
                 "scale" and "offset".
+            product_id: optional Sentinel-2 product ID from STAC
+                `properties["sentinel:product_id"]`.
         """
         super().__init__(name, geometry)
         self.asset_urls = asset_urls
         self.asset_scale_offsets = asset_scale_offsets or {}
+        self.product_id = product_id
 
     def serialize(self) -> dict[str, Any]:
         """Serializes the item to a JSON-encodable dictionary."""
         d = super().serialize()
         d["asset_urls"] = self.asset_urls
         d["asset_scale_offsets"] = self.asset_scale_offsets
+        d["product_id"] = self.product_id
         return d
 
     @staticmethod
@@ -79,6 +85,7 @@ class EarthDailyItem(Item):
             geometry=item.geometry,
             asset_urls=d["asset_urls"],
             asset_scale_offsets=d.get("asset_scale_offsets") or {},
+            product_id=d.get("product_id"),
         )
 
 
@@ -250,8 +257,16 @@ class EarthDaily(DataSource, TileStore):
             if scale_offsets:
                 asset_scale_offsets[asset_key] = scale_offsets
 
+        product_id = stac_item.properties.get("sentinel:product_id")
+        if not isinstance(product_id, str):
+            product_id = None
+
         return EarthDailyItem(
-            stac_item.id, geom, asset_urls, asset_scale_offsets=asset_scale_offsets
+            stac_item.id,
+            geom,
+            asset_urls,
+            asset_scale_offsets=asset_scale_offsets,
+            product_id=product_id,
         )
 
     def get_item_by_name(self, name: str) -> EarthDailyItem:
@@ -922,6 +937,8 @@ class Sentinel2L2A(EarthDaily):
         "B8A": ["B8A"],
         "visual": ["R", "G", "B"],
     }
+    PROCESSING_BASELINE_PATTERN = re.compile(r"(?:^|_)N(?P<baseline>\d{4})(?:_|$)")
+    HARMONIZE_PROCESSING_BASELINE = 400
     HARMONIZE_CUTOFF = datetime(2022, 1, 25)
     HARMONIZE_OFFSET = 1000
 
@@ -983,14 +1000,29 @@ class Sentinel2L2A(EarthDaily):
         response.raise_for_status()
         return ET.fromstring(response.content)
 
+    def _get_processing_baseline(self, item_name: str) -> int | None:
+        match = self.PROCESSING_BASELINE_PATTERN.search(item_name)
+        if match is None:
+            return None
+        return int(match.group("baseline"))
+
     def _fallback_harmonize_callback(
         self, item: EarthDailyItem
     ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
-        if item.geometry.time_range is None:
-            return None
-        start_time = self._normalize_dt(item.geometry.time_range[0])
-        if start_time < self.HARMONIZE_CUTOFF:
-            return None
+        processing_baseline = None
+        if item.product_id is not None:
+            processing_baseline = self._get_processing_baseline(item.product_id)
+        if processing_baseline is None:
+            processing_baseline = self._get_processing_baseline(item.name)
+        if processing_baseline is not None:
+            if processing_baseline < self.HARMONIZE_PROCESSING_BASELINE:
+                return None
+        else:
+            if item.geometry.time_range is None:
+                return None
+            start_time = self._normalize_dt(item.geometry.time_range[0])
+            if start_time < self.HARMONIZE_CUTOFF:
+                return None
 
         offset = self.HARMONIZE_OFFSET
 
@@ -1028,7 +1060,7 @@ class Sentinel2L2A(EarthDaily):
             callback = self._fallback_harmonize_callback(item)
             if callback is not None:
                 logger.debug(
-                    "EarthDaily Sentinel2L2A using date-based harmonization fallback for %s",
+                    "EarthDaily Sentinel2L2A using product-id/item-id/date-based harmonization fallback for %s",
                     item.name,
                 )
 

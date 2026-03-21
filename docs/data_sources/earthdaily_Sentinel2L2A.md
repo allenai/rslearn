@@ -64,10 +64,13 @@ These bands are available:
 Harmonization first tries to build the callback from Sentinel-2 metadata XML
 (`product_metadata`) using `get_harmonize_callback(...)` when that asset is present.
 
-If metadata is unavailable or cannot be read, rslearn falls back to date-based
-harmonization:
+If metadata is unavailable or cannot be read, rslearn falls back to the
+processing baseline encoded in STAC `properties["sentinel:product_id"]` when
+available, then to the item ID, and otherwise to the acquisition date:
 
 - scenes with baseline 04.00+ include a +1000 DN offset for non-visual bands,
 - harmonization undoes this by subtracting 1000 DN (with clipping at zero),
-- fallback applies this adjustment for acquisitions on/after 2022-01-25,
+- fallback applies this adjustment when the scene ID encodes baseline 04.00+,
+- if the scene ID does not expose a processing baseline, fallback applies the
+  adjustment for acquisitions on/after 2022-01-25,
 - `visual` (TCI RGB) is not harmonized.
