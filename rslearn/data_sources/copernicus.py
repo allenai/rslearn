@@ -589,7 +589,7 @@ class Copernicus(DataSource):
 
             # Get each raster that is needed.
             for glob_pattern, band_names in self.glob_to_bands.items():
-                if tile_store.is_raster_ready(item.name, band_names):
+                if tile_store.is_raster_ready(item, band_names):
                     continue
 
                 member_name = self._zip_member_glob(member_names, glob_pattern)
@@ -602,7 +602,7 @@ class Copernicus(DataSource):
                     # Now we can ingest it.
                     logger.debug(f"Ingesting the raster for bands {band_names}")
                     tile_store.write_raster_file(
-                        item.name,
+                        item,
                         band_names,
                         UPath(local_raster_fname),
                         time_range=item.geometry.time_range,
@@ -626,7 +626,7 @@ class Copernicus(DataSource):
             # hasn't been ingested yet.
             any_rasters_needed = False
             for band_names in self.glob_to_bands.values():
-                if tile_store.is_raster_ready(item.name, band_names):
+                if tile_store.is_raster_ready(item, band_names):
                     continue
                 any_rasters_needed = True
                 break
@@ -821,7 +821,7 @@ class Sentinel2(Copernicus):
 
             # Get each raster that is needed.
             for glob_pattern, band_names in self.glob_to_bands.items():
-                if tile_store.is_raster_ready(item.name, band_names):
+                if tile_store.is_raster_ready(item, band_names):
                     continue
 
                 member_name = self._zip_member_glob(member_names, glob_pattern)
@@ -837,7 +837,7 @@ class Sentinel2(Copernicus):
                         # No callback -- we can just ingest the file directly.
                         # Or it is TCI product which is not impacted by the harmonization issue.
                         tile_store.write_raster_file(
-                            item.name,
+                            item,
                             band_names,
                             UPath(local_raster_fname),
                             time_range=item.geometry.time_range,
@@ -851,7 +851,7 @@ class Sentinel2(Copernicus):
                             projection, bounds = get_raster_projection_and_bounds(src)
                         array = harmonize_callback(array)
                         tile_store.write_raster(
-                            item.name,
+                            item,
                             band_names,
                             projection,
                             bounds,

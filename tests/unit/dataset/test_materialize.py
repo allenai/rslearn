@@ -53,7 +53,7 @@ class TestReadRasterWindowFromTiles:
         src = 2 * np.ones((1, 4, 4), dtype=np.uint8)
         tile_store.write_raster(
             self.LAYER_NAME,
-            item.name,
+            item,
             bands,
             self.PROJECTION,
             self.BOUNDS,
@@ -92,7 +92,7 @@ class TestReadRasterWindowFromTiles:
         src = 3 * np.ones((2, 4, 4), dtype=np.uint8)
         tile_store.write_raster(
             self.LAYER_NAME,
-            item.name,
+            item,
             self.BANDS,
             self.PROJECTION,
             self.BOUNDS,
@@ -171,7 +171,7 @@ class TestBuildMeanComposite:
         for item, data in zip([item1, item2], [array1, array2]):
             tile_store.write_raster(
                 self.LAYER_NAME,
-                item.name,
+                item,
                 self.BANDS,
                 self.PROJECTION,
                 self.BOUNDS,
@@ -230,7 +230,7 @@ class TestBuildMeanComposite:
         for item, array in zip([item1, item2, item3], [array1, array2, array3]):
             tile_store.write_raster(
                 self.LAYER_NAME,
-                item.name,
+                item,
                 self.BANDS,
                 self.PROJECTION,
                 self.BOUNDS,
@@ -300,7 +300,7 @@ class TestBuildMeanComposite:
         for item, data in zip([item1, item2], [array1, array2]):
             tile_store.write_raster(
                 self.LAYER_NAME,
-                item.name,
+                item,
                 self.BANDS,
                 self.PROJECTION,
                 self.BOUNDS,
@@ -382,7 +382,7 @@ class TestBuildMedianComposite:
         for item, data in zip([item1, item2], [array1, array2]):
             tile_store.write_raster(
                 self.LAYER_NAME,
-                item.name,
+                item,
                 self.BANDS,
                 self.PROJECTION,
                 self.BOUNDS,
@@ -441,7 +441,7 @@ class TestBuildMedianComposite:
         for item, array in zip([item1, item2, item3], [array1, array2, array3]):
             tile_store.write_raster(
                 self.LAYER_NAME,
-                item.name,
+                item,
                 self.BANDS,
                 self.PROJECTION,
                 self.BOUNDS,
@@ -514,7 +514,7 @@ class TestBuildMedianComposite:
         for item, data in zip([item1, item2], [array1, array2]):
             tile_store.write_raster(
                 self.LAYER_NAME,
-                item.name,
+                item,
                 self.BANDS,
                 self.PROJECTION,
                 self.BOUNDS,
@@ -572,7 +572,7 @@ class TestBuildTemporalStackComposite:
         data_a = np.full((1, 4, 4), 10, dtype=np.uint8)
         tile_store.write_raster(
             self.LAYER_NAME,
-            "a",
+            item_a,
             self.BANDS,
             self.PROJECTION,
             self.BOUNDS,
@@ -583,7 +583,7 @@ class TestBuildTemporalStackComposite:
         data_b = np.full((1, 4, 4), 20, dtype=np.uint8)
         tile_store.write_raster(
             self.LAYER_NAME,
-            "b",
+            item_b,
             self.BANDS,
             self.PROJECTION,
             self.BOUNDS,
@@ -623,7 +623,7 @@ class TestBuildTemporalStackComposite:
         data_a = np.full((1, 4, 2), 5, dtype=np.uint8)
         tile_store.write_raster(
             self.LAYER_NAME,
-            "a",
+            item_a,
             self.BANDS,
             self.PROJECTION,
             (0, 0, 2, 4),
@@ -634,7 +634,7 @@ class TestBuildTemporalStackComposite:
         data_b = np.full((1, 4, 2), 15, dtype=np.uint8)
         tile_store.write_raster(
             self.LAYER_NAME,
-            "b",
+            item_b,
             self.BANDS,
             self.PROJECTION,
             (2, 0, 4, 4),
@@ -668,6 +668,7 @@ class TestBuildTemporalStackComposite:
         bbox = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
 
         # Write a CTHW raster with T=2 and timestamps via write_raster.
+        item_a = Item("a", STGeometry(self.PROJECTION, bbox, (t0, t2)))
         data = np.zeros((1, 2, 4, 4), dtype=np.uint8)
         data[:, 0, :, :] = 30
         data[:, 1, :, :] = 40
@@ -675,14 +676,12 @@ class TestBuildTemporalStackComposite:
         raster = RasterArray(array=data, timestamps=timestamps)
         tile_store.write_raster(
             self.LAYER_NAME,
-            "a",
+            item_a,
             self.BANDS,
             self.PROJECTION,
             self.BOUNDS,
             raster,
         )
-
-        item_a = Item("a", STGeometry(self.PROJECTION, bbox, (t0, t2)))
 
         result = build_temporal_stack_composite(
             group=[item_a],
@@ -726,7 +725,7 @@ class TestBuildTemporalStackComposite:
         ts_a = [(jan, feb), (feb, mar), (mar, apr)]
         tile_store.write_raster(
             self.LAYER_NAME,
-            "a",
+            item_a,
             self.BANDS,
             self.PROJECTION,
             (0, 0, 4, 3),
@@ -740,7 +739,7 @@ class TestBuildTemporalStackComposite:
         ts_b = [(mar, apr), (apr, may), (may, jun)]
         tile_store.write_raster(
             self.LAYER_NAME,
-            "b",
+            item_b,
             self.BANDS,
             self.PROJECTION,
             (0, 1, 4, 4),
@@ -811,7 +810,7 @@ class TestBuildTemporalStackComposite:
         ts_a = [(jan, feb), (feb, mar)]
         tile_store.write_raster(
             self.LAYER_NAME,
-            "a",
+            item_a,
             bands,
             self.PROJECTION,
             self.BOUNDS,
@@ -823,7 +822,7 @@ class TestBuildTemporalStackComposite:
         data_b = np.full((2, 4, 4), 20, dtype=np.uint8)
         tile_store.write_raster(
             self.LAYER_NAME,
-            "b",
+            item_b,
             bands,
             self.PROJECTION,
             self.BOUNDS,
@@ -886,13 +885,15 @@ class TestMultiTimestepComposites:
         t2 = datetime(2024, 1, 3, tzinfo=UTC)
         bbox = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
         timestamps = [(t0, t1), (t1, t2)]
+        item_a = Item("a", STGeometry(self.PROJECTION, bbox, (t0, t2)))
+        item_b = Item("b", STGeometry(self.PROJECTION, bbox, (t0, t2)))
 
         # Item 1: T=2, value 10 everywhere except bottom half is nodata at T=0.
         data_a = np.full((1, 2, 4, 4), 10, dtype=np.uint8)
         data_a[:, 0, 2:4, :] = 0
         tile_store.write_raster(
             self.LAYER_NAME,
-            "a",
+            item_a,
             self.BANDS,
             self.PROJECTION,
             self.BOUNDS,
@@ -903,15 +904,12 @@ class TestMultiTimestepComposites:
         data_b = np.full((1, 2, 4, 4), 20, dtype=np.uint8)
         tile_store.write_raster(
             self.LAYER_NAME,
-            "b",
+            item_b,
             self.BANDS,
             self.PROJECTION,
             self.BOUNDS,
             RasterArray(array=data_b, timestamps=timestamps),
         )
-
-        item_a = Item("a", STGeometry(self.PROJECTION, bbox, (t0, t2)))
-        item_b = Item("b", STGeometry(self.PROJECTION, bbox, (t0, t2)))
 
         result = build_first_valid_composite(
             group=[item_a, item_b],
@@ -946,6 +944,8 @@ class TestMultiTimestepComposites:
         t2 = datetime(2024, 1, 3, tzinfo=UTC)
         bbox = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
         timestamps = [(t0, t1), (t1, t2)]
+        item_a = Item("a", STGeometry(self.PROJECTION, bbox, (t0, t2)))
+        item_b = Item("b", STGeometry(self.PROJECTION, bbox, (t0, t2)))
 
         # Item 1: T=2, value 2 at T=0, value 6 at T=1.
         # Bottom half is nodata (0) at T=0.
@@ -955,7 +955,7 @@ class TestMultiTimestepComposites:
         data_a[:, 1, :, :] = 6
         tile_store.write_raster(
             self.LAYER_NAME,
-            "a",
+            item_a,
             self.BANDS,
             self.PROJECTION,
             self.BOUNDS,
@@ -970,15 +970,12 @@ class TestMultiTimestepComposites:
         data_b[:, 1, 0, 0] = 0  # nodata
         tile_store.write_raster(
             self.LAYER_NAME,
-            "b",
+            item_b,
             self.BANDS,
             self.PROJECTION,
             self.BOUNDS,
             RasterArray(array=data_b, timestamps=timestamps),
         )
-
-        item_a = Item("a", STGeometry(self.PROJECTION, bbox, (t0, t2)))
-        item_b = Item("b", STGeometry(self.PROJECTION, bbox, (t0, t2)))
 
         result = build_mean_composite(
             group=[item_a, item_b],
@@ -1011,12 +1008,14 @@ class TestMultiTimestepComposites:
         t1 = datetime(2024, 1, 2, tzinfo=UTC)
         t2 = datetime(2024, 1, 3, tzinfo=UTC)
         bbox = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
+        item_a = Item("a", STGeometry(self.PROJECTION, bbox, (t0, t2)))
+        item_b = Item("b", STGeometry(self.PROJECTION, bbox, (t0, t1)))
 
         # Item 1: T=2
         data_a = np.full((1, 2, 4, 4), 2, dtype=np.uint8)
         tile_store.write_raster(
             self.LAYER_NAME,
-            "a",
+            item_a,
             self.BANDS,
             self.PROJECTION,
             self.BOUNDS,
@@ -1027,15 +1026,12 @@ class TestMultiTimestepComposites:
         data_b = np.full((1, 4, 4), 4, dtype=np.uint8)
         tile_store.write_raster(
             self.LAYER_NAME,
-            "b",
+            item_b,
             self.BANDS,
             self.PROJECTION,
             self.BOUNDS,
             RasterArray(chw_array=data_b, time_range=(t0, t1)),
         )
-
-        item_a = Item("a", STGeometry(self.PROJECTION, bbox, (t0, t2)))
-        item_b = Item("b", STGeometry(self.PROJECTION, bbox, (t0, t1)))
 
         with pytest.raises(ValueError, match="same number of timesteps"):
             build_mean_composite(

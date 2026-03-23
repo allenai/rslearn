@@ -319,7 +319,7 @@ def is_window_ingested(
                     for band_set in layer_cfg.band_sets:
                         # Make sure that layers exist containing each configured band.
                         # And that those layers are marked completed.
-                        available_bands = layer_tile_store.get_raster_bands(item.name)
+                        available_bands = layer_tile_store.get_raster_bands(item)
                         wanted_bands = {band for band in band_set.bands}
                         for cur_bands in available_bands:
                             is_needed = False
