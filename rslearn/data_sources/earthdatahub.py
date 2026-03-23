@@ -5,9 +5,8 @@ from __future__ import annotations
 import base64
 import math
 import os
-import re
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -120,13 +119,59 @@ def _np_datetime64_to_utc(ts: np.datetime64) -> datetime:
     return pd.Timestamp(ts).to_pydatetime(warn=False).replace(tzinfo=UTC)
 
 
-class ERA5LandDailyUTCv1(DataSource[Item]):
+class ERA5LandChunkItem(Item):
+    """An item representing a single Zarr chunk in the ERA5-Land dataset."""
+
+    def __init__(
+        self,
+        name: str,
+        geometry: STGeometry,
+        time_chunk: int,
+        lat_chunk: int,
+        lon_chunk: int,
+    ) -> None:
+        """Create a new ERA5LandChunkItem.
+
+        Args:
+            name: unique name of the item.
+            geometry: the spatial and temporal extent of the item.
+            time_chunk: time-dimension chunk index in the Zarr store.
+            lat_chunk: latitude-dimension chunk index in the Zarr store.
+            lon_chunk: longitude-dimension chunk index in the Zarr store.
+        """
+        super().__init__(name, geometry)
+        self.time_chunk = time_chunk
+        self.lat_chunk = lat_chunk
+        self.lon_chunk = lon_chunk
+
+    def serialize(self) -> dict:
+        """Serialize the item to a JSON-encodable dictionary."""
+        d = super().serialize()
+        d["time_chunk"] = self.time_chunk
+        d["lat_chunk"] = self.lat_chunk
+        d["lon_chunk"] = self.lon_chunk
+        return d
+
+    @staticmethod
+    def deserialize(d: dict) -> ERA5LandChunkItem:
+        """Deserialize an item from a JSON-decoded dictionary."""
+        item = Item.deserialize(d)
+        return ERA5LandChunkItem(
+            name=item.name,
+            geometry=item.geometry,
+            time_chunk=d["time_chunk"],
+            lat_chunk=d["lat_chunk"],
+            lon_chunk=d["lon_chunk"],
+        )
+
+
+class ERA5LandDailyUTCv1(DataSource[ERA5LandChunkItem]):
     """ERA5-Land daily UTC (v1) hosted on EarthDataHub.
 
     This data source reads from the EarthDataHub Zarr store and writes
     multi-timestep GeoTIFFs into the dataset tile store.  Each item corresponds
-    to exactly one Zarr chunk (time × lat × lon), so only the chunks needed for
-    each window are fetched.
+    to exactly one Zarr chunk (currently time (75d) × lat () × lon ()),
+    so only the chunks needed for each window are fetched.
 
     The recommended configuration uses ``SINGLE_COMPOSITE`` space mode with
     ``SPATIAL_MOSAIC_TEMPORAL_STACK`` compositing method.  Materialization reads
@@ -135,7 +180,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
     raster.
 
     Supported bands:
-    - d2m: 2m dewpoint temperature (units: K or °C; see ``temperature_unit``)
+    - d2m: 2m dewpoint temperature (units: K)
     - e: evaporation (units: m of water equivalent)
     - pev: potential evaporation (units: m)
     - ro: runoff (units: m)
@@ -145,7 +190,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
     - str: surface net long-wave (thermal) radiation (units: J m-2)
     - swvl1: volumetric soil water layer 1 (units: m3 m-3)
     - swvl2: volumetric soil water layer 2 (units: m3 m-3)
-    - t2m: 2m temperature (units: K or °C; see ``temperature_unit``)
+    - t2m: 2m temperature (units: K)
     - tp: total precipitation (units: m)
     - u10: 10m U wind component (units: m s-1)
     - v10: 10m V wind component (units: m s-1)
@@ -177,7 +222,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         "u10",
         "v10",
     }
-    ERA5L_PIXEL_SIZE_DEGREES = 0.1
+    ERA5L_PIX_DEG = 0.1
     DEFAULT_TIME_CHUNK_SIZE = 75
     NODATA_VALUE: float = -9999.0
 
@@ -185,7 +230,6 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         self,
         band_names: list[str] | None = None,
         zarr_url: str = DEFAULT_ZARR_URL,
-        temperature_unit: Literal["celsius", "kelvin"] = "kelvin",
         trust_env: bool = True,
         context: DataSourceContext = DataSourceContext(),
     ) -> None:
@@ -195,14 +239,11 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
             band_names: list of bands to ingest. If omitted and a LayerConfig is
                 provided via context, bands are inferred from that layer's band sets.
             zarr_url: URL/path to the EarthDataHub Zarr store.
-            temperature_unit: units for temperature bands `t2m` and `d2m`
-                ("celsius" or "kelvin").
             trust_env: if True (default), allow the underlying HTTP client to read
                 environment configuration (including netrc) for auth/proxies.
             context: rslearn data source context.
         """
         self.zarr_url = zarr_url
-        self.temperature_unit = temperature_unit
         self.trust_env = trust_env
 
         self.band_names: list[str]
@@ -228,14 +269,6 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
 
         self._ds: xr.Dataset | None = None
 
-    def _resolve_token(self) -> str | None:
-        """Resolve the EarthDataHub token from the environment.
-
-        Returns:
-            The token string, or None if ``EARTHDATAHUB_TOKEN`` is not set.
-        """
-        return os.environ.get("EARTHDATAHUB_TOKEN")
-
     def _get_dataset(self) -> xr.Dataset:
         """Open (and memoize) the backing ERA5-Land Zarr dataset."""
         if self._ds is not None:
@@ -247,7 +280,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
 
             # If an explicit token is available, inject a Basic auth header so
             # authentication works without a netrc file (e.g. on clusters).
-            token = self._resolve_token()
+            token = os.environ.get("EARTHDATAHUB_TOKEN")
             if token:
                 credentials = base64.b64encode(f"edh:{token}".encode()).decode()
                 storage_options["headers"] = {
@@ -261,46 +294,33 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
             storage_options=storage_options,
         )
 
-        # Sanity-check that the source time chunk size hasn't changed.
+        # Warn if the upstream time chunk size has drifted from the value
+        # assumed when this data source was written.
         if self.zarr_url == self.DEFAULT_ZARR_URL:
             ref_band = self.band_names[0]
             chunks = self._ds[ref_band].encoding.get("chunks")
             if chunks is not None and len(chunks) > 0:
                 if int(chunks[0]) != self.DEFAULT_TIME_CHUNK_SIZE:
-                    raise ValueError(
-                        f"Expected time chunk size {self.DEFAULT_TIME_CHUNK_SIZE}, "
-                        f"got {chunks[0]}"
+                    logger.warning(
+                        "EarthDataHub Zarr time chunk size changed from %d to "
+                        "%d since this data source was written. The code will "
+                        "still run but may not fetch data as efficiently.",
+                        self.DEFAULT_TIME_CHUNK_SIZE,
+                        int(chunks[0]),
                     )
 
-        # Eagerly validate chunk metadata so callers get a clear error at open time
-        self._get_chunk_sizes(self._ds)
-
-        return self._ds
-
-    def _get_chunk_sizes(self, ds: xr.Dataset | None = None) -> tuple[int, int, int]:
-        """Return ``(time, lat, lon)`` chunk sizes from the Zarr encoding.
-
-        Args:
-            ds: Dataset to inspect. Falls back to ``_get_dataset()`` when
-                not provided (convenience for callers that already have it).
-
-        Raises:
-            ValueError: if the Zarr store does not expose 3-element chunk
-                metadata for the reference band.
-        """
-        if ds is None:
-            ds = self._get_dataset()
+        # Validate/cache chunk sizes so callers get a clear error at open time
         ref_band = self.band_names[0]
-        chunks = ds[ref_band].encoding.get("chunks")
-
+        chunks = self._ds[ref_band].encoding.get("chunks")
         if chunks is None or len(chunks) != 3:
             raise ValueError(
                 f"Expected 3D chunk encoding (time, lat, lon) for band "
                 f"'{ref_band}', got {chunks!r}. Ensure the Zarr store has "
                 f"explicit chunk metadata for all three dimensions."
             )
+        self._chunk_sizes = (int(chunks[0]), int(chunks[1]), int(chunks[2]))
 
-        return (int(chunks[0]), int(chunks[1]), int(chunks[2]))
+        return self._ds
 
     # ------------------------------------------------------------------
     # Spatial / temporal chunk overlap helpers
@@ -336,9 +356,6 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         # If the query range falls entirely outside the dataset, return empty.
         if start_day_idx >= n_times or end_day_idx == 0:
             return range(0, 0)
-
-        start_day_idx = max(0, min(start_day_idx, n_times - 1))
-        end_day_idx = max(start_day_idx + 1, min(end_day_idx, n_times))
 
         first_chunk_idx = start_day_idx // time_cs
         last_chunk_idx = (end_day_idx - 1) // time_cs
@@ -414,7 +431,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[list[ERA5LandChunkItem]]]:
         """Get chunk-level items intersecting the given geometries.
 
         Each item maps 1-to-1 to a single Zarr chunk identified by a
@@ -445,11 +462,9 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         n_times = len(time_vals)
         n_lat = len(lat_vals)
         n_lon = len(lon_vals)
-        time_cs, lat_cs, lon_cs = self._get_chunk_sizes(ds)
+        time_cs, lat_cs, lon_cs = self._chunk_sizes
 
-        dx = dy = self.ERA5L_PIXEL_SIZE_DEGREES
-
-        all_groups: list[list[list[Item]]] = []
+        all_groups: list[list[list[ERA5LandChunkItem]]] = []
         for geometry in geometries:
             if geometry.time_range is None:
                 raise ValueError("expected all geometries to have a time range")
@@ -462,7 +477,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
             # --- spatial overlap ---
             wgs84 = geometry.to_projection(WGS84_PROJECTION)
             bbox = wgs84.shp.bounds  # (min_lon, min_lat, max_lon, max_lat)
-            snapped = _snap_bounds_outward(bbox, dx)
+            snapped = _snap_bounds_outward(bbox, self.ERA5L_PIX_DEG)
 
             lat_chunk_indices = self._find_overlapping_lat_chunks(
                 lat_vals, lat_cs, snapped[1], snapped[3]
@@ -476,7 +491,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                 continue
 
             # --- build items for every (t, lat, lon) triple ---
-            items: list[Item] = []
+            items: list[ERA5LandChunkItem] = []
             for tc_idx in time_chunks_idx:
                 tc_start = tc_idx * time_cs
                 tc_end = min((tc_idx + 1) * time_cs, n_times)
@@ -496,11 +511,12 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
 
                         # Convert lon to [-180, 180) for the item geometry.
                         lons_180 = ((chunk_lons + 180) % 360) - 180
+                        half_px = self.ERA5L_PIX_DEG / 2
                         item_shp = shapely.box(
-                            float(lons_180.min()) - dx / 2,
-                            float(chunk_lats.min()) - dy / 2,
-                            float(lons_180.max()) + dx / 2,
-                            float(chunk_lats.max()) + dy / 2,
+                            float(lons_180.min()) - half_px,
+                            float(chunk_lats.min()) - half_px,
+                            float(lons_180.max()) + half_px,
+                            float(chunk_lats.max()) + half_px,
                         )
 
                         item_name = f"era5land_v1_t{tc_idx}_y{latc}_x{lonc}"
@@ -509,22 +525,30 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
                             item_shp,
                             (chunk_start_dt, chunk_end_dt),
                         )
-                        items.append(Item(item_name, item_geom))
+                        items.append(
+                            ERA5LandChunkItem(
+                                item_name,
+                                item_geom,
+                                tc_idx,
+                                latc,
+                                lonc,
+                            )
+                        )
 
             all_groups.append([items])
 
         return all_groups
 
-    def deserialize_item(self, serialized_item: dict) -> Item:
+    def deserialize_item(self, serialized_item: dict) -> ERA5LandChunkItem:
         """Deserialize an `Item` previously produced by this data source.
 
         Args:
             serialized_item: Serialized item dictionary.
 
         Returns:
-            Deserialized rslearn ``Item``.
+            Deserialized ``ERA5LandChunkItem``.
         """
-        return Item.deserialize(serialized_item)
+        return ERA5LandChunkItem.deserialize(serialized_item)
 
     # ------------------------------------------------------------------
     # Projection / bounds helper (used by ingest)
@@ -542,15 +566,14 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         Returns:
             ``(projection, pixel_bounds)`` suitable for ``tile_store.write_raster``.
         """
-        dx = self.ERA5L_PIXEL_SIZE_DEGREES
-        dy = self.ERA5L_PIXEL_SIZE_DEGREES
+        projection = Projection(
+            CRS.from_epsg(WGS84_EPSG), self.ERA5L_PIX_DEG, -self.ERA5L_PIX_DEG
+        )
 
-        projection = Projection(CRS.from_epsg(WGS84_EPSG), dx, -dy)
-
-        west = float(lon.min()) - dx / 2
-        north = float(lat.max()) + dy / 2
-        col_off = round(west / dx)
-        row_off = round(north / (-dy))
+        west = float(lon.min()) - self.ERA5L_PIX_DEG / 2
+        north = float(lat.max()) + self.ERA5L_PIX_DEG / 2
+        col_off = round(west / self.ERA5L_PIX_DEG)
+        row_off = round(north / (-self.ERA5L_PIX_DEG))
         pixel_bounds: PixelBounds = (
             col_off,
             row_off,
@@ -567,7 +590,7 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
     def ingest(
         self,
         tile_store: TileStoreWithLayer,
-        items: list[Item],
+        items: list[ERA5LandChunkItem],
         geometries: list[list[STGeometry]],
     ) -> None:
         """Ingest ERA5-Land chunk items into the tile store.
@@ -586,33 +609,25 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
         n_times = len(time_vals)
         n_lat = len(ds["latitude"])
         n_lon = len(ds["longitude"])
-        time_cs, lat_cs, lon_cs = self._get_chunk_sizes(ds)
+        time_cs, lat_cs, lon_cs = self._chunk_sizes
 
         for item in items:
             if tile_store.is_raster_ready(item, self.band_names):
                 continue
 
-            # Parse chunk indices from item name: era5land_v1_t{tc}_y{latc}_x{lonc}
-            m = re.fullmatch(r"era5land_v1_t(\d+)_y(\d+)_x(\d+)", item.name)
-            if m is None:
-                raise ValueError(
-                    f"Cannot parse chunk indices from item name: {item.name!r}"
-                )
-            tc, latc, lonc = int(m.group(1)), int(m.group(2)), int(m.group(3))
-
-            tc_start = tc * time_cs
-            tc_end = min((tc + 1) * time_cs, n_times)
-            latc_start = latc * lat_cs
-            latc_end = min((latc + 1) * lat_cs, n_lat)
-            lonc_start = lonc * lon_cs
-            lonc_end = min((lonc + 1) * lon_cs, n_lon)
+            tc_start = item.time_chunk * time_cs
+            tc_end = min((item.time_chunk + 1) * time_cs, n_times)
+            latc_start = item.lat_chunk * lat_cs
+            latc_end = min((item.lat_chunk + 1) * lat_cs, n_lat)
+            lonc_start = item.lon_chunk * lon_cs
+            lonc_end = min((item.lon_chunk + 1) * lon_cs, n_lon)
 
             logger.info(
                 "Fetching ERA5 chunk t=%d lat=%d lon=%d "
                 "(time %d..%d, lat %d..%d, lon %d..%d)",
-                tc,
-                latc,
-                lonc,
+                item.time_chunk,
+                item.lat_chunk,
+                item.lon_chunk,
                 tc_start,
                 tc_end - 1,
                 latc_start,
@@ -644,8 +659,6 @@ class ERA5LandDailyUTCv1(DataSource[Item]):
             band_arrays: list[np.ndarray] = []
             for band in self.band_names:
                 arr = subset[band].values  # (T, H, W)
-                if band in ("t2m", "d2m") and self.temperature_unit == "celsius":
-                    arr = arr - 273.15
                 arr = arr[:, :, lon_sort_idx]
                 band_arrays.append(arr)
 
