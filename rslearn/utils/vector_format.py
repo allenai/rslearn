@@ -342,7 +342,8 @@ class GeojsonVectorFormat(VectorFormat):
             path: the directory to read from
             projection: the projection to read the data in
             bounds: the bounds to read under the given projection. Only features that
-                intersect the bounds should be returned.
+                intersect the bounds should be returned. These features are returned
+                unmodified (not clipped).
 
         Returns:
             the vector data
