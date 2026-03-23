@@ -130,7 +130,7 @@ class ERA5LandChunkItem(Item):
         lat_chunk: int,
         lon_chunk: int,
     ) -> None:
-        """Create a new ERA5LandChunkItem.
+        """Create am earthdatahub ERA5L chunk specific Item.
 
         Args:
             name: unique name of the item.
@@ -170,7 +170,7 @@ class ERA5LandDailyUTCv1(DataSource[ERA5LandChunkItem]):
 
     This data source reads from the EarthDataHub Zarr store and writes
     multi-timestep GeoTIFFs into the dataset tile store.  Each item corresponds
-    to exactly one Zarr chunk (currently time (75d) × lat () × lon ()),
+    to exactly one Zarr chunk, currently of size time (75d) x lat (15°) x lon (30°),
     so only the chunks needed for each window are fetched.
 
     The recommended configuration uses ``SINGLE_COMPOSITE`` space mode with
