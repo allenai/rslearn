@@ -618,12 +618,15 @@ def safely_reproject_within_valid_area(
         boxes = []
         for part in parts:
             b = part.bounds
+            # We buffer it by WGS84_CLIP_BUFFER_DEGREES, plus half its size (so we
+            # minimize issues for larger windows).
+            half_size = max(b[2] - b[0], b[3] - b[1]) / 2
             boxes.append(
                 shapely.box(
-                    b[0] - WGS84_CLIP_BUFFER_DEGREES,
-                    b[1] - WGS84_CLIP_BUFFER_DEGREES,
-                    b[2] + WGS84_CLIP_BUFFER_DEGREES,
-                    b[3] + WGS84_CLIP_BUFFER_DEGREES,
+                    b[0] - WGS84_CLIP_BUFFER_DEGREES - half_size,
+                    b[1] - WGS84_CLIP_BUFFER_DEGREES - half_size,
+                    b[2] + WGS84_CLIP_BUFFER_DEGREES + half_size,
+                    b[3] + WGS84_CLIP_BUFFER_DEGREES + half_size,
                 )
             )
         return shapely.unary_union(boxes)
