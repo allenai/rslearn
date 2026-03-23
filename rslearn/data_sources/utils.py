@@ -308,6 +308,12 @@ def _filter_and_project_items(
 ) -> tuple[list[ItemType], list[shapely.Geometry]]:
     """Filter items by time and project to geometry's projection.
 
+    If the geometry and items are in different projections, we handle re-projection
+    using safely_reproject_within_valid_area. This should be relatively robust for
+    items that are in WGS84, but if data sources provide items in other projections,
+    then the re-projection could still introduce distortions that result in incorrect
+    matching.
+
     Returns:
         tuple of (acceptable_items, acceptable_item_shps)
     """
