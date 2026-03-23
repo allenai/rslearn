@@ -22,6 +22,11 @@ RESOLUTION_EPSILON = 1e-6
 WGS84_EPSG = 4326
 WGS84_BOUNDS: PixelBounds = (-180, -90, 180, 90)
 
+# Threshold in degrees above which a geometry is probably not going to re-project
+# correctly due to projections with limited validity and other issues.
+# 6 degrees corresponds to the UTM zone interval.
+MAX_GEOMETRY_DEGREES = 6
+
 
 def is_same_resolution(res1: float, res2: float) -> bool:
     """Returns whether the two resolutions are the same."""
@@ -294,6 +299,18 @@ class STGeometry:
         if self.shp != shapely.box(*WGS84_BOUNDS):
             return False
         return True
+
+    def is_too_large(self) -> bool:
+        """Returns whether this geometry's spatial coverage is too large.
+
+        This means that it will likely have issues during re-projections and such.
+        """
+        wgs84_bounds = self.to_projection(WGS84_PROJECTION).shp.bounds
+        if wgs84_bounds[2] - wgs84_bounds[0] > MAX_GEOMETRY_DEGREES:
+            return True
+        if wgs84_bounds[3] - wgs84_bounds[1] > MAX_GEOMETRY_DEGREES:
+            return True
+        return False
 
     def to_wgs84(self) -> "STGeometry":
         """Convert to WGS84 with antimeridian splitting handling.
