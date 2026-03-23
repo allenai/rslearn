@@ -849,6 +849,7 @@ class NumpyRasterFormat(RasterFormat):
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
+        expect_bounds_mismatch: bool = False,
     ) -> RasterArray:
         """Decode a previously stored ``data.npy`` + ``metadata.json``.
 
@@ -862,6 +863,11 @@ class NumpyRasterFormat(RasterFormat):
             projection: used to verify consistency with stored projection.
             bounds: used to verify consistency with stored bounds.
             resampling: ignored (kept for interface conformance).
+            expect_bounds_mismatch: if True, a bounds mismatch is expected
+                (e.g. because spatial_size was used at materialization time,
+                which stores data in a different pixel coordinate system) and
+                only triggers a debug log. If False, a mismatch raises
+                ValueError.
 
         Returns:
             the (C, T, H, W) RasterArray.
@@ -869,15 +875,22 @@ class NumpyRasterFormat(RasterFormat):
         with (path / METADATA_FNAME).open() as f:
             metadata = NumpyRasterMetadata.model_validate_json(f.read())
 
-        # Warn if the requested bounds/projection differ from what was stored,
-        # since NumpyRasterFormat does not perform reprojection or cropping.
         if metadata.bounds != tuple(bounds):
-            logger.warning(
-                "NumpyRasterFormat: requested bounds %s differ from stored "
-                "bounds %s — returning stored data as-is",
-                bounds,
-                metadata.bounds,
-            )
+            if expect_bounds_mismatch:
+                logger.debug(
+                    "NumpyRasterFormat: requested bounds %s differ from stored "
+                    "bounds %s (expected due to spatial_size) "
+                    "— returning stored data as-is",
+                    bounds,
+                    metadata.bounds,
+                )
+            else:
+                raise ValueError(
+                    f"NumpyRasterFormat: requested bounds {bounds} differ from "
+                    f"stored bounds {metadata.bounds}. Unlike GeotiffRasterFormat, "
+                    f"NumpyRasterFormat cannot reproject or crop to different "
+                    f"bounds."
+                )
 
         with (path / self.data_fname).open("rb") as f:
             array = np.load(f)

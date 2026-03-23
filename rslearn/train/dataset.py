@@ -37,6 +37,7 @@ from rslearn.train.model_context import RasterImage
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
 from rslearn.utils.mp import make_pool_and_star_imap_unordered
+from rslearn.utils.raster_format import NumpyRasterFormat
 
 from .model_context import SampleMetadata
 from .tasks import Task
@@ -448,8 +449,15 @@ def read_raster_layer_for_data_input(
         # resampling. If it really is much faster to handle it via torch, then it may
         # make sense to bring back that functionality.
 
+        decode_kwargs: dict[str, Any] = {}
+        if isinstance(raster_format, NumpyRasterFormat):
+            decode_kwargs["expect_bounds_mismatch"] = band_set.spatial_size is not None
         raster_array = raster_format.decode_raster(
-            raster_dir, final_projection, final_bounds, resampling=Resampling.nearest
+            raster_dir,
+            final_projection,
+            final_bounds,
+            resampling=Resampling.nearest,
+            **decode_kwargs,
         )
         src = raster_array.array  # (C, T, H, W)
 

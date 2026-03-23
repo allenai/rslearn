@@ -187,12 +187,12 @@ class BandSetConfig(BaseModel):
 
     # Optional explicit spatial dimensions for the materialized output. When set,
     # the projection resolution is adjusted so that the window's geographic extent
-    # maps to exactly (spatial_size[0], spatial_size[1]) pixels (height, width).
+    # maps to exactly spatial_size pixels (height, width).
     # This is useful for coarse-resolution layers (e.g. ERA5 at 0.1 deg) where
     # only 1 pixel covers a typical window.
-    spatial_size: list[int] | None = Field(
+    spatial_size: tuple[int, int] | None = Field(
         default=None,
-        description="Optional [height, width] output size. Mutually exclusive with non-zero zoom_offset.",
+        description="Optional (height, width) output size. Mutually exclusive with non-zero zoom_offset.",
     )
 
     @model_validator(mode="after")
@@ -210,11 +210,6 @@ class BandSetConfig(BaseModel):
         if self.spatial_size is not None and self.zoom_offset != 0:
             raise ValueError(
                 "spatial_size and non-zero zoom_offset are mutually exclusive"
-            )
-
-        if self.spatial_size is not None and len(self.spatial_size) != 2:
-            raise ValueError(
-                "spatial_size must be a list of exactly 2 ints [height, width]"
             )
 
         if self.spatial_size is not None and any(v <= 0 for v in self.spatial_size):

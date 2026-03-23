@@ -307,7 +307,7 @@ class TestBandSetConfigSpatialSize:
 
     def test_spatial_size_projection_and_bounds(self) -> None:
         """spatial_size should adjust projection and bounds to target dimensions."""
-        bs = BandSetConfig(dtype=DType.FLOAT32, bands=["a"], spatial_size=[1, 1])
+        bs = BandSetConfig(dtype=DType.FLOAT32, bands=["a"], spatial_size=(1, 1))
         projection = Projection(CRS.from_epsg(3857), 10.0, -10.0)
         bounds = (100, 200, 228, 328)  # 128 x 128 pixels
 
@@ -324,7 +324,7 @@ class TestBandSetConfigSpatialSize:
 
     def test_spatial_size_non_square(self) -> None:
         """spatial_size with non-square dimensions should work correctly."""
-        bs = BandSetConfig(dtype=DType.FLOAT32, bands=["a"], spatial_size=[2, 4])
+        bs = BandSetConfig(dtype=DType.FLOAT32, bands=["a"], spatial_size=(2, 4))
         projection = Projection(CRS.from_epsg(3857), 1.0, -1.0)
         bounds = (0, 0, 100, 200)  # 100 x 200 pixels
 
@@ -337,18 +337,18 @@ class TestBandSetConfigSpatialSize:
         """spatial_size and non-zero zoom_offset should raise an error."""
         with pytest.raises(ValidationError, match="mutually exclusive"):
             BandSetConfig(
-                dtype=DType.FLOAT32, bands=["a"], spatial_size=[1, 1], zoom_offset=1
+                dtype=DType.FLOAT32, bands=["a"], spatial_size=(1, 1), zoom_offset=1
             )
 
     def test_spatial_size_zero_rejected(self) -> None:
         """spatial_size with zero value should raise an error."""
         with pytest.raises(ValidationError, match="positive integers"):
-            BandSetConfig(dtype=DType.FLOAT32, bands=["a"], spatial_size=[0, 1])
+            BandSetConfig(dtype=DType.FLOAT32, bands=["a"], spatial_size=(0, 1))
 
     def test_spatial_size_negative_rejected(self) -> None:
         """spatial_size with negative value should raise an error."""
         with pytest.raises(ValidationError, match="positive integers"):
-            BandSetConfig(dtype=DType.FLOAT32, bands=["a"], spatial_size=[-1, 1])
+            BandSetConfig(dtype=DType.FLOAT32, bands=["a"], spatial_size=(-1, 1))
 
     def test_numpy_raster_format_from_config(self) -> None:
         """NumpyRasterFormat should be instantiable from config via jsonargparse."""
