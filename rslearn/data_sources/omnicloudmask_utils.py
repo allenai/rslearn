@@ -52,21 +52,34 @@ def _compute_clear_fraction(
     Args:
         item: the item to score.
         geometry: the window geometry defining the spatial extent and CRS.
+            ``geometry.shp`` is in pixel coordinates; this function converts
+            to CRS units before calling rasterio.
         get_url: callable(item, asset_key) → accessible URL for the band.
         red_asset_key: asset key for the red band (e.g. "B04").
         green_asset_key: asset key for the green band (e.g. "B03").
         nir_asset_key: asset key for the NIR band (e.g. "B8A").
-        resolution: spatial resolution to read at (in geometry CRS units, e.g. metres).
+        resolution: spatial resolution to read at (in CRS units, e.g. metres
+            for a UTM projection).
 
     Returns:
         fraction of pixels classified as clear, in [0, 1].
     """
     from omnicloudmask import predict_from_array
 
-    minx, miny, maxx, maxy = geometry.shp.bounds
-    width = max(1, int(abs(maxx - minx) / resolution))
-    height = max(1, int(abs(maxy - miny) / resolution))
-    out_transform = from_bounds(minx, miny, maxx, maxy, width, height)
+    # geometry.shp is in pixel coordinates; convert to CRS units by multiplying
+    # by the projection resolutions (pixel * resolution = CRS unit).
+    px_minx, px_miny, px_maxx, px_maxy = geometry.shp.bounds
+    x_res = geometry.projection.x_resolution
+    y_res = geometry.projection.y_resolution
+
+    crs_coords_x = sorted([px_minx * x_res, px_maxx * x_res])
+    crs_coords_y = sorted([px_miny * y_res, px_maxy * y_res])
+    crs_left, crs_right = crs_coords_x
+    crs_bottom, crs_top = crs_coords_y
+
+    width = max(1, int(abs(crs_right - crs_left) / resolution))
+    height = max(1, int(abs(crs_top - crs_bottom) / resolution))
+    out_transform = from_bounds(crs_left, crs_bottom, crs_right, crs_top, width, height)
     crs = geometry.projection.crs
 
     bands = []
@@ -75,7 +88,19 @@ def _compute_clear_fraction(
         bands.append(_read_band(url, crs, out_transform, width, height))
 
     scene = np.stack(bands)  # (3, H, W)
+
+    # OmniCloudMask requires at least 32×32 pixels; pad if necessary.
+    min_size = 32
+    _, h, w = scene.shape
+    pad_h = max(0, min_size - h)
+    pad_w = max(0, min_size - w)
+    if pad_h > 0 or pad_w > 0:
+        scene = np.pad(scene, ((0, 0), (0, pad_h), (0, pad_w)), mode="constant")
+
     mask = predict_from_array(input_array=scene)
+
+    # Only evaluate over the original (unpadded) region.
+    mask = mask[:h, :w]
     return float((mask == 0).mean())
 
 
