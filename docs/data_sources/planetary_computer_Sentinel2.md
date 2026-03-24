@@ -17,6 +17,10 @@ Sentinel-2 satellite images from https://planetarycomputer.microsoft.com/dataset
     "query": null,
     "sort_by": null,
     "sort_ascending": true,
+    // If true, candidate items are re-ranked by pixel-level clear fraction
+    // within each window geometry using OmniCloudMask, instead of (or after)
+    // sorting by eo:cloud_cover. See "OmniCloudMask" section below.
+    "sort_by_omnicloudmask": false,
     "timeout_seconds": 10
   }
 }
@@ -125,6 +129,39 @@ got included, e.g.:
     "query": {
       "s2:processing_baseline": {"gte": "04.00"}
     }
+  }
+}
+```
+
+### OmniCloudMask
+
+Setting `sort_by_omnicloudmask: true` enables pixel-level cloud filtering during
+the prepare step. Instead of relying solely on the tile-level `eo:cloud_cover`
+property (which is averaged over the full ~110×110 km S2 tile), candidate items are
+scored by the fraction of **clear pixels within your specific window geometry** using
+[OmniCloudMask](https://github.com/ESA-PhiLab/OmniCloudMask). Items are then sorted
+descending by that clear fraction, so mosaicing and compositing logic picks the
+cleanest tile for each window.
+
+This is an opt-in improvement over `sort_by: "eo:cloud_cover"`. It is particularly
+useful when:
+- Windows are small relative to the S2 tile (clouds may be unevenly distributed).
+- Cloud patterns are heterogeneous across overlapping tiles covering the same AOI.
+
+It is recommended to combine it with a coarse `eo:cloud_cover` pre-filter to avoid
+running inference on obviously overcast tiles:
+
+```json
+{
+  "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+  "init_args": {
+    "harmonize": true,
+    "query": {"eo:cloud_cover": {"lt": 80}},
+    "sort_by_omnicloudmask": true
+  },
+  "query_config": {
+    "max_matches": 1,
+    "space_mode": "MOSAIC"
   }
 }
 ```

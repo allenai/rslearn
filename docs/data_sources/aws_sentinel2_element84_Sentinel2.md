@@ -15,12 +15,16 @@ The bucket is public and free so no credentials are needed.
   "class_path": "rslearn.data_sources.aws_sentinel2_element84.Sentinel2",
   "init_args": {
     // Optional STAC query filter.
-    // Example: {"eo:cloud_cover": {"lt": 20}}
+    // Example: {"eo:cloud_cover": {"lt": 80}}
     "query": null,
     // Sort by this STAC property, e.g. "eo:cloud_cover".
     "sort_by": null,
     // Whether to sort ascending or descending (default ascending).
     "sort_ascending": true,
+    // If true, candidate items are re-ranked by pixel-level clear fraction
+    // within each window geometry using OmniCloudMask, instead of (or after)
+    // sorting by eo:cloud_cover. See "OmniCloudMask" section below.
+    "sort_by_omnicloudmask": false,
     // Optional directory to cache discovered items.
     "cache_dir": null,
     // Flag (default false) to harmonize pixel values across different processing
@@ -32,6 +36,13 @@ The bucket is public and free so no credentials are needed.
   }
 }
 ```
+
+### OmniCloudMask
+
+See the [Planetary Computer Sentinel2](./planetary_computer_sentinel2.md#omnicloudmask)
+documentation for a full description of the `sort_by_omnicloudmask` option. The
+behaviour is identical here; no credentials or URL signing are required since the
+Element 84 bucket is public.
 
 ### Available Bands
 
