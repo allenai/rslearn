@@ -327,6 +327,7 @@ class Sentinel2(PlanetaryComputer):
         self,
         harmonize: bool = False,
         assets: list[str] | None = None,
+        sort_by_omnicloudmask: bool = False,
         context: DataSourceContext = DataSourceContext(),
         **kwargs: Any,
     ):
@@ -337,10 +338,16 @@ class Sentinel2(PlanetaryComputer):
                 see https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
             assets: list of asset names to ingest, or None to ingest all assets. This
                 is only used if the layer config is missing from the context.
+            sort_by_omnicloudmask: if True, candidate items are scored by their
+                pixel-level clear fraction (using OmniCloudMask) within each window
+                geometry and sorted descending before ``match_candidate_items_to_window``
+                runs. This provides finer-grained cloud filtering than the tile-level
+                ``eo:cloud_cover`` STAC property.
             context: the data source context.
             kwargs: other arguments to pass to PlanetaryComputer.
         """
         self.harmonize = harmonize
+        self.sort_by_omnicloudmask = sort_by_omnicloudmask
 
         # Determine which assets we need based on the bands in the layer config.
         if context.layer_config is not None:
@@ -472,6 +479,27 @@ class Sentinel2(PlanetaryComputer):
             return None
 
         return get_harmonize_callback(self._get_product_xml(item))
+
+    def _post_filter_items(
+        self, geometry: STGeometry, items: list[SourceItem]
+    ) -> list[SourceItem]:
+        """Re-rank items by pixel-level clear fraction using OmniCloudMask."""
+        if not self.sort_by_omnicloudmask:
+            return items
+
+        from rslearn.data_sources.omnicloudmask_utils import sort_items_by_omnicloudmask
+
+        def get_url(item: SourceItem, asset_key: str) -> str:
+            return planetary_computer.sign(item.asset_urls[asset_key])
+
+        return sort_items_by_omnicloudmask(
+            items,
+            geometry,
+            get_url=get_url,
+            red_asset_key="B04",
+            green_asset_key="B03",
+            nir_asset_key="B8A",
+        )
 
 
 class Hls2S30(PlanetaryComputer):

@@ -60,6 +60,7 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
         query: dict[str, Any] | None = None,
         sort_by: str | None = None,
         sort_ascending: bool = True,
+        sort_by_omnicloudmask: bool = False,
         cache_dir: str | None = None,
         timeout: timedelta = timedelta(seconds=10),
         context: DataSourceContext = DataSourceContext(),
@@ -72,6 +73,10 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
             query: optional STAC query filter to use.
             sort_by: STAC item property to sort by. For example, use "eo:cloud_cover" to sort by cloud cover.
             sort_ascending: whether to sort ascending or descending.
+            sort_by_omnicloudmask: if True, candidate items are scored by their pixel-level
+                clear fraction (using OmniCloudMask) within each window geometry and sorted
+                descending before ``match_candidate_items_to_window`` runs. This provides
+                finer-grained cloud filtering than the tile-level ``eo:cloud_cover`` property.
             cache_dir: deprecated, no longer used. Item data is now passed to
                 materialization functions so caching in the data source is unnecessary.
             timeout: timeout to use for requests.
@@ -118,6 +123,7 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
             required_assets=list(asset_bands.keys()),
         )
 
+        self.sort_by_omnicloudmask = sort_by_omnicloudmask
         self.timeout = timeout
 
     # --- DirectMaterializeDataSource implementation ---
@@ -189,3 +195,24 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
                     item.name,
                     asset_key,
                 )
+
+    def _post_filter_items(
+        self, geometry: STGeometry, items: list[SourceItem]
+    ) -> list[SourceItem]:
+        """Re-rank items by pixel-level clear fraction using OmniCloudMask."""
+        if not self.sort_by_omnicloudmask:
+            return items
+
+        from rslearn.data_sources.omnicloudmask_utils import sort_items_by_omnicloudmask
+
+        def get_url(item: SourceItem, asset_key: str) -> str:
+            return item.asset_urls[asset_key]
+
+        return sort_items_by_omnicloudmask(
+            items,
+            geometry,
+            get_url=get_url,
+            red_asset_key="red",
+            green_asset_key="green",
+            nir_asset_key="nir08",
+        )

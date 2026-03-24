@@ -635,6 +635,7 @@ class Sentinel2(EarthDaily):
         cloud_cover_max: float | None = None,
         search_max_items: int = 500,
         sort_items_by: Literal["cloud_cover", "datetime"] | None = "cloud_cover",
+        sort_by_omnicloudmask: bool = False,
         query: dict[str, Any] | None = None,
         sort_by: str | None = None,
         sort_ascending: bool = True,
@@ -658,6 +659,11 @@ class Sentinel2(EarthDaily):
                 rslearn's grouping/matching logic runs.
             sort_items_by: optional ordering applied before grouping; useful when
                 using `SpaceMode.COMPOSITE` with `CompositingMethod.FIRST_VALID`.
+            sort_by_omnicloudmask: if True, candidate items are scored by their
+                pixel-level clear fraction (using OmniCloudMask) within each window
+                geometry and sorted descending before ``match_candidate_items_to_window``
+                runs. This provides finer-grained cloud filtering than the tile-level
+                ``eo:cloud_cover`` property.
             query: optional STAC API `query` filter passed to searches. If
                 cloud_cover_max/cloud_cover_threshold is set, the effective query also
                 includes an `eo:cloud_cover` upper bound.
@@ -714,6 +720,7 @@ class Sentinel2(EarthDaily):
         self.cloud_cover_max = cloud_cover_max
         self.search_max_items = search_max_items
         self.sort_items_by = sort_items_by
+        self.sort_by_omnicloudmask = sort_by_omnicloudmask
         self.apply_scale_offset = apply_scale_offset
 
     def read_raster(
@@ -825,6 +832,21 @@ class Sentinel2(EarthDaily):
             candidate_items = [
                 self.get_item_by_name(stac_item.id) for stac_item in stac_items
             ]
+
+            if self.sort_by_omnicloudmask:
+                from rslearn.data_sources.omnicloudmask_utils import (
+                    sort_items_by_omnicloudmask,
+                )
+
+                candidate_items = sort_items_by_omnicloudmask(
+                    candidate_items,
+                    geometry,
+                    get_url=lambda item, asset_key: item.asset_urls[asset_key],
+                    red_asset_key="red",
+                    green_asset_key="green",
+                    nir_asset_key="nir08",
+                )
+
             cur_groups = match_candidate_items_to_window(
                 geometry, candidate_items, query_config
             )
