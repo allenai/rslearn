@@ -2,21 +2,21 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
+import pytest
 import shapely
+import xarray as xr
+import zarr  # noqa: F401
+from upath import UPath
+
+from rslearn.config import QueryConfig, SpaceMode
+from rslearn.const import WGS84_PROJECTION
+from rslearn.data_sources.earthdatahub import ERA5LandDailyUTCv1
+from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
+from rslearn.utils.geometry import STGeometry
 
 
 def test_era5land_dailyutc_v1_chunk_items_and_ingest(tmp_path: Path) -> None:
     """get_items returns chunk-level items and ingest writes multi-timestep rasters."""
-    import xarray as xr
-    import zarr  # noqa: F401
-    from upath import UPath
-
-    from rslearn.config import QueryConfig, SpaceMode
-    from rslearn.const import WGS84_PROJECTION
-    from rslearn.data_sources.earthdatahub import ERA5LandDailyUTCv1
-    from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
-    from rslearn.utils.geometry import STGeometry
-
     valid_time = np.array(
         ["2020-01-01", "2020-01-02", "2020-01-03"], dtype="datetime64[ns]"
     )
@@ -83,15 +83,6 @@ def test_era5land_dailyutc_v1_chunk_items_and_ingest(tmp_path: Path) -> None:
 
 def test_era5land_dailyutc_v1_requires_single_composite(tmp_path: Path) -> None:
     """get_items rejects non-SINGLE_COMPOSITE space modes."""
-    import pytest
-    import xarray as xr
-    import zarr  # noqa: F401
-
-    from rslearn.config import QueryConfig, SpaceMode
-    from rslearn.const import WGS84_PROJECTION
-    from rslearn.data_sources.earthdatahub import ERA5LandDailyUTCv1
-    from rslearn.utils.geometry import STGeometry
-
     valid_time = np.array(["2020-01-01"], dtype="datetime64[ns]")
     latitude = np.array([1.0, 0.9], dtype=np.float64)
     longitude = np.array([0.0, 0.1], dtype=np.float64)
@@ -129,16 +120,6 @@ def test_era5land_dailyutc_v1_requires_single_composite(tmp_path: Path) -> None:
 def test_era5land_dailyutc_v1_spatial_chunk_splitting(tmp_path: Path) -> None:
     """When the Zarr has spatial chunks smaller than the window, multiple items
     are returned — one per (time, lat, lon) chunk triple."""
-    import xarray as xr
-    import zarr  # noqa: F401
-    from upath import UPath
-
-    from rslearn.config import QueryConfig, SpaceMode
-    from rslearn.const import WGS84_PROJECTION
-    from rslearn.data_sources.earthdatahub import ERA5LandDailyUTCv1
-    from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
-    from rslearn.utils.geometry import STGeometry
-
     # 2 time steps, 4 lat, 4 lon — write with explicit chunks (2, 2, 2)
     valid_time = np.array(["2020-01-01", "2020-01-02"], dtype="datetime64[ns]")
     latitude = np.array([1.0, 0.9, 0.8, 0.7], dtype=np.float64)
@@ -204,14 +185,6 @@ def test_era5land_dailyutc_v1_spatial_chunk_splitting(tmp_path: Path) -> None:
 
 def test_era5land_dailyutc_v1_time_range_after_dataset(tmp_path: Path) -> None:
     """get_items returns no items when the time range is entirely after the dataset."""
-    import xarray as xr
-    import zarr  # noqa: F401
-
-    from rslearn.config import QueryConfig, SpaceMode
-    from rslearn.const import WGS84_PROJECTION
-    from rslearn.data_sources.earthdatahub import ERA5LandDailyUTCv1
-    from rslearn.utils.geometry import STGeometry
-
     valid_time = np.array(["2020-01-01", "2020-01-02"], dtype="datetime64[ns]")
     latitude = np.array([1.0, 0.9], dtype=np.float64)
     longitude = np.array([0.0, 0.1], dtype=np.float64)
@@ -250,14 +223,6 @@ def test_era5land_dailyutc_v1_time_range_after_dataset(tmp_path: Path) -> None:
 
 def test_era5land_dailyutc_v1_time_range_before_dataset(tmp_path: Path) -> None:
     """get_items returns no items when the time range is entirely before the dataset."""
-    import xarray as xr
-    import zarr  # noqa: F401
-
-    from rslearn.config import QueryConfig, SpaceMode
-    from rslearn.const import WGS84_PROJECTION
-    from rslearn.data_sources.earthdatahub import ERA5LandDailyUTCv1
-    from rslearn.utils.geometry import STGeometry
-
     valid_time = np.array(["2020-01-01", "2020-01-02"], dtype="datetime64[ns]")
     latitude = np.array([1.0, 0.9], dtype=np.float64)
     longitude = np.array([0.0, 0.1], dtype=np.float64)
