@@ -256,7 +256,6 @@ def ingest_dataset_windows(
         data_source = layer_cfg.instantiate_data_source(dataset.path)
 
         geometries_by_item: dict = {}
-        seen_items: dict[str, Item] = {}
         for window in windows:
             layer_datas = window.load_layer_datas()
             if layer_name not in layer_datas:
@@ -265,12 +264,10 @@ def ingest_dataset_windows(
             layer_data = layer_datas[layer_name]
             for group in layer_data.serialized_item_groups:
                 for serialized_item in group:
-                    item_name = serialized_item["name"]
-                    if item_name not in seen_items:
-                        item = data_source.deserialize_item(serialized_item)
-                        seen_items[item_name] = item
+                    item = data_source.deserialize_item(serialized_item)
+                    if item not in geometries_by_item:
                         geometries_by_item[item] = []
-                    geometries_by_item[seen_items[item_name]].append(geometry)
+                    geometries_by_item[item].append(geometry)
 
         logger.info(
             "Ingesting %d items in layer %s", len(geometries_by_item), layer_name
