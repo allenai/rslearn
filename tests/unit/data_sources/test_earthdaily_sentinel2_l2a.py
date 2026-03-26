@@ -276,9 +276,8 @@ def test_read_raster_harmonizes_with_processing_baseline_fallback_before_cutoff(
         bounds=(0, 0, 2, 2),
     ).get_chw_array()
 
-    expected = np.clip(raw, 1000, None) - 1000
     assert out.dtype == np.uint16
-    np.testing.assert_array_equal(out, expected)
+    np.testing.assert_array_equal(out, raw)
 
 
 def test_read_raster_processing_baseline_fallback_overrides_geometry_date(
@@ -316,8 +315,9 @@ def test_read_raster_processing_baseline_fallback_overrides_geometry_date(
         bounds=(0, 0, 2, 2),
     ).get_chw_array()
 
+    expected = np.clip(raw, 1000, None) - 1000
     assert out.dtype == np.uint16
-    np.testing.assert_array_equal(out, raw)
+    np.testing.assert_array_equal(out, expected)
 
 
 def test_read_raster_uses_product_id_processing_baseline_before_item_name(

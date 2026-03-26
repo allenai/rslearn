@@ -1021,8 +1021,6 @@ class Sentinel2L2A(EarthDaily):
         processing_baseline = None
         if item.product_id is not None:
             processing_baseline = self._get_processing_baseline(item.product_id)
-        if processing_baseline is None:
-            processing_baseline = self._get_processing_baseline(item.name)
         if processing_baseline is not None:
             if processing_baseline < self.HARMONIZE_PROCESSING_BASELINE:
                 return None
