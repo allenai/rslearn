@@ -4,7 +4,6 @@ import random
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from inspect import Parameter, signature
 from typing import Any
 
 from rslearn.config import (
@@ -457,22 +456,13 @@ def materialize_window(
             f"Materializing {len(item_groups)} item groups in layer {layer_name} via data source"
         )
 
-        materialize_params = signature(data_source.materialize).parameters
-        supports_group_time_ranges = "group_time_ranges" in materialize_params or any(
-            param.kind == Parameter.VAR_KEYWORD for param in materialize_params.values()
-        )
-
         retry(
-            fn=(
-                lambda: data_source.materialize(
-                    window,
-                    item_groups,
-                    layer_name,
-                    layer_cfg,
-                    group_time_ranges=layer_data.group_time_ranges,
-                )
-                if supports_group_time_ranges
-                else data_source.materialize(window, item_groups, layer_name, layer_cfg)
+            fn=lambda: data_source.materialize(
+                window,
+                item_groups,
+                layer_name,
+                layer_cfg,
+                group_time_ranges=layer_data.group_time_ranges,
             ),
             retry_max_attempts=retry_max_attempts,
             retry_backoff=retry_backoff,
