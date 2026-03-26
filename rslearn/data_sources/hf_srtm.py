@@ -267,6 +267,9 @@ class SRTM(DataSource):
         for geometry in geometries:
             wgs84_geometry = geometry.to_wgs84()
             items = []
+            # Use a set to avoid adding the same item multiple times for different
+            # components of a MultiPolygon or geometry collection.
+            seen_tiles = set()
             for shp in flatten_shape(wgs84_geometry.shp):
                 shp_bounds = shp.bounds
                 cell_bounds = (
@@ -279,7 +282,10 @@ class SRTM(DataSource):
                     for lat_min in range(cell_bounds[1], cell_bounds[3]):
                         if (lon_min, lat_min) not in self._tile_to_item:
                             continue
+                        if (lon_min, lat_min) in seen_tiles:
+                            continue
                         items.append(self._tile_to_item[(lon_min, lat_min)])
+                        seen_tiles.add((lon_min, lat_min))
 
             logger.debug(f"Got {len(items)} items (grid cells) for geometry")
             groups.append([items])
