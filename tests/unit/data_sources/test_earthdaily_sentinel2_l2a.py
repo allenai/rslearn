@@ -188,9 +188,7 @@ def test_resolve_metadata_url_uses_granule_metadata() -> None:
     )
     ds = Sentinel2L2A(harmonize=True, assets=["B04"], cache_dir=None)
 
-    assert (
-        ds._resolve_metadata_url(item) == "https://example.com/granule_metadata.xml"
-    )
+    assert ds._resolve_metadata_url(item) == "https://example.com/granule_metadata.xml"
 
 
 def test_read_raster_no_date_fallback_before_cutoff(
