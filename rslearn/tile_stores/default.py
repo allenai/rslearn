@@ -229,10 +229,13 @@ class DefaultTileStore(TileStore):
         projection: Projection,
         bounds: PixelBounds,
         raster: RasterArray,
+        nodata_val: int | float | None = None,
     ) -> None:
         raster_dir = self._get_raster_dir(layer_name, item.name, bands, write=True)
         raster_format = GeotiffRasterFormat(geotiff_options=self.geotiff_options)
-        raster_format.encode_raster(raster_dir, projection, bounds, raster)
+        raster_format.encode_raster(
+            raster_dir, projection, bounds, raster, nodata_val=nodata_val
+        )
         (raster_dir / COMPLETED_FNAME).touch()
 
     @override
