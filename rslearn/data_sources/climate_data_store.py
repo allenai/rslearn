@@ -115,6 +115,10 @@ class ERA5Land(DataSource):
             raise ValueError(
                 "expected MOSAIC or SINGLE_COMPOSITE space mode in the query configuration"
             )
+        if query_config.min_matches != 0:
+            raise ValueError(
+                "min_matches is not supported for ERA5Land; set min_matches=0"
+            )
 
         all_groups = []
         for geometry in geometries:
@@ -609,6 +613,10 @@ class ERA5LandHourlyTimeseries(DataSource):
         ):
             raise ValueError(
                 "expected MOSAIC or SINGLE_COMPOSITE space mode in the query configuration"
+            )
+        if query_config.min_matches != 0:
+            raise ValueError(
+                "min_matches is not supported for ERA5LandHourlyTimeseries; set min_matches=0"
             )
 
         all_groups = []

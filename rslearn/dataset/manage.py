@@ -211,10 +211,6 @@ def prepare_dataset_windows(
             for window, result, group_time_ranges in zip(
                 needed_windows, results, group_time_ranges_by_window
             ):
-                if len(result) < min_matches:
-                    result = []
-                    group_time_ranges = []
-
                 layer_datas = window.load_layer_datas()
                 layer_datas[layer_name] = WindowLayerData(
                     layer_name=layer_name,

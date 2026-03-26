@@ -117,6 +117,45 @@ def test_era5land_dailyutc_v1_requires_single_composite(tmp_path: Path) -> None:
         )
 
 
+def test_era5land_dailyutc_v1_rejects_min_matches(tmp_path: Path) -> None:
+    """get_items rejects min_matches for custom chunk matching."""
+    valid_time = np.array(["2020-01-01"], dtype="datetime64[ns]")
+    latitude = np.array([1.0, 0.9], dtype=np.float64)
+    longitude = np.array([0.0, 0.1], dtype=np.float64)
+    t2m = np.zeros((1, 2, 2), dtype=np.float32)
+
+    ds = xr.Dataset(
+        data_vars=dict(t2m=(("valid_time", "latitude", "longitude"), t2m)),
+        coords=dict(valid_time=valid_time, latitude=latitude, longitude=longitude),
+    )
+    zarr_path = tmp_path / "era5_min_matches.zarr"
+    ds.to_zarr(
+        zarr_path,
+        mode="w",
+        encoding={"t2m": {"chunks": (1, 2, 2)}},
+    )
+
+    data_source = ERA5LandDailyUTCv1(
+        band_names=["t2m"],
+        zarr_url=str(zarr_path),
+        trust_env=False,
+    )
+
+    window_geom = STGeometry(
+        WGS84_PROJECTION,
+        shapely.box(0.0, 0.85, 0.2, 1.05),
+        (datetime(2020, 1, 1, 0, tzinfo=UTC), datetime(2020, 1, 2, 0, tzinfo=UTC)),
+    )
+
+    with pytest.raises(ValueError, match="min_matches"):
+        data_source.get_items(
+            [window_geom],
+            query_config=QueryConfig(
+                space_mode=SpaceMode.SINGLE_COMPOSITE, min_matches=1
+            ),
+        )
+
+
 def test_era5land_dailyutc_v1_spatial_chunk_splitting(tmp_path: Path) -> None:
     """When the Zarr has spatial chunks smaller than the window, multiple items
     are returned — one per (time, lat, lon) chunk triple."""

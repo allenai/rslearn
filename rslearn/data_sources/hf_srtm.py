@@ -262,6 +262,8 @@ class SRTM(DataSource):
             raise ValueError(
                 "expected mosaic with max_matches=1 for the query configuration"
             )
+        if query_config.min_matches != 0:
+            raise ValueError("min_matches is not supported for SRTM; set min_matches=0")
 
         groups = []
         for geometry in geometries:

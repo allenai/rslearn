@@ -454,6 +454,10 @@ class ERA5LandDailyUTCv1(DataSource[ERA5LandChunkItem]):
                 "ERA5LandDailyUTCv1 requires SINGLE_COMPOSITE space mode "
                 f"(got {query_config.space_mode})"
             )
+        if query_config.min_matches != 0:
+            raise ValueError(
+                "min_matches is not supported for ERA5LandDailyUTCv1; set min_matches=0"
+            )
 
         ds = self._get_dataset()
         time_vals = ds["valid_time"].values
