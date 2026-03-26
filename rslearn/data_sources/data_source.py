@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Generator
+from datetime import datetime
 from typing import Any, BinaryIO, Generic, TypeVar
 
 from upath import UPath
@@ -104,6 +105,7 @@ class DataSource(ABC, Generic[ItemType]):
         item_groups: list[list[ItemType]],
         layer_name: str,
         layer_cfg: LayerConfig,
+        group_time_ranges: list[tuple[datetime, datetime] | None] | None = None,
     ) -> None:
         """Materialize data for the window.
 
@@ -112,6 +114,7 @@ class DataSource(ABC, Generic[ItemType]):
             item_groups: the items from get_items
             layer_name: the name of this layer
             layer_cfg: the config of this layer
+            group_time_ranges: optional request time range for each item group
         """
         raise NotImplementedError
 

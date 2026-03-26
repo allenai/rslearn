@@ -4,7 +4,7 @@ import copy
 import json
 import os
 import tempfile
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
 import affine
@@ -578,6 +578,7 @@ class EarthDaily(DataSource, TileStore):
         item_groups: list[list[Item]],
         layer_name: str,
         layer_cfg: LayerConfig,
+        group_time_ranges: list[tuple[datetime, datetime] | None] | None = None,
     ) -> None:
         """Materialize data for the window.
 
@@ -586,6 +587,7 @@ class EarthDaily(DataSource, TileStore):
             item_groups: the items from get_items
             layer_name: the name of this layer
             layer_cfg: the config of this layer
+            group_time_ranges: optional request time range for each item group
         """
         RasterMaterializer().materialize(
             TileStoreWithLayer(self, layer_name),
@@ -593,6 +595,7 @@ class EarthDaily(DataSource, TileStore):
             layer_name,
             layer_cfg,
             item_groups,
+            group_time_ranges=group_time_ranges,
         )
 
 

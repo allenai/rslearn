@@ -7,6 +7,7 @@ since data is fetched on-demand per window.
 from __future__ import annotations
 
 import tempfile
+from datetime import datetime
 from typing import Any
 
 import numpy as np
@@ -318,6 +319,7 @@ class SoilGrids(DataSource, TileStore):
         item_groups: list[list[Item]],
         layer_name: str,
         layer_cfg: LayerConfig,
+        group_time_ranges: list[tuple[datetime, datetime] | None] | None = None,
     ) -> None:
         """Materialize a window by reading from SoilGrids on-demand."""
         RasterMaterializer().materialize(
@@ -326,4 +328,5 @@ class SoilGrids(DataSource, TileStore):
             layer_name,
             layer_cfg,
             item_groups,
+            group_time_ranges=group_time_ranges,
         )

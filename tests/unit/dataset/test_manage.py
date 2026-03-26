@@ -23,7 +23,7 @@ from rslearn.main import IngestHandler
 from rslearn.utils import STGeometry
 
 
-def _make_local_files_dataset(tmp_path: pathlib.Path) -> Dataset:
+def _make_local_files_dataset(tmp_path: pathlib.Path, ingest: bool = True) -> Dataset:
     """Helper: create a dataset with one LocalFiles vector layer and one window."""
     ds_path = UPath(tmp_path)
     src_data_dir = tmp_path / "src_data"
@@ -56,6 +56,7 @@ def _make_local_files_dataset(tmp_path: pathlib.Path) -> Dataset:
                         "min_matches": 0,
                         "max_matches": 10,
                     },
+                    "ingest": ingest,
                 },
             },
         },
@@ -640,6 +641,52 @@ class TestIngestHandler:
 
 class TestMaterializeDatasetWindows:
     """Tests for materialize_dataset_windows."""
+
+    def test_direct_materialize_forwards_group_time_ranges(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Direct materialization should receive stored group_time_ranges."""
+        dataset = _make_local_files_dataset(tmp_path, ingest=False)
+        windows = dataset.load_windows()
+        prepare_dataset_windows(dataset, windows)
+
+        expected_time_range = (
+            datetime(2024, 1, 1, tzinfo=UTC),
+            datetime(2024, 1, 31, tzinfo=UTC),
+        )
+        layer_datas = windows[0].load_layer_datas()
+        layer_data = layer_datas["local_file"]
+        layer_data.group_time_ranges = [expected_time_range] * len(
+            layer_data.serialized_item_groups
+        )
+        windows[0].save_layer_datas(layer_datas)
+
+        captured: dict[str, Any] = {}
+
+        def fake_materialize(
+            self: Any,
+            window: Window,
+            item_groups: list[list[Item]],
+            layer_name: str,
+            layer_cfg: Any,
+            group_time_ranges: list[tuple[datetime, datetime] | None] | None = None,
+        ) -> None:
+            captured["window"] = window
+            captured["num_groups"] = len(item_groups)
+            captured["group_time_ranges"] = group_time_ranges
+            captured["layer_name"] = layer_name
+
+        monkeypatch.setattr(LocalFiles, "materialize", fake_materialize, raising=False)
+
+        summary = materialize_dataset_windows(dataset, windows)
+
+        ls = summary.layer_summaries["local_file"]
+        assert ls.windows_failed == 0
+        assert ls.num_windows_materialized == 1
+        assert captured["window"].name == windows[0].name
+        assert captured["num_groups"] == len(layer_data.serialized_item_groups)
+        assert captured["layer_name"] == "local_file"
+        assert captured["group_time_ranges"] == layer_data.group_time_ranges
 
     def test_materialize_error_captured(
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
