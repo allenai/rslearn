@@ -117,3 +117,21 @@ def test_read_raster_no_apply_scale_offset_returns_raw(tmp_path: Path) -> None:
     arr = out.get_chw_array()
     assert arr.dtype == raw.dtype
     np.testing.assert_array_equal(arr[0], raw)
+
+
+def test_earthdaily_item_serialize_roundtrip_preserves_product_id() -> None:
+    geom = STGeometry(
+        Projection(CRS.from_epsg(3857), 1, -1),
+        shapely.box(0, 0, 2, 2),
+        (datetime(2024, 1, 1, tzinfo=UTC), datetime(2024, 1, 2, tzinfo=UTC)),
+    )
+    item = EarthDailyItem(
+        name="item1",
+        geometry=geom,
+        asset_urls={"red": "/tmp/red.tif"},
+        product_id="S2A_MSIL2A_20240101T000000_N0511_R080_T15CWM_20240101T150509",
+    )
+
+    restored = EarthDailyItem.deserialize(item.serialize())
+
+    assert restored.product_id == item.product_id

@@ -773,3 +773,114 @@ class SingleImageRasterFormat(RasterFormat):
             array=array[:, np.newaxis, :, :],
             timestamps=image_metadata.timestamps,
         )
+
+
+class NumpyRasterMetadata(pydantic.BaseModel):
+    """Metadata sidecar for NumpyRasterFormat."""
+
+    projection: dict[str, Any]
+    bounds: PixelBounds
+    timestamps: list[tuple[datetime, datetime]] | None = None
+
+
+class NumpyRasterFormat(RasterFormat):
+    """A raster format that stores data as a NumPy ``.npy`` file.
+
+    This avoids GeoTIFF overhead for small spatial arrays (e.g. 1x1 pixels)
+    and/or arrays with many bands (e.g. C*T > 1000).
+
+    The directory contains two files:
+    - ``data.npy``: the raw (C, T, H, W) array.
+    - ``metadata.json``: projection, bounds, dtype, channel/timestep counts,
+      and optional timestamps.
+
+    ``decode_raster`` returns the stored array as-is without any reprojection
+    or resampling -- data is assumed to have been materialized at the target
+    resolution already.
+    """
+
+    data_fname = "data.npy"
+
+    def encode_raster(
+        self,
+        path: UPath,
+        projection: Projection,
+        bounds: PixelBounds,
+        raster: RasterArray,
+    ) -> None:
+        """Encode a RasterArray to ``data.npy`` + ``metadata.json``.
+
+        Args:
+            path: directory to write into.
+            projection: the projection of the raster data.
+            bounds: the bounds of the raster data in the projection.
+            raster: the (C, T, H, W) RasterArray to store.
+        """
+        path.mkdir(parents=True, exist_ok=True)
+
+        # Write the raw array.
+        with (path / self.data_fname).open("wb") as f:
+            np.save(f, raster.array)
+
+        # Write the metadata sidecar.
+        metadata = NumpyRasterMetadata(
+            projection=projection.serialize(),
+            bounds=bounds,
+            timestamps=raster.timestamps,
+        )
+        with (path / METADATA_FNAME).open("w") as f:
+            f.write(metadata.model_dump_json())
+
+    def decode_raster(
+        self,
+        path: UPath,
+        projection: Projection,
+        bounds: PixelBounds,
+        resampling: Resampling = Resampling.bilinear,
+        expect_bounds_mismatch: bool = False,
+    ) -> RasterArray:
+        """Decode a previously stored ``data.npy`` + ``metadata.json``.
+
+        The returned array is the stored array *as-is* -- no reprojection or
+        resampling is performed. The ``projection``, ``bounds``, and
+        ``resampling`` parameters are accepted for interface conformance but
+        are not used for spatial transformation.
+
+        Args:
+            path: directory to read from.
+            projection: used to verify consistency with stored projection.
+            bounds: used to verify consistency with stored bounds.
+            resampling: ignored (kept for interface conformance).
+            expect_bounds_mismatch: if True, a bounds mismatch is expected
+                (e.g. because spatial_size was used at materialization time,
+                which stores data in a different pixel coordinate system) and
+                only triggers a debug log. If False, a mismatch raises
+                ValueError.
+
+        Returns:
+            the (C, T, H, W) RasterArray.
+        """
+        with (path / METADATA_FNAME).open() as f:
+            metadata = NumpyRasterMetadata.model_validate_json(f.read())
+
+        if metadata.bounds != tuple(bounds):
+            if expect_bounds_mismatch:
+                logger.debug(
+                    "NumpyRasterFormat: requested bounds %s differ from stored "
+                    "bounds %s (expected due to spatial_size) "
+                    "— returning stored data as-is",
+                    bounds,
+                    metadata.bounds,
+                )
+            else:
+                raise ValueError(
+                    f"NumpyRasterFormat: requested bounds {bounds} differ from "
+                    f"stored bounds {metadata.bounds}. Unlike GeotiffRasterFormat, "
+                    f"NumpyRasterFormat cannot reproject or crop to different "
+                    f"bounds."
+                )
+
+        with (path / self.data_fname).open("rb") as f:
+            array = np.load(f)
+
+        return RasterArray(array=array, timestamps=metadata.timestamps)

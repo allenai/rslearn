@@ -1,15 +1,27 @@
 ## rslearn.data_sources.earthdaily.Sentinel2
 
 Sentinel-2 L2A data on [EarthDaily](https://earthdaily.com/) platform (collection: `sentinel-2-c1-l2a`).
+For EarthDaily collection `sentinel-2-l2a` with Planetary Computer-style asset keys and
+optional harmonization, use `rslearn.data_sources.earthdaily.Sentinel2L2A`.
 
 See [EarthDaily Setup](earthdaily.md) for required dependency/credentials.
 
 By default, this data source applies per-asset scale/offset values from STAC
 `raster:bands` metadata (`apply_scale_offset: true`) to convert raw pixel values into
-physical units using `physical = raw * scale + offset`. Set `apply_scale_offset: false`
-to keep raw values.
+physical units using `physical = raw * scale + offset` (for spectral bands, this is
+surface reflectance). Set `apply_scale_offset: false` to keep raw values.
 
 Note: EarthDaily may include a preview `thumbnail` asset; rslearn does not ingest/materialize it.
+
+### Collection Status
+
+According to the Earth Search project, `sentinel-2-c1-l2a` is intended to eventually
+replace `sentinel-2-l2a`, and contains COG assets processed to at least baseline 5.0.
+As noted there (as of April 2024), ESA archive reprocessing to baseline 5.0 is still
+incomplete, with known gaps for Nov 2016 to Nov 2019 and for 2022, and no published
+completion date.
+
+Source: <https://github.com/Element84/earth-search>
 
 ### Configuration
 
