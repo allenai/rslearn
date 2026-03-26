@@ -110,6 +110,7 @@ class TileStore:
         projection: Projection,
         bounds: PixelBounds,
         raster: RasterArray,
+        nodata_val: int | float | None = None,
     ) -> None:
         """Write raster data to the store.
 
@@ -120,6 +121,9 @@ class TileStore:
             projection: the projection of the array.
             bounds: the bounds of the array.
             raster: the raster data.
+            nodata_val: if set, tag the GeoTIFF with this nodata value so that
+                downstream resampling (e.g. via WarpedVRT) excludes nodata
+                pixels from interpolation.
         """
         raise NotImplementedError
 
@@ -276,6 +280,7 @@ class TileStoreWithLayer:
         projection: Projection,
         bounds: PixelBounds,
         raster: RasterArray,
+        nodata_val: int | float | None = None,
     ) -> None:
         """Write raster data to the store.
 
@@ -285,9 +290,11 @@ class TileStoreWithLayer:
             projection: the projection of the array.
             bounds: the bounds of the array.
             raster: the raster data.
+            nodata_val: if set, tag the GeoTIFF with this nodata value so that
+                downstream resampling excludes nodata pixels from interpolation.
         """
         self.tile_store.write_raster(
-            self.layer_name, item, bands, projection, bounds, raster
+            self.layer_name, item, bands, projection, bounds, raster, nodata_val
         )
 
     def write_raster_file(
