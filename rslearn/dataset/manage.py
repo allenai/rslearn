@@ -459,8 +459,7 @@ def materialize_window(
 
         materialize_params = signature(data_source.materialize).parameters
         supports_group_time_ranges = "group_time_ranges" in materialize_params or any(
-            param.kind == Parameter.VAR_KEYWORD
-            for param in materialize_params.values()
+            param.kind == Parameter.VAR_KEYWORD for param in materialize_params.values()
         )
 
         retry(
