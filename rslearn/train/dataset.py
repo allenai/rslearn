@@ -146,6 +146,21 @@ def compute_expected_timestamps(
     return [(time_range_start, time_range_end)]
 
 
+def expected_timestamps_from_layer_data(
+    layer_data: WindowLayerData | None,
+) -> list[tuple[datetime, datetime]] | None:
+    """Read expected timestamps directly from stored layer data when available."""
+    if layer_data is None or layer_data.group_time_ranges is None:
+        return None
+    if any(time_range is None for time_range in layer_data.group_time_ranges):
+        return None
+    return [
+        time_range
+        for time_range in layer_data.group_time_ranges
+        if time_range is not None
+    ]
+
+
 class SamplerFactory:
     """Factory to produce a Sampler.
 
@@ -601,9 +616,16 @@ def read_data_input(
             images.append(image)
 
             # Compute expected_timestamps from the first layer's config
-            # (assuming all layers in the same DataInput have same temporal config)
+            # (assuming all layers in the same DataInput have same temporal config).
+            # Prefer stored group_time_ranges from prepare, and fall back to
+            # config-based inference for backward compatibility.
             if expected_timestamps is None:
-                expected_timestamps = compute_expected_timestamps(window, layer_config)
+                layer_data = layer_datas.get(layer_name)
+                expected_timestamps = expected_timestamps_from_layer_data(layer_data)
+                if expected_timestamps is None:
+                    expected_timestamps = compute_expected_timestamps(
+                        window, layer_config
+                    )
 
             if timestamps is not None:
                 all_timestamps.extend(timestamps)

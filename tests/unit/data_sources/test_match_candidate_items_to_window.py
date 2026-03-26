@@ -7,7 +7,7 @@ from rasterio.crs import CRS
 from rslearn.config import QueryConfig, SpaceMode, TimeMode
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import Item
-from rslearn.data_sources.utils import match_candidate_items_to_window
+from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.utils.geometry import Projection, STGeometry, get_global_geometry
 
 
@@ -395,6 +395,12 @@ class TestMosaicWithPeriodDuration:
             [item_list[1], item_list[2]],
             [item_list[3]],
             [item_list[4]],
+        ]
+        assert all(isinstance(group, MatchedItemGroup) for group in item_groups)
+        assert [group.request_time_range for group in item_groups] == [
+            periods[1],
+            periods[2],
+            periods[3],
         ]
 
     def test_reverse_time_order(self) -> None:

@@ -25,6 +25,19 @@ entire geometry."""
 ItemType = TypeVar("ItemType", bound=Item)
 
 
+class MatchedItemGroup(list[ItemType]):
+    """A matched item group carrying the request time range used to build it."""
+
+    def __init__(
+        self,
+        items: list[ItemType],
+        request_time_range: tuple[datetime, datetime] | None,
+    ) -> None:
+        """Initialize a matched item group."""
+        super().__init__(items)
+        self.request_time_range = request_time_range
+
+
 @dataclass
 class PendingMosaic:
     """A mosaic being created by match_candidate_items_to_window.
@@ -434,7 +447,12 @@ def match_candidate_items_to_window(
                 period_geom, period_items, period_shps, per_period_query_config
             )
             if period_groups:
-                groups.append(period_groups[0])
+                groups.append(
+                    MatchedItemGroup(
+                        period_groups[0],
+                        period_geom.time_range,
+                    )
+                )
 
         # Groups are in reverse chronological order. Reverse to chronological
         # unless the deprecated per_period_mosaic_reverse_time_order is True.
@@ -451,7 +469,12 @@ def match_candidate_items_to_window(
         else:
             groups.reverse()
     else:
-        groups = handler(geometry, acceptable_items, acceptable_item_shps, query_config)
+        groups = [
+            MatchedItemGroup(group, geometry.time_range)
+            for group in handler(
+                geometry, acceptable_items, acceptable_item_shps, query_config
+            )
+        ]
 
     # Enforce minimum matches if set.
     if len(groups) < query_config.min_matches:

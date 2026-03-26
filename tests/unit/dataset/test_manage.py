@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+import shapely
 from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
@@ -19,6 +20,7 @@ from rslearn.dataset.manage import (
 )
 from rslearn.dataset.materialize import VectorMaterializer
 from rslearn.main import IngestHandler
+from rslearn.utils import STGeometry
 
 
 def _make_local_files_dataset(tmp_path: pathlib.Path) -> Dataset:
@@ -511,7 +513,7 @@ class TestPrepareDatasetWindows:
     def test_period_duration_stores_exact_group_time_ranges_for_temporal_reducers(
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Prepare should store exact sub-period bounds for temporal reducers."""
+        """Prepare should store exact sub-period bounds from datasource matching."""
         ds_path = UPath(tmp_path)
         src_data_dir = tmp_path / "src_data"
         src_data_dir.mkdir()
@@ -572,20 +574,12 @@ class TestPrepareDatasetWindows:
             ),
         ]
 
-        def fake_get_items(self: Any, geometries: Any, query_config: Any) -> Any:
-            assert query_config.period_duration is None
-            assert query_config.max_matches == 1
-            results = []
-            for geometry in geometries:
-                assert geometry.time_range is not None
-                if geometry.time_range in expected_periods:
-                    item = Item("match", geometry)
-                    results.append([[item]])
-                else:
-                    results.append([])
-            return results
-
-        monkeypatch.setattr(LocalFiles, "get_items", fake_get_items)
+        bbox = shapely.box(0, 0, 10, 10)
+        items = [
+            Item("match_0", STGeometry(WGS84_PROJECTION, bbox, expected_periods[0])),
+            Item("match_1", STGeometry(WGS84_PROJECTION, bbox, expected_periods[1])),
+        ]
+        monkeypatch.setattr(LocalFiles, "list_items", lambda self: items)
 
         windows = dataset.load_windows()
         summary = prepare_dataset_windows(dataset, windows)
