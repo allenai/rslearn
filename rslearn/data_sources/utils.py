@@ -1,10 +1,10 @@
 """Utilities shared by data sources."""
 
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, MutableSequence, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TypeVar
+from typing import Any, Generic, TypeVar
 
 import shapely
 
@@ -25,17 +25,47 @@ entire geometry."""
 ItemType = TypeVar("ItemType", bound=Item)
 
 
-class MatchedItemGroup(list[ItemType]):
+@dataclass(eq=False)
+class MatchedItemGroup(MutableSequence[ItemType], Generic[ItemType]):
     """A matched item group carrying the request time range used to build it."""
 
-    def __init__(
-        self,
-        items: list[ItemType],
-        request_time_range: tuple[datetime, datetime] | None,
-    ) -> None:
-        """Initialize a matched item group."""
-        super().__init__(items)
-        self.request_time_range = request_time_range
+    items: list[ItemType]
+    request_time_range: tuple[datetime, datetime] | None
+
+    def __iter__(self) -> Iterator[ItemType]:
+        """Iterate over the items in this group."""
+        return iter(self.items)
+
+    def __len__(self) -> int:
+        """Return number of items in this group."""
+        return len(self.items)
+
+    def __getitem__(self, index: int | slice) -> ItemType | list[ItemType]:
+        """Get one item or a slice of items from this group."""
+        return self.items[index]
+
+    def __setitem__(self, index: int, value: ItemType) -> None:
+        """Set one item in this group."""
+        self.items[index] = value
+
+    def __delitem__(self, index: int) -> None:
+        """Delete one item from this group."""
+        del self.items[index]
+
+    def insert(self, index: int, value: ItemType) -> None:
+        """Insert one item into this group."""
+        self.items.insert(index, value)
+
+    def __eq__(self, other: Any) -> bool:
+        """Support comparisons to both MatchedItemGroup and plain sequences."""
+        if isinstance(other, MatchedItemGroup):
+            return (
+                self.items == other.items
+                and self.request_time_range == other.request_time_range
+            )
+        if isinstance(other, Sequence):
+            return self.items == list(other)
+        return False
 
 
 @dataclass
@@ -374,7 +404,7 @@ def _filter_and_project_items(
 
 def match_candidate_items_to_window(
     geometry: STGeometry, items: list[ItemType], query_config: QueryConfig
-) -> list[list[ItemType]]:
+) -> list[MatchedItemGroup[ItemType]]:
     """Match candidate items to a window based on the query configuration.
 
     If ``period_duration`` is set, the window time range is split into sub-periods
@@ -427,7 +457,7 @@ def match_candidate_items_to_window(
 
         # Iterate from most recent period backwards so that when max_matches
         # truncates, we keep the most recent periods.
-        groups: list[list[ItemType]] = []
+        groups: list[MatchedItemGroup[ItemType]] = []
         period_end = geometry.time_range[1]
         while (
             period_end - period_duration >= geometry.time_range[0]

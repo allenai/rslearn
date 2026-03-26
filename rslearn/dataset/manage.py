@@ -44,31 +44,14 @@ class AttemptsCounter:
 
 
 def _extract_group_time_ranges(
-    geometry: STGeometry,
-    item_groups: list[list[Item]],
+    item_groups: list[MatchedItemGroup[Item]],
 ) -> list[tuple[datetime, datetime] | None]:
     """Extract group request time ranges from matched groups.
 
-    If groups do not include explicit per-group time ranges, falls back to the
-    geometry request time range for each group.
+    All in-tree data sources now return MatchedItemGroup with explicit
+    request_time_range.
     """
-    if len(item_groups) == 0:
-        return []
-
-    group_time_ranges: list[tuple[datetime, datetime] | None] = []
-    has_explicit_group_time_range = False
-    for group in item_groups:
-        if isinstance(group, MatchedItemGroup):
-            group_time_ranges.append(group.request_time_range)
-            if group.request_time_range is not None:
-                has_explicit_group_time_range = True
-        else:
-            group_time_ranges.append(None)
-
-    if has_explicit_group_time_range:
-        return group_time_ranges
-
-    return [geometry.time_range for _ in item_groups]
+    return [group.request_time_range for group in item_groups]
 
 
 def retry(
@@ -204,8 +187,7 @@ def prepare_dataset_windows(
                 attempts_counter=attempts_counter,
             )
             group_time_ranges_by_window = [
-                _extract_group_time_ranges(geometry, result)
-                for geometry, result in zip(geometries, results)
+                _extract_group_time_ranges(result) for result in results
             ]
 
             windows_prepared = 0
