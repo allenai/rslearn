@@ -23,8 +23,6 @@ machine data.earthdatahub.destine.eu
     // Recommended for performance. Dateline-crossing bounds (min_lon > max_lon) are not
     // supported.
     "bounds": null,
-    // Units to return for `t2m` (default "kelvin"): "celsius" or "kelvin".
-    "temperature_unit": "kelvin",
     // Whether to allow the underlying HTTP client to read environment configuration
     // (including netrc) for auth/proxies (default true).
     "trust_env": true
@@ -44,7 +42,7 @@ machine data.earthdatahub.destine.eu
 - `str`: surface net long-wave (thermal) radiation (units: J m-2)
 - `swvl1`: volumetric soil water layer 1 (units: m3 m-3)
 - `swvl2`: volumetric soil water layer 2 (units: m3 m-3)
-- `t2m`: 2m temperature (units: K or °C; see `temperature_unit`)
+- `t2m`: 2m temperature (units: K)
 - `tp`: total precipitation (units: m)
 - `u10`: 10m U wind component (units: m s-1)
 - `v10`: 10m V wind component (units: m s-1)
