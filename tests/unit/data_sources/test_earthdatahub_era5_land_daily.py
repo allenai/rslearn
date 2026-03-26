@@ -11,6 +11,7 @@ from upath import UPath
 from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.earthdatahub import ERA5LandDailyUTCv1
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
 
@@ -61,6 +62,7 @@ def test_era5land_dailyutc_v1_chunk_items_and_ingest(tmp_path: Path) -> None:
     # 1 geometry -> 1 outer entry; SINGLE_COMPOSITE -> 1 group; 1 chunk -> 1 item.
     assert len(groups) == 1
     assert len(groups[0]) == 1
+    assert isinstance(groups[0][0], MatchedItemGroup)
     items = groups[0][0]
     assert len(items) == 1
     assert items[0].name == "era5land_v1_t0_y0_x0"

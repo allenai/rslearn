@@ -1057,9 +1057,7 @@ class TestTemporalReducers:
     BOUNDS = (0, 0, 4, 4)
     PROJECTION = WGS84_PROJECTION
 
-    def test_temporal_reducers_clip_and_reduce(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_temporal_reducers_clip_and_reduce(self, tmp_path: pathlib.Path) -> None:
         """Temporal reducers should clip to the request range and reduce along T."""
         tile_store = DefaultTileStore()
         tile_store.set_dataset_path(UPath(tmp_path))

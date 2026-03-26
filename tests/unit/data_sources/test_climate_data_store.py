@@ -7,6 +7,7 @@ import shapely
 from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.climate_data_store import ERA5Land, ERA5LandHourlyTimeseries
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.utils.geometry import STGeometry
 
 TEST_BANDS = ["2m-temperature", "total-precipitation"]
@@ -64,3 +65,27 @@ def test_era5_land_hourly_timeseries_rejects_min_matches(
             [geometry],
             query_config=QueryConfig(space_mode=SpaceMode.MOSAIC, min_matches=1),
         )
+
+
+@patch("rslearn.data_sources.climate_data_store.cdsapi.Client")
+def test_era5_land_returns_matched_item_groups(mock_client: MagicMock) -> None:
+    """ERA5Land should return MatchedItemGroup instances."""
+    data_source = ERA5Land(
+        dataset="reanalysis-era5-land",
+        product_type="reanalysis",
+        band_names=TEST_BANDS,
+    )
+    geometry = STGeometry(
+        WGS84_PROJECTION,
+        shapely.box(-1, -1, 1, 1),
+        (datetime(2024, 1, 1, tzinfo=UTC), datetime(2024, 2, 1, tzinfo=UTC)),
+    )
+
+    groups = data_source.get_items(
+        [geometry],
+        query_config=QueryConfig(space_mode=SpaceMode.SINGLE_COMPOSITE),
+    )
+    assert len(groups) == 1
+    assert len(groups[0]) == 1
+    assert isinstance(groups[0][0], MatchedItemGroup)
+    assert groups[0][0].request_time_range == geometry.time_range

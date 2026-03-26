@@ -17,6 +17,7 @@ from rasterio.crs import CRS
 from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_EPSG, WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
@@ -491,7 +492,7 @@ class ERA5LandDailyUTCv1(DataSource[ERA5LandChunkItem]):
             )
 
             if lat_chunk_indices is None or not lon_chunk_indices:
-                all_groups.append([[]])
+                all_groups.append([MatchedItemGroup([], geometry.time_range)])
                 continue
 
             # --- build items for every (t, lat, lon) triple ---
@@ -539,7 +540,7 @@ class ERA5LandDailyUTCv1(DataSource[ERA5LandChunkItem]):
                             )
                         )
 
-            all_groups.append([items])
+            all_groups.append([MatchedItemGroup(items, geometry.time_range)])
 
         return all_groups
 

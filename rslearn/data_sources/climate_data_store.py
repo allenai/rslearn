@@ -17,6 +17,7 @@ from upath import UPath
 from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_EPSG, WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
@@ -162,9 +163,11 @@ class ERA5Land(DataSource):
                 items.append(Item(item_name, item_geometry))
 
             if query_config.space_mode == SpaceMode.SINGLE_COMPOSITE:
-                all_groups.append([items])
+                all_groups.append([MatchedItemGroup(items, geometry.time_range)])
             else:
-                all_groups.append([[item] for item in items])
+                all_groups.append(
+                    [MatchedItemGroup([item], geometry.time_range) for item in items]
+                )
 
         return all_groups
 
@@ -678,9 +681,11 @@ class ERA5LandHourlyTimeseries(DataSource):
                 items.append(Item(item_name, item_geometry))
 
             if query_config.space_mode == SpaceMode.SINGLE_COMPOSITE:
-                all_groups.append([items])
+                all_groups.append([MatchedItemGroup(items, geometry.time_range)])
             else:
-                all_groups.append([[item] for item in items])
+                all_groups.append(
+                    [MatchedItemGroup([item], geometry.time_range) for item in items]
+                )
 
         return all_groups
 

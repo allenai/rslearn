@@ -30,6 +30,7 @@ from upath import UPath
 from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath, open_atomic
@@ -283,7 +284,7 @@ class SRTM(DataSource):
                     items.append(self._tile_to_item[(lon_min, lat_min)])
 
             logger.debug(f"Got {len(items)} items (grid cells) for geometry")
-            groups.append([items])
+            groups.append([MatchedItemGroup(items, geometry.time_range)])
 
         return groups
 
