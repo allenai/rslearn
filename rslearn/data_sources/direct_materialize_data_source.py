@@ -254,6 +254,7 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
         projection: Projection,
         bounds: PixelBounds,
         raster: RasterArray,
+        nodata_val: int | float | None = None,
     ) -> None:
         raise NotImplementedError(
             "DirectMaterializeDataSource does not support writing raster data"
