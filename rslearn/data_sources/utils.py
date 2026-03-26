@@ -1,10 +1,10 @@
 """Utilities shared by data sources."""
 
 import warnings
-from collections.abc import Callable, Iterator, MutableSequence, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Generic, TypeVar
+from typing import Generic, TypeVar
 
 import shapely
 
@@ -25,47 +25,12 @@ entire geometry."""
 ItemType = TypeVar("ItemType", bound=Item)
 
 
-@dataclass(eq=False)
-class MatchedItemGroup(MutableSequence[ItemType], Generic[ItemType]):
+@dataclass
+class MatchedItemGroup(Generic[ItemType]):
     """A matched item group carrying the request time range used to build it."""
 
     items: list[ItemType]
     request_time_range: tuple[datetime, datetime] | None
-
-    def __iter__(self) -> Iterator[ItemType]:
-        """Iterate over the items in this group."""
-        return iter(self.items)
-
-    def __len__(self) -> int:
-        """Return number of items in this group."""
-        return len(self.items)
-
-    def __getitem__(self, index: int | slice) -> ItemType | list[ItemType]:
-        """Get one item or a slice of items from this group."""
-        return self.items[index]
-
-    def __setitem__(self, index: int, value: ItemType) -> None:
-        """Set one item in this group."""
-        self.items[index] = value
-
-    def __delitem__(self, index: int) -> None:
-        """Delete one item from this group."""
-        del self.items[index]
-
-    def insert(self, index: int, value: ItemType) -> None:
-        """Insert one item into this group."""
-        self.items.insert(index, value)
-
-    def __eq__(self, other: Any) -> bool:
-        """Support comparisons to both MatchedItemGroup and plain sequences."""
-        if isinstance(other, MatchedItemGroup):
-            return (
-                self.items == other.items
-                and self.request_time_range == other.request_time_range
-            )
-        if isinstance(other, Sequence):
-            return self.items == list(other)
-        return False
 
 
 @dataclass

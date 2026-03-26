@@ -63,7 +63,7 @@ def test_era5land_dailyutc_v1_chunk_items_and_ingest(tmp_path: Path) -> None:
     assert len(groups) == 1
     assert len(groups[0]) == 1
     assert isinstance(groups[0][0], MatchedItemGroup)
-    items = groups[0][0]
+    items = groups[0][0].items
     assert len(items) == 1
     assert items[0].name == "era5land_v1_t0_y0_x0"
 
@@ -196,7 +196,7 @@ def test_era5land_dailyutc_v1_spatial_chunk_splitting(tmp_path: Path) -> None:
 
     assert len(groups) == 1
     assert len(groups[0]) == 1
-    items = groups[0][0]
+    items = groups[0][0].items
 
     # 1 time chunk x 2 lat chunks x 2 lon chunks = 4 items
     assert len(items) == 4
@@ -259,7 +259,7 @@ def test_era5land_dailyutc_v1_time_range_after_dataset(tmp_path: Path) -> None:
 
     assert len(groups) == 1
     assert len(groups[0]) == 1
-    assert len(groups[0][0]) == 0
+    assert len(groups[0][0].items) == 0
 
 
 def test_era5land_dailyutc_v1_time_range_before_dataset(tmp_path: Path) -> None:
@@ -297,4 +297,4 @@ def test_era5land_dailyutc_v1_time_range_before_dataset(tmp_path: Path) -> None:
 
     assert len(groups) == 1
     assert len(groups[0]) == 1
-    assert len(groups[0][0]) == 0
+    assert len(groups[0][0].items) == 0

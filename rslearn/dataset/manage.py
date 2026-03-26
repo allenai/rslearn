@@ -197,7 +197,7 @@ def prepare_dataset_windows(
                 layer_datas[layer_name] = WindowLayerData(
                     layer_name=layer_name,
                     serialized_item_groups=[
-                        [item.serialize() for item in group] for group in result
+                        [item.serialize() for item in group.items] for group in result
                     ],
                     group_time_ranges=group_time_ranges,
                 )
