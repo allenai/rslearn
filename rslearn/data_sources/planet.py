@@ -77,7 +77,7 @@ class Planet(DataSource):
                 self.cache_dir = UPath(cache_dir)
 
     async def _search_items(self, geometry: STGeometry) -> list[dict[str, Any]]:
-        wgs84_geometry = geometry.to_projection(WGS84_PROJECTION)
+        wgs84_geometry = geometry.to_wgs84()
         geojson_data = json.loads(shapely.to_geojson(wgs84_geometry.shp))
 
         async with planet.Session() as session:
