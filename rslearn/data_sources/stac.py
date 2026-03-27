@@ -228,12 +228,32 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
                 self._stac_item_to_item(stac_item) for stac_item in stac_items
             ]
 
+            candidate_items = self._post_filter_items(geometry, candidate_items)
+
             cur_groups = match_candidate_items_to_window(
                 geometry, candidate_items, query_config
             )
             groups.append(cur_groups)
 
         return groups
+
+    def _post_filter_items(
+        self, geometry: STGeometry, items: list[SourceItem]
+    ) -> list[SourceItem]:
+        """Hook for subclasses to re-rank or filter candidate items before matching.
+
+        Called after STAC search and required-asset filtering, and before
+        ``match_candidate_items_to_window``. The default implementation returns
+        items unchanged.
+
+        Args:
+            geometry: the window geometry (native projection).
+            items: candidate items in their current sort order.
+
+        Returns:
+            items to pass to ``match_candidate_items_to_window``.
+        """
+        return items
 
     def deserialize_item(self, serialized_item: dict) -> SourceItem:
         """Deserializes an item from JSON-decoded data."""

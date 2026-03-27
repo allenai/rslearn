@@ -22,7 +22,7 @@ from earthdaily import EDSClient, EDSConfig
 from rasterio.enums import Resampling
 from upath import UPath
 
-from rslearn.config import LayerConfig, QueryConfig
+from rslearn.config import LayerConfig, QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
@@ -670,6 +670,7 @@ class Sentinel2(EarthDaily):
         cloud_cover_max: float | None = None,
         search_max_items: int = 500,
         sort_items_by: Literal["cloud_cover", "datetime"] | None = "cloud_cover",
+        sort_by_omnicloudmask: bool = False,
         query: dict[str, Any] | None = None,
         sort_by: str | None = None,
         sort_ascending: bool = True,
@@ -693,6 +694,12 @@ class Sentinel2(EarthDaily):
                 rslearn's grouping/matching logic runs.
             sort_items_by: optional ordering applied before grouping; useful when
                 using `SpaceMode.COMPOSITE` with `CompositingMethod.FIRST_VALID`.
+            sort_by_omnicloudmask: if True, candidate items are scored by their
+                pixel-level OmniCloudMask class fractions within each window
+                geometry. Ranking prioritizes lower thick-cloud fraction first, then
+                uses clear fraction and other classes as tie-breakers. For
+                ``SpaceMode.SINGLE_COMPOSITE`` with ``ingest=False``, this ranking is
+                deferred to materialization; otherwise it runs during prepare.
             query: optional STAC API `query` filter passed to searches. If
                 cloud_cover_max/cloud_cover_threshold is set, the effective query also
                 includes an `eo:cloud_cover` upper bound.
@@ -750,6 +757,14 @@ class Sentinel2(EarthDaily):
         self.cloud_cover_max = cloud_cover_max
         self.search_max_items = search_max_items
         self.sort_items_by = sort_items_by
+        self.sort_by_omnicloudmask = sort_by_omnicloudmask
+        self._defer_omnicloudmask_to_materialize = (
+            context.layer_config is not None
+            and context.layer_config.data_source is not None
+            and not context.layer_config.data_source.ingest
+            and context.layer_config.data_source.query_config.space_mode
+            == SpaceMode.SINGLE_COMPOSITE
+        )
         self.apply_scale_offset = apply_scale_offset
 
     def read_raster(
@@ -861,12 +876,60 @@ class Sentinel2(EarthDaily):
             candidate_items = [
                 self.get_item_by_name(stac_item.id) for stac_item in stac_items
             ]
+
+            if (
+                self.sort_by_omnicloudmask
+                and not self._defer_omnicloudmask_to_materialize
+            ):
+                from rslearn.data_sources.omnicloudmask_utils import (
+                    sort_items_by_omnicloudmask,
+                )
+
+                candidate_items = sort_items_by_omnicloudmask(
+                    candidate_items,
+                    geometry,
+                    get_url=lambda item, asset_key: item.asset_urls[asset_key],
+                    red_asset_key="red",
+                    green_asset_key="green",
+                    nir_asset_key="nir08",
+                )
+
             cur_groups = match_candidate_items_to_window(
                 geometry, candidate_items, query_config
             )
             groups.append(cur_groups)
 
         return groups
+
+    def materialize(
+        self,
+        window: Window,
+        item_groups: list[list[EarthDailyItem]],
+        layer_name: str,
+        layer_cfg: LayerConfig,
+    ) -> None:
+        """Materialize data for the window."""
+        if self.sort_by_omnicloudmask and self._defer_omnicloudmask_to_materialize:
+            from rslearn.data_sources.omnicloudmask_utils import (
+                sort_items_by_omnicloudmask,
+            )
+
+            window_geometry = window.get_geometry()
+            item_groups = [
+                sort_items_by_omnicloudmask(
+                    group,
+                    window_geometry,
+                    get_url=lambda item, asset_key: item.asset_urls[asset_key],
+                    red_asset_key="red",
+                    green_asset_key="green",
+                    nir_asset_key="nir08",
+                )
+                if len(group) > 1
+                else group
+                for group in item_groups
+            ]
+
+        super().materialize(window, item_groups, layer_name, layer_cfg)
 
     def ingest(
         self,

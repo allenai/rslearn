@@ -66,6 +66,10 @@ Source: <https://github.com/Element84/earth-search>
     "sort_by": null,
     // Whether to sort ascending when sort_by is set (default true).
     "sort_ascending": true,
+    // If true, candidate items are re-ranked by pixel-level clear fraction
+    // within each window geometry using OmniCloudMask, instead of (or after)
+    // sorting by eo:cloud_cover. See "OmniCloudMask" section below.
+    "sort_by_omnicloudmask": false,
     // Optional cache directory for cached item metadata.
     "cache_dir": null,
     // Timeout for HTTP asset downloads.
@@ -113,3 +117,10 @@ Common EarthDaily asset key to rslearn band name mapping:
 - scl → scl
 - aot → aot
 - wvp → wvp
+
+### OmniCloudMask
+
+See the [Planetary Computer Sentinel2](./planetary_computer_sentinel2.md#omnicloudmask)
+documentation for a full description of the `sort_by_omnicloudmask` option. The
+behaviour is identical here; asset URLs from EarthDaily include auth tokens so no
+additional signing step is required.
