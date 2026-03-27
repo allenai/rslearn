@@ -2,6 +2,7 @@
 
 import pathlib
 import sqlite3
+from datetime import UTC, datetime
 
 import pytest
 from upath import UPath
@@ -149,7 +150,14 @@ def test_save_layer_datas(
         "name",
         {
             "layer_name": WindowLayerData(
-                "layer_name", serialized_item_groups=[[item.serialize()]]
+                "layer_name",
+                serialized_item_groups=[[item.serialize()]],
+                group_time_ranges=[
+                    (
+                        datetime(2024, 1, 1, tzinfo=UTC),
+                        datetime(2024, 1, 15, tzinfo=UTC),
+                    )
+                ],
             ),
         },
     )
@@ -157,6 +165,9 @@ def test_save_layer_datas(
     layer_datas = storage.get_layer_datas("group", "name")
     assert len(layer_datas) == 1
     assert len(layer_datas["layer_name"].serialized_item_groups) == 1
+    assert layer_datas["layer_name"].group_time_ranges == [
+        (datetime(2024, 1, 1, tzinfo=UTC), datetime(2024, 1, 15, tzinfo=UTC))
+    ]
     deserialized_item = Item.deserialize(
         layer_datas["layer_name"].serialized_item_groups[0][0]
     )

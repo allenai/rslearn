@@ -25,7 +25,7 @@ from upath import UPath
 from rslearn.config import LayerConfig, QueryConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
-from rslearn.data_sources.utils import match_candidate_items_to_window
+from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.log_utils import get_logger
@@ -308,7 +308,7 @@ class EarthDaily(DataSource, TileStore):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[EarthDailyItem]]]:
+    ) -> list[list[MatchedItemGroup[EarthDailyItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -610,6 +610,7 @@ class EarthDaily(DataSource, TileStore):
         item_groups: list[list[Item]],
         layer_name: str,
         layer_cfg: LayerConfig,
+        group_time_ranges: list[tuple[datetime, datetime] | None] | None = None,
     ) -> None:
         """Materialize data for the window.
 
@@ -618,6 +619,7 @@ class EarthDaily(DataSource, TileStore):
             item_groups: the items from get_items
             layer_name: the name of this layer
             layer_cfg: the config of this layer
+            group_time_ranges: optional request time range for each item group
         """
         RasterMaterializer().materialize(
             TileStoreWithLayer(self, layer_name),
@@ -625,6 +627,7 @@ class EarthDaily(DataSource, TileStore):
             layer_name,
             layer_cfg,
             item_groups,
+            group_time_ranges=group_time_ranges,
         )
 
 
@@ -781,7 +784,7 @@ class Sentinel2(EarthDaily):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[EarthDailyItem]]]:
+    ) -> list[list[MatchedItemGroup[EarthDailyItem]]]:
         """Get Sentinel-2 items intersecting the given geometries.
 
         Uses raw STAC search (not Sentinel2CollectionHelper) so that collection

@@ -12,7 +12,7 @@ from upath import UPath
 from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
-from rslearn.data_sources.utils import match_candidate_items_to_window
+from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
@@ -190,7 +190,7 @@ class PlanetBasemap(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[PlanetItem]]]:
+    ) -> list[list[MatchedItemGroup[PlanetItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:

@@ -124,7 +124,7 @@ def test_with_worldcereal_dir(
 
         print("get items")
         item_groups = data_source.get_items([seattle2020], query_config)
-        item = item_groups[0][0][0]
+        item = item_groups[0][0].items[0]
         tile_store_dir = UPath(worldcereal_dir) / "tile_store"
         tile_store = DefaultTileStore(str(tile_store_dir))
         tile_store.set_dataset_path(tile_store_dir)
@@ -133,7 +133,7 @@ def test_with_worldcereal_dir(
         layer_name = "layer"
         data_source.ingest(
             TileStoreWithLayer(tile_store, layer_name),
-            item_groups[0][0],
+            item_groups[0][0].items,
             [[seattle2020]],
         )
         print(list(tile_store_dir.glob("layer/1/*")))
@@ -189,7 +189,7 @@ def test_with_context_ds_path(
     item_groups = data_source.get_items([seattle2020], query_config)
     assert len(item_groups) == 1
     assert len(item_groups[0]) > 0
-    item = item_groups[0][0][0]
+    item = item_groups[0][0].items[0]
 
     # Verify ingest works
     tile_store_dir = ds_path / "tile_store"
@@ -199,7 +199,7 @@ def test_with_context_ds_path(
     layer_name = "layer"
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name),
-        item_groups[0][0],
+        item_groups[0][0].items,
         [[seattle2020]],
     )
     assert tile_store.is_raster_ready(layer_name, item, [band])

@@ -9,7 +9,7 @@ import shapely
 from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import Item, ItemLookupDataSource
-from rslearn.data_sources.utils import match_candidate_items_to_window
+from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.stac import StacClient, StacItem
@@ -169,7 +169,7 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[SourceItem]]]:
+    ) -> list[list[MatchedItemGroup[SourceItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
