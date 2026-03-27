@@ -24,6 +24,7 @@ class Conv(IntermediateComponent):
         padding: str | int = "same",
         stride: int = 1,
         activation: torch.nn.Module = torch.nn.ReLU(inplace=True),
+        batch_norm: bool = False,
     ):
         """Initialize a Conv.
 
@@ -34,12 +35,14 @@ class Conv(IntermediateComponent):
             padding: padding to apply, see torch.nn.Conv2D.
             stride: stride to apply, see torch.nn.Conv2D.
             activation: activation to apply after convolution
+            batch_norm: whether to apply batch normalization before activation
         """
         super().__init__()
 
         self.layer = torch.nn.Conv2d(
             in_channels, out_channels, kernel_size, padding=padding, stride=stride
         )
+        self.batch_norm = torch.nn.BatchNorm2d(out_channels) if batch_norm else None
         self.activation = activation
 
     def forward(self, intermediates: Any, context: ModelContext) -> FeatureMaps:
@@ -58,6 +61,8 @@ class Conv(IntermediateComponent):
         new_features = []
         for feat_map in intermediates.feature_maps:
             feat_map = self.layer(feat_map)
+            if self.batch_norm is not None:
+                feat_map = self.batch_norm(feat_map)
             feat_map = self.activation(feat_map)
             new_features.append(feat_map)
         return FeatureMaps(new_features)
