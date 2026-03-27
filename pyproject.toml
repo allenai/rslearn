@@ -50,6 +50,7 @@ extra = [
     "h5netcdf>=1.6",
     "h5py>=3.12",
     "netCDF4>=1.7.2",
+    "omnicloudmask>=1.7.1",
     "osmium>=4.0.2",
     "planet>=3.1",
     "planetary_computer>=1.0",
