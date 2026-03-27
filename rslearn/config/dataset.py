@@ -31,6 +31,7 @@ from rslearn.utils.vector_format import VectorFormat
 
 if TYPE_CHECKING:
     from rslearn.data_sources.data_source import DataSource
+    from rslearn.dataset.compositing import Compositor
     from rslearn.dataset.storage.storage import WindowStorageFactory
 
 logger = get_logger("__name__")
@@ -621,9 +622,13 @@ class LayerConfig(BaseModel):
         default=ResamplingMethod.BILINEAR,
         description="For raster layers, how to resample rasters (if neeed), default bilinear resampling.",
     )
-    compositing_method: CompositingMethod = Field(
+    compositing_method: CompositingMethod | dict[str, Any] = Field(
         default=CompositingMethod.FIRST_VALID,
-        description="For raster layers, how to compute pixel values in the composite of each window's items.",
+        description=(
+            "For raster layers, how to compute pixel values in the composite of each "
+            "window's items. Either a built-in enum name (e.g. FIRST_VALID) or a "
+            "jsonargparse class_path/init_args dict for a custom Compositor subclass."
+        ),
     )
 
     # Vector layer options.
@@ -722,6 +727,28 @@ class LayerConfig(BaseModel):
         cfg = parser.parse_object({"vector_format": self.vector_format})
         vector_format = parser.instantiate_classes(cfg).vector_format
         return vector_format
+
+    def instantiate_compositor(self) -> "Compositor":
+        """Instantiate the Compositor for this layer's compositing_method.
+
+        Returns:
+            A Compositor instance -- either a built-in one resolved from the
+            CompositingMethod enum, or a custom one instantiated via jsonargparse
+            from a class_path/init_args dict.
+        """
+        if isinstance(self.compositing_method, CompositingMethod):
+            from rslearn.dataset.compositing import BUILTIN_COMPOSITORS
+
+            return BUILTIN_COMPOSITORS[self.compositing_method]
+
+        from rslearn.dataset.compositing import Compositor
+        from rslearn.utils.jsonargparse import init_jsonargparse
+
+        init_jsonargparse()
+        parser = jsonargparse.ArgumentParser()
+        parser.add_argument("--compositor", type=Compositor)
+        cfg = parser.parse_object({"compositor": self.compositing_method})
+        return parser.instantiate_classes(cfg).compositor
 
 
 class StorageConfig(BaseModel):
