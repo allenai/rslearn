@@ -20,9 +20,9 @@ from google.cloud import storage
 from upath import UPath
 
 import rslearn.data_sources.utils
-from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.config import DType, LayerConfig
 from rslearn.const import WGS84_PROJECTION
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.dataset.window import Window
 from rslearn.log_utils import get_logger

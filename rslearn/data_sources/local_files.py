@@ -11,9 +11,9 @@ from rasterio.crs import CRS
 from upath import UPath
 
 import rslearn.data_sources.utils
-from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.config import LayerType
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.feature import Feature

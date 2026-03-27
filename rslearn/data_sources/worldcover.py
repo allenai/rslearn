@@ -18,7 +18,6 @@ from typing_extensions import override
 from upath import UPath
 
 import rslearn.data_sources.utils
-from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import (
     DataSourceContext,
@@ -29,6 +28,7 @@ from rslearn.data_sources.data_source import (
 from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath, open_atomic

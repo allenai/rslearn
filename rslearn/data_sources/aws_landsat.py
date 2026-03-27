@@ -21,11 +21,11 @@ import shapely.geometry
 from upath import UPath
 
 import rslearn.data_sources.utils
-from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_PROJECTION
 from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 from rslearn.utils.geometry import STGeometry

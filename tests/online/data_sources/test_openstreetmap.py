@@ -48,14 +48,14 @@ class TestOpenStreetMap:
         )
         print("get items")
         item_groups = data_source.get_items([delaware_area], query_config)[0]
-        item = item_groups[0][0]
+        item = item_groups[0].items[0]
         tile_store = DefaultTileStore(str(tile_store_dir))
         tile_store.set_dataset_path(tile_store_dir)
         layer_name = "layer"
         print("ingest")
         data_source.ingest(
             TileStoreWithLayer(tile_store, layer_name),
-            item_groups[0],
+            item_groups[0].items,
             [[delaware_area]],
         )
         expected_path = tile_store_dir / layer_name / item.name / "data.geojson"

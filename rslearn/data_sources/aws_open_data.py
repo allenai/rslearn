@@ -24,8 +24,8 @@ from rasterio.crs import CRS
 from upath import UPath
 
 import rslearn.data_sources.utils
-from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_EPSG, WGS84_PROJECTION
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import GridIndex, Projection, STGeometry, daterange
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
