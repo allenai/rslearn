@@ -68,8 +68,8 @@ def test_srtm_ingest(
     data_source = SRTM()
     query_config = QueryConfig(space_mode=SpaceMode.MOSAIC, max_matches=1)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    assert len(item_groups) == 1 and len(item_groups[0]) == 1
-    item = item_groups[0][0]
+    assert len(item_groups) == 1 and len(item_groups[0].items) == 1
+    item = item_groups[0].items[0]
 
     assert item.name == "N47/SRTM1N47W123V2.tif"
 
@@ -79,7 +79,9 @@ def test_srtm_ingest(
     layer_name = "layer"
 
     data_source.ingest(
-        TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+        TileStoreWithLayer(tile_store, layer_name),
+        item_groups[0].items,
+        [[seattle2020]],
     )
     assert tile_store.is_raster_ready(layer_name, item, ["dem"])
 
@@ -104,7 +106,7 @@ def test_srtm_cache_dir(
 
     # First call fetches from the server and caches.
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    assert len(item_groups) == 1 and len(item_groups[0]) == 1
+    assert len(item_groups) == 1 and len(item_groups[0].items) == 1
     assert (cache_dir / SRTM.FILE_LIST_FILENAME).exists()
 
     # Stop the server so any HTTP request would fail.
@@ -113,5 +115,5 @@ def test_srtm_cache_dir(
     # Second instantiation with same cache_dir should work without the server.
     data_source2 = SRTM(cache_dir=str(cache_dir))
     item_groups2 = data_source2.get_items([seattle2020], query_config)[0]
-    assert len(item_groups2) == 1 and len(item_groups2[0]) == 1
-    assert item_groups2[0][0].name == item_groups[0][0].name
+    assert len(item_groups2) == 1 and len(item_groups2[0].items) == 1
+    assert item_groups2[0].items[0].name == item_groups[0].items[0].name
