@@ -287,3 +287,40 @@ class TestResolutionFactor:
         result = factor.multiply_projection(proj)
         assert result.x_resolution == pytest.approx(10 / 3)
         assert result.y_resolution == pytest.approx(-10 / 3)
+
+    def test_multiply_bounds_even(self) -> None:
+        """Even-sized bounds should divide exactly."""
+        factor = ResolutionFactor(denominator=2)
+        result = factor.multiply_bounds((100, 200, 228, 328))
+        assert result == (50, 100, 114, 164)
+        assert result[2] - result[0] == 64
+        assert result[3] - result[1] == 64
+
+    def test_multiply_bounds_odd(self) -> None:
+        """Odd-sized bounds (e.g. 127x127) should ceil to 64x64, not error."""
+        factor = ResolutionFactor(denominator=2)
+        result = factor.multiply_bounds((74068, -396257, 74195, -396130))
+        assert result[2] - result[0] == 64
+        assert result[3] - result[1] == 64
+
+    def test_multiply_bounds_odd_denom4(self) -> None:
+        """127x127 with denominator=4 should ceil to 32x32."""
+        factor = ResolutionFactor(denominator=4)
+        result = factor.multiply_bounds((74068, -396257, 74195, -396130))
+        assert result[2] - result[0] == 32
+        assert result[3] - result[1] == 32
+
+    def test_multiply_bounds_deterministic_across_offsets(self) -> None:
+        """Same input size at different absolute positions should give same output size."""
+        factor = ResolutionFactor(denominator=2)
+        r1 = factor.multiply_bounds((0, 0, 127, 127))
+        r2 = factor.multiply_bounds((1, 1, 128, 128))
+        r3 = factor.multiply_bounds((9999, 9999, 10126, 10126))
+        assert r1[2] - r1[0] == r2[2] - r2[0] == r3[2] - r3[0] == 64
+        assert r1[3] - r1[1] == r2[3] - r2[1] == r3[3] - r3[1] == 64
+
+    def test_multiply_bounds_numerator(self) -> None:
+        """Refining (numerator > 1) should multiply all coordinates."""
+        factor = ResolutionFactor(numerator=2)
+        result = factor.multiply_bounds((10, 20, 30, 40))
+        assert result == (20, 40, 60, 80)
