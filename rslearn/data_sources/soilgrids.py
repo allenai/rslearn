@@ -7,6 +7,7 @@ since data is fetched on-demand per window.
 from __future__ import annotations
 
 import tempfile
+from datetime import datetime
 from typing import Any
 
 import numpy as np
@@ -27,7 +28,7 @@ from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_transform_from_projection_and_bounds
 
 from .data_source import DataSource, DataSourceContext, Item
-from .utils import match_candidate_items_to_window
+from .utils import MatchedItemGroup, match_candidate_items_to_window
 
 SOILGRIDS_NODATA_VALUE = -32768.0
 """Default nodata value used by SoilGrids GeoTIFF responses (GEOTIFF_INT16)."""
@@ -129,7 +130,7 @@ class SoilGrids(DataSource, TileStore):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[MatchedItemGroup[Item]]]:
         """Get item groups matching each requested geometry."""
         groups = []
         for geometry in geometries:
@@ -318,6 +319,7 @@ class SoilGrids(DataSource, TileStore):
         item_groups: list[list[Item]],
         layer_name: str,
         layer_cfg: LayerConfig,
+        group_time_ranges: list[tuple[datetime, datetime] | None] | None = None,
     ) -> None:
         """Materialize a window by reading from SoilGrids on-demand."""
         RasterMaterializer().materialize(
@@ -326,4 +328,5 @@ class SoilGrids(DataSource, TileStore):
             layer_name,
             layer_cfg,
             item_groups,
+            group_time_ranges=group_time_ranges,
         )

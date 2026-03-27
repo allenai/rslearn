@@ -21,7 +21,6 @@ import rslearn.train.transforms.transform
 from rslearn.config import (
     DType,
     LayerConfig,
-    SpaceMode,
 )
 from rslearn.data_sources.data_source import Item
 from rslearn.dataset.dataset import Dataset
@@ -37,6 +36,7 @@ from rslearn.train.model_context import RasterImage
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
 from rslearn.utils.mp import make_pool_and_star_imap_unordered
+from rslearn.utils.raster_format import NumpyRasterFormat
 
 from .model_context import SampleMetadata
 from .tasks import Task
@@ -68,82 +68,19 @@ def get_torch_dtype(dtype: DType) -> torch.dtype:
         raise ValueError(f"unable to handle {dtype} as a torch dtype")
 
 
-def compute_expected_timestamps(
-    window: Window,
-    layer_config: LayerConfig,
+def expected_timestamps_from_layer_data(
+    layer_data: WindowLayerData | None,
 ) -> list[tuple[datetime, datetime]] | None:
-    """Compute expected timestamps from window time_range and layer config.
-
-    This function derives the theoretical timestamps expected for a layer based on
-    the window's time range and the layer's query configuration. This allows models
-    to identify which timesteps are present vs missing and insert missing timesteps
-    at the correct temporal positions.
-
-    Args:
-        window: the window containing the time range.
-        layer_config: the layer configuration with data source and query config.
-
-    Returns:
-        A list of (start, end) datetime tuples representing expected timestamps,
-        sorted in chronological order (oldest first). Returns None if expected
-        timestamps cannot be computed (e.g., no time range or data source config).
-    """
-    if window.time_range is None:
+    """Read expected timestamps directly from stored layer data when available."""
+    if layer_data is None or layer_data.group_time_ranges is None:
         return None
-
-    if layer_config.data_source is None:
+    if any(time_range is None for time_range in layer_data.group_time_ranges):
         return None
-
-    data_source_cfg = layer_config.data_source
-    query_config = data_source_cfg.query_config
-
-    # Apply temporal modifiers from data source config
-    time_range_start = window.time_range[0]
-    time_range_end = window.time_range[1]
-
-    if data_source_cfg.time_offset:
-        time_range_start = time_range_start + data_source_cfg.time_offset
-        time_range_end = time_range_end + data_source_cfg.time_offset
-
-    if data_source_cfg.duration:
-        time_range_end = time_range_start + data_source_cfg.duration
-
-    # For PER_PERIOD_MOSAIC mode, compute periods aligned from the end backwards
-    if query_config.space_mode == SpaceMode.PER_PERIOD_MOSAIC:
-        period_duration = query_config.period_duration
-        if period_duration is None:
-            return None
-        max_matches = query_config.max_matches
-
-        # If the window has more periods than max_matches, the actual periods
-        # selected depend on data availability, so return None
-        total_periods = (time_range_end - time_range_start) // period_duration
-        if total_periods > max_matches:
-            return None
-
-        # Compute periods aligned from end backwards (matching data_sources/utils.py logic)
-        expected_timestamps: list[tuple[datetime, datetime]] = []
-        period_start = time_range_end - period_duration
-        while (
-            period_start >= time_range_start and len(expected_timestamps) < max_matches
-        ):
-            period_time_range = (period_start, period_start + period_duration)
-            expected_timestamps.append(period_time_range)
-            period_start = period_start - period_duration
-
-        # Reverse to get chronological order (oldest first)
-        expected_timestamps.reverse()
-        return expected_timestamps
-
-    # For non-PER_PERIOD_MOSAIC modes with max_matches > 1, we can't easily determine
-    # expected timestamps without knowing the actual items. In this case, return None
-    # and let the model handle alignment based on actual timestamps.
-    if query_config.max_matches > 1:
-        return None
-
-    # For single-timestep modes (max_matches=1), the expected timestamp is the window's
-    # time range (after applying modifiers).
-    return [(time_range_start, time_range_end)]
+    return [
+        time_range
+        for time_range in layer_data.group_time_ranges
+        if time_range is not None
+    ]
 
 
 class SamplerFactory:
@@ -448,8 +385,15 @@ def read_raster_layer_for_data_input(
         # resampling. If it really is much faster to handle it via torch, then it may
         # make sense to bring back that functionality.
 
+        decode_kwargs: dict[str, Any] = {}
+        if isinstance(raster_format, NumpyRasterFormat):
+            decode_kwargs["expect_bounds_mismatch"] = band_set.spatial_size is not None
         raster_array = raster_format.decode_raster(
-            raster_dir, final_projection, final_bounds, resampling=Resampling.nearest
+            raster_dir,
+            final_projection,
+            final_bounds,
+            resampling=Resampling.nearest,
+            **decode_kwargs,
         )
         src = raster_array.array  # (C, T, H, W)
 
@@ -459,8 +403,8 @@ def read_raster_layer_for_data_input(
                 (
                     len(needed_bands),
                     t,
-                    final_bounds[3] - final_bounds[1],
-                    final_bounds[2] - final_bounds[0],
+                    src.shape[2],
+                    src.shape[3],
                 ),
                 dtype=get_torch_dtype(data_input.dtype),
             )
@@ -600,10 +544,11 @@ def read_data_input(
             )
             images.append(image)
 
-            # Compute expected_timestamps from the first layer's config
-            # (assuming all layers in the same DataInput have same temporal config)
+            # Compute expected_timestamps from the first layer's stored group ranges
+            # (assuming all layers in the same DataInput have same temporal config).
             if expected_timestamps is None:
-                expected_timestamps = compute_expected_timestamps(window, layer_config)
+                layer_data = layer_datas.get(layer_name)
+                expected_timestamps = expected_timestamps_from_layer_data(layer_data)
 
             if timestamps is not None:
                 all_timestamps.extend(timestamps)

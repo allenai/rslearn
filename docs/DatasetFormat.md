@@ -120,6 +120,9 @@ specifies which items in the data source matched with the window. Here is an exa
           }
         }
       ],
+    ],
+    "group_time_ranges": [
+      ["2020-09-01T00:00:00+00:00", "2020-09-15T00:00:00+00:00"]
     ]
   }
 ]
@@ -132,6 +135,8 @@ layer name, along with the item groups that matched. `item_groups` is a serializ
 be merged/mosaicked together to form one raster or vector file for the window. If there
 are multiple sub-lists, it typically corresponds to multi-temporal data, and each one
 will result in a different raster or vector file after the data is materialized.
+`group_time_ranges` is optional metadata parallel to `serialized_item_groups`; when
+present, it stores the exact request time range used for each item group.
 
 Materialization will use the first item group in `item_groups` to populate
 `layers/LAYER_NAME`, the second to populate `layers/LAYER_NAME.1`, and so on.
