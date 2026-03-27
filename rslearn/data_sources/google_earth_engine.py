@@ -20,6 +20,7 @@ from google.cloud import storage
 from upath import UPath
 
 import rslearn.data_sources.utils
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.config import DType, LayerConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset.materialize import RasterMaterializer
@@ -203,7 +204,7 @@ class GEE(DataSource, TileStore):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[MatchedItemGroup[Item]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:

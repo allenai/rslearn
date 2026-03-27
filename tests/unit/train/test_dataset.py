@@ -332,7 +332,7 @@ def test_read_data_input_uses_group_time_ranges_for_expected_timestamps(
 
     ts1 = (datetime(2024, 1, 5), datetime(2024, 1, 10))
     ts2 = (datetime(2024, 1, 31), datetime(2024, 2, 5))
-    expected_ts = [
+    expected_ts: list[tuple[datetime, datetime] | None] = [
         (datetime(2024, 1, 1), datetime(2024, 1, 15)),
         (datetime(2024, 1, 29), datetime(2024, 2, 12)),
     ]

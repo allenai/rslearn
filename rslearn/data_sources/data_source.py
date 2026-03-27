@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from datetime import datetime
-from typing import Any, BinaryIO, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, BinaryIO, Generic, TypeVar
 
 from upath import UPath
 
@@ -11,6 +11,9 @@ from rslearn.config import LayerConfig, QueryConfig
 from rslearn.dataset import Window
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
+
+if TYPE_CHECKING:
+    from rslearn.data_sources.utils import MatchedItemGroup
 
 
 class Item:
@@ -67,7 +70,7 @@ class DataSource(ABC, Generic[ItemType]):
     @abstractmethod
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[ItemType]]]:
+    ) -> list[list["MatchedItemGroup[ItemType]"]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:

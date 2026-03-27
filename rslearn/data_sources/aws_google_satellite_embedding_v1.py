@@ -20,6 +20,7 @@ from rasterio.enums import Resampling
 from upath import UPath
 
 import rslearn.data_sources.utils
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import (
     DataSourceContext,
@@ -210,7 +211,7 @@ class GoogleSatelliteEmbeddingV1(
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[GoogleSatelliteEmbeddingV1Item]]]:
+    ) -> list[list[MatchedItemGroup[GoogleSatelliteEmbeddingV1Item]]]:
         """Get a list of items in the data source intersecting the given geometries."""
         grid_index, _ = self._load_index()
 
@@ -234,7 +235,7 @@ class GoogleSatelliteEmbeddingV1(
 
             cur_items.sort(key=lambda item: item.geometry.time_range[0])
 
-            cur_groups: list[list[GoogleSatelliteEmbeddingV1Item]] = (
+            cur_groups: list[MatchedItemGroup[GoogleSatelliteEmbeddingV1Item]] = (
                 rslearn.data_sources.utils.match_candidate_items_to_window(
                     geometry, cur_items, query_config
                 )

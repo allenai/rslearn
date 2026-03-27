@@ -11,6 +11,7 @@ from rasterio.crs import CRS
 from upath import UPath
 
 import rslearn.data_sources.utils
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.config import LayerType
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS
 from rslearn.log_utils import get_logger
@@ -468,7 +469,7 @@ class LocalFiles(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[MatchedItemGroup[Item]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:

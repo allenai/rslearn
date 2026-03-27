@@ -247,7 +247,7 @@ class SRTM(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[MatchedItemGroup[Item]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:

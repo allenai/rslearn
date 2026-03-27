@@ -6,7 +6,7 @@ import base64
 import math
 import os
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -432,7 +432,7 @@ class ERA5LandDailyUTCv1(DataSource[ERA5LandChunkItem]):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[ERA5LandChunkItem]]]:
+    ) -> list[list[MatchedItemGroup[ERA5LandChunkItem]]]:
         """Get chunk-level items intersecting the given geometries.
 
         Each item maps 1-to-1 to a single Zarr chunk identified by a
@@ -469,7 +469,7 @@ class ERA5LandDailyUTCv1(DataSource[ERA5LandChunkItem]):
         n_lon = len(lon_vals)
         time_cs, lat_cs, lon_cs = self._chunk_sizes
 
-        all_groups: list[list[list[ERA5LandChunkItem]]] = []
+        all_groups: list[list[MatchedItemGroup[ERA5LandChunkItem]]] = []
         for geometry in geometries:
             if geometry.time_range is None:
                 raise ValueError("expected all geometries to have a time range")
@@ -492,7 +492,13 @@ class ERA5LandDailyUTCv1(DataSource[ERA5LandChunkItem]):
             )
 
             if lat_chunk_indices is None or not lon_chunk_indices:
-                all_groups.append([MatchedItemGroup([], geometry.time_range)])
+                all_groups.append(
+                    [
+                        MatchedItemGroup(
+                            cast(list[ERA5LandChunkItem], []), geometry.time_range
+                        )
+                    ]
+                )
                 continue
 
             # --- build items for every (t, lat, lon) triple ---

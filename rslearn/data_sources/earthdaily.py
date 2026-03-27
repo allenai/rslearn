@@ -25,7 +25,7 @@ from upath import UPath
 from rslearn.config import LayerConfig, QueryConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
-from rslearn.data_sources.utils import match_candidate_items_to_window
+from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.log_utils import get_logger
@@ -308,7 +308,7 @@ class EarthDaily(DataSource, TileStore):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[EarthDailyItem]]]:
+    ) -> list[list[MatchedItemGroup[EarthDailyItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -784,7 +784,7 @@ class Sentinel2(EarthDaily):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[EarthDailyItem]]]:
+    ) -> list[list[MatchedItemGroup[EarthDailyItem]]]:
         """Get Sentinel-2 items intersecting the given geometries.
 
         Uses raw STAC search (not Sentinel2CollectionHelper) so that collection

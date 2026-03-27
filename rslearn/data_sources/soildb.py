@@ -23,7 +23,7 @@ from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
 from rslearn.data_sources.stac import SourceItem
-from rslearn.data_sources.utils import match_candidate_items_to_window
+from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
@@ -166,10 +166,10 @@ class SoilDB(DirectMaterializeDataSource[SourceItem], ItemLookupDataSource[Sourc
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[SourceItem]]]:
+    ) -> list[list[MatchedItemGroup[SourceItem]]]:
         """Get the SoilDB item for each requested window geometry."""
         item = self._get_or_load_item()
-        groups: list[list[list[SourceItem]]] = []
+        groups: list[list[MatchedItemGroup[SourceItem]]] = []
         for geometry in geometries:
             cur_groups = match_candidate_items_to_window(geometry, [item], query_config)
             groups.append(cur_groups)

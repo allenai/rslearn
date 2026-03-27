@@ -18,6 +18,7 @@ from typing_extensions import override
 from upath import UPath
 
 import rslearn.data_sources.utils
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import (
     DataSourceContext,
@@ -130,7 +131,7 @@ class WorldCover(DirectMaterializeDataSource[Item], ItemLookupDataSource[Item]):
     @override
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[MatchedItemGroup[Item]]]:
         grid_index, _ = self._load_index()
 
         groups = []
@@ -142,7 +143,7 @@ class WorldCover(DirectMaterializeDataSource[Item], ItemLookupDataSource[Item]):
                     continue
                 cur_items.append(item)
 
-            cur_groups: list[list[Item]] = (
+            cur_groups: list[MatchedItemGroup[Item]] = (
                 rslearn.data_sources.utils.match_candidate_items_to_window(
                     geometry, cur_items, query_config
                 )

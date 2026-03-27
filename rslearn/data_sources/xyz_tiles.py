@@ -25,7 +25,7 @@ from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_transform_from_projection_and_bounds
 
 from .data_source import DataSource, DataSourceContext, Item
-from .utils import match_candidate_items_to_window
+from .utils import MatchedItemGroup, match_candidate_items_to_window
 
 WEB_MERCATOR_EPSG = 3857
 WEB_MERCATOR_UNITS = 2 * math.pi * 6378137
@@ -162,7 +162,7 @@ class XyzTiles(DataSource, TileStore):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[MatchedItemGroup[Item]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         In XyzTiles we treat the data source as containing a single item, i.e., the
