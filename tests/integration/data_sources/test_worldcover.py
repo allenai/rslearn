@@ -78,8 +78,8 @@ def test_get_items(
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
     assert len(item_groups) == 1
-    assert len(item_groups[0]) == 1
-    item = item_groups[0][0]
+    assert len(item_groups[0].items) == 1
+    item = item_groups[0].items[0]
     assert isinstance(item, Item)
     assert item.name == TILE_NAME
 
@@ -116,7 +116,7 @@ def test_ingest(
     data_source = WorldCover(metadata_cache_dir=str(tmp_path / "cache"))
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    item = item_groups[0][0]
+    item = item_groups[0].items[0]
 
     tile_store_dir = UPath(tmp_path / "tiles")
     tile_store = DefaultTileStore(str(tile_store_dir))
@@ -125,7 +125,7 @@ def test_ingest(
 
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name),
-        item_groups[0],
+        item_groups[0].items,
         [[seattle2020]],
     )
     assert tile_store.is_raster_ready(layer_name, item, ["B1"])
@@ -154,7 +154,7 @@ def test_direct_materialize(
     data_source = WorldCover(metadata_cache_dir=str(tmp_path / "cache"))
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    item = item_groups[0][0]
+    item = item_groups[0].items[0]
 
     # Change rasterio.open to open our local test GeoTIFF.
     original_open = rasterio.open

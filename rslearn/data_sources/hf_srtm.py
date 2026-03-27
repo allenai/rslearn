@@ -30,6 +30,7 @@ from upath import UPath
 from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath, open_atomic
@@ -246,7 +247,7 @@ class SRTM(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[MatchedItemGroup[Item]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -262,6 +263,8 @@ class SRTM(DataSource):
             raise ValueError(
                 "expected mosaic with max_matches=1 for the query configuration"
             )
+        if query_config.min_matches != 0:
+            raise ValueError("min_matches is not supported for SRTM; set min_matches=0")
 
         groups = []
         for geometry in geometries:
@@ -281,7 +284,7 @@ class SRTM(DataSource):
                     items.append(self._tile_to_item[(lon_min, lat_min)])
 
             logger.debug(f"Got {len(items)} items (grid cells) for geometry")
-            groups.append([items])
+            groups.append([MatchedItemGroup(items, geometry.time_range)])
 
         return groups
 

@@ -28,6 +28,7 @@ from rslearn.data_sources.data_source import (
 from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath, open_atomic
@@ -130,7 +131,7 @@ class WorldCover(DirectMaterializeDataSource[Item], ItemLookupDataSource[Item]):
     @override
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[MatchedItemGroup[Item]]]:
         grid_index, _ = self._load_index()
 
         groups = []
@@ -142,7 +143,7 @@ class WorldCover(DirectMaterializeDataSource[Item], ItemLookupDataSource[Item]):
                     continue
                 cur_items.append(item)
 
-            cur_groups: list[list[Item]] = (
+            cur_groups: list[MatchedItemGroup[Item]] = (
                 rslearn.data_sources.utils.match_candidate_items_to_window(
                     geometry, cur_items, query_config
                 )

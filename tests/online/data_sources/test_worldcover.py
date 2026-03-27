@@ -13,8 +13,8 @@ def test_read_raster(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
     assert len(item_groups) >= 1
-    assert len(item_groups[0]) >= 1
-    item = item_groups[0][0]
+    assert len(item_groups[0].items) >= 1
+    item = item_groups[0].items[0]
     assert item.name == "N45W123"
 
     bounds = (

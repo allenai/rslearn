@@ -193,7 +193,7 @@ class TestERA5LandMonthlyMeans:
         query_config = QueryConfig(max_matches=1)
         item_groups = data_source.get_items([query_geom], query_config)[0]
         assert len(item_groups) == 1
-        item = item_groups[0][0]
+        item = item_groups[0].items[0]
 
         # Now ingest the data into a TileStore.
         tile_store_dir = UPath(tmp_path / "tiles")
@@ -286,7 +286,7 @@ class TestERA5LandHourlyTimeseries:
         # There should be one item since the data source produces point items for each
         # calendar month over the geometry's time range.
         assert len(item_groups) == 1
-        item = item_groups[0][0]
+        item = item_groups[0].items[0]
 
         # The item should be snapped to the grid.
         assert item.geometry.shp.geom_type == "Point"

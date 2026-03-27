@@ -37,7 +37,7 @@ def test_edc_preview(tmp_path: pathlib.Path, edc_preview_geometry: STGeometry) -
 
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([edc_preview_geometry], query_config)[0]
-    item = item_groups[0][0]
+    item = item_groups[0].items[0]
 
     tile_store_dir = UPath(tmp_path)
     tile_store = DefaultTileStore(str(tile_store_dir))
@@ -46,7 +46,7 @@ def test_edc_preview(tmp_path: pathlib.Path, edc_preview_geometry: STGeometry) -
     layer_name = "layer"
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name),
-        item_groups[0],
+        item_groups[0].items,
         [[edc_preview_geometry]],
     )
     assert tile_store.is_raster_ready(layer_name, item, [band_name])
