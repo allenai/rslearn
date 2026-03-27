@@ -1,9 +1,17 @@
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
+import shapely
 
-from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType
+from rslearn.config import (
+    BandSetConfig,
+    DataSourceConfig,
+    DType,
+    LayerConfig,
+    LayerType,
+)
+from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSourceContext
 from rslearn.data_sources.planetary_computer import (
     CopDemGlo30,
@@ -11,8 +19,11 @@ from rslearn.data_sources.planetary_computer import (
     Hls2S30,
     LandsatC2L2,
     PlanetaryComputer,
+    Sentinel2,
     Sentinel3SlstrLST,
 )
+from rslearn.data_sources.stac import SourceItem
+from rslearn.utils.geometry import STGeometry
 from rslearn.utils.stac import StacAsset, StacItem
 
 
@@ -198,3 +209,109 @@ def test_sentinel3_slstr_lst_rejects_non_lst_band_in_context() -> None:
 
     with pytest.raises(ValueError, match="only supports the LST band"):
         Sentinel3SlstrLST(context=context)
+
+
+def _make_pc_sentinel2_context(*, ingest: bool) -> DataSourceContext:
+    layer_cfg = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT16, bands=["B04", "B03", "B8A"])],
+        data_source=DataSourceConfig(
+            class_path="rslearn.data_sources.planetary_computer.Sentinel2",
+            init_args={},
+            ingest=ingest,
+        ),
+    )
+    return DataSourceContext(layer_config=layer_cfg)
+
+
+def _make_source_item(name: str) -> SourceItem:
+    geometry = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), None)
+    return SourceItem(
+        name=name,
+        geometry=geometry,
+        asset_urls={
+            "B04": f"https://example.com/{name}_B04.tif",
+            "B03": f"https://example.com/{name}_B03.tif",
+            "B8A": f"https://example.com/{name}_B8A.tif",
+        },
+        properties={},
+    )
+
+
+def test_sentinel2_omnicloudmask_skips_prepare_ranking_when_ingest_disabled() -> None:
+    data_source = Sentinel2(
+        context=_make_pc_sentinel2_context(ingest=False),
+        sort_by_omnicloudmask=True,
+    )
+    geometry = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), None)
+    items = [_make_source_item("item0"), _make_source_item("item1")]
+
+    with patch(
+        "rslearn.data_sources.omnicloudmask_utils.sort_items_by_omnicloudmask"
+    ) as sort_mock:
+        result = data_source._post_filter_items(geometry, items)
+
+    assert result == items
+    sort_mock.assert_not_called()
+
+
+def test_sentinel2_omnicloudmask_prepare_ranking_when_ingest_enabled() -> None:
+    data_source = Sentinel2(
+        context=_make_pc_sentinel2_context(ingest=True),
+        sort_by_omnicloudmask=True,
+    )
+    geometry = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), None)
+    items = [_make_source_item("item0"), _make_source_item("item1")]
+
+    with patch(
+        "rslearn.data_sources.omnicloudmask_utils.sort_items_by_omnicloudmask",
+        return_value=[items[1], items[0]],
+    ) as sort_mock:
+        result = data_source._post_filter_items(geometry, items)
+
+    assert result == [items[1], items[0]]
+    sort_mock.assert_called_once()
+
+
+def test_sentinel2_omnicloudmask_reranks_during_materialize_when_deferred() -> None:
+    data_source = Sentinel2(
+        context=_make_pc_sentinel2_context(ingest=False),
+        sort_by_omnicloudmask=True,
+    )
+    item0 = _make_source_item("item0")
+    item1 = _make_source_item("item1")
+    item_groups = [[item0, item1], [item1]]
+    window = Mock()
+    window.get_geometry.return_value = STGeometry(
+        WGS84_PROJECTION, shapely.box(0, 0, 1, 1), None
+    )
+    layer_cfg = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT16, bands=["B04"])],
+    )
+    captured_groups: dict[str, list[list[SourceItem]]] = {}
+
+    def fake_materialize(
+        _self: object,
+        _tile_store: object,
+        _window: object,
+        _layer_name: str,
+        _layer_cfg: LayerConfig,
+        materialize_item_groups: list[list[SourceItem]],
+    ) -> None:
+        captured_groups["item_groups"] = materialize_item_groups
+
+    with (
+        patch(
+            "rslearn.data_sources.omnicloudmask_utils.sort_items_by_omnicloudmask",
+            side_effect=lambda items, *args, **kwargs: list(reversed(items)),
+        ) as sort_mock,
+        patch(
+            "rslearn.data_sources.direct_materialize_data_source.RasterMaterializer.materialize",
+            new=fake_materialize,
+        ),
+    ):
+        data_source.materialize(window, item_groups, "sentinel2", layer_cfg)
+
+    assert captured_groups["item_groups"] == [[item1, item0], [item1]]
+    assert sort_mock.call_count == 1

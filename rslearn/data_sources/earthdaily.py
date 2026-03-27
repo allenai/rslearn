@@ -754,6 +754,11 @@ class Sentinel2(EarthDaily):
         self.search_max_items = search_max_items
         self.sort_items_by = sort_items_by
         self.sort_by_omnicloudmask = sort_by_omnicloudmask
+        self._defer_omnicloudmask_to_materialize = (
+            context.layer_config is not None
+            and context.layer_config.data_source is not None
+            and not context.layer_config.data_source.ingest
+        )
         self.apply_scale_offset = apply_scale_offset
 
     def read_raster(
@@ -866,7 +871,10 @@ class Sentinel2(EarthDaily):
                 self.get_item_by_name(stac_item.id) for stac_item in stac_items
             ]
 
-            if self.sort_by_omnicloudmask:
+            if (
+                self.sort_by_omnicloudmask
+                and not self._defer_omnicloudmask_to_materialize
+            ):
                 from rslearn.data_sources.omnicloudmask_utils import (
                     sort_items_by_omnicloudmask,
                 )
@@ -886,6 +894,36 @@ class Sentinel2(EarthDaily):
             groups.append(cur_groups)
 
         return groups
+
+    def materialize(
+        self,
+        window: Window,
+        item_groups: list[list[EarthDailyItem]],
+        layer_name: str,
+        layer_cfg: LayerConfig,
+    ) -> None:
+        """Materialize data for the window."""
+        if self.sort_by_omnicloudmask and self._defer_omnicloudmask_to_materialize:
+            from rslearn.data_sources.omnicloudmask_utils import (
+                sort_items_by_omnicloudmask,
+            )
+
+            window_geometry = window.get_geometry()
+            item_groups = [
+                sort_items_by_omnicloudmask(
+                    group,
+                    window_geometry,
+                    get_url=lambda item, asset_key: item.asset_urls[asset_key],
+                    red_asset_key="red",
+                    green_asset_key="green",
+                    nir_asset_key="nir08",
+                )
+                if len(group) > 1
+                else group
+                for group in item_groups
+            ]
+
+        super().materialize(window, item_groups, layer_name, layer_cfg)
 
     def ingest(
         self,

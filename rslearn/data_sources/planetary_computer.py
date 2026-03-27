@@ -17,12 +17,14 @@ import xarray as xr
 from typing_extensions import override
 from upath import UPath
 
+from rslearn.config import LayerConfig
 from rslearn.data_sources import DataSourceContext
 from rslearn.data_sources.data_source import Item
 from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
 from rslearn.data_sources.stac import SourceItem, StacDataSource
+from rslearn.dataset import Window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
@@ -348,6 +350,11 @@ class Sentinel2(PlanetaryComputer):
         """
         self.harmonize = harmonize
         self.sort_by_omnicloudmask = sort_by_omnicloudmask
+        self._defer_omnicloudmask_to_materialize = (
+            context.layer_config is not None
+            and context.layer_config.data_source is not None
+            and not context.layer_config.data_source.ingest
+        )
 
         # Determine which assets we need based on the bands in the layer config.
         if context.layer_config is not None:
@@ -484,7 +491,7 @@ class Sentinel2(PlanetaryComputer):
         self, geometry: STGeometry, items: list[SourceItem]
     ) -> list[SourceItem]:
         """Re-rank items by pixel-level clear fraction using OmniCloudMask."""
-        if not self.sort_by_omnicloudmask:
+        if not self.sort_by_omnicloudmask or self._defer_omnicloudmask_to_materialize:
             return items
 
         from rslearn.data_sources.omnicloudmask_utils import sort_items_by_omnicloudmask
@@ -500,6 +507,40 @@ class Sentinel2(PlanetaryComputer):
             green_asset_key="B03",
             nir_asset_key="B8A",
         )
+
+    def materialize(
+        self,
+        window: Window,
+        item_groups: list[list[SourceItem]],
+        layer_name: str,
+        layer_cfg: LayerConfig,
+    ) -> None:
+        """Materialize data for the window."""
+        if self.sort_by_omnicloudmask and self._defer_omnicloudmask_to_materialize:
+            from rslearn.data_sources.omnicloudmask_utils import (
+                sort_items_by_omnicloudmask,
+            )
+
+            window_geometry = window.get_geometry()
+
+            def get_url(item: SourceItem, asset_key: str) -> str:
+                return planetary_computer.sign(item.asset_urls[asset_key])
+
+            item_groups = [
+                sort_items_by_omnicloudmask(
+                    group,
+                    window_geometry,
+                    get_url=get_url,
+                    red_asset_key="B04",
+                    green_asset_key="B03",
+                    nir_asset_key="B8A",
+                )
+                if len(group) > 1
+                else group
+                for group in item_groups
+            ]
+
+        super().materialize(window, item_groups, layer_name, layer_cfg)
 
 
 class Hls2S30(PlanetaryComputer):

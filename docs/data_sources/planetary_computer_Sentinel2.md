@@ -135,13 +135,17 @@ got included, e.g.:
 
 ### OmniCloudMask
 
-Setting `sort_by_omnicloudmask: true` enables pixel-level cloud filtering during
-the prepare step. Instead of relying solely on the tile-level `eo:cloud_cover`
+Setting `sort_by_omnicloudmask: true` enables pixel-level cloud filtering based on
+your window extent. Instead of relying solely on the tile-level `eo:cloud_cover`
 property (which is averaged over the full ~110×110 km S2 tile), candidate items are
 scored by the fraction of **clear pixels within your specific window geometry** using
 [OmniCloudMask](https://github.com/ESA-PhiLab/OmniCloudMask). Items are then sorted
-descending by that clear fraction, so mosaicing and compositing logic picks the
-cleanest tile for each window.
+descending by that clear fraction, so mosaicing and compositing logic picks cleaner
+imagery first.
+
+Execution stage depends on your layer mode:
+- `ingest: true`: OmniCloudMask ranking runs during `prepare`.
+- `ingest: false` (direct materialization): ranking is deferred to `materialize`.
 
 This is an opt-in improvement over `sort_by: "eo:cloud_cover"`. It is particularly
 useful when:

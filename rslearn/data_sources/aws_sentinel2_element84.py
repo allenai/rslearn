@@ -9,10 +9,12 @@ from typing import Any
 import requests
 from upath import UPath
 
+from rslearn.config import LayerConfig
 from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
 from rslearn.data_sources.stac import SourceItem, StacDataSource
+from rslearn.dataset import Window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
@@ -124,6 +126,11 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
         )
 
         self.sort_by_omnicloudmask = sort_by_omnicloudmask
+        self._defer_omnicloudmask_to_materialize = (
+            context.layer_config is not None
+            and context.layer_config.data_source is not None
+            and not context.layer_config.data_source.ingest
+        )
         self.timeout = timeout
 
     # --- DirectMaterializeDataSource implementation ---
@@ -200,7 +207,7 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
         self, geometry: STGeometry, items: list[SourceItem]
     ) -> list[SourceItem]:
         """Re-rank items by pixel-level clear fraction using OmniCloudMask."""
-        if not self.sort_by_omnicloudmask:
+        if not self.sort_by_omnicloudmask or self._defer_omnicloudmask_to_materialize:
             return items
 
         from rslearn.data_sources.omnicloudmask_utils import sort_items_by_omnicloudmask
@@ -216,3 +223,33 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
             green_asset_key="green",
             nir_asset_key="nir08",
         )
+
+    def materialize(
+        self,
+        window: Window,
+        item_groups: list[list[SourceItem]],
+        layer_name: str,
+        layer_cfg: LayerConfig,
+    ) -> None:
+        """Materialize data for the window."""
+        if self.sort_by_omnicloudmask and self._defer_omnicloudmask_to_materialize:
+            from rslearn.data_sources.omnicloudmask_utils import (
+                sort_items_by_omnicloudmask,
+            )
+
+            window_geometry = window.get_geometry()
+            item_groups = [
+                sort_items_by_omnicloudmask(
+                    group,
+                    window_geometry,
+                    get_url=lambda item, asset_key: item.asset_urls[asset_key],
+                    red_asset_key="red",
+                    green_asset_key="green",
+                    nir_asset_key="nir08",
+                )
+                if len(group) > 1
+                else group
+                for group in item_groups
+            ]
+
+        super().materialize(window, item_groups, layer_name, layer_cfg)
