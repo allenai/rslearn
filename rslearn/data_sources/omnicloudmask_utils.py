@@ -35,7 +35,7 @@ def _read_band(
             return vrt.read(1).astype(np.float32)
 
 
-def _compute_clear_fraction(
+def _compute_cloud_class_fractions(
     item: Item,
     geometry: STGeometry,
     get_url: Callable[[Item, str], str],
@@ -43,11 +43,12 @@ def _compute_clear_fraction(
     green_asset_key: str,
     nir_asset_key: str,
     resolution: float,
-) -> float:
-    """Compute the clear-pixel fraction for one item within the geometry.
+) -> tuple[float, float, float, float]:
+    """Compute OmniCloudMask class fractions for one item within the geometry.
 
     Reads R/G/NIR bands from the item's asset URLs, runs OmniCloudMask
-    inference, and returns the fraction of pixels classified as clear (class 0).
+    inference, and returns per-class fractions in this order:
+    clear (0), thick cloud (1), thin cloud (2), cloud shadow (3).
 
     Args:
         item: the item to score.
@@ -62,7 +63,7 @@ def _compute_clear_fraction(
             for a UTM projection).
 
     Returns:
-        fraction of pixels classified as clear, in [0, 1].
+        tuple of class fractions ``(clear, thick, thin, shadow)``, each in [0, 1].
     """
     from omnicloudmask import predict_from_array
 
@@ -101,7 +102,11 @@ def _compute_clear_fraction(
 
     # Only evaluate over the original (unpadded) region.
     mask = mask[:h, :w]
-    return float((mask == 0).mean())
+    clear_frac = float((mask == 0).mean())
+    thick_frac = float((mask == 1).mean())
+    thin_frac = float((mask == 2).mean())
+    shadow_frac = float((mask == 3).mean())
+    return clear_frac, thick_frac, thin_frac, shadow_frac
 
 
 def sort_items_by_omnicloudmask(
@@ -113,13 +118,17 @@ def sort_items_by_omnicloudmask(
     nir_asset_key: str,
     resolution: float = 20.0,
 ) -> list[Item]:
-    """Sort items by descending clear-pixel fraction using OmniCloudMask.
+    """Sort items by OmniCloudMask classes with thick-cloud-first prioritization.
 
     For each item, reads R/G/NIR bands within the geometry bounds and runs
-    OmniCloudMask inference to estimate the fraction of clear pixels in that
-    window. Items are returned sorted descending by clear fraction so that
-    clearest items come first — making them preferred by mosaicing/compositing
-    logic in ``match_candidate_items_to_window``.
+    OmniCloudMask inference in that window. Ranking prioritizes *minimizing thick
+    cloud fraction* (class 1) first, because thick cloud is the most severe cloud
+    failure mode for downstream quality.
+
+    Tie-breakers are, in order:
+    1. higher clear fraction (class 0),
+    2. lower thin cloud fraction (class 2),
+    3. lower cloud shadow fraction (class 3).
 
     Items that fail to be scored (e.g. missing asset URLs or read errors) are
     placed at the end of the list.
@@ -135,23 +144,30 @@ def sort_items_by_omnicloudmask(
         resolution: resolution to read bands at (geometry CRS units, default 20 m).
 
     Returns:
-        ``items`` sorted by descending clear-pixel fraction.
+        ``items`` sorted best-to-worst by OmniCloudMask class fractions.
     """
-    scores: list[tuple[float, Item]] = []
+    scores: list[tuple[tuple[float, float, float, float], Item]] = []
 
     for item in items:
         try:
-            frac = _compute_clear_fraction(
-                item,
-                geometry,
-                get_url,
-                red_asset_key,
-                green_asset_key,
-                nir_asset_key,
-                resolution,
+            clear_frac, thick_frac, thin_frac, shadow_frac = (
+                _compute_cloud_class_fractions(
+                    item,
+                    geometry,
+                    get_url,
+                    red_asset_key,
+                    green_asset_key,
+                    nir_asset_key,
+                    resolution,
+                )
             )
             logger.debug(
-                "OmniCloudMask clear fraction for item %s: %.3f", item.name, frac
+                "OmniCloudMask fractions for %s: thick=%.3f clear=%.3f thin=%.3f shadow=%.3f",
+                item.name,
+                thick_frac,
+                clear_frac,
+                thin_frac,
+                shadow_frac,
             )
         except Exception:
             logger.warning(
@@ -159,9 +175,13 @@ def sort_items_by_omnicloudmask(
                 item.name,
                 exc_info=True,
             )
-            frac = -1.0
+            # Sort key is (thick asc, -clear asc, thin asc, shadow asc).
+            # Use out-of-range sentinel values so failures always sort last.
+            sort_key = (2.0, 1.0, 2.0, 2.0)
+        else:
+            sort_key = (thick_frac, -clear_frac, thin_frac, shadow_frac)
 
-        scores.append((frac, item))
+        scores.append((sort_key, item))
 
-    scores.sort(key=lambda t: t[0], reverse=True)
+    scores.sort(key=lambda t: t[0])
     return [item for _, item in scores]

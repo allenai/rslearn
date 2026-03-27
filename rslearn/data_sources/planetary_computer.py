@@ -17,7 +17,7 @@ import xarray as xr
 from typing_extensions import override
 from upath import UPath
 
-from rslearn.config import LayerConfig
+from rslearn.config import LayerConfig, SpaceMode
 from rslearn.data_sources import DataSourceContext
 from rslearn.data_sources.data_source import Item
 from rslearn.data_sources.direct_materialize_data_source import (
@@ -341,10 +341,11 @@ class Sentinel2(PlanetaryComputer):
             assets: list of asset names to ingest, or None to ingest all assets. This
                 is only used if the layer config is missing from the context.
             sort_by_omnicloudmask: if True, candidate items are scored by their
-                pixel-level clear fraction (using OmniCloudMask) within each window
-                geometry and sorted descending before ``match_candidate_items_to_window``
-                runs. This provides finer-grained cloud filtering than the tile-level
-                ``eo:cloud_cover`` STAC property.
+                pixel-level OmniCloudMask class fractions within each window geometry.
+                Ranking prioritizes lower thick-cloud fraction first, then uses clear
+                fraction and other classes as tie-breakers. For
+                ``SpaceMode.SINGLE_COMPOSITE`` with ``ingest=False``, this ranking is
+                deferred to materialization; otherwise it runs during prepare.
             context: the data source context.
             kwargs: other arguments to pass to PlanetaryComputer.
         """
@@ -354,6 +355,8 @@ class Sentinel2(PlanetaryComputer):
             context.layer_config is not None
             and context.layer_config.data_source is not None
             and not context.layer_config.data_source.ingest
+            and context.layer_config.data_source.query_config.space_mode
+            == SpaceMode.SINGLE_COMPOSITE
         )
 
         # Determine which assets we need based on the bands in the layer config.

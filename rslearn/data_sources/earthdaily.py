@@ -22,7 +22,7 @@ from earthdaily import EDSClient, EDSConfig
 from rasterio.enums import Resampling
 from upath import UPath
 
-from rslearn.config import LayerConfig, QueryConfig
+from rslearn.config import LayerConfig, QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import match_candidate_items_to_window
@@ -692,10 +692,11 @@ class Sentinel2(EarthDaily):
             sort_items_by: optional ordering applied before grouping; useful when
                 using `SpaceMode.COMPOSITE` with `CompositingMethod.FIRST_VALID`.
             sort_by_omnicloudmask: if True, candidate items are scored by their
-                pixel-level clear fraction (using OmniCloudMask) within each window
-                geometry and sorted descending before ``match_candidate_items_to_window``
-                runs. This provides finer-grained cloud filtering than the tile-level
-                ``eo:cloud_cover`` property.
+                pixel-level OmniCloudMask class fractions within each window
+                geometry. Ranking prioritizes lower thick-cloud fraction first, then
+                uses clear fraction and other classes as tie-breakers. For
+                ``SpaceMode.SINGLE_COMPOSITE`` with ``ingest=False``, this ranking is
+                deferred to materialization; otherwise it runs during prepare.
             query: optional STAC API `query` filter passed to searches. If
                 cloud_cover_max/cloud_cover_threshold is set, the effective query also
                 includes an `eo:cloud_cover` upper bound.
@@ -758,6 +759,8 @@ class Sentinel2(EarthDaily):
             context.layer_config is not None
             and context.layer_config.data_source is not None
             and not context.layer_config.data_source.ingest
+            and context.layer_config.data_source.query_config.space_mode
+            == SpaceMode.SINGLE_COMPOSITE
         )
         self.apply_scale_offset = apply_scale_offset
 

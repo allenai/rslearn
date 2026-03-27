@@ -9,7 +9,7 @@ from typing import Any
 import requests
 from upath import UPath
 
-from rslearn.config import LayerConfig
+from rslearn.config import LayerConfig, SpaceMode
 from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
@@ -76,9 +76,11 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
             sort_by: STAC item property to sort by. For example, use "eo:cloud_cover" to sort by cloud cover.
             sort_ascending: whether to sort ascending or descending.
             sort_by_omnicloudmask: if True, candidate items are scored by their pixel-level
-                clear fraction (using OmniCloudMask) within each window geometry and sorted
-                descending before ``match_candidate_items_to_window`` runs. This provides
-                finer-grained cloud filtering than the tile-level ``eo:cloud_cover`` property.
+                OmniCloudMask class fractions within each window geometry. Ranking
+                prioritizes lower thick-cloud fraction first, then uses clear fraction
+                and other classes as tie-breakers. For ``SpaceMode.SINGLE_COMPOSITE``
+                with ``ingest=False``, this ranking is deferred to materialization;
+                otherwise it runs during prepare.
             cache_dir: deprecated, no longer used. Item data is now passed to
                 materialization functions so caching in the data source is unnecessary.
             timeout: timeout to use for requests.
@@ -130,6 +132,8 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
             context.layer_config is not None
             and context.layer_config.data_source is not None
             and not context.layer_config.data_source.ingest
+            and context.layer_config.data_source.query_config.space_mode
+            == SpaceMode.SINGLE_COMPOSITE
         )
         self.timeout = timeout
 

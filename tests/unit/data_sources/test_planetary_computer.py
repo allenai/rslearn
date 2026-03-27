@@ -10,6 +10,8 @@ from rslearn.config import (
     DType,
     LayerConfig,
     LayerType,
+    QueryConfig,
+    SpaceMode,
 )
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSourceContext
@@ -211,13 +213,18 @@ def test_sentinel3_slstr_lst_rejects_non_lst_band_in_context() -> None:
         Sentinel3SlstrLST(context=context)
 
 
-def _make_pc_sentinel2_context(*, ingest: bool) -> DataSourceContext:
+def _make_pc_sentinel2_context(
+    *,
+    ingest: bool,
+    space_mode: SpaceMode = SpaceMode.MOSAIC,
+) -> DataSourceContext:
     layer_cfg = LayerConfig(
         type=LayerType.RASTER,
         band_sets=[BandSetConfig(dtype=DType.UINT16, bands=["B04", "B03", "B8A"])],
         data_source=DataSourceConfig(
             class_path="rslearn.data_sources.planetary_computer.Sentinel2",
             init_args={},
+            query_config=QueryConfig(space_mode=space_mode),
             ingest=ingest,
         ),
     )
@@ -240,7 +247,9 @@ def _make_source_item(name: str) -> SourceItem:
 
 def test_sentinel2_omnicloudmask_skips_prepare_ranking_when_ingest_disabled() -> None:
     data_source = Sentinel2(
-        context=_make_pc_sentinel2_context(ingest=False),
+        context=_make_pc_sentinel2_context(
+            ingest=False, space_mode=SpaceMode.SINGLE_COMPOSITE
+        ),
         sort_by_omnicloudmask=True,
     )
     geometry = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), None)
@@ -253,6 +262,26 @@ def test_sentinel2_omnicloudmask_skips_prepare_ranking_when_ingest_disabled() ->
 
     assert result == items
     sort_mock.assert_not_called()
+
+
+def test_sentinel2_omnicloudmask_prepare_ranking_when_ingest_disabled_non_single_composite() -> (
+    None
+):
+    data_source = Sentinel2(
+        context=_make_pc_sentinel2_context(ingest=False, space_mode=SpaceMode.MOSAIC),
+        sort_by_omnicloudmask=True,
+    )
+    geometry = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), None)
+    items = [_make_source_item("item0"), _make_source_item("item1")]
+
+    with patch(
+        "rslearn.data_sources.omnicloudmask_utils.sort_items_by_omnicloudmask",
+        return_value=[items[1], items[0]],
+    ) as sort_mock:
+        result = data_source._post_filter_items(geometry, items)
+
+    assert result == [items[1], items[0]]
+    sort_mock.assert_called_once()
 
 
 def test_sentinel2_omnicloudmask_prepare_ranking_when_ingest_enabled() -> None:
@@ -275,7 +304,9 @@ def test_sentinel2_omnicloudmask_prepare_ranking_when_ingest_enabled() -> None:
 
 def test_sentinel2_omnicloudmask_reranks_during_materialize_when_deferred() -> None:
     data_source = Sentinel2(
-        context=_make_pc_sentinel2_context(ingest=False),
+        context=_make_pc_sentinel2_context(
+            ingest=False, space_mode=SpaceMode.SINGLE_COMPOSITE
+        ),
         sort_by_omnicloudmask=True,
     )
     item0 = _make_source_item("item0")
