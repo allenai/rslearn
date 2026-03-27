@@ -269,7 +269,9 @@ def ingest_dataset_windows(
                         geometries_by_item[item] = []
                     geometries_by_item[item].append(geometry)
 
-        print(f"Ingesting {len(geometries_by_item)} items in layer {layer_name}")
+        logger.info(
+            "Ingesting %d items in layer %s", len(geometries_by_item), layer_name
+        )
         geometries_and_items = list(geometries_by_item.items())
 
         # Use retry loop for the actual data source ingest call.
