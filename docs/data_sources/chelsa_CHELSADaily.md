@@ -43,7 +43,6 @@ returned in one group.
 | `clt` | Total Cloud Cover Percentage | `percent` | Total cloud area fraction (reported as percentage) for the full atmospheric column, including large-scale and convective cloud. |
 | `hurs` | Near-Surface Relative Humidity | `percent` | Relative humidity with respect to liquid water for `T > 0°C` and with respect to ice for `T < 0°C`. |
 | `pr` | Precipitation | `kg m-2 day-1` | Daily precipitation including both liquid and solid phases. |
-| `prec` | Precipitation (alternate code) | `kg m-2 day-1` | Daily precipitation including both liquid and solid phases. |
 | `ps` | Surface Air Pressure | `hPa` | Surface pressure (not mean sea-level pressure). |
 | `rsds` | Surface Downwelling Shortwave Flux in Air | `W m-2` | Surface solar irradiance, commonly used for UV-related calculations. |
 | `sfcWind` | Near-Surface Wind Speed | `m s-1` | Near-surface (usually 10 m) wind speed. |
