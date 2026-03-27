@@ -185,12 +185,12 @@ class ResolutionFactor:
         via ceiling division so that odd-sized windows are handled correctly.
         """
         if self.denominator > 1:
-            import math
-
             coarse_start_x = bounds[0] // self.denominator
             coarse_start_y = bounds[1] // self.denominator
-            coarse_width = math.ceil((bounds[2] - bounds[0]) / self.denominator)
-            coarse_height = math.ceil((bounds[3] - bounds[1]) / self.denominator)
+            width = bounds[2] - bounds[0]
+            height = bounds[3] - bounds[1]
+            coarse_width = (width + self.denominator - 1) // self.denominator
+            coarse_height = (height + self.denominator - 1) // self.denominator
             return (
                 coarse_start_x,
                 coarse_start_y,
