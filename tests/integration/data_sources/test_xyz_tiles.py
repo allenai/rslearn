@@ -92,7 +92,12 @@ def test_materialize(
     )
     window.save()
 
-    data_source.materialize(window, item_groups, "raster", layer_config)
+    data_source.materialize(
+        window,
+        [group.items for group in item_groups],
+        "raster",
+        layer_config,
+    )
     raster_dir = window.get_raster_dir("raster", ["R", "G", "B"])
     assert (raster_dir / "geotiff.tif").exists()
 

@@ -7,8 +7,12 @@ from rasterio.crs import CRS
 from rslearn.config import QueryConfig, SpaceMode, TimeMode
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import Item
-from rslearn.data_sources.utils import match_candidate_items_to_window
+from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.utils.geometry import Projection, STGeometry, get_global_geometry
+
+
+def _group_items(item_groups: list[MatchedItemGroup[Item]]) -> list[list[Item]]:
+    return [group.items for group in item_groups]
 
 
 def test_global_geometry() -> None:
@@ -21,7 +25,7 @@ def test_global_geometry() -> None:
         window_geom, [Item("item", global_geometry)], QueryConfig()
     )
     assert len(item_groups) == 1
-    assert len(item_groups[0]) == 1
+    assert len(item_groups[0].items) == 1
 
 
 def test_window_geometry_crossing_antimeridian() -> None:
@@ -54,7 +58,7 @@ def test_window_geometry_crossing_antimeridian() -> None:
         window_geom, [Item("item", item_geom)], QueryConfig()
     )
     assert len(item_groups) == 1
-    assert len(item_groups[0]) == 1
+    assert len(item_groups[0].items) == 1
 
 
 class TestTimeMode:
@@ -85,7 +89,11 @@ class TestTimeMode:
         item_groups = match_candidate_items_to_window(
             window_geom, item_list, query_config
         )
-        assert item_groups == [[item_list[1]], [item_list[2]], [item_list[3]]]
+        assert _group_items(item_groups) == [
+            [item_list[1]],
+            [item_list[2]],
+            [item_list[3]],
+        ]
 
     def test_before_mode(self, item_list: list[Item]) -> None:
         """Verify that BEFORE time mode yields items in reverse temporal order."""
@@ -98,7 +106,11 @@ class TestTimeMode:
         item_groups = match_candidate_items_to_window(
             window_geom, item_list, query_config
         )
-        assert item_groups == [[item_list[1]], [item_list[3]], [item_list[2]]]
+        assert _group_items(item_groups) == [
+            [item_list[1]],
+            [item_list[3]],
+            [item_list[2]],
+        ]
 
     def test_after_mode(self, item_list: list[Item]) -> None:
         """Verify that AFTER time mode yields items in temporal order."""
@@ -111,7 +123,11 @@ class TestTimeMode:
         item_groups = match_candidate_items_to_window(
             window_geom, item_list, query_config
         )
-        assert item_groups == [[item_list[2]], [item_list[3]], [item_list[1]]]
+        assert _group_items(item_groups) == [
+            [item_list[2]],
+            [item_list[3]],
+            [item_list[1]],
+        ]
 
 
 class TestSpaceMode:
@@ -151,8 +167,8 @@ class TestSpaceMode:
         item_groups = match_candidate_items_to_window(
             window_geometry, item_list, query_config
         )
-        print([group[0].name for group in item_groups])
-        assert item_groups == [[item_list[1]]]
+        print([group.items[0].name for group in item_groups])
+        assert _group_items(item_groups) == [[item_list[1]]]
 
     def test_intersects_mode(
         self, window_geometry: STGeometry, item_list: list[Item]
@@ -162,7 +178,7 @@ class TestSpaceMode:
         item_groups = match_candidate_items_to_window(
             window_geometry, item_list, query_config
         )
-        assert item_groups == [
+        assert _group_items(item_groups) == [
             [item_list[0]],
             [item_list[1]],
             [item_list[2]],
@@ -197,7 +213,7 @@ class TestMosaic:
         item_groups = match_candidate_items_to_window(
             window_geom, six_items, query_config
         )
-        assert item_groups == [
+        assert _group_items(item_groups) == [
             [six_items[0], six_items[3]],
             [six_items[1], six_items[4]],
         ]
@@ -213,7 +229,7 @@ class TestMosaic:
         item_groups = match_candidate_items_to_window(
             window_geom, six_items, query_config
         )
-        assert item_groups == [
+        assert _group_items(item_groups) == [
             [six_items[0], six_items[3]],
             [six_items[1], six_items[4]],
             [six_items[2], six_items[5]],
@@ -230,7 +246,7 @@ class TestMosaic:
         item_groups = match_candidate_items_to_window(
             window_geom, six_items, query_config
         )
-        assert item_groups == [
+        assert _group_items(item_groups) == [
             [six_items[0], six_items[3]],
             [six_items[1], six_items[4]],
             [six_items[2], six_items[5]],
@@ -265,7 +281,7 @@ class TestMosaic:
         item_groups = match_candidate_items_to_window(
             window_geom, items_to_use, query_config
         )
-        assert item_groups == [
+        assert _group_items(item_groups) == [
             [six_items[0], six_items[3]],
             [six_items[1]],
             [six_items[2]],
@@ -310,14 +326,14 @@ class TestMosaicCompositingOverlaps:
         # We get 2 groups: first consolidates 2 mosaics, second has partial (1 mosaic)
         assert len(item_groups) == 2
         # First group should have items from first two mosaics (4 items)
-        assert set(item.name for item in item_groups[0]) == {
+        assert set(item.name for item in item_groups[0].items) == {
             "part1_item1",
             "part2_item1",
             "part1_item2",
             "part2_item2",
         }
         # Second group has the third mosaic (2 items)
-        assert set(item.name for item in item_groups[1]) == {
+        assert set(item.name for item in item_groups[1].items) == {
             "part1_item3",
             "part2_item3",
         }
@@ -336,7 +352,7 @@ class TestMosaicCompositingOverlaps:
         )
         # All items should be in one group
         assert len(item_groups) == 1
-        assert len(item_groups[0]) == 6
+        assert len(item_groups[0].items) == 6
 
 
 class TestMosaicWithPeriodDuration:
@@ -391,10 +407,16 @@ class TestMosaicWithPeriodDuration:
         )
         # Most recent 3 periods kept, returned in chronological order:
         # period 2, period 3, period 4 (period 1 dropped by max_matches)
-        assert item_groups == [
+        assert _group_items(item_groups) == [
             [item_list[1], item_list[2]],
             [item_list[3]],
             [item_list[4]],
+        ]
+        assert all(isinstance(group, MatchedItemGroup) for group in item_groups)
+        assert [group.request_time_range for group in item_groups] == [
+            periods[1],
+            periods[2],
+            periods[3],
         ]
 
     def test_reverse_time_order(self) -> None:
@@ -446,7 +468,7 @@ class TestMosaicWithPeriodDuration:
                 window_geometry, item_list, query_config
             )
         # Most recent 3 periods in reverse chronological order: period 4, 3, 2
-        assert item_groups == [
+        assert _group_items(item_groups) == [
             [item_list[4]],
             [item_list[3]],
             [item_list[1], item_list[2]],
@@ -490,7 +512,7 @@ class TestMosaicWithPeriodDuration:
         )
         # Most recent first: period 4 skipped (no spatial match), period 3, 2
         # kept. Reversed to chronological: period 2, period 3.
-        assert item_groups == [
+        assert _group_items(item_groups) == [
             [item_list[1]],
             [item_list[2]],
         ]
@@ -545,7 +567,7 @@ class TestSingleComposite:
             window_geom, [item_a, item_b, item_c, item_d], query_config
         )
         assert len(item_groups) == 1
-        assert item_groups[0] == [item_a, item_b]
+        assert item_groups[0].items == [item_a, item_b]
 
 
 class TestMinMatches:
@@ -568,7 +590,7 @@ class TestMinMatches:
             space_mode=SpaceMode.CONTAINS, max_matches=10, min_matches=3
         )
         item_groups = match_candidate_items_to_window(geom, item_list, query_config)
-        assert item_groups == []
+        assert _group_items(item_groups) == []
 
     def test_min_matches_intersects(self) -> None:
         """Test min_matches with INTERSECTS mode."""
@@ -587,7 +609,7 @@ class TestMinMatches:
             space_mode=SpaceMode.INTERSECTS, max_matches=10, min_matches=3
         )
         item_groups = match_candidate_items_to_window(geom, item_list, query_config)
-        assert item_groups == []
+        assert _group_items(item_groups) == []
 
     def test_min_matches_mosaic(self) -> None:
         """Test min_matches with MOSAIC mode."""
@@ -603,7 +625,7 @@ class TestMinMatches:
             space_mode=SpaceMode.MOSAIC, max_matches=10, min_matches=2
         )
         item_groups = match_candidate_items_to_window(window_geom, items, query_config)
-        assert item_groups == []
+        assert _group_items(item_groups) == []
 
     def test_min_matches_mosaic_with_overlaps(self) -> None:
         """Test min_matches with MOSAIC mode and high overlaps (compositing behavior)."""
@@ -626,7 +648,7 @@ class TestMinMatches:
             mosaic_compositing_overlaps=100,
         )
         item_groups = match_candidate_items_to_window(geom, item_list, query_config)
-        assert item_groups == []
+        assert _group_items(item_groups) == []
 
     def test_min_matches_mosaic_with_period_duration(self) -> None:
         """Test min_matches with MOSAIC mode and period_duration."""
@@ -657,4 +679,4 @@ class TestMinMatches:
         item_groups = match_candidate_items_to_window(
             window_geometry, item_list, query_config
         )
-        assert item_groups == []
+        assert _group_items(item_groups) == []

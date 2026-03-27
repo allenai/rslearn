@@ -72,7 +72,7 @@ def test_era5land_dailyutc_v1_ingest_from_local_zarr(tmp_path: Path) -> None:
     # Both days are in 1 chunk -> 1 group with 1 item.
     assert len(groups) == 1
     assert len(groups[0]) == 1
-    items = groups[0][0]
+    items = groups[0][0].items
     assert len(items) == 1
 
     ds_path = UPath(tmp_path / "ds")
@@ -170,7 +170,7 @@ def test_era5land_dailyutc_v1_ingest_negative_longitude_bounds(tmp_path: Path) -
     groups = data_source.get_items([window_geom], query_config=query_config)
     assert len(groups) == 1
     assert len(groups[0]) == 1
-    items = groups[0][0]
+    items = groups[0][0].items
     assert len(items) == 1
 
     ds_path = UPath(tmp_path / "ds")
@@ -241,7 +241,7 @@ def test_era5land_dailyutc_v1_spatial_chunk_ingest(tmp_path: Path) -> None:
     query_config = QueryConfig(space_mode=SpaceMode.SINGLE_COMPOSITE)
     groups = data_source.get_items([window_geom], query_config=query_config)
 
-    items = groups[0][0]
+    items = groups[0][0].items
     assert len(items) == 4  # 1 time x 2 lat x 2 lon
 
     ds_path = UPath(tmp_path / "ds")

@@ -3,7 +3,7 @@
 import random
 import time
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from rslearn.config import (
@@ -11,6 +11,7 @@ from rslearn.config import (
     LayerType,
 )
 from rslearn.data_sources import DataSource, Item
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.dataset.handler_summaries import (
     LayerPrepareSummary,
     MaterializeDatasetWindowsSummary,
@@ -20,6 +21,7 @@ from rslearn.dataset.handler_summaries import (
 )
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, get_tile_store_with_layer
+from rslearn.utils import STGeometry
 
 from .dataset import Dataset
 from .materialize import Materializer, RasterMaterializer, VectorMaterializer
@@ -38,6 +40,17 @@ class AttemptsCounter:
     def increment(self) -> None:
         """Increment the counter by 1."""
         self.value += 1
+
+
+def _extract_group_time_ranges(
+    item_groups: list[MatchedItemGroup[Item]],
+) -> list[tuple[datetime, datetime] | None]:
+    """Extract group request time ranges from matched groups.
+
+    All in-tree data sources now return MatchedItemGroup with explicit
+    request_time_range.
+    """
+    return [group.request_time_range for group in item_groups]
 
 
 def retry(
@@ -152,37 +165,41 @@ def prepare_dataset_windows(
         # if there are no windows to prepare.
         data_source = layer_cfg.instantiate_data_source(dataset.path)
 
-        # Get STGeometry for each window.
-        geometries = []
-        for window in needed_windows:
-            geometry = window.get_geometry()
-
-            # Apply time_offset/duration temporal modifiers from the layer config.
-            geometry.time_range = data_source_cfg.get_request_time_range(
-                geometry.time_range
-            )
-
-            geometries.append(geometry)
-
         attempts_counter = AttemptsCounter()
         try:
+            query_config = data_source_cfg.query_config
+            geometries: list[STGeometry] = []
+            for window in needed_windows:
+                geometry = window.get_geometry()
+
+                # Apply time_offset/duration temporal modifiers from the layer config.
+                geometry.time_range = data_source_cfg.get_request_time_range(
+                    geometry.time_range
+                )
+
+                geometries.append(geometry)
+
             results = retry(
-                fn=lambda: data_source.get_items(
-                    geometries, data_source_cfg.query_config
-                ),
+                fn=lambda: data_source.get_items(geometries, query_config),
                 retry_max_attempts=retry_max_attempts,
                 retry_backoff=retry_backoff,
                 attempts_counter=attempts_counter,
             )
+            group_time_ranges_by_window = [
+                _extract_group_time_ranges(result) for result in results
+            ]
 
             windows_prepared = 0
-            for window, result in zip(needed_windows, results):
+            for window, result, group_time_ranges in zip(
+                needed_windows, results, group_time_ranges_by_window
+            ):
                 layer_datas = window.load_layer_datas()
                 layer_datas[layer_name] = WindowLayerData(
                     layer_name=layer_name,
                     serialized_item_groups=[
-                        [item.serialize() for item in group] for group in result
+                        [item.serialize() for item in group.items] for group in result
                     ],
+                    group_time_ranges=group_time_ranges,
                 )
                 window.save_layer_datas(layer_datas)
 
@@ -426,6 +443,7 @@ def materialize_window(
                 layer_name,
                 layer_cfg,
                 item_groups,
+                layer_data.group_time_ranges,
             ),
             retry_max_attempts=retry_max_attempts,
             retry_backoff=retry_backoff,
@@ -437,9 +455,14 @@ def materialize_window(
         logger.info(
             f"Materializing {len(item_groups)} item groups in layer {layer_name} via data source"
         )
+
         retry(
             fn=lambda: data_source.materialize(
-                window, item_groups, layer_name, layer_cfg
+                window,
+                item_groups,
+                layer_name,
+                layer_cfg,
+                group_time_ranges=layer_data.group_time_ranges,
             ),
             retry_max_attempts=retry_max_attempts,
             retry_backoff=retry_backoff,
