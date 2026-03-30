@@ -42,7 +42,7 @@ def test_chelsa_daily_get_items_returns_daily_items() -> None:
 
     assert len(groups) == 1
     assert len(groups[0]) == 1
-    items = groups[0][0]
+    items = groups[0][0].items
     assert [item.name for item in items] == [
         "chelsa_daily_20230616",
         "chelsa_daily_20230617",
@@ -68,7 +68,7 @@ def test_chelsa_daily_get_items_clamps_to_configured_range() -> None:
 
     assert len(groups) == 1
     assert len(groups[0]) == 1
-    items = groups[0][0]
+    items = groups[0][0].items
     assert [item.name for item in items] == [
         "chelsa_daily_20230610",
         "chelsa_daily_20230611",
@@ -95,7 +95,7 @@ def test_chelsa_daily_get_items_outside_range_returns_empty_group() -> None:
 
     assert len(groups) == 1
     assert len(groups[0]) == 1
-    assert len(groups[0][0]) == 0
+    assert len(groups[0][0].items) == 0
 
 
 def test_chelsa_daily_requires_single_composite() -> None:
