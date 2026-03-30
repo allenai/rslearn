@@ -27,7 +27,7 @@ def test_aws_sentinel2_element84(
     print("get items")
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    item = item_groups[0][0]
+    item = item_groups[0].items[0]
 
     tile_store_dir = UPath(tmp_path)
     tile_store = DefaultTileStore(str(tile_store_dir))
@@ -36,7 +36,9 @@ def test_aws_sentinel2_element84(
     print("ingest")
     layer_name = "layer"
     data_source.ingest(
-        TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+        TileStoreWithLayer(tile_store, layer_name),
+        item_groups[0].items,
+        [[seattle2020]],
     )
     assert tile_store.is_raster_ready(layer_name, item, [band_name])
 
@@ -46,7 +48,7 @@ def test_materialize_all_bands(tmp_path: pathlib.Path, seattle2020: STGeometry) 
     data_source = Sentinel2()
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    item = item_groups[0][0]
+    item = item_groups[0].items[0]
 
     bounds = (
         int(seattle2020.shp.bounds[0]),

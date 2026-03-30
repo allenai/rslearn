@@ -22,7 +22,7 @@ def test_read_raster_subset_bands(
 
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    item = item_groups[0][0]
+    item = item_groups[0].items[0]
 
     layer_name = "gse"
     projection = seattle2020.projection
@@ -65,7 +65,7 @@ def test_read_raster_no_dequantization(
 
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    item = item_groups[0][0]
+    item = item_groups[0].items[0]
 
     layer_name = "gse"
     projection = seattle2020.projection

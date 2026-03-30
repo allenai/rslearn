@@ -6,7 +6,7 @@ import base64
 import math
 import os
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -17,6 +17,7 @@ from rasterio.crs import CRS
 from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_EPSG, WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
@@ -431,7 +432,7 @@ class ERA5LandDailyUTCv1(DataSource[ERA5LandChunkItem]):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[ERA5LandChunkItem]]]:
+    ) -> list[list[MatchedItemGroup[ERA5LandChunkItem]]]:
         """Get chunk-level items intersecting the given geometries.
 
         Each item maps 1-to-1 to a single Zarr chunk identified by a
@@ -454,6 +455,10 @@ class ERA5LandDailyUTCv1(DataSource[ERA5LandChunkItem]):
                 "ERA5LandDailyUTCv1 requires SINGLE_COMPOSITE space mode "
                 f"(got {query_config.space_mode})"
             )
+        if query_config.min_matches != 0:
+            raise ValueError(
+                "min_matches is not supported for ERA5LandDailyUTCv1; set min_matches=0"
+            )
 
         ds = self._get_dataset()
         time_vals = ds["valid_time"].values
@@ -464,7 +469,7 @@ class ERA5LandDailyUTCv1(DataSource[ERA5LandChunkItem]):
         n_lon = len(lon_vals)
         time_cs, lat_cs, lon_cs = self._chunk_sizes
 
-        all_groups: list[list[list[ERA5LandChunkItem]]] = []
+        all_groups: list[list[MatchedItemGroup[ERA5LandChunkItem]]] = []
         for geometry in geometries:
             if geometry.time_range is None:
                 raise ValueError("expected all geometries to have a time range")
@@ -487,7 +492,13 @@ class ERA5LandDailyUTCv1(DataSource[ERA5LandChunkItem]):
             )
 
             if lat_chunk_indices is None or not lon_chunk_indices:
-                all_groups.append([[]])
+                all_groups.append(
+                    [
+                        MatchedItemGroup(
+                            cast(list[ERA5LandChunkItem], []), geometry.time_range
+                        )
+                    ]
+                )
                 continue
 
             # --- build items for every (t, lat, lon) triple ---
@@ -535,7 +546,7 @@ class ERA5LandDailyUTCv1(DataSource[ERA5LandChunkItem]):
                             )
                         )
 
-            all_groups.append([items])
+            all_groups.append([MatchedItemGroup(items, geometry.time_range)])
 
         return all_groups
 

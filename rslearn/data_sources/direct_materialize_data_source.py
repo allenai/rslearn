@@ -226,6 +226,7 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
         item_groups: list[list[ItemType]],
         layer_name: str,
         layer_cfg: LayerConfig,
+        group_time_ranges: list[tuple[datetime, datetime] | None] | None = None,
     ) -> None:
         """Materialize data for the window.
 
@@ -234,6 +235,7 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
             item_groups: the items from get_items.
             layer_name: the name of this layer.
             layer_cfg: the config of this layer.
+            group_time_ranges: optional request time range for each item group.
         """
         RasterMaterializer().materialize(
             TileStoreWithLayer(self, layer_name),
@@ -241,6 +243,7 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
             layer_name,
             layer_cfg,
             item_groups,
+            group_time_ranges=group_time_ranges,
         )
 
     # --- TileStore methods that are not supported ---

@@ -22,6 +22,7 @@ from upath import UPath
 import rslearn.data_sources.utils
 from rslearn.config import DType, LayerConfig
 from rslearn.const import WGS84_PROJECTION
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.dataset.window import Window
 from rslearn.log_utils import get_logger
@@ -203,7 +204,7 @@ class GEE(DataSource, TileStore):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[MatchedItemGroup[Item]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -582,6 +583,7 @@ class GEE(DataSource, TileStore):
         item_groups: list[list[Item]],
         layer_name: str,
         layer_cfg: LayerConfig,
+        group_time_ranges: list[tuple[datetime, datetime] | None] | None = None,
     ) -> None:
         """Materialize data for the window.
 
@@ -590,6 +592,7 @@ class GEE(DataSource, TileStore):
             item_groups: the items from get_items
             layer_name: the name of this layer
             layer_cfg: the config of this layer
+            group_time_ranges: optional request time range for each item group
         """
         RasterMaterializer().materialize(
             TileStoreWithLayer(self, layer_name),
@@ -597,6 +600,7 @@ class GEE(DataSource, TileStore):
             layer_name,
             layer_cfg,
             item_groups,
+            group_time_ranges=group_time_ranges,
         )
 
 

@@ -4,7 +4,7 @@ import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TypeVar
+from typing import Generic, TypeVar
 
 import shapely
 
@@ -24,6 +24,14 @@ MOSAIC_REMAINDER_EPSILON = 0.01
 entire geometry."""
 
 ItemType = TypeVar("ItemType", bound=Item)
+
+
+@dataclass
+class MatchedItemGroup(Generic[ItemType]):
+    """A matched item group carrying the request time range used to build it."""
+
+    items: list[ItemType]
+    request_time_range: tuple[datetime, datetime] | None
 
 
 @dataclass
@@ -377,7 +385,7 @@ def _filter_and_project_items(
 
 def match_candidate_items_to_window(
     geometry: STGeometry, items: list[ItemType], query_config: QueryConfig
-) -> list[list[ItemType]]:
+) -> list[MatchedItemGroup[ItemType]]:
     """Match candidate items to a window based on the query configuration.
 
     If ``period_duration`` is set, the window time range is split into sub-periods
@@ -430,7 +438,7 @@ def match_candidate_items_to_window(
 
         # Iterate from most recent period backwards so that when max_matches
         # truncates, we keep the most recent periods.
-        groups: list[list[ItemType]] = []
+        groups: list[MatchedItemGroup[ItemType]] = []
         period_end = geometry.time_range[1]
         while (
             period_end - period_duration >= geometry.time_range[0]
@@ -450,7 +458,12 @@ def match_candidate_items_to_window(
                 period_geom, period_items, period_shps, per_period_query_config
             )
             if period_groups:
-                groups.append(period_groups[0])
+                groups.append(
+                    MatchedItemGroup(
+                        period_groups[0],
+                        period_geom.time_range,
+                    )
+                )
 
         # Groups are in reverse chronological order. Reverse to chronological
         # unless the deprecated per_period_mosaic_reverse_time_order is True.
@@ -467,7 +480,12 @@ def match_candidate_items_to_window(
         else:
             groups.reverse()
     else:
-        groups = handler(geometry, acceptable_items, acceptable_item_shps, query_config)
+        groups = [
+            MatchedItemGroup(group, geometry.time_range)
+            for group in handler(
+                geometry, acceptable_items, acceptable_item_shps, query_config
+            )
+        ]
 
     # Enforce minimum matches if set.
     if len(groups) < query_config.min_matches:

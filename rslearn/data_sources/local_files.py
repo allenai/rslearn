@@ -13,6 +13,7 @@ from upath import UPath
 import rslearn.data_sources.utils
 from rslearn.config import LayerType
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.feature import Feature
@@ -449,7 +450,7 @@ class LocalFiles(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[MatchedItemGroup[Item]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:

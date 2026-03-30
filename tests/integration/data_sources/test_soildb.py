@@ -119,7 +119,7 @@ def test_materialize_auto_asset(
 
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    assert len(item_groups) > 0 and len(item_groups[0]) > 0
+    assert len(item_groups) > 0 and len(item_groups[0].items) > 0
 
     bounds = (
         int(seattle2020.shp.bounds[0]),
@@ -140,7 +140,12 @@ def test_materialize_auto_asset(
     )
     window.save()
 
-    data_source.materialize(window, item_groups, "layer", layer_config)
+    data_source.materialize(
+        window,
+        [group.items for group in item_groups],
+        "layer",
+        layer_config,
+    )
     raster_dir = window.get_raster_dir("layer", [band_name])
     assert (raster_dir / "geotiff.tif").exists()
 

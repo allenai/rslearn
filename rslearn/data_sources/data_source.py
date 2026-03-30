@@ -2,7 +2,8 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Generator
-from typing import Any, BinaryIO, Generic, TypeVar
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, BinaryIO, Generic, TypeVar
 
 from upath import UPath
 
@@ -10,6 +11,9 @@ from rslearn.config import LayerConfig, QueryConfig
 from rslearn.dataset import Window
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
+
+if TYPE_CHECKING:
+    from rslearn.data_sources.utils import MatchedItemGroup
 
 
 class Item:
@@ -66,7 +70,7 @@ class DataSource(ABC, Generic[ItemType]):
     @abstractmethod
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[ItemType]]]:
+    ) -> list[list["MatchedItemGroup[ItemType]"]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -104,6 +108,7 @@ class DataSource(ABC, Generic[ItemType]):
         item_groups: list[list[ItemType]],
         layer_name: str,
         layer_cfg: LayerConfig,
+        group_time_ranges: list[tuple[datetime, datetime] | None] | None = None,
     ) -> None:
         """Materialize data for the window.
 
@@ -112,6 +117,7 @@ class DataSource(ABC, Generic[ItemType]):
             item_groups: the items from get_items
             layer_name: the name of this layer
             layer_cfg: the config of this layer
+            group_time_ranges: optional request time range for each item group
         """
         raise NotImplementedError
 

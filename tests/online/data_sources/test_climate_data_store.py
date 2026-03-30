@@ -30,8 +30,8 @@ class TestERA5LandMonthlyMeans:
         data_source = ERA5LandMonthlyMeans(band_names=self.TEST_BANDS)
         print("get items")
         item_groups = data_source.get_items([seattle2020], query_config)[0]  # type: ignore
-        item_0 = item_groups[0][0]
-        item_1 = item_groups[1][0]
+        item_0 = item_groups[0].items[0]
+        item_1 = item_groups[1].items[0]
 
         tile_store_dir = UPath(tmp_path) / "tiles"
         tile_store_dir.mkdir(parents=True, exist_ok=True)
@@ -41,10 +41,14 @@ class TestERA5LandMonthlyMeans:
 
         print("ingest")
         data_source.ingest(
-            TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[0].items,
+            [[seattle2020]],
         )
         data_source.ingest(
-            TileStoreWithLayer(tile_store, layer_name), item_groups[1], [[seattle2020]]
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[1].items,
+            [[seattle2020]],
         )
         assert tile_store.is_raster_ready(layer_name, item_0, self.TEST_BANDS)
         assert tile_store.is_raster_ready(layer_name, item_1, self.TEST_BANDS)
@@ -65,8 +69,8 @@ class TestERA5LandHourly:
         )
         print("get items")
         item_groups = data_source.get_items([seattle2020], query_config)[0]  # type: ignore
-        item_0 = item_groups[0][0]
-        item_1 = item_groups[1][0]
+        item_0 = item_groups[0].items[0]
+        item_1 = item_groups[1].items[0]
 
         tile_store_dir = UPath(tmp_path) / "tiles"
         tile_store_dir.mkdir(parents=True, exist_ok=True)
@@ -76,10 +80,14 @@ class TestERA5LandHourly:
 
         print("ingest")
         data_source.ingest(
-            TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[0].items,
+            [[seattle2020]],
         )
         data_source.ingest(
-            TileStoreWithLayer(tile_store, layer_name), item_groups[1], [[seattle2020]]
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[1].items,
+            [[seattle2020]],
         )
         assert tile_store.is_raster_ready(layer_name, item_0, self.TEST_BANDS)
         assert tile_store.is_raster_ready(layer_name, item_1, self.TEST_BANDS)
@@ -98,8 +106,8 @@ class TestERA5LandHourlyTimeseries:
         data_source = ERA5LandHourlyTimeseries(band_names=self.TEST_BANDS)
         print("get items")
         item_groups = data_source.get_items([seattle2020], query_config)[0]  # type: ignore
-        item_0 = item_groups[0][0]
-        item_1 = item_groups[1][0]
+        item_0 = item_groups[0].items[0]
+        item_1 = item_groups[1].items[0]
 
         # Verify items have point geometry (snapped to grid)
         assert item_0.geometry.shp.geom_type == "Point"
@@ -113,8 +121,8 @@ class TestERA5LandHourlyTimeseries:
 
         print("ingest")
         ts = TileStoreWithLayer(tile_store, layer_name)
-        data_source.ingest(ts, item_groups[0], [[seattle2020]])
-        data_source.ingest(ts, item_groups[1], [[seattle2020]])
+        data_source.ingest(ts, item_groups[0].items, [[seattle2020]])
+        data_source.ingest(ts, item_groups[1].items, [[seattle2020]])
         assert tile_store.is_raster_ready(layer_name, item_0, self.TEST_BANDS)
         assert tile_store.is_raster_ready(layer_name, item_1, self.TEST_BANDS)
 

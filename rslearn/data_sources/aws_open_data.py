@@ -25,6 +25,7 @@ from upath import UPath
 
 import rslearn.data_sources.utils
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_EPSG, WGS84_PROJECTION
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import GridIndex, Projection, STGeometry, daterange
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
@@ -277,7 +278,7 @@ class Naip(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[NaipItem]]]:
+    ) -> list[list[MatchedItemGroup[NaipItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -561,7 +562,7 @@ class Sentinel2(
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Sentinel2Item]]]:
+    ) -> list[list[MatchedItemGroup[Sentinel2Item]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:

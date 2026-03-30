@@ -13,6 +13,7 @@ from rslearn.data_sources.copernicus import (
     Sentinel1ProductType,
 )
 from rslearn.data_sources.copernicus import Sentinel1 as CopernicusSentinel1
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
@@ -61,7 +62,7 @@ class Sentinel1(DataSource, TileStore):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[CopernicusItem]]]:
+    ) -> list[list[MatchedItemGroup[CopernicusItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
