@@ -24,7 +24,7 @@ from upath import UPath
 
 from rslearn.log_utils import get_logger
 from rslearn.models.component import FeatureExtractor, FeatureMaps, TokenFeatureMaps
-from rslearn.train.model_context import ModelContext, RasterImage
+from rslearn.train.model_context import ModelContext, RasterImage, SampleMetadata
 
 logger = get_logger(__name__)
 
@@ -66,6 +66,7 @@ class OlmoEarth(FeatureExtractor):
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
         use_legacy_timestamps: bool = True,
+        use_latlon: bool = False,
     ):
         """Create a new OlmoEarth model.
 
@@ -95,6 +96,9 @@ class OlmoEarth(FeatureExtractor):
             use_legacy_timestamps: In our original implementation of OlmoEarth, we applied timestamps starting
                 from 0 (instead of the actual timestamps of the input). The option to do this is preserved
                 for backwards compatability with finetuned models which were trained against this implementation.
+            use_latlon: whether to compute lat/lon from sample metadata and pass it to
+                the encoder for geographic encoding. Requires the pretrained model to have
+                been trained with use_latlon_encoding=True.
         """
         if use_legacy_timestamps:
             warnings.warn(
@@ -154,6 +158,7 @@ class OlmoEarth(FeatureExtractor):
         self.model = model
         self.token_pooling = token_pooling
         self.use_legacy_timestamps = use_legacy_timestamps
+        self.use_latlon = use_latlon
 
     def _patch_legacy_encoder_config(self, config_dict: dict) -> dict:
         """Patch checkpoint config dicts that predate use_linear_patch_embed.
@@ -234,6 +239,38 @@ class OlmoEarth(FeatureExtractor):
             [d.year for d in mid_ranges], dtype=torch.int32
         )
         return timestamps
+
+    @staticmethod
+    def _compute_latlon_from_metadata(
+        metadatas: list[SampleMetadata], device: torch.device
+    ) -> torch.Tensor:
+        """Compute lat/lon center coordinates from sample metadata.
+
+        Converts each sample's crop center from its native CRS to WGS84
+        (EPSG:4326) to produce geographic coordinates for lat/lon encoding.
+
+        Args:
+            metadatas: list of SampleMetadata, one per sample in the batch.
+            device: torch device to place the output tensor on.
+
+        Returns:
+            Tensor of shape (B, 2) with (latitude, longitude) in degrees.
+        """
+        from rasterio.crs import CRS
+        from rasterio.warp import transform
+
+        wgs84 = CRS.from_epsg(4326)
+        latlons = []
+        for meta in metadatas:
+            col_start, row_start, col_end, row_end = meta.crop_bounds
+            cx = (col_start + col_end) / 2.0
+            cy = (row_start + row_end) / 2.0
+            crs_x = cx * meta.projection.x_resolution
+            crs_y = cy * meta.projection.y_resolution
+            xs, ys = transform(meta.projection.crs, wgs84, [crs_x], [crs_y])
+            # transform returns (lon, lat) in WGS84; we want (lat, lon)
+            latlons.append([ys[0], xs[0]])
+        return torch.tensor(latlons, dtype=torch.float32, device=device)
 
     @staticmethod
     def _get_sample_expected_timestamps(
@@ -577,6 +614,10 @@ class OlmoEarth(FeatureExtractor):
                 resolution. Embeddings will be pooled across modalities and timesteps.
         """
         sample, present_modalities, device = self._prepare_modality_inputs(context)
+
+        if self.use_latlon:
+            latlon = self._compute_latlon_from_metadata(context.metadatas, device)
+            sample = sample._replace(latlon=latlon)
 
         # Decide context based on self.autocast_dtype.
         if self.autocast_dtype is None:
