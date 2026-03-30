@@ -85,8 +85,8 @@ def test_ingest(tmp_path: pathlib.Path, test_pbf: pathlib.Path) -> None:
 
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([geometry], query_config)[0]
-    assert len(item_groups) > 0 and len(item_groups[0]) > 0
-    item = item_groups[0][0]
+    assert len(item_groups) > 0 and len(item_groups[0].items) > 0
+    item = item_groups[0].items[0]
 
     tile_store = DefaultTileStore(str(tile_store_dir))
     tile_store.set_dataset_path(tile_store_dir)
@@ -94,7 +94,7 @@ def test_ingest(tmp_path: pathlib.Path, test_pbf: pathlib.Path) -> None:
 
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name),
-        item_groups[0],
+        item_groups[0].items,
         [[geometry]],
     )
 

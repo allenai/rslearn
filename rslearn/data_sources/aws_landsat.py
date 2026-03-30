@@ -25,6 +25,7 @@ from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_PROJECTION
 from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 from rslearn.utils.geometry import STGeometry
@@ -279,7 +280,7 @@ class LandsatOliTirs(
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[LandsatOliTirsItem]]]:
+    ) -> list[list[MatchedItemGroup[LandsatOliTirsItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -327,7 +328,7 @@ class LandsatOliTirs(
             elif self.sort_by is not None:
                 raise ValueError(f"invalid sort_by setting ({self.sort_by})")
 
-            cur_groups: list[list[LandsatOliTirsItem]] = (
+            cur_groups: list[MatchedItemGroup[LandsatOliTirsItem]] = (
                 rslearn.data_sources.utils.match_candidate_items_to_window(
                     geometry, cur_items, query_config
                 )

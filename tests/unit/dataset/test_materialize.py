@@ -14,6 +14,9 @@ from rslearn.dataset.materialize import (
     build_first_valid_composite,
     build_mean_composite,
     build_median_composite,
+    build_temporal_max_composite,
+    build_temporal_mean_composite,
+    build_temporal_min_composite,
     build_temporal_stack_composite,
     read_raster_window_from_tiles,
 )
@@ -1044,3 +1047,67 @@ class TestMultiTimestepComposites:
                 projection=self.PROJECTION,
                 remapper=None,
             )
+
+
+class TestTemporalReducers:
+    """Tests for temporal reducers built on top of temporal stacks."""
+
+    LAYER_NAME = "layer"
+    BANDS = ["B1"]
+    BOUNDS = (0, 0, 4, 4)
+    PROJECTION = WGS84_PROJECTION
+
+    def test_temporal_reducers_clip_and_reduce(self, tmp_path: pathlib.Path) -> None:
+        """Temporal reducers should clip to the request range and reduce along T."""
+        tile_store = DefaultTileStore()
+        tile_store.set_dataset_path(UPath(tmp_path))
+
+        t0 = datetime(2024, 1, 1, tzinfo=UTC)
+        t1 = datetime(2024, 1, 15, tzinfo=UTC)
+        t2 = datetime(2024, 1, 29, tzinfo=UTC)
+        t3 = datetime(2024, 2, 12, tzinfo=UTC)
+        bbox = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
+
+        item = Item("item", STGeometry(self.PROJECTION, bbox, (t0, t3)))
+        data = np.empty((1, 3, 4, 4), dtype=np.float32)
+        data[:, 0, :, :] = 2.0
+        data[:, 1, :, :] = 6.0
+        data[:, 2, :, :] = 4.0
+        timestamps = [(t0, t1), (t1, t2), (t2, t3)]
+        tile_store.write_raster(
+            self.LAYER_NAME,
+            item,
+            self.BANDS,
+            self.PROJECTION,
+            self.BOUNDS,
+            RasterArray(array=data, timestamps=timestamps),
+        )
+
+        request_time_range = (t1, t3)
+        common_kwargs = {
+            "group": [item],
+            "nodata_vals": [0.0],
+            "bands": self.BANDS,
+            "bounds": self.BOUNDS,
+            "band_dtype": np.float32,
+            "tile_store": TileStoreWithLayer(tile_store, self.LAYER_NAME),
+            "projection": self.PROJECTION,
+            "remapper": None,
+            "request_time_range": request_time_range,
+        }
+
+        mean_result = build_temporal_mean_composite(**common_kwargs)
+        max_result = build_temporal_max_composite(**common_kwargs)
+        min_result = build_temporal_min_composite(**common_kwargs)
+
+        assert mean_result.array.shape == (1, 1, 4, 4)
+        assert max_result.array.shape == (1, 1, 4, 4)
+        assert min_result.array.shape == (1, 1, 4, 4)
+
+        assert np.all(mean_result.get_chw_array() == 5.0)
+        assert np.all(max_result.get_chw_array() == 6.0)
+        assert np.all(min_result.get_chw_array() == 4.0)
+
+        assert mean_result.timestamps == [request_time_range]
+        assert max_result.timestamps == [request_time_range]
+        assert min_result.timestamps == [request_time_range]

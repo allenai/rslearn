@@ -108,7 +108,12 @@ def test_soilgrids_clay_scale_offset_applied(
     item_groups = data_source.get_items(
         [window.get_geometry()], QueryConfig(space_mode=SpaceMode.INTERSECTS)
     )[0]
-    data_source.materialize(window, item_groups, "clay", layer_cfg)
+    data_source.materialize(
+        window,
+        [group.items for group in item_groups],
+        "clay",
+        layer_cfg,
+    )
 
     out_path = window.get_raster_dir("clay", ["B1"]) / "geotiff.tif"
     with rasterio.open(out_path) as src:

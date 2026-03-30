@@ -17,6 +17,7 @@ from upath import UPath
 from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_EPSG, WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
@@ -97,7 +98,7 @@ class ERA5Land(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[MatchedItemGroup[Item]]]:
         """Get a list if items in the data source intersecting the given geometries.
 
         Args:
@@ -114,6 +115,10 @@ class ERA5Land(DataSource):
         ):
             raise ValueError(
                 "expected MOSAIC or SINGLE_COMPOSITE space mode in the query configuration"
+            )
+        if query_config.min_matches != 0:
+            raise ValueError(
+                "min_matches is not supported for ERA5Land; set min_matches=0"
             )
 
         all_groups = []
@@ -158,9 +163,11 @@ class ERA5Land(DataSource):
                 items.append(Item(item_name, item_geometry))
 
             if query_config.space_mode == SpaceMode.SINGLE_COMPOSITE:
-                all_groups.append([items])
+                all_groups.append([MatchedItemGroup(items, geometry.time_range)])
             else:
-                all_groups.append([[item] for item in items])
+                all_groups.append(
+                    [MatchedItemGroup([item], geometry.time_range) for item in items]
+                )
 
         return all_groups
 
@@ -587,7 +594,7 @@ class ERA5LandHourlyTimeseries(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[MatchedItemGroup[Item]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         For each geometry, this method extracts the centroid, snaps it to the nearest
@@ -609,6 +616,10 @@ class ERA5LandHourlyTimeseries(DataSource):
         ):
             raise ValueError(
                 "expected MOSAIC or SINGLE_COMPOSITE space mode in the query configuration"
+            )
+        if query_config.min_matches != 0:
+            raise ValueError(
+                "min_matches is not supported for ERA5LandHourlyTimeseries; set min_matches=0"
             )
 
         all_groups = []
@@ -670,9 +681,11 @@ class ERA5LandHourlyTimeseries(DataSource):
                 items.append(Item(item_name, item_geometry))
 
             if query_config.space_mode == SpaceMode.SINGLE_COMPOSITE:
-                all_groups.append([items])
+                all_groups.append([MatchedItemGroup(items, geometry.time_range)])
             else:
-                all_groups.append([[item] for item in items])
+                all_groups.append(
+                    [MatchedItemGroup([item], geometry.time_range) for item in items]
+                )
 
         return all_groups
 

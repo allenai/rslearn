@@ -47,7 +47,12 @@ class TestXyzTiles:
         )
         window.save()
         print("materialize")
-        data_source.materialize(window, item_groups, "raster", layer_config)
+        data_source.materialize(
+            window,
+            [item_group.items for item_group in item_groups],
+            "raster",
+            layer_config,
+        )
         expected_path = window.get_raster_dir("raster", self.TEST_BANDS) / "geotiff.tif"
         assert expected_path.exists()
 
