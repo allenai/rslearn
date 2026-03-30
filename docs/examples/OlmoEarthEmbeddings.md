@@ -244,8 +244,6 @@ dataset configuration file:
     "embeddings": {
       "band_sets": [{
           "dtype": "float32",
-          // Set this to the embedding size for your chosen OlmoEarth `model_id`.
-          // For example: NANO=128, TINY=192, BASE=768, LARGE=1024.
           "num_bands": 768
       }],
       "type": "raster"
@@ -253,6 +251,8 @@ dataset configuration file:
   }
 }
 ```
+
+Set `num_bands` as follows: NANO=128, TINY=192, BASE=768, LARGE=1024.
 
 Finally, we can run the `model predict` command:
 
