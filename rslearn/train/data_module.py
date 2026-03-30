@@ -79,7 +79,9 @@ class RslearnDataModule(L.LightningDataModule):
             task: the task to train on
             path: the dataset path
             path_options: additional options for path to pass to fsspec.
-            batch_size: the batch size
+            batch_size: the total batch size across all GPUs. In multi-GPU
+                training, this is divided by world_size to get the per-GPU
+                batch size.
             num_workers: number of data loader worker processes, or 0 to use main
                 process only
             init_workers: number of workers used to initialize the dataset, e.g. for
@@ -215,9 +217,19 @@ class RslearnDataModule(L.LightningDataModule):
         ):
             num_workers = min(num_workers, len(dataset.get_dataset_examples()))
 
+        # Compute per-GPU batch size from total batch size.
+        per_gpu_batch_size = self.batch_size
+        if self.trainer is not None and self.trainer.world_size > 1:
+            if self.batch_size % self.trainer.world_size != 0:
+                raise ValueError(
+                    f"batch_size ({self.batch_size}) must be divisible by "
+                    f"world_size ({self.trainer.world_size})"
+                )
+            per_gpu_batch_size = self.batch_size // self.trainer.world_size
+
         kwargs: dict[str, Any] = dict(
             dataset=dataset,
-            batch_size=self.batch_size,
+            batch_size=per_gpu_batch_size,
             num_workers=num_workers,
             collate_fn=collate_fn,
             persistent_workers=persistent_workers,
