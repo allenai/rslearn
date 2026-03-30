@@ -341,28 +341,36 @@ def _filter_and_project_items(
                 reverse=False,
             )
 
-    # Project items to geometry's projection.
+    # Re-project items to geometry's projection.
+    reprojected_geometries = safely_reproject_within_valid_area(
+        [item.geometry for item in items], geometry
+    )
+
+    # Ignore items that are degenerate after re-projection.
     acceptable_items: list[ItemType] = []
     acceptable_item_shps: list[shapely.Geometry] = []
-    for item in items:
-        item_geom = item.geometry
-        if item_geom.projection == geometry.projection:
-            if item_geom.shp.area == 0:
-                continue
-            acceptable_items.append(item)
-            acceptable_item_shps.append(item_geom.shp)
-        elif item_geom.is_global():
+    for item, reprojected_geom in zip(items, reprojected_geometries):
+        if item.geometry.is_global():
+            # This means the item is supposed to span everything. In this case instead
+            # of using the re-projected geometry, we use the window geometry, to make
+            # sure that all windows will be covered even in corner cases.
             acceptable_items.append(item)
             acceptable_item_shps.append(geometry.shp)
-        else:
-            # Re-projection is needed. We use safely_reproject_within_valid_area since
-            # the item could be much larger than the window geometry, so it is better
-            # to clip the item to the window in WGS84 before re-projecting.
-            result = safely_reproject_within_valid_area([item_geom], geometry)[0]
-            if result is None or result.shp.is_empty or result.shp.area == 0:
-                continue
-            acceptable_items.append(item)
-            acceptable_item_shps.append(result.shp)
+            continue
+
+        # Ignore degenerate geometries (check is_empty in case there was no
+        # intersection, but also area in case it collapsed to line/point).
+        # reprojected_geom could also be None if safely_reproject_within_valid_area
+        # found no intersection with the window geometry.
+        if (
+            reprojected_geom is None
+            or reprojected_geom.shp.is_empty
+            or reprojected_geom.shp.area == 0
+        ):
+            continue
+
+        acceptable_items.append(item)
+        acceptable_item_shps.append(reprojected_geom.shp)
 
     return acceptable_items, acceptable_item_shps
 

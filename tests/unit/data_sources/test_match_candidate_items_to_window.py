@@ -16,7 +16,9 @@ def test_global_geometry() -> None:
     """Verify that a global geometry matches with everything."""
     global_geometry = get_global_geometry(None)
     window_geom = STGeometry(
-        CRS.from_epsg(32610), shapely.box(500000, 500000, 500001, 500001), None
+        Projection(CRS.from_epsg(32610), 1, 1),
+        shapely.box(500000, 500000, 500001, 500001),
+        None,
     )
     item_groups = match_candidate_items_to_window(
         window_geom, [Item("item", global_geometry)], QueryConfig()
