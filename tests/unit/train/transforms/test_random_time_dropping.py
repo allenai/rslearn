@@ -20,15 +20,12 @@ def _make_input(
     H: int = 4,
     W: int = 4,
     with_timestamps: bool = False,
-    with_expected_timestamps: bool = False,
 ) -> dict:
     timestamps = _make_timestamps(T) if with_timestamps else None
-    expected_timestamps = _make_timestamps(T) if with_expected_timestamps else None
     return {
         "image": RasterImage(
             torch.randn(C, T, H, W),
             timestamps=timestamps,
-            expected_timestamps=expected_timestamps,
         )
     }
 
@@ -36,22 +33,17 @@ def _make_input(
 def test_drops_some_timesteps() -> None:
     """With a high drop ratio, at least one timestep should be removed.
 
-    Also verifies that timestamps shrink together with the tensor and that
-    expected_timestamps are left unchanged.
+    Also verifies that timestamps shrink together with the tensor.
     """
     torch.manual_seed(0)
     T = 10
     rand_drop = RandomTimeDropping(drop_ratio=0.8, min_keep=1)
-    inp = _make_input(T=T, with_timestamps=True, with_expected_timestamps=True)
-    expected_before = list(inp["image"].expected_timestamps)
+    inp = _make_input(T=T, with_timestamps=True)
     original_T = inp["image"].shape[1]
     inp, _ = rand_drop(inp, {})
     assert inp["image"].shape[1] < original_T
     # timestamps must shrink together with the tensor
     assert len(inp["image"].timestamps) == inp["image"].shape[1]
-    # expected_timestamps must NOT be modified (model uses the mismatch)
-    assert inp["image"].expected_timestamps == expected_before
-    assert len(inp["image"].expected_timestamps) == T
 
 
 def test_min_keep_respected() -> None:

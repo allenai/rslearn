@@ -68,21 +68,6 @@ def get_torch_dtype(dtype: DType) -> torch.dtype:
         raise ValueError(f"unable to handle {dtype} as a torch dtype")
 
 
-def expected_timestamps_from_layer_data(
-    layer_data: WindowLayerData | None,
-) -> list[tuple[datetime, datetime]] | None:
-    """Read expected timestamps directly from stored layer data when available."""
-    if layer_data is None or layer_data.group_time_ranges is None:
-        return None
-    if any(time_range is None for time_range in layer_data.group_time_ranges):
-        return None
-    return [
-        time_range
-        for time_range in layer_data.group_time_ranges
-        if time_range is not None
-    ]
-
-
 class SamplerFactory:
     """Factory to produce a Sampler.
 
@@ -529,7 +514,7 @@ def read_data_input(
     if data_input.data_type == "raster":
         layer_datas = window.load_layer_datas()
         images: list[torch.Tensor] = []  # each is CTHW
-        expected_timestamps: list[tuple[datetime, datetime]] | None = None
+
         all_timestamps: list[tuple[datetime, datetime]] = []
         has_all_timestamps = True
         for layer_name, group_idx in layers_to_read:
@@ -543,12 +528,6 @@ def read_data_input(
                 data_input,
             )
             images.append(image)
-
-            # Compute expected_timestamps from the first layer's stored group ranges
-            # (assuming all layers in the same DataInput have same temporal config).
-            if expected_timestamps is None:
-                layer_data = layer_datas.get(layer_name)
-                expected_timestamps = expected_timestamps_from_layer_data(layer_data)
 
             if timestamps is not None:
                 all_timestamps.extend(timestamps)
@@ -579,7 +558,6 @@ def read_data_input(
         return RasterImage(
             stacked,
             all_timestamps if has_all_timestamps else None,
-            expected_timestamps=expected_timestamps,
         )
 
     elif data_input.data_type == "vector":
