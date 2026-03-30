@@ -20,7 +20,7 @@ from rslearn.data_sources.data_source import (
 from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
-from rslearn.data_sources.utils import match_candidate_items_to_window
+from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry, get_global_geometry
 
@@ -117,6 +117,7 @@ class CHELSADaily(
         if self.end_date < self.start_date:
             raise ValueError("end_date must be >= start_date")
 
+        self.band_names: list[str]
         if context.layer_config is not None:
             self.band_names = []
             for band_set in context.layer_config.band_sets:
@@ -177,7 +178,7 @@ class CHELSADaily(
     @override
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[CHELSADailyItem]]]:
+    ) -> list[list[MatchedItemGroup[CHELSADailyItem]]]:
         if query_config.space_mode != SpaceMode.SINGLE_COMPOSITE:
             raise ValueError(
                 "CHELSADaily expects SINGLE_COMPOSITE space mode in the query configuration"
@@ -196,7 +197,7 @@ class CHELSADaily(
             tzinfo=UTC,
         ) + timedelta(days=1)
 
-        groups: list[list[list[CHELSADailyItem]]] = []
+        groups: list[list[MatchedItemGroup[CHELSADailyItem]]] = []
         for geometry in geometries:
             if geometry.time_range is None:
                 raise ValueError("expected all geometries to have a time range")
@@ -207,7 +208,7 @@ class CHELSADaily(
             clipped_end = min(request_end, dataset_end_exclusive)
 
             if clipped_start >= clipped_end:
-                groups.append([[]])
+                groups.append([MatchedItemGroup(items=[], request_time_range=None)])
                 continue
 
             day_cursor = datetime(
