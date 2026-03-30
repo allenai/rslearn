@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+import warnings
 from datetime import timedelta
 from typing import Any
 
@@ -15,7 +16,6 @@ from rslearn.data_sources.stac import SourceItem, StacDataSource
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
-from rslearn.utils.fsspec import join_upath
 
 from .data_source import (
     DataSourceContext,
@@ -72,19 +72,18 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
             query: optional STAC query filter to use.
             sort_by: STAC item property to sort by. For example, use "eo:cloud_cover" to sort by cloud cover.
             sort_ascending: whether to sort ascending or descending.
-            cache_dir: directory to cache discovered items.
+            cache_dir: deprecated, no longer used. Item data is now passed to
+                materialization functions so caching in the data source is unnecessary.
             timeout: timeout to use for requests.
             context: the data source context.
         """  # noqa: E501
-        # Determine the cache_upath to use.
-        cache_upath: UPath | None = None
         if cache_dir is not None:
-            if context.ds_path is not None:
-                cache_upath = join_upath(context.ds_path, cache_dir)
-            else:
-                cache_upath = UPath(cache_dir)
-
-            cache_upath.mkdir(parents=True, exist_ok=True)
+            warnings.warn(
+                "cache_dir is deprecated and no longer used. "
+                "Item data is now passed directly during materialization.",
+                FutureWarning,
+                stacklevel=2,
+            )
 
         # Determine which assets we need based on the bands in the layer config.
         asset_bands: dict[str, list[str]]
@@ -117,24 +116,22 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
             sort_by=sort_by,
             sort_ascending=sort_ascending,
             required_assets=list(asset_bands.keys()),
-            cache_dir=cache_upath,
         )
 
         self.timeout = timeout
 
     # --- DirectMaterializeDataSource implementation ---
 
-    def get_asset_url(self, item_name: str, asset_key: str) -> str:
+    def get_asset_url(self, item: SourceItem, asset_key: str) -> str:
         """Get the URL to read the asset for the given item and asset key.
 
         Args:
-            item_name: the name of the item.
+            item: the item.
             asset_key: the key identifying which asset to get.
 
         Returns:
             the URL to read the asset from.
         """
-        item = self.get_item_by_name(item_name)
         return item.asset_urls[asset_key]
 
     def ingest(
@@ -154,7 +151,7 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
             for asset_key, band_names in self.asset_bands.items():
                 if asset_key not in item.asset_urls:
                     continue
-                if tile_store.is_raster_ready(item.name, band_names):
+                if tile_store.is_raster_ready(item, band_names):
                     continue
 
                 asset_url = item.asset_urls[asset_key]
@@ -181,7 +178,10 @@ class Sentinel2(DirectMaterializeDataSource[SourceItem], StacDataSource):
                         asset_key,
                     )
                     tile_store.write_raster_file(
-                        item.name, band_names, UPath(local_fname)
+                        item,
+                        band_names,
+                        UPath(local_fname),
+                        time_range=item.geometry.time_range,
                     )
 
                 logger.debug(

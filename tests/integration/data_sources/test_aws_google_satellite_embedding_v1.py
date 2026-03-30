@@ -21,6 +21,7 @@ from rslearn.data_sources.aws_google_satellite_embedding_v1 import (
 )
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 # Seattle area in WGS84
@@ -52,7 +53,7 @@ def test_geotiff(tmp_path: pathlib.Path) -> pathlib.Path:
     data = np.full((64, height, width), RAW_PIXEL_VALUE, dtype=np.int8)
     raster_dir = UPath(tmp_path / "raster")
     fmt = GeotiffRasterFormat()
-    fmt.encode_raster(raster_dir, projection, bounds, data)
+    fmt.encode_raster(raster_dir, projection, bounds, RasterArray(chw_array=data))
     return raster_dir / fmt.fname
 
 
@@ -122,8 +123,8 @@ def test_ingest(
 
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    assert len(item_groups) > 0 and len(item_groups[0]) > 0
-    item = item_groups[0][0]
+    assert len(item_groups) > 0 and len(item_groups[0].items) > 0
+    item = item_groups[0].items[0]
 
     tile_store_dir = UPath(tmp_path / "tiles")
     tile_store = DefaultTileStore(str(tile_store_dir))
@@ -132,10 +133,10 @@ def test_ingest(
 
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name),
-        item_groups[0],
+        item_groups[0].items,
         [[seattle2020]],
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, BANDS)
+    assert tile_store.is_raster_ready(layer_name, item, BANDS)
 
     # Read back and verify pixel values.
     bounds = (
@@ -145,9 +146,9 @@ def test_ingest(
         int(seattle2020.shp.bounds[3]),
     )
     array = tile_store.read_raster(
-        layer_name, item.name, BANDS, seattle2020.projection, bounds
+        layer_name, item, BANDS, seattle2020.projection, bounds
     )
-    assert array.max() == expected_value
+    assert array.get_chw_array().max() == expected_value
 
 
 @pytest.mark.parametrize(
@@ -176,14 +177,14 @@ def test_materialize(
 
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    item = item_groups[0][0]
+    item = item_groups[0].items[0]
 
-    # read_raster uses rasterio to open a /vsicurl/ URL.
+    # read_raster uses rasterio to open an HTTP URL.
     # Redirect it to the local test file instead.
     original_rasterio_open = rasterio.open
 
     def mock_rasterio_open(url: Any, *args: Any, **kwargs: Any) -> Any:
-        if "/vsicurl/" in str(url):
+        if "s3.us-west-2.amazonaws.com" in str(url):
             return original_rasterio_open(str(test_geotiff), *args, **kwargs)
         return original_rasterio_open(url, *args, **kwargs)
 
@@ -198,9 +199,10 @@ def test_materialize(
 
     array = data_source.read_raster(
         layer_name="fake",
-        item_name=item.name,
+        item=item,
         bands=BANDS,
         projection=seattle2020.projection,
         bounds=bounds,
     )
-    assert array.max() == expected_value
+    assert array.get_chw_array().max() == expected_value
+    assert array.timestamps == [item.geometry.time_range]

@@ -1,6 +1,10 @@
 Examples
 --------
 
+- [IntroExample](examples/IntroExample.md): this is an introductory example to rslearn.
+  It shows how to create an rslearn dataset with aligned Sentinel-2 images and
+  WorldCover map data, how to train a model on the dataset, and how to apply the model
+  to map land cover in new regions.
 - [WindowsFromGeojson](examples/WindowsFromGeojson.md): create windows based on a
   GeoJSON file of point features and acquire Sentinel-2 images. Then, train a model to
   predict the point positions.

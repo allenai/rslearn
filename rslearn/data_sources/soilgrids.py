@@ -7,10 +7,10 @@ since data is fetched on-demand per window.
 from __future__ import annotations
 
 import tempfile
+from datetime import datetime
 from typing import Any
 
 import numpy as np
-import numpy.typing as npt
 import rasterio
 import rasterio.warp
 import shapely
@@ -24,10 +24,11 @@ from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils import PixelBounds, Projection, STGeometry, get_global_raster_bounds
 from rslearn.utils.geometry import get_global_geometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_transform_from_projection_and_bounds
 
 from .data_source import DataSource, DataSourceContext, Item
-from .utils import match_candidate_items_to_window
+from .utils import MatchedItemGroup, match_candidate_items_to_window
 
 SOILGRIDS_NODATA_VALUE = -32768.0
 """Default nodata value used by SoilGrids GeoTIFF responses (GEOTIFF_INT16)."""
@@ -129,7 +130,7 @@ class SoilGrids(DataSource, TileStore):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[MatchedItemGroup[Item]]]:
         """Get item groups matching each requested geometry."""
         groups = []
         for geometry in geometries:
@@ -154,18 +155,16 @@ class SoilGrids(DataSource, TileStore):
             "SoilGrids is intended for direct materialization; set data_source.ingest=false."
         )
 
-    def is_raster_ready(
-        self, layer_name: str, item_name: str, bands: list[str]
-    ) -> bool:
+    def is_raster_ready(self, layer_name: str, item: Item, bands: list[str]) -> bool:
         """Return whether the requested raster is ready (always true for direct reads)."""
         return True
 
-    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
+    def get_raster_bands(self, layer_name: str, item: Item) -> list[list[str]]:
         """Return the band sets available for this coverage."""
         return [self.band_names]
 
     def get_raster_bounds(
-        self, layer_name: str, item_name: str, bands: list[str], projection: Projection
+        self, layer_name: str, item: Item, bands: list[str], projection: Projection
     ) -> PixelBounds:
         """Return (approximate) bounds for this raster in the requested projection."""
         # We don't know bounds without an extra metadata request; treat as "very large"
@@ -212,12 +211,12 @@ class SoilGrids(DataSource, TileStore):
     def read_raster(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Read and reproject a SoilGrids coverage subset into the requested grid."""
         if bands != self.band_names:
             raise ValueError(
@@ -312,7 +311,7 @@ class SoilGrids(DataSource, TileStore):
                     dst_nodata=dst_nodata,
                     resampling=resampling,
                 )
-                return dst
+                return RasterArray(chw_array=dst, time_range=item.geometry.time_range)
 
     def materialize(
         self,
@@ -320,6 +319,7 @@ class SoilGrids(DataSource, TileStore):
         item_groups: list[list[Item]],
         layer_name: str,
         layer_cfg: LayerConfig,
+        group_time_ranges: list[tuple[datetime, datetime] | None] | None = None,
     ) -> None:
         """Materialize a window by reading from SoilGrids on-demand."""
         RasterMaterializer().materialize(
@@ -328,4 +328,5 @@ class SoilGrids(DataSource, TileStore):
             layer_name,
             layer_cfg,
             item_groups,
+            group_time_ranges=group_time_ranges,
         )

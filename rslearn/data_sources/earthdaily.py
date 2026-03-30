@@ -3,8 +3,11 @@
 import copy
 import json
 import os
+import re
 import tempfile
-from datetime import timedelta
+import xml.etree.ElementTree as ET
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 import affine
@@ -22,14 +25,17 @@ from upath import UPath
 from rslearn.config import LayerConfig, QueryConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
-from rslearn.data_sources.utils import match_candidate_items_to_window
+from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
+
+from .copernicus import get_harmonize_callback
 
 logger = get_logger(__name__)
 
@@ -43,6 +49,7 @@ class EarthDailyItem(Item):
         geometry: STGeometry,
         asset_urls: dict[str, str],
         asset_scale_offsets: dict[str, list[dict[str, float]]] | None = None,
+        product_id: str | None = None,
     ):
         """Creates a new EarthDailyItem.
 
@@ -53,16 +60,20 @@ class EarthDailyItem(Item):
             asset_scale_offsets: optional per-asset scale/offset metadata. Each asset key
                 maps to a list of dictionaries (one per raster band) with keys
                 "scale" and "offset".
+            product_id: optional Sentinel-2 product ID from STAC
+                `properties["sentinel:product_id"]`.
         """
         super().__init__(name, geometry)
         self.asset_urls = asset_urls
         self.asset_scale_offsets = asset_scale_offsets or {}
+        self.product_id = product_id
 
     def serialize(self) -> dict[str, Any]:
         """Serializes the item to a JSON-encodable dictionary."""
         d = super().serialize()
         d["asset_urls"] = self.asset_urls
         d["asset_scale_offsets"] = self.asset_scale_offsets
+        d["product_id"] = self.product_id
         return d
 
     @staticmethod
@@ -74,6 +85,7 @@ class EarthDailyItem(Item):
             geometry=item.geometry,
             asset_urls=d["asset_urls"],
             asset_scale_offsets=d.get("asset_scale_offsets") or {},
+            product_id=d.get("product_id"),
         )
 
 
@@ -87,6 +99,8 @@ class EarthDaily(DataSource, TileStore):
     - EDS_API_URL
     """
 
+    METADATA_ASSET_KEYS = frozenset({"product_metadata", "granule_metadata"})
+
     def __init__(
         self,
         collection_name: str,
@@ -99,6 +113,7 @@ class EarthDaily(DataSource, TileStore):
         cache_dir: str | None = None,
         max_retries: int = 3,
         retry_backoff_factor: float = 5.0,
+        read_scale_offsets: bool = True,
         context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new EarthDaily instance.
@@ -121,6 +136,8 @@ class EarthDaily(DataSource, TileStore):
             retry_backoff_factor: backoff factor for exponential retry delays between HTTP
                 request attempts.  The delay between retries is calculated using the formula:
                 `(retry_backoff_factor * (2 ** (retry_count - 1)))` seconds.
+            read_scale_offsets: whether to parse per-band `scale`/`offset` metadata from
+                STAC `raster:bands`.
             context: the data source context.
         """
         self.collection_name = collection_name
@@ -132,6 +149,7 @@ class EarthDaily(DataSource, TileStore):
         self.skip_items_missing_assets = skip_items_missing_assets
         self.max_retries = max_retries
         self.retry_backoff_factor = retry_backoff_factor
+        self.read_scale_offsets = read_scale_offsets
 
         if cache_dir is not None:
             # Use dataset path as root if provided.
@@ -193,15 +211,32 @@ class EarthDaily(DataSource, TileStore):
         asset_urls: dict[str, str] = {}
         asset_scale_offsets: dict[str, list[dict[str, float]]] = {}
         for asset_key, asset_obj in stac_item.assets.items():
-            if (
-                "alternate" not in asset_obj.extra_fields
-                or "download" not in asset_obj.extra_fields["alternate"]
-                or "href" not in asset_obj.extra_fields["alternate"]["download"]
-            ):
+            is_metadata_asset = asset_key in self.METADATA_ASSET_KEYS
+            if asset_key not in self.asset_bands and not is_metadata_asset:
                 continue
-            asset_urls[asset_key] = asset_obj.extra_fields["alternate"]["download"][
-                "href"
-            ]
+
+            href: str | None = None
+            alt = asset_obj.extra_fields.get("alternate")
+            if isinstance(alt, dict):
+                download = alt.get("download")
+                if isinstance(download, dict):
+                    raw_href = download.get("href")
+                    if isinstance(raw_href, str) and raw_href:
+                        href = raw_href
+
+            if href is None:
+                if is_metadata_asset and isinstance(asset_obj.href, str):
+                    href = asset_obj.href
+                else:
+                    raise ValueError(
+                        f"item {stac_item.id} asset {asset_key} is missing "
+                        "alternate.download.href"
+                    )
+
+            asset_urls[asset_key] = href
+
+            if is_metadata_asset or not self.read_scale_offsets:
+                continue
 
             raster_bands = asset_obj.extra_fields.get("raster:bands", [])
             if not isinstance(raster_bands, list) or not raster_bands:
@@ -224,8 +259,19 @@ class EarthDaily(DataSource, TileStore):
             if scale_offsets:
                 asset_scale_offsets[asset_key] = scale_offsets
 
+        product_id = None
+        for property_key in ("sentinel:product_id", "s2:product_uri", "s2:product_id"):
+            raw_product_id = stac_item.properties.get(property_key)
+            if isinstance(raw_product_id, str) and raw_product_id:
+                product_id = raw_product_id
+                break
+
         return EarthDailyItem(
-            stac_item.id, geom, asset_urls, asset_scale_offsets=asset_scale_offsets
+            stac_item.id,
+            geom,
+            asset_urls,
+            asset_scale_offsets=asset_scale_offsets,
+            product_id=product_id,
         )
 
     def get_item_by_name(self, name: str) -> EarthDailyItem:
@@ -245,12 +291,8 @@ class EarthDaily(DataSource, TileStore):
         if cache_fname is not None and cache_fname.exists():
             with cache_fname.open() as f:
                 cached = json.load(f)
-            if isinstance(cached, dict) and "asset_scale_offsets" in cached:
+            if isinstance(cached, dict):
                 return EarthDailyItem.deserialize(cached)
-            logger.debug(
-                "EarthDaily cache entry at %s is missing scale/offset metadata; refreshing",
-                cache_fname,
-            )
 
         # No cache or not in cache, so we need to make the STAC request.
         _, _, collection = self._load_client()
@@ -266,7 +308,7 @@ class EarthDaily(DataSource, TileStore):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[EarthDailyItem]]]:
+    ) -> list[list[MatchedItemGroup[EarthDailyItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -333,6 +375,20 @@ class EarthDaily(DataSource, TileStore):
         assert isinstance(serialized_item, dict)
         return EarthDailyItem.deserialize(serialized_item)
 
+    def _download_asset_to_tmp(
+        self, asset_url: str, tmp_dir: str, asset_key: str, item_name: str
+    ) -> str:
+        """Download an asset URL to a temporary GeoTIFF path."""
+        local_fname = os.path.join(tmp_dir, f"{item_name}_{asset_key}.tif")
+        with requests.get(
+            asset_url, stream=True, timeout=self.timeout.total_seconds()
+        ) as r:
+            r.raise_for_status()
+            with open(local_fname, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+        return local_fname
+
     def ingest(
         self,
         tile_store: TileStoreWithLayer,
@@ -350,25 +406,20 @@ class EarthDaily(DataSource, TileStore):
             for asset_key, band_names in self.asset_bands.items():
                 if asset_key not in item.asset_urls:
                     continue
-                if tile_store.is_raster_ready(item.name, band_names):
+                if tile_store.is_raster_ready(item, band_names):
                     continue
 
                 asset_url = item.asset_urls[asset_key]
                 with tempfile.TemporaryDirectory() as tmp_dir:
-                    local_fname = os.path.join(tmp_dir, f"{asset_key}.tif")
+                    local_fname = self._download_asset_to_tmp(
+                        asset_url, tmp_dir, asset_key, item.name
+                    )
                     logger.debug(
                         "EarthDaily download item %s asset %s to %s",
                         item.name,
                         asset_key,
                         local_fname,
                     )
-                    with requests.get(
-                        asset_url, stream=True, timeout=self.timeout.total_seconds()
-                    ) as r:
-                        r.raise_for_status()
-                        with open(local_fname, "wb") as f:
-                            for chunk in r.iter_content(chunk_size=8192):
-                                f.write(chunk)
 
                     logger.debug(
                         "EarthDaily ingest item %s asset %s",
@@ -376,7 +427,10 @@ class EarthDaily(DataSource, TileStore):
                         asset_key,
                     )
                     tile_store.write_raster_file(
-                        item.name, band_names, UPath(local_fname)
+                        item,
+                        band_names,
+                        UPath(local_fname),
+                        time_range=item.geometry.time_range,
                     )
 
                 logger.debug(
@@ -385,14 +439,12 @@ class EarthDaily(DataSource, TileStore):
                     asset_key,
                 )
 
-    def is_raster_ready(
-        self, layer_name: str, item_name: str, bands: list[str]
-    ) -> bool:
+    def is_raster_ready(self, layer_name: str, item: Item, bands: list[str]) -> bool:
         """Checks if this raster has been written to the store.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item.
+            item: the item.
             bands: the list of bands identifying which specific raster to read.
 
         Returns:
@@ -402,20 +454,15 @@ class EarthDaily(DataSource, TileStore):
         # Always ready since we wrap accesses to EarthDaily.
         return True
 
-    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
+    def get_raster_bands(self, layer_name: str, item: Item) -> list[list[str]]:
         """Get the sets of bands that have been stored for the specified item.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item.
+            item: the item.
         """
-        if self.skip_items_missing_assets:
-            # In this case we can assume that the item has all of the assets.
-            return list(self.asset_bands.values())
-
-        # Otherwise we have to lookup the STAC item to see which assets it has.
-        # Here we use get_item_by_name since it handles caching.
-        item = self.get_item_by_name(item_name)
+        if not isinstance(item, EarthDailyItem):
+            raise TypeError(f"expected EarthDailyItem, got {type(item)}")
         all_bands = []
         for asset_key, band_names in self.asset_bands.items():
             if asset_key not in item.asset_urls:
@@ -484,13 +531,13 @@ class EarthDaily(DataSource, TileStore):
         return array * scales + offsets
 
     def get_raster_bounds(
-        self, layer_name: str, item_name: str, bands: list[str], projection: Projection
+        self, layer_name: str, item: Item, bands: list[str], projection: Projection
     ) -> PixelBounds:
         """Get the bounds of the raster in the specified projection.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item to check.
+            item: the item to check.
             bands: the list of bands identifying which specific raster to read. These
                 bands must match the bands of a stored raster.
             projection: the projection to get the raster's bounds in.
@@ -498,7 +545,6 @@ class EarthDaily(DataSource, TileStore):
         Returns:
             the bounds of the raster in the projection.
         """
-        item = self.get_item_by_name(item_name)
         geom = item.geometry.to_projection(projection)
         return (
             int(geom.shp.bounds[0]),
@@ -510,17 +556,17 @@ class EarthDaily(DataSource, TileStore):
     def read_raster(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Read raster data from the store.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item to read.
+            item: the item to read.
             bands: the list of bands identifying which specific raster to read. These
                 bands must match the bands of a stored raster.
             projection: the projection to read in.
@@ -530,8 +576,9 @@ class EarthDaily(DataSource, TileStore):
         Returns:
             the raster data
         """
+        if not isinstance(item, EarthDailyItem):
+            raise TypeError(f"expected EarthDailyItem, got {type(item)}")
         asset_key = self._get_asset_by_band(bands)
-        item = self.get_item_by_name(item_name)
         asset_url = item.asset_urls[asset_key]
 
         # Construct the transform to use for the warped dataset.
@@ -553,7 +600,9 @@ class EarthDaily(DataSource, TileStore):
                 height=bounds[3] - bounds[1],
                 resampling=resampling,
             ) as vrt:
-                return vrt.read()
+                return RasterArray(
+                    chw_array=vrt.read(), time_range=item.geometry.time_range
+                )
 
     def materialize(
         self,
@@ -561,6 +610,7 @@ class EarthDaily(DataSource, TileStore):
         item_groups: list[list[Item]],
         layer_name: str,
         layer_cfg: LayerConfig,
+        group_time_ranges: list[tuple[datetime, datetime] | None] | None = None,
     ) -> None:
         """Materialize data for the window.
 
@@ -569,6 +619,7 @@ class EarthDaily(DataSource, TileStore):
             item_groups: the items from get_items
             layer_name: the name of this layer
             layer_cfg: the config of this layer
+            group_time_ranges: optional request time range for each item group
         """
         RasterMaterializer().materialize(
             TileStoreWithLayer(self, layer_name),
@@ -576,6 +627,7 @@ class EarthDaily(DataSource, TileStore):
             layer_name,
             layer_cfg,
             item_groups,
+            group_time_ranges=group_time_ranges,
         )
 
 
@@ -627,7 +679,7 @@ class Sentinel2(EarthDaily):
         retry_backoff_factor: float = 5.0,
         context: DataSourceContext = DataSourceContext(),
     ) -> None:
-        """Initialize an EarthDaily Sentinel-2 data source.
+        """Initialize an EarthDaily Sentinel-2 C1 L2A data source.
 
         Args:
             assets: optional list of EarthDaily Sentinel-2 asset keys (e.g. ["red",
@@ -690,6 +742,7 @@ class Sentinel2(EarthDaily):
             cache_dir=cache_dir,
             max_retries=max_retries,
             retry_backoff_factor=retry_backoff_factor,
+            read_scale_offsets=apply_scale_offset,
             context=context,
         )
 
@@ -702,34 +755,36 @@ class Sentinel2(EarthDaily):
     def read_raster(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Read raster data from the store.
 
         Applies per-asset scale/offset metadata when apply_scale_offset=True.
         """
-        raw_data = super().read_raster(
-            layer_name, item_name, bands, projection, bounds, resampling=resampling
+        raster = super().read_raster(
+            layer_name, item, bands, projection, bounds, resampling=resampling
         )
         if not self.apply_scale_offset:
-            return raw_data
+            return raster
 
+        if not isinstance(item, EarthDailyItem):
+            raise TypeError(f"expected EarthDailyItem, got {type(item)}")
         asset_key = self._get_asset_by_band(bands)
-        item = self.get_item_by_name(item_name)
-        return self._apply_scale_offsets(
-            raw_data,
+        result = self._apply_scale_offsets(
+            raster.get_chw_array(),
             scale_offsets=item.asset_scale_offsets.get(asset_key),
-            item_name=item_name,
+            item_name=item.name,
             asset_key=asset_key,
         )
+        return RasterArray(chw_array=result, time_range=item.geometry.time_range)
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[EarthDailyItem]]]:
+    ) -> list[list[MatchedItemGroup[EarthDailyItem]]]:
         """Get Sentinel-2 items intersecting the given geometries.
 
         Uses raw STAC search (not Sentinel2CollectionHelper) so that collection
@@ -813,19 +868,6 @@ class Sentinel2(EarthDaily):
 
         return groups
 
-    def _download_asset_to_tmp(
-        self, asset_url: str, tmp_dir: str, asset_key: str, item_name: str
-    ) -> str:
-        local_fname = os.path.join(tmp_dir, f"{item_name}_{asset_key}.tif")
-        with requests.get(
-            asset_url, stream=True, timeout=self.timeout.total_seconds()
-        ) as r:
-            r.raise_for_status()
-            with open(local_fname, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-        return local_fname
-
     def ingest(
         self,
         tile_store: TileStoreWithLayer,
@@ -842,7 +884,7 @@ class Sentinel2(EarthDaily):
                     asset_url = item.asset_urls.get(asset_key)
                     if asset_url is None:
                         continue
-                    if tile_store.is_raster_ready(item.name, band_names):
+                    if tile_store.is_raster_ready(item, band_names):
                         continue
 
                     local_fname = self._download_asset_to_tmp(
@@ -851,7 +893,10 @@ class Sentinel2(EarthDaily):
 
                     if not self.apply_scale_offset:
                         tile_store.write_raster_file(
-                            item.name, band_names, UPath(local_fname)
+                            item,
+                            band_names,
+                            UPath(local_fname),
+                            time_range=item.geometry.time_range,
                         )
                         continue
 
@@ -866,5 +911,292 @@ class Sentinel2(EarthDaily):
 
                         projection, bounds = get_raster_projection_and_bounds(src)
                     tile_store.write_raster(
-                        item.name, band_names, projection, bounds, array
+                        item,
+                        band_names,
+                        projection,
+                        bounds,
+                        RasterArray(
+                            chw_array=array,
+                            time_range=item.geometry.time_range,
+                        ),
                     )
+
+
+class Sentinel2L2A(EarthDaily):
+    """Sentinel-2 L2A on EarthDaily platform using `sentinel-2-l2a` collection.
+
+    This collection exposes the same asset keys as Planetary Computer Sentinel-2.
+    """
+
+    COLLECTION_NAME = "sentinel-2-l2a"
+
+    BANDS = {
+        "B01": ["B01"],
+        "B02": ["B02"],
+        "B03": ["B03"],
+        "B04": ["B04"],
+        "B05": ["B05"],
+        "B06": ["B06"],
+        "B07": ["B07"],
+        "B08": ["B08"],
+        "B09": ["B09"],
+        "B11": ["B11"],
+        "B12": ["B12"],
+        "B8A": ["B8A"],
+        "visual": ["R", "G", "B"],
+    }
+    PROCESSING_BASELINE_PATTERN = re.compile(r"(?:^|_)N(?P<baseline>\d{4})(?:_|$)")
+    HARMONIZE_PROCESSING_BASELINE = 400
+    HARMONIZE_CUTOFF = datetime(2022, 1, 25)
+    HARMONIZE_OFFSET = 1000
+
+    def __init__(
+        self,
+        harmonize: bool = False,
+        assets: list[str] | None = None,
+        context: DataSourceContext = DataSourceContext(),
+        **kwargs: Any,
+    ) -> None:
+        """Initialize a new EarthDaily Sentinel2L2A data source."""
+        self.harmonize = harmonize
+        self._harmonize_callback_cache: dict[
+            str, Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None
+        ] = {}
+
+        if context.layer_config is not None:
+            asset_bands: dict[str, list[str]] = {}
+            for asset_key, band_names in self.BANDS.items():
+                for band_set in context.layer_config.band_sets:
+                    if set(band_set.bands).intersection(set(band_names)):
+                        asset_bands[asset_key] = band_names
+                        break
+        elif assets is not None:
+            unknown_assets = [
+                asset_key for asset_key in assets if asset_key not in self.BANDS
+            ]
+            if unknown_assets:
+                raise ValueError(
+                    f"unknown EarthDaily Sentinel-2 L2A assets {unknown_assets}; "
+                    f"supported assets are {sorted(self.BANDS.keys())}"
+                )
+            asset_bands = {asset_key: self.BANDS[asset_key] for asset_key in assets}
+        else:
+            asset_bands = dict(self.BANDS)
+
+        super().__init__(
+            collection_name=self.COLLECTION_NAME,
+            asset_bands=asset_bands,
+            skip_items_missing_assets=True,
+            read_scale_offsets=False,
+            context=context,
+            **kwargs,
+        )
+
+    def _normalize_dt(self, dt: datetime) -> datetime:
+        if dt.tzinfo is None:
+            return dt
+        return dt.astimezone(UTC).replace(tzinfo=None)
+
+    def _resolve_metadata_url(self, item: EarthDailyItem) -> str:
+        for asset_key in self.METADATA_ASSET_KEYS:
+            if asset_key in item.asset_urls:
+                return item.asset_urls[asset_key]
+        raise KeyError(
+            "missing metadata asset URL (expected one of: "
+            "product_metadata, granule_metadata)"
+        )
+
+    def _get_product_xml(self, item: EarthDailyItem) -> ET.Element:
+        asset_url = self._resolve_metadata_url(item)
+        response = requests.get(asset_url, timeout=self.timeout.total_seconds())
+        response.raise_for_status()
+        return ET.fromstring(response.content)
+
+    def _get_processing_baseline(self, item_name: str) -> int | None:
+        match = self.PROCESSING_BASELINE_PATTERN.search(item_name)
+        if match is None:
+            return None
+        return int(match.group("baseline"))
+
+    def _fallback_harmonize_callback(
+        self, item: EarthDailyItem
+    ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
+        processing_baseline = None
+        if item.product_id is not None:
+            processing_baseline = self._get_processing_baseline(item.product_id)
+        if processing_baseline is not None:
+            if processing_baseline < self.HARMONIZE_PROCESSING_BASELINE:
+                return None
+        else:
+            if item.geometry.time_range is None:
+                return None
+            start_time = self._normalize_dt(item.geometry.time_range[0])
+            if start_time < self.HARMONIZE_CUTOFF:
+                return None
+
+        offset = self.HARMONIZE_OFFSET
+
+        def callback(array: npt.NDArray[Any]) -> npt.NDArray[Any]:
+            if array.dtype != np.uint16:
+                return array
+            return np.clip(array, offset, None) - offset  # type: ignore
+
+        return callback
+
+    def _get_harmonize_callback_for_item(
+        self, item: EarthDailyItem, asset_key: str
+    ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
+        if not self.harmonize or asset_key == "visual":
+            return None
+        if item.name in self._harmonize_callback_cache:
+            return self._harmonize_callback_cache[item.name]
+
+        callback = get_harmonize_callback(self._get_product_xml(item))
+        if callback is None:
+            callback = self._fallback_harmonize_callback(item)
+            if callback is not None:
+                logger.debug(
+                    "EarthDaily Sentinel2L2A using product-id/item-id/date-based harmonization fallback for %s",
+                    item.name,
+                )
+
+        self._harmonize_callback_cache[item.name] = callback
+        return callback
+
+    def read_raster(
+        self,
+        layer_name: str,
+        item: Item,
+        bands: list[str],
+        projection: Projection,
+        bounds: PixelBounds,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> RasterArray:
+        """Read raster data for an item and apply harmonization when configured."""
+        if not isinstance(item, EarthDailyItem):
+            raise TypeError(f"expected EarthDailyItem, got {type(item)}")
+        raster = super().read_raster(
+            layer_name, item, bands, projection, bounds, resampling=resampling
+        )
+
+        asset_key = self._get_asset_by_band(bands)
+        harmonize_callback = self._get_harmonize_callback_for_item(item, asset_key)
+        if harmonize_callback is None:
+            return raster
+
+        return RasterArray(
+            chw_array=harmonize_callback(raster.get_chw_array()),
+            time_range=item.geometry.time_range,
+        )
+
+    def ingest(
+        self,
+        tile_store: TileStoreWithLayer,
+        items: list[EarthDailyItem],
+        geometries: list[list[STGeometry]],
+    ) -> None:
+        """Ingest Sentinel-2 L2A items with optional harmonization."""
+        for item in items:
+            for asset_key, band_names in self.asset_bands.items():
+                asset_url = item.asset_urls.get(asset_key)
+                if asset_url is None:
+                    continue
+                if tile_store.is_raster_ready(item, band_names):
+                    continue
+
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    local_fname = self._download_asset_to_tmp(
+                        asset_url, tmp_dir, asset_key, item.name
+                    )
+
+                    harmonize_callback = self._get_harmonize_callback_for_item(
+                        item, asset_key
+                    )
+                    if harmonize_callback is None:
+                        tile_store.write_raster_file(
+                            item,
+                            band_names,
+                            UPath(local_fname),
+                            time_range=item.geometry.time_range,
+                        )
+                        continue
+
+                    with rasterio.open(local_fname) as src:
+                        array = src.read()
+                        projection, bounds = get_raster_projection_and_bounds(src)
+                    array = harmonize_callback(array)
+                    tile_store.write_raster(
+                        item,
+                        band_names,
+                        projection,
+                        bounds,
+                        RasterArray(
+                            chw_array=array,
+                            time_range=item.geometry.time_range,
+                        ),
+                    )
+
+
+class Biophysical(EarthDaily):
+    """Biophysical variables on EarthDaily platform (EDAgro layers).
+
+    Supported variables (each maps to its own EarthDaily STAC collection + asset key):
+    - `lai` → collection `lai-layer-edagro`, asset `lai`
+    - `fapar` → collection `fapar-layer-edagro`, asset `fapar`
+    - `fcover` → collection `fcover-layer-edagro`, asset `fcover`
+    """
+
+    VARIABLES: dict[str, dict[str, str]] = {
+        "lai": {"collection": "lai-layer-edagro", "asset": "lai"},
+        "fapar": {"collection": "fapar-layer-edagro", "asset": "fapar"},
+        "fcover": {"collection": "fcover-layer-edagro", "asset": "fcover"},
+    }
+
+    def __init__(
+        self,
+        variable: Literal["lai", "fapar", "fcover"],
+        *,
+        query: dict[str, Any] | None = None,
+        sort_by: str | None = None,
+        sort_ascending: bool = True,
+        timeout: timedelta = timedelta(seconds=10),
+        cache_dir: str | None = None,
+        max_retries: int = 3,
+        retry_backoff_factor: float = 5.0,
+        context: DataSourceContext = DataSourceContext(),
+    ) -> None:
+        """Initialize an EarthDaily biophysical variable data source.
+
+        Args:
+            variable: one of `lai`, `fapar`, or `fcover`.
+            query: optional STAC API `query` filter passed to searches.
+            sort_by: optional STAC item property to sort by before grouping/matching.
+            sort_ascending: whether to sort ascending when sort_by is set.
+            timeout: timeout for HTTP asset downloads (when ingesting).
+            cache_dir: optional directory to cache item metadata by item id.
+            max_retries: max retries for EarthDaily API client (search/get item).
+            retry_backoff_factor: backoff factor for EarthDaily API client retries.
+            context: rslearn data source context.
+        """
+        if variable not in self.VARIABLES:
+            raise ValueError(
+                f"unknown biophysical variable {variable}; supported variables are "
+                f"{sorted(self.VARIABLES.keys())}"
+            )
+        cfg = self.VARIABLES[variable]
+        self.variable = variable
+
+        asset_key = cfg["asset"]
+        super().__init__(
+            collection_name=cfg["collection"],
+            asset_bands={asset_key: [asset_key]},
+            query=query,
+            sort_by=sort_by,
+            sort_ascending=sort_ascending,
+            timeout=timeout,
+            skip_items_missing_assets=True,
+            cache_dir=cache_dir,
+            max_retries=max_retries,
+            retry_backoff_factor=retry_backoff_factor,
+            context=context,
+        )

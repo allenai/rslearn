@@ -62,14 +62,15 @@ def test_read_raster_applies_asset_scale_offset(tmp_path: Path) -> None:
     projection = Projection(crs, 1, -1)
     out = ds.read_raster(
         layer_name="layer",
-        item_name="item1",
+        item=item,
         bands=["B04"],
         projection=projection,
         bounds=(0, 0, 2, 2),
     )
 
-    assert out.dtype == np.float32
-    np.testing.assert_allclose(out[0], raw.astype(np.float32) * 0.001 + 1.0)
+    arr = out.get_chw_array()
+    assert arr.dtype == np.float32
+    np.testing.assert_allclose(arr[0], raw.astype(np.float32) * 0.001 + 1.0)
 
 
 def test_read_raster_no_apply_scale_offset_returns_raw(tmp_path: Path) -> None:
@@ -107,11 +108,30 @@ def test_read_raster_no_apply_scale_offset_returns_raw(tmp_path: Path) -> None:
     projection = Projection(crs, 1, -1)
     out = ds.read_raster(
         layer_name="layer",
-        item_name="item1",
+        item=item,
         bands=["B04"],
         projection=projection,
         bounds=(0, 0, 2, 2),
     )
 
-    assert out.dtype == raw.dtype
-    np.testing.assert_array_equal(out[0], raw)
+    arr = out.get_chw_array()
+    assert arr.dtype == raw.dtype
+    np.testing.assert_array_equal(arr[0], raw)
+
+
+def test_earthdaily_item_serialize_roundtrip_preserves_product_id() -> None:
+    geom = STGeometry(
+        Projection(CRS.from_epsg(3857), 1, -1),
+        shapely.box(0, 0, 2, 2),
+        (datetime(2024, 1, 1, tzinfo=UTC), datetime(2024, 1, 2, tzinfo=UTC)),
+    )
+    item = EarthDailyItem(
+        name="item1",
+        geometry=geom,
+        asset_urls={"red": "/tmp/red.tif"},
+        product_id="S2A_MSIL2A_20240101T000000_N0511_R080_T15CWM_20240101T150509",
+    )
+
+    restored = EarthDailyItem.deserialize(item.serialize())
+
+    assert restored.product_id == item.product_id

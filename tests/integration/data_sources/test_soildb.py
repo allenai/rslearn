@@ -23,6 +23,7 @@ from rslearn.data_sources.soildb import SoilDB
 from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.utils.geometry import Projection, STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 # seattle2020 fixture is a UTM box; we need WGS84 bounds for the mock STAC item.
@@ -44,7 +45,7 @@ def _make_test_geotiff(path: pathlib.Path) -> pathlib.Path:
     data = np.ones((1, height, width), dtype=np.uint16) * 7
     raster_dir = UPath(path / "raster")
     fmt = GeotiffRasterFormat()
-    fmt.encode_raster(raster_dir, projection, bounds, data)
+    fmt.encode_raster(raster_dir, projection, bounds, RasterArray(chw_array=data))
     return raster_dir / fmt.fname
 
 
@@ -118,7 +119,7 @@ def test_materialize_auto_asset(
 
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    assert len(item_groups) > 0 and len(item_groups[0]) > 0
+    assert len(item_groups) > 0 and len(item_groups[0].items) > 0
 
     bounds = (
         int(seattle2020.shp.bounds[0]),
@@ -139,7 +140,12 @@ def test_materialize_auto_asset(
     )
     window.save()
 
-    data_source.materialize(window, item_groups, "layer", layer_config)
+    data_source.materialize(
+        window,
+        [group.items for group in item_groups],
+        "layer",
+        layer_config,
+    )
     raster_dir = window.get_raster_dir("layer", [band_name])
     assert (raster_dir / "geotiff.tif").exists()
 

@@ -27,7 +27,7 @@ def test_aws_sentinel2_element84(
     print("get items")
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    item = item_groups[0][0]
+    item = item_groups[0].items[0]
 
     tile_store_dir = UPath(tmp_path)
     tile_store = DefaultTileStore(str(tile_store_dir))
@@ -36,9 +36,11 @@ def test_aws_sentinel2_element84(
     print("ingest")
     layer_name = "layer"
     data_source.ingest(
-        TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+        TileStoreWithLayer(tile_store, layer_name),
+        item_groups[0].items,
+        [[seattle2020]],
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+    assert tile_store.is_raster_ready(layer_name, item, [band_name])
 
 
 def test_materialize_all_bands(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
@@ -46,7 +48,7 @@ def test_materialize_all_bands(tmp_path: pathlib.Path, seattle2020: STGeometry) 
     data_source = Sentinel2()
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    item = item_groups[0][0]
+    item = item_groups[0].items[0]
 
     bounds = (
         int(seattle2020.shp.bounds[0]),
@@ -56,14 +58,15 @@ def test_materialize_all_bands(tmp_path: pathlib.Path, seattle2020: STGeometry) 
     )
 
     for bands in Sentinel2.ASSET_BANDS.values():
-        array = data_source.read_raster(
+        raster_array = data_source.read_raster(
             # layer_name is ignored
             layer_name="fake",
-            item_name=item.name,
+            item=item,
             bands=bands,
             projection=seattle2020.projection,
             bounds=bounds,
         )
+        array = raster_array.get_chw_array()
         assert array.max() > 0 and array.shape == (
             len(bands),
             bounds[3] - bounds[1],
@@ -99,6 +102,9 @@ def test_harmonization_preapplied(
     aws_data_source = Sentinel2(assets=["red"])
     pc_source = PlanetaryComputerSentinel2(harmonize=True, assets=["B04"])
 
+    aws_item = aws_data_source.get_item_by_name(aws_item_name)
+    pc_item = pc_source.get_item_by_name(pc_item_name)
+
     projection = seattle2020.projection
     bounds = (
         int(seattle2020.shp.bounds[0]),
@@ -107,11 +113,11 @@ def test_harmonization_preapplied(
         int(seattle2020.shp.bounds[3]),
     )
     aws_array = aws_data_source.read_raster(
-        "unused", aws_item_name, ["B04"], projection, bounds
-    )
+        "unused", aws_item, ["B04"], projection, bounds
+    ).get_chw_array()
     pc_array = pc_source.read_raster(
-        "unused", pc_item_name, ["B04"], projection, bounds
-    )
+        "unused", pc_item, ["B04"], projection, bounds
+    ).get_chw_array()
     # The 2026 scenes are very similar (all pixels are at most 1 off). But the 2021
     # scenes seem to have differences despite being from the same processing baseline.
     # I checked the raw GeoTIFFs from each source and they do differ, so it probably

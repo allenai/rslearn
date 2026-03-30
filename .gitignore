@@ -4,3 +4,4 @@ __pycache__
 build
 rslearn.egg-info
 .DS_Store
+.cursor/

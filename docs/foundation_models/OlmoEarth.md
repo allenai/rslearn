@@ -3,15 +3,6 @@
 This component wraps the [OlmoEarth model](https://github.com/allenai/olmoearth_pretrain)
 for fine-tuning in rslearn.
 
-### Installation
-
-Due to license incompatibility, the `olmoearth_pretrain` package required for this
-component is not included as a dependency and must be installed explicitly:
-
-```bash
-pip install olmoearth_pretrain
-```
-
 ### Usage
 
 OlmoEarth inputs time series of any subset of Sentinel-2 L2A, Sentinel-1 IW GRD vv+vh,

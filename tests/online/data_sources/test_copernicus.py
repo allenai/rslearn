@@ -44,7 +44,7 @@ class TestCopernicus:
         logger.info("get items")
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
         item_groups = data_source.get_items([seattle2020], query_config)[0]
-        item = item_groups[0][0]
+        item = item_groups[0].items[0]
 
         tile_store_dir = UPath(tmp_path)
         tile_store = DefaultTileStore(str(tile_store_dir))
@@ -53,9 +53,11 @@ class TestCopernicus:
         logger.info(f"ingest item {item.name}")
         layer_name = "layer"
         data_source.ingest(
-            TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[0].items,
+            [[seattle2020]],
         )
-        assert tile_store.is_raster_ready(layer_name, item.name, band_names)
+        assert tile_store.is_raster_ready(layer_name, item, band_names)
 
 
 class TestSentinel2:
@@ -75,7 +77,7 @@ class TestSentinel2:
         logger.info("get items")
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
         item_groups = data_source.get_items([seattle2020], query_config)[0]
-        item = item_groups[0][0]
+        item = item_groups[0].items[0]
 
         tile_store_dir = UPath(tmp_path)
         tile_store = DefaultTileStore(str(tile_store_dir))
@@ -84,7 +86,9 @@ class TestSentinel2:
         logger.info(f"ingest item {item.name}")
         layer_name = "layer"
         data_source.ingest(
-            TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[0].items,
+            [[seattle2020]],
         )
 
         # So with harmonization, B04 should be about 10 times of TCI.
@@ -98,20 +102,24 @@ class TestSentinel2:
         )
         b04 = tile_store.read_raster(
             layer_name,
-            item.name,
+            item,
             ["B04"],
             seattle2020.projection,
             bounds,
             resampling=Resampling.nearest,
-        )[0, :, :]
-        red = tile_store.read_raster(
-            layer_name,
-            item.name,
-            ["R", "G", "B"],
-            seattle2020.projection,
-            bounds,
-            resampling=Resampling.nearest,
-        )[0, :, :].astype(np.uint16)
+        ).get_chw_array()[0, :, :]
+        red = (
+            tile_store.read_raster(
+                layer_name,
+                item,
+                ["R", "G", "B"],
+                seattle2020.projection,
+                bounds,
+                resampling=Resampling.nearest,
+            )
+            .get_chw_array()[0, :, :]
+            .astype(np.uint16)
+        )
         check_array = (b04 > red * 8) & (b04 < red * 12)
         count = np.count_nonzero((~check_array) & (b04 > 500) & (b04 < 2500))
 
@@ -133,7 +141,7 @@ class TestSentinel1:
         logger.info("get items")
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
         item_groups = data_source.get_items([seattle2020], query_config)[0]
-        item = item_groups[0][0]
+        item = item_groups[0].items[0]
 
         tile_store_dir = UPath(tmp_path)
         tile_store = DefaultTileStore(str(tile_store_dir))
@@ -142,7 +150,9 @@ class TestSentinel1:
         logger.info(f"ingest item {item.name}")
         layer_name = "layer"
         data_source.ingest(
-            TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[0].items,
+            [[seattle2020]],
         )
-        assert tile_store.is_raster_ready(layer_name, item.name, ["vv"])
-        assert tile_store.is_raster_ready(layer_name, item.name, ["vh"])
+        assert tile_store.is_raster_ready(layer_name, item, ["vv"])
+        assert tile_store.is_raster_ready(layer_name, item, ["vh"])

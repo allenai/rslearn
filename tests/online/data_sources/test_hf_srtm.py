@@ -15,7 +15,7 @@ def test_hf_srtm_use_srtm1(tmp_path: pathlib.Path, seattle2020: STGeometry) -> N
 
     query_config = QueryConfig(space_mode=SpaceMode.MOSAIC, max_matches=1)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    item = item_groups[0][0]
+    item = item_groups[0].items[0]
 
     # Seattle should get SRTM1 (higher resolution available for US)
     assert "SRTM1" in item.name
@@ -26,9 +26,11 @@ def test_hf_srtm_use_srtm1(tmp_path: pathlib.Path, seattle2020: STGeometry) -> N
 
     layer_name = "layer"
     data_source.ingest(
-        TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+        TileStoreWithLayer(tile_store, layer_name),
+        item_groups[0].items,
+        [[seattle2020]],
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+    assert tile_store.is_raster_ready(layer_name, item, [band_name])
 
 
 def test_hf_srtm_use_srtm3(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
@@ -38,7 +40,7 @@ def test_hf_srtm_use_srtm3(tmp_path: pathlib.Path, seattle2020: STGeometry) -> N
 
     query_config = QueryConfig(space_mode=SpaceMode.MOSAIC, max_matches=1)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    item = item_groups[0][0]
+    item = item_groups[0].items[0]
 
     # With always_use_3arcsecond=True, should get SRTM3
     assert "SRTM3" in item.name
@@ -49,9 +51,11 @@ def test_hf_srtm_use_srtm3(tmp_path: pathlib.Path, seattle2020: STGeometry) -> N
 
     layer_name = "layer"
     data_source.ingest(
-        TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+        TileStoreWithLayer(tile_store, layer_name),
+        item_groups[0].items,
+        [[seattle2020]],
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+    assert tile_store.is_raster_ready(layer_name, item, [band_name])
 
 
 def test_hf_srtm_with_cache_dir(
@@ -64,7 +68,7 @@ def test_hf_srtm_with_cache_dir(
 
     query_config = QueryConfig(space_mode=SpaceMode.MOSAIC, max_matches=1)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    item = item_groups[0][0]
+    item = item_groups[0].items[0]
 
     tile_store_dir = UPath(tmp_path / "tiles")
     tile_store = DefaultTileStore(str(tile_store_dir))
@@ -72,7 +76,9 @@ def test_hf_srtm_with_cache_dir(
 
     layer_name = "layer"
     data_source.ingest(
-        TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+        TileStoreWithLayer(tile_store, layer_name),
+        item_groups[0].items,
+        [[seattle2020]],
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+    assert tile_store.is_raster_ready(layer_name, item, [band_name])
     assert (cache_dir / data_source.FILE_LIST_FILENAME).exists()

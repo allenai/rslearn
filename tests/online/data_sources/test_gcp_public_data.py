@@ -50,15 +50,17 @@ class TestSentinel2:
 
         print("get items")
         item_groups = data_source.get_items([seattle2020], query_config)[0]
-        item = item_groups[0][0]
+        item = item_groups[0].items[0]
         tile_store = DefaultTileStore(str(tile_store_dir))
         tile_store.set_dataset_path(tile_store_dir)
         layer_name = "layer"
         print("ingest")
         data_source.ingest(
-            TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[0].items,
+            [[seattle2020]],
         )
-        assert tile_store.is_raster_ready(layer_name, item.name, [TEST_BAND])
+        assert tile_store.is_raster_ready(layer_name, item, [TEST_BAND])
 
     # use_rtree_index=True and use_bigquery=False is not supported, so we test all the
     # other combinations.
@@ -154,7 +156,7 @@ def test_prepare_antimeridian_yes_matches(sentinel2_without_rtree: Sentinel2) ->
         [negative_geom, positive_geom], query_config
     )
     for group in groups:
-        assert len(group) > 0 and len(group[0]) > 0
+        assert len(group) > 0 and len(group[0].items) > 0
 
 
 def test_product_with_missing_xml(sentinel2_without_rtree: Sentinel2) -> None:
@@ -200,7 +202,7 @@ def test_search_intersecting_product_with_missing_xml(
     # Ensure it includes products with matching tile, but does not throw error.
     query_config = QueryConfig(space_mode=SpaceMode.MOSAIC, max_matches=1000)
     item_groups = sentinel2_without_rtree.get_items([geometry], query_config)[0]
-    flat_items = [item for item_list in item_groups for item in item_list]
+    flat_items = [item for item_group in item_groups for item in item_group.items]
     matching_items = [
         item for item in flat_items if item.name.split("_")[5][1:] == cell_id
     ]

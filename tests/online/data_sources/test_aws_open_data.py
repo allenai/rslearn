@@ -37,15 +37,17 @@ class TestNaip:
 
         print("get items")
         item_groups = data_source.get_items([seattle2020], query_config)[0]
-        item = item_groups[0][0]
+        item = item_groups[0].items[0]
         tile_store = DefaultTileStore(str(tile_store_dir))
         tile_store.set_dataset_path(tile_store_dir)
         layer_name = "layer"
         print("ingest")
         data_source.ingest(
-            TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[0].items,
+            [[seattle2020]],
         )
-        assert tile_store.is_raster_ready(layer_name, item.name, self.TEST_BANDS)
+        assert tile_store.is_raster_ready(layer_name, item, self.TEST_BANDS)
 
     @pytest.mark.parametrize("use_rtree_index", [False, True])
     def test_local(
@@ -100,15 +102,17 @@ class TestSentinel2:
         )
         print("get items")
         item_groups = data_source.get_items([seattle2020], query_config)[0]
-        item = item_groups[0][0]
+        item = item_groups[0].items[0]
         tile_store = DefaultTileStore(str(tile_store_dir))
         tile_store.set_dataset_path(tile_store_dir)
         layer_name = "layer"
         print("ingest")
         data_source.ingest(
-            TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[0].items,
+            [[seattle2020]],
         )
-        assert tile_store.is_raster_ready(layer_name, item.name, [self.TEST_BAND])
+        assert tile_store.is_raster_ready(layer_name, item, [self.TEST_BAND])
 
     def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         """Test ingesting to local filesystem."""

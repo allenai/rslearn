@@ -25,9 +25,11 @@ from upath import UPath
 
 import rslearn.data_sources.utils
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_EPSG, WGS84_PROJECTION
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import GridIndex, Projection, STGeometry, daterange
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 from .copernicus import get_harmonize_callback, get_sentinel2_tiles
@@ -275,7 +277,7 @@ class Naip(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[NaipItem]]]:
+    ) -> list[list[MatchedItemGroup[NaipItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -337,7 +339,7 @@ class Naip(DataSource):
         """
         for item in items:
             bands = ["R", "G", "B", "IR"]
-            if tile_store.is_raster_ready(item.name, bands):
+            if tile_store.is_raster_ready(item, bands):
                 continue
 
             with tempfile.TemporaryDirectory() as tmp_dir:
@@ -345,7 +347,9 @@ class Naip(DataSource):
                 self.bucket.download_file(
                     item.blob_path, fname, ExtraArgs={"RequestPayer": "requester"}
                 )
-                tile_store.write_raster_file(item.name, bands, UPath(fname))
+                tile_store.write_raster_file(
+                    item, bands, UPath(fname), time_range=item.geometry.time_range
+                )
 
 
 class Sentinel2Modality(Enum):
@@ -556,7 +560,7 @@ class Sentinel2(
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Sentinel2Item]]]:
+    ) -> list[list[MatchedItemGroup[Sentinel2Item]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -696,7 +700,7 @@ class Sentinel2(
         """
         for item in items:
             for fname, band_names in self.band_fnames[self.modality]:
-                if tile_store.is_raster_ready(item.name, band_names):
+                if tile_store.is_raster_ready(item, band_names):
                     continue
 
                 with tempfile.TemporaryDirectory() as tmp_dir:
@@ -726,10 +730,20 @@ class Sentinel2(
                             projection, bounds = get_raster_projection_and_bounds(src)
                         array = harmonize_callback(array)
                         tile_store.write_raster(
-                            item.name, band_names, projection, bounds, array
+                            item,
+                            band_names,
+                            projection,
+                            bounds,
+                            RasterArray(
+                                chw_array=array,
+                                time_range=item.geometry.time_range,
+                            ),
                         )
 
                     else:
                         tile_store.write_raster_file(
-                            item.name, band_names, UPath(local_fname)
+                            item,
+                            band_names,
+                            UPath(local_fname),
+                            time_range=item.geometry.time_range,
                         )

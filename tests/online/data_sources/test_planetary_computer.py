@@ -30,7 +30,7 @@ def test_sentinel1(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
     print("get items")
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    item = item_groups[0][0]
+    item = item_groups[0].items[0]
 
     tile_store_dir = UPath(tmp_path)
     tile_store = DefaultTileStore(str(tile_store_dir))
@@ -39,9 +39,11 @@ def test_sentinel1(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
     print("ingest")
     layer_name = "layer"
     data_source.ingest(
-        TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+        TileStoreWithLayer(tile_store, layer_name),
+        item_groups[0].items,
+        [[seattle2020]],
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+    assert tile_store.is_raster_ready(layer_name, item, [band_name])
 
 
 def test_sentinel2(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
@@ -52,7 +54,7 @@ def test_sentinel2(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
     print("get items")
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    item = item_groups[0][0]
+    item = item_groups[0].items[0]
 
     tile_store_dir = UPath(tmp_path)
     tile_store = DefaultTileStore(str(tile_store_dir))
@@ -61,9 +63,11 @@ def test_sentinel2(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
     print("ingest")
     layer_name = "layer"
     data_source.ingest(
-        TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+        TileStoreWithLayer(tile_store, layer_name),
+        item_groups[0].items,
+        [[seattle2020]],
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+    assert tile_store.is_raster_ready(layer_name, item, [band_name])
 
 
 def test_cache_dir(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
@@ -124,7 +128,7 @@ class TestSentinel2Pagination:
         item_groups = data_source.get_items([seattle_long_time_range], query_config)[0]
 
         # Flatten all items from all groups (each group has one item with INTERSECTS).
-        all_items = [item for group in item_groups for item in group]
+        all_items = [item for group in item_groups for item in group.items]
 
         # Verify we got more than 1000 items (proving pagination worked).
         assert len(all_items) > 1000, (
@@ -139,7 +143,7 @@ def test_cop_dem_glo_30(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None
 
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    item = item_groups[0][0]
+    item = item_groups[0].items[0]
 
     tile_store_dir = UPath(tmp_path)
     tile_store = DefaultTileStore(str(tile_store_dir))
@@ -147,6 +151,8 @@ def test_cop_dem_glo_30(tmp_path: pathlib.Path, seattle2020: STGeometry) -> None
 
     layer_name = "layer"
     data_source.ingest(
-        TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+        TileStoreWithLayer(tile_store, layer_name),
+        item_groups[0].items,
+        [[seattle2020]],
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, [band_name])
+    assert tile_store.is_raster_ready(layer_name, item, [band_name])

@@ -2,6 +2,7 @@
 
 import io
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -17,7 +18,6 @@ import fiona
 import fiona.transform
 import shapely
 import shapely.geometry
-import tqdm
 from upath import UPath
 
 import rslearn.data_sources.utils
@@ -25,14 +25,17 @@ from rslearn.const import SHAPEFILE_AUX_EXTENSIONS, WGS84_PROJECTION
 from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.grid_index import GridIndex
 
-from .data_source import DataSourceContext, Item, QueryConfig
+from .data_source import DataSourceContext, Item, ItemLookupDataSource, QueryConfig
 
 WRS2_GRID_SIZE = 1.0
+
+logger = logging.getLogger(__name__)
 
 
 class LandsatOliTirsItem(Item):
@@ -75,7 +78,10 @@ class LandsatOliTirsItem(Item):
         )
 
 
-class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
+class LandsatOliTirs(
+    DirectMaterializeDataSource[LandsatOliTirsItem],
+    ItemLookupDataSource[LandsatOliTirsItem],
+):
     """A data source for Landsat 8/9 OLI-TIRS imagery on AWS.
 
     Specifically, uses the usgs-landsat S3 bucket maintained by USGS. The data includes
@@ -134,9 +140,16 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
             needed_year_pathrows: set of (year, path, row) where we need to search for
                 images.
         """
-        for year, path, row in tqdm.tqdm(
-            needed_year_pathrows, desc="Reading product infos"
-        ):
+        year_pathrows = sorted(needed_year_pathrows)
+        total = len(year_pathrows)
+        for cur_idx, (year, path, row) in enumerate(year_pathrows, start=1):
+            logger.debug(
+                "Reading product infos (%s) year=%s path=%s row=%s",
+                f"{cur_idx}/{total}",
+                year,
+                path,
+                row,
+            )
             assert len(path) == 3
             assert len(row) == 3
             local_fname = self.metadata_cache_dir / f"{year}_{path}_{row}.json"
@@ -267,7 +280,7 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[LandsatOliTirsItem]]]:
+    ) -> list[list[MatchedItemGroup[LandsatOliTirsItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -315,7 +328,7 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
             elif self.sort_by is not None:
                 raise ValueError(f"invalid sort_by setting ({self.sort_by})")
 
-            cur_groups: list[list[LandsatOliTirsItem]] = (
+            cur_groups: list[MatchedItemGroup[LandsatOliTirsItem]] = (
                 rslearn.data_sources.utils.match_candidate_items_to_window(
                     geometry, cur_items, query_config
                 )
@@ -344,19 +357,16 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
 
     # --- DirectMaterializeDataSource implementation ---
 
-    def get_asset_url(self, item_name: str, asset_key: str) -> str:
+    def get_asset_url(self, item: LandsatOliTirsItem, asset_key: str) -> str:
         """Get the presigned URL to read the asset for the given item and asset key.
 
         Args:
-            item_name: the name of the item.
+            item: the item.
             asset_key: the key identifying which asset to get (the band name).
 
         Returns:
             the presigned URL to read the asset from.
         """
-        # Get the item since it has the blob path.
-        item = self.get_item_by_name(item_name)
-
         # For Landsat, the asset_key is the band name (e.g., "B1", "B2", etc.).
         blob_key = item.blob_path + f"{asset_key}.TIF"
         return self.client.generate_presigned_url(
@@ -405,7 +415,7 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
         for item, cur_geometries in zip(items, geometries):
             for band in self.BANDS:
                 band_names = [band]
-                if tile_store.is_raster_ready(item.name, band_names):
+                if tile_store.is_raster_ready(item, band_names):
                     continue
 
                 with tempfile.TemporaryDirectory() as tmp_dir:
@@ -415,4 +425,9 @@ class LandsatOliTirs(DirectMaterializeDataSource[LandsatOliTirsItem]):
                         fname,
                         ExtraArgs={"RequestPayer": "requester"},
                     )
-                    tile_store.write_raster_file(item.name, band_names, UPath(fname))
+                    tile_store.write_raster_file(
+                        item,
+                        band_names,
+                        UPath(fname),
+                        time_range=item.geometry.time_range,
+                    )

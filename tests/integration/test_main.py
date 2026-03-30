@@ -21,6 +21,7 @@ from rslearn.data_sources.soilgrids import SoilGrids
 from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.log_utils import get_logger
 from rslearn.utils.geometry import STGeometry
+from rslearn.utils.raster_array import RasterArray
 
 logger = get_logger(__name__)
 
@@ -143,6 +144,7 @@ class TestIngestion:
             "ingest",
             "--root",
             str(prepared_dataset.path),
+            "--no-ignore-errors",
         ]
         monkeypatch.setattr(sys, "argv", mock_args)
 
@@ -430,6 +432,7 @@ class TestMaterialization:
             "materialize",
             "--root",
             str(ds_path),
+            "--no-ignore-errors",
         ]
         monkeypatch.setattr(sys, "argv", mock_args)
         with pytest.raises(json.decoder.JSONDecodeError):
@@ -523,7 +526,7 @@ class TestMaterialization:
                 raise SoilGridsWcsError("msImageCreate(): out of memory")
             height = bounds[3] - bounds[1]
             width = bounds[2] - bounds[0]
-            return np.ones((1, height, width), dtype=np.float32)
+            return RasterArray(chw_array=np.ones((1, height, width), dtype=np.float32))
 
         monkeypatch.setattr(SoilGrids, "read_raster", fake_read_raster)
 

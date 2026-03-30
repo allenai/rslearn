@@ -13,6 +13,7 @@ from rslearn.data_sources.copernicus import (
     Sentinel1ProductType,
 )
 from rslearn.data_sources.copernicus import Sentinel1 as CopernicusSentinel1
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
@@ -61,7 +62,7 @@ class Sentinel1(DataSource, TileStore):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[CopernicusItem]]]:
+    ) -> list[list[MatchedItemGroup[CopernicusItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -97,7 +98,7 @@ class Sentinel1(DataSource, TileStore):
         for item in items:
             for band in self.bands:
                 band_names = [band]
-                if tile_store.is_raster_ready(item.name, band_names):
+                if tile_store.is_raster_ready(item, band_names):
                     continue
 
                 # Item name is like "S1C_IW_GRDH_1SDV_20250528T172106_20250528T172131_002534_00545C_B433.SAFE".
@@ -126,4 +127,9 @@ class Sentinel1(DataSource, TileStore):
                             f"encountered error while downloading s3://{self.bucket_name}/{blob_path}"
                         )
                         raise
-                    tile_store.write_raster_file(item.name, band_names, UPath(fname))
+                    tile_store.write_raster_file(
+                        item,
+                        band_names,
+                        UPath(fname),
+                        time_range=item.geometry.time_range,
+                    )

@@ -21,10 +21,11 @@ from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils import PixelBounds, Projection, STGeometry, get_global_raster_bounds
 from rslearn.utils.array import copy_spatial_array
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_transform_from_projection_and_bounds
 
 from .data_source import DataSource, DataSourceContext, Item
-from .utils import match_candidate_items_to_window
+from .utils import MatchedItemGroup, match_candidate_items_to_window
 
 WEB_MERCATOR_EPSG = 3857
 WEB_MERCATOR_UNITS = 2 * math.pi * 6378137
@@ -161,7 +162,7 @@ class XyzTiles(DataSource, TileStore):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[MatchedItemGroup[Item]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         In XyzTiles we treat the data source as containing a single item, i.e., the
@@ -232,14 +233,12 @@ class XyzTiles(DataSource, TileStore):
             self.tile_size,
         )
 
-    def is_raster_ready(
-        self, layer_name: str, item_name: str, bands: list[str]
-    ) -> bool:
+    def is_raster_ready(self, layer_name: str, item: Item, bands: list[str]) -> bool:
         """Checks if this raster has been written to the store.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item.
+            item: the item.
             bands: the list of bands identifying which specific raster to read.
 
         Returns:
@@ -249,12 +248,12 @@ class XyzTiles(DataSource, TileStore):
         # Always ready since we wrap accesses to the XYZ tile URL.
         return True
 
-    def get_raster_bands(self, layer_name: str, item_name: str) -> list[list[str]]:
+    def get_raster_bands(self, layer_name: str, item: Item) -> list[list[str]]:
         """Get the sets of bands that have been stored for the specified item.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item.
+            item: the item.
 
         Returns:
             a list of lists of bands that are in the tile store (with one raster
@@ -264,13 +263,13 @@ class XyzTiles(DataSource, TileStore):
         return [self.band_names]
 
     def get_raster_bounds(
-        self, layer_name: str, item_name: str, bands: list[str], projection: Projection
+        self, layer_name: str, item: Item, bands: list[str], projection: Projection
     ) -> PixelBounds:
         """Get the bounds of the raster in the specified projection.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item to check.
+            item: the item to check.
             bands: the list of bands identifying which specific raster to read. These
                 bands must match the bands of a stored raster.
             projection: the projection to get the raster's bounds in.
@@ -285,17 +284,17 @@ class XyzTiles(DataSource, TileStore):
     def read_raster(
         self,
         layer_name: str,
-        item_name: str,
+        item: Item,
         bands: list[str],
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
-    ) -> npt.NDArray[Any]:
+    ) -> RasterArray:
         """Read raster data from the store.
 
         Args:
             layer_name: the layer name or alias.
-            item_name: the item to read.
+            item: the item to read.
             bands: the list of bands identifying which specific raster to read. These
                 bands must match the bands of a stored raster.
             projection: the projection to read in.
@@ -322,7 +321,7 @@ class XyzTiles(DataSource, TileStore):
             math.ceil(projected_geometry.shp.bounds[3]),
         )
         # The item name is the URL template.
-        url_template = item_name
+        url_template = item.name
         array = self.read_bounds(url_template, projected_bounds)
         # Now project it back to the requested geometry.
         src_transform = get_transform_from_projection_and_bounds(
@@ -342,7 +341,7 @@ class XyzTiles(DataSource, TileStore):
             dst_transform=dst_transform,
             resampling=resampling,
         )
-        return dst_array
+        return RasterArray(chw_array=dst_array, time_range=item.geometry.time_range)
 
     def materialize(
         self,
@@ -350,6 +349,7 @@ class XyzTiles(DataSource, TileStore):
         item_groups: list[list[Item]],
         layer_name: str,
         layer_cfg: LayerConfig,
+        group_time_ranges: list[tuple[datetime, datetime] | None] | None = None,
     ) -> None:
         """Materialize data for the window.
 
@@ -358,6 +358,7 @@ class XyzTiles(DataSource, TileStore):
             item_groups: the items from get_items
             layer_name: the name of this layer
             layer_cfg: the config of this layer
+            group_time_ranges: optional request time range for each item group
         """
         RasterMaterializer().materialize(
             TileStoreWithLayer(self, layer_name),
@@ -365,4 +366,5 @@ class XyzTiles(DataSource, TileStore):
             layer_name,
             layer_cfg,
             item_groups,
+            group_time_ranges=group_time_ranges,
         )

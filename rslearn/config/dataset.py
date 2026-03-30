@@ -4,7 +4,7 @@ import copy
 import functools
 import json
 import warnings
-from datetime import timedelta
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -185,6 +185,16 @@ class BandSetConfig(BaseModel):
         default=None, description="Optional nodata value for each band."
     )
 
+    # Optional explicit spatial dimensions for the materialized output. When set,
+    # the projection resolution is adjusted so that the window's geographic extent
+    # maps to exactly spatial_size pixels (height, width).
+    # This is useful for coarse-resolution layers (e.g. ERA5 at 0.1 deg) where
+    # only 1 pixel covers a typical window.
+    spatial_size: tuple[int, int] | None = Field(
+        default=None,
+        description="Optional (height, width) output size. Mutually exclusive with non-zero zoom_offset.",
+    )
+
     @model_validator(mode="after")
     def after_validator(self) -> "BandSetConfig":
         """Ensure the BandSetConfig is valid, and handle the num_bands field."""
@@ -197,6 +207,14 @@ class BandSetConfig(BaseModel):
             self.bands = [f"B{band_idx}" for band_idx in range(self.num_bands)]
             self.num_bands = None
 
+        if self.spatial_size is not None and self.zoom_offset != 0:
+            raise ValueError(
+                "spatial_size and non-zero zoom_offset are mutually exclusive"
+            )
+
+        if self.spatial_size is not None and any(v <= 0 for v in self.spatial_size):
+            raise ValueError("spatial_size values must be positive integers")
+
         return self
 
     def get_final_projection_and_bounds(
@@ -204,17 +222,47 @@ class BandSetConfig(BaseModel):
     ) -> tuple[Projection, PixelBounds]:
         """Gets the final projection/bounds based on band set config.
 
-        The band set config may apply a non-zero zoom offset that modifies the window's
-        projection.
+        The band set config may apply a non-zero zoom offset or a fixed spatial_size
+        that modifies the window's projection and bounds.
+
+        When ``spatial_size`` is set, the projection resolution is scaled so that the
+        window's geographic extent maps to exactly ``spatial_size`` pixels. The returned
+        bounds will have width = spatial_size[1] and height = spatial_size[0].
+
+        Note: the ``spatial_size`` path uses ``round()`` to compute the new pixel-space
+        origin, which can shift the geographic origin by up to half of the new
+        (coarser) pixel size. This is the same rounding behaviour used by
+        ``ResolutionFactor.multiply_bounds`` and is negligible for coarse-resolution
+        layers (e.g. ERA5 at 0.1 deg) where sub-pixel shifts are irrelevant.
 
         Args:
             projection: the window's projection
-            bounds: the window's bounds (optional)
-            band_set: band set configuration object
+            bounds: the window's bounds
 
         Returns:
-            tuple of updated projection and bounds with zoom offset applied
+            tuple of updated projection and bounds
         """
+        if self.spatial_size is not None:
+            target_h, target_w = self.spatial_size
+            cur_w = bounds[2] - bounds[0]
+            cur_h = bounds[3] - bounds[1]
+
+            x_factor = target_w / cur_w
+            y_factor = target_h / cur_h
+
+            new_projection = Projection(
+                projection.crs,
+                projection.x_resolution / x_factor,
+                projection.y_resolution / y_factor,
+            )
+            new_bounds = (
+                round(bounds[0] * x_factor),
+                round(bounds[1] * y_factor),
+                round(bounds[0] * x_factor) + target_w,
+                round(bounds[1] * y_factor) + target_h,
+            )
+            return (new_projection, new_bounds)
+
         if self.zoom_offset >= 0:
             factor = ResolutionFactor(numerator=2**self.zoom_offset)
         else:
@@ -287,9 +335,13 @@ class SpaceMode(StrEnum):
     """
 
     PER_PERIOD_MOSAIC = "PER_PERIOD_MOSAIC"
-    """Create one mosaic per sub-period of the time range.
+    """Deprecated: use MOSAIC with period_duration instead. Will be removed after 2026-05-01."""
 
-    The duration of the sub-periods is controlled by another option in QueryConfig.
+    SINGLE_COMPOSITE = "SINGLE_COMPOSITE"
+    """Put all intersecting items into a single group.
+
+    This can be used together with compositing method to create one composite for the
+    layer.
     """
 
 
@@ -329,11 +381,25 @@ class QueryConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _warn_deprecated_time_mode(self) -> "QueryConfig":
+    def _warn_deprecated_fields(self) -> "QueryConfig":
         if "time_mode" in self.model_fields_set:
             warnings.warn(
                 "time_mode is deprecated and will be removed in a future version. "
                 "Remove it from your config (WITHIN is the only supported behavior).",
+                FutureWarning,
+                stacklevel=6,
+            )
+        if self.space_mode == SpaceMode.PER_PERIOD_MOSAIC:
+            warnings.warn(
+                "SpaceMode.PER_PERIOD_MOSAIC is deprecated and will be removed after "
+                "2026-05-01. Use SpaceMode.MOSAIC with period_duration instead.",
+                FutureWarning,
+                stacklevel=6,
+            )
+        if "per_period_mosaic_reverse_time_order" in self.model_fields_set:
+            warnings.warn(
+                "per_period_mosaic_reverse_time_order is deprecated and will be "
+                "removed after 2026-05-01.",
                 FutureWarning,
                 stacklevel=6,
             )
@@ -347,15 +413,22 @@ class QueryConfig(BaseModel):
     )
 
     max_matches: int = Field(
-        default=1, description="The maximum number of item groups."
+        default=1,
+        description="The maximum number of item groups. When period_duration is set, this "
+        "controls the maximum number of sub-periods for which item groups are created,"
+        "and within each sub-period, the matching strategy is applied with an effective "
+        "max_matches of 1 (i.e. one item group per sub-period).",
     )
     period_duration: Annotated[
-        timedelta,
-        BeforeValidator(ensure_timedelta),
+        timedelta | None,
+        BeforeValidator(ensure_optional_timedelta),
         PlainSerializer(serialize_optional_timedelta),
     ] = Field(
-        default=timedelta(days=30),
-        description="The duration of the periods, if the space mode is PER_PERIOD_MOSAIC.",
+        default=None,
+        description="If set, split the window's time range into sub-periods of this duration. "
+        "The sub-period splitting takes effect before the SpaceMode, i.e., SpaceMode matching "
+        "operates within the sub-periods. Each sub-period produces a single separate item group, "
+        "up to max_matches total groups/periods.",
     )
     mosaic_compositing_overlaps: int = Field(
         default=1,
@@ -407,6 +480,29 @@ class DataSourceConfig(BaseModel):
         default=True,
         description="Whether to ingest this layer (default True). If False, it will be directly materialized without ingestion.",
     )
+
+    def get_request_time_range(
+        self, window_time_range: tuple[datetime, datetime] | None
+    ) -> tuple[datetime, datetime] | None:
+        """Apply time_offset and duration to a window time range.
+
+        This converts a window's time range into the request time range that should be
+        used during prepare and materialize.
+
+        Args:
+            window_time_range: the window's original time range, or None.
+
+        Returns:
+            The adjusted time range, or None if the input was None.
+        """
+        if window_time_range is None:
+            return None
+        result = window_time_range
+        if self.time_offset:
+            result = (result[0] + self.time_offset, result[1] + self.time_offset)
+        if self.duration:
+            result = (result[0], result[0] + self.duration)
+        return result
 
     @model_validator(mode="before")
     @classmethod
@@ -482,6 +578,24 @@ class CompositingMethod(StrEnum):
 
     MEDIAN = "MEDIAN"
     """Select per-pixel median value of corresponding items of a window"""
+
+    SPATIAL_MOSAIC_TEMPORAL_STACK = "SPATIAL_MOSAIC_TEMPORAL_STACK"
+    """Spatial first-valid compositing per timestep, stacked along T.
+
+    Items, which can contain multi-temporal rasters, are spatially composited using
+    first-valid logic within each timestep, but timesteps are stacked. The result is a
+    (C, T, H, W) RasterArray whose T dimension spans the union of all item timesteps,
+    clipped to the window time range.
+    """
+
+    TEMPORAL_MEAN = "TEMPORAL_MEAN"
+    """Reduce a multi-temporal raster stack to one timestep via temporal mean."""
+
+    TEMPORAL_MAX = "TEMPORAL_MAX"
+    """Reduce a multi-temporal raster stack to one timestep via temporal max."""
+
+    TEMPORAL_MIN = "TEMPORAL_MIN"
+    """Reduce a multi-temporal raster stack to one timestep via temporal min."""
 
 
 class LayerConfig(BaseModel):

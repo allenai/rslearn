@@ -17,7 +17,7 @@ from upath import UPath
 from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
-from rslearn.data_sources.utils import match_candidate_items_to_window
+from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils import STGeometry
 from rslearn.utils.fsspec import join_upath
@@ -112,7 +112,7 @@ class Planet(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[MatchedItemGroup[Item]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -233,9 +233,14 @@ class Planet(DataSource):
             geometries: a list of geometries needed for each item
         """
         for item in items:
-            if tile_store.is_raster_ready(item.name, self.bands):
+            if tile_store.is_raster_ready(item, self.bands):
                 continue
 
             with tempfile.TemporaryDirectory() as tmp_dir:
                 asset_path = asyncio.run(self._download_asset(item, Path(tmp_dir)))
-                tile_store.write_raster_file(item.name, self.bands, asset_path)
+                tile_store.write_raster_file(
+                    item,
+                    self.bands,
+                    asset_path,
+                    time_range=item.geometry.time_range,
+                )

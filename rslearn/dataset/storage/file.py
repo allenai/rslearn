@@ -15,7 +15,7 @@ from rslearn.dataset.window import (
     get_window_layer_dir,
 )
 from rslearn.log_utils import get_logger
-from rslearn.utils.fsspec import iter_nonhidden_subdirs, open_atomic
+from rslearn.utils.fsspec import iter_nonhidden, iter_nonhidden_subdirs, open_atomic
 from rslearn.utils.geometry import Projection
 from rslearn.utils.mp import make_pool_and_star_imap_unordered
 
@@ -131,7 +131,11 @@ class FileWindowStorage(WindowStorage):
                         continue
                     window_dirs.append(window_dir)
             else:
-                for window_dir in iter_nonhidden_subdirs(group_dir):
+                # We use iter_nonhidden here instead of iter_nonhidden_subdirs since
+                # iter_nonhidden_subdirs is slow for large directories, and the group
+                # directories could contain many windows. There should not be
+                # non-hidden files in the group directory anyway.
+                for window_dir in iter_nonhidden(group_dir):
                     window_dirs.append(window_dir)
 
         with make_pool_and_star_imap_unordered(
@@ -203,14 +207,14 @@ class FileWindowStorage(WindowStorage):
         if not layers_directory.exists():
             return []
 
-        completed_layers = []
+        completed_item_groups = []
         for layer_dir in iter_nonhidden_subdirs(layers_directory):
             layer_name, group_idx = get_layer_and_group_from_dir_name(layer_dir.name)
             if not self.is_layer_completed(group, name, layer_name, group_idx):
                 continue
-            completed_layers.append((layer_name, group_idx))
+            completed_item_groups.append((layer_name, group_idx))
 
-        return completed_layers
+        return completed_item_groups
 
     @override
     def is_layer_completed(
@@ -232,8 +236,8 @@ class FileWindowStorage(WindowStorage):
         self._validate_layer_name(layer_name)
         window_path = self.get_window_root(group, name)
         layer_dir = get_window_layer_dir(window_path, layer_name, group_idx)
-        # We assume the directory exists because the layer should be materialized before
-        # being marked completed.
+        # We assume the directory exists because the item group should be materialized
+        # before being marked completed.
         (layer_dir / "completed").touch()
 
 

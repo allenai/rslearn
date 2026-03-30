@@ -7,6 +7,7 @@ from upath import UPath
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
@@ -51,8 +52,9 @@ def test_window_location(tmp_path: pathlib.Path) -> None:
 def test_underscore_band_name(empty_window: Window) -> None:
     """Verify that we can have undescore in the raster band name."""
     raster_dir = empty_window.get_raster_dir("layer", ["_"])
+    arr = np.zeros((1, 4, 4), dtype=np.uint8)
     GeotiffRasterFormat().encode_raster(
-        raster_dir, WGS84_PROJECTION, (0, 0, 4, 4), np.zeros((1, 4, 4), dtype=np.uint8)
+        raster_dir, WGS84_PROJECTION, (0, 0, 4, 4), RasterArray(chw_array=arr)
     )
     empty_window.mark_layer_completed("layer")
     assert empty_window.is_layer_completed("layer")

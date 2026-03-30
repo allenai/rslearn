@@ -7,8 +7,11 @@ from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType
 from rslearn.data_sources import DataSourceContext
 from rslearn.data_sources.planetary_computer import (
     CopDemGlo30,
+    Hls2L30,
+    Hls2S30,
     LandsatC2L2,
     PlanetaryComputer,
+    Sentinel3SlstrLST,
 )
 from rslearn.utils.stac import StacAsset, StacItem
 
@@ -113,6 +116,31 @@ def test_landsat_c2_l2_uses_user_query_unmodified() -> None:
     assert data_source.query == query
 
 
+def test_hls2_s30_defaults_to_reflectance_bands() -> None:
+    data_source = Hls2S30()
+    assert set(data_source.asset_bands.keys()) == set(Hls2S30.DEFAULT_BANDS)
+
+
+def test_hls2_s30_rejects_unknown_band() -> None:
+    with pytest.raises(ValueError, match="unsupported HLS2 S30 band"):
+        Hls2S30(band_names=["B01", "NOT_A_BAND"])
+
+
+def test_hls2_s30_accepts_common_name_aliases() -> None:
+    data_source = Hls2S30(band_names=["coastal", "red", "nir"])
+    assert set(data_source.asset_bands.keys()) == {"B01", "B04", "B08"}
+
+
+def test_hls2_l30_defaults_to_reflectance_bands() -> None:
+    data_source = Hls2L30()
+    assert set(data_source.asset_bands.keys()) == set(Hls2L30.DEFAULT_BANDS)
+
+
+def test_hls2_l30_accepts_common_name_aliases() -> None:
+    data_source = Hls2L30(band_names=["coastal", "red", "nir"])
+    assert set(data_source.asset_bands.keys()) == {"B01", "B04", "B05"}
+
+
 def test_planetary_computer_get_item_by_name_delegates_to_stac_data_source() -> None:
     """Ensure get_item_by_name works and doesn't raise NotImplementedError."""
     data_source = PlanetaryComputer(
@@ -147,3 +175,26 @@ def test_planetary_computer_get_item_by_name_delegates_to_stac_data_source() -> 
 
     assert item.name == "test-item-id"
     assert "visual" in item.asset_urls
+
+
+def test_sentinel3_slstr_lst_uses_fixed_band() -> None:
+    layer_cfg = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.FLOAT32, bands=["LST"])],
+    )
+    context = DataSourceContext(layer_config=layer_cfg)
+
+    data_source = Sentinel3SlstrLST(context=context)
+    assert data_source.asset_bands["lst-in"] == ["LST"]
+    assert data_source.band_names == ["LST"]
+
+
+def test_sentinel3_slstr_lst_rejects_non_lst_band_in_context() -> None:
+    layer_cfg = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.FLOAT32, bands=["LST_uncertainty"])],
+    )
+    context = DataSourceContext(layer_config=layer_cfg)
+
+    with pytest.raises(ValueError, match="only supports the LST band"):
+        Sentinel3SlstrLST(context=context)

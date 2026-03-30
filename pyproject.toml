@@ -1,6 +1,6 @@
 [project]
 name = "rslearn"
-version = "0.0.29"
+version = "0.1.0"
 description = "A library for developing remote sensing datasets and models"
 authors = [
     { name = "OlmoEarth Team" },
@@ -32,22 +32,27 @@ dependencies = [
 [project.optional-dependencies]
 # These are requirements that are specific to a subset of data sources or models.
 extra = [
-    "accelerate>=1.10",
     "cdsapi>=0.7.6",
     "earthdaily[platform]>=1.9.0",
     "earthengine-api>=1.6.3",
     "einops>=0.8",
+    "olmoearth-pretrain-minimal>=0.0.2",
     # https://github.com/fsspec/universal_pathlib?tab=readme-ov-file#adding-universal_pathlib-to-your-project
     # https://github.com/fsspec/filesystem_spec?tab=readme-ov-file#install
     "fsspec[gcs, s3]", # for both direct use via fsspec and indirect use via universal_pathlib, docs suggest enabling specific backends like this
+    # aiobotocore pins botocore very tightly, and boto3 (a core dep) also pins
+    # botocore. Without this hint, pip backtracks through thousands of version
+    # combinations of s3fs/aiobotocore/botocore/boto3 and eventually fails.
+    "aiobotocore>=2.19.0",
     "google-cloud-bigquery>=3.35",
     "google-cloud-storage>=2.18",
     "huggingface_hub>=0.34.4",
+    "h5netcdf>=1.6",
+    "h5py>=3.12",
     "netCDF4>=1.7.2",
     "osmium>=4.0.2",
     "planet>=3.1",
     "planetary_computer>=1.0",
-    "pycocotools>=2.0",
     "pystac_client>=0.9",
     "rtree>=1.4",
     # Needed by DINOv3.

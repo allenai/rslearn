@@ -7,8 +7,12 @@ from rasterio.crs import CRS
 from rslearn.config import QueryConfig, SpaceMode, TimeMode
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import Item
-from rslearn.data_sources.utils import match_candidate_items_to_window
+from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.utils.geometry import Projection, STGeometry, get_global_geometry
+
+
+def _group_items(item_groups: list[MatchedItemGroup[Item]]) -> list[list[Item]]:
+    return [group.items for group in item_groups]
 
 
 def test_global_geometry() -> None:
@@ -21,7 +25,7 @@ def test_global_geometry() -> None:
         window_geom, [Item("item", global_geometry)], QueryConfig()
     )
     assert len(item_groups) == 1
-    assert len(item_groups[0]) == 1
+    assert len(item_groups[0].items) == 1
 
 
 def test_window_geometry_crossing_antimeridian() -> None:
@@ -54,7 +58,7 @@ def test_window_geometry_crossing_antimeridian() -> None:
         window_geom, [Item("item", item_geom)], QueryConfig()
     )
     assert len(item_groups) == 1
-    assert len(item_groups[0]) == 1
+    assert len(item_groups[0].items) == 1
 
 
 class TestTimeMode:
@@ -85,7 +89,11 @@ class TestTimeMode:
         item_groups = match_candidate_items_to_window(
             window_geom, item_list, query_config
         )
-        assert item_groups == [[item_list[1]], [item_list[2]], [item_list[3]]]
+        assert _group_items(item_groups) == [
+            [item_list[1]],
+            [item_list[2]],
+            [item_list[3]],
+        ]
 
     def test_before_mode(self, item_list: list[Item]) -> None:
         """Verify that BEFORE time mode yields items in reverse temporal order."""
@@ -98,7 +106,11 @@ class TestTimeMode:
         item_groups = match_candidate_items_to_window(
             window_geom, item_list, query_config
         )
-        assert item_groups == [[item_list[1]], [item_list[3]], [item_list[2]]]
+        assert _group_items(item_groups) == [
+            [item_list[1]],
+            [item_list[3]],
+            [item_list[2]],
+        ]
 
     def test_after_mode(self, item_list: list[Item]) -> None:
         """Verify that AFTER time mode yields items in temporal order."""
@@ -111,7 +123,11 @@ class TestTimeMode:
         item_groups = match_candidate_items_to_window(
             window_geom, item_list, query_config
         )
-        assert item_groups == [[item_list[2]], [item_list[3]], [item_list[1]]]
+        assert _group_items(item_groups) == [
+            [item_list[2]],
+            [item_list[3]],
+            [item_list[1]],
+        ]
 
 
 class TestSpaceMode:
@@ -151,8 +167,8 @@ class TestSpaceMode:
         item_groups = match_candidate_items_to_window(
             window_geometry, item_list, query_config
         )
-        print([group[0].name for group in item_groups])
-        assert item_groups == [[item_list[1]]]
+        print([group.items[0].name for group in item_groups])
+        assert _group_items(item_groups) == [[item_list[1]]]
 
     def test_intersects_mode(
         self, window_geometry: STGeometry, item_list: list[Item]
@@ -162,7 +178,7 @@ class TestSpaceMode:
         item_groups = match_candidate_items_to_window(
             window_geometry, item_list, query_config
         )
-        assert item_groups == [
+        assert _group_items(item_groups) == [
             [item_list[0]],
             [item_list[1]],
             [item_list[2]],
@@ -197,7 +213,7 @@ class TestMosaic:
         item_groups = match_candidate_items_to_window(
             window_geom, six_items, query_config
         )
-        assert item_groups == [
+        assert _group_items(item_groups) == [
             [six_items[0], six_items[3]],
             [six_items[1], six_items[4]],
         ]
@@ -213,7 +229,7 @@ class TestMosaic:
         item_groups = match_candidate_items_to_window(
             window_geom, six_items, query_config
         )
-        assert item_groups == [
+        assert _group_items(item_groups) == [
             [six_items[0], six_items[3]],
             [six_items[1], six_items[4]],
             [six_items[2], six_items[5]],
@@ -230,7 +246,7 @@ class TestMosaic:
         item_groups = match_candidate_items_to_window(
             window_geom, six_items, query_config
         )
-        assert item_groups == [
+        assert _group_items(item_groups) == [
             [six_items[0], six_items[3]],
             [six_items[1], six_items[4]],
             [six_items[2], six_items[5]],
@@ -265,7 +281,7 @@ class TestMosaic:
         item_groups = match_candidate_items_to_window(
             window_geom, items_to_use, query_config
         )
-        assert item_groups == [
+        assert _group_items(item_groups) == [
             [six_items[0], six_items[3]],
             [six_items[1]],
             [six_items[2]],
@@ -310,14 +326,14 @@ class TestMosaicCompositingOverlaps:
         # We get 2 groups: first consolidates 2 mosaics, second has partial (1 mosaic)
         assert len(item_groups) == 2
         # First group should have items from first two mosaics (4 items)
-        assert set(item.name for item in item_groups[0]) == {
+        assert set(item.name for item in item_groups[0].items) == {
             "part1_item1",
             "part2_item1",
             "part1_item2",
             "part2_item2",
         }
         # Second group has the third mosaic (2 items)
-        assert set(item.name for item in item_groups[1]) == {
+        assert set(item.name for item in item_groups[1].items) == {
             "part1_item3",
             "part2_item3",
         }
@@ -336,19 +352,17 @@ class TestMosaicCompositingOverlaps:
         )
         # All items should be in one group
         assert len(item_groups) == 1
-        assert len(item_groups[0]) == 6
+        assert len(item_groups[0].items) == 6
 
 
-class TestPerPeriodMosaic:
-    """Tests for the PER_PERIOD_MOSAIC SpaceMode."""
+class TestMosaicWithPeriodDuration:
+    """Tests for MOSAIC SpaceMode with period_duration set."""
 
-    def test_three_mosaics(self) -> None:
-        """Test creating two full mosaics and one partial mosaic.
+    def test_three_periods(self) -> None:
+        """Test creating one mosaic per period, capped at max_matches.
 
-        We provide time range with four time periods, but the full mosaic for first
-        (oldest) time period should not be used due to the max_matches=3.
-
-        With reverse_time_order=False, groups are returned in chronological order.
+        Four time periods exist but only three are kept due to max_matches=3.
+        Most recent periods are prioritized, so the oldest period is dropped.
         """
         base_ts = datetime(2024, 1, 1, tzinfo=UTC)
         period_duration = timedelta(days=30)
@@ -383,25 +397,33 @@ class TestPerPeriodMosaic:
             Item("item4", STGeometry(WGS84_PROJECTION, bbox, periods[3])),
         ]
         query_config = QueryConfig(
-            space_mode=SpaceMode.PER_PERIOD_MOSAIC,
+            space_mode=SpaceMode.MOSAIC,
             max_matches=3,
+            period_duration=timedelta(days=30),
             per_period_mosaic_reverse_time_order=False,
         )
         item_groups = match_candidate_items_to_window(
             window_geometry, item_list, query_config
         )
-        # Chronological order: period 2, period 3, period 4
-        assert item_groups == [
+        # Most recent 3 periods kept, returned in chronological order:
+        # period 2, period 3, period 4 (period 1 dropped by max_matches)
+        assert _group_items(item_groups) == [
             [item_list[1], item_list[2]],
             [item_list[3]],
             [item_list[4]],
         ]
+        assert all(isinstance(group, MatchedItemGroup) for group in item_groups)
+        assert [group.request_time_range for group in item_groups] == [
+            periods[1],
+            periods[2],
+            periods[3],
+        ]
 
-    def test_three_mosaics_reverse_order(self) -> None:
-        """Test creating mosaics in reverse temporal order (most recent first).
+    def test_reverse_time_order(self) -> None:
+        """Test that per_period_mosaic_reverse_time_order keeps reverse chronological order.
 
-        With per_period_mosaic_reverse_time_order=True (default), groups are returned
-        with most recent first.
+        With per_period_mosaic_reverse_time_order=True (current default), groups
+        are returned in reverse chronological order (most recent first).
         """
         base_ts = datetime(2024, 1, 1, tzinfo=UTC)
         period_duration = timedelta(days=30)
@@ -436,23 +458,24 @@ class TestPerPeriodMosaic:
             Item("item4", STGeometry(WGS84_PROJECTION, bbox, periods[3])),
         ]
         query_config = QueryConfig(
-            space_mode=SpaceMode.PER_PERIOD_MOSAIC,
+            space_mode=SpaceMode.MOSAIC,
             max_matches=3,
+            period_duration=timedelta(days=30),
             per_period_mosaic_reverse_time_order=True,
         )
         with pytest.warns(FutureWarning, match="per_period_mosaic_reverse_time_order"):
             item_groups = match_candidate_items_to_window(
                 window_geometry, item_list, query_config
             )
-        # Reverse order: period 4, period 3, period 2
-        assert item_groups == [
+        # Most recent 3 periods in reverse chronological order: period 4, 3, 2
+        assert _group_items(item_groups) == [
             [item_list[4]],
             [item_list[3]],
             [item_list[1], item_list[2]],
         ]
 
     def test_skip_empty_period(self) -> None:
-        """Ensure that empty periods are skipped so it falls back to earlier period."""
+        """Ensure that empty periods are skipped and don't count toward max_matches."""
         base_ts = datetime(2024, 1, 1, tzinfo=UTC)
         period_duration = timedelta(days=30)
         periods = [
@@ -479,18 +502,72 @@ class TestPerPeriodMosaic:
             ),
         ]
         query_config = QueryConfig(
-            space_mode=SpaceMode.PER_PERIOD_MOSAIC,
+            space_mode=SpaceMode.MOSAIC,
             max_matches=2,
+            period_duration=timedelta(days=30),
             per_period_mosaic_reverse_time_order=False,
         )
         item_groups = match_candidate_items_to_window(
             window_geometry, item_list, query_config
         )
-        # Chronological order: period 2, period 3 (period 4 skipped due to no items)
-        assert item_groups == [
+        # Most recent first: period 4 skipped (no spatial match), period 3, 2
+        # kept. Reversed to chronological: period 2, period 3.
+        assert _group_items(item_groups) == [
             [item_list[1]],
             [item_list[2]],
         ]
+
+
+class TestSingleComposite:
+    """Tests for SINGLE_COMPOSITE space mode."""
+
+    def test_spatiotemporal_filtering(self) -> None:
+        """All spatially and temporally intersecting items go into one group.
+
+        Four items:
+        - item_a: intersects both spatially and temporally (full window, timestep 1)
+        - item_b: intersects both spatially and temporally (full window, timestep 2)
+        - item_c: intersects temporally but NOT spatially
+        - item_d: intersects spatially but NOT temporally
+
+        Only item_a and item_b should be in a single item group.
+        """
+        t0 = datetime(2024, 1, 1, tzinfo=UTC)
+        t1 = datetime(2024, 2, 1, tzinfo=UTC)
+        t2 = datetime(2024, 3, 1, tzinfo=UTC)
+        t3 = datetime(2024, 6, 1, tzinfo=UTC)
+
+        window_bbox = shapely.box(0, 0, 1, 1)
+        window_geom = STGeometry(WGS84_PROJECTION, window_bbox, (t0, t2))
+
+        item_a = Item(
+            "item_a",
+            STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), (t0, t1)),
+        )
+        item_b = Item(
+            "item_b",
+            STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), (t1, t2)),
+        )
+        # Temporally overlapping but spatially disjoint.
+        item_c = Item(
+            "item_c",
+            STGeometry(WGS84_PROJECTION, shapely.box(5, 5, 6, 6), (t0, t1)),
+        )
+        # Spatially overlapping but temporally disjoint.
+        item_d = Item(
+            "item_d",
+            STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), (t2, t3)),
+        )
+
+        query_config = QueryConfig(
+            space_mode=SpaceMode.SINGLE_COMPOSITE,
+            max_matches=10,
+        )
+        item_groups = match_candidate_items_to_window(
+            window_geom, [item_a, item_b, item_c, item_d], query_config
+        )
+        assert len(item_groups) == 1
+        assert item_groups[0].items == [item_a, item_b]
 
 
 class TestMinMatches:
@@ -513,7 +590,7 @@ class TestMinMatches:
             space_mode=SpaceMode.CONTAINS, max_matches=10, min_matches=3
         )
         item_groups = match_candidate_items_to_window(geom, item_list, query_config)
-        assert item_groups == []
+        assert _group_items(item_groups) == []
 
     def test_min_matches_intersects(self) -> None:
         """Test min_matches with INTERSECTS mode."""
@@ -532,7 +609,7 @@ class TestMinMatches:
             space_mode=SpaceMode.INTERSECTS, max_matches=10, min_matches=3
         )
         item_groups = match_candidate_items_to_window(geom, item_list, query_config)
-        assert item_groups == []
+        assert _group_items(item_groups) == []
 
     def test_min_matches_mosaic(self) -> None:
         """Test min_matches with MOSAIC mode."""
@@ -548,7 +625,7 @@ class TestMinMatches:
             space_mode=SpaceMode.MOSAIC, max_matches=10, min_matches=2
         )
         item_groups = match_candidate_items_to_window(window_geom, items, query_config)
-        assert item_groups == []
+        assert _group_items(item_groups) == []
 
     def test_min_matches_mosaic_with_overlaps(self) -> None:
         """Test min_matches with MOSAIC mode and high overlaps (compositing behavior)."""
@@ -571,10 +648,10 @@ class TestMinMatches:
             mosaic_compositing_overlaps=100,
         )
         item_groups = match_candidate_items_to_window(geom, item_list, query_config)
-        assert item_groups == []
+        assert _group_items(item_groups) == []
 
-    def test_min_matches_per_period_mosaic(self) -> None:
-        """Test min_matches with PER_PERIOD_MOSAIC mode."""
+    def test_min_matches_mosaic_with_period_duration(self) -> None:
+        """Test min_matches with MOSAIC mode and period_duration."""
         base_ts = datetime(2024, 1, 1, tzinfo=UTC)
         period_duration = timedelta(days=30)
         bbox = shapely.box(0, 0, 1, 1)
@@ -593,7 +670,7 @@ class TestMinMatches:
             ),
         ]
         query_config = QueryConfig(
-            space_mode=SpaceMode.PER_PERIOD_MOSAIC,
+            space_mode=SpaceMode.MOSAIC,
             max_matches=10,
             min_matches=2,
             period_duration=period_duration,
@@ -602,4 +679,4 @@ class TestMinMatches:
         item_groups = match_candidate_items_to_window(
             window_geometry, item_list, query_config
         )
-        assert item_groups == []
+        assert _group_items(item_groups) == []

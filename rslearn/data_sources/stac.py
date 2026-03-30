@@ -5,14 +5,12 @@ from datetime import datetime
 from typing import Any
 
 import shapely
-from upath import UPath
 
 from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import Item, ItemLookupDataSource
-from rslearn.data_sources.utils import match_candidate_items_to_window
+from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.log_utils import get_logger
-from rslearn.utils.fsspec import open_atomic
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.stac import StacClient, StacItem
 
@@ -75,7 +73,6 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
         sort_by: str | None = None,
         sort_ascending: bool = True,
         required_assets: list[str] | None = None,
-        cache_dir: UPath | None = None,
         limit: int = 100,
         properties_to_record: list[str] = [],
     ):
@@ -90,11 +87,6 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
                 Otherwise sort in descending order.
             required_assets: if set, we ignore items that do not have all of these
                 asset keys.
-            cache_dir: optional cache directory to cache items. This is recommended if
-                allowing direct materialization from the data source, since it will
-                likely be necessary to make lots of get_item_by_name calls during
-                materialization. TODO: give direct materialization access to the Item
-                object.
             limit: limit to pass to search queries.
             properties_to_record: if these properties on the STAC item exist, they are
                 are retained in the SourceItem when we initialize it.
@@ -105,7 +97,6 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
         self.sort_by = sort_by
         self.sort_ascending = sort_ascending
         self.required_assets = required_assets
-        self.cache_dir = cache_dir
         self.limit = limit
         self.properties_to_record = properties_to_record
 
@@ -161,16 +152,6 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
         Returns:
             the item object
         """
-        # If cache_dir is set, we cache the item. First here we check if it is already
-        # in the cache.
-        cache_fname: UPath | None = None
-        if self.cache_dir:
-            cache_fname = self.cache_dir / f"{name}.json"
-        if cache_fname is not None and cache_fname.exists():
-            with cache_fname.open() as f:
-                return SourceItem.deserialize(json.load(f))
-
-        # No cache or not in cache, so we need to make the STAC request.
         logger.debug(f"Getting STAC item {name}")
         stac_items = self.client.search(ids=[name], collections=[self.collection_name])
 
@@ -184,18 +165,11 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
             )
 
         stac_item = stac_items[0]
-        item = self._stac_item_to_item(stac_item)
-
-        # Finally we cache it if cache_dir is set.
-        if cache_fname is not None:
-            with open_atomic(cache_fname, "w") as f:
-                json.dump(item.serialize(), f)
-
-        return item
+        return self._stac_item_to_item(stac_item)
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[SourceItem]]]:
+    ) -> list[list[MatchedItemGroup[SourceItem]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:
@@ -253,15 +227,6 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
             candidate_items = [
                 self._stac_item_to_item(stac_item) for stac_item in stac_items
             ]
-
-            # Since we made the STAC request, might as well save these to the cache.
-            if self.cache_dir is not None:
-                for item in candidate_items:
-                    cache_fname = self.cache_dir / f"{item.name}.json"
-                    if cache_fname.exists():
-                        continue
-                    with open_atomic(cache_fname, "w") as f:
-                        json.dump(item.serialize(), f)
 
             cur_groups = match_candidate_items_to_window(
                 geometry, candidate_items, query_config

@@ -14,6 +14,7 @@ from rslearn.lightning_cli import RslearnLightningCLI
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.utils.jsonargparse import init_jsonargparse
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
 NUM_CLASSES = 3
@@ -85,7 +86,7 @@ def segmentation_dataset(tmp_path: pathlib.Path) -> Dataset:
         layer_dir / "band",
         window.projection,
         window.bounds,
-        image,
+        RasterArray(chw_array=image),
     )
     window.mark_layer_completed(layer_name)
 
@@ -97,7 +98,7 @@ def segmentation_dataset(tmp_path: pathlib.Path) -> Dataset:
         layer_dir / "class",
         window.projection,
         window.bounds,
-        targets,
+        RasterArray(chw_array=targets),
     )
     window.mark_layer_completed(layer_name)
 
@@ -228,10 +229,14 @@ def test_segmentation_prediction_writes_to_dataset(
     # Verify that predictions were written to the dataset.
     window = segmentation_dataset.load_windows()[0]
     assert window.is_layer_completed("predictions")
-    array = GeotiffRasterFormat().decode_raster(
-        window.get_raster_dir("predictions", ["class"]),
-        window.projection,
-        window.bounds,
+    array = (
+        GeotiffRasterFormat()
+        .decode_raster(
+            window.get_raster_dir("predictions", ["class"]),
+            window.projection,
+            window.bounds,
+        )
+        .get_chw_array()
     )
     assert array.shape == (1, 32, 32)
     # Verify predictions are valid class IDs.

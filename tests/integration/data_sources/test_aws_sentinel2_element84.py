@@ -23,6 +23,7 @@ from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 from rslearn.utils.stac import StacAsset, StacItem
 
@@ -45,7 +46,7 @@ def _make_test_geotiff(path: pathlib.Path) -> pathlib.Path:
     data = np.ones((1, height, width), dtype=np.uint16) * 1000
     raster_dir = UPath(path / "raster")
     fmt = GeotiffRasterFormat()
-    fmt.encode_raster(raster_dir, projection, bounds, data)
+    fmt.encode_raster(raster_dir, projection, bounds, RasterArray(chw_array=data))
     return raster_dir / fmt.fname
 
 
@@ -93,8 +94,8 @@ def test_ingest(
 
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    assert len(item_groups) > 0 and len(item_groups[0]) > 0
-    item = item_groups[0][0]
+    assert len(item_groups) > 0 and len(item_groups[0].items) > 0
+    item = item_groups[0].items[0]
 
     tile_store_dir = UPath(tmp_path / "tiles")
     tile_store = DefaultTileStore(str(tile_store_dir))
@@ -103,10 +104,10 @@ def test_ingest(
 
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name),
-        item_groups[0],
+        item_groups[0].items,
         [[seattle2020]],
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, ["B04"])
+    assert tile_store.is_raster_ready(layer_name, item, ["B04"])
 
 
 def test_materialize(
@@ -146,6 +147,11 @@ def test_materialize(
     )
     window.save()
 
-    data_source.materialize(window, item_groups, "layer", layer_config)
+    data_source.materialize(
+        window,
+        [group.items for group in item_groups],
+        "layer",
+        layer_config,
+    )
     raster_dir = window.get_raster_dir("layer", ["B04"])
     assert (raster_dir / "geotiff.tif").exists()

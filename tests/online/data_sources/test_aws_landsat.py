@@ -47,15 +47,17 @@ class TestLandsatOliTirs:
         print("get items")
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
         item_groups = landsat_data_source.get_items([seattle2020], query_config)[0]
-        item = item_groups[0][0]
+        item = item_groups[0].items[0]
         tile_store = DefaultTileStore(str(tile_store_dir))
         tile_store.set_dataset_path(tile_store_dir)
         layer_name = "layer"
         print("ingest")
         landsat_data_source.ingest(
-            TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[0].items,
+            [[seattle2020]],
         )
-        assert tile_store.is_raster_ready(layer_name, item.name, [TEST_BAND])
+        assert tile_store.is_raster_ready(layer_name, item, [TEST_BAND])
 
     def test_materialize(
         self,
@@ -86,7 +88,10 @@ class TestLandsatOliTirs:
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
         item_groups = landsat_data_source.get_items([seattle2020], query_config)[0]
         landsat_data_source.materialize(
-            window, item_groups, "landsat", landsat_layer_config
+            window,
+            [item_group.items for item_group in item_groups],
+            "landsat",
+            landsat_layer_config,
         )
         assert window.is_layer_completed("landsat")
 
@@ -114,6 +119,6 @@ class TestLandsatOliTirs:
         # There should be enough images matching this geometry that we exhaust max_matches.
         assert len(item_groups) == 10
         # And they should be ordered by cloud cover.
-        cloud_covers = [group[0].cloud_cover for group in item_groups]
+        cloud_covers = [group.items[0].cloud_cover for group in item_groups]
         sorted_cloud_covers = list(sorted(cloud_covers))
         assert cloud_covers == sorted_cloud_covers

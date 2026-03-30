@@ -13,6 +13,7 @@ from upath import UPath
 import rslearn.data_sources.utils
 from rslearn.config import LayerType
 from rslearn.const import SHAPEFILE_AUX_EXTENSIONS
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.feature import Feature
@@ -275,9 +276,11 @@ class RasterImporter(Importer):
                 else:
                     bands = [f"B{band_idx + 1}" for band_idx in range(src.count)]
 
-            if tile_store.is_raster_ready(item.name, bands):
+            if tile_store.is_raster_ready(item, bands):
                 continue
-            tile_store.write_raster_file(item.name, bands, fname_upath)
+            tile_store.write_raster_file(
+                item, bands, fname_upath, time_range=item.geometry.time_range
+            )
 
 
 class VectorImporter(Importer):
@@ -364,7 +367,7 @@ class VectorImporter(Importer):
             item: the Item to ingest
             cur_geometries: the geometries where the item is needed.
         """
-        if tile_store.is_vector_ready(item.name):
+        if tile_store.is_vector_ready(item):
             return
 
         assert isinstance(item, VectorItem)
@@ -397,7 +400,7 @@ class VectorImporter(Importer):
                         )
                     )
 
-                tile_store.write_vector(item.name, features)
+                tile_store.write_vector(item, features)
 
 
 class LocalFiles(DataSource):
@@ -466,7 +469,7 @@ class LocalFiles(DataSource):
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[list[Item]]]:
+    ) -> list[list[MatchedItemGroup[Item]]]:
         """Get a list of items in the data source intersecting the given geometries.
 
         Args:

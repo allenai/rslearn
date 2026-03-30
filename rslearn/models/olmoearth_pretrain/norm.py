@@ -3,7 +3,9 @@
 import json
 from typing import Any
 
-from olmoearth_pretrain.data.normalize import load_computed_config
+from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.data.normalize import (
+    load_computed_config,
+)
 
 from rslearn.log_utils import get_logger
 from rslearn.train.transforms.transform import Transform, selector_exists
@@ -38,10 +40,9 @@ class OlmoEarthNormalize(Transform):
             skip_missing: if True, skip modalities that don't exist in the input dict.
                 Useful when working with optional inputs.
         """
-        super().__init__()
+        super().__init__(skip_missing=skip_missing)
         self.band_names = band_names
         self.std_multiplier = std_multiplier
-        self.skip_missing = skip_missing
 
         if config_fname is None:
             self.norm_config = load_computed_config()

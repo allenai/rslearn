@@ -41,7 +41,7 @@ class Normalize(Transform):
             skip_missing: if True, skip selectors that don't exist in the input/target
                 dicts. Useful when working with optional inputs.
         """
-        super().__init__()
+        super().__init__(skip_missing=skip_missing)
 
         if num_bands is not None:
             warnings.warn(
@@ -62,7 +62,6 @@ class Normalize(Transform):
 
         self.selectors = selectors
         self.bands = torch.tensor(bands) if bands is not None else None
-        self.skip_missing = skip_missing
 
     def apply_image(self, image: RasterImage) -> RasterImage:
         """Normalize the specified image.

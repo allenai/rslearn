@@ -25,6 +25,7 @@ from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
 from rslearn.utils.stac import StacAsset, StacItem
 
@@ -52,7 +53,7 @@ def test_geotiff(tmp_path: pathlib.Path) -> pathlib.Path:
     data = np.ones((1, height, width), dtype=np.uint16) * RAW_PIXEL_VALUE
     raster_dir = UPath(tmp_path / "raster")
     fmt = GeotiffRasterFormat()
-    fmt.encode_raster(raster_dir, projection, bounds, data)
+    fmt.encode_raster(raster_dir, projection, bounds, RasterArray(chw_array=data))
     return raster_dir / fmt.fname
 
 
@@ -158,8 +159,8 @@ def test_sentinel2_ingest(
     # Run ingestion.
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    assert len(item_groups) > 0 and len(item_groups[0]) > 0
-    item = item_groups[0][0]
+    assert len(item_groups) > 0 and len(item_groups[0].items) > 0
+    item = item_groups[0].items[0]
 
     tile_store_dir = UPath(tmp_path / "tiles")
     tile_store = DefaultTileStore(str(tile_store_dir))
@@ -168,10 +169,10 @@ def test_sentinel2_ingest(
 
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name),
-        item_groups[0],
+        item_groups[0].items,
         [[seattle2020]],
     )
-    assert tile_store.is_raster_ready(layer_name, item.name, ["B04"])
+    assert tile_store.is_raster_ready(layer_name, item, ["B04"])
 
     # Read back and verify pixel values based on harmonization.
     bounds = (
@@ -181,9 +182,9 @@ def test_sentinel2_ingest(
         int(seattle2020.shp.bounds[3]),
     )
     array = tile_store.read_raster(
-        layer_name, item.name, ["B04"], seattle2020.projection, bounds
+        layer_name, item, ["B04"], seattle2020.projection, bounds
     )
-    assert array.max() == expected_value
+    assert array.get_chw_array().max() == expected_value
 
 
 @HARMONIZATION_PARAMS
@@ -240,15 +241,21 @@ def test_sentinel2_materialize(
     )
     window.save()
 
-    data_source.materialize(window, item_groups, "layer", layer_config)
+    data_source.materialize(
+        window,
+        [group.items for group in item_groups],
+        "layer",
+        layer_config,
+    )
 
     # Verify it was materialized.
     raster_dir = window.get_raster_dir("layer", ["B04"])
     assert (raster_dir / "geotiff.tif").exists()
 
     # Read back and verify pixel values match expected harmonization behavior.
-    array = GeotiffRasterFormat().decode_raster(
+    raster_array = GeotiffRasterFormat().decode_raster(
         raster_dir, seattle2020.projection, bounds
     )
+    array = raster_array.get_chw_array()
     assert array.shape == (1, bounds[3] - bounds[1], bounds[2] - bounds[0])
     assert array.max() == expected_value

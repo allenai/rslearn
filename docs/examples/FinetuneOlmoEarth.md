@@ -7,12 +7,11 @@ Cropland Data Layer. For the inputs, we use four Sentinel-2 images (one per mont
 If you are new to rslearn, you may want to read [the main README](../../README.md) or
 [CoreConcepts](../CoreConcepts.md) first.
 
-Due to license incompatibility, the `olmoearth_pretrain` package required for this
-example is not included as a dependency and must be installed explicitly:
+There will be three steps:
 
-```bash
-pip install olmoearth_pretrain
-```
+1. [Create the dataset.](#create-the-dataset)
+2. [Fine-tune the model.](#fine-tune-the-model)
+3. [Apply the model.](#apply-the-model)
 
 ## Create the Dataset
 
@@ -148,7 +147,7 @@ model:
             init_args:
               in_channels: [[8, 768]]
               out_channels: 256
-              conv_layers_per_resolution: 2
+              conv_layers_per_resolution: 1
               num_channels: {8: 512, 4: 512, 2: 256, 1: 128}
           # The SegmentationHead computes softmax and cross entropy loss.
           - class_path: rslearn.train.tasks.segmentation.SegmentationHead
@@ -166,7 +165,7 @@ data:
       sentinel2_l2a:
         data_type: "raster"
         layers: ["sentinel2_l2a", "sentinel2_l2a.1", "sentinel2_l2a.2", "sentinel2_l2a.3"]
-        # This is the band order expected by  OlmoEarth.
+        # This is the band order expected by OlmoEarth.
         bands: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
         passthrough: true
         dtype: FLOAT32
@@ -216,26 +215,17 @@ data:
 trainer:
   max_epochs: 100
   callbacks:
-    # Save the latest checkpoint (last.ckpt) as well as best one based on accuracy
-    # metric.
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        save_top_k: 1
-        save_last: true
-        monitor: val_accuracy
-        mode: max
     # We find that freezing the model for the first few epochs helps to improve the
     # performance of the fine-tuned models.
     - class_path: rslearn.train.callbacks.freeze_unfreeze.FreezeUnfreeze
       init_args:
         module_selector: ["model", "encoder", 0]
         unfreeze_at_epoch: 10
+        unfreeze_lr_factor: 10
     # The RslearnWriter is used during `model predict` to save the predicted outputs to
     # the rslearn dataset.
     - class_path: rslearn.train.prediction_writer.RslearnWriter
       init_args:
-        # This path will be copied from data.init_args.path by rslearn.
-        path: placeholder
         output_layer: output
         merger:
           class_path: rslearn.train.prediction_writer.RasterMerger
@@ -244,6 +234,11 @@ trainer:
             # So we keep the center 116x116 of each 128x128 output, since there are
             # 12 pixels of overlap between adjacent inference crops.
             overlap_pixels: 12
+    # Save best checkpoint based on accuracy metric.
+    - class_path: rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint
+      init_args:
+        monitor: val_accuracy
+        mode: max
 # Here we enable automatic checkpoint management and logging to W&B.
 # Set WANDB_MODE=offline to disable online logging.
 project_name: ${PROJECT_NAME}
@@ -287,5 +282,5 @@ We can then open up one of the input Sentinel-2 images, the model prediction, an
 actual CDL in qgis:
 
 ```
-qgis dataset/windows/predict/bellingham2/layers/{cdl,output,sentinel2_l2a}/*/geotiff.tif
+qgis dataset/windows/predict/bellingham/layers/{cdl,output,sentinel2_l2a}/*/geotiff.tif
 ```

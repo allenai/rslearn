@@ -42,7 +42,7 @@ class Crop(Transform):
             offset: optional (left, top) pixel offset for deterministic cropping. When
                 set, the crop is placed at this fixed position instead of randomly.
         """
-        super().__init__()
+        super().__init__(skip_missing=skip_missing)
         self.offset = offset
 
         if isinstance(crop_size, int):
@@ -52,7 +52,6 @@ class Crop(Transform):
 
         self.image_selectors = image_selectors
         self.box_selectors = box_selectors
-        self.skip_missing = skip_missing
 
     def sample_state(self, image_shape: tuple[int, int]) -> dict[str, Any]:
         """Decide how to crop the input.

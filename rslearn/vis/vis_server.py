@@ -278,14 +278,14 @@ def create_app(
     template_folder = Path(__file__).parent / "templates"
     app = Flask(__name__, template_folder=str(template_folder))
 
+    if len(windows) > max_samples:
+        sampled_windows = random.sample(windows, max_samples)
+    else:
+        sampled_windows = list(windows)
+
     @app.route("/")
     def index() -> str:
         """Render the main visualization page."""
-        if len(windows) > max_samples:
-            sampled_windows = random.sample(windows, max_samples)
-        else:
-            sampled_windows = windows
-
         template_data = prepare_visualization_data(
             sampled_windows,
             dataset,
@@ -302,18 +302,18 @@ def create_app(
         """Generate and serve an image for a specific window/layer.
 
         Args:
-            window_idx: Index of the window in the windows list
+            window_idx: Index of the window in the sampled windows list
             layer_name: Name of the layer to visualize
 
         Returns:
             PNG image response or error response
         """
-        if window_idx < 0 or window_idx >= len(windows):
+        if window_idx < 0 or window_idx >= len(sampled_windows):
             return Response(
                 "Window index out of range", status=404, mimetype="text/plain"
             )
 
-        window = windows[window_idx]
+        window = sampled_windows[window_idx]
 
         layer_label_colors = None
         if label_colors_dict and layer_name in label_colors_dict:
@@ -354,6 +354,7 @@ def run(
     port: int = 8000,
     host: str = "0.0.0.0",
     group_idx: int = 0,
+    groups: list[str] | None = None,
     label_layers: list[str] | None = None,
 ) -> None:
     """Run the visualization server.
@@ -368,6 +369,7 @@ def run(
         port: Port to serve on
         host: Host to bind to
         group_idx: Item group index (default 0)
+        groups: Optional list of window group names to load (e.g. ["predict"]). If not set, all groups under windows/ are loaded.
         label_layers: List of layer names that are labels
     """
     dataset_path = UPath(dataset_path)
@@ -411,7 +413,7 @@ def run(
                 )
 
     logger.info(f"Loading all windows from dataset {dataset_path}")
-    windows = dataset.load_windows()
+    windows = dataset.load_windows(groups=groups)
     logger.info(f"Loaded {len(windows)} windows from dataset")
     logger.info(f"Layers: {all_layers}")
     logger.info(f"Bands: {bands}")
@@ -437,7 +439,7 @@ def run(
     logger.info(f"Serving on http://{host}:{port}")
     logger.info(f"Open http://localhost:{port} in your browser")
     logger.info(
-        f"Loaded {len(windows)} windows - refreshing the page will show a different random sample"
+        f"Loaded {len(windows)} windows, sampled {min(len(windows), max_samples)} for display"
     )
 
     app.run(host=host, port=port, debug=False)
@@ -550,6 +552,13 @@ def main() -> None:
     parser.add_argument(
         "--group_idx", type=int, default=0, help="Item group index (default: 0)"
     )
+    parser.add_argument(
+        "--groups",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Window group(s) to load (e.g. predict). If not set, all groups under windows/ are loaded.",
+    )
 
     args = parser.parse_args()
 
@@ -566,6 +575,7 @@ def main() -> None:
         port=args.port,
         host=args.host,
         group_idx=args.group_idx,
+        groups=args.groups,
         label_layers=args.label_layers,
     )
 

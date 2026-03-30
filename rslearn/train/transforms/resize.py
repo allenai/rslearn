@@ -37,11 +37,10 @@ class Resize(Transform):
             skip_missing: if True, skip selectors that don't exist in the input/target
                 dicts. Useful when working with optional inputs.
         """
-        super().__init__()
+        super().__init__(skip_missing=skip_missing)
         self.target_size = target_size
         self.selectors = selectors
         self.interpolation = INTERPOLATION_MODES[interpolation]
-        self.skip_missing = skip_missing
 
     def apply_resize(self, image: RasterImage) -> RasterImage:
         """Apply resizing on the specified image.

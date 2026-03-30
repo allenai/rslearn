@@ -89,8 +89,10 @@ def read_raster_layer(
         resampling=Resampling.nearest,
     )
 
-    image_tensor = read_raster_layer_for_data_input(
+    image_tensor, _ = read_raster_layer_for_data_input(
         window, bounds, layer_name, group_idx, layer_config, data_input
     )
 
-    return image_tensor.numpy().astype(np.float32)
+    array = image_tensor.numpy().astype(np.float32)  # (C, T, H, W)
+    array = array[:, 0, :, :]
+    return array
