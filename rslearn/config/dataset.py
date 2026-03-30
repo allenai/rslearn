@@ -185,6 +185,16 @@ class BandSetConfig(BaseModel):
         default=None, description="Optional nodata value for each band."
     )
 
+    # Optional explicit spatial dimensions for the materialized output. When set,
+    # the projection resolution is adjusted so that the window's geographic extent
+    # maps to exactly spatial_size pixels (height, width).
+    # This is useful for coarse-resolution layers (e.g. ERA5 at 0.1 deg) where
+    # only 1 pixel covers a typical window.
+    spatial_size: tuple[int, int] | None = Field(
+        default=None,
+        description="Optional (height, width) output size. Mutually exclusive with non-zero zoom_offset.",
+    )
+
     @model_validator(mode="after")
     def after_validator(self) -> "BandSetConfig":
         """Ensure the BandSetConfig is valid, and handle the num_bands field."""
@@ -197,6 +207,14 @@ class BandSetConfig(BaseModel):
             self.bands = [f"B{band_idx}" for band_idx in range(self.num_bands)]
             self.num_bands = None
 
+        if self.spatial_size is not None and self.zoom_offset != 0:
+            raise ValueError(
+                "spatial_size and non-zero zoom_offset are mutually exclusive"
+            )
+
+        if self.spatial_size is not None and any(v <= 0 for v in self.spatial_size):
+            raise ValueError("spatial_size values must be positive integers")
+
         return self
 
     def get_final_projection_and_bounds(
@@ -204,17 +222,47 @@ class BandSetConfig(BaseModel):
     ) -> tuple[Projection, PixelBounds]:
         """Gets the final projection/bounds based on band set config.
 
-        The band set config may apply a non-zero zoom offset that modifies the window's
-        projection.
+        The band set config may apply a non-zero zoom offset or a fixed spatial_size
+        that modifies the window's projection and bounds.
+
+        When ``spatial_size`` is set, the projection resolution is scaled so that the
+        window's geographic extent maps to exactly ``spatial_size`` pixels. The returned
+        bounds will have width = spatial_size[1] and height = spatial_size[0].
+
+        Note: the ``spatial_size`` path uses ``round()`` to compute the new pixel-space
+        origin, which can shift the geographic origin by up to half of the new
+        (coarser) pixel size. This is the same rounding behaviour used by
+        ``ResolutionFactor.multiply_bounds`` and is negligible for coarse-resolution
+        layers (e.g. ERA5 at 0.1 deg) where sub-pixel shifts are irrelevant.
 
         Args:
             projection: the window's projection
-            bounds: the window's bounds (optional)
-            band_set: band set configuration object
+            bounds: the window's bounds
 
         Returns:
-            tuple of updated projection and bounds with zoom offset applied
+            tuple of updated projection and bounds
         """
+        if self.spatial_size is not None:
+            target_h, target_w = self.spatial_size
+            cur_w = bounds[2] - bounds[0]
+            cur_h = bounds[3] - bounds[1]
+
+            x_factor = target_w / cur_w
+            y_factor = target_h / cur_h
+
+            new_projection = Projection(
+                projection.crs,
+                projection.x_resolution / x_factor,
+                projection.y_resolution / y_factor,
+            )
+            new_bounds = (
+                round(bounds[0] * x_factor),
+                round(bounds[1] * y_factor),
+                round(bounds[0] * x_factor) + target_w,
+                round(bounds[1] * y_factor) + target_h,
+            )
+            return (new_projection, new_bounds)
+
         if self.zoom_offset >= 0:
             factor = ResolutionFactor(numerator=2**self.zoom_offset)
         else:
@@ -539,6 +587,15 @@ class CompositingMethod(StrEnum):
     (C, T, H, W) RasterArray whose T dimension spans the union of all item timesteps,
     clipped to the window time range.
     """
+
+    TEMPORAL_MEAN = "TEMPORAL_MEAN"
+    """Reduce a multi-temporal raster stack to one timestep via temporal mean."""
+
+    TEMPORAL_MAX = "TEMPORAL_MAX"
+    """Reduce a multi-temporal raster stack to one timestep via temporal max."""
+
+    TEMPORAL_MIN = "TEMPORAL_MIN"
+    """Reduce a multi-temporal raster stack to one timestep via temporal min."""
 
 
 class LayerConfig(BaseModel):

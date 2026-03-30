@@ -1,5 +1,6 @@
 """OlmoEarth model wrapper for fine-tuning in rslearn."""
 
+import copy
 import json
 import warnings
 from contextlib import nullcontext
@@ -154,6 +155,19 @@ class OlmoEarth(FeatureExtractor):
         self.token_pooling = token_pooling
         self.use_legacy_timestamps = use_legacy_timestamps
 
+    def _patch_legacy_encoder_config(self, config_dict: dict) -> dict:
+        """Patch checkpoint config dicts that predate use_linear_patch_embed.
+
+        Old checkpoints used Conv2d for patch projection and have no use_linear_patch_embed
+        key. Without this patch they would incorrectly default to True (Linear) and fail
+        to load. Call this on the raw config dict before passing to Config.from_dict.
+        """
+        enc = config_dict.get("model", {}).get("encoder_config", {})
+        if isinstance(enc, dict) and "use_linear_patch_embed" not in enc:
+            config_dict = copy.deepcopy(config_dict)
+            config_dict["model"]["encoder_config"]["use_linear_patch_embed"] = False
+        return config_dict
+
     def _load_model_from_checkpoint(
         self, checkpoint_upath: UPath, random_initialization: bool
     ) -> torch.nn.Module:
@@ -173,6 +187,7 @@ class OlmoEarth(FeatureExtractor):
 
         with (checkpoint_upath / "config.json").open() as f:
             config_dict = json.load(f)
+            config_dict = self._patch_legacy_encoder_config(config_dict)
             model_config = FullConfig.from_dict(config_dict["model"])
 
         model = model_config.build()

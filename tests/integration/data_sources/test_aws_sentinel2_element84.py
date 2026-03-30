@@ -94,8 +94,8 @@ def test_ingest(
 
     query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
     item_groups = data_source.get_items([seattle2020], query_config)[0]
-    assert len(item_groups) > 0 and len(item_groups[0]) > 0
-    item = item_groups[0][0]
+    assert len(item_groups) > 0 and len(item_groups[0].items) > 0
+    item = item_groups[0].items[0]
 
     tile_store_dir = UPath(tmp_path / "tiles")
     tile_store = DefaultTileStore(str(tile_store_dir))
@@ -104,7 +104,7 @@ def test_ingest(
 
     data_source.ingest(
         TileStoreWithLayer(tile_store, layer_name),
-        item_groups[0],
+        item_groups[0].items,
         [[seattle2020]],
     )
     assert tile_store.is_raster_ready(layer_name, item, ["B04"])
@@ -147,6 +147,11 @@ def test_materialize(
     )
     window.save()
 
-    data_source.materialize(window, item_groups, "layer", layer_config)
+    data_source.materialize(
+        window,
+        [group.items for group in item_groups],
+        "layer",
+        layer_config,
+    )
     raster_dir = window.get_raster_dir("layer", ["B04"])
     assert (raster_dir / "geotiff.tif").exists()

@@ -156,7 +156,7 @@ def test_read_raster_preserves_nodata_from_metadata(tmp_path: Path) -> None:
     projection = Projection(crs, 1, -1)
     out = ds.read_raster(
         layer_name="layer",
-        item_name="item1",
+        item=item,
         bands=["B04"],
         projection=projection,
         bounds=(0, 0, 2, 2),
@@ -166,6 +166,24 @@ def test_read_raster_preserves_nodata_from_metadata(tmp_path: Path) -> None:
     assert arr.dtype == np.float32
     expected = np.array([[0.0, 3.0], [4.0, 0.0]], dtype=np.float32)
     np.testing.assert_allclose(arr[0], expected)
+
+
+def test_earthdaily_item_serialize_roundtrip_preserves_product_id() -> None:
+    geom = STGeometry(
+        Projection(CRS.from_epsg(3857), 1, -1),
+        shapely.box(0, 0, 2, 2),
+        (datetime(2024, 1, 1, tzinfo=UTC), datetime(2024, 1, 2, tzinfo=UTC)),
+    )
+    item = EarthDailyItem(
+        name="item1",
+        geometry=geom,
+        asset_urls={"red": "/tmp/red.tif"},
+        product_id="S2A_MSIL2A_20240101T000000_N0511_R080_T15CWM_20240101T150509",
+    )
+
+    restored = EarthDailyItem.deserialize(item.serialize())
+
+    assert restored.product_id == item.product_id
 
 
 def test_init_requires_float32_band_dtype_when_scale_offset_enabled() -> None:

@@ -44,7 +44,7 @@ class TestCopernicus:
         logger.info("get items")
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
         item_groups = data_source.get_items([seattle2020], query_config)[0]
-        item = item_groups[0][0]
+        item = item_groups[0].items[0]
 
         tile_store_dir = UPath(tmp_path)
         tile_store = DefaultTileStore(str(tile_store_dir))
@@ -53,7 +53,9 @@ class TestCopernicus:
         logger.info(f"ingest item {item.name}")
         layer_name = "layer"
         data_source.ingest(
-            TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[0].items,
+            [[seattle2020]],
         )
         assert tile_store.is_raster_ready(layer_name, item, band_names)
 
@@ -75,7 +77,7 @@ class TestSentinel2:
         logger.info("get items")
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
         item_groups = data_source.get_items([seattle2020], query_config)[0]
-        item = item_groups[0][0]
+        item = item_groups[0].items[0]
 
         tile_store_dir = UPath(tmp_path)
         tile_store = DefaultTileStore(str(tile_store_dir))
@@ -84,7 +86,9 @@ class TestSentinel2:
         logger.info(f"ingest item {item.name}")
         layer_name = "layer"
         data_source.ingest(
-            TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[0].items,
+            [[seattle2020]],
         )
 
         # So with harmonization, B04 should be about 10 times of TCI.
@@ -137,7 +141,7 @@ class TestSentinel1:
         logger.info("get items")
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
         item_groups = data_source.get_items([seattle2020], query_config)[0]
-        item = item_groups[0][0]
+        item = item_groups[0].items[0]
 
         tile_store_dir = UPath(tmp_path)
         tile_store = DefaultTileStore(str(tile_store_dir))
@@ -146,7 +150,9 @@ class TestSentinel1:
         logger.info(f"ingest item {item.name}")
         layer_name = "layer"
         data_source.ingest(
-            TileStoreWithLayer(tile_store, layer_name), item_groups[0], [[seattle2020]]
+            TileStoreWithLayer(tile_store, layer_name),
+            item_groups[0].items,
+            [[seattle2020]],
         )
         assert tile_store.is_raster_ready(layer_name, item, ["vv"])
         assert tile_store.is_raster_ready(layer_name, item, ["vh"])

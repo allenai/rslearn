@@ -89,6 +89,7 @@ class WindowLayerData:
         self,
         layer_name: str,
         serialized_item_groups: list[list[Any]],
+        group_time_ranges: list[tuple[datetime, datetime] | None] | None = None,
         materialized: bool = False,
     ) -> None:
         """Initialize a new WindowLayerData.
@@ -97,10 +98,19 @@ class WindowLayerData:
             layer_name: the layer name
             serialized_item_groups: the groups of items, where each item is serialized
                 so it is JSON-encodable.
+            group_time_ranges: optional request time range for each item group. When
+                set, it must have one entry per item group.
             materialized: whether the items have been materialized
         """
         self.layer_name = layer_name
         self.serialized_item_groups = serialized_item_groups
+        if group_time_ranges is not None and len(group_time_ranges) != len(
+            serialized_item_groups
+        ):
+            raise ValueError(
+                "group_time_ranges length must match serialized_item_groups length"
+            )
+        self.group_time_ranges = group_time_ranges
         self.materialized = materialized
 
     def serialize(self) -> dict:
@@ -112,6 +122,16 @@ class WindowLayerData:
         return {
             "layer_name": self.layer_name,
             "serialized_item_groups": self.serialized_item_groups,
+            "group_time_ranges": (
+                [
+                    [time_range[0].isoformat(), time_range[1].isoformat()]
+                    if time_range is not None
+                    else None
+                    for time_range in self.group_time_ranges
+                ]
+                if self.group_time_ranges is not None
+                else None
+            ),
             "materialized": self.materialized,
         }
 
@@ -125,9 +145,22 @@ class WindowLayerData:
         Returns:
             the WindowLayerData
         """
+        group_time_ranges_data = d.get("group_time_ranges")
+        group_time_ranges = None
+        if group_time_ranges_data is not None:
+            group_time_ranges = [
+                (
+                    datetime.fromisoformat(time_range[0]),
+                    datetime.fromisoformat(time_range[1]),
+                )
+                if time_range is not None
+                else None
+                for time_range in group_time_ranges_data
+            ]
         return WindowLayerData(
             layer_name=d["layer_name"],
             serialized_item_groups=d["serialized_item_groups"],
+            group_time_ranges=group_time_ranges,
             materialized=d["materialized"],
         )
 
