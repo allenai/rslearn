@@ -317,7 +317,7 @@ class STGeometry:
 
         For geometries already in WGS84, this is a no-op.
         """
-        if self.projection.crs == CRS.from_epsg(WGS84_EPSG):
+        if self.projection.crs == WGS84_PROJECTION.crs:
             if self.projection == WGS84_PROJECTION:
                 return self
             return self.to_projection(WGS84_PROJECTION)
