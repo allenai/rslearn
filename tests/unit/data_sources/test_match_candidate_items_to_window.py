@@ -9,6 +9,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import Item
 from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.utils.geometry import Projection, STGeometry, get_global_geometry
+from rslearn.utils.get_utm_ups_crs import get_utm_ups_projection
 
 
 def _group_items(item_groups: list[MatchedItemGroup[Item]]) -> list[list[Item]]:
@@ -19,7 +20,9 @@ def test_global_geometry() -> None:
     """Verify that a global geometry matches with everything."""
     global_geometry = get_global_geometry(None)
     window_geom = STGeometry(
-        CRS.from_epsg(32610), shapely.box(500000, 500000, 500001, 500001), None
+        Projection(CRS.from_epsg(32610), 1, 1),
+        shapely.box(500000, 500000, 500001, 500001),
+        None,
     )
     item_groups = match_candidate_items_to_window(
         window_geom, [Item("item", global_geometry)], QueryConfig()
@@ -28,37 +31,163 @@ def test_global_geometry() -> None:
     assert len(item_groups[0].items) == 1
 
 
-def test_window_geometry_crossing_antimeridian() -> None:
-    """Verify that a window geometry crossing the antimeridian is handled correctly."""
-    item_geom = STGeometry(
-        WGS84_PROJECTION,
-        shapely.Polygon(
-            [
-                (-179.997854, -16.170659),
-                (-179.969444, -16.170659),
-                (-179.969444, -16.143371),
-                (-179.997854, -16.143371),
-                (-179.997854, -16.170659),
-            ]
-        ),
-        (
-            datetime(2025, 1, 27, 9, 5, 59, 24000, tzinfo=UTC),
-            datetime(2025, 1, 27, 9, 5, 59, 24000, tzinfo=UTC),
-        ),
-    )
-    window_geom = STGeometry(
-        Projection(CRS.from_epsg(32701), 1, -1),
-        shapely.box(179162, -8211693, 180177, -8210678),
-        (
-            datetime(2024, 12, 31, 14, 0, tzinfo=UTC),
-            datetime(2025, 8, 27, 14, 0, tzinfo=UTC),
-        ),
-    )
-    item_groups = match_candidate_items_to_window(
-        window_geom, [Item("item", item_geom)], QueryConfig()
-    )
-    assert len(item_groups) == 1
-    assert len(item_groups[0].items) == 1
+class TestReprojectionHandling:
+    """Tests for reprojection edge cases: antimeridian, close vertices, large geometry."""
+
+    def test_window_geometry_crossing_antimeridian(self) -> None:
+        """Verify that a window geometry crossing the antimeridian is handled correctly."""
+        item_geom = STGeometry(
+            WGS84_PROJECTION,
+            shapely.Polygon(
+                [
+                    (-179.997854, -16.170659),
+                    (-179.969444, -16.170659),
+                    (-179.969444, -16.143371),
+                    (-179.997854, -16.143371),
+                    (-179.997854, -16.170659),
+                ]
+            ),
+            (
+                datetime(2025, 1, 27, 9, 5, 59, 24000, tzinfo=UTC),
+                datetime(2025, 1, 27, 9, 5, 59, 24000, tzinfo=UTC),
+            ),
+        )
+        window_geom = STGeometry(
+            Projection(CRS.from_epsg(32701), 1, -1),
+            shapely.box(179162, -8211693, 180177, -8210678),
+            (
+                datetime(2024, 12, 31, 14, 0, tzinfo=UTC),
+                datetime(2025, 8, 27, 14, 0, tzinfo=UTC),
+            ),
+        )
+        item_groups = match_candidate_items_to_window(
+            window_geom, [Item("item", item_geom)], QueryConfig()
+        )
+        assert len(item_groups) == 1
+        assert len(item_groups[0].items) == 1
+
+    @pytest.fixture
+    def cdse_item_with_near_duplicate_vertices(self) -> Item:
+        """CDSE STAC geometry for S2B_MSIL2A_20251115T224759_N0511_R058_T01RBM.
+
+        This Sentinel-2 tile straddles the antimeridian in UTM zone 1N. The
+        STAC API returns a 3-part MultiPolygon that is valid in WGS84 but
+        contains near-duplicate vertices and coordinates at
+        179.99999999999994 (very close to but not exactly 180). When
+        reprojected to UTM zone 1N, these cause a degenerate triangle
+        (area=0) and a TopologyException.
+
+        Queried from https://stac.dataspace.copernicus.eu/v1/search?collections=sentinel-2-l2a&ids=S2B_MSIL2A_20251115T224759_N0511_R058_T01RBM_20251116T000614
+        """
+        shp = shapely.geometry.shape(
+            {
+                "type": "MultiPolygon",
+                "coordinates": [
+                    [
+                        [
+                            [-178.93747545748153, 28.16415854963138],
+                            [-178.93747545748153, 28.164158549631395],
+                            [-178.93747545748147, 28.16415854963138],
+                            [-178.93747545748153, 28.16415854963138],
+                        ]
+                    ],
+                    [
+                        [
+                            [-180, 28.894559786649314],
+                            [-178.94913222743162, 28.802724820493484],
+                            [-178.93747545748153, 28.16415854963139],
+                            [-180, 28.405489029508054],
+                            [-180, 28.894559786649314],
+                        ]
+                    ],
+                    [
+                        [
+                            [179.93733286444046, 28.41807604484601],
+                            [179.9236638370703, 28.893134383068205],
+                            [179.99999999999994, 28.894559786649314],
+                            [180, 28.894559786649314],
+                            [180, 28.405489029508054],
+                            [179.99999999999994, 28.405489029508065],
+                            [179.93733286444046, 28.41807604484601],
+                        ]
+                    ],
+                ],
+            }
+        )
+        return Item(
+            "S2B_MSIL2A_20251115T224759_N0511_R058_T01RBM",
+            STGeometry(WGS84_PROJECTION, shp, None),
+        )
+
+    def test_close_vertices_geometry_contains(
+        self, cdse_item_with_near_duplicate_vertices: Item
+    ) -> None:
+        """Item with degenerate triangle should not crash or give wrong results.
+
+        The CDSE STAC geometry for T01RBM has a degenerate zero-area triangle from
+        near-duplicate vertices. If it is naively reprojected to UTM zone 1N, it may
+        trigger a TopologyException. We should be robust to that issue.
+        """
+        window_proj = Projection(CRS.from_epsg(32601), 10, -10)
+        window_shp = shapely.box(25000, -315000, 25500, -314500)
+        window_geom = STGeometry(window_proj, window_shp, None)
+
+        item_groups = match_candidate_items_to_window(
+            window_geom,
+            [cdse_item_with_near_duplicate_vertices],
+            QueryConfig(space_mode=SpaceMode.MOSAIC, max_matches=1),
+        )
+        assert len(item_groups) == 1
+        assert len(item_groups[0].items) == 1
+
+    def test_large_geometry_contains(self) -> None:
+        """Large WGS84 item covering a UTM window should CONTAINS-match.
+
+        Item WGS84: (-47, 30, 53, 50)
+        Window WGS84: (2.5, 39.5, 3.5, 40.5)
+
+        With naive re-projection to UTM, the large geometry no longer contains the
+        window:
+
+        Item EPSG:32631: (-4599K, 4650K, 5599K, 6839K)
+        Window EPSG:32631: (457K, 4372K, 543K, 4483K)
+        """
+        item_shp = shapely.box(-47, 30, 53, 50)
+        item_geom = STGeometry(WGS84_PROJECTION, item_shp, None)
+
+        window_proj = Projection(CRS.from_epsg(32631), 10, -10)
+        window_geom = STGeometry(
+            WGS84_PROJECTION, shapely.box(2.5, 39.5, 3.5, 40.5), None
+        ).to_projection(window_proj)
+
+        item_groups = match_candidate_items_to_window(
+            window_geom,
+            [Item("large", item_geom)],
+            QueryConfig(space_mode=SpaceMode.CONTAINS, max_matches=1),
+        )
+        assert len(item_groups) == 1
+        assert len(item_groups[0].items) == 1
+
+    def test_large_geometry_non_intersecting(self) -> None:
+        """Large WGS84 item that doesn't intersect a small UTM window should return no matches."""
+        item_shp = shapely.box(100, 30, 110, 40)
+        item_geom = STGeometry(WGS84_PROJECTION, item_shp, None)
+
+        # Create UTM window that is nearby but not intersecting.
+        window_geom_wgs84 = STGeometry(
+            WGS84_PROJECTION, shapely.box(98, 35, 99, 36), None
+        )
+        window_proj = get_utm_ups_projection(
+            window_geom_wgs84.shp.bounds[0], window_geom_wgs84.shp.bounds[1], 10, -10
+        )
+        window_geom = window_geom_wgs84.to_projection(window_proj)
+
+        item_groups = match_candidate_items_to_window(
+            window_geom,
+            [Item("item", item_geom)],
+            QueryConfig(space_mode=SpaceMode.CONTAINS, max_matches=1),
+        )
+        assert len(item_groups) == 0
 
 
 class TestTimeMode:
