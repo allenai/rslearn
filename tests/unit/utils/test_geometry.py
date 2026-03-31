@@ -11,7 +11,7 @@ from rslearn.utils.geometry import (
     Projection,
     ResolutionFactor,
     STGeometry,
-    safely_reproject_and_clip,
+    safely_reproject_within_valid_area,
     split_shape_at_antimeridian,
 )
 
@@ -102,6 +102,59 @@ class TestSTGeometry:
         geom3 = STGeometry(WGS84_PROJECTION, shp3, rng_good)
         assert not geom.intersects(geom3)
 
+    @pytest.fixture
+    def utm_geometry_crossing_antimeridian(self) -> STGeometry:
+        """A small UTM geometry that straddles the antimeridian."""
+        utm_proj = Projection(CRS.from_epsg(32701), 1, -1)
+        # Reproject two WGS84 points on opposite sides of the antimeridian,
+        # then build a box from the resulting UTM pixel coordinates. The result should
+        # be a small box crossing the antimeridian, not the big box spanning the whole
+        # world.
+        p1 = STGeometry(
+            WGS84_PROJECTION, shapely.Point(-179.99, -16.17), None
+        ).to_projection(utm_proj)
+        p2 = STGeometry(
+            WGS84_PROJECTION, shapely.Point(179.99, -16.14), None
+        ).to_projection(utm_proj)
+        shp = shapely.box(p1.shp.x, p1.shp.y, p2.shp.x, p2.shp.y)
+        return STGeometry(utm_proj, shp, None)
+
+    def test_intersects_antimeridian_true(
+        self, utm_geometry_crossing_antimeridian: STGeometry
+    ) -> None:
+        """WGS84 geometry near antimeridian should intersect a UTM geometry crossing it."""
+        nearby_item = STGeometry(
+            WGS84_PROJECTION, shapely.box(-180.0, -16.17, -179.995, -16.14), None
+        )
+        assert nearby_item.intersects(utm_geometry_crossing_antimeridian)
+
+    def test_intersects_antimeridian_false(
+        self, utm_geometry_crossing_antimeridian: STGeometry
+    ) -> None:
+        """WGS84 item far from antimeridian should NOT intersect a UTM geometry crossing it."""
+        distant_item = STGeometry(
+            WGS84_PROJECTION, shapely.box(10, -16.17, 11, -16.14), None
+        )
+        assert not distant_item.intersects(utm_geometry_crossing_antimeridian)
+
+    def test_to_wgs84_noop_for_wgs84(self) -> None:
+        """to_wgs84() on a WGS84 geometry should return self."""
+        geom = STGeometry(WGS84_PROJECTION, shapely.box(10, 20, 11, 21), None)
+        assert geom.to_wgs84() is geom
+
+    def test_to_wgs84_antimeridian_split(
+        self, utm_geometry_crossing_antimeridian: STGeometry
+    ) -> None:
+        """to_wgs84() on an antimeridian-crossing UTM geometry should produce a compact MultiPolygon."""
+        wgs84 = utm_geometry_crossing_antimeridian.to_wgs84()
+        assert wgs84.projection == WGS84_PROJECTION
+        # The result should be a MultiPolygon with two small components near +/-180,
+        # not a single polygon spanning -180 to +180.
+        assert wgs84.shp.geom_type == "MultiPolygon"
+        for part in wgs84.shp.geoms:
+            lon_extent = part.bounds[2] - part.bounds[0]
+            assert lon_extent < 1.0  # each component < 1 degree wide
+
     def test_to_projection_double(self, geom: STGeometry) -> None:
         # Halve the unit/pixel -> double the coordinates.
         # New box should be 20, 20 to 22, 22.
@@ -191,8 +244,16 @@ class TestSplitAntiMeridian:
         assert output == polygon
 
 
-class TestSafelyReprojectAndClip:
-    """Unit tests for safely_reproject_and_clip."""
+class TestSafelyReprojectWithinValidArea:
+    """Unit tests for safely_reproject_within_valid_area."""
+
+    def test_same_projection_passthrough(self) -> None:
+        """When src and valid_geom share a projection, return src unchanged."""
+        proj = Projection(CRS.from_epsg(32631), 10, -10)
+        src = STGeometry(proj, shapely.box(0, 0, 100, 100), None)
+        valid = STGeometry(proj, shapely.box(50, 50, 150, 150), None)
+        result = safely_reproject_within_valid_area([src], valid)[0]
+        assert result is src
 
     def test_invalid_projection(self) -> None:
         """Test on geometries that would have error with direct re-projection."""
@@ -207,24 +268,13 @@ class TestSafelyReprojectAndClip:
         with pytest.raises(rasterio._err.CPLE_AppDefinedError):
             src_geom.to_projection(dst_geom.projection)
 
-        # Now verify that it works with safely_reproject_and_clip.
+        # Now verify that it works with safely_reproject_within_valid_area.
         # It should return None since these geometries don't actually intersect.
-        result = safely_reproject_and_clip([src_geom], dst_geom)[0]
+        result = safely_reproject_within_valid_area([src_geom], dst_geom)[0]
         assert result is None
 
-    def test_clipping(self) -> None:
-        """Verify that the source geometry is clipped to the destination geometry."""
-        src_geom = STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 1), None)
-        dst_geom = STGeometry(WGS84_PROJECTION, shapely.box(0.5, 0.5, 1.5, 1.5), None)
-        result = safely_reproject_and_clip([src_geom], dst_geom)[0]
-        assert result is not None
-        assert result.shp.bounds[0] == pytest.approx(0.5)
-        assert result.shp.bounds[1] == pytest.approx(0.5)
-        assert result.shp.bounds[2] == pytest.approx(1)
-        assert result.shp.bounds[3] == pytest.approx(1)
-
     def test_antimeridian_handling_disjoint(self) -> None:
-        """Verify that antiremidian handling works for non-intersecting geometries."""
+        """Verify that antimeridian handling works for non-intersecting geometries."""
         # Source geometry intersects antimeridian at +10 degrees latitude.
         # We also include the point from test_invalid_projection that should fail
         # direct re-projection.
@@ -243,8 +293,38 @@ class TestSafelyReprojectAndClip:
         with pytest.raises(rasterio._err.CPLE_AppDefinedError):
             src_geom.to_projection(dst_geom.projection)
 
-        result = safely_reproject_and_clip([src_geom], dst_geom)[0]
+        result = safely_reproject_within_valid_area([src_geom], dst_geom)[0]
         assert result is None
+
+    def test_antimeridian_large_source_contains_window(self) -> None:
+        """Re-projection should work when the window crosses the antimeridian.
+
+        In this case, the window should be split into two parts and each should be
+        buffered separately to handle the clipping.
+        """
+        utm_proj = Projection(CRS.from_epsg(32701), 10, -10)
+        p1 = STGeometry(
+            WGS84_PROJECTION, shapely.Point(-179.99, -16.17), None
+        ).to_projection(utm_proj)
+        p2 = STGeometry(
+            WGS84_PROJECTION, shapely.Point(179.99, -16.14), None
+        ).to_projection(utm_proj)
+        valid_geom = STGeometry(
+            utm_proj, shapely.box(p1.shp.x, p1.shp.y, p2.shp.x, p2.shp.y), None
+        )
+
+        src_geom = STGeometry(
+            WGS84_PROJECTION,
+            shapely.box(-180, -20, -90, 0).union(shapely.box(-179, -20, 180, 0)),
+            None,
+        )
+        result = safely_reproject_within_valid_area([src_geom], valid_geom)[0]
+        assert result is not None
+        # contains check may fail since it is on the border, but the intersection area
+        # should be almost the same as valid_geom's area.
+        assert result.shp.intersection(valid_geom.shp).area == pytest.approx(
+            valid_geom.shp.area
+        )
 
     def test_antimeridian_handling_intersecting(self) -> None:
         """Verify that antimeridian handling works for intersecting geometries."""
@@ -258,13 +338,13 @@ class TestSafelyReprojectAndClip:
         )
         dst_geom = wgs84_geom.to_projection(Projection(CRS.from_epsg(32660), 1, 1))
 
-        result = safely_reproject_and_clip([src_geom], dst_geom)[0]
+        result = safely_reproject_within_valid_area([src_geom], dst_geom)[0]
         assert result is not None
-        result_wgs84 = result.to_projection(WGS84_PROJECTION)
-        assert result_wgs84.shp.bounds[0] == pytest.approx(-179.95)
-        assert result_wgs84.shp.bounds[1] == pytest.approx(10)
-        assert result_wgs84.shp.bounds[2] == pytest.approx(-179.9)
-        assert result_wgs84.shp.bounds[3] == pytest.approx(10.1)
+        assert result.shp.area > 0
+        # The reprojected source should overlap the destination area (source only
+        # partially covers destination since it spans -180.1 to -179.9 while destination
+        # spans -179.95 to -179.85).
+        assert result.shp.intersects(dst_geom.shp)
 
 
 class TestResolutionFactor:
