@@ -12,6 +12,7 @@ from rslearn.config import QueryConfig, SpaceMode, TimeMode
 from rslearn.data_sources import Item
 from rslearn.log_utils import get_logger
 from rslearn.utils import STGeometry, shp_intersects
+from rslearn.utils.geometry import safely_reproject_within_valid_area
 
 logger = get_logger(__name__)
 
@@ -315,6 +316,12 @@ def _filter_and_project_items(
 ) -> tuple[list[ItemType], list[shapely.Geometry]]:
     """Filter items by time and project to geometry's projection.
 
+    If the geometry and items are in different projections, we handle re-projection
+    using safely_reproject_within_valid_area. This should be relatively robust for
+    items that are in WGS84, but if data sources provide items in other projections,
+    then the re-projection could still introduce distortions that result in incorrect
+    matching.
+
     Returns:
         tuple of (acceptable_items, acceptable_item_shps)
     """
@@ -342,27 +349,36 @@ def _filter_and_project_items(
                 reverse=False,
             )
 
-    # Project items to geometry's projection.
+    # Re-project items to geometry's projection.
+    reprojected_geometries = safely_reproject_within_valid_area(
+        [item.geometry for item in items], geometry
+    )
+
+    # Ignore items that are degenerate after re-projection.
     acceptable_items: list[ItemType] = []
     acceptable_item_shps: list[shapely.Geometry] = []
-    for item in items:
-        item_geom = item.geometry
-        # We need to re-project items to the geometry projection for the spatial checks
-        # later. Unless the item's geometry indicates global coverage, in which case we
-        # set it to match the geometry to show that it should cover the entire
-        # geometry.
-        if item_geom.projection != geometry.projection:
-            if item_geom.is_global():
-                item_geom = geometry
-            else:
-                item_geom = item_geom.to_projection(geometry.projection)
+    for item, reprojected_geom in zip(items, reprojected_geometries):
+        if item.geometry.is_global():
+            # This means the item is supposed to span everything. In this case instead
+            # of using the re-projected geometry, we use the window geometry, to make
+            # sure that all windows will be covered even in corner cases.
+            acceptable_items.append(item)
+            acceptable_item_shps.append(geometry.shp)
+            continue
 
-        if item_geom.shp.area == 0:
-            # Must have been an item that didn't quite match the window's spatial extent.
+        # Ignore degenerate geometries (check is_empty in case there was no
+        # intersection, but also area in case it collapsed to line/point).
+        # reprojected_geom could also be None if safely_reproject_within_valid_area
+        # found no intersection with the window geometry.
+        if (
+            reprojected_geom is None
+            or reprojected_geom.shp.is_empty
+            or reprojected_geom.shp.area == 0
+        ):
             continue
 
         acceptable_items.append(item)
-        acceptable_item_shps.append(item_geom.shp)
+        acceptable_item_shps.append(reprojected_geom.shp)
 
     return acceptable_items, acceptable_item_shps
 
