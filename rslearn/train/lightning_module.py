@@ -274,7 +274,7 @@ class RslearnLightningModule(L.LightningModule):
 
         If metrics_file is set, the metrics are saved to that file. Otherwise, if
         write_test_metrics is True, the metrics are saved to test_metrics.json in the
-        parent directory of the checkpoint.
+        same directory as the checkpoint (i.e. the run directory).
         Non-scalar metrics (like confusion matrices) are logged separately.
         """
         metrics = self.test_metrics.compute()
@@ -299,36 +299,37 @@ class RslearnLightningModule(L.LightningModule):
         metrics_write_path = self.metrics_file
         if metrics_write_path is None and self.write_test_metrics:
             if self.trainer.ckpt_path:
-                ckpt_dir = os.path.dirname(self.trainer.ckpt_path)
-                project_dir = os.path.dirname(ckpt_dir)
-                
+                run_dir = os.path.dirname(self.trainer.ckpt_path)
+
                 # Build filename from groups and tags
                 filename_parts = ["metrics"]
-                
+
                 # Try to get groups and tags from the datamodule's test config
                 test_groups = None
                 test_tags = None
-                if hasattr(self.trainer, 'datamodule'):
+                if hasattr(self.trainer, "datamodule"):
                     datamodule = self.trainer.datamodule
                     # Handle both RslearnDataModule and MultiDatasetDataModule
-                    if hasattr(datamodule, 'split_configs'):
-                        test_config = datamodule.split_configs.get('test')
+                    if hasattr(datamodule, "split_configs"):
+                        test_config = datamodule.split_configs.get("test")
                         if test_config:
                             test_groups = test_config.groups
                             test_tags = test_config.tags
-                
+
                 # Add groups to filename
                 if test_groups:
                     groups_str = "-".join(test_groups)
                     filename_parts.append(groups_str)
-                
+
                 # Add tags to filename
                 if test_tags:
-                    tags_str = "-".join(f"{k}-{v}" if v else k for k, v in test_tags.items())
+                    tags_str = "-".join(
+                        f"{k}-{v}" if v else k for k, v in test_tags.items()
+                    )
                     filename_parts.append(f"tags-{tags_str}")
-                
+
                 filename = "_".join(filename_parts) + ".json"
-                metrics_write_path = os.path.join(project_dir, filename)
+                metrics_write_path = os.path.join(run_dir, filename)
             else:
                 raise ValueError(
                     "write_test_metrics is enabled but no ckpt_path provided. "
