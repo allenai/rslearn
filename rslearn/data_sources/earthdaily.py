@@ -544,10 +544,8 @@ class EarthDaily(DataSource, TileStore):
         scaled = array * scales + offsets
 
         # Preserve source nodata pixels.
-        nodata_mask = np.zeros(array.shape, dtype=bool)
-        for band_idx in range(num_bands):
-            band_nodata = nodata_vals[band_idx, 0, 0]
-            nodata_mask[band_idx] = array[band_idx] == band_nodata
+        nodata_mask = np.equal(array, nodata_vals)
+        # nodata_vals is shaped (bands, 1, 1), so this broadcasts per-band nodata.
         if nodata_mask.any():
             scaled[nodata_mask] = array[nodata_mask]
 
