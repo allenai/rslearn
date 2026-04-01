@@ -27,6 +27,48 @@ def test_chelsa_daily_get_asset_url() -> None:
     )
 
 
+def test_chelsa_daily_precipitation_alias_switches_for_pr_band() -> None:
+    data_source = CHELSADaily(band_names=["pr"])
+
+    pre_overlap = data_source.get_item_by_name("chelsa_daily_20191231")
+    overlap = data_source.get_item_by_name("chelsa_daily_20200601")
+    post_overlap = data_source.get_item_by_name("chelsa_daily_20210101")
+
+    assert data_source.get_asset_url(pre_overlap, "pr") == (
+        "https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/daily/pr/2019/"
+        "CHELSA_pr_31_12_2019_V.2.1.tif"
+    )
+    assert data_source.get_asset_url(overlap, "pr") == (
+        "https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/daily/pr/2020/"
+        "CHELSA_pr_01_06_2020_V.2.1.tif"
+    )
+    assert data_source.get_asset_url(post_overlap, "pr") == (
+        "https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/daily/prec/2021/"
+        "CHELSA_prec_01_01_2021_V.2.1.tif"
+    )
+
+
+def test_chelsa_daily_precipitation_alias_switches_for_prec_band() -> None:
+    data_source = CHELSADaily(band_names=["prec"])
+
+    pre_overlap = data_source.get_item_by_name("chelsa_daily_20191231")
+    overlap = data_source.get_item_by_name("chelsa_daily_20200601")
+    post_overlap = data_source.get_item_by_name("chelsa_daily_20210101")
+
+    assert data_source.get_asset_url(pre_overlap, "prec") == (
+        "https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/daily/pr/2019/"
+        "CHELSA_pr_31_12_2019_V.2.1.tif"
+    )
+    assert data_source.get_asset_url(overlap, "prec") == (
+        "https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/daily/prec/2020/"
+        "CHELSA_prec_01_06_2020_V.2.1.tif"
+    )
+    assert data_source.get_asset_url(post_overlap, "prec") == (
+        "https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/daily/prec/2021/"
+        "CHELSA_prec_01_01_2021_V.2.1.tif"
+    )
+
+
 def test_chelsa_daily_get_items_returns_daily_items() -> None:
     data_source = CHELSADaily(band_names=["tas"])
 
