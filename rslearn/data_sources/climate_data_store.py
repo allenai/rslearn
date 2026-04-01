@@ -165,9 +165,7 @@ class ERA5Land(DataSource):
             key=api_key,
         )
 
-    def _validate_band_names(
-        self, valid_band_names: set[str] | frozenset[str]
-    ) -> None:
+    def _validate_band_names(self, valid_band_names: set[str] | frozenset[str]) -> None:
         """Validate configured bands against supported rslearn band names.
 
         Args:
