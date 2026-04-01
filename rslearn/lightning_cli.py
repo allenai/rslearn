@@ -301,8 +301,13 @@ class RslearnLightningCLI(LightningCLI):
         # Get project directory within the project management directory.
         project_dir = UPath(management_dir) / c.project_name / c.run_name
 
-        # Set default_root_dir so ManagedBestLastCheckpoint can resolve it.
-        c.trainer.default_root_dir = str(project_dir)
+        # Set dirpath on any ManagedBestLastCheckpoint callbacks so they know
+        # where to save checkpoints, without polluting trainer.default_root_dir
+        # (which would redirect default logging into the project directory).
+        if c.trainer.callbacks:
+            for cb in c.trainer.callbacks:
+                if "ManagedBestLastCheckpoint" in getattr(cb, "class_path", ""):
+                    cb.init_args.dirpath = str(project_dir)
 
         # Configure W&B logging.
         should_log = False

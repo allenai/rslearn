@@ -81,27 +81,29 @@ class BestLastCheckpoint(Callback):
 
 
 class ManagedBestLastCheckpoint(BestLastCheckpoint):
-    """BestLastCheckpoint that resolves dirpath from trainer.default_root_dir.
+    """BestLastCheckpoint whose dirpath is injected by the CLI project management.
 
-    Use with project management: the CLI sets trainer.default_root_dir to the project
-    directory ({MANAGEMENT_DIR}/{PROJECT_NAME}/{RUN_NAME}), and this callback picks it
-    up at setup time.
+    Use with ``--management_dir``: the CLI sets ``dirpath`` on this callback's
+    init_args before instantiation.
     """
 
     def __init__(
-        self, monitor: str = "val_loss", mode: Literal["min", "max"] = "min"
+        self,
+        dirpath: str = "",
+        monitor: str = "val_loss",
+        mode: Literal["min", "max"] = "min",
     ) -> None:
         """Create a new ManagedBestLastCheckpoint.
 
         Args:
+            dirpath: checkpoint directory (set automatically by CLI project management).
             monitor: metric key to monitor for best checkpoint.
             mode: "min" if lower is better, "max" if higher is better.
         """
-        super().__init__(dirpath="", monitor=monitor, mode=mode)
-
-    def setup(
-        self, trainer: Trainer, pl_module: LightningModule, stage: str | None = None
-    ) -> None:
-        """Resolve dirpath from trainer.default_root_dir."""
-        self.dirpath = trainer.default_root_dir
-        logger.info("ManagedBestLastCheckpoint using dirpath=%s", self.dirpath)
+        if not dirpath:
+            raise ValueError(
+                "ManagedBestLastCheckpoint requires dirpath to be set. "
+                "Use --management_dir so the CLI injects it automatically, "
+                "or use BestLastCheckpoint with an explicit dirpath instead."
+            )
+        super().__init__(dirpath=dirpath, monitor=monitor, mode=mode)
