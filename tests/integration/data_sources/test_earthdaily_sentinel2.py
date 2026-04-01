@@ -146,7 +146,7 @@ def test_sentinel2_read_raster_applies_scale_offset_when_apply_scale_offset_true
         name="S2_TEST_ITEM",
         geometry=item_geom,
         asset_urls={"red": str(red_path)},
-        asset_scale_offsets={"red": [{"scale": 0.1, "offset": 1.0}]},
+        asset_scale_offsets={"red": [{"scale": 0.1, "offset": 1.0, "nodata": 0.0}]},
     )
 
     data_source = Sentinel2(assets=["red"], apply_scale_offset=True)
@@ -194,7 +194,7 @@ def test_sentinel2_ingest_applies_scale_offset_when_apply_scale_offset_true(
         name="S2_TEST_ITEM",
         geometry=item_geom,
         asset_urls={"red": httpserver.url_for("/red.tif")},
-        asset_scale_offsets={"red": [{"scale": 0.1, "offset": 1.0}]},
+        asset_scale_offsets={"red": [{"scale": 0.1, "offset": 1.0, "nodata": 0.0}]},
     )
 
     data_source = Sentinel2(assets=["red"], apply_scale_offset=True)
