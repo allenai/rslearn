@@ -1,5 +1,6 @@
 """OlmoEarthPeriodTimestamps: aligns modality images to a fixed period grid."""
 
+import logging
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -14,6 +15,8 @@ from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (
 
 from rslearn.models.olmoearth_pretrain.model import MODALITY_NAMES, OlmoEarth
 from rslearn.train.model_context import ModelContext, RasterImage
+
+logger = logging.getLogger(__name__)
 
 
 class OlmoEarthPeriodTimestamps(OlmoEarth):
@@ -195,6 +198,12 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
                     aligned[:, period_idx, :, :] = tensor[:, orig_idx, :, :]
                     mask[period_idx, :, :, :] = MaskValue.ONLINE_ENCODER.value
                     filled.add(period_idx)
+                else:
+                    logger.warning(
+                        "Image %d (timestamp %s) could not be assigned to a period.",
+                        orig_idx,
+                        actual_ts,
+                    )
 
         return aligned, mask
 
@@ -239,6 +248,16 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             periods = self._compute_periods(
                 metadata.time_range, self.period_duration, self.max_matches
             )
+            if len(periods) < self.max_matches:
+                logger.warning(
+                    "Window %s/%s: time range fits %d periods but "
+                    "max_matches=%d. The window time range is shorter than "
+                    "max_matches * period_duration.",
+                    metadata.window_group,
+                    metadata.window_name,
+                    len(periods),
+                    self.max_matches,
+                )
             periods_per_sample.append(periods)
 
         max_timesteps = max(len(p) for p in periods_per_sample)
