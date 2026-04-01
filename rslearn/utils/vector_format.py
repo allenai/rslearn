@@ -13,7 +13,12 @@ from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import open_atomic
 
 from .feature import Feature
-from .geometry import PixelBounds, Projection, STGeometry, safely_reproject_and_clip
+from .geometry import (
+    PixelBounds,
+    Projection,
+    STGeometry,
+    safely_reproject_within_valid_area,
+)
 
 logger = get_logger(__name__)
 
@@ -337,23 +342,31 @@ class GeojsonVectorFormat(VectorFormat):
             path: the directory to read from
             projection: the projection to read the data in
             bounds: the bounds to read under the given projection. Only features that
-                intersect the bounds should be returned.
+                intersect the bounds should be returned. These features are returned
+                unmodified (not clipped).
 
         Returns:
             the vector data
         """
         features = self.decode_from_file(path / self.fname)
 
-        # Re-project to the desired projection and clip to bounds.
+        # Re-project to the desired projection.
         dst_geom = STGeometry(projection, shapely.box(*bounds), None)
-        reprojected_geoms = safely_reproject_and_clip(
+        reprojected_geoms = safely_reproject_within_valid_area(
             [feat.geometry for feat in features], dst_geom
         )
         reprojected_features = []
-        for feat, geom in zip(features, reprojected_geoms):
-            if geom is None:
-                # None value means that it did not intersect the provided bounds.
+        for feat, reproj in zip(features, reprojected_geoms):
+            if reproj is None:
                 continue
-            reprojected_features.append(Feature(geom, feat.properties))
+            # Only include shapes that intersect the given bounds.
+            if not reproj.shp.intersects(dst_geom.shp):
+                continue
+            reprojected_features.append(
+                Feature(
+                    reproj,
+                    feat.properties,
+                )
+            )
 
         return reprojected_features

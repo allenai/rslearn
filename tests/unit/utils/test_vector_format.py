@@ -54,7 +54,7 @@ def test_geojson(
         assert feat_y == pytest.approx(wgs84_geom.shp.y)
 
     # Make sure that when we read the features back, we get the same geometry as
-    # before. The bounds is ignored since it is GeoJSON (no index).
+    # before.
     result = (
         GeojsonVectorFormat()
         .decode_vector(out_dir, projection, (col - 1, row - 1, col + 1, row + 1))[0]

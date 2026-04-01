@@ -88,6 +88,7 @@ These data sources are still experimental and may have incomplete functionality.
 | Data Source | Description |
 |---|---|
 | [climate_data_store.ERA5Land](data_sources/climate_data_store.md) | ERA5 Land from Copernicus CDS (base class, monthly means, hourly) |
+| [chelsa.CHELSADaily](data_sources/chelsa_CHELSADaily.md) | CHELSA daily global climate rasters |
 | [earthdatahub.ERA5LandDailyUTCv1](data_sources/earthdatahub_ERA5LandDailyUTCv1.md) | ERA5-Land daily UTC from EarthDataHub |
 
 #### Land Cover / Crop
