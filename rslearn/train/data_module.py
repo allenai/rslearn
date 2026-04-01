@@ -33,18 +33,20 @@ logger = get_logger(__name__)
 
 def collate_fn(
     batch: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]],
-) -> tuple:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Collate batch of training examples.
 
-    We just make list of the inputs and another of the targets.
+    Transposes a list of (input, target, metadata) tuples into three separate
+    lists: one for inputs, one for targets, and one for metadatas.
 
     Args:
         batch: list of input/target/metadata for each example
 
     Returns:
-        a tuple (inputs, targets, metadatas)
+        a tuple (inputs, targets, metadatas) where each element is a list of dicts
     """
-    return tuple(zip(*batch))
+    inputs, targets, metadatas = zip(*batch)
+    return (list(inputs), list(targets), list(metadatas))
 
 
 class RslearnDataModule(L.LightningDataModule):
