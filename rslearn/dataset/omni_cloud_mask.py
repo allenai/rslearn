@@ -75,7 +75,6 @@ class OmniCloudMaskFirstValid(Compositor):
         projection: Projection,
         bounds: PixelBounds,
         resampling_method: Resampling,
-        nodata_vals: list[Any],
     ) -> float | None:
         """Score a single item using OmniCloudMask.
 
@@ -88,6 +87,9 @@ class OmniCloudMaskFirstValid(Compositor):
         Returns: the score, where lower scores should be preferred.
         """
         scoring_bands = [self.red_band, self.green_band, self.nir_band]
+        # The NODATA values for the scoring bands are expected to be 0 for both Sentinel-2
+        # and Landsat.
+        nodata_vals = [0, 0, 0]
 
         # The bands should be available, raise error if not.
         needed_band_sets_and_indexes = get_needed_band_sets_and_indexes(
@@ -166,7 +168,7 @@ class OmniCloudMaskFirstValid(Compositor):
             scored: list[tuple[float, ItemType]] = []
             for item in group:
                 score = self._score_item(
-                    item, tile_store, projection, bounds, resampling_method, nodata_vals
+                    item, tile_store, projection, bounds, resampling_method
                 )
                 if score is None:
                     # Missing image. We skip this item since we can't score it and
