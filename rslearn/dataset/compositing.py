@@ -158,7 +158,9 @@ class MeanCompositor(Compositor):
         fill_vals = np.array(nodata_vals).reshape(-1, 1, 1, 1)
         cthw = np.ma.filled(mean_result, fill_value=fill_vals).astype(band_dtype)
         metadata = RasterMetadata(nodata_values=list(nodata_vals))
-        return RasterArray(array=cthw, timestamps=rasters[0].timestamps, metadata=metadata)
+        return RasterArray(
+            array=cthw, timestamps=rasters[0].timestamps, metadata=metadata
+        )
 
 
 class MedianCompositor(Compositor):
@@ -205,7 +207,9 @@ class MedianCompositor(Compositor):
         fill_vals = np.array(nodata_vals).reshape(-1, 1, 1, 1)
         cthw = np.ma.filled(median_result, fill_value=fill_vals).astype(band_dtype)
         metadata = RasterMetadata(nodata_values=list(nodata_vals))
-        return RasterArray(array=cthw, timestamps=rasters[0].timestamps, metadata=metadata)
+        return RasterArray(
+            array=cthw, timestamps=rasters[0].timestamps, metadata=metadata
+        )
 
 
 class SpatialMosaicTemporalStackCompositor(Compositor):
@@ -299,7 +303,9 @@ class SpatialMosaicTemporalStackCompositor(Compositor):
             output[:, out_idxs, :, :] = np.where(mask[np.newaxis], src_slice, dst_slice)
 
         metadata = RasterMetadata(nodata_values=list(nodata_vals))
-        return RasterArray(array=output, timestamps=sorted_timestamps, metadata=metadata)
+        return RasterArray(
+            array=output, timestamps=sorted_timestamps, metadata=metadata
+        )
 
 
 class _TemporalReducerCompositor(Compositor):
