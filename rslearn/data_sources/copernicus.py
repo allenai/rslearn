@@ -86,7 +86,11 @@ def get_harmonize_callback(
         # Subtract positive number instead of add negative number since only the former
         # works with uint16 array.
         assert array.shape[0] == 1 and array.dtype == np.uint16
-        return np.clip(array, -offset, None) - (-offset)  # type: ignore
+        was_valid = array > 0
+        result = np.clip(array, -offset, None) - (-offset)  # type: ignore
+        # Clamp valid pixels that became 0 to 1, so they aren't mistaken for nodata (0).
+        result[(result == 0) & was_valid] = 1
+        return result
 
     return callback
 
