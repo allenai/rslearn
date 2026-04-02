@@ -266,6 +266,12 @@ You can visualize the output embeddings in qgis:
 qgis $DATASET_PATH/windows/default/default/layers/embeddings/*/geotiff.tif
 ```
 
+## Benchmarking on CPU/MPS
+
+For a reproducible local benchmark process (including measured results for all
+OlmoEarth v1 model sizes on this machine), see
+[OlmoEarthEmbeddingsBenchmark](OlmoEarthEmbeddingsBenchmark.md).
+
 ## Fit a Downstream Head From Saved Embeddings
 
 Once the embeddings are written to the `"embeddings"` layer, you can train a

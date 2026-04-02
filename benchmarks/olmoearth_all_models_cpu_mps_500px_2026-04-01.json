@@ -1,0 +1,206 @@
+{
+  "system_info": {
+    "timestamp_utc": "2026-04-01T11:18:48.248445+00:00",
+    "python": "3.11.13",
+    "platform": "macOS-15.7.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "torch_version": "2.9.1",
+    "mps_available": true,
+    "mps_built": true
+  },
+  "args": {
+    "dataset_root": "/tmp/olmoearth_bench_500px_fNU7fg",
+    "devices": [
+      "cpu",
+      "mps"
+    ],
+    "model_ids": [
+      "OLMOEARTH_V1_NANO",
+      "OLMOEARTH_V1_TINY",
+      "OLMOEARTH_V1_BASE",
+      "OLMOEARTH_V1_LARGE"
+    ],
+    "patch_size": 4,
+    "num_windows": 1,
+    "timesteps": 1,
+    "window_size": 500,
+    "crop_size": 64,
+    "overlap_pixels": 32,
+    "batch_size": 1,
+    "num_workers": 0,
+    "warmup_runs": 1,
+    "num_runs": 1,
+    "seed": 42
+  },
+  "results": [
+    {
+      "model_id": "OLMOEARTH_V1_NANO",
+      "device": "cpu",
+      "num_runs": 1,
+      "warmup_runs": 1,
+      "num_windows": 1,
+      "timesteps": 1,
+      "window_size": 500,
+      "crop_size": 64,
+      "overlap_pixels": 32,
+      "batch_size": 1,
+      "num_predict_crops": 225,
+      "run_seconds": [
+        3.91054854192771
+      ],
+      "mean_seconds": 3.91054854192771,
+      "std_seconds": 0.0,
+      "min_seconds": 3.91054854192771,
+      "max_seconds": 3.91054854192771,
+      "mean_crops_per_second": 57.536685093566426
+    },
+    {
+      "model_id": "OLMOEARTH_V1_NANO",
+      "device": "mps",
+      "num_runs": 1,
+      "warmup_runs": 1,
+      "num_windows": 1,
+      "timesteps": 1,
+      "window_size": 500,
+      "crop_size": 64,
+      "overlap_pixels": 32,
+      "batch_size": 1,
+      "num_predict_crops": 225,
+      "run_seconds": [
+        3.1413617921061814
+      ],
+      "mean_seconds": 3.1413617921061814,
+      "std_seconds": 0.0,
+      "min_seconds": 3.1413617921061814,
+      "max_seconds": 3.1413617921061814,
+      "mean_crops_per_second": 71.62498778886108
+    },
+    {
+      "model_id": "OLMOEARTH_V1_TINY",
+      "device": "cpu",
+      "num_runs": 1,
+      "warmup_runs": 1,
+      "num_windows": 1,
+      "timesteps": 1,
+      "window_size": 500,
+      "crop_size": 64,
+      "overlap_pixels": 32,
+      "batch_size": 1,
+      "num_predict_crops": 225,
+      "run_seconds": [
+        11.655670291977003
+      ],
+      "mean_seconds": 11.655670291977003,
+      "std_seconds": 0.0,
+      "min_seconds": 11.655670291977003,
+      "max_seconds": 11.655670291977003,
+      "mean_crops_per_second": 19.303909115795356
+    },
+    {
+      "model_id": "OLMOEARTH_V1_TINY",
+      "device": "mps",
+      "num_runs": 1,
+      "warmup_runs": 1,
+      "num_windows": 1,
+      "timesteps": 1,
+      "window_size": 500,
+      "crop_size": 64,
+      "overlap_pixels": 32,
+      "batch_size": 1,
+      "num_predict_crops": 225,
+      "run_seconds": [
+        4.694106291979551
+      ],
+      "mean_seconds": 4.694106291979551,
+      "std_seconds": 0.0,
+      "min_seconds": 4.694106291979551,
+      "max_seconds": 4.694106291979551,
+      "mean_crops_per_second": 47.93244677574509
+    },
+    {
+      "model_id": "OLMOEARTH_V1_BASE",
+      "device": "cpu",
+      "num_runs": 1,
+      "warmup_runs": 1,
+      "num_windows": 1,
+      "timesteps": 1,
+      "window_size": 500,
+      "crop_size": 64,
+      "overlap_pixels": 32,
+      "batch_size": 1,
+      "num_predict_crops": 225,
+      "run_seconds": [
+        42.506796166999266
+      ],
+      "mean_seconds": 42.506796166999266,
+      "std_seconds": 0.0,
+      "min_seconds": 42.506796166999266,
+      "max_seconds": 42.506796166999266,
+      "mean_crops_per_second": 5.293271201057534
+    },
+    {
+      "model_id": "OLMOEARTH_V1_BASE",
+      "device": "mps",
+      "num_runs": 1,
+      "warmup_runs": 1,
+      "num_windows": 1,
+      "timesteps": 1,
+      "window_size": 500,
+      "crop_size": 64,
+      "overlap_pixels": 32,
+      "batch_size": 1,
+      "num_predict_crops": 225,
+      "run_seconds": [
+        17.936985249863937
+      ],
+      "mean_seconds": 17.936985249863937,
+      "std_seconds": 0.0,
+      "min_seconds": 17.936985249863937,
+      "max_seconds": 17.936985249863937,
+      "mean_crops_per_second": 12.543913978058645
+    },
+    {
+      "model_id": "OLMOEARTH_V1_LARGE",
+      "device": "cpu",
+      "num_runs": 1,
+      "warmup_runs": 1,
+      "num_windows": 1,
+      "timesteps": 1,
+      "window_size": 500,
+      "crop_size": 64,
+      "overlap_pixels": 32,
+      "batch_size": 1,
+      "num_predict_crops": 225,
+      "run_seconds": [
+        134.5513452498708
+      ],
+      "mean_seconds": 134.5513452498708,
+      "std_seconds": 0.0,
+      "min_seconds": 134.5513452498708,
+      "max_seconds": 134.5513452498708,
+      "mean_crops_per_second": 1.672224083543424
+    },
+    {
+      "model_id": "OLMOEARTH_V1_LARGE",
+      "device": "mps",
+      "num_runs": 1,
+      "warmup_runs": 1,
+      "num_windows": 1,
+      "timesteps": 1,
+      "window_size": 500,
+      "crop_size": 64,
+      "overlap_pixels": 32,
+      "batch_size": 1,
+      "num_predict_crops": 225,
+      "run_seconds": [
+        48.91633250005543
+      ],
+      "mean_seconds": 48.91633250005543,
+      "std_seconds": 0.0,
+      "min_seconds": 48.91633250005543,
+      "max_seconds": 48.91633250005543,
+      "mean_crops_per_second": 4.599690706570143
+    }
+  ]
+}

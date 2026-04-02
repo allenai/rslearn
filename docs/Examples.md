@@ -26,3 +26,5 @@ Examples
   are taken from the USDA Cropland Data Layer.
 - [OlmoEarthEmbeddings](examples/OlmoEarthEmbeddings.md): compute OlmoEarth embeddings
   on a location and time range of interest.
+- [OlmoEarthEmbeddingsBenchmark](examples/OlmoEarthEmbeddingsBenchmark.md): benchmark
+  OlmoEarth embedding generation on local CPU/MPS for all OlmoEarth v1 model sizes.
