@@ -6,6 +6,7 @@ from io import BytesIO
 import numpy as np
 from PIL import Image
 
+from rslearn.config import LayerConfig
 from rslearn.dataset import Window
 from rslearn.log_utils import get_logger
 from rslearn.utils.colors import DEFAULT_COLORS
@@ -17,21 +18,27 @@ logger = get_logger(__name__)
 VISUALIZATION_IMAGE_SIZE = (512, 512)
 
 
-def generate_label_colors(label_classes: set[str]) -> dict[str, tuple[int, int, int]]:
-    """Generate distinct colors for label classes.
+def generate_label_colors_for_layer(
+    layer_config: LayerConfig,
+) -> dict[str, tuple[int, int, int]] | None:
+    """Generate label colors from a layer config's class_names.
+
+    Returns None if class_names is not set, signaling that the caller should fall back
+    to DEFAULT_COLORS by index.
 
     Args:
-        label_classes: Set or list of label class names
+        layer_config: LayerConfig to read class_names from
 
     Returns:
-        Dictionary mapping label class names to RGB color tuples
+        Dictionary mapping label class names to RGB color tuples, or None
     """
-    label_colors = {}
+    if not layer_config.class_names:
+        return None
 
-    sorted_labels = sorted(label_classes)
+    label_colors = {}
+    sorted_labels = sorted(layer_config.class_names)
     for color_idx, label in enumerate(sorted_labels):
         label_colors[label] = DEFAULT_COLORS[color_idx % len(DEFAULT_COLORS)]
-
     return label_colors
 
 
@@ -58,13 +65,13 @@ def format_window_info(
 
 
 def array_to_bytes(
-    array: np.ndarray, resampling: Image.Resampling = Image.Resampling.LANCZOS
+    array: np.ndarray, resampling: Image.Resampling = Image.Resampling.NEAREST
 ) -> bytes:
     """Convert a numpy array to PNG bytes.
 
     Args:
         array: Array with shape (height, width, channels) or (height, width) as uint8
-        resampling: PIL Image resampling method (default LANCZOS, use NEAREST for labels)
+        resampling: PIL Image resampling method (default NEAREST)
 
     Returns:
         PNG image bytes
@@ -86,14 +93,3 @@ def array_to_bytes(
     buf = BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
-
-
-def _escape_html(text: str) -> str:
-    """Escape HTML special characters."""
-    return (
-        text.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&#x27;")
-    )

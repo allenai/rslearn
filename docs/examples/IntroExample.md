@@ -171,12 +171,10 @@ We can also visualize samples using the visualization module:
 ```
 python -m rslearn.vis.vis_server \
     $DATASET_PATH \
-    --layers sentinel2 \  # image modality layers
-    --label_layers label_raster \  # label layers
-    --bands '{"sentinel2": ["B04", "B03", "B02"]}' \  # specify bands wanted for each image modality
-    --normalization '{"sentinel2": "sentinel2_rgb"}'  \  # specify normalization wanted for each image modality
-    --task_type segmentation \  # segmentation, detection, or classification
-    --max_samples 100 \  # number of datapoints to randomly sample and visualize
+    --raster_groups sentinel2 label_raster \
+    --bands '{"sentinel2": ["B04", "B03", "B02"], "label_raster": ["class"]}' \
+    --raster_render '{"sentinel2": {"name": "sentinel2_rgb"}, "label_raster": {"name": "classes"}}' \
+    --max_samples 100 \
     --port 8000
 ```
 
