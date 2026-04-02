@@ -22,7 +22,7 @@ from earthdaily import EDSClient, EDSConfig
 from rasterio.enums import Resampling
 from upath import UPath
 
-from rslearn.config import LayerConfig, QueryConfig
+from rslearn.config import DType, LayerConfig, QueryConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
@@ -59,7 +59,7 @@ class EarthDailyItem(Item):
             asset_urls: map from asset key to the asset URL.
             asset_scale_offsets: optional per-asset scale/offset metadata. Each asset key
                 maps to a list of dictionaries (one per raster band) with keys
-                "scale" and "offset".
+                "scale", "offset", and "nodata".
             product_id: optional Sentinel-2 product ID from STAC
                 `properties["sentinel:product_id"]`.
         """
@@ -255,7 +255,12 @@ class EarthDaily(DataSource, TileStore):
                     offset = float(raw_offset) if raw_offset is not None else 0.0
                 except (TypeError, ValueError):
                     offset = 0.0
-                scale_offsets.append({"scale": scale, "offset": offset})
+                parsed: dict[str, float] = {
+                    "scale": scale,
+                    "offset": offset,
+                    "nodata": float(band_meta["nodata"]),
+                }
+                scale_offsets.append(parsed)
             if scale_offsets:
                 asset_scale_offsets[asset_key] = scale_offsets
 
@@ -499,8 +504,10 @@ class EarthDaily(DataSource, TileStore):
         if len(scale_offsets) == 1:
             scale = _to_float(scale_offsets[0].get("scale"), 1.0)
             offset = _to_float(scale_offsets[0].get("offset"), 0.0)
+            nodata = float(scale_offsets[0]["nodata"])
             scales = np.full((num_bands, 1, 1), scale, dtype=np.float32)
             offsets = np.full((num_bands, 1, 1), offset, dtype=np.float32)
+            nodata_vals = np.full((num_bands, 1, 1), nodata, dtype=np.float32)
         elif len(scale_offsets) == num_bands:
             scales = np.array(
                 [_to_float(so.get("scale"), 1.0) for so in scale_offsets],
@@ -508,6 +515,10 @@ class EarthDaily(DataSource, TileStore):
             ).reshape(num_bands, 1, 1)
             offsets = np.array(
                 [_to_float(so.get("offset"), 0.0) for so in scale_offsets],
+                dtype=np.float32,
+            ).reshape(num_bands, 1, 1)
+            nodata_vals = np.array(
+                [float(so["nodata"]) for so in scale_offsets],
                 dtype=np.float32,
             ).reshape(num_bands, 1, 1)
         else:
@@ -521,14 +532,24 @@ class EarthDaily(DataSource, TileStore):
             )
             scale = _to_float(scale_offsets[0].get("scale"), 1.0)
             offset = _to_float(scale_offsets[0].get("offset"), 0.0)
+            nodata = float(scale_offsets[0]["nodata"])
             scales = np.full((num_bands, 1, 1), scale, dtype=np.float32)
             offsets = np.full((num_bands, 1, 1), offset, dtype=np.float32)
+            nodata_vals = np.full((num_bands, 1, 1), nodata, dtype=np.float32)
 
         if np.all(scales == 1.0) and np.all(offsets == 0.0):
             return array
 
         array = array.astype(np.float32, copy=False)
-        return array * scales + offsets
+        scaled = array * scales + offsets
+
+        # Preserve source nodata pixels.
+        nodata_mask = np.equal(array, nodata_vals)
+        # nodata_vals is shaped (bands, 1, 1), so this broadcasts per-band nodata.
+        if nodata_mask.any():
+            scaled[nodata_mask] = array[nodata_mask]
+
+        return scaled
 
     def get_raster_bounds(
         self, layer_name: str, item: Item, bands: list[str], projection: Projection
@@ -707,6 +728,23 @@ class Sentinel2(EarthDaily):
             apply_scale_offset: apply per-asset scale/offset metadata from STAC
                 `raster:bands` (defaults to True). Set to False to use raw values.
         """
+        if apply_scale_offset and context.layer_config is not None:
+            invalid_band_sets = [
+                band_set
+                for band_set in context.layer_config.band_sets
+                if band_set.dtype != DType.FLOAT32
+            ]
+            if invalid_band_sets:
+                invalid_str = ", ".join(
+                    f"bands={band_set.bands} dtype={band_set.dtype.value}"
+                    for band_set in invalid_band_sets
+                )
+                raise ValueError(
+                    "EarthDaily Sentinel-2 with apply_scale_offset=True requires "
+                    "band_sets dtype=float32 because scale/offset outputs physical "
+                    f"float values. Invalid band sets: {invalid_str}"
+                )
+
         asset_bands: dict[str, list[str]]
         if context.layer_config is not None and assets is None:
             asset_bands = {}
