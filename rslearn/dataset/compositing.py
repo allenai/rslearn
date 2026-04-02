@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 import numpy.typing as npt
@@ -37,7 +38,7 @@ class Compositor(ABC):
     def build_composite(
         self,
         group: list[ItemType],
-        nodata_vals: list[Any],
+        nodata_vals: Sequence[int | float],
         bands: list[str],
         bounds: PixelBounds,
         band_dtype: npt.DTypeLike,
@@ -73,7 +74,7 @@ class FirstValidCompositor(Compositor):
     def build_composite(
         self,
         group: list[ItemType],
-        nodata_vals: list[Any],
+        nodata_vals: Sequence[int | float],
         bands: list[str],
         bounds: PixelBounds,
         band_dtype: npt.DTypeLike,
@@ -116,7 +117,7 @@ class MeanCompositor(Compositor):
     def build_composite(
         self,
         group: list[ItemType],
-        nodata_vals: list[Any],
+        nodata_vals: Sequence[int | float],
         bands: list[str],
         bounds: PixelBounds,
         band_dtype: npt.DTypeLike,
@@ -162,7 +163,7 @@ class MedianCompositor(Compositor):
     def build_composite(
         self,
         group: list[ItemType],
-        nodata_vals: list[Any],
+        nodata_vals: Sequence[int | float],
         bands: list[str],
         bounds: PixelBounds,
         band_dtype: npt.DTypeLike,
@@ -208,7 +209,7 @@ class SpatialMosaicTemporalStackCompositor(Compositor):
     def build_composite(
         self,
         group: list[ItemType],
-        nodata_vals: list[Any],
+        nodata_vals: Sequence[int | float],
         bands: list[str],
         bounds: PixelBounds,
         band_dtype: npt.DTypeLike,
@@ -316,7 +317,7 @@ class _TemporalReducerCompositor(Compositor):
     def build_composite(
         self,
         group: list[ItemType],
-        nodata_vals: list[Any],
+        nodata_vals: Sequence[int | float],
         bands: list[str],
         bounds: PixelBounds,
         band_dtype: npt.DTypeLike,

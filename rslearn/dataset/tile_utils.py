@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 import numpy.typing as npt
@@ -66,7 +67,7 @@ def read_raster_window_from_tiles(
     bands: list[str],
     projection: Projection,
     bounds: PixelBounds,
-    nodata_vals: list[float],
+    nodata_vals: Sequence[int | float],
     band_dtype: npt.DTypeLike,
     remapper: Remapper | None = None,
     resampling: Resampling = Resampling.bilinear,
@@ -169,7 +170,7 @@ def read_raster_windows(
     tile_store: TileStoreWithLayer,
     projection: Projection,
     bounds: PixelBounds,
-    nodata_vals: list[Any],
+    nodata_vals: Sequence[int | float],
     band_dtype: npt.DTypeLike,
     remapper: Remapper | None = None,
     resampling_method: Resampling = Resampling.bilinear,
@@ -215,7 +216,7 @@ def read_raster_windows(
 
 def mask_stacked_rasters(
     stacked_rasters: npt.NDArray[np.generic],
-    nodata_vals: list[Any],
+    nodata_vals: Sequence[int | float],
 ) -> np.ma.MaskedArray:
     """Mask stacked rasters -- each item's band with the corresponding nodata val.
 

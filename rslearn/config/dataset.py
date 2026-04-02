@@ -182,7 +182,7 @@ class BandSetConfig(BaseModel):
     # Optional list of nodata values for this band set. This is used during
     # materialization when creating mosaics, to determine which parts of the source
     # images should be copied.
-    nodata_vals: list[float] | None = Field(
+    nodata_vals: list[int | float] | None = Field(
         default=None, description="Optional nodata value for each band."
     )
 

@@ -1,7 +1,7 @@
 """OmniCloudMask-based compositor for cloud-aware FIRST_VALID compositing."""
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -153,7 +153,7 @@ class OmniCloudMaskFirstValid(Compositor):
     def build_composite(
         self,
         group: list[ItemType],
-        nodata_vals: list[Any],
+        nodata_vals: Sequence[int | float],
         bands: list[str],
         bounds: PixelBounds,
         band_dtype: npt.DTypeLike,
