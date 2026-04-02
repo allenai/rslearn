@@ -313,6 +313,7 @@ class SegmentationHead(Predictor):
         weights: list[float] | None = None,
         dice_loss: bool = False,
         temperature: float = 1.0,
+        smooth_sigma: float = 0.0,
     ):
         """Initialize a new SegmentationTask.
 
@@ -321,6 +322,9 @@ class SegmentationHead(Predictor):
             dice_loss: weather to add dice loss to cross entropy
             temperature: temperature scaling for softmax, does not affect the loss,
                 only the predictor outputs
+            smooth_sigma: if > 0, apply a fixed Gaussian blur to logits before
+                computing loss and outputs. The filter is non-learned but
+                differentiable, so gradients flow through it to the model.
         """
         super().__init__()
         if weights is not None:
@@ -329,6 +333,22 @@ class SegmentationHead(Predictor):
             self.weights = None
         self.dice_loss = dice_loss
         self.temperature = temperature
+        self.smooth_sigma = smooth_sigma
+
+    def _gaussian_smooth(self, logits: torch.Tensor) -> torch.Tensor:
+        """Apply depthwise Gaussian blur to logits. Differentiable, no learned params."""
+        sigma = self.smooth_sigma
+        radius = int(3 * sigma + 0.5)
+        size = 2 * radius + 1
+        x = torch.arange(size, device=logits.device, dtype=logits.dtype) - radius
+        g1d = torch.exp(-(x**2) / (2 * sigma**2))
+        g2d = g1d[:, None] * g1d[None, :]
+        g2d = g2d / g2d.sum()
+        channels = logits.shape[1]
+        kernel = g2d.unsqueeze(0).unsqueeze(0).expand(channels, 1, size, size)
+        # Use replicate padding to avoid border artifacts from zero padding
+        padded = torch.nn.functional.pad(logits, [radius] * 4, mode="replicate")
+        return torch.nn.functional.conv2d(padded, kernel, groups=channels)
 
     def forward(
         self,
@@ -357,6 +377,10 @@ class SegmentationHead(Predictor):
             )
 
         logits = intermediates.feature_maps[0]
+
+        if self.smooth_sigma > 0:
+            logits = self._gaussian_smooth(logits)
+
         outputs = torch.nn.functional.softmax(logits / self.temperature, dim=1)
 
         losses = {}
