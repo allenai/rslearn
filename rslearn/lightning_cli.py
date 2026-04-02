@@ -275,7 +275,7 @@ class RslearnLightningCLI(LightningCLI):
 
         if load_checkpoint_required == "yes" and ckpt_path is None:
             raise ValueError(
-                "load_checkpoint_required is set but no checkpoint was found"
+                f"load_checkpoint_required is set but no checkpoint was found under {project_dir}"
             )
 
         return ckpt_path

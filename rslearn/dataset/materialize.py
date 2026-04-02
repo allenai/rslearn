@@ -1,7 +1,6 @@
 """Classes to implement dataset materialization."""
 
 from datetime import datetime
-from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -16,7 +15,7 @@ from rslearn.data_sources.data_source import ItemType
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, Projection
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 
 from .remap import Remapper, load_remapper
 from .window import Window
@@ -115,7 +114,11 @@ def read_raster_window_from_tiles(
             )
             for idx, nodata_val in enumerate(nodata_vals):
                 dst_arr[idx, :, :, :] = nodata_val
-            dst = RasterArray(array=dst_arr, timestamps=raster_array.timestamps)
+            dst = RasterArray(
+                array=dst_arr,
+                timestamps=raster_array.timestamps,
+                metadata=RasterMetadata(nodata_values=nodata_vals),
+            )
 
         if src.shape[1] != dst.array.shape[1]:
             raise ValueError(
@@ -194,9 +197,42 @@ def get_needed_band_sets_and_indexes(
     return needed_band_sets_and_indexes
 
 
+def resolve_nodata_values(
+    tile_store: TileStoreWithLayer,
+    items: list[ItemType],
+    bands: list[str],
+) -> list[float]:
+    """Resolve per-band nodata values from the tile store metadata.
+
+    Probes the first item that has matching bands and reads nodata from the
+    raster file header (no pixel data is read).  Falls back to 0.0 per band
+    when no item has matching bands or the source has no nodata metadata.
+
+    Args:
+        tile_store: the tile store to query.
+        items: candidate items (from one or more item groups).
+        bands: the requested band names.
+
+    Returns:
+        A list of nodata values, one per band.
+    """
+    for item in items:
+        needed = get_needed_band_sets_and_indexes(item, bands, tile_store)
+        if not needed:
+            continue
+        resolved = [0.0] * len(bands)
+        for src_bands, src_indexes, dst_indexes in needed:
+            metadata = tile_store.get_raster_metadata(item, src_bands)
+            if metadata.nodata_values is not None:
+                for src_idx, dst_idx in zip(src_indexes, dst_indexes):
+                    resolved[dst_idx] = float(metadata.nodata_values[src_idx])
+        return resolved
+    return [0.0] * len(bands)
+
+
 def build_first_valid_composite(
     group: list[ItemType],
-    nodata_vals: list[Any],
+    nodata_vals: list[float],
     bands: list[str],
     bounds: PixelBounds,
     band_dtype: npt.DTypeLike,
@@ -248,9 +284,9 @@ def build_first_valid_composite(
         height = bounds[3] - bounds[1]
         width = bounds[2] - bounds[0]
         arr = np.empty((len(bands), 1, height, width), dtype=band_dtype)
-        for idx, nodata_val in enumerate(nodata_vals):
-            arr[idx, :, :, :] = nodata_val
-        dst = RasterArray(array=arr)
+        for idx, nv in enumerate(nodata_vals):
+            arr[idx, :, :, :] = nv
+        dst = RasterArray(array=arr, metadata=RasterMetadata(nodata_values=nodata_vals))
 
     return dst
 
@@ -261,7 +297,7 @@ def read_raster_windows(
     tile_store: TileStoreWithLayer,
     projection: Projection,
     bounds: PixelBounds,
-    nodata_vals: list[Any],
+    nodata_vals: list[float],
     band_dtype: npt.DTypeLike,
     remapper: Remapper | None = None,
     resampling_method: Resampling = Resampling.bilinear,
@@ -307,7 +343,7 @@ def read_raster_windows(
 
 def mask_stacked_rasters(
     stacked_rasters: npt.NDArray[np.generic],
-    nodata_vals: list[Any],
+    nodata_vals: list[float],
 ) -> np.ma.MaskedArray:
     """Masks the stacked rasters - each items band with the corresponding nodata val.
 
@@ -332,7 +368,7 @@ def mask_stacked_rasters(
 
 def build_mean_composite(
     group: list[ItemType],
-    nodata_vals: list[Any],
+    nodata_vals: list[float],
     bands: list[str],
     bounds: PixelBounds,
     band_dtype: npt.DTypeLike,
@@ -363,6 +399,7 @@ def build_mean_composite(
     Returns:
         RasterArray with shape (C, T, H, W) having per-pixel mean of all items.
     """
+    metadata = RasterMetadata(nodata_values=nodata_vals)
     rasters = read_raster_windows(
         group=group,
         bands=bands,
@@ -393,12 +430,12 @@ def build_mean_composite(
     # Fill masked values and convert to target dtype.
     fill_vals = np.array(nodata_vals).reshape(-1, 1, 1, 1)
     cthw = np.ma.filled(mean_result, fill_value=fill_vals).astype(band_dtype)
-    return RasterArray(array=cthw, timestamps=rasters[0].timestamps)
+    return RasterArray(array=cthw, timestamps=rasters[0].timestamps, metadata=metadata)
 
 
 def build_median_composite(
     group: list[ItemType],
-    nodata_vals: list[Any],
+    nodata_vals: list[float],
     bands: list[str],
     bounds: PixelBounds,
     band_dtype: npt.DTypeLike,
@@ -429,6 +466,7 @@ def build_median_composite(
     Returns:
         RasterArray with shape (C, T, H, W) having per-pixel median of all items.
     """
+    metadata = RasterMetadata(nodata_values=nodata_vals)
     rasters = read_raster_windows(
         group=group,
         bands=bands,
@@ -459,12 +497,12 @@ def build_median_composite(
     # Fill masked values and convert to target dtype.
     fill_vals = np.array(nodata_vals).reshape(-1, 1, 1, 1)
     cthw = np.ma.filled(median_result, fill_value=fill_vals).astype(band_dtype)
-    return RasterArray(array=cthw, timestamps=rasters[0].timestamps)
+    return RasterArray(array=cthw, timestamps=rasters[0].timestamps, metadata=metadata)
 
 
 def build_temporal_stack_composite(
     group: list[ItemType],
-    nodata_vals: list[Any],
+    nodata_vals: list[float],
     bands: list[str],
     bounds: PixelBounds,
     band_dtype: npt.DTypeLike,
@@ -505,6 +543,7 @@ def build_temporal_stack_composite(
     Returns:
         A RasterArray with shape (C, T, H, W) and associated timestamps.
     """
+    metadata = RasterMetadata(nodata_values=nodata_vals)
     height = bounds[3] - bounds[1]
     width = bounds[2] - bounds[0]
 
@@ -545,7 +584,11 @@ def build_temporal_stack_composite(
             ]
             kept_array = raster.array[:, keep_indices, :, :]
             clipped_rasters.append(
-                RasterArray(array=kept_array, timestamps=kept_timestamps)
+                RasterArray(
+                    array=kept_array,
+                    timestamps=kept_timestamps,
+                    metadata=metadata,
+                )
             )
         rasters = clipped_rasters
 
@@ -569,8 +612,8 @@ def build_temporal_stack_composite(
 
     # --- Step 4: allocate the output CTHW array, initialized to nodata. ---
     output = np.empty((len(bands), num_timesteps, height, width), dtype=band_dtype)
-    for band_idx, nodata_val in enumerate(nodata_vals):
-        output[band_idx, :, :, :] = nodata_val
+    for band_idx, nv in enumerate(nodata_vals):
+        output[band_idx, :, :, :] = nv
     nodata_arr = np.array(nodata_vals, dtype=band_dtype).reshape(-1, 1, 1, 1)
 
     # --- Step 5: write each item's data into the output at correct timestep slots. ---
@@ -590,12 +633,12 @@ def build_temporal_stack_composite(
             mask[np.newaxis], src_slice, dst_slice
         )
 
-    return RasterArray(array=output, timestamps=sorted_timestamps)
+    return RasterArray(array=output, timestamps=sorted_timestamps, metadata=metadata)
 
 
 def _reduce_temporal_stack(
     group: list[ItemType],
-    nodata_vals: list[Any],
+    nodata_vals: list[float],
     bands: list[str],
     bounds: PixelBounds,
     band_dtype: npt.DTypeLike,
@@ -641,12 +684,14 @@ def _reduce_temporal_stack(
             max(time_range[1] for time_range in stacked.timestamps),
         )
 
-    return RasterArray(chw_array=chw, time_range=output_time_range)
+    return RasterArray(
+        chw_array=chw, time_range=output_time_range, metadata=stacked.metadata
+    )
 
 
 def build_temporal_mean_composite(
     group: list[ItemType],
-    nodata_vals: list[Any],
+    nodata_vals: list[float],
     bands: list[str],
     bounds: PixelBounds,
     band_dtype: npt.DTypeLike,
@@ -674,7 +719,7 @@ def build_temporal_mean_composite(
 
 def build_temporal_max_composite(
     group: list[ItemType],
-    nodata_vals: list[Any],
+    nodata_vals: list[float],
     bands: list[str],
     bounds: PixelBounds,
     band_dtype: npt.DTypeLike,
@@ -702,7 +747,7 @@ def build_temporal_max_composite(
 
 def build_temporal_min_composite(
     group: list[ItemType],
-    nodata_vals: list[Any],
+    nodata_vals: list[float],
     bands: list[str],
     bounds: PixelBounds,
     band_dtype: npt.DTypeLike,
@@ -768,7 +813,7 @@ def build_composite(
     """
     nodata_vals = band_cfg.nodata_vals
     if nodata_vals is None:
-        nodata_vals = [0 for _ in band_cfg.bands]
+        nodata_vals = resolve_nodata_values(tile_store, group, band_cfg.bands)
 
     return compositing_methods[compositing_method](
         group=group,
