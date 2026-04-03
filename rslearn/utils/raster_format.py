@@ -20,7 +20,7 @@ from rslearn.const import TILE_SIZE
 from rslearn.log_utils import get_logger
 from rslearn.utils.array import copy_spatial_array
 from rslearn.utils.fsspec import open_rasterio_upath_reader, open_rasterio_upath_writer
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 
 from .geometry import PixelBounds, Projection
 
@@ -482,7 +482,6 @@ class GeotiffRasterFormat(RasterFormat):
         bounds: PixelBounds,
         raster: RasterArray,
         fname: str | None = None,
-        nodata_val: int | float | None = None,
     ) -> None:
         """Encodes raster data.
 
@@ -498,7 +497,10 @@ class GeotiffRasterFormat(RasterFormat):
             bounds: the bounds of the raster data in the projection
             raster: the raster data (CTHW RasterArray)
             fname: override the filename to save as
-            nodata_val: set the nodata value when writing the raster.
+
+        Raises:
+            ValueError: if ``raster.metadata.nodata_values`` contains different
+                values across bands (GeoTIFF supports only a single nodata).
         """
         if fname is None:
             fname = self.fname
@@ -539,9 +541,16 @@ class GeotiffRasterFormat(RasterFormat):
             profile["tiled"] = True
             profile["blockxsize"] = self.block_size
             profile["blockysize"] = self.block_size
-        # Set nodata_val if provided.
-        if nodata_val is not None:
-            profile["nodata"] = nodata_val
+
+        nodata_values = raster.metadata.nodata_values
+        if nodata_values is not None:
+            unique = set(nodata_values)
+            if len(unique) != 1:
+                raise ValueError(
+                    f"GeoTIFF only supports a single nodata value but got "
+                    f"different per-band values: {nodata_values}"
+                )
+            profile["nodata"] = nodata_values[0]
 
         profile.update(self.geotiff_options)
 
@@ -575,6 +584,13 @@ class GeotiffRasterFormat(RasterFormat):
         If a metadata.json sidecar exists with ``num_timesteps > 1``, the GeoTIFF
         is treated as (C*T, H, W) and reshaped back to (C, T, H, W).
 
+        If the GeoTIFF has a nodata value set, it is read back and populated on
+        the returned ``RasterArray.metadata.nodata_values`` (replicated per
+        channel).  When ``nodata_val`` is provided it overrides the source
+        nodata for the WarpedVRT read, so out-of-bounds pixels are filled with
+        that value instead; ``metadata.nodata_values`` on the returned array is
+        then set to the override value.
+
         Args:
             path: the directory to read from
             projection: the projection to read the raster in.
@@ -603,6 +619,8 @@ class GeotiffRasterFormat(RasterFormat):
         # Construct the transform to use for the warped dataset.
         wanted_transform = get_transform_from_projection_and_bounds(projection, bounds)
         with open_rasterio_upath_reader(path / fname) as src:
+            src_nodata = src.nodata
+
             vrt_kwargs: dict = dict(
                 crs=projection.crs,
                 transform=wanted_transform,
@@ -628,7 +646,17 @@ class GeotiffRasterFormat(RasterFormat):
         array = raw.reshape(num_channels, num_timesteps, raw.shape[1], raw.shape[2])
 
         timestamps = metadata.timestamps if metadata else None
-        return RasterArray(array=array, timestamps=timestamps)
+
+        reported_nodata = nodata_val if nodata_val is not None else src_nodata
+        nodata_values: list[int | float] | None = None
+        if reported_nodata is not None:
+            nodata_values = [reported_nodata] * num_channels
+
+        return RasterArray(
+            array=array,
+            timestamps=timestamps,
+            metadata=RasterMetadata(nodata_values=nodata_values),
+        )
 
     def get_raster_bounds(self, path: UPath) -> PixelBounds:
         """Returns the bounds of the stored raster.
@@ -781,6 +809,7 @@ class NumpyRasterMetadata(pydantic.BaseModel):
     projection: dict[str, Any]
     bounds: PixelBounds
     timestamps: list[tuple[datetime, datetime]] | None = None
+    nodata_values: list[int | float] | None = None
 
 
 class NumpyRasterFormat(RasterFormat):
@@ -827,6 +856,7 @@ class NumpyRasterFormat(RasterFormat):
             projection=projection.serialize(),
             bounds=bounds,
             timestamps=raster.timestamps,
+            nodata_values=raster.metadata.nodata_values,
         )
         with (path / METADATA_FNAME).open("w") as f:
             f.write(metadata.model_dump_json())
@@ -883,4 +913,8 @@ class NumpyRasterFormat(RasterFormat):
         with (path / self.data_fname).open("rb") as f:
             array = np.load(f)
 
-        return RasterArray(array=array, timestamps=metadata.timestamps)
+        return RasterArray(
+            array=array,
+            timestamps=metadata.timestamps,
+            metadata=RasterMetadata(nodata_values=metadata.nodata_values),
+        )

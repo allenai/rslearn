@@ -11,7 +11,7 @@ from rasterio.enums import Resampling
 
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import PixelBounds, Projection
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 
 from .remap import Remapper
 
@@ -129,7 +129,11 @@ def read_raster_window_from_tiles(
             )
             for idx, nodata_val in enumerate(nodata_vals):
                 dst_arr[idx, :, :, :] = nodata_val
-            dst = RasterArray(array=dst_arr, timestamps=raster_array.timestamps)
+            dst = RasterArray(
+                array=dst_arr,
+                timestamps=raster_array.timestamps,
+                metadata=RasterMetadata(nodata_values=list(nodata_vals)),
+            )
 
         if src.shape[1] != dst.array.shape[1]:
             raise ValueError(

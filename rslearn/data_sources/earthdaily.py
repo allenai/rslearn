@@ -1125,6 +1125,7 @@ class Sentinel2L2A(EarthDaily):
         return RasterArray(
             chw_array=harmonize_callback(raster.get_chw_array()),
             time_range=item.geometry.time_range,
+            metadata=raster.metadata,
         )
 
     def ingest(

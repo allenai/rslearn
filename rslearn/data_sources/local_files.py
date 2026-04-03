@@ -217,18 +217,28 @@ class RasterImporter(Importer):
             # We assume files are readable with rasterio.
             fname = join_upath(src_dir, spec.fnames[0])
             with open_rasterio_upath_reader(fname) as src:
-                crs = src.crs
-                left = src.transform.c
-                top = src.transform.f
-                # Resolutions in projection units per pixel.
-                x_resolution = src.transform.a
-                y_resolution = src.transform.e
-                start = (int(left / x_resolution), int(top / y_resolution))
-                shp = shapely.box(
-                    start[0], start[1], start[0] + src.width, start[1] + src.height
-                )
-                projection = Projection(crs, x_resolution, y_resolution)
-                geometry = STGeometry(projection, shp, None)
+                if src.crs is None and src.gcps:
+                    gcps, gcp_crs = src.gcps
+                    xs = [gcp.x for gcp in gcps]
+                    ys = [gcp.y for gcp in gcps]
+                    shp = shapely.box(min(xs), min(ys), max(xs), max(ys))
+                    projection = Projection(gcp_crs, 1, 1)
+                    geometry = STGeometry(projection, shp, None)
+                else:
+                    crs = src.crs
+                    left = src.transform.c
+                    top = src.transform.f
+                    x_resolution = src.transform.a
+                    y_resolution = src.transform.e
+                    start = (int(left / x_resolution), int(top / y_resolution))
+                    shp = shapely.box(
+                        start[0],
+                        start[1],
+                        start[0] + src.width,
+                        start[1] + src.height,
+                    )
+                    projection = Projection(crs, x_resolution, y_resolution)
+                    geometry = STGeometry(projection, shp, None)
 
             if spec.name:
                 item_name = spec.name
