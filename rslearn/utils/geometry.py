@@ -340,7 +340,7 @@ class STGeometry:
             return shp_intersects(self.shp, other.shp)
 
         # OK the projections are different. If the CRS is the same, then rescaling is
-        # pretty safe so we can just rescale and copmare shapely geometries. Otherwise,
+        # pretty safe so we can just rescale and compare shapely geometries. Otherwise,
         # we check the intersection in WGS84 so we can be sure to handle the
         # anti-meridian properly. Re-projection is required anyway so it shouldn't
         # be any less reliable to re-project to WGS84 (versus re-projecting one
