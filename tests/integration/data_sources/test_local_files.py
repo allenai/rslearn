@@ -4,7 +4,9 @@ import pathlib
 
 import numpy as np
 import pytest
+import rasterio
 import shapely
+from rasterio.control import GroundControlPoint
 from rasterio.crs import CRS
 from upath import UPath
 
@@ -206,6 +208,86 @@ class TestLocalFiles:
         arr = materialized_image.get_chw_array()
         assert arr[0, :, :].min() == 0 and arr[0, :, :].max() == 0
         assert arr[1, :, :].min() == 1 and arr[1, :, :].max() == 1
+
+    def test_raster_dataset_with_gcps(self, tmp_path: pathlib.Path) -> None:
+        """Test LocalFiles with a GeoTIFF that has GCPs instead of a CRS/transform."""
+        ds_path = UPath(tmp_path)
+
+        source_dir_name = "source_data"
+        src_path = tmp_path / source_dir_name
+        src_path.mkdir()
+
+        # Write a GeoTIFF with GCPs and no CRS/transform.
+        width, height = 8, 8
+        gcp_crs = CRS.from_epsg(4326)
+        gcps = [
+            GroundControlPoint(row=0, col=0, x=10.0, y=28.0),
+            GroundControlPoint(row=0, col=width, x=18.0, y=28.0),
+            GroundControlPoint(row=height, col=0, x=10.0, y=20.0),
+            GroundControlPoint(row=height, col=width, x=18.0, y=20.0),
+        ]
+        data = np.full((1, height, width), 42, dtype=np.uint8)
+        tif_path = src_path / "gcp_image.tif"
+        with rasterio.open(
+            tif_path,
+            "w",
+            driver="GTiff",
+            width=width,
+            height=height,
+            count=1,
+            dtype="uint8",
+            nodata=0,
+        ) as dst:
+            dst.gcps = (gcps, gcp_crs)
+            dst.write(data)
+
+        # The GCP branch derives geometry with Projection(gcp_crs, 1, 1) and
+        # bounding box shapely.box(10, 20, 18, 28).
+        layer_name = "local_file"
+        dataset_config = {
+            "layers": {
+                layer_name: {
+                    "type": "raster",
+                    "band_sets": [{"bands": ["B1"], "dtype": "uint8"}],
+                    "data_source": {
+                        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+                        "init_args": {"src_dir": source_dir_name},
+                    },
+                },
+            },
+        }
+        with (ds_path / "config.json").open("w") as f:
+            json.dump(dataset_config, f)
+        dataset = Dataset(ds_path)
+
+        # Window bounds must intersect shapely.box(10, 20, 18, 28) in the same
+        # projection (EPSG:4326, resolution 1, 1).
+        projection = Projection(gcp_crs, 1, 1)
+        window_bounds = (10, 20, 18, 28)
+        Window(
+            storage=dataset.storage,
+            group="default",
+            name="default",
+            projection=projection,
+            bounds=window_bounds,
+            time_range=None,
+        ).save()
+
+        windows = dataset.load_windows()
+        prepare_dataset_windows(dataset, windows)
+        ingest_dataset_windows(dataset, windows)
+        materialize_dataset_windows(dataset, windows)
+
+        window = windows[0]
+        raster_dir = window.get_raster_dir(layer_name, ["B1"])
+        assert raster_dir.exists()
+
+        materialized_image = GeotiffRasterFormat().decode_raster(
+            raster_dir, window.projection, window.bounds
+        )
+        arr = materialized_image.get_chw_array()
+        assert arr.shape[0] == 1
+        assert (arr[0] == 42).all()
 
 
 class TestCoordinateModes:
