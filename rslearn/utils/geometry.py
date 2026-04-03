@@ -334,16 +334,22 @@ class STGeometry:
         if self.is_global() or other.is_global():
             # One of the geometries indicates global coverage.
             return True
-        # Need to reproject if projections don't match.
-        if other.projection != self.projection:
-            # Check the intersection in WGS84 so we can be sure to handle the
-            # anti-meridian properly. Re-projection is required anyway so it shouldn't
-            # be any less reliable to re-project to WGS84 (versus re-projecting one
-            # geometry to the other's projection), and this allows us to have uniform
-            # anti-meridian handling.
-            return shp_intersects(self.to_wgs84().shp, other.to_wgs84().shp)
 
-        return shp_intersects(self.shp, other.shp)
+        # If projection is the same, it is an easy check.
+        if other.projection == self.projection:
+            return shp_intersects(self.shp, other.shp)
+
+        # OK the projections are different. If the CRS is the same, then rescaling is
+        # pretty safe so we can just rescale and copmare shapely geometries. Otherwise,
+        # we check the intersection in WGS84 so we can be sure to handle the
+        # anti-meridian properly. Re-projection is required anyway so it shouldn't
+        # be any less reliable to re-project to WGS84 (versus re-projecting one
+        # geometry to the other's projection), and this allows us to have uniform
+        # anti-meridian handling.
+        if other.projection.crs == self.projection.crs:
+            return shp_intersects(self.shp, other.to_projection(self.projection).shp)
+        else:
+            return shp_intersects(self.to_wgs84().shp, other.to_wgs84().shp)
 
     def to_projection(self, projection: Projection) -> "STGeometry":
         """Transforms this geometry to the specified projection.
@@ -652,6 +658,10 @@ def safely_reproject_within_valid_area(
     for src_geom in src_geoms:
         if src_geom.projection == valid_geom.projection:
             results.append(src_geom)
+            continue
+        # If the CRS is the same, to_projection is just rescaling which is safe.
+        if src_geom.projection.crs == valid_geom.projection.crs:
+            results.append(src_geom.to_projection(valid_geom.projection))
             continue
 
         src_wgs84 = src_geom.to_wgs84()
