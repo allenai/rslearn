@@ -1,10 +1,10 @@
-"""Tests for the rslearn.models.CrossAttentionFusionExtractor module."""
+"""Tests for the rslearn.models.xatt_fusion module."""
 
 import pytest
 import torch
 
 from rslearn.models.component import FeatureExtractor, FeatureMaps, FeatureVector
-from rslearn.models.CrossAttentionFusionExtractor import CrossAttentionFusionExtractor
+from rslearn.models.xatt_fusion import CrossAttentionFusionExtractor
 from rslearn.train.model_context import ModelContext
 
 
@@ -146,6 +146,7 @@ def test_cross_attention_validates_runtime_channels() -> None:
         attention_dim=8,
         num_memory_tokens=4,
         num_heads=4,
+        pre_fusion_norm=False,
     )
 
     with pytest.raises(ValueError, match="produced FeatureVector with 6 channels"):
@@ -178,10 +179,10 @@ def test_cross_attention_alpha_defaults_to_scalar_zero() -> None:
     assert float(model.cross_attn_alpha.detach().cpu().item()) == 0.0
 
 
-def test_context_path_dropout_returns_missing_context_mask(
+def test_context_dropout_returns_missing_context_mask(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Context path dropout should return per-sample missing-context flags."""
+    """Context dropout should return per-sample missing-context flags."""
     primary = torch.randn(2, 6)
     context = torch.randn(2, 4)
     model = CrossAttentionFusionExtractor(
@@ -189,7 +190,7 @@ def test_context_path_dropout_returns_missing_context_mask(
         path_output_channels=[6, 4],
         attention_dim=8,
         num_heads=4,
-        path_dropout_prob=0.5,
+        context_dropout_prob=0.5,
     )
     model.train()
     monkeypatch.setattr(
@@ -198,7 +199,7 @@ def test_context_path_dropout_returns_missing_context_mask(
         lambda size, device=None: torch.zeros(size, device=device),
     )
 
-    missing_context = model._apply_context_path_dropout(
+    missing_context = model._apply_context_dropout(
         [
             FeatureVector(feature_vector=primary.clone()),
             FeatureVector(feature_vector=context.clone()),
@@ -217,6 +218,7 @@ def test_forward_stores_path0_intermediate_in_context() -> None:
         path_output_channels=[6, 4],
         attention_dim=8,
         num_heads=4,
+        pre_fusion_norm=False,
     )
 
     context = _dummy_context(batch_size=2)

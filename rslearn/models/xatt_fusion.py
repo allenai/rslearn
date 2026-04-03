@@ -51,7 +51,8 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         ffn_dropout: float = 0.0,
         pre_fusion_norm: bool = True,
         pre_fusion_dropout: float = 0.0,
-        path_dropout_prob: float = 0.0,
+        normalize_memory_values: bool = True,
+        context_dropout_prob: float = 0.0,
         path0_context_key: str = "path0_intermediate",
     ):
         """Create a CrossAttentionFusionExtractor.
@@ -80,9 +81,14 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
                 path output before fusion.
             pre_fusion_dropout: dropout probability applied to each path output
                 right before fusion.
-            path_dropout_prob: branch-level dropout probability applied
-                independently to each context path (paths 1+) per sample during
-                training. Path 0 is never dropped. Default ``0.0`` (disabled).
+            normalize_memory_values: if ``True``, apply ``LayerNorm`` to the
+                memory value vectors before cross-attention. This can help
+                stabilize early training when the memory MLP weights are
+                still randomly initialized. Default ``True``.
+            context_dropout_prob: probability of dropping all context for a
+                given sample during training. When dropped, the cross-attention
+                residual is zeroed so the model falls back to primary-only
+                features. Default ``0.0`` (disabled).
             path0_context_key: key used to store path0 intermediate output in
                 ``context.context_dict`` for optional downstream auxiliary
                 supervision.
@@ -147,9 +153,9 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
             raise ValueError(
                 f"pre_fusion_dropout must be in [0, 1), got {pre_fusion_dropout!r}"
             )
-        if not 0.0 <= path_dropout_prob < 1.0:
+        if not 0.0 <= context_dropout_prob < 1.0:
             raise ValueError(
-                f"path_dropout_prob must be in [0, 1), got {path_dropout_prob!r}"
+                f"context_dropout_prob must be in [0, 1), got {context_dropout_prob!r}"
             )
         if memory_hidden_dim is not None and memory_hidden_dim <= 0:
             raise ValueError(
@@ -179,13 +185,15 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         self.residual_dropout = residual_dropout
         self.post_fusion_mode = post_fusion_mode
         self.ffn_dropout = ffn_dropout
-        self.path_dropout_prob = path_dropout_prob
+        self.context_dropout_prob = context_dropout_prob
         self.path0_context_key = path0_context_key
 
         self.query_in_proj = torch.nn.Linear(self._primary_channels, attention_dim)
         self.cross_attn_norm = torch.nn.LayerNorm(attention_dim)
         self.key_norm = torch.nn.LayerNorm(attention_dim)
-        self.value_norm = torch.nn.LayerNorm(attention_dim)
+        self.normalize_memory_values = normalize_memory_values
+        if normalize_memory_values:
+            self.value_norm = torch.nn.LayerNorm(attention_dim)
         self.cross_attn = torch.nn.MultiheadAttention(
             embed_dim=attention_dim,
             num_heads=num_heads,
@@ -194,28 +202,30 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         )
         self.cross_attn_alpha = torch.nn.Parameter(torch.tensor(0.0))
 
-        self.self_attn_norm = torch.nn.LayerNorm(attention_dim)
-        self.self_attn = torch.nn.MultiheadAttention(
-            embed_dim=attention_dim,
-            num_heads=num_heads,
-            dropout=attention_dropout,
-            batch_first=True,
-        )
-
-        self.ffn_norm = torch.nn.LayerNorm(attention_dim)
-        ffn_hidden = max(1, int(round(attention_dim * ffn_expansion)))
-        if ffn_activation == "gelu":
-            self.ffn = torch.nn.Sequential(
-                torch.nn.Linear(attention_dim, ffn_hidden),
-                torch.nn.GELU(),
-                torch.nn.Dropout(ffn_dropout),
-                torch.nn.Linear(ffn_hidden, attention_dim),
+        if post_fusion_mode == "self_attn_ffn":
+            self.self_attn_norm = torch.nn.LayerNorm(attention_dim)
+            self.self_attn = torch.nn.MultiheadAttention(
+                embed_dim=attention_dim,
+                num_heads=num_heads,
+                dropout=attention_dropout,
+                batch_first=True,
             )
-            self._ffn_is_swiglu = False
-        else:
-            self.ffn_in = torch.nn.Linear(attention_dim, ffn_hidden * 2)
-            self.ffn_out = torch.nn.Linear(ffn_hidden, attention_dim)
-            self._ffn_is_swiglu = True
+
+        if post_fusion_mode in ("ffn", "self_attn_ffn"):
+            self.ffn_norm = torch.nn.LayerNorm(attention_dim)
+            ffn_hidden = max(1, int(round(attention_dim * ffn_expansion)))
+            if ffn_activation == "gelu":
+                self.ffn = torch.nn.Sequential(
+                    torch.nn.Linear(attention_dim, ffn_hidden),
+                    torch.nn.GELU(),
+                    torch.nn.Dropout(ffn_dropout),
+                    torch.nn.Linear(ffn_hidden, attention_dim),
+                )
+                self._ffn_is_swiglu = False
+            else:
+                self.ffn_in = torch.nn.Linear(attention_dim, ffn_hidden * 2)
+                self.ffn_out = torch.nn.Linear(ffn_hidden, attention_dim)
+                self._ffn_is_swiglu = True
 
         self.query_out_proj = torch.nn.Linear(attention_dim, self._primary_channels)
 
@@ -281,14 +291,15 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
                 result.append(out)
         return result
 
-    def _apply_context_path_dropout(self, outputs: list[Any]) -> torch.Tensor | None:
-        """Return per-sample indicator for missing context after path dropout.
+    def _apply_context_dropout(self, outputs: list[Any]) -> torch.Tensor | None:
+        """Return per-sample boolean indicating context is dropped.
 
-        ``missing_context[b]`` is ``True`` when all context paths (1+) are dropped
-        for sample ``b``. Path outputs are left unchanged; the mask is consumed in
-        ``_cross_attend`` to gate off the attention residual in missing-context cases.
+        When ``context_dropout_prob > 0`` and the model is training, each sample
+        independently has its entire context dropped with the configured
+        probability.  The returned mask is consumed in ``_cross_attend`` to zero
+        the cross-attention residual for those samples.
         """
-        if not self.training or self.path_dropout_prob <= 0.0 or len(outputs) <= 1:
+        if not self.training or self.context_dropout_prob <= 0.0:
             return None
 
         if isinstance(outputs[0], FeatureVector):
@@ -300,27 +311,11 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         else:
             return None
 
-        any_context_present = torch.zeros(batch_size, device=device, dtype=torch.bool)
-        for out in outputs[1:]:
-            if isinstance(out, FeatureVector):
-                vec = out.feature_vector
-                keep_mask = (
-                    torch.rand((vec.shape[0],), device=vec.device)
-                    >= self.path_dropout_prob
-                )
-                any_context_present |= keep_mask
-            elif isinstance(out, FeatureMaps):
-                ref = out.feature_maps[0]
-                keep_mask = (
-                    torch.rand((ref.shape[0],), device=ref.device)
-                    >= self.path_dropout_prob
-                )
-                any_context_present |= keep_mask
-        return ~any_context_present
+        return torch.rand(batch_size, device=device) < self.context_dropout_prob
 
     @staticmethod
     def _validate_feature_map_scales(outputs: list[FeatureMaps]) -> int:
-        """Validate same number of scales and spatial sizes across paths."""
+        """Validate that all paths produce the same number of feature map scales."""
         n_scales = len(outputs[0].feature_maps)
         for i, o in enumerate(outputs):
             if len(o.feature_maps) != n_scales:
@@ -328,18 +323,6 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
                     f"All paths must produce the same number of feature map scales. "
                     f"Path 0 has {n_scales} but path {i} has {len(o.feature_maps)}."
                 )
-
-        for scale_idx in range(n_scales):
-            h0 = outputs[0].feature_maps[scale_idx].shape[2]
-            w0 = outputs[0].feature_maps[scale_idx].shape[3]
-            for path_idx, o in enumerate(outputs[1:], start=1):
-                m = o.feature_maps[scale_idx]
-                if m.shape[2] != h0 or m.shape[3] != w0:
-                    raise ValueError(
-                        f"Spatial size mismatch at scale {scale_idx}: path 0 has "
-                        f"({h0}, {w0}) but path {path_idx} has ({m.shape[2]}, {m.shape[3]})."
-                    )
-
         return n_scales
 
     def _validate_channels(self, outputs: list[Any]) -> None:
@@ -400,12 +383,16 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         q_norm = self.cross_attn_norm(x)
         k, v = self._build_memory_kv(context_vec)
         k = self.key_norm(k)
-        v = self.value_norm(v)
+        if self.normalize_memory_values:
+            v = self.value_norm(v)
         attn_out, _ = self.cross_attn(q_norm, k, v, need_weights=False)
         attn_out = F.dropout(attn_out, p=self.residual_dropout, training=self.training)
         if missing_context is not None:
-            context_present = (~missing_context).to(attn_out.dtype).view(-1, 1, 1)
-            attn_out = attn_out * context_present
+            attn_out = torch.where(
+                missing_context.view(-1, 1, 1),
+                torch.zeros_like(attn_out),
+                attn_out,
+            )
         x = x + self.cross_attn_alpha * attn_out
 
         if self.post_fusion_mode == "self_attn_ffn":
@@ -442,7 +429,7 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         outputs: list[FeatureMaps],
         missing_context: torch.Tensor | None = None,
     ) -> FeatureMaps:
-        """Fuse FeatureMaps outputs using per-token cross-attention over memory tokens."""
+        """Fuse FeatureMaps outputs via cross-attention over a global context memory bank."""
         self._validate_feature_map_scales(outputs)
         primary = outputs[0].feature_maps
         context_vectors: list[torch.Tensor] = []
@@ -465,8 +452,6 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         """Run all paths and fuse path outputs with context-memory cross-attention."""
         outputs = [self._run_path(path, context) for path in self.paths]
         outputs = self._normalize_outputs(outputs)
-        missing_context = self._apply_context_path_dropout(outputs)
-        context.context_dict[self.path0_context_key] = outputs[0]
 
         first_type = type(outputs[0])
         for i, out in enumerate(outputs):
@@ -478,6 +463,9 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
                 )
 
         self._validate_channels(outputs)
+
+        missing_context = self._apply_context_dropout(outputs)
+        context.context_dict[self.path0_context_key] = outputs[0]
 
         if isinstance(outputs[0], FeatureVector):
             return self._fuse_feature_vectors(outputs, missing_context=missing_context)  # type: ignore[arg-type]
