@@ -21,7 +21,7 @@ from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 
 logger = get_logger(__name__)
 
@@ -685,12 +685,17 @@ class ERA5LandDailyUTCv1(DataSource[ERA5LandChunkItem]):
 
             projection, pixel_bounds = self._compute_projection_and_bounds(lat, lon)
 
-            raster = RasterArray(array=array, timestamps=timestamps)
+            raster = RasterArray(
+                array=array,
+                timestamps=timestamps,
+                metadata=RasterMetadata(
+                    nodata_values=[self.NODATA_VALUE] * len(self.band_names)
+                ),
+            )
             tile_store.write_raster(
                 item,
                 self.band_names,
                 projection,
                 pixel_bounds,
                 raster,
-                nodata_val=self.NODATA_VALUE,
             )

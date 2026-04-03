@@ -16,6 +16,7 @@ from rslearn.utils.raster_array import RasterArray
 
 from .compositing import Compositor
 from .remap import Remapper, load_remapper
+from .tile_utils import get_needed_band_sets_and_indexes
 from .window import Window
 
 
@@ -42,6 +43,39 @@ class Materializer:
             group_time_ranges: optional request time range for each item group
         """
         raise NotImplementedError
+
+
+def resolve_nodata_values(
+    tile_store: TileStoreWithLayer,
+    items: list[ItemType],
+    bands: list[str],
+) -> list[float]:
+    """Resolve per-band nodata values from the tile store metadata.
+
+    Probes the first item that has matching bands and reads nodata from the
+    raster file header (no pixel data is read).  Falls back to 0.0 per band
+    when no item has matching bands or the source has no nodata metadata.
+
+    Args:
+        tile_store: the tile store to query.
+        items: candidate items (from one or more item groups).
+        bands: the requested band names.
+
+    Returns:
+        A list of nodata values, one per band.
+    """
+    for item in items:
+        needed = get_needed_band_sets_and_indexes(item, bands, tile_store)
+        if not needed:
+            continue
+        resolved = [0.0] * len(bands)
+        for src_bands, src_indexes, dst_indexes in needed:
+            metadata = tile_store.get_raster_metadata(item, src_bands)
+            if metadata.nodata_values is not None:
+                for src_idx, dst_idx in zip(src_indexes, dst_indexes):
+                    resolved[dst_idx] = float(metadata.nodata_values[src_idx])
+        return resolved
+    return [0.0] * len(bands)
 
 
 def build_composite(
@@ -73,7 +107,7 @@ def build_composite(
     """
     nodata_vals = band_cfg.nodata_vals
     if nodata_vals is None:
-        nodata_vals = [0 for _ in band_cfg.bands]
+        nodata_vals = resolve_nodata_values(tile_store, group, band_cfg.bands)
 
     return compositor.build_composite(
         group=group,
