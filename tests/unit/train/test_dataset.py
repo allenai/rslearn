@@ -16,7 +16,7 @@ from rslearn.config import (
     DType,
 )
 from rslearn.const import WGS84_PROJECTION
-from rslearn.dataset import Dataset, Window, WindowLayerData
+from rslearn.dataset import Dataset, Window
 from rslearn.train.dataset import (
     DataInput,
     IndexMode,
@@ -283,104 +283,6 @@ def test_read_data_input_timestamps(tmp_path: UPath) -> None:
     assert torch.all(result.image[:, 1] == 2)
     # RasterArray should have the stacked timestamps as well.
     assert result.timestamps == [ts1, ts2]
-
-
-def test_read_data_input_uses_group_time_ranges_for_expected_timestamps(
-    tmp_path: UPath,
-) -> None:
-    """Stored group_time_ranges should be preferred for expected timestamps."""
-    ds_path = UPath(tmp_path)
-    ds_path.mkdir(parents=True, exist_ok=True)
-
-    dataset_config = {
-        "layers": {
-            "image": {
-                "type": "raster",
-                "band_sets": [
-                    {
-                        "dtype": "uint8",
-                        "bands": ["band"],
-                    }
-                ],
-                "data_source": {
-                    "class_path": "rslearn.data_sources.local_files.LocalFiles",
-                    "init_args": {"src_dir": str(ds_path / "src_data")},
-                    "query_config": {
-                        "space_mode": "MOSAIC",
-                        "max_matches": 4,
-                        "period_duration": "14d",
-                        "per_period_mosaic_reverse_time_order": False,
-                    },
-                },
-            },
-        },
-    }
-    with (ds_path / "config.json").open("w") as f:
-        json.dump(dataset_config, f)
-
-    dataset = Dataset(ds_path)
-
-    window = Window(
-        storage=dataset.storage,
-        name="test_window",
-        group="default",
-        projection=WGS84_PROJECTION,
-        bounds=(0, 0, 4, 4),
-        time_range=(datetime(2024, 1, 1), datetime(2024, 2, 26)),
-    )
-    window.save()
-
-    ts1 = (datetime(2024, 1, 5), datetime(2024, 1, 10))
-    ts2 = (datetime(2024, 1, 31), datetime(2024, 2, 5))
-    expected_ts: list[tuple[datetime, datetime] | None] = [
-        (datetime(2024, 1, 1), datetime(2024, 1, 15)),
-        (datetime(2024, 1, 29), datetime(2024, 2, 12)),
-    ]
-
-    image1 = np.ones((1, 4, 4), dtype=np.uint8)
-    raster_dir1 = window.get_raster_dir("image", ["band"], group_idx=0)
-    GeotiffRasterFormat().encode_raster(
-        raster_dir1,
-        window.projection,
-        window.bounds,
-        RasterArray(chw_array=image1, time_range=ts1),
-    )
-
-    image2 = 2 * np.ones((1, 4, 4), dtype=np.uint8)
-    raster_dir2 = window.get_raster_dir("image", ["band"], group_idx=1)
-    GeotiffRasterFormat().encode_raster(
-        raster_dir2,
-        window.projection,
-        window.bounds,
-        RasterArray(chw_array=image2, time_range=ts2),
-    )
-
-    window.mark_layer_completed("image", group_idx=0)
-    window.mark_layer_completed("image", group_idx=1)
-    window.save_layer_datas(
-        {
-            "image": WindowLayerData(
-                layer_name="image",
-                serialized_item_groups=[[], []],
-                group_time_ranges=expected_ts,
-            )
-        }
-    )
-
-    data_input = DataInput(
-        "raster",
-        ["image"],
-        bands=["band"],
-        load_all_layers=True,
-        load_all_item_groups=True,
-    )
-
-    result = read_data_input(
-        dataset, window, window.bounds, data_input, random.Random(0)
-    )
-
-    assert isinstance(result, RasterImage)
-    assert result.expected_timestamps == expected_ts
 
 
 def test_read_data_input_use_all_bands_single_band_set(tmp_path: UPath) -> None:

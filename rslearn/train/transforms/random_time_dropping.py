@@ -13,8 +13,7 @@ class RandomTimeDropping(Transform):
     """Randomly drop entire timesteps from a CTHW tensor.
 
     Dropped timesteps are removed from both ``image.image`` (shrinking T)
-    and ``image.timestamps``.  ``image.expected_timestamps`` is preserved
-    so the model can infer which temporal positions are absent.
+    and ``image.timestamps``.
     """
 
     def __init__(
