@@ -1,13 +1,12 @@
 """Cross-attention fusion extractor with learned context-conditioned memory tokens.
 
 This module runs multiple encoder paths in parallel, then fuses them by:
-1) treating path 0 as the query stream (primary modality),
-2) turning paths 1+ into a compact context vector,
+1) treating the primary path as the query stream,
+2) turning the context paths into a compact context vector,
 3) mapping that context vector into a small learned memory bank (K, V),
 4) cross-attending primary tokens over that memory bank.
 
-It supports both ``FeatureVector`` and ``FeatureMaps`` outputs while keeping the
-same high-level path API as ``LateFusionFeatureExtractor``.
+It supports both ``FeatureVector`` and ``FeatureMaps`` outputs.
 """
 
 from __future__ import annotations
@@ -31,14 +30,16 @@ from .component import (
 class CrossAttentionFusionExtractor(FeatureExtractor):
     """Late-fusion feature extractor using cross-attention over learned memory tokens.
 
-    Path 0 is the primary/query path. Paths 1+ are context paths used to build a
-    compact memory bank for cross-attention.
+    The primary path provides the query stream.  Context paths are compressed into
+    a compact memory bank for cross-attention.
     """
 
     def __init__(
         self,
-        paths: list[list[FeatureExtractor | IntermediateComponent]],
-        path_output_channels: list[int],
+        primary_path: list[FeatureExtractor | IntermediateComponent],
+        context_paths: list[list[FeatureExtractor | IntermediateComponent]],
+        primary_output_channels: int,
+        context_output_channels: list[int],
         attention_dim: int = 256,
         num_memory_tokens: int = 4,
         num_heads: int = 4,
@@ -53,16 +54,21 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         pre_fusion_dropout: float = 0.0,
         normalize_memory_values: bool = True,
         context_dropout_prob: float = 0.0,
-        path0_context_key: str = "path0_intermediate",
+        primary_context_key: str = "path0_intermediate",
     ):
         """Create a CrossAttentionFusionExtractor.
 
         Args:
-            paths: list of encoder paths. The first module in each path must be a
-                ``FeatureExtractor``; subsequent modules must be
+            primary_path: the primary/query encoder path.  The first module must
+                be a ``FeatureExtractor``; subsequent modules must be
                 ``IntermediateComponent`` instances.
-            path_output_channels: channel dimension produced by each path. Must
-                have one entry per path.
+            context_paths: one or more context encoder paths used to build the
+                memory bank for cross-attention.  Each path follows the same
+                structure as ``primary_path``.
+            primary_output_channels: channel dimension produced by the primary
+                path.
+            context_output_channels: channel dimension produced by each context
+                path.  Must have one entry per context path.
             attention_dim: internal attention embedding dimension.
             num_memory_tokens: number of learned context-conditioned memory tokens.
             num_heads: number of attention heads.
@@ -89,18 +95,18 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
                 given sample during training. When dropped, the cross-attention
                 residual is zeroed so the model falls back to primary-only
                 features. Default ``0.0`` (disabled).
-            path0_context_key: key used to store path0 intermediate output in
-                ``context.context_dict`` for optional downstream auxiliary
-                supervision.
+            primary_context_key: key used to store primary path intermediate
+                output in ``context.context_dict`` for optional downstream
+                auxiliary supervision.
         """
         super().__init__()
 
-        if len(paths) < 2:
+        if len(context_paths) == 0:
             raise ValueError(
-                "CrossAttentionFusionExtractor requires at least two paths "
-                "(one primary/query path and at least one context path)."
+                "CrossAttentionFusionExtractor requires at least one context path."
             )
 
+        paths = [primary_path] + list(context_paths)
         for i, path in enumerate(paths):
             if len(path) == 0:
                 raise ValueError(f"Path {i} is empty")
@@ -116,11 +122,12 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
                         f"got {type(module).__name__}"
                     )
 
-        if len(path_output_channels) != len(paths):
+        if len(context_output_channels) != len(context_paths):
             raise ValueError(
-                f"path_output_channels must have one entry per path ({len(paths)}), "
-                f"got {len(path_output_channels)}"
+                f"context_output_channels must have one entry per context path "
+                f"({len(context_paths)}), got {len(context_output_channels)}"
             )
+        path_output_channels = [primary_output_channels] + list(context_output_channels)
         for i, channels in enumerate(path_output_channels):
             if channels <= 0:
                 raise ValueError(
@@ -161,32 +168,23 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
             raise ValueError(
                 f"memory_hidden_dim must be a positive int when set, got {memory_hidden_dim!r}"
             )
-        if post_fusion_mode not in ("none", "ffn", "self_attn_ffn"):
-            raise ValueError(
-                f"Unknown post_fusion_mode '{post_fusion_mode}'. Expected one of "
-                "'none', 'ffn', or 'self_attn_ffn'."
-            )
         if ffn_expansion <= 0:
             raise ValueError(f"ffn_expansion must be > 0, got {ffn_expansion!r}")
-        if ffn_activation not in ("gelu", "swiglu"):
-            raise ValueError(
-                f"Unknown ffn_activation '{ffn_activation}'. Expected 'gelu' or 'swiglu'."
-            )
         if not 0.0 <= ffn_dropout < 1.0:
             raise ValueError(f"ffn_dropout must be in [0, 1), got {ffn_dropout!r}")
 
         self.paths = torch.nn.ModuleList([torch.nn.ModuleList(path) for path in paths])
         self.path_output_channels = list(path_output_channels)
 
-        self._primary_channels = path_output_channels[0]
-        self._context_channels = sum(path_output_channels[1:])
+        self._primary_channels = primary_output_channels
+        self._context_channels = sum(context_output_channels)
         self.num_memory_tokens = num_memory_tokens
         self.attention_dim = attention_dim
         self.residual_dropout = residual_dropout
         self.post_fusion_mode = post_fusion_mode
         self.ffn_dropout = ffn_dropout
         self.context_dropout_prob = context_dropout_prob
-        self.path0_context_key = path0_context_key
+        self.primary_context_key = primary_context_key
 
         self.query_in_proj = torch.nn.Linear(self._primary_channels, attention_dim)
         self.cross_attn_norm = torch.nn.LayerNorm(attention_dim)
@@ -465,7 +463,7 @@ class CrossAttentionFusionExtractor(FeatureExtractor):
         self._validate_channels(outputs)
 
         missing_context = self._apply_context_dropout(outputs)
-        context.context_dict[self.path0_context_key] = outputs[0]
+        context.context_dict[self.primary_context_key] = outputs[0]
 
         if isinstance(outputs[0], FeatureVector):
             return self._fuse_feature_vectors(outputs, missing_context=missing_context)  # type: ignore[arg-type]

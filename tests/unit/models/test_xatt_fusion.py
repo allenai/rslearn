@@ -41,12 +41,13 @@ def test_cross_attention_feature_vectors_shape() -> None:
     context_b = torch.randn(2, 5)
 
     model = CrossAttentionFusionExtractor(
-        paths=[
-            [_FixedVectorExtractor(primary)],
+        primary_path=[_FixedVectorExtractor(primary)],
+        context_paths=[
             [_FixedVectorExtractor(context_a)],
             [_FixedVectorExtractor(context_b)],
         ],
-        path_output_channels=[6, 4, 5],
+        primary_output_channels=6,
+        context_output_channels=[4, 5],
         attention_dim=8,
         num_memory_tokens=4,
         num_heads=4,
@@ -64,12 +65,13 @@ def test_cross_attention_feature_vectors_with_ffn_block_shape() -> None:
     context_b = torch.randn(2, 5)
 
     model = CrossAttentionFusionExtractor(
-        paths=[
-            [_FixedVectorExtractor(primary)],
+        primary_path=[_FixedVectorExtractor(primary)],
+        context_paths=[
             [_FixedVectorExtractor(context_a)],
             [_FixedVectorExtractor(context_b)],
         ],
-        path_output_channels=[6, 4, 5],
+        primary_output_channels=6,
+        context_output_channels=[4, 5],
         attention_dim=8,
         num_memory_tokens=4,
         num_heads=4,
@@ -89,8 +91,10 @@ def test_cross_attention_feature_maps_shape() -> None:
     context = [torch.randn(2, 3, 8, 8), torch.randn(2, 3, 4, 4)]
 
     model = CrossAttentionFusionExtractor(
-        paths=[[_FixedMapsExtractor(primary)], [_FixedMapsExtractor(context)]],
-        path_output_channels=[6, 3],
+        primary_path=[_FixedMapsExtractor(primary)],
+        context_paths=[[_FixedMapsExtractor(context)]],
+        primary_output_channels=6,
+        context_output_channels=[3],
         attention_dim=12,
         num_memory_tokens=4,
         num_heads=4,
@@ -109,8 +113,10 @@ def test_cross_attention_feature_maps_with_self_attn_ffn_shape() -> None:
     context = [torch.randn(2, 3, 8, 8), torch.randn(2, 3, 4, 4)]
 
     model = CrossAttentionFusionExtractor(
-        paths=[[_FixedMapsExtractor(primary)], [_FixedMapsExtractor(context)]],
-        path_output_channels=[6, 3],
+        primary_path=[_FixedMapsExtractor(primary)],
+        context_paths=[[_FixedMapsExtractor(context)]],
+        primary_output_channels=6,
+        context_output_channels=[3],
         attention_dim=12,
         num_memory_tokens=8,
         num_heads=4,
@@ -129,10 +135,12 @@ def test_cross_attention_feature_maps_with_self_attn_ffn_shape() -> None:
 def test_cross_attention_requires_context_path() -> None:
     """Cross-attention requires at least one context path."""
     primary = torch.randn(2, 6)
-    with pytest.raises(ValueError, match="at least two paths"):
+    with pytest.raises(ValueError, match="at least one context path"):
         CrossAttentionFusionExtractor(
-            paths=[[_FixedVectorExtractor(primary)]],
-            path_output_channels=[6],
+            primary_path=[_FixedVectorExtractor(primary)],
+            context_paths=[],
+            primary_output_channels=6,
+            context_output_channels=[],
         )
 
 
@@ -141,8 +149,10 @@ def test_cross_attention_validates_runtime_channels() -> None:
     primary = torch.randn(2, 6)
     context = torch.randn(2, 4)
     model = CrossAttentionFusionExtractor(
-        paths=[[_FixedVectorExtractor(primary)], [_FixedVectorExtractor(context)]],
-        path_output_channels=[7, 4],
+        primary_path=[_FixedVectorExtractor(primary)],
+        context_paths=[[_FixedVectorExtractor(context)]],
+        primary_output_channels=7,
+        context_output_channels=[4],
         attention_dim=8,
         num_memory_tokens=4,
         num_heads=4,
@@ -153,25 +163,15 @@ def test_cross_attention_validates_runtime_channels() -> None:
         model(_dummy_context(batch_size=2))
 
 
-def test_cross_attention_rejects_unknown_post_fusion_mode() -> None:
-    """Unknown post-fusion mode should raise a clear validation error."""
-    primary = torch.randn(2, 6)
-    context = torch.randn(2, 4)
-    with pytest.raises(ValueError, match="Unknown post_fusion_mode"):
-        CrossAttentionFusionExtractor(
-            paths=[[_FixedVectorExtractor(primary)], [_FixedVectorExtractor(context)]],
-            path_output_channels=[6, 4],
-            post_fusion_mode="bad_mode",  # type: ignore[arg-type]
-        )
-
-
 def test_cross_attention_alpha_defaults_to_scalar_zero() -> None:
     """Default alpha should be a scalar initialized to zero."""
     primary = torch.randn(2, 6)
     context = torch.randn(2, 4)
     model = CrossAttentionFusionExtractor(
-        paths=[[_FixedVectorExtractor(primary)], [_FixedVectorExtractor(context)]],
-        path_output_channels=[6, 4],
+        primary_path=[_FixedVectorExtractor(primary)],
+        context_paths=[[_FixedVectorExtractor(context)]],
+        primary_output_channels=6,
+        context_output_channels=[4],
         attention_dim=8,
         num_heads=4,
     )
@@ -186,8 +186,10 @@ def test_context_dropout_returns_missing_context_mask(
     primary = torch.randn(2, 6)
     context = torch.randn(2, 4)
     model = CrossAttentionFusionExtractor(
-        paths=[[_FixedVectorExtractor(primary)], [_FixedVectorExtractor(context)]],
-        path_output_channels=[6, 4],
+        primary_path=[_FixedVectorExtractor(primary)],
+        context_paths=[[_FixedVectorExtractor(context)]],
+        primary_output_channels=6,
+        context_output_channels=[4],
         attention_dim=8,
         num_heads=4,
         context_dropout_prob=0.5,
@@ -214,8 +216,10 @@ def test_forward_stores_path0_intermediate_in_context() -> None:
     primary = torch.randn(2, 6)
     context_vec = torch.randn(2, 4)
     model = CrossAttentionFusionExtractor(
-        paths=[[_FixedVectorExtractor(primary)], [_FixedVectorExtractor(context_vec)]],
-        path_output_channels=[6, 4],
+        primary_path=[_FixedVectorExtractor(primary)],
+        context_paths=[[_FixedVectorExtractor(context_vec)]],
+        primary_output_channels=6,
+        context_output_channels=[4],
         attention_dim=8,
         num_heads=4,
         pre_fusion_norm=False,
@@ -233,8 +237,10 @@ def test_cross_attend_skips_attention_residual_when_context_missing() -> None:
     primary = torch.randn(2, 6)
     context = torch.randn(2, 4)
     model = CrossAttentionFusionExtractor(
-        paths=[[_FixedVectorExtractor(primary)], [_FixedVectorExtractor(context)]],
-        path_output_channels=[6, 4],
+        primary_path=[_FixedVectorExtractor(primary)],
+        context_paths=[[_FixedVectorExtractor(context)]],
+        primary_output_channels=6,
+        context_output_channels=[4],
         attention_dim=8,
         num_heads=4,
     )
