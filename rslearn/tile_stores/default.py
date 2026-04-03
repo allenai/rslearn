@@ -262,6 +262,7 @@ class DefaultTileStore(TileStore):
             with open_rasterio_upath_reader(fname) as src:
                 profile = src.profile
                 array = src.read()
+                nodata = profile.get("nodata")
 
                 # If raster specifies ground control points, use WarpedVRT to get it in
                 # an appropriate projection.
@@ -302,6 +303,8 @@ class DefaultTileStore(TileStore):
                 "blockxsize": self.tile_size,
                 "blockysize": self.tile_size,
             }
+            if nodata is not None:
+                output_profile["nodata"] = nodata
 
             output_profile.update(self.geotiff_options)
 
