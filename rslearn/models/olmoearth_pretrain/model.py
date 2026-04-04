@@ -309,9 +309,12 @@ class OlmoEarth(FeatureExtractor):
 
                     # We pad the T dimension of CTHW tensor to max_timesteps.
                     cur_timesteps = tensor.shape[1]
-                    padded = torch.nn.functional.pad(
-                        tensor, pad=(0, 0, 0, max_timesteps - cur_timesteps, 0, 0, 0, 0)
+                    padded = torch.zeros(
+                        (num_channels, max_timesteps, height, width),
+                        dtype=tensor.dtype,
+                        device=tensor.device,
                     )
+                    padded[:, :cur_timesteps, :, :] = tensor
                     padded_tensors.append(padded)
 
                     valid_mask = [MaskValue.ONLINE_ENCODER.value] * cur_timesteps + [
