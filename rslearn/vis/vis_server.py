@@ -18,7 +18,6 @@ from rslearn.dataset.window import get_layer_and_group_from_dir_name
 from rslearn.log_utils import get_logger
 
 from .render_raster import (
-    RASTER_RENDER_CLASSES,
     read_raster_layer,
     render_raster,
 )
@@ -228,7 +227,10 @@ def create_app(
                 group_idx=group_idx,
             )
             image_array = render_raster(
-                array, layer_config, raster_render[item_group_name]
+                array,
+                layer_config,
+                raster_render[item_group_name],
+                label_colors=label_colors_dict.get(item_group_name),
             )
             image_bytes = array_to_bytes(image_array)
         elif item_group_name in vector_image_groups:
@@ -337,15 +339,7 @@ def run(
 
     label_colors_dict: dict[str, dict[str, tuple[int, int, int]]] = {}
 
-    for item_group_name in raster_groups:
-        if raster_render.get(item_group_name, {}).get("name") == RASTER_RENDER_CLASSES:
-            layer_name, _ = get_layer_and_group_from_dir_name(item_group_name)
-            layer_config = dataset.layers[layer_name]
-            colors = generate_label_colors_for_layer(layer_config)
-            if colors:
-                label_colors_dict[item_group_name] = colors
-
-    for item_group_name in vector_image_groups:
+    for item_group_name in raster_groups + vector_image_groups:
         layer_name, _ = get_layer_and_group_from_dir_name(item_group_name)
         layer_config = dataset.layers[layer_name]
         colors = generate_label_colors_for_layer(layer_config)

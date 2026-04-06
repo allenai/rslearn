@@ -6,51 +6,20 @@ import numpy as np
 import shapely
 from PIL import Image, ImageDraw
 
-from rslearn.config import LayerConfig, LayerType
+from rslearn.config import LayerConfig
 from rslearn.dataset import Dataset, Window
 from rslearn.dataset.window import get_layer_and_group_from_dir_name
 from rslearn.log_utils import get_logger
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, flatten_shape
-from rslearn.utils.vector_format import VectorFormat
 
 from .render_raster import read_raster_layer, render_raster
+from .utils import read_vector_layer
 
 logger = get_logger(__name__)
 
 VECTOR_IMAGE_RENDER_DETECTION = "detection"
 VECTOR_IMAGE_RENDER_SEGMENTATION = "segmentation"
-
-
-def read_vector_layer(
-    window: Window,
-    layer_name: str,
-    layer_config: LayerConfig,
-    group_idx: int = 0,
-) -> list[Any]:
-    """Read a vector layer for visualization.
-
-    Args:
-        window: The window to read from
-        layer_name: The layer name
-        layer_config: The layer configuration
-        group_idx: The item group index (default 0)
-
-    Returns:
-        List of Feature objects
-    """
-    if layer_config.type != LayerType.VECTOR:
-        raise ValueError(f"Layer {layer_name} is not a vector layer")
-
-    vector_format: VectorFormat = layer_config.instantiate_vector_format()
-    layer_dir = window.get_layer_dir(layer_name, group_idx=group_idx)
-    logger.info(
-        f"Reading vector layer {layer_name} from {layer_dir}, bounds: {window.bounds}, projection: {window.projection}"
-    )
-
-    features = vector_format.decode_vector(layer_dir, window.projection, window.bounds)
-    logger.info(f"Decoded {len(features)} features from vector layer {layer_name}")
-    return features
 
 
 def point_to_pixel_coords(

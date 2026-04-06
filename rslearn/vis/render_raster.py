@@ -71,17 +71,19 @@ def read_raster_layer(
 
 
 # --- Raster render functions ---
-#
-# Each takes (array, layer_config) where array is (C, H, W) float32
-# and returns (H, W, C) uint8. Some accept additional keyword arguments.
 
 
-def render_sentinel2_rgb(array: np.ndarray, layer_config: LayerConfig) -> np.ndarray:
+def render_sentinel2_rgb(
+    array: np.ndarray,
+    layer_config: LayerConfig,
+    label_colors: dict[str, tuple[int, int, int]] | None = None,
+) -> np.ndarray:
     """Render by dividing by 10 and clipping (for Sentinel-2 B04/B03/B02 bands).
 
     Args:
         array: Input array with shape (channels, height, width)
         layer_config: LayerConfig (unused)
+        label_colors: Label colors (unused)
 
     Returns:
         Array with shape (height, width, channels) as uint8
@@ -94,12 +96,17 @@ def render_sentinel2_rgb(array: np.ndarray, layer_config: LayerConfig) -> np.nda
     return normalized
 
 
-def render_percentile(array: np.ndarray, layer_config: LayerConfig) -> np.ndarray:
+def render_percentile(
+    array: np.ndarray,
+    layer_config: LayerConfig,
+    label_colors: dict[str, tuple[int, int, int]] | None = None,
+) -> np.ndarray:
     """Render using 2-98 percentile clipping per band.
 
     Args:
         array: Input array with shape (channels, height, width)
         layer_config: LayerConfig (unused)
+        label_colors: Label colors (unused)
 
     Returns:
         Array with shape (height, width, channels) as uint8
@@ -119,12 +126,17 @@ def render_percentile(array: np.ndarray, layer_config: LayerConfig) -> np.ndarra
     return normalized
 
 
-def render_minmax(array: np.ndarray, layer_config: LayerConfig) -> np.ndarray:
+def render_minmax(
+    array: np.ndarray,
+    layer_config: LayerConfig,
+    label_colors: dict[str, tuple[int, int, int]] | None = None,
+) -> np.ndarray:
     """Render using min-max stretch per band.
 
     Args:
         array: Input array with shape (channels, height, width)
         layer_config: LayerConfig (unused)
+        label_colors: Label colors (unused)
 
     Returns:
         Array with shape (height, width, channels) as uint8
@@ -144,6 +156,7 @@ def render_minmax(array: np.ndarray, layer_config: LayerConfig) -> np.ndarray:
 def render_linear(
     array: np.ndarray,
     layer_config: LayerConfig,
+    label_colors: dict[str, tuple[int, int, int]] | None = None,
     vmin: float = 0,
     vmax: float = 1,
 ) -> np.ndarray:
@@ -152,6 +165,7 @@ def render_linear(
     Args:
         array: Input array with shape (channels, height, width)
         layer_config: LayerConfig (unused)
+        label_colors: Label colors (unused)
         vmin: Minimum value of the range
         vmax: Maximum value of the range
 
@@ -168,15 +182,20 @@ def render_linear(
     return normalized
 
 
-def render_classes(array: np.ndarray, layer_config: LayerConfig) -> np.ndarray:
+def render_classes(
+    array: np.ndarray,
+    layer_config: LayerConfig,
+    label_colors: dict[str, tuple[int, int, int]] | None = None,
+) -> np.ndarray:
     """Render a raster as a colored class map.
 
-    Maps integer pixel values to colors. Uses class_names from the layer config
-    when available, otherwise falls back to DEFAULT_COLORS by index.
+    Maps integer pixel values to colors. Uses label_colors when provided,
+    otherwise falls back to DEFAULT_COLORS by index.
 
     Args:
         array: Raster array with shape (bands, height, width) -- uses band 0
         layer_config: LayerConfig with optional class_names
+        label_colors: Optional pre-computed mapping of class name -> RGB color
 
     Returns:
         Array with shape (height, width, 3) as uint8
@@ -191,9 +210,11 @@ def render_classes(array: np.ndarray, layer_config: LayerConfig) -> np.ndarray:
     valid_mask = ~np.isnan(label_values)
     label_int = label_values.astype(np.int32)
 
-    if layer_config.class_names:
-        for idx in range(len(layer_config.class_names)):
-            color = DEFAULT_COLORS[idx % len(DEFAULT_COLORS)]
+    if label_colors and layer_config.class_names:
+        for idx, class_name in enumerate(layer_config.class_names):
+            color = label_colors.get(
+                class_name, DEFAULT_COLORS[idx % len(DEFAULT_COLORS)]
+            )
             mask = (label_int == idx) & valid_mask
             mask_img[mask] = color
     else:
@@ -219,6 +240,7 @@ def render_raster(
     array: np.ndarray,
     layer_config: LayerConfig,
     render_spec: dict[str, Any],
+    label_colors: dict[str, tuple[int, int, int]] | None = None,
 ) -> np.ndarray:
     """Dispatch to the appropriate raster render function.
 
@@ -227,6 +249,7 @@ def render_raster(
         layer_config: LayerConfig for this layer
         render_spec: Dict with "name" key and optional "args" dict,
             e.g. {"name": "linear", "args": {"vmin": 0, "vmax": 3000}}
+        label_colors: Optional pre-computed label colors to pass to render functions
 
     Returns:
         Rendered array as uint8 (H, W, C)
@@ -237,4 +260,4 @@ def render_raster(
     if fn is None:
         raise ValueError(f"Unknown raster render method: {name}")
 
-    return fn(array, layer_config, **args)
+    return fn(array, layer_config, label_colors=label_colors, **args)
