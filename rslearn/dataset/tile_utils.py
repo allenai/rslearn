@@ -133,7 +133,7 @@ def read_raster_window_from_tiles(
             dst = RasterArray(
                 array=dst_arr,
                 timestamps=raster_array.timestamps,
-                metadata=RasterMetadata(nodata_values=list(nodata_vals)),
+                metadata=RasterMetadata(nodata_values=tuple(nodata_vals)),
             )
 
         if src.shape[1] != dst.array.shape[1]:

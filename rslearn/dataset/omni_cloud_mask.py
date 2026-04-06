@@ -89,7 +89,7 @@ class OmniCloudMaskFirstValid(Compositor):
         scoring_bands = [self.red_band, self.green_band, self.nir_band]
         # The NODATA values for the scoring bands are expected to be 0 for both Sentinel-2
         # and Landsat.
-        nodata_vals = [0, 0, 0]
+        nodata_vals = (0, 0, 0)
 
         # The bands should be available, raise error if not.
         needed_band_sets_and_indexes = get_needed_band_sets_and_indexes(

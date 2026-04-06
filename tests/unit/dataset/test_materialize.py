@@ -62,7 +62,7 @@ class TestReadRasterWindowFromTiles:
             bands=bands,
             projection=self.PROJECTION,
             bounds=self.BOUNDS,
-            nodata_vals=[0],
+            nodata_vals=(0,),
             band_dtype=np.uint8,
             dst=dst,
         )
@@ -91,7 +91,7 @@ class TestReadRasterWindowFromTiles:
             RasterArray(chw_array=src),
         )
 
-        nodata_vals = [1.0, 2.0]
+        nodata_vals = (1.0, 2.0)
         dst_arr = np.zeros((2, 1, 4, 4), dtype=np.uint8)
         # Set first band 1 in top half, and second band 2 in left half.
         # So then only topleft has both bands matching nodata.
@@ -148,7 +148,7 @@ class TestReadRasterWindowFromTiles:
             bands=bands,
             projection=self.PROJECTION,
             bounds=self.BOUNDS,
-            nodata_vals=[np.nan],
+            nodata_vals=(np.nan,),
             band_dtype=np.float32,
             dst=dst,
         )

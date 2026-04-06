@@ -197,7 +197,7 @@ class ImageTileRasterMetadata(pydantic.BaseModel):
     dtype: str
     num_bands: int
     timestamps: list[tuple[datetime, datetime]] | None = None
-    nodata_values: list[int | float] | None = None
+    nodata_values: tuple[int | float, ...] | None = None
 
 
 class ImageTileRasterFormat(RasterFormat):
@@ -224,7 +224,7 @@ class ImageTileRasterFormat(RasterFormat):
         projection: Projection,
         bounds: PixelBounds,
         array: npt.NDArray[Any],
-        nodata_values: list[int | float] | None = None,
+        nodata_values: tuple[int | float, ...] | None = None,
     ) -> None:
         """Encodes a single tile to a file.
 
@@ -667,9 +667,9 @@ class GeotiffRasterFormat(RasterFormat):
         timestamps = metadata.timestamps if metadata else None
 
         reported_nodata = nodata_val if nodata_val is not None else src_nodata
-        nodata_values: list[int | float] | None = None
+        nodata_values: tuple[int | float, ...] | None = None
         if reported_nodata is not None:
-            nodata_values = [reported_nodata] * num_channels
+            nodata_values = (reported_nodata,) * num_channels
 
         return RasterArray(
             array=array,
@@ -697,7 +697,7 @@ class SingleImageRasterMetadata(pydantic.BaseModel):
     projection: dict[str, Any] | None = None
     bounds: PixelBounds
     timestamps: list[tuple[datetime, datetime]] | None = None
-    nodata_values: list[int | float] | None = None
+    nodata_values: tuple[int | float, ...] | None = None
 
 
 class SingleImageRasterFormat(RasterFormat):
@@ -834,7 +834,7 @@ class NumpyRasterMetadata(pydantic.BaseModel):
     projection: dict[str, Any]
     bounds: PixelBounds
     timestamps: list[tuple[datetime, datetime]] | None = None
-    nodata_values: list[int | float] | None = None
+    nodata_values: tuple[int | float, ...] | None = None
 
 
 class NumpyRasterFormat(RasterFormat):

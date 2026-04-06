@@ -49,7 +49,7 @@ def resolve_nodata_values(
     tile_store: TileStoreWithLayer,
     items: list[ItemType],
     bands: list[str],
-) -> list[float]:
+) -> tuple[float, ...]:
     """Resolve per-band nodata values from the tile store metadata.
 
     Probes the first item that has matching bands and reads nodata from the
@@ -63,7 +63,7 @@ def resolve_nodata_values(
         bands: the requested band names.
 
     Returns:
-        A list of nodata values, one per band.
+        A tuple of nodata values, one per band.
     """
     for item in items:
         needed = get_needed_band_sets_and_indexes(item, bands, tile_store)
@@ -75,8 +75,8 @@ def resolve_nodata_values(
             if metadata.nodata_values is not None:
                 for src_idx, dst_idx in zip(src_indexes, dst_indexes):
                     resolved[dst_idx] = float(metadata.nodata_values[src_idx])
-        return resolved
-    return [0.0] * len(bands)
+        return tuple(resolved)
+    return (0.0,) * len(bands)
 
 
 def build_composite(

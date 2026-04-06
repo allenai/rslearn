@@ -17,7 +17,7 @@ class RasterMetadata:
     fields like ``band_names``, suggested colours, etc.
     """
 
-    nodata_values: list[int | float] | None = field(default=None)
+    nodata_values: tuple[int | float, ...] | None = field(default=None)
 
 
 class RasterArray:
