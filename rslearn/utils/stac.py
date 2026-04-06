@@ -151,7 +151,9 @@ class StacClient:
         cur_url = self.endpoint + "/search"
         items: list[StacItem] = []
         while True:
-            logger.debug("Reading STAC items from %s", cur_url)
+            logger.debug(
+                "Reading STAC items from %s with request data %s", cur_url, request_data
+            )
             response = self.session.post(url=cur_url, json=request_data)
             response.raise_for_status()
             data = response.json()

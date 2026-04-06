@@ -25,6 +25,75 @@ from rslearn.utils.raster_array import RasterArray
 
 logger = get_logger(__name__)
 
+# Source: CDS constraints for reanalysis-era5-land-monthly-means.
+ERA5_LAND_MONTHLY_MEANS_VARIABLES = frozenset(
+    {
+        "10m_u_component_of_wind",
+        "10m_v_component_of_wind",
+        "2m_dewpoint_temperature",
+        "2m_temperature",
+        "evaporation_from_bare_soil",
+        "evaporation_from_open_water_surfaces_excluding_oceans",
+        "evaporation_from_the_top_of_canopy",
+        "evaporation_from_vegetation_transpiration",
+        "forecast_albedo",
+        "geopotential",
+        "glacier_mask",
+        "high_vegetation_cover",
+        "lake_bottom_temperature",
+        "lake_cover",
+        "lake_ice_depth",
+        "lake_ice_temperature",
+        "lake_mix_layer_depth",
+        "lake_mix_layer_temperature",
+        "lake_shape_factor",
+        "lake_total_depth",
+        "lake_total_layer_temperature",
+        "land_sea_mask",
+        "leaf_area_index_high_vegetation",
+        "leaf_area_index_low_vegetation",
+        "low_vegetation_cover",
+        "potential_evaporation",
+        "runoff",
+        "skin_reservoir_content",
+        "skin_temperature",
+        "snow_albedo",
+        "snow_cover",
+        "snow_density",
+        "snow_depth",
+        "snow_depth_water_equivalent",
+        "snow_evaporation",
+        "snowfall",
+        "snowmelt",
+        "soil_temperature_level_1",
+        "soil_temperature_level_2",
+        "soil_temperature_level_3",
+        "soil_temperature_level_4",
+        "soil_type",
+        "sub_surface_runoff",
+        "surface_latent_heat_flux",
+        "surface_net_solar_radiation",
+        "surface_net_thermal_radiation",
+        "surface_pressure",
+        "surface_runoff",
+        "surface_sensible_heat_flux",
+        "surface_solar_radiation_downwards",
+        "surface_thermal_radiation_downwards",
+        "temperature_of_snow_layer",
+        "total_evaporation",
+        "total_precipitation",
+        "type_of_high_vegetation",
+        "type_of_low_vegetation",
+        "volumetric_soil_water_layer_1",
+        "volumetric_soil_water_layer_2",
+        "volumetric_soil_water_layer_3",
+        "volumetric_soil_water_layer_4",
+    }
+)
+ERA5_LAND_MONTHLY_MEANS_BANDS = frozenset(
+    variable.replace("_", "-") for variable in ERA5_LAND_MONTHLY_MEANS_VARIABLES
+)
+
 
 class ERA5Land(DataSource):
     """Base class for ingesting ERA5 land data from the Copernicus Climate Data Store.
@@ -95,6 +164,25 @@ class ERA5Land(DataSource):
             url=self.api_url,
             key=api_key,
         )
+
+    def _validate_band_names(self, valid_band_names: set[str] | frozenset[str]) -> None:
+        """Validate configured bands against supported rslearn band names.
+
+        Args:
+            valid_band_names: the set of valid rslearn band names, in hyphen format.
+
+        Raises:
+            ValueError: if any configured band is not supported.
+        """
+        invalid = sorted(
+            {band for band in self.band_names if band not in valid_band_names}
+        )
+        if invalid:
+            invalid_str = ", ".join(invalid)
+            raise ValueError(
+                f"unsupported band(s) for dataset '{self.dataset}': {invalid_str}. "
+                "Use rslearn band names with '-' (replace '_' with '-')."
+            )
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
@@ -342,6 +430,7 @@ class ERA5LandMonthlyMeans(ERA5Land):
             bounds=bounds,
             context=context,
         )
+        self._validate_band_names(ERA5_LAND_MONTHLY_MEANS_BANDS)
 
     def ingest(
         self,

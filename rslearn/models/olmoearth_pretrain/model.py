@@ -228,14 +228,14 @@ class OlmoEarth(FeatureExtractor):
         """Turn datetimes to timestamps accepted by OlmoEarth."""
         timestamps = torch.zeros((max_timestamps, 3), dtype=torch.int32, device=device)
         timestamps[: len(datetimes), 0] = torch.tensor(
-            [d.day for d in datetimes], dtype=torch.int32
+            [d.day for d in datetimes], dtype=torch.int32, device=device
         )
         # months are indexed 0-11
         timestamps[: len(datetimes), 1] = torch.tensor(
-            [d.month - 1 for d in datetimes], dtype=torch.int32
+            [d.month - 1 for d in datetimes], dtype=torch.int32, device=device
         )
         timestamps[: len(datetimes), 2] = torch.tensor(
-            [d.year for d in datetimes], dtype=torch.int32
+            [d.year for d in datetimes], dtype=torch.int32, device=device
         )
         return timestamps
 
@@ -309,15 +309,20 @@ class OlmoEarth(FeatureExtractor):
 
                     # We pad the T dimension of CTHW tensor to max_timesteps.
                     cur_timesteps = tensor.shape[1]
-                    padded = torch.nn.functional.pad(
-                        tensor, pad=(0, 0, 0, max_timesteps - cur_timesteps, 0, 0, 0, 0)
+                    padded = torch.zeros(
+                        (num_channels, max_timesteps, height, width),
+                        dtype=tensor.dtype,
+                        device=tensor.device,
                     )
+                    padded[:, :cur_timesteps, :, :] = tensor
                     padded_tensors.append(padded)
 
                     valid_mask = [MaskValue.ONLINE_ENCODER.value] * cur_timesteps + [
                         MaskValue.MISSING.value
                     ] * (max_timesteps - cur_timesteps)
-                    valid_mask_tensor = torch.tensor(valid_mask, dtype=torch.int32)
+                    valid_mask_tensor = torch.tensor(
+                        valid_mask, dtype=torch.int32, device=tensor.device
+                    )
                     valid_mask_tensor = valid_mask_tensor.view(max_timesteps, 1, 1, 1)
                     valid_mask_tensor = valid_mask_tensor.expand(
                         max_timesteps, height, width, num_band_sets
