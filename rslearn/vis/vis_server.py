@@ -11,6 +11,7 @@ from typing import Any
 
 from flask import Flask, Response
 from flask import render_template as flask_render_template
+from PIL import Image
 from upath import UPath
 
 from rslearn.dataset import Dataset, Window
@@ -150,6 +151,7 @@ def create_app(
     vector_text_render: dict[str, dict[str, Any]],
     vector_image_render: dict[str, dict[str, Any]],
     label_colors_dict: dict[str, dict[str, tuple[int, int, int]]],
+    resampling: dict[str, Image.Resampling],
     max_samples: int,
 ) -> Flask:
     """Create and configure Flask app.
@@ -165,6 +167,7 @@ def create_app(
         vector_text_render: Dictionary mapping item_group_name -> render spec dict
         vector_image_render: Dictionary mapping item_group_name -> render spec dict
         label_colors_dict: Dictionary mapping item_group_name -> label_colors
+        resampling: Dictionary mapping item_group_name -> PIL resampling method
         max_samples: Maximum number of windows to sample
 
     Returns:
@@ -232,7 +235,8 @@ def create_app(
                 raster_render[item_group_name],
                 label_colors=label_colors_dict.get(item_group_name),
             )
-            image_bytes = array_to_bytes(image_array)
+            layer_resampling = resampling.get(item_group_name, Image.Resampling.NEAREST)
+            image_bytes = array_to_bytes(image_array, resampling=layer_resampling)
         elif item_group_name in vector_image_groups:
             image_array = render_vector_image(
                 window,
@@ -245,7 +249,8 @@ def create_app(
                 bands=bands,
                 raster_render=raster_render,
             )
-            image_bytes = array_to_bytes(image_array)
+            layer_resampling = resampling.get(item_group_name, Image.Resampling.NEAREST)
+            image_bytes = array_to_bytes(image_array, resampling=layer_resampling)
         else:
             return Response(
                 f"Unknown item group name: {item_group_name}",
@@ -271,6 +276,7 @@ def run(
     vector_text_render: dict[str, dict[str, Any]] | None = None,
     vector_image_groups: list[str] | None = None,
     vector_image_render: dict[str, dict[str, Any]] | None = None,
+    resampling: dict[str, str] | None = None,
     max_samples: int = 100,
     port: int = 8000,
     host: str = "0.0.0.0",
@@ -288,6 +294,8 @@ def run(
         vector_text_render: Dictionary mapping item_group_name -> render spec dict
         vector_image_groups: List of vector image item group names to visualize
         vector_image_render: Dictionary mapping item_group_name -> render spec dict
+        resampling: Optional dictionary mapping item_group_name -> resampling method
+            name (e.g. "nearest", "bilinear", "bicubic"). Defaults to "nearest".
         max_samples: Maximum number of windows to sample
         port: Port to serve on
         host: Host to bind to
@@ -304,6 +312,22 @@ def run(
     raster_render = raster_render or {}
     vector_text_render = vector_text_render or {}
     vector_image_render = vector_image_render or {}
+
+    resampling_str_map = {
+        "nearest": Image.Resampling.NEAREST,
+        "bilinear": Image.Resampling.BILINEAR,
+        "bicubic": Image.Resampling.BICUBIC,
+        "lanczos": Image.Resampling.LANCZOS,
+    }
+    resampling_resolved: dict[str, Image.Resampling] = {}
+    for name, method_str in (resampling or {}).items():
+        method = resampling_str_map.get(method_str)
+        if method is None:
+            raise ValueError(
+                f"Unknown resampling method '{method_str}' for '{name}'. "
+                f"Valid options: {', '.join(resampling_str_map)}"
+            )
+        resampling_resolved[name] = method
 
     for item_group_name in raster_groups:
         if item_group_name not in bands:
@@ -368,6 +392,7 @@ def run(
         vector_text_render,
         vector_image_render,
         label_colors_dict,
+        resampling_resolved,
         max_samples,
     )
 
@@ -468,6 +493,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--resampling",
+        type=str,
+        help=(
+            "Resampling method per group as JSON. Optional per-layer, defaults to nearest. "
+            "Methods: nearest, bilinear, bicubic, lanczos. "
+            'Example: \'{"sentinel2": "bilinear", "label": "nearest"}\''
+        ),
+    )
+    parser.add_argument(
         "--max_samples",
         type=int,
         default=100,
@@ -500,6 +534,7 @@ def main() -> None:
     vector_image_render_dict = parse_json_dict_arg(
         args.vector_image_render, "--vector_image_render"
     )
+    resampling_dict = parse_json_dict_arg(args.resampling, "--resampling")
 
     run(
         dataset_path=args.dataset_path,
@@ -510,6 +545,7 @@ def main() -> None:
         vector_text_render=vector_text_render_dict or None,
         vector_image_groups=args.vector_image_groups,
         vector_image_render=vector_image_render_dict or None,
+        resampling=resampling_dict or None,
         max_samples=args.max_samples,
         port=args.port,
         host=args.host,
