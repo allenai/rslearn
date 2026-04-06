@@ -224,7 +224,7 @@ class TestGeotiffBoundsAndNodata:
         raster = RasterArray(
             chw_array=array, metadata=RasterMetadata(nodata_values=(-1.0, -2.0))
         )
-        with pytest.raises(ValueError, match="single nodata"):
+        with pytest.raises(ValueError, match="single unique nodata"):
             GeotiffRasterFormat().encode_raster(path, projection, (0, 0, 4, 4), raster)
 
     def test_geotiff_decode_no_nodata(self, tmp_path: pathlib.Path) -> None:
