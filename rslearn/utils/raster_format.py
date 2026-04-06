@@ -18,7 +18,7 @@ from upath import UPath
 
 from rslearn.const import TILE_SIZE
 from rslearn.log_utils import get_logger
-from rslearn.utils.array import copy_spatial_array
+from rslearn.utils.array import copy_spatial_array, nodata_eq, unique_nodata_value
 from rslearn.utils.fsspec import open_rasterio_upath_reader, open_rasterio_upath_writer
 from rslearn.utils.raster_array import RasterArray, RasterMetadata
 
@@ -267,13 +267,7 @@ class ImageTileRasterFormat(RasterFormat):
                 "transform": transform,
             }
             if nodata_values is not None:
-                unique = set(nodata_values)
-                if len(unique) != 1:
-                    raise ValueError(
-                        f"GeoTIFF only supports a single nodata value but got "
-                        f"different per-band values: {nodata_values}"
-                    )
-                profile["nodata"] = nodata_values[0]
+                profile["nodata"] = unique_nodata_value(nodata_values)
             with rasterio.open(f, "w", **profile) as dst:
                 dst.write(array)
 
@@ -337,6 +331,11 @@ class ImageTileRasterFormat(RasterFormat):
             array, ((0, 0), (padding[1], padding[3]), (padding[0], padding[2]))
         )
 
+        if nodata_values is not None:
+            _skip_nodata = np.array(nodata_values, dtype=array.dtype).reshape(-1, 1, 1)
+        else:
+            _skip_nodata = None
+
         path.mkdir(parents=True, exist_ok=True)
         for col in range(start_tile[0], end_tile[0]):
             for row in range(start_tile[1], end_tile[1]):
@@ -347,7 +346,12 @@ class ImageTileRasterFormat(RasterFormat):
                     j * self.tile_size : (j + 1) * self.tile_size,
                     i * self.tile_size : (i + 1) * self.tile_size,
                 ]
-                if np.count_nonzero(cur_array) == 0:
+                # Skip arrays that are all nodata. We fallback to nodata value being 0
+                # to match pre-existing behavior.
+                if _skip_nodata is not None:
+                    if nodata_eq(cur_array, _skip_nodata).all():
+                        continue
+                elif np.count_nonzero(cur_array) == 0:
                     continue
                 cur_bounds = (
                     col * self.tile_size,
@@ -563,13 +567,7 @@ class GeotiffRasterFormat(RasterFormat):
 
         nodata_values = raster.metadata.nodata_values
         if nodata_values is not None:
-            unique = set(nodata_values)
-            if len(unique) != 1:
-                raise ValueError(
-                    f"GeoTIFF only supports a single nodata value but got "
-                    f"different per-band values: {nodata_values}"
-                )
-            profile["nodata"] = nodata_values[0]
+            profile["nodata"] = unique_nodata_value(nodata_values)
 
         profile.update(self.geotiff_options)
 

@@ -1,8 +1,9 @@
 """Tests for rslearn.utils.array."""
 
 import numpy as np
+import pytest
 
-from rslearn.utils.array import nodata_eq
+from rslearn.utils.array import nodata_eq, unique_nodata_value
 
 
 class TestNodataEq:
@@ -44,3 +45,25 @@ class TestNodataEq:
             ]
         )
         np.testing.assert_array_equal(result, expected)
+
+
+class TestUniqueNodataValue:
+    """Unit tests for the NaN-aware unique_nodata_value helper."""
+
+    def test_single_value(self) -> None:
+        assert unique_nodata_value((0,)) == 0
+
+    def test_identical_values(self) -> None:
+        assert unique_nodata_value((5.0, 5.0, 5.0)) == 5.0
+
+    def test_nan_values_same(self) -> None:
+        result = unique_nodata_value((float("nan"), float("nan")))
+        assert np.isnan(result)
+
+    def test_mixed_nan_and_other_raises(self) -> None:
+        with pytest.raises(ValueError, match="different per-band"):
+            unique_nodata_value((float("nan"), 0.0))
+
+    def test_different_values_raises(self) -> None:
+        with pytest.raises(ValueError, match="different per-band"):
+            unique_nodata_value((1, 2))

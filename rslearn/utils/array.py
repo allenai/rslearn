@@ -1,5 +1,6 @@
 """Array util functions."""
 
+import math
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -7,6 +8,34 @@ import numpy.typing as npt
 
 if TYPE_CHECKING:
     import torch
+
+
+def unique_nodata_value(nodata_values: tuple[int | float, ...]) -> int | float:
+    """Return the single unique nodata value from a per-band tuple.
+
+    NaN values are treated as equal to each other, unlike the default Python
+    ``set`` behaviour where each NaN object is distinct.
+
+    Args:
+        nodata_values: per-band nodata values (must be non-empty).
+
+    Returns:
+        The unique nodata value.
+
+    Raises:
+        ValueError: if *nodata_values* contains more than one distinct value.
+    """
+    unique: list[int | float] = []
+    for v in nodata_values:
+        if any((math.isnan(u) if math.isnan(v) else u == v) for u in unique):
+            continue
+        unique.append(v)
+    if len(unique) != 1:
+        raise ValueError(
+            f"Expected a single unique nodata value but got "
+            f"different per-band values: {nodata_values}"
+        )
+    return unique[0]
 
 
 def nodata_eq(
