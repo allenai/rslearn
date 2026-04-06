@@ -77,6 +77,8 @@ def test_read_raster_harmonizes_non_visual_band(
     ).get_chw_array()
 
     expected = np.clip(raw, 1000, None) - 1000
+    # Nodata is 0 so anything that wasn't 0 before should be 1.
+    expected[(expected == 0) & (raw > 0)] = 1
     assert out.dtype == np.uint16
     np.testing.assert_array_equal(out, expected)
 

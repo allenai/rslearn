@@ -69,6 +69,11 @@ class CHELSADaily(
     DEFAULT_START_DATE = date(1979, 1, 1)
     DEFAULT_END_DATE = date(2025, 8, 29)
     DEFAULT_VERSION = "V.2.1"
+    # CHELSA daily uses both "pr" and "prec" for precipitation:
+    # - "pr" is used before 2020 and overlaps in 2020.
+    # - "prec" is used after 2020 and overlaps in 2020.
+    PRECIPITATION_ALIASES = {"pr", "prec"}
+    PRECIPITATION_OVERLAP_YEAR = 2020
     ALLOWED_VARIABLES = {
         "clt",
         "hurs",
@@ -174,6 +179,25 @@ class CHELSADaily(
             geometry=get_global_geometry((start, end)),
             item_date=item_date,
         )
+
+    @classmethod
+    def _resolve_variable_for_date(
+        cls, requested_variable: str, item_date: date
+    ) -> str:
+        """Resolve CHELSA variable alias for a specific date.
+
+        CHELSA precipitation changed variable naming from ``pr`` to ``prec`` with
+        overlap in 2020. Users may configure either alias once, and this method picks
+        the correct URL variable automatically by year.
+        """
+        if requested_variable not in cls.PRECIPITATION_ALIASES:
+            return requested_variable
+
+        if item_date.year < cls.PRECIPITATION_OVERLAP_YEAR:
+            return "pr"
+        if item_date.year > cls.PRECIPITATION_OVERLAP_YEAR:
+            return "prec"
+        return requested_variable
 
     @override
     def get_items(
@@ -289,8 +313,9 @@ class CHELSADaily(
         yyyy = f"{d.year:04d}"
         mm = f"{d.month:02d}"
         dd = f"{d.day:02d}"
+        resolved_variable = self._resolve_variable_for_date(asset_key, d)
 
         return (
-            f"{self.base_url}/{self.extent}/daily/{asset_key}/{yyyy}/"
-            f"CHELSA_{asset_key}_{dd}_{mm}_{yyyy}_{self.version}.tif"
+            f"{self.base_url}/{self.extent}/daily/{resolved_variable}/{yyyy}/"
+            f"CHELSA_{resolved_variable}_{dd}_{mm}_{yyyy}_{self.version}.tif"
         )
