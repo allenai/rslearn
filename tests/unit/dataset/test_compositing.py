@@ -1062,3 +1062,62 @@ class TestTemporalReducers:
         assert mean_result.timestamps == [request_time_range]
         assert max_result.timestamps == [request_time_range]
         assert min_result.timestamps == [request_time_range]
+
+
+class TestNaNNodata:
+    """Tests that NaN nodata is handled correctly through compositing."""
+
+    LAYER_NAME = "layer"
+    BANDS = ["B1"]
+    BOUNDS = (0, 0, 4, 4)
+    PROJECTION = WGS84_PROJECTION
+
+    def test_first_valid_nan_nodata(self, tmp_path: pathlib.Path) -> None:
+        """First-valid compositor should work with NaN nodata value.
+
+        NaN nodata requires special handling since equality check between two NaN
+        values evaluates to false.
+        """
+        tile_store = DefaultTileStore()
+        tile_store.set_dataset_path(UPath(tmp_path))
+
+        bbox = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
+        item_a = Item("a", STGeometry(self.PROJECTION, bbox, None))
+        item_b = Item("b", STGeometry(self.PROJECTION, bbox, None))
+
+        data_a = np.full((1, 4, 4), 10.0, dtype=np.float32)
+        data_a[:, 2:4, :] = np.nan
+        tile_store.write_raster(
+            self.LAYER_NAME,
+            item_a,
+            self.BANDS,
+            self.PROJECTION,
+            self.BOUNDS,
+            RasterArray(chw_array=data_a),
+        )
+
+        data_b = np.full((1, 4, 4), 20.0, dtype=np.float32)
+        tile_store.write_raster(
+            self.LAYER_NAME,
+            item_b,
+            self.BANDS,
+            self.PROJECTION,
+            self.BOUNDS,
+            RasterArray(chw_array=data_b),
+        )
+
+        result = FirstValidCompositor().build_composite(
+            group=[item_a, item_b],
+            nodata_vals=[np.nan],
+            bands=self.BANDS,
+            bounds=self.BOUNDS,
+            band_dtype=np.float32,
+            tile_store=TileStoreWithLayer(tile_store, self.LAYER_NAME),
+            projection=self.PROJECTION,
+            resampling_method=Resampling.bilinear,
+            remapper=None,
+        )
+
+        chw = result.get_chw_array()
+        assert np.all(chw[:, 0:2, :] == 10.0)
+        assert np.all(chw[:, 2:4, :] == 20.0)

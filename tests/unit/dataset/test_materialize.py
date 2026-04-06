@@ -119,3 +119,39 @@ class TestReadRasterWindowFromTiles:
         assert np.all(result[:, 0:2, 0:2] == 3)
         # Bottom-right: both bands at 0, not nodata -> unchanged.
         assert np.all(result[:, 2:4, 2:4] == 0)
+
+    def test_nan_nodata_mosaic(self, tmp_path: pathlib.Path) -> None:
+        """First-valid merge should detect NaN nodata and fill from source.
+
+        NaN requires special handling since NaN != NaN.
+        """
+        tile_store = DefaultTileStore()
+        tile_store.set_dataset_path(UPath(tmp_path))
+        item = self._make_item()
+        bands = ["band1"]
+        src = np.full((1, 4, 4), 5.0, dtype=np.float32)
+        tile_store.write_raster(
+            self.LAYER_NAME,
+            item,
+            bands,
+            self.PROJECTION,
+            self.BOUNDS,
+            RasterArray(chw_array=src),
+        )
+
+        dst_arr = np.full((1, 1, 4, 4), np.nan, dtype=np.float32)
+        dst_arr[0, 0, 0:2, :] = 1.0
+        dst = RasterArray(array=dst_arr)
+        read_raster_window_from_tiles(
+            tile_store=TileStoreWithLayer(tile_store, self.LAYER_NAME),
+            item=item,
+            bands=bands,
+            projection=self.PROJECTION,
+            bounds=self.BOUNDS,
+            nodata_vals=[np.nan],
+            band_dtype=np.float32,
+            dst=dst,
+        )
+        result = dst.get_chw_array()
+        assert np.all(result[0, 0:2, :] == 1.0)
+        assert np.all(result[0, 2:4, :] == 5.0)

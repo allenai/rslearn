@@ -53,8 +53,9 @@ def resolve_nodata_values(
     """Resolve per-band nodata values from the tile store metadata.
 
     Probes the first item that has matching bands and reads nodata from the
-    raster file header (no pixel data is read).  Falls back to 0.0 per band
-    when no item has matching bands or the source has no nodata metadata.
+    raster file header (no pixel data is read). Falls back to 0.0 per band
+    when no item has matching bands or the source has no nodata metadata, to align
+    with previous behavior.
 
     Args:
         tile_store: the tile store to query.

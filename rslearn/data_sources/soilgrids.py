@@ -6,6 +6,7 @@ since data is fetched on-demand per window.
 
 from __future__ import annotations
 
+import math
 import tempfile
 from datetime import datetime
 from typing import Any
@@ -281,7 +282,11 @@ class SoilGrids(DataSource, TileStore):
                 offset = float(src.offsets[0]) if src.offsets else 0.0
 
                 if src_nodata is not None:
-                    valid_mask = src_array != float(src_nodata)
+                    nodata_f = float(src_nodata)
+                    if math.isnan(nodata_f):
+                        valid_mask = ~np.isnan(src_array)
+                    else:
+                        valid_mask = src_array != nodata_f
                     src_array[valid_mask] = src_array[valid_mask] * scale + offset
                     dst_nodata = float(src_nodata)
                     src_nodata_val = dst_nodata

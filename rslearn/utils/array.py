@@ -2,10 +2,36 @@
 
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import numpy.typing as npt
 
 if TYPE_CHECKING:
     import torch
+
+
+def nodata_eq(
+    array: npt.NDArray[np.generic],
+    nodata_vals: npt.NDArray[np.generic],
+) -> npt.NDArray[np.bool_]:
+    """NaN-aware element-wise equality between *array* and a nodata sentinel.
+
+    Equivalent to ``array == nodata_vals`` but also matches NaN positions when
+    the corresponding nodata sentinel is NaN.
+
+    Args:
+        array: the data array (any shape).
+        nodata_vals: nodata sentinel(s), broadcastable against *array*.
+
+    Returns:
+        Boolean mask with the same shape as the broadcast result; True where the
+        value equals (or is NaN-matching) the nodata sentinel.
+    """
+    result = array == nodata_vals
+    if np.issubdtype(nodata_vals.dtype, np.floating):
+        nan_mask = np.isnan(nodata_vals)
+        if nan_mask.any():
+            result = result | (np.isnan(array) & nan_mask)
+    return result
 
 
 def copy_spatial_array(
