@@ -23,6 +23,7 @@ from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils import PixelBounds, Projection, STGeometry, get_global_raster_bounds
+from rslearn.utils.array import nodata_eq
 from rslearn.utils.geometry import get_global_geometry
 from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import get_transform_from_projection_and_bounds
@@ -281,7 +282,9 @@ class SoilGrids(DataSource, TileStore):
                 offset = float(src.offsets[0]) if src.offsets else 0.0
 
                 if src_nodata is not None:
-                    valid_mask = src_array != float(src_nodata)
+                    nodata_f = float(src_nodata)
+                    nodata_arr = np.array([nodata_f], dtype=np.float32)
+                    valid_mask = ~nodata_eq(src_array, nodata_arr)
                     src_array[valid_mask] = src_array[valid_mask] * scale + offset
                     dst_nodata = float(src_nodata)
                     src_nodata_val = dst_nodata

@@ -10,6 +10,7 @@ import numpy.typing as npt
 from rasterio.enums import Resampling
 
 from rslearn.tile_stores import TileStoreWithLayer
+from rslearn.utils.array import nodata_eq
 from rslearn.utils.geometry import PixelBounds, Projection
 from rslearn.utils.raster_array import RasterArray, RasterMetadata
 
@@ -132,7 +133,7 @@ def read_raster_window_from_tiles(
             dst = RasterArray(
                 array=dst_arr,
                 timestamps=raster_array.timestamps,
-                metadata=RasterMetadata(nodata_values=list(nodata_vals)),
+                metadata=RasterMetadata(nodata_values=tuple(nodata_vals)),
             )
 
         if src.shape[1] != dst.array.shape[1]:
@@ -159,7 +160,9 @@ def read_raster_window_from_tiles(
         cur_nodata = np.array(
             [nodata_vals[dst_index] for dst_index in dst_indexes], dtype=band_dtype
         ).reshape(-1, 1, 1, 1)
-        mask = (out_crop[dst_indexes] == cur_nodata).min(axis=0)  # (T, H_int, W_int)
+        mask = nodata_eq(out_crop[dst_indexes], cur_nodata).min(
+            axis=0
+        )  # (T, H_int, W_int)
 
         src_typed = src_sel.astype(band_dtype)
         for src_index, dst_index in enumerate(dst_indexes):
@@ -235,6 +238,6 @@ def mask_stacked_rasters(
         pixels equal to the per-band nodata value are masked.
     """
     nodata_vals_array = np.array(nodata_vals).reshape(1, -1, 1, 1, 1)
-    valid_mask = stacked_rasters != nodata_vals_array
-    masked_data = np.ma.masked_where(~valid_mask, stacked_rasters)
+    is_nodata = nodata_eq(stacked_rasters, nodata_vals_array)
+    masked_data = np.ma.masked_where(is_nodata, stacked_rasters)
     return masked_data

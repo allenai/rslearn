@@ -99,7 +99,7 @@ class TestGeotiffBoundsAndNodata:
             (0, 0, 4, 4),
             RasterArray(
                 chw_array=array,
-                metadata=RasterMetadata(nodata_values=[nodata_val]),
+                metadata=RasterMetadata(nodata_values=(nodata_val,)),
             ),
         )
 
@@ -121,7 +121,7 @@ class TestGeotiffBoundsAndNodata:
             path,
             projection,
             (0, 0, 4, 4),
-            RasterArray(chw_array=array, metadata=RasterMetadata(nodata_values=[255])),
+            RasterArray(chw_array=array, metadata=RasterMetadata(nodata_values=(255,))),
         )
 
         # Read partially out of bounds without specifying nodata_val.
@@ -134,7 +134,7 @@ class TestGeotiffBoundsAndNodata:
         assert np.all(result[:, 2:6, :] == 255)
         assert np.all(result[:, :, 2:6] == 255)
         # nodata_values should be populated from the GeoTIFF.
-        assert raster.metadata.nodata_values == [255]
+        assert raster.metadata.nodata_values == (255,)
 
     def test_geotiff_read_nodata_val_out_of_bounds(
         self, tmp_path: pathlib.Path
@@ -152,7 +152,7 @@ class TestGeotiffBoundsAndNodata:
             (0, 0, 4, 4),
             RasterArray(
                 chw_array=array,
-                metadata=RasterMetadata(nodata_values=[0]),
+                metadata=RasterMetadata(nodata_values=(0,)),
             ),
         )
 
@@ -171,7 +171,7 @@ class TestGeotiffBoundsAndNodata:
         assert np.all(result[:, 2:6, :] == nodata_val)
         assert np.all(result[:, :, 2:6] == nodata_val)
         # The nodata on the RasterArray should also be overridden to nodata_val instead of 0.
-        assert raster_array.metadata.nodata_values == [nodata_val]
+        assert raster_array.metadata.nodata_values == (nodata_val,)
 
     def test_geotiff_read_nodata_val_orig_nodata(self, tmp_path: pathlib.Path) -> None:
         """Test reading from GeoTIFF that has nodata values, but we set different nodata_val.
@@ -194,7 +194,7 @@ class TestGeotiffBoundsAndNodata:
             (0, 0, 4, 4),
             RasterArray(
                 chw_array=array,
-                metadata=RasterMetadata(nodata_values=[original_nodata]),
+                metadata=RasterMetadata(nodata_values=(original_nodata,)),
             ),
         )
 
@@ -212,7 +212,7 @@ class TestGeotiffBoundsAndNodata:
         # Original nodata pixels should still be as they were.
         assert np.all(result[:, 2:4, 2:4] == original_nodata)
         # The RasterArray should use the nodata value from the override.
-        assert raster_array.metadata.nodata_values == [new_nodata]
+        assert raster_array.metadata.nodata_values == (new_nodata,)
 
     def test_geotiff_encode_raises_on_heterogeneous_nodata(
         self, tmp_path: pathlib.Path
@@ -222,7 +222,7 @@ class TestGeotiffBoundsAndNodata:
         projection = Projection(CRS.from_epsg(3857), 1, -1)
         array = np.zeros((2, 4, 4), dtype=np.float32)
         raster = RasterArray(
-            chw_array=array, metadata=RasterMetadata(nodata_values=[-1.0, -2.0])
+            chw_array=array, metadata=RasterMetadata(nodata_values=(-1.0, -2.0))
         )
         with pytest.raises(ValueError, match="single nodata"):
             GeotiffRasterFormat().encode_raster(path, projection, (0, 0, 4, 4), raster)
@@ -424,7 +424,7 @@ class TestNumpyRasterFormat:
         """nodata_values should round-trip through NumpyRasterFormat."""
         path = UPath(tmp_path)
         data = np.ones((2, 1, 3, 3), dtype=np.float32)
-        nodata_values = [-9999.0, 0.0]
+        nodata_values = (-9999.0, 0.0)
         raster = RasterArray(
             array=data, metadata=RasterMetadata(nodata_values=nodata_values)
         )

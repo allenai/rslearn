@@ -95,7 +95,7 @@ class TestMeanCompositor:
 
     def test_mean_of_two_items(self, tile_store: DefaultTileStore) -> None:
         """Test mean composite of two 2-band rasters with valid values."""
-        nodata_vals = [0, 0]
+        nodata_vals = (0, 0)
 
         array1 = np.array(
             [np.full((4, 4), 2, dtype=np.uint8), np.full((4, 4), 6, dtype=np.uint8)]
@@ -141,7 +141,7 @@ class TestMeanCompositor:
         self, tile_store: DefaultTileStore
     ) -> None:
         """Test mean composite with 3 items having different spatial extents (float32)."""
-        nodata_vals = [0.0, 0.0]
+        nodata_vals = (0.0, 0.0)
 
         def make_array(val1: Any, val2: Any) -> npt.NDArray[np.float32]:
             return np.array(
@@ -216,7 +216,7 @@ class TestMeanCompositor:
         """Test mean composite where each band has a different nodata value (float32)."""
 
         # Different nodata values for each band
-        nodata_vals = [0.0, 99.0]  # Band 1 has 0.0 as nodata, Band 2 has 99.0 as nodata
+        nodata_vals = (0.0, 99.0)  # Band 1 has 0.0 as nodata, Band 2 has 99.0 as nodata
 
         array1 = np.array(
             [
@@ -303,7 +303,7 @@ class TestMedianCompositor:
 
     def test_median_of_two_items(self, tile_store: DefaultTileStore) -> None:
         """Median of two 2-band rasters with valid values everywhere."""
-        nodata_vals = [0, 0]
+        nodata_vals = (0, 0)
 
         array1 = np.array(
             [
@@ -356,7 +356,7 @@ class TestMedianCompositor:
         self, tile_store: DefaultTileStore
     ) -> None:
         """Median with 3 items having different spatial extents."""
-        nodata_vals = [0, 0]
+        nodata_vals = (0, 0)
 
         def make_array(val1: Any, val2: Any) -> npt.NDArray[np.float32]:
             return np.array(
@@ -433,7 +433,7 @@ class TestMedianCompositor:
         self, tile_store: DefaultTileStore
     ) -> None:
         """Median where each band has a different nodata value and per-pixel masks."""
-        nodata_vals = [0, 99]
+        nodata_vals = (0, 99)
 
         array1 = np.array(
             [
@@ -537,7 +537,7 @@ class TestSpatialMosaicTemporalStackCompositor:
 
         result = SpatialMosaicTemporalStackCompositor().build_composite(
             group=[item_a, item_b],
-            nodata_vals=[0],
+            nodata_vals=(0,),
             bands=self.BANDS,
             bounds=self.BOUNDS,
             band_dtype=np.uint8,
@@ -589,7 +589,7 @@ class TestSpatialMosaicTemporalStackCompositor:
 
         result = SpatialMosaicTemporalStackCompositor().build_composite(
             group=[item_a, item_b],
-            nodata_vals=[0],
+            nodata_vals=(0,),
             bands=self.BANDS,
             bounds=self.BOUNDS,
             band_dtype=np.uint8,
@@ -632,7 +632,7 @@ class TestSpatialMosaicTemporalStackCompositor:
 
         result = SpatialMosaicTemporalStackCompositor().build_composite(
             group=[item_a],
-            nodata_vals=[0],
+            nodata_vals=(0,),
             bands=self.BANDS,
             bounds=self.BOUNDS,
             band_dtype=np.uint8,
@@ -698,7 +698,7 @@ class TestSpatialMosaicTemporalStackCompositor:
 
         result = SpatialMosaicTemporalStackCompositor().build_composite(
             group=[item_a, item_b],
-            nodata_vals=[0],
+            nodata_vals=(0,),
             bands=self.BANDS,
             bounds=self.BOUNDS,
             band_dtype=np.uint8,
@@ -729,7 +729,7 @@ class TestSpatialMosaicTemporalStackCompositor:
     def test_temporal_stack_nodata_two_bands(self, tmp_path: pathlib.Path) -> None:
         """Nodata handling with two bands and per-band nodata values.
 
-        nodata_vals = [1, 2].
+        nodata_vals = (1, 2).
         Item 1: T=2 [Jan Feb], full coverage, both bands are nodata
                 everywhere ([1, 2]) except topleft pixel (0,0) which is [10, 10].
         Item 2: T=1 [Feb], full coverage, [20, 20] everywhere.
@@ -747,7 +747,7 @@ class TestSpatialMosaicTemporalStackCompositor:
         mar = datetime(2024, 3, 1, tzinfo=UTC)
 
         bands = ["B1", "B2"]
-        nodata_vals = [1, 2]
+        nodata_vals = (1, 2)
         bbox = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
 
         # Item 1: nodata everywhere except topleft, two timesteps.
@@ -863,7 +863,7 @@ class TestMultiTimestepComposites:
 
         result = FirstValidCompositor().build_composite(
             group=[item_a, item_b],
-            nodata_vals=[0],
+            nodata_vals=(0,),
             bands=self.BANDS,
             bounds=self.BOUNDS,
             band_dtype=np.uint8,
@@ -930,7 +930,7 @@ class TestMultiTimestepComposites:
 
         result = MeanCompositor().build_composite(
             group=[item_a, item_b],
-            nodata_vals=[0],
+            nodata_vals=(0,),
             bands=self.BANDS,
             bounds=self.BOUNDS,
             band_dtype=np.uint8,
@@ -988,7 +988,7 @@ class TestMultiTimestepComposites:
         with pytest.raises(ValueError, match="same number of timesteps"):
             MeanCompositor().build_composite(
                 group=[item_a, item_b],
-                nodata_vals=[0],
+                nodata_vals=(0,),
                 bands=self.BANDS,
                 bounds=self.BOUNDS,
                 band_dtype=np.uint8,
@@ -1062,3 +1062,62 @@ class TestTemporalReducers:
         assert mean_result.timestamps == [request_time_range]
         assert max_result.timestamps == [request_time_range]
         assert min_result.timestamps == [request_time_range]
+
+
+class TestNaNNodata:
+    """Tests that NaN nodata is handled correctly through compositing."""
+
+    LAYER_NAME = "layer"
+    BANDS = ["B1"]
+    BOUNDS = (0, 0, 4, 4)
+    PROJECTION = WGS84_PROJECTION
+
+    def test_first_valid_nan_nodata(self, tmp_path: pathlib.Path) -> None:
+        """First-valid compositor should work with NaN nodata value.
+
+        NaN nodata requires special handling since equality check between two NaN
+        values evaluates to false.
+        """
+        tile_store = DefaultTileStore()
+        tile_store.set_dataset_path(UPath(tmp_path))
+
+        bbox = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
+        item_a = Item("a", STGeometry(self.PROJECTION, bbox, None))
+        item_b = Item("b", STGeometry(self.PROJECTION, bbox, None))
+
+        data_a = np.full((1, 4, 4), 10.0, dtype=np.float32)
+        data_a[:, 2:4, :] = np.nan
+        tile_store.write_raster(
+            self.LAYER_NAME,
+            item_a,
+            self.BANDS,
+            self.PROJECTION,
+            self.BOUNDS,
+            RasterArray(chw_array=data_a),
+        )
+
+        data_b = np.full((1, 4, 4), 20.0, dtype=np.float32)
+        tile_store.write_raster(
+            self.LAYER_NAME,
+            item_b,
+            self.BANDS,
+            self.PROJECTION,
+            self.BOUNDS,
+            RasterArray(chw_array=data_b),
+        )
+
+        result = FirstValidCompositor().build_composite(
+            group=[item_a, item_b],
+            nodata_vals=(np.nan,),
+            bands=self.BANDS,
+            bounds=self.BOUNDS,
+            band_dtype=np.float32,
+            tile_store=TileStoreWithLayer(tile_store, self.LAYER_NAME),
+            projection=self.PROJECTION,
+            resampling_method=Resampling.bilinear,
+            remapper=None,
+        )
+
+        chw = result.get_chw_array()
+        assert np.all(chw[:, 0:2, :] == 10.0)
+        assert np.all(chw[:, 2:4, :] == 20.0)

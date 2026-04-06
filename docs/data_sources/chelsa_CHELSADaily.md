@@ -18,6 +18,9 @@ returned in one group.
   "class_path": "rslearn.data_sources.chelsa.CHELSADaily",
   "init_args": {
     // CHELSA variable names to read (if omitted, inferred from layer_config bands).
+    // For precipitation, either "pr" or "prec" works: rslearn automatically
+    // switches URL variable by year (before 2020 -> "pr", after 2020 -> "prec",
+    // overlap year 2020 preserves your requested alias).
     "band_names": ["tas", "pr"],
 
     // URL path extent, usually "global".
@@ -36,6 +39,16 @@ returned in one group.
 }
 ```
 
+### Precipitation Alias Handling
+
+CHELSA daily precipitation has two variable names:
+- `pr` in years before 2020 (and also available in 2020)
+- `prec` in years after 2020 (and also available in 2020)
+
+When you configure either precipitation alias (`pr` or `prec`), rslearn
+automatically chooses the URL variable for each item date so multi-year runs across
+the transition work without manual layer changes.
+
 ### Supported Variables
 
 | Code | Name | Unit | Description |
@@ -43,6 +56,7 @@ returned in one group.
 | `clt` | Total Cloud Cover Percentage | `percent` | Total cloud area fraction (reported as percentage) for the full atmospheric column, including large-scale and convective cloud. |
 | `hurs` | Near-Surface Relative Humidity | `percent` | Relative humidity with respect to liquid water for `T > 0°C` and with respect to ice for `T < 0°C`. |
 | `pr` | Precipitation | `kg m-2 day-1` | Daily precipitation including both liquid and solid phases. |
+| `prec` | Precipitation | `kg m-2 day-1` | Alias of CHELSA daily precipitation used in later years. |
 | `ps` | Surface Air Pressure | `hPa` | Surface pressure (not mean sea-level pressure). |
 | `rsds` | Surface Downwelling Shortwave Flux in Air | `W m-2` | Surface solar irradiance, commonly used for UV-related calculations. |
 | `sfcWind` | Near-Surface Wind Speed | `m s-1` | Near-surface (usually 10 m) wind speed. |

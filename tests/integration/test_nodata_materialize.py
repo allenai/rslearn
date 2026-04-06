@@ -51,13 +51,13 @@ def test_nodata_persists_through_ingestion_and_materialization(
         BOUNDS,
         RasterArray(
             chw_array=src,
-            metadata=RasterMetadata(nodata_values=[NODATA_VAL]),
+            metadata=RasterMetadata(nodata_values=(NODATA_VAL,)),
         ),
     )
 
     # Sanity-check: tile store metadata has the nodata value.
     ts_with_layer = TileStoreWithLayer(tile_store, LAYER_NAME)
-    assert ts_with_layer.get_raster_metadata(item, BANDS).nodata_values == [NODATA_VAL]
+    assert ts_with_layer.get_raster_metadata(item, BANDS).nodata_values == (NODATA_VAL,)
 
     # Materialize via RasterMaterializer (no explicit nodata_vals in BandSetConfig).
     layer_cfg = LayerConfig(

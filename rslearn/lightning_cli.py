@@ -304,6 +304,11 @@ class RslearnLightningCLI(LightningCLI):
         # Set default_root_dir so ManagedBestLastCheckpoint can resolve it.
         c.trainer.default_root_dir = str(project_dir)
 
+        # Disable Lightning's default ModelCheckpoint since we use our own
+        # (ManagedBestLastCheckpoint). Without this, Lightning adds a redundant
+        # ModelCheckpoint that writes to the logger's directory.
+        c.trainer.enable_checkpointing = False
+
         # Configure W&B logging.
         should_log = False
         if c.log_mode == "yes":

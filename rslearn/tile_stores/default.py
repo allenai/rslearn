@@ -207,9 +207,9 @@ class DefaultTileStore(TileStore):
     ) -> RasterMetadata:
         raster_fname = self._get_raster_fname(layer_name, item.name, bands)
         with open_rasterio_upath_reader(raster_fname) as src:
-            nodata_values: list[int | float] | None = None
+            nodata_values: tuple[int | float, ...] | None = None
             if src.nodata is not None:
-                nodata_values = [src.nodata] * src.count
+                nodata_values = (src.nodata,) * src.count
             return RasterMetadata(nodata_values=nodata_values)
 
     @override

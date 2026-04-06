@@ -689,7 +689,7 @@ class ERA5LandDailyUTCv1(DataSource[ERA5LandChunkItem]):
                 array=array,
                 timestamps=timestamps,
                 metadata=RasterMetadata(
-                    nodata_values=[self.NODATA_VALUE] * len(self.band_names)
+                    nodata_values=(self.NODATA_VALUE,) * len(self.band_names)
                 ),
             )
             tile_store.write_raster(
