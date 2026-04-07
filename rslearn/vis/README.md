@@ -29,6 +29,7 @@ You must enable **at least one** of:
 Optional:
 
 - `--groups` — restrict which window groups are loaded (e.g. `predict` only). If omitted, all groups under `windows/` are loaded.
+- `--resampling` — JSON object mapping group name to a PIL resampling method used when resizing to the display size (512×512). Defaults to `nearest`. Valid methods: `nearest`, `bilinear`, `bicubic`, `lanczos`. Example: `'{"sentinel2": "bilinear", "label": "nearest"}'`.
 
 ### Item group names (`layer` vs `layer.N`)
 
@@ -149,6 +150,7 @@ python -m rslearn.vis.vis_server /path/to/dataset \
   --raster_render '{"sentinel2": {"name": "sentinel2_rgb"}, "worldcover": {"name": "classes"}}' \
   --vector_text_render '{"meta": {"name": "text"}}' \
   --vector_image_render '{"objects": {"name": "detection"}}' \
+  --resampling '{"sentinel2": "bilinear", "worldcover": "nearest"}' \
   --groups default \
   --max_samples 80 \
   --port 8000
