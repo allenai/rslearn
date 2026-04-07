@@ -83,6 +83,47 @@ Here is an example data source configuration to obtain 8-bit RGB imagery. We set
 }
 ```
 
+### OmniCloudMask Ranking
+
+This data source does not have a `sort_by_omnicloudmask` init arg. To rank overlapping
+items using [OmniCloudMask](https://github.com/DPIRD-DMA/OmniCloudMask), configure a
+custom `compositing_method` on the raster layer:
+
+```jsonc
+{
+  "layers": {
+    "sentinel2": {
+      "type": "raster",
+      "band_sets": [{"bands": ["R", "G", "B"], "dtype": "uint8"}],
+      "data_source": {
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+        "init_args": {
+          "harmonize": true,
+          "query": {"eo:cloud_cover": {"lt": 80}}
+        },
+        "ingest": false,
+        "query_config": {
+          "max_matches": 1,
+          "space_mode": "MOSAIC"
+        }
+      },
+      "compositing_method": {
+        "class_path": "rslearn.dataset.omni_cloud_mask.OmniCloudMaskFirstValid",
+        "init_args": {
+          "red_band": "B04",
+          "green_band": "B03",
+          "nir_band": "B8A"
+        }
+      }
+    }
+  }
+}
+```
+
+OmniCloudMask scoring runs during materialization on each multi-item group and then
+FIRST_VALID is applied in the ranked order. See
+[`DataSourceConfig`](../dataset_config/DataSourceConfig.md) for more details.
+
 Save this to a dataset folder like `/path/to/dataset/config.json`. Then we can create a
 sample window, and then run prepare and materialize (skipping ingest since we disabled
 it above in favor of directly materializing from the Planetary Computer COGs):
