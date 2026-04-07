@@ -1,4 +1,8 @@
 from datetime import UTC, datetime
+from pathlib import Path
+from types import TracebackType
+from collections.abc import Iterator
+from typing import BinaryIO
 
 import numpy as np
 import pytest
@@ -175,26 +179,31 @@ def test_chelsa_daily_item_serialization_roundtrip() -> None:
 
 
 def test_chelsa_daily_ingest_preserves_nodata_and_temporal_reducers_ignore_it(
-    tmp_path,
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _LocalResponse:
         def __init__(self, path: UPath) -> None:
             self.path = path
-            self._f = None
+            self._f: BinaryIO | None = None
 
-        def __enter__(self):
+        def __enter__(self) -> "_LocalResponse":
             self._f = self.path.open("rb")
             return self
 
-        def __exit__(self, exc_type, exc, tb) -> None:
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc: BaseException | None,
+            tb: TracebackType | None,
+        ) -> None:
             assert self._f is not None
             self._f.close()
 
         def raise_for_status(self) -> None:
             return None
 
-        def iter_content(self, chunk_size: int):
+        def iter_content(self, chunk_size: int) -> Iterator[bytes]:
             assert self._f is not None
             while True:
                 chunk = self._f.read(chunk_size)
