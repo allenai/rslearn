@@ -232,7 +232,6 @@ class BandSetConfig(BaseModel):
                 "nodata_vals is deprecated and will be removed after 2026-08-01. "
                 "Use nodata_value (a single scalar) instead.",
                 FutureWarning,
-                stacklevel=6,
             )
             if len(self.nodata_vals) > 0:
                 unique: list[int | float] = []
@@ -424,21 +423,18 @@ class QueryConfig(BaseModel):
                 "time_mode is deprecated and will be removed in a future version. "
                 "Remove it from your config (WITHIN is the only supported behavior).",
                 FutureWarning,
-                stacklevel=6,
             )
         if self.space_mode == SpaceMode.PER_PERIOD_MOSAIC:
             warnings.warn(
                 "SpaceMode.PER_PERIOD_MOSAIC is deprecated and will be removed after "
                 "2026-05-01. Use SpaceMode.MOSAIC with period_duration instead.",
                 FutureWarning,
-                stacklevel=6,
             )
         if "per_period_mosaic_reverse_time_order" in self.model_fields_set:
             warnings.warn(
                 "per_period_mosaic_reverse_time_order is deprecated and will be "
                 "removed after 2026-05-01.",
                 FutureWarning,
-                stacklevel=6,
             )
         return self
 

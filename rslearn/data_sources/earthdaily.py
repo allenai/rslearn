@@ -541,7 +541,10 @@ class EarthDaily(DataSource, TileStore):
             scales = np.full((num_bands, 1, 1), scale, dtype=np.float32)
             offsets = np.full((num_bands, 1, 1), offset, dtype=np.float32)
 
-        metadata = RasterMetadata(nodata_value=nodata_value)
+        if metadata is None:
+            metadata = RasterMetadata(nodata_value=nodata_value)
+        elif nodata_value is not None:
+            metadata.nodata_value = nodata_value
 
         if np.all(scales == 1.0) and np.all(offsets == 0.0):
             return RasterArray(

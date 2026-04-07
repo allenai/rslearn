@@ -54,8 +54,8 @@ def resolve_nodata_value(
     """Resolve scalar nodata value from the tile store metadata.
 
     Probes the first item that has matching bands and reads nodata from the
-    raster file header (no pixel data is read).  Returns ``None`` when no
-    item has matching bands or no source declares nodata metadata.
+    raster file header (no pixel data is read). An error is raised if different assets
+    have different nodata values.
 
     Args:
         tile_store: the tile store to query.

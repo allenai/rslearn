@@ -30,6 +30,9 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
     raster data on-demand from remote sources (like cloud buckets or APIs) without
     first ingesting into a local tile store.
 
+    We assume here that the same asset across items has the same nodata value. The
+    nodata value is cached so we don't need to probe the raster repeatedly.
+
     Subclasses must implement:
         - get_asset_url(): Get the URL for an asset given item and bands
 
