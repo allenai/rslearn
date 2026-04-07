@@ -53,7 +53,7 @@ Supported `name` values (see `rslearn.vis.render_raster`):
 | `percentile`     | Per-band 2–98% stretch to uint8. |
 | `minmax`         | Per-band min/max stretch. |
 | `linear`         | Fixed user-configured range, e.g. `args`: `vmin`, `vmax`. |
-| `classes`        | Class index raster; colors from layer `class_names` when set. |
+| `classes`        | Class index raster. |
 
 Example — RGB + label raster:
 
@@ -103,8 +103,8 @@ python -m rslearn.vis.vis_server /path/to/dataset \
 ## 3. Vector as image
 
 Use **`--vector_image_groups`** and **`--vector_image_render`**.
-Colors come from the layer’s **`class_names`** in `config.json` (sorted, then mapped to the default palette).
-If `class_names` is absent, labels fall back to a default red-like color per unknown class string.
+If `class_names` is set, it will be used to select colors from `DEFAULT_COLORS` in `rslearn.utils.colors`,
+otherwise, labels fallback to a default red color.
 
 Both modes require **`class_property_name`** on the vector layer so each feature’s class can be colored.
 

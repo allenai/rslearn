@@ -114,7 +114,7 @@
     <div class="legend">
         <h3>{{ layer_name | e }} Color Legend</h3>
         <div class="legend-items">
-            {% for label in colors.keys()|sort %}
+            {% for label in colors.keys() %}
             <div class="legend-item">
                 <div class="legend-color" style="background: rgb({{ colors[label][0] }}, {{ colors[label][1] }}, {{ colors[label][2] }});"></div>
                 <span>{{ label | e }}</span>
