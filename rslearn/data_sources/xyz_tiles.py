@@ -21,7 +21,7 @@ from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils import PixelBounds, Projection, STGeometry, get_global_raster_bounds
 from rslearn.utils.array import copy_spatial_array
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 from rslearn.utils.raster_format import get_transform_from_projection_and_bounds
 
 from .data_source import DataSource, DataSourceContext, Item
@@ -280,6 +280,12 @@ class XyzTiles(DataSource, TileStore):
         # XyzTiles is a global data source, so we return global raster bounds based on
         # the projection.
         return get_global_raster_bounds(projection)
+
+    def get_raster_metadata(
+        self, layer_name: str, item: Item, bands: list[str]
+    ) -> RasterMetadata:
+        """XYZ tiles have no file-header nodata or similar metadata."""
+        return RasterMetadata()
 
     def read_raster(
         self,

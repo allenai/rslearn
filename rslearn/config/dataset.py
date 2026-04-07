@@ -3,7 +3,6 @@
 import copy
 import functools
 import json
-import math
 import warnings
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -26,6 +25,7 @@ from rasterio.enums import Resampling
 from upath import UPath
 
 from rslearn.log_utils import get_logger
+from rslearn.utils.array import unique_nodata_value
 from rslearn.utils.geometry import PixelBounds, Projection, ResolutionFactor
 from rslearn.utils.raster_format import RasterFormat
 from rslearn.utils.vector_format import VectorFormat
@@ -234,22 +234,7 @@ class BandSetConfig(BaseModel):
                 FutureWarning,
             )
             if len(self.nodata_vals) > 0:
-                unique: list[int | float] = []
-                for v in self.nodata_vals:
-                    if any(
-                        (math.isnan(u) and math.isnan(v))
-                        if isinstance(v, float) and isinstance(u, float)
-                        else u == v
-                        for u in unique
-                    ):
-                        continue
-                    unique.append(v)
-                if len(unique) != 1:
-                    raise ValueError(
-                        f"nodata_vals contains multiple distinct values {self.nodata_vals}; "
-                        f"use a single nodata_value instead."
-                    )
-                self.nodata_value = unique[0]
+                self.nodata_value = unique_nodata_value(self.nodata_vals)
 
         return self
 
