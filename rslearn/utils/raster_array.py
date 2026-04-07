@@ -13,11 +13,11 @@ import numpy.typing as npt
 class RasterMetadata:
     """Extensible metadata attached to a :class:`RasterArray`.
 
-    Currently carries per-band nodata values; designed to be extended with
-    fields like ``band_names``, suggested colours, etc.
+    Currently carries a scalar nodata value for the band set; designed to be
+    extended with fields like ``band_names``, suggested colours, etc.
     """
 
-    nodata_values: tuple[int | float, ...] | None = field(default=None)
+    nodata_value: int | float | None = field(default=None)
 
 
 class RasterArray:
@@ -99,14 +99,6 @@ class RasterArray:
             )
 
         self.metadata = metadata if metadata is not None else RasterMetadata()
-
-        if self.metadata.nodata_values is not None:
-            num_channels = self.array.shape[0]
-            if len(self.metadata.nodata_values) != num_channels:
-                raise ValueError(
-                    f"metadata.nodata_values length ({len(self.metadata.nodata_values)}) "
-                    f"does not match C dimension ({num_channels})"
-                )
 
     def get_chw_array(self) -> npt.NDArray[np.generic]:
         """Return the array as (C, H, W), requiring T=1.

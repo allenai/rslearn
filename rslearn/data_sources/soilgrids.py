@@ -168,7 +168,7 @@ class SoilGrids(DataSource, TileStore):
         self, layer_name: str, item: Item, bands: list[str]
     ) -> RasterMetadata:
         """Return metadata with the SoilGrids nodata value."""
-        return RasterMetadata(nodata_values=(SOILGRIDS_NODATA_VALUE,) * len(bands))
+        return RasterMetadata(nodata_value=SOILGRIDS_NODATA_VALUE)
 
     def get_raster_bounds(
         self, layer_name: str, item: Item, bands: list[str], projection: Projection
@@ -288,9 +288,7 @@ class SoilGrids(DataSource, TileStore):
                 offset = float(src.offsets[0]) if src.offsets else 0.0
 
                 if src_nodata is not None:
-                    nodata_f = float(src_nodata)
-                    nodata_arr = np.array([nodata_f], dtype=np.float32)
-                    valid_mask = ~nodata_eq(src_array, nodata_arr)
+                    valid_mask = ~nodata_eq(src_array, src_nodata)
                     src_array[valid_mask] = src_array[valid_mask] * scale + offset
                     dst_nodata = float(src_nodata)
                     src_nodata_val = dst_nodata
@@ -320,7 +318,7 @@ class SoilGrids(DataSource, TileStore):
                     dst_nodata=dst_nodata,
                     resampling=resampling,
                 )
-                raster_metadata = RasterMetadata(nodata_values=(dst_nodata,))
+                raster_metadata = RasterMetadata(nodata_value=dst_nodata)
                 return RasterArray(
                     chw_array=dst,
                     time_range=item.geometry.time_range,

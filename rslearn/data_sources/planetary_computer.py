@@ -431,11 +431,7 @@ class Sentinel2(PlanetaryComputer):
                             src_nodata = src.nodata
                             projection, bounds = get_raster_projection_and_bounds(src)
                         array = harmonize_callback(array)
-                        raster_metadata = RasterMetadata(
-                            nodata_values=(src_nodata,) * array.shape[0]
-                            if src_nodata is not None
-                            else None
-                        )
+                        raster_metadata = RasterMetadata(nodata_value=src_nodata)
                         tile_store.write_raster(
                             item,
                             band_names,
@@ -1076,9 +1072,7 @@ class Sentinel3SlstrLST(PlanetaryComputer):
                             gridded_array,
                         )
 
-                raster_metadata = RasterMetadata(
-                    nodata_values=(self.nodata_value,) * len(self.band_names)
-                )
+                raster_metadata = RasterMetadata(nodata_value=self.nodata_value)
                 tile_store.write_raster(
                     item,
                     self.band_names,

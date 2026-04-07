@@ -286,9 +286,7 @@ class GoogleSatelliteEmbeddingV1(
                         array = src.read()
                         projection, bounds = get_raster_projection_and_bounds(src)
                     array = self._dequantize(array)
-                    raster_metadata = RasterMetadata(
-                        nodata_values=(-1.0,) * array.shape[0]
-                    )
+                    raster_metadata = RasterMetadata(nodata_value=-1.0)
                     tile_store.write_raster(
                         item,
                         BANDS,
@@ -315,8 +313,8 @@ class GoogleSatelliteEmbeddingV1(
     ) -> RasterMetadata:
         """Return metadata reflecting the effective nodata value."""
         if self.apply_dequantization:
-            return RasterMetadata(nodata_values=(-1.0,) * len(bands))
-        return RasterMetadata(nodata_values=(-128,) * len(bands))
+            return RasterMetadata(nodata_value=-1.0)
+        return RasterMetadata(nodata_value=-128)
 
     def get_asset_url(
         self, item: GoogleSatelliteEmbeddingV1Item, asset_key: str
@@ -404,9 +402,9 @@ class GoogleSatelliteEmbeddingV1(
             data = callback(data)
 
         if self.apply_dequantization:
-            raster_metadata = RasterMetadata(nodata_values=(-1.0,) * data.shape[0])
+            raster_metadata = RasterMetadata(nodata_value=-1.0)
         else:
-            raster_metadata = RasterMetadata(nodata_values=(-128,) * data.shape[0])
+            raster_metadata = RasterMetadata(nodata_value=-128)
 
         return RasterArray(
             chw_array=data,

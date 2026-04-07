@@ -72,7 +72,7 @@ class TestOmniCloudMaskFirstValid:
             # Pass cloudy first, clear second -- compositor should reorder.
             result = compositor.build_composite(
                 group=[item_cloudy, item_clear],
-                nodata_vals=(0, 0, 0),
+                nodata_val=0,
                 bands=BANDS,
                 bounds=BOUNDS,
                 band_dtype=np.uint8,
@@ -105,7 +105,7 @@ class TestOmniCloudMaskFirstValid:
         ):
             result = compositor.build_composite(
                 group=[item],
-                nodata_vals=(0, 0, 0),
+                nodata_val=0,
                 bands=BANDS,
                 bounds=BOUNDS,
                 band_dtype=np.uint8,
@@ -145,7 +145,7 @@ class TestOmniCloudMaskFirstValid:
         ):
             compositor.build_composite(
                 group=[item_fail, item_ok],
-                nodata_vals=(0, 0, 0),
+                nodata_val=0,
                 bands=BANDS,
                 bounds=BOUNDS,
                 band_dtype=np.uint8,

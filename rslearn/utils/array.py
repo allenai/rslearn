@@ -10,57 +10,46 @@ if TYPE_CHECKING:
     import torch
 
 
-def unique_nodata_value(nodata_values: tuple[int | float, ...]) -> int | float:
-    """Return the single unique nodata value from a per-band tuple.
-
-    NaN values are treated as equal to each other, unlike the default Python
-    ``set`` behaviour where each NaN object is distinct.
-
-    Args:
-        nodata_values: per-band nodata values (must be non-empty).
-
-    Returns:
-        The unique nodata value.
-
-    Raises:
-        ValueError: if *nodata_values* contains more than one distinct value.
-    """
-    unique: list[int | float] = []
-    for v in nodata_values:
-        if any((math.isnan(u) if math.isnan(v) else u == v) for u in unique):
-            continue
-        unique.append(v)
-    if len(unique) != 1:
-        raise ValueError(
-            f"Expected a single unique nodata value but got "
-            f"different per-band values: {nodata_values}"
-        )
-    return unique[0]
-
-
 def nodata_eq(
     array: npt.NDArray[np.generic],
-    nodata_vals: npt.NDArray[np.generic],
+    nodata_value: int | float,
 ) -> npt.NDArray[np.bool_]:
     """NaN-aware element-wise equality between *array* and a nodata sentinel.
 
-    Equivalent to ``array == nodata_vals`` but also matches NaN positions when
-    the corresponding nodata sentinel is NaN.
+    Equivalent to ``array == nodata_value`` but also matches NaN positions when
+    the nodata sentinel is NaN.
 
     Args:
         array: the data array (any shape).
-        nodata_vals: nodata sentinel(s), broadcastable against *array*.
+        nodata_value: scalar nodata sentinel.
 
     Returns:
-        Boolean mask with the same shape as the broadcast result; True where the
-        value equals (or is NaN-matching) the nodata sentinel.
+        Boolean mask with the same shape as *array*; True where the value
+        equals (or is NaN-matching) the nodata sentinel.
     """
-    result = array == nodata_vals
-    if np.issubdtype(nodata_vals.dtype, np.floating):
-        nan_mask = np.isnan(nodata_vals)
-        if nan_mask.any():
-            result = result | (np.isnan(array) & nan_mask)
-    return result
+    if isinstance(nodata_value, float) and math.isnan(nodata_value):
+        return np.isnan(array)
+    return array == nodata_value
+
+
+def unique_nodata_value(values: list[int | float]) -> int | float | None:
+    """Return the single unique value from *values*, or None if empty.
+
+    NaN-aware: all NaN entries are treated as equal.
+
+    Raises:
+        ValueError: if *values* contains more than one distinct value.
+    """
+    unique: list[int | float] = []
+    for v in values:
+        is_nan = isinstance(v, float) and math.isnan(v)
+        if not any((math.isnan(u) if is_nan else u == v) for u in unique):
+            unique.append(v)
+    if not unique:
+        return None
+    if len(unique) > 1:
+        raise ValueError(f"Expected exactly one unique nodata value, got {unique}")
+    return unique[0]
 
 
 def copy_spatial_array(

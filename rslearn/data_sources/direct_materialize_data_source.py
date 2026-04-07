@@ -17,13 +17,10 @@ from rslearn.config import LayerConfig
 from rslearn.data_sources.data_source import DataSource, Item, ItemType
 from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
-from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils import Feature
 from rslearn.utils.geometry import PixelBounds, Projection
 from rslearn.utils.raster_array import RasterArray, RasterMetadata
-
-logger = get_logger(__name__)
 
 
 class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
@@ -208,16 +205,12 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
 
         if asset_key not in self._nodata_cache:
             asset_url = self.get_asset_url(typed_item, asset_key)
-            try:
-                with rasterio.open(asset_url) as src:
-                    self._nodata_cache[asset_key] = src.nodata
-            except Exception:
-                logger.debug("Could not read nodata from %s; assuming None", asset_url)
-                self._nodata_cache[asset_key] = None
+            with rasterio.open(asset_url) as src:
+                self._nodata_cache[asset_key] = src.nodata
 
         nodata = self._nodata_cache[asset_key]
         if nodata is not None:
-            return RasterMetadata(nodata_values=(nodata,) * len(bands))
+            return RasterMetadata(nodata_value=nodata)
         return RasterMetadata()
 
     @override
@@ -256,9 +249,7 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
 
         raster_metadata = None
         if src_nodata is not None:
-            raster_metadata = RasterMetadata(
-                nodata_values=(src_nodata,) * raw_data.shape[0]
-            )
+            raster_metadata = RasterMetadata(nodata_value=src_nodata)
 
         return RasterArray(
             chw_array=raw_data,

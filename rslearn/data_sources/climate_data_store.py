@@ -480,9 +480,7 @@ class ERA5LandMonthlyMeans(ERA5Land):
                 array, timestamps, projection, bounds = self._parse_nc(
                     UPath(local_nc_fname)
                 )
-                raster_metadata = RasterMetadata(
-                    nodata_values=(self.NODATA_VALUE,) * array.shape[0]
-                )
+                raster_metadata = RasterMetadata(nodata_value=self.NODATA_VALUE)
                 tile_store.write_raster(
                     item,
                     self.band_names,
@@ -600,9 +598,7 @@ class ERA5LandHourly(ERA5Land):
                 array, timestamps, projection, bounds = self._parse_nc(
                     UPath(local_nc_fname)
                 )
-                raster_metadata = RasterMetadata(
-                    nodata_values=(self.NODATA_VALUE,) * array.shape[0]
-                )
+                raster_metadata = RasterMetadata(nodata_value=self.NODATA_VALUE)
                 tile_store.write_raster(
                     item,
                     self.band_names,
@@ -983,9 +979,7 @@ class ERA5LandHourlyTimeseries(DataSource):
                 array, timestamps, projection, bounds = self._parse_nc_timeseries(
                     local_nc_paths, lon, lat
                 )
-                raster_metadata = RasterMetadata(
-                    nodata_values=(self.NODATA_VALUE,) * array.shape[0]
-                )
+                raster_metadata = RasterMetadata(nodata_value=self.NODATA_VALUE)
                 tile_store.write_raster(
                     item,
                     self.band_names,

@@ -888,11 +888,7 @@ class Sentinel2(DataSource):
                             src_nodata = src.nodata
                             projection, bounds = get_raster_projection_and_bounds(src)
                         array = harmonize_callback(array)
-                        raster_metadata = RasterMetadata(
-                            nodata_values=(src_nodata,) * array.shape[0]
-                            if src_nodata is not None
-                            else None
-                        )
+                        raster_metadata = RasterMetadata(nodata_value=src_nodata)
                         tile_store.write_raster(
                             item,
                             band_names,
