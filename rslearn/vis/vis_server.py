@@ -14,134 +14,44 @@ from flask import render_template as flask_render_template
 from PIL import Image
 from upath import UPath
 
-from rslearn.config import LayerType
 from rslearn.dataset import Dataset, Window
+from rslearn.dataset.window import get_layer_and_group_from_dir_name
 from rslearn.log_utils import get_logger
 
-from .render_raster_label import read_raster_layer, render_raster_label
-from .render_sensor_image import render_sensor_image
-from .render_vector_label import get_vector_label_by_property, render_vector_label_image
-from .utils import array_to_bytes, format_window_info, generate_label_colors
+from .render_raster import (
+    read_raster_layer,
+    render_raster,
+)
+from .render_vector_image import render_vector_image
+from .render_vector_text import render_vector_text
+from .utils import (
+    array_to_bytes,
+    format_window_info,
+    generate_label_colors_for_layer,
+)
 
 logger = get_logger(__name__)
-
-
-def generate_image_as_bytes(
-    window: Window,
-    layer_name: str,
-    dataset: Dataset,
-    bands: dict[str, list[str]],
-    normalization: dict[str, str],
-    task_type: str,
-    label_colors: dict[str, tuple[int, int, int]] | None,
-    label_colors_dict: dict[str, dict[str, tuple[int, int, int]]] | None = None,
-    group_idx: int = 0,
-    label_layers: list[str] | None = None,
-) -> bytes:
-    """Generate an image for a window/layer combination as PNG bytes.
-
-    Args:
-        window: Window object
-        layer_name: Layer name to visualize
-        dataset: Dataset object
-        bands: Dictionary mapping layer_name -> list of band names
-        normalization: Dictionary mapping layer_name -> normalization method
-        task_type: Task type
-        label_colors: Dictionary mapping label class names to RGB colors
-        label_colors_dict: Dictionary mapping layer_name -> label_colors
-        group_idx: Item group index
-        label_layers: List of layer names that are labels
-
-    Returns:
-        PNG image bytes
-    """
-    label_layers = label_layers or []
-    layer_config = dataset.layers[layer_name]
-
-    # Render raster sensor image
-    if layer_config.type == LayerType.RASTER and layer_name not in label_layers:
-        if layer_name in bands and layer_name in normalization:
-            array = read_raster_layer(
-                window, layer_name, layer_config, bands[layer_name], group_idx=group_idx
-            )
-            image_array = render_sensor_image(array, normalization[layer_name])
-            return array_to_bytes(image_array)
-        else:
-            raise ValueError(
-                f"Bands or normalization not specified for layer {layer_name}"
-            )
-
-    # Render labels
-    elif layer_name in label_layers:
-        layer_label_colors = (
-            label_colors_dict.get(layer_name) if label_colors_dict else label_colors
-        )
-        if not layer_label_colors:
-            raise ValueError(f"No label colors available for layer {layer_name}")
-
-        # Render raster label
-        if layer_config.type == LayerType.RASTER:
-            band_set = layer_config.band_sets[0]
-            label_array = read_raster_layer(
-                window,
-                layer_name,
-                layer_config,
-                [band_set.bands[0]],
-                group_idx=group_idx,
-            )
-            image_array = render_raster_label(
-                label_array, layer_label_colors, layer_config
-            )
-            return array_to_bytes(image_array, resampling=Image.Resampling.NEAREST)
-
-        # Render vector label
-        elif layer_config.type == LayerType.VECTOR:
-            image_array = render_vector_label_image(
-                window,
-                layer_name,
-                layer_config,
-                task_type,
-                layer_label_colors,
-                dataset,
-                label_layers,
-                group_idx,
-                bands,
-                normalization,
-            )
-            # Use NEAREST for segmentation labels, LANCZOS for detection (which overlays on reference image)
-            resampling = (
-                Image.Resampling.NEAREST
-                if task_type == "segmentation"
-                else Image.Resampling.LANCZOS
-            )
-            return array_to_bytes(image_array, resampling=resampling)
-
-    raise ValueError(f"Layer {layer_name} is not a raster sensor image or label layer")
-
-
-# Global state (set during initialization)
-_app_state: dict[str, Any] = {}
 
 
 def prepare_visualization_data(
     sampled_windows: list[Window],
     dataset: Dataset,
-    layers: list[str],
-    label_layers: list[str],
-    task_type: str,
+    raster_groups: list[str],
+    vector_text_groups: list[str],
+    vector_text_render: dict[str, dict[str, Any]],
+    vector_image_groups: list[str],
     label_colors_dict: dict[str, dict[str, tuple[int, int, int]]],
-    group_idx: int,
 ) -> dict[str, Any]:
     """Prepare data for visualization template.
 
     Args:
         sampled_windows: List of windows to display
         dataset: Dataset object
-        layers: List of all layers
-        label_layers: List of label layer names
-        task_type: Task type
-        label_colors_dict: Dictionary mapping layer_name -> label_colors
-        group_idx: Item group index
+        raster_groups: List of raster item group names
+        vector_text_groups: List of vector text item group names
+        vector_text_render: Dictionary mapping item_group_name -> render spec dict
+        vector_image_groups: List of vector image item group names
+        label_colors_dict: Dictionary mapping item_group_name -> label_colors
 
     Returns:
         Dictionary with template context data
@@ -155,56 +65,45 @@ def prepare_visualization_data(
             else None
         )
 
-        available_layers = set()
-        mask_layers = []
-        label_texts = {}
+        available_raster_groups: set[str] = set()
+        available_vector_image_groups: list[str] = []
+        label_texts: dict[str, str] = {}
 
-        for layer_name in layers:
+        for item_group_name in raster_groups:
+            layer_name, group_idx = get_layer_and_group_from_dir_name(item_group_name)
+            if layer_name not in dataset.layers:
+                continue
+            if window.is_layer_completed(layer_name, group_idx=group_idx):
+                available_raster_groups.add(item_group_name)
+
+        for item_group_name in vector_text_groups:
+            layer_name, group_idx = get_layer_and_group_from_dir_name(item_group_name)
             if layer_name not in dataset.layers:
                 continue
             layer_config = dataset.layers[layer_name]
+            render_spec = vector_text_render[item_group_name]
             try:
-                if (
-                    layer_config.type == LayerType.RASTER
-                    and layer_name not in label_layers
-                ):
-                    if window.is_layer_completed(layer_name, group_idx=group_idx):
-                        available_layers.add(layer_name)
-                elif layer_name in label_layers:
-                    if layer_config.type == LayerType.VECTOR:
-                        if task_type == "classification":
-                            try:
-                                if not window.is_layer_completed(
-                                    layer_name, group_idx=group_idx
-                                ):
-                                    logger.debug(
-                                        f"Layer {layer_name} not marked as completed for window {window.name}, attempting to read anyway"
-                                    )
-                                label_text = get_vector_label_by_property(
-                                    window,
-                                    layer_config,
-                                    layer_name,
-                                    group_idx=group_idx,
-                                )
-                                if label_text is not None:
-                                    label_texts[layer_name] = label_text
-                            except Exception as e:
-                                logger.debug(
-                                    f"Failed to get label text for {layer_name} in window {window.name}: {e}"
-                                )
-                        else:
-                            if window.is_layer_completed(
-                                layer_name, group_idx=group_idx
-                            ):
-                                mask_layers.append(layer_name)
-                    elif layer_config.type == LayerType.RASTER:
-                        if window.is_layer_completed(layer_name, group_idx=group_idx):
-                            mask_layers.append(layer_name)
+                result = render_vector_text(
+                    window,
+                    layer_name,
+                    layer_config,
+                    render_spec,
+                    group_idx=group_idx,
+                )
+                if result is not None:
+                    label_texts[item_group_name] = result
             except Exception as e:
                 logger.debug(
-                    f"Error processing layer {layer_name} for window {window.name}: {e}"
+                    f"Error processing group {item_group_name} for window {window.name}: {e}"
                 )
                 continue
+
+        for item_group_name in vector_image_groups:
+            layer_name, group_idx = get_layer_and_group_from_dir_name(item_group_name)
+            if layer_name not in dataset.layers:
+                continue
+            if window.is_layer_completed(layer_name, group_idx=group_idx):
+                available_vector_image_groups.append(item_group_name)
 
         # Format time range for template
         time_range_formatted = None
@@ -223,38 +122,36 @@ def prepare_visualization_data(
                 "lat": lat,
                 "lon": lon,
                 "maps_link": maps_link,
-                "available_layers": available_layers,
-                "mask_layers": mask_layers,
+                "available_raster_groups": available_raster_groups,
+                "available_vector_image_groups": available_vector_image_groups,
                 "label_texts": label_texts,
             }
         )
 
-    label_colors = None
-    sorted_label_keys = None
-    if label_colors_dict:
-        first_label_layer = list(label_colors_dict.keys())[0]
-        label_colors = label_colors_dict[first_label_layer]
-        sorted_label_keys = sorted(label_colors.keys())
+    per_layer_legends: dict[str, dict[str, tuple[int, int, int]]] = {}
+    for item_group_name, colors in label_colors_dict.items():
+        if colors:
+            per_layer_legends[item_group_name] = colors
 
     return {
         "windows": window_data,
-        "layers": layers,
-        "label_colors": label_colors,
-        "sorted_label_keys": sorted_label_keys,
-        "task_type": task_type,
+        "raster_groups": raster_groups,
+        "per_layer_legends": per_layer_legends,
     }
 
 
 def create_app(
     dataset: Dataset,
     windows: list[Window],
-    layers: list[str],
+    raster_groups: list[str],
+    vector_text_groups: list[str],
+    vector_image_groups: list[str],
     bands: dict[str, list[str]],
-    normalization: dict[str, str],
-    task_type: str,
+    raster_render: dict[str, dict[str, Any]],
+    vector_text_render: dict[str, dict[str, Any]],
+    vector_image_render: dict[str, dict[str, Any]],
     label_colors_dict: dict[str, dict[str, tuple[int, int, int]]],
-    group_idx: int,
-    label_layers: list[str],
+    resampling: dict[str, Image.Resampling],
     max_samples: int,
 ) -> Flask:
     """Create and configure Flask app.
@@ -262,13 +159,15 @@ def create_app(
     Args:
         dataset: Dataset object
         windows: List of all windows
-        layers: List of all layers
-        bands: Dictionary mapping layer_name -> list of band names
-        normalization: Dictionary mapping layer_name -> normalization method
-        task_type: Task type
-        label_colors_dict: Dictionary mapping layer_name -> label_colors
-        group_idx: Item group index
-        label_layers: List of label layer names
+        raster_groups: List of raster item group names
+        vector_text_groups: List of vector text item group names
+        vector_image_groups: List of vector image item group names
+        bands: Dictionary mapping item_group_name -> list of band names
+        raster_render: Dictionary mapping item_group_name -> render spec dict
+        vector_text_render: Dictionary mapping item_group_name -> render spec dict
+        vector_image_render: Dictionary mapping item_group_name -> render spec dict
+        label_colors_dict: Dictionary mapping item_group_name -> label_colors
+        resampling: Dictionary mapping item_group_name -> PIL resampling method
         max_samples: Maximum number of windows to sample
 
     Returns:
@@ -289,21 +188,21 @@ def create_app(
         template_data = prepare_visualization_data(
             sampled_windows,
             dataset,
-            layers,
-            label_layers,
-            task_type,
+            raster_groups,
+            vector_text_groups,
+            vector_text_render,
+            vector_image_groups,
             label_colors_dict,
-            group_idx,
         )
         return flask_render_template("visualization.html", **template_data)
 
-    @app.route("/images/<int:window_idx>/<layer_name>")
-    def get_image(window_idx: int, layer_name: str) -> Response:
-        """Generate and serve an image for a specific window/layer.
+    @app.route("/images/<int:window_idx>/<item_group_name>")
+    def get_image(window_idx: int, item_group_name: str) -> Response:
+        """Generate and serve an image for a specific window/group.
 
         Args:
             window_idx: Index of the window in the sampled windows list
-            layer_name: Name of the layer to visualize
+            item_group_name: Item group name to visualize
 
         Returns:
             PNG image response or error response
@@ -315,25 +214,49 @@ def create_app(
 
         window = sampled_windows[window_idx]
 
-        layer_label_colors = None
-        if label_colors_dict and layer_name in label_colors_dict:
-            layer_label_colors = label_colors_dict[layer_name]
-        elif label_colors_dict:
-            first_label_layer = list(label_colors_dict.keys())[0]
-            layer_label_colors = label_colors_dict[first_label_layer]
+        layer_name, group_idx = get_layer_and_group_from_dir_name(item_group_name)
+        if layer_name not in dataset.layers:
+            return Response(
+                f"Unknown layer: {layer_name}", status=404, mimetype="text/plain"
+            )
+        layer_config = dataset.layers[layer_name]
 
-        image_bytes = generate_image_as_bytes(
-            window,
-            layer_name,
-            dataset,
-            bands,
-            normalization,
-            task_type,
-            layer_label_colors,
-            label_colors_dict,
-            group_idx,
-            label_layers,
-        )
+        if item_group_name in raster_groups:
+            array = read_raster_layer(
+                window,
+                layer_name,
+                layer_config,
+                bands[item_group_name],
+                group_idx=group_idx,
+            )
+            image_array = render_raster(
+                array,
+                layer_config,
+                raster_render[item_group_name],
+                label_colors=label_colors_dict.get(item_group_name),
+            )
+            layer_resampling = resampling.get(item_group_name, Image.Resampling.NEAREST)
+            image_bytes = array_to_bytes(image_array, resampling=layer_resampling)
+        elif item_group_name in vector_image_groups:
+            image_array = render_vector_image(
+                window,
+                layer_name,
+                layer_config,
+                vector_image_render[item_group_name],
+                label_colors_dict.get(item_group_name, {}),
+                dataset=dataset,
+                group_idx=group_idx,
+                bands=bands,
+                raster_render=raster_render,
+            )
+            layer_resampling = resampling.get(item_group_name, Image.Resampling.NEAREST)
+            image_bytes = array_to_bytes(image_array, resampling=layer_resampling)
+        else:
+            return Response(
+                f"Unknown item group name: {item_group_name}",
+                status=404,
+                mimetype="text/plain",
+            )
 
         return Response(
             image_bytes,
@@ -346,93 +269,130 @@ def create_app(
 
 def run(
     dataset_path: str | Path | UPath,
-    layers: list[str] | None = None,
+    raster_groups: list[str] | None = None,
     bands: dict[str, list[str]] | None = None,
-    normalization: dict[str, str] | None = None,
-    task_type: str | None = None,
+    raster_render: dict[str, dict[str, Any]] | None = None,
+    vector_text_groups: list[str] | None = None,
+    vector_text_render: dict[str, dict[str, Any]] | None = None,
+    vector_image_groups: list[str] | None = None,
+    vector_image_render: dict[str, dict[str, Any]] | None = None,
+    resampling: dict[str, str] | None = None,
     max_samples: int = 100,
     port: int = 8000,
     host: str = "0.0.0.0",
-    group_idx: int = 0,
     groups: list[str] | None = None,
-    label_layers: list[str] | None = None,
 ) -> None:
     """Run the visualization server.
 
     Args:
         dataset_path: Path to dataset directory (containing config.json)
-        layers: List of layer names to visualize
-        bands: Dictionary mapping layer_name -> list of band names
-        normalization: Dictionary mapping layer_name -> normalization method
-        task_type: Task type - "classification", "regression", "detection", or "segmentation"
+        raster_groups: List of raster item group names to visualize
+            (e.g. ["sentinel1", "sentinel1.1", "label"])
+        bands: Dictionary mapping item_group_name -> list of band names
+        raster_render: Dictionary mapping item_group_name -> render spec dict
+        vector_text_groups: List of vector text item group names to visualize
+        vector_text_render: Dictionary mapping item_group_name -> render spec dict
+        vector_image_groups: List of vector image item group names to visualize
+        vector_image_render: Dictionary mapping item_group_name -> render spec dict
+        resampling: Optional dictionary mapping item_group_name -> resampling method
+            name (e.g. "nearest", "bilinear", "bicubic"). Defaults to "nearest".
         max_samples: Maximum number of windows to sample
         port: Port to serve on
         host: Host to bind to
-        group_idx: Item group index (default 0)
-        groups: Optional list of window group names to load (e.g. ["predict"]). If not set, all groups under windows/ are loaded.
-        label_layers: List of layer names that are labels
+        groups: Optional list of window group names to load (e.g. ["predict"]).
+            If not set, all groups under windows/ are loaded.
     """
     dataset_path = UPath(dataset_path)
     dataset = Dataset(dataset_path)
 
-    label_layers = label_layers or []
-
-    if layers is None:
-        raise ValueError("--layers is required")
-    all_layers = list(set(layers + label_layers))
-    raster_image_layers = [name for name in all_layers if name not in label_layers]
-    label_layers_in_list = [name for name in all_layers if name in label_layers]
-
+    raster_groups = raster_groups or []
+    vector_text_groups = vector_text_groups or []
+    vector_image_groups = vector_image_groups or []
     bands = bands or {}
-    normalization = normalization or {}
-    for layer_name in raster_image_layers:
-        if layer_name not in bands:
+    raster_render = raster_render or {}
+    vector_text_render = vector_text_render or {}
+    vector_image_render = vector_image_render or {}
+
+    resampling_str_map = {
+        "nearest": Image.Resampling.NEAREST,
+        "bilinear": Image.Resampling.BILINEAR,
+        "bicubic": Image.Resampling.BICUBIC,
+        "lanczos": Image.Resampling.LANCZOS,
+    }
+    resampling_resolved: dict[str, Image.Resampling] = {}
+    for name, method_str in (resampling or {}).items():
+        method = resampling_str_map.get(method_str)
+        if method is None:
             raise ValueError(
-                f"Bands not specified for layer {layer_name}. Please provide --bands {layer_name}:band1,band2,band3"
+                f"Unknown resampling method '{method_str}' for '{name}'. "
+                f"Valid options: {', '.join(resampling_str_map)}"
             )
-        if layer_name not in normalization:
+        resampling_resolved[name] = method
+
+    for item_group_name in raster_groups:
+        if item_group_name not in bands:
             raise ValueError(
-                f"Normalization not specified for layer {layer_name}. Please provide --normalization {layer_name}:method"
+                f"Bands not specified for raster group '{item_group_name}'. "
+                f"Provide --bands with an entry for '{item_group_name}'."
+            )
+        if item_group_name not in raster_render:
+            raise ValueError(
+                f"Render method not specified for raster group '{item_group_name}'. "
+                f"Provide --raster_render with an entry for '{item_group_name}'."
             )
 
-    label_colors_dict = {}
-    if task_type in ("segmentation", "detection"):
-        for label_layer_name in label_layers_in_list:
-            label_config = dataset.layers[label_layer_name]
-            if not label_config.class_names:
-                raise ValueError(
-                    f"class_names must be specified in the config for label layer '{label_layer_name}'. "
-                    "Auto-detection of class names is not supported."
-                )
-            else:
-                label_classes = set(label_config.class_names)
-                label_colors = generate_label_colors(label_classes)
-                label_colors_dict[label_layer_name] = label_colors
-                logger.info(
-                    f"Found {len(label_classes)} label classes for {label_layer_name}: {sorted(label_classes)}"
-                )
+    for item_group_name in vector_text_groups:
+        if item_group_name not in vector_text_render:
+            raise ValueError(
+                f"Render method not specified for vector text group '{item_group_name}'. "
+                f"Provide --vector_text_render with an entry for '{item_group_name}'."
+            )
+
+    for item_group_name in vector_image_groups:
+        if item_group_name not in vector_image_render:
+            raise ValueError(
+                f"Render method not specified for vector image group '{item_group_name}'. "
+                f"Provide --vector_image_render with an entry for '{item_group_name}'."
+            )
+
+    if not raster_groups and not vector_text_groups and not vector_image_groups:
+        raise ValueError(
+            "At least one of --raster_groups, --vector_text_groups, "
+            "or --vector_image_groups is required"
+        )
+
+    label_colors_dict: dict[str, dict[str, tuple[int, int, int]]] = {}
+
+    for item_group_name in raster_groups + vector_image_groups:
+        layer_name, _ = get_layer_and_group_from_dir_name(item_group_name)
+        layer_config = dataset.layers[layer_name]
+        colors = generate_label_colors_for_layer(layer_config)
+        if colors:
+            label_colors_dict[item_group_name] = colors
 
     logger.info(f"Loading all windows from dataset {dataset_path}")
-    windows = dataset.load_windows(groups=groups)
+    windows = dataset.load_windows(groups=groups, workers=128, show_progress=True)
     logger.info(f"Loaded {len(windows)} windows from dataset")
-    logger.info(f"Layers: {all_layers}")
+    logger.info(f"Raster groups: {raster_groups}")
+    logger.info(f"Vector text groups: {vector_text_groups}")
+    logger.info(f"Vector image groups: {vector_image_groups}")
     logger.info(f"Bands: {bands}")
-    logger.info(f"Normalization: {normalization}")
-    logger.info(f"Task type: {task_type}")
-
-    if task_type is None:
-        raise ValueError("--task_type is required")
+    logger.info(f"Raster render: {raster_render}")
+    logger.info(f"Vector text render: {vector_text_render}")
+    logger.info(f"Vector image render: {vector_image_render}")
 
     app = create_app(
         dataset,
         windows,
-        all_layers,
+        raster_groups,
+        vector_text_groups,
+        vector_image_groups,
         bands,
-        normalization,
-        task_type,
+        raster_render,
+        vector_text_render,
+        vector_image_render,
         label_colors_dict,
-        group_idx,
-        label_layers,
+        resampling_resolved,
         max_samples,
     )
 
@@ -445,54 +405,25 @@ def run(
     app.run(host=host, port=port, debug=False)
 
 
-def parse_bands_arg(bands_str: str | None) -> dict[str, list[str]]:
-    """Parse --bands argument as JSON.
+def parse_json_dict_arg(arg_str: str | None, arg_name: str) -> dict:
+    """Parse a JSON dict CLI argument.
 
     Args:
-        bands_str: JSON string mapping layer_name -> list of band names, e.g. '{"sentinel2": ["B04", "B03", "B02"]}'
+        arg_str: JSON string to parse
+        arg_name: Name of the argument (for error messages)
 
     Returns:
-        Dictionary mapping layer_name -> list of band names
+        Parsed dictionary
     """
-    if not bands_str:
+    if not arg_str:
         return {}
     try:
-        bands_dict = json.loads(bands_str)
-        if not isinstance(bands_dict, dict):
-            raise ValueError("Bands must be a JSON object/dictionary")
-        for layer_name, band_list in bands_dict.items():
-            if not isinstance(band_list, list):
-                raise ValueError(f"Bands for layer '{layer_name}' must be a list")
-            if not all(isinstance(band, str) for band in band_list):
-                raise ValueError(f"All bands for layer '{layer_name}' must be strings")
-        return bands_dict
+        d = json.loads(arg_str)
+        if not isinstance(d, dict):
+            raise ValueError(f"{arg_name} must be a JSON object/dictionary")
+        return d
     except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON for bands: {e}") from e
-
-
-def parse_normalization_arg(norm_str: str | None) -> dict[str, str]:
-    """Parse --normalization argument as JSON.
-
-    Args:
-        norm_str: JSON string mapping layer_name -> normalization method, e.g. '{"sentinel2": "sentinel2_rgb"}'
-
-    Returns:
-        Dictionary mapping layer_name -> normalization method
-    """
-    if not norm_str:
-        return {}
-    try:
-        norm_dict = json.loads(norm_str)
-        if not isinstance(norm_dict, dict):
-            raise ValueError("Normalization must be a JSON object/dictionary")
-        for layer_name, method in norm_dict.items():
-            if not isinstance(method, str):
-                raise ValueError(
-                    f"Normalization method for layer '{layer_name}' must be a string"
-                )
-        return norm_dict
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON for normalization: {e}") from e
+        raise ValueError(f"Invalid JSON for {arg_name}: {e}") from e
 
 
 def main() -> None:
@@ -506,36 +437,69 @@ def main() -> None:
         help="Path to dataset directory (containing config.json)",
     )
     parser.add_argument(
-        "--layers",
-        type=str,
-        required=True,
-        nargs="+",
-        help="List of layer names to visualize (default: all raster layers)",
-    )
-    parser.add_argument(
-        "--label_layers",
+        "--raster_groups",
         type=str,
         nargs="+",
-        help="List of layer names that are labels (same format as --layers)",
+        help=(
+            "List of raster item group names to visualize. "
+            "E.g. 'sentinel1' (group 0) or 'sentinel1.1' (group 1)."
+        ),
     )
     parser.add_argument(
         "--bands",
         type=str,
-        required=True,
-        help='Bands to visualize per layer as JSON. Example: \'{"sentinel2": ["B04", "B03", "B02"]}\'',
+        help=(
+            "Bands per raster group as JSON. "
+            'Example: \'{"sentinel2": ["B04", "B03", "B02"], "sentinel2.1": ["B04", "B03", "B02"]}\''
+        ),
     )
     parser.add_argument(
-        "--normalization",
+        "--raster_render",
         type=str,
-        required=True,
-        help='Normalization method per layer as JSON. Example: \'{"sentinel2": "sentinel2_rgb"}\'',
+        help=(
+            "Render method per raster group as JSON. Each value is a dict with 'name' and optional 'args'. "
+            "Methods: sentinel2_rgb, percentile, minmax, linear, classes. "
+            'Example: \'{"sentinel2": {"name": "sentinel2_rgb"}, "elevation": {"name": "linear", "args": {"vmin": 0, "vmax": 3000}}}\''
+        ),
     )
     parser.add_argument(
-        "--task_type",
+        "--vector_text_groups",
         type=str,
-        required=True,
-        choices=["classification", "regression", "detection", "segmentation"],
-        help="Task type (default: auto-detect, but user should specify)",
+        nargs="+",
+        help="List of vector item group names to render as text",
+    )
+    parser.add_argument(
+        "--vector_text_render",
+        type=str,
+        help=(
+            "Render method per vector text group as JSON. "
+            "Methods: text, property. "
+            'Example: \'{"labels": {"name": "text"}}\''
+        ),
+    )
+    parser.add_argument(
+        "--vector_image_groups",
+        type=str,
+        nargs="+",
+        help="List of vector item group names to render as images",
+    )
+    parser.add_argument(
+        "--vector_image_render",
+        type=str,
+        help=(
+            "Render method per vector image group as JSON. "
+            "Methods: detection, segmentation. "
+            'Example: \'{"annotations": {"name": "detection"}}\''
+        ),
+    )
+    parser.add_argument(
+        "--resampling",
+        type=str,
+        help=(
+            "Resampling method per group as JSON. Optional per-layer, defaults to nearest. "
+            "Methods: nearest, bilinear, bicubic, lanczos. "
+            'Example: \'{"sentinel2": "bilinear", "label": "nearest"}\''
+        ),
     )
     parser.add_argument(
         "--max_samples",
@@ -547,10 +511,10 @@ def main() -> None:
         "--port", type=int, default=8000, help="Port to serve on (default: 8000)"
     )
     parser.add_argument(
-        "--host", type=str, default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)"
-    )
-    parser.add_argument(
-        "--group_idx", type=int, default=0, help="Item group index (default: 0)"
+        "--host",
+        type=str,
+        default="0.0.0.0",
+        help="Host to bind to (default: 0.0.0.0)",
     )
     parser.add_argument(
         "--groups",
@@ -562,21 +526,30 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    bands_dict = parse_bands_arg(args.bands)
-    normalization_dict = parse_normalization_arg(args.normalization)
+    bands_dict = parse_json_dict_arg(args.bands, "--bands")
+    raster_render_dict = parse_json_dict_arg(args.raster_render, "--raster_render")
+    vector_text_render_dict = parse_json_dict_arg(
+        args.vector_text_render, "--vector_text_render"
+    )
+    vector_image_render_dict = parse_json_dict_arg(
+        args.vector_image_render, "--vector_image_render"
+    )
+    resampling_dict = parse_json_dict_arg(args.resampling, "--resampling")
 
     run(
         dataset_path=args.dataset_path,
-        layers=args.layers,
-        bands=bands_dict if bands_dict else None,
-        normalization=normalization_dict if normalization_dict else None,
-        task_type=args.task_type,
+        raster_groups=args.raster_groups,
+        bands=bands_dict or None,
+        raster_render=raster_render_dict or None,
+        vector_text_groups=args.vector_text_groups,
+        vector_text_render=vector_text_render_dict or None,
+        vector_image_groups=args.vector_image_groups,
+        vector_image_render=vector_image_render_dict or None,
+        resampling=resampling_dict or None,
         max_samples=args.max_samples,
         port=args.port,
         host=args.host,
-        group_idx=args.group_idx,
         groups=args.groups,
-        label_layers=args.label_layers,
     )
 
 

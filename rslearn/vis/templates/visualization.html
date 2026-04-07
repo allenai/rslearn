@@ -91,31 +91,45 @@
             border-top: 1px solid #e0e0e0;
             font-weight: 600;
         }
+        .label-text-box {
+            padding: 12px 20px;
+            font-size: 14px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+            background: #fafafa;
+        }
+        .label-text-box .layer-name {
+            font-weight: bold;
+            font-size: 15px;
+            margin-bottom: 4px;
+        }
     </style>
 </head>
 <body>
     <h1>rslearn Dataset Visualization</h1>
 
-    {% if label_colors and task_type != "classification" %}
+    {% for layer_name, colors in per_layer_legends.items() %}
     <div class="legend">
-        <h3>Mask Color Legend</h3>
+        <h3>{{ layer_name | e }} Color Legend</h3>
         <div class="legend-items">
-            {% for label in sorted_label_keys %}
+            {% for label in colors.keys() %}
             <div class="legend-item">
-                <div class="legend-color" style="background: rgb({{ label_colors[label][0] }}, {{ label_colors[label][1] }}, {{ label_colors[label][2] }});"></div>
+                <div class="legend-color" style="background: rgb({{ colors[label][0] }}, {{ colors[label][1] }}, {{ colors[label][2] }});"></div>
                 <span>{{ label | e }}</span>
             </div>
             {% endfor %}
         </div>
     </div>
-    {% endif %}
+    {% endfor %}
 
     {% for window in windows %}
     <div class="window-section">
         <div class="window-header">
             {{ window.name | e }}
             {% if window.maps_link %}
-            <a href="{{ window.maps_link | e }}" target="_blank" style="color: #3498db; text-decoration: none; margin-left: 10px;">🗺️ View on Google Maps</a>
+            <a href="{{ window.maps_link | e }}" target="_blank" style="color: #3498db; text-decoration: none; margin-left: 10px; font-size: 16px;">View on Google Maps</a>
             {% endif %}
         </div>
         <div class="window-info">
@@ -127,25 +141,28 @@
             {% endif %}
         </div>
         <div class="window-grid">
-            {% for layer_name in layers %}
-                {% if layer_name in window.available_layers %}
+            {% for group_name in raster_groups %}
+                {% if group_name in window.available_raster_groups %}
                 <div class="image-container">
-                    <img src="/images/{{ window.idx }}/{{ layer_name | e }}" alt="{{ layer_name | e }}">
-                    <div class="image-label">{{ layer_name | e }}</div>
+                    <img src="/images/{{ window.idx }}/{{ group_name | e }}" alt="{{ group_name | e }}">
+                    <div class="image-label">{{ group_name | e }}</div>
                 </div>
                 {% endif %}
             {% endfor %}
 
-            {% for mask_layer in window.mask_layers %}
-            <div class="image-container" id="mask-{{ window.idx }}-{{ mask_layer | e }}">
-                <img src="/images/{{ window.idx }}/{{ mask_layer | e }}" alt="Label Mask: {{ mask_layer | e }}" onerror="this.closest('.image-container').remove()">
-                <div class="image-label">Label Mask: {{ mask_layer | e }}</div>
+            {% for group_name in window.available_vector_image_groups %}
+            <div class="image-container" id="mask-{{ window.idx }}-{{ group_name | e }}">
+                <img src="/images/{{ window.idx }}/{{ group_name | e }}" alt="{{ group_name | e }}" onerror="this.closest('.image-container').remove()">
+                <div class="image-label">{{ group_name | e }}</div>
             </div>
             {% endfor %}
 
             {% for layer_name, label_text in window.label_texts.items() %}
             <div class="image-container">
-                <div style="padding: 20px; font-size: 18px; font-weight: bold;">{{ layer_name | e }}: {{ label_text | e }}</div>
+                <div class="label-text-box">
+                    <div class="layer-name">{{ layer_name | e }}</div>
+                    {{ label_text | e }}
+                </div>
             </div>
             {% endfor %}
         </div>
