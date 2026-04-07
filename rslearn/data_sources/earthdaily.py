@@ -166,6 +166,7 @@ class EarthDaily(DataSource, TileStore):
         self.eds_client: EDSClient | None = None
         self.client: pystac_client.Client | None = None
         self.collection: pystac_client.CollectionClient | None = None
+        self._nodata_cache: dict[str, float | None] = {}
 
     def _load_client(
         self,
@@ -553,6 +554,26 @@ class EarthDaily(DataSource, TileStore):
 
         return RasterArray(chw_array=scaled, time_range=time_range, metadata=metadata)
 
+    def get_raster_metadata(
+        self, layer_name: str, item: Item, bands: list[str]
+    ) -> RasterMetadata:
+        """Read nodata from the remote file header (cached per asset key)."""
+        if not isinstance(item, EarthDailyItem):
+            return RasterMetadata()
+        asset_key = self._get_asset_by_band(bands)
+        if asset_key not in item.asset_urls:
+            return RasterMetadata()
+        if asset_key not in self._nodata_cache:
+            with rasterio.open(item.asset_urls[asset_key]) as src:
+                self._nodata_cache[asset_key] = src.nodata
+
+        nodata_value = self._nodata_cache[asset_key]
+        return RasterMetadata(
+            nodata_values=(nodata_value,) * len(bands)
+            if nodata_value is not None
+            else None
+        )
+
     def get_raster_bounds(
         self, layer_name: str, item: Item, bands: list[str], projection: Projection
     ) -> PixelBounds:
@@ -615,6 +636,7 @@ class EarthDaily(DataSource, TileStore):
         )
 
         with rasterio.open(asset_url) as src:
+            src_nodata = src.nodata
             with rasterio.vrt.WarpedVRT(
                 src,
                 crs=projection.crs,
@@ -623,9 +645,17 @@ class EarthDaily(DataSource, TileStore):
                 height=bounds[3] - bounds[1],
                 resampling=resampling,
             ) as vrt:
-                return RasterArray(
-                    chw_array=vrt.read(), time_range=item.geometry.time_range
-                )
+                data = vrt.read()
+        raster_metadata = None
+        if src_nodata is not None:
+            raster_metadata = RasterMetadata(
+                nodata_values=(src_nodata,) * data.shape[0]
+            )
+        return RasterArray(
+            chw_array=data,
+            time_range=item.geometry.time_range,
+            metadata=raster_metadata,
+        )
 
     def materialize(
         self,
@@ -1165,8 +1195,14 @@ class Sentinel2L2A(EarthDaily):
 
                     with rasterio.open(local_fname) as src:
                         array = src.read()
+                        src_nodata = src.nodata
                         projection, bounds = get_raster_projection_and_bounds(src)
                     array = harmonize_callback(array)
+                    raster_metadata = RasterMetadata(
+                        nodata_values=(src_nodata,) * array.shape[0]
+                        if src_nodata is not None
+                        else None
+                    )
                     tile_store.write_raster(
                         item,
                         band_names,
@@ -1175,6 +1211,7 @@ class Sentinel2L2A(EarthDaily):
                         RasterArray(
                             chw_array=array,
                             time_range=item.geometry.time_range,
+                            metadata=raster_metadata,
                         ),
                     )
 

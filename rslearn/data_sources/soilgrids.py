@@ -25,7 +25,7 @@ from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils import PixelBounds, Projection, STGeometry, get_global_raster_bounds
 from rslearn.utils.array import nodata_eq
 from rslearn.utils.geometry import get_global_geometry
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 from rslearn.utils.raster_format import get_transform_from_projection_and_bounds
 
 from .data_source import DataSource, DataSourceContext, Item
@@ -163,6 +163,12 @@ class SoilGrids(DataSource, TileStore):
     def get_raster_bands(self, layer_name: str, item: Item) -> list[list[str]]:
         """Return the band sets available for this coverage."""
         return [self.band_names]
+
+    def get_raster_metadata(
+        self, layer_name: str, item: Item, bands: list[str]
+    ) -> RasterMetadata:
+        """Return metadata with the SoilGrids nodata value."""
+        return RasterMetadata(nodata_values=(SOILGRIDS_NODATA_VALUE,) * len(bands))
 
     def get_raster_bounds(
         self, layer_name: str, item: Item, bands: list[str], projection: Projection
@@ -314,7 +320,12 @@ class SoilGrids(DataSource, TileStore):
                     dst_nodata=dst_nodata,
                     resampling=resampling,
                 )
-                return RasterArray(chw_array=dst, time_range=item.geometry.time_range)
+                raster_metadata = RasterMetadata(nodata_values=(dst_nodata,))
+                return RasterArray(
+                    chw_array=dst,
+                    time_range=item.geometry.time_range,
+                    metadata=raster_metadata,
+                )
 
     def materialize(
         self,

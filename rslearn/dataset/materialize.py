@@ -49,13 +49,12 @@ def resolve_nodata_values(
     tile_store: TileStoreWithLayer,
     items: list[ItemType],
     bands: list[str],
-) -> tuple[float, ...]:
+) -> tuple[float, ...] | None:
     """Resolve per-band nodata values from the tile store metadata.
 
     Probes the first item that has matching bands and reads nodata from the
-    raster file header (no pixel data is read). Falls back to 0.0 per band
-    when no item has matching bands or the source has no nodata metadata, to align
-    with previous behavior.
+    raster file header (no pixel data is read).  Returns ``None`` when no
+    item has matching bands or no source declares nodata metadata.
 
     Args:
         tile_store: the tile store to query.
@@ -63,20 +62,23 @@ def resolve_nodata_values(
         bands: the requested band names.
 
     Returns:
-        A tuple of nodata values, one per band.
+        A tuple of nodata values (one per band), or ``None`` when the source
+        has no nodata.
     """
     for item in items:
         needed = get_needed_band_sets_and_indexes(item, bands, tile_store)
         if not needed:
             continue
         resolved = [0.0] * len(bands)
+        has_nodata = False
         for src_bands, src_indexes, dst_indexes in needed:
             metadata = tile_store.get_raster_metadata(item, src_bands)
             if metadata.nodata_values is not None:
+                has_nodata = True
                 for src_idx, dst_idx in zip(src_indexes, dst_indexes):
                     resolved[dst_idx] = float(metadata.nodata_values[src_idx])
-        return tuple(resolved)
-    return (0.0,) * len(bands)
+        return tuple(resolved) if has_nodata else None
+    return None
 
 
 def build_composite(
@@ -106,7 +108,7 @@ def build_composite(
     Returns:
         A RasterArray produced by the chosen compositing method.
     """
-    nodata_vals = band_cfg.nodata_vals
+    nodata_vals: tuple[int | float, ...] | None = band_cfg.nodata_vals
     if nodata_vals is None:
         nodata_vals = resolve_nodata_values(tile_store, group, band_cfg.bands)
 

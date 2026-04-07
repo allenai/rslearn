@@ -68,7 +68,7 @@ def read_raster_window_from_tiles(
     bands: list[str],
     projection: Projection,
     bounds: PixelBounds,
-    nodata_vals: Sequence[int | float],
+    nodata_vals: Sequence[int | float] | None,
     band_dtype: npt.DTypeLike,
     remapper: Remapper | None = None,
     resampling: Resampling = Resampling.bilinear,
@@ -79,13 +79,16 @@ def read_raster_window_from_tiles(
     Handles band mapping and spatial intersection internally. Uses first-valid
     nodata logic: only overwrites pixels where all bands equal their nodata value.
 
+    When nodata_vals is None, every source pixel unconditionally overwrites the
+    destination, and the destination is initialized as zeros.
+
     Args:
         tile_store: the TileStore to read from.
         item: the item to read.
         bands: the requested band names (determines dst band order).
         projection: the projection of the window.
         bounds: the pixel bounds of the window.
-        nodata_vals: the nodata values for each requested band.
+        nodata_vals: the nodata values for each requested band, or ``None``.
         band_dtype: data type for the output array.
         remapper: optional remapper to apply on the source pixel values.
         resampling: how to resample pixels if re-projection is needed.
@@ -119,7 +122,7 @@ def read_raster_window_from_tiles(
 
         if dst is None:
             num_timesteps = src.shape[1]
-            dst_arr = np.empty(
+            dst_arr = np.zeros(
                 (
                     len(bands),
                     num_timesteps,
@@ -128,12 +131,17 @@ def read_raster_window_from_tiles(
                 ),
                 dtype=band_dtype,
             )
-            for idx, nodata_val in enumerate(nodata_vals):
-                dst_arr[idx, :, :, :] = nodata_val
+            if nodata_vals is not None:
+                for idx, nodata_val in enumerate(nodata_vals):
+                    dst_arr[idx, :, :, :] = nodata_val
             dst = RasterArray(
                 array=dst_arr,
                 timestamps=raster_array.timestamps,
-                metadata=RasterMetadata(nodata_values=tuple(nodata_vals)),
+                metadata=RasterMetadata(
+                    nodata_values=tuple(nodata_vals)
+                    if nodata_vals is not None
+                    else None
+                ),
             )
 
         if src.shape[1] != dst.array.shape[1]:
@@ -156,17 +164,22 @@ def read_raster_window_from_tiles(
             dst_col : dst_col + src_sel.shape[3],
         ]  # (C, T, H_int, W_int) view
 
-        # First-valid: only overwrite pixels where all dst bands are nodata.
-        cur_nodata = np.array(
-            [nodata_vals[dst_index] for dst_index in dst_indexes], dtype=band_dtype
-        ).reshape(-1, 1, 1, 1)
-        mask = nodata_eq(out_crop[dst_indexes], cur_nodata).min(
-            axis=0
-        )  # (T, H_int, W_int)
-
         src_typed = src_sel.astype(band_dtype)
-        for src_index, dst_index in enumerate(dst_indexes):
-            out_crop[dst_index][mask] = src_typed[src_index][mask]
+
+        if nodata_vals is not None:
+            # First-valid: only overwrite pixels where all dst bands are nodata.
+            cur_nodata = np.array(
+                [nodata_vals[dst_index] for dst_index in dst_indexes], dtype=band_dtype
+            ).reshape(-1, 1, 1, 1)
+            mask = nodata_eq(out_crop[dst_indexes], cur_nodata).min(
+                axis=0
+            )  # (T, H_int, W_int)
+
+            for src_index, dst_index in enumerate(dst_indexes):
+                out_crop[dst_index][mask] = src_typed[src_index][mask]
+        else:
+            for src_index, dst_index in enumerate(dst_indexes):
+                out_crop[dst_index] = src_typed[src_index]
 
     return dst
 
@@ -177,7 +190,7 @@ def read_raster_windows(
     tile_store: TileStoreWithLayer,
     projection: Projection,
     bounds: PixelBounds,
-    nodata_vals: Sequence[int | float],
+    nodata_vals: Sequence[int | float] | None,
     band_dtype: npt.DTypeLike,
     remapper: Remapper | None = None,
     resampling_method: Resampling = Resampling.bilinear,
@@ -195,7 +208,7 @@ def read_raster_windows(
         tile_store: tile store containing raster data.
         projection: target projection.
         bounds: target pixel bounds.
-        nodata_vals: nodata values for each band.
+        nodata_vals: nodata values for each band, or ``None``.
         band_dtype: output data type.
         remapper: optional remapper.
         resampling_method: resampling method.

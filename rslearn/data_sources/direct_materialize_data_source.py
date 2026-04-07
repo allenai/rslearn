@@ -17,10 +17,13 @@ from rslearn.config import LayerConfig
 from rslearn.data_sources.data_source import DataSource, Item, ItemType
 from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
+from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils import Feature
 from rslearn.utils.geometry import PixelBounds, Projection
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
+
+logger = get_logger(__name__)
 
 
 class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemType]):
@@ -48,6 +51,7 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
             asset_bands: mapping from asset key to the list of band names in that asset.
         """
         self.asset_bands = asset_bands
+        self._nodata_cache: dict[str, float | None] = {}
 
     def _get_asset_key_by_bands(self, bands: list[str]) -> str:
         """Get the asset key based on the band names.
@@ -154,7 +158,7 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling,
-    ) -> npt.NDArray[Any]:
+    ) -> tuple[npt.NDArray[Any], float | None]:
         """Read raster data from a URL with reprojection.
 
         This is the common logic for reading raster data from a URL and reprojecting
@@ -167,9 +171,8 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
             resampling: the resampling method to use.
 
         Returns:
-            the raster data as a numpy array.
+            A tuple of (raster array, nodata value or None).
         """
-        # Construct the transform to use for the warped dataset.
         wanted_transform = affine.Affine(
             projection.x_resolution,
             0,
@@ -180,6 +183,7 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
         )
 
         with rasterio.open(url) as src:
+            src_nodata = src.nodata
             with rasterio.vrt.WarpedVRT(
                 src,
                 crs=projection.crs,
@@ -188,7 +192,33 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
                 height=bounds[3] - bounds[1],
                 resampling=resampling,
             ) as vrt:
-                return vrt.read()
+                return vrt.read(), src_nodata
+
+    @override
+    def get_raster_metadata(
+        self, layer_name: str, item: Item, bands: list[str]
+    ) -> RasterMetadata:
+        """Get metadata for a stored raster without reading pixel data.
+
+        Opens the remote file to read the nodata value from the header and
+        caches the result per asset key.
+        """
+        typed_item = cast(ItemType, item)
+        asset_key = self._get_asset_key_by_bands(bands)
+
+        if asset_key not in self._nodata_cache:
+            asset_url = self.get_asset_url(typed_item, asset_key)
+            try:
+                with rasterio.open(asset_url) as src:
+                    self._nodata_cache[asset_key] = src.nodata
+            except Exception:
+                logger.debug("Could not read nodata from %s; assuming None", asset_url)
+                self._nodata_cache[asset_key] = None
+
+        nodata = self._nodata_cache[asset_key]
+        if nodata is not None:
+            return RasterMetadata(nodata_values=(nodata,) * len(bands))
+        return RasterMetadata()
 
     @override
     def read_raster(
@@ -211,14 +241,30 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
         asset_url = self.get_asset_url(typed_item, asset_key)
 
         # Read the raster data
-        raw_data = self._read_raster_from_url(asset_url, projection, bounds, resampling)
+        raw_data, src_nodata = self._read_raster_from_url(
+            asset_url, projection, bounds, resampling
+        )
+
+        # Cache nodata for get_raster_metadata.
+        if asset_key not in self._nodata_cache:
+            self._nodata_cache[asset_key] = src_nodata
 
         # Apply any post-processing callback
         callback = self.get_read_callback(typed_item, asset_key)
         if callback is not None:
             raw_data = callback(raw_data)
 
-        return RasterArray(chw_array=raw_data, time_range=item.geometry.time_range)
+        raster_metadata = None
+        if src_nodata is not None:
+            raster_metadata = RasterMetadata(
+                nodata_values=(src_nodata,) * raw_data.shape[0]
+            )
+
+        return RasterArray(
+            chw_array=raw_data,
+            time_range=item.geometry.time_range,
+            metadata=raster_metadata,
+        )
 
     def materialize(
         self,

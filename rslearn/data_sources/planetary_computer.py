@@ -27,7 +27,7 @@ from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.interpolation import NODATA_VALUE, interpolate_to_grid
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 from rslearn.utils.stac import StacClient, StacItem
 
@@ -428,8 +428,14 @@ class Sentinel2(PlanetaryComputer):
                         # values, and pass modified array directly to the TileStore.
                         with rasterio.open(local_fname) as src:
                             array = src.read()
+                            src_nodata = src.nodata
                             projection, bounds = get_raster_projection_and_bounds(src)
                         array = harmonize_callback(array)
+                        raster_metadata = RasterMetadata(
+                            nodata_values=(src_nodata,) * array.shape[0]
+                            if src_nodata is not None
+                            else None
+                        )
                         tile_store.write_raster(
                             item,
                             band_names,
@@ -438,6 +444,7 @@ class Sentinel2(PlanetaryComputer):
                             RasterArray(
                                 chw_array=array,
                                 time_range=item.geometry.time_range,
+                                metadata=raster_metadata,
                             ),
                         )
 
@@ -1069,6 +1076,9 @@ class Sentinel3SlstrLST(PlanetaryComputer):
                             gridded_array,
                         )
 
+                raster_metadata = RasterMetadata(
+                    nodata_values=(self.nodata_value,) * len(self.band_names)
+                )
                 tile_store.write_raster(
                     item,
                     self.band_names,
@@ -1077,6 +1087,7 @@ class Sentinel3SlstrLST(PlanetaryComputer):
                     RasterArray(
                         chw_array=gridded_array,
                         time_range=item.geometry.time_range,
+                        metadata=raster_metadata,
                     ),
                 )
 
