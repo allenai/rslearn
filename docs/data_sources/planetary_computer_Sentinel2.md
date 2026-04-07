@@ -85,9 +85,8 @@ Here is an example data source configuration to obtain 8-bit RGB imagery. We set
 
 ### OmniCloudMask Ranking
 
-This data source does not have a `sort_by_omnicloudmask` init arg. To rank overlapping
-items using [OmniCloudMask](https://github.com/DPIRD-DMA/OmniCloudMask), configure a
-custom `compositing_method` on the raster layer:
+To rank overlapping items using [OmniCloudMask](https://github.com/DPIRD-DMA/OmniCloudMask),
+configure a custom `compositing_method` on the raster layer:
 
 ```jsonc
 {
