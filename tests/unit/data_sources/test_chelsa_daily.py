@@ -1,7 +1,7 @@
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from collections.abc import Iterator
 from typing import BinaryIO
 
 import numpy as np
