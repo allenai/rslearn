@@ -1077,7 +1077,10 @@ class Sentinel2L2A(EarthDaily):
         def callback(array: npt.NDArray[Any]) -> npt.NDArray[Any]:
             if array.dtype != np.uint16:
                 return array
-            return np.clip(array, offset, None) - offset  # type: ignore
+            was_valid = array > 0
+            result = np.clip(array, offset, None) - offset
+            result[(result == 0) & was_valid] = 1
+            return result
 
         return callback
 
