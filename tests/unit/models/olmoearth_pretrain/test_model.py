@@ -545,6 +545,59 @@ def test_missing_modality_handling() -> None:
     assert (s2_s1_mask == MaskValue.MISSING.value).all()
 
 
+def test_legacy_varying_timesteps() -> None:
+    """Legacy timestamps with different samples having different numbers of timesteps."""
+    model = OlmoEarth(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        use_legacy_timestamps=True,
+    )
+
+    H = 4
+    W = 4
+    inputs = [
+        {
+            "sentinel2_l2a": RasterImage(
+                image=torch.ones((12, 4, H, W), dtype=torch.float32),
+                timestamps=[
+                    (datetime(2025, m, 1), datetime(2025, m, 1)) for m in range(1, 5)
+                ],
+            ),
+        },
+        {
+            "sentinel2_l2a": RasterImage(
+                image=torch.ones((12, 2, H, W), dtype=torch.float32) * 2,
+                timestamps=[
+                    (datetime(2025, m, 1), datetime(2025, m, 1)) for m in range(1, 3)
+                ],
+            ),
+        },
+    ]
+    context = ModelContext(
+        inputs=inputs,
+        metadatas=[_make_metadata((0, 0, H, W)), _make_metadata((0, 0, H, W))],
+    )
+    sample, _, _ = model._prepare_modality_inputs_legacy(context)
+
+    # Sample 0: all 4 timesteps have data (value 1).
+    assert torch.allclose(sample.sentinel2_l2a[0], torch.ones(H, W, 4, 12))
+
+    # Sample 1: first 2 timesteps have data (value 2), last 2 are zero-padded.
+    assert torch.allclose(
+        sample.sentinel2_l2a[1, :, :, :2, :], torch.ones(H, W, 2, 12) * 2
+    )
+    assert torch.allclose(
+        sample.sentinel2_l2a[1, :, :, 2:, :], torch.zeros(H, W, 2, 12)
+    )
+
+    mask = sample.sentinel2_l2a_mask  # (2, H, W, T, S)
+    assert (mask[0, :, :, :4] == MaskValue.ONLINE_ENCODER.value).all()
+    assert (mask[1, :, :, :2] == MaskValue.ONLINE_ENCODER.value).all()
+    assert (mask[1, :, :, 2:] == MaskValue.MISSING.value).all()
+
+
 def test_legacy_timestamps_one_modality_three_timesteps() -> None:
     """Legacy timestamps with one modality should produce [1 Jan 2024, 1 Feb 2024, 1 Mar 2024]."""
     model = OlmoEarth(

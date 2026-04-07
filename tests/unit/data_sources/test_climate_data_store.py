@@ -6,7 +6,11 @@ import shapely
 
 from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources.climate_data_store import ERA5Land, ERA5LandHourlyTimeseries
+from rslearn.data_sources.climate_data_store import (
+    ERA5Land,
+    ERA5LandHourlyTimeseries,
+    ERA5LandMonthlyMeans,
+)
 from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.utils.geometry import STGeometry
 
@@ -89,3 +93,35 @@ def test_era5_land_returns_matched_item_groups(mock_client: MagicMock) -> None:
     assert len(groups[0]) == 1
     assert isinstance(groups[0][0], MatchedItemGroup)
     assert groups[0][0].request_time_range == geometry.time_range
+
+
+@patch("rslearn.data_sources.climate_data_store.cdsapi.Client")
+def test_era5_land_monthly_means_accepts_hyphen_bands(
+    mock_client: MagicMock,
+) -> None:
+    """Monthly means should validate rslearn naming style."""
+    ERA5LandMonthlyMeans(
+        band_names=["2m-temperature", "surface-solar-radiation-downwards"]
+    )
+
+
+@patch("rslearn.data_sources.climate_data_store.cdsapi.Client")
+def test_era5_land_monthly_means_rejects_underscore_bands(
+    mock_client: MagicMock,
+) -> None:
+    """Monthly means should reject CDS underscore style in rslearn config."""
+    with pytest.raises(ValueError, match="replace '_' with '-'"):
+        ERA5LandMonthlyMeans(
+            band_names=["2m-temperature", "surface_solar_radiation_downwards"]
+        )
+
+
+@patch("rslearn.data_sources.climate_data_store.cdsapi.Client")
+def test_era5_land_monthly_means_rejects_invalid_bands(
+    mock_client: MagicMock,
+) -> None:
+    """Monthly means should fail fast for unsupported variable names."""
+    with pytest.raises(ValueError, match="unsupported band\\(s\\)"):
+        ERA5LandMonthlyMeans(
+            band_names=["2m-temperature", "not-a-valid-era5-land-variable"]
+        )

@@ -347,6 +347,53 @@ class TestSafelyReprojectWithinValidArea:
         assert result.shp.intersects(dst_geom.shp)
 
 
+class TestSameCrsDifferentResolution:
+    """Regression tests for geometries sharing CRS but with different resolutions."""
+
+    @pytest.fixture(scope="class")
+    def item_geom(self) -> STGeometry:
+        proj = Projection(CRS.from_epsg(32618), 30.0, -30.0)
+        shp = shapely.Polygon(
+            [
+                (18990, -306150),
+                (18990, -298919),
+                (11689, -298919),
+                (11689, -306150),
+                (18990, -306150),
+            ]
+        )
+        return STGeometry(proj, shp, None)
+
+    @pytest.fixture(scope="class")
+    def window_geom(self) -> STGeometry:
+        proj = Projection(CRS.from_epsg(32618), 15.0, -15.0)
+        shp = shapely.Polygon(
+            [
+                (34877, -612103),
+                (34877, -611975),
+                (34749, -611975),
+                (34749, -612103),
+                (34877, -612103),
+            ]
+        )
+        return STGeometry(proj, shp, None)
+
+    def test_intersects_same_crs_different_resolution(
+        self, item_geom: STGeometry, window_geom: STGeometry
+    ) -> None:
+        """Geometries with same CRS but different resolutions should intersect."""
+        assert window_geom.intersects(item_geom)
+
+    def test_safely_reproject_same_crs_different_resolution(
+        self, item_geom: STGeometry, window_geom: STGeometry
+    ) -> None:
+        """safely_reproject_within_valid_area should return geometry intersecting window."""
+        results = safely_reproject_within_valid_area([item_geom], window_geom)
+        result = results[0]
+        assert result is not None
+        assert result.shp.intersects(window_geom.shp)
+
+
 class TestResolutionFactor:
     """Tests for ResolutionFactor."""
 
