@@ -8,6 +8,7 @@ import fiona
 import shapely
 import shapely.geometry
 from rasterio.crs import CRS
+from rasterio.transform import from_gcps
 from upath import UPath
 
 import rslearn.data_sources.utils
@@ -219,14 +220,23 @@ class RasterImporter(Importer):
             with open_rasterio_upath_reader(fname) as src:
                 gcps, gcp_crs = src.gcps
                 if src.crs is None and len(gcps) > 0:
-                    xs = [gcp.x for gcp in gcps]
-                    ys = [gcp.y for gcp in gcps]
+                    # Fit an affine transform from the GCPs and project the
+                    # image corners to get image's geographic extent.
+                    transform = from_gcps(gcps)
+                    corners = [
+                        transform * (0, 0),
+                        transform * (src.width, 0),
+                        transform * (src.width, src.height),
+                        transform * (0, src.height),
+                    ]
+                    xs = [c[0] for c in corners]
+                    ys = [c[1] for c in corners]
                     shp = shapely.box(min(xs), min(ys), max(xs), max(ys))
-                    # We use 1 unit/pixel projection so it is compatible with the shape
-                    # defined above. The actual resolution may differ, but it is okay
-                    # since this geometry is only for item-window matching. Re-projection
-                    # will be handled by the tile store, e.g. DefaultTileStore applies
-                    # WarpedVRT which should pick a reasonable resolution.
+                    # We use 1 unit/pixel projection so it is compatible with
+                    # the shape above. The actual resolution may differ, but
+                    # it is okay since this geometry is only for item-window
+                    # matching. Re-projection will be handled by the tile
+                    # store, e.g. DefaultTileStore applies WarpedVRT.
                     projection = Projection(gcp_crs, 1, 1)
                     geometry = STGeometry(projection, shp, None)
                 else:

@@ -260,7 +260,6 @@ class DefaultTileStore(TileStore):
 
         if self.convert_rasters_to_cogs:
             with open_rasterio_upath_reader(fname) as src:
-                array = src.read()
                 nodata = src.nodata
 
                 # If raster specifies ground control points, use WarpedVRT to get it in
@@ -285,6 +284,7 @@ class DefaultTileStore(TileStore):
                         transform = vrt.transform
 
                 else:
+                    array = src.read()
                     crs = src.crs
                     transform = src.transform
 

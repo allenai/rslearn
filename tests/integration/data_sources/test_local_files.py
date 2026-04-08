@@ -218,13 +218,16 @@ class TestLocalFiles:
         src_path.mkdir()
 
         # Write a GeoTIFF with GCPs and no CRS/transform.
+        # GCPs are placed at interior points (not corners) to verify that the
+        # geometry is derived from the fitted affine transform + image
+        # dimensions rather than from the bounding box of GCP coordinates.
         width, height = 8, 8
         gcp_crs = CRS.from_epsg(4326)
         gcps = [
-            GroundControlPoint(row=0, col=0, x=10.0, y=28.0),
-            GroundControlPoint(row=0, col=width, x=18.0, y=28.0),
-            GroundControlPoint(row=height, col=0, x=10.0, y=20.0),
-            GroundControlPoint(row=height, col=width, x=18.0, y=20.0),
+            GroundControlPoint(row=2, col=2, x=12.0, y=26.0),
+            GroundControlPoint(row=2, col=6, x=16.0, y=26.0),
+            GroundControlPoint(row=6, col=2, x=12.0, y=22.0),
+            GroundControlPoint(row=6, col=6, x=16.0, y=22.0),
         ]
         data = np.full((1, height, width), 42, dtype=np.uint8)
         tif_path = src_path / "gcp_image.tif"
@@ -241,8 +244,8 @@ class TestLocalFiles:
             dst.gcps = (gcps, gcp_crs)
             dst.write(data)
 
-        # The GCP branch derives geometry with Projection(gcp_crs, 1, 1) and
-        # bounding box shapely.box(10, 20, 18, 28).
+        # The fitted transform maps pixel (col, row) -> (col+10, 28-row), so
+        # image corners produce bounding box shapely.box(10, 20, 18, 28).
         layer_name = "local_file"
         dataset_config = {
             "layers": {
