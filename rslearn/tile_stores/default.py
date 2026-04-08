@@ -260,8 +260,6 @@ class DefaultTileStore(TileStore):
                 profile = src.profile
                 array = src.read()
                 nodata = src.nodata
-                scales = src.scales
-                offsets = src.offsets
 
                 # If raster specifies ground control points, use WarpedVRT to get it in
                 # an appropriate projection.
@@ -311,10 +309,6 @@ class DefaultTileStore(TileStore):
                 raster_dir / "geotiff.tif", **output_profile
             ) as dst:
                 dst.write(array)
-                if scales is not None and len(scales) == dst.count:
-                    dst.scales = scales
-                if offsets is not None and len(offsets) == dst.count:
-                    dst.offsets = offsets
 
         else:
             # Just copy the file directly.

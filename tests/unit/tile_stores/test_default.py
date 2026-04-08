@@ -93,9 +93,7 @@ def test_zstd_compression(tmp_path: pathlib.Path) -> None:
         assert raster.profile["compress"] == "zstd"
 
 
-def test_write_raster_file_preserves_nodata_and_scale_offset(
-    tmp_path: pathlib.Path,
-) -> None:
+def test_write_raster_file_preserves_nodata(tmp_path: pathlib.Path) -> None:
     ds_path = UPath(tmp_path)
     tile_store = DefaultTileStore()
     tile_store.set_dataset_path(ds_path)
@@ -115,8 +113,6 @@ def test_write_raster_file_preserves_nodata_and_scale_offset(
         nodata=65535,
     ) as src:
         src.write(src_array)
-        src.scales = (0.1,)
-        src.offsets = (0.0,)
 
     tile_store.write_raster_file(
         LAYER_NAME,
@@ -128,8 +124,6 @@ def test_write_raster_file_preserves_nodata_and_scale_offset(
     stored_fname = tile_store._get_raster_fname(LAYER_NAME, ITEM.name, BANDS)
     with rasterio.open(stored_fname) as raster:
         assert raster.nodata == 65535
-        assert raster.scales == pytest.approx((0.1,))
-        assert raster.offsets == pytest.approx((0.0,))
         np.testing.assert_array_equal(raster.read(), src_array)
 
 
