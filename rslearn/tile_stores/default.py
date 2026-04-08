@@ -268,8 +268,8 @@ class DefaultTileStore(TileStore):
                 # Previously we used rasterio.transform.from_gcps(gcps) but I think the
                 # problem is that it computes one transform for the entire raster but
                 # the raster might actually need warping.
-                if src.crs is None and len(src.gcps[0]) > 0:
-                    gcps, gcp_crs = src.gcps
+                gcps, gcp_crs = src.gcps
+                if src.crs is None and len(gcps) > 0:
                     # Use the first ground control point to pick a UTM/UPS projection.
                     first_gcp_orig = STGeometry(
                         Projection(gcp_crs, 1, 1),

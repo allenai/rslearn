@@ -217,11 +217,16 @@ class RasterImporter(Importer):
             # We assume files are readable with rasterio.
             fname = join_upath(src_dir, spec.fnames[0])
             with open_rasterio_upath_reader(fname) as src:
-                if src.crs is None and len(src.gcps[0]) > 0:
-                    gcps, gcp_crs = src.gcps
+                gcps, gcp_crs = src.gcps
+                if src.crs is None and len(gcps) > 0:
                     xs = [gcp.x for gcp in gcps]
                     ys = [gcp.y for gcp in gcps]
                     shp = shapely.box(min(xs), min(ys), max(xs), max(ys))
+                    # We use 1 unit/pixel projection so it is compatible with the shape
+                    # defined above. The actual resolution may differ, but it is okay
+                    # since this geometry is only for item-window matching. Re-projection
+                    # will be handled by the tile store, e.g. DefaultTileStore applies
+                    # WarpedVRT which should pick a reasonable resolution.
                     projection = Projection(gcp_crs, 1, 1)
                     geometry = STGeometry(projection, shp, None)
                 else:
