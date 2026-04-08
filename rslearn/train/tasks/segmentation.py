@@ -7,7 +7,9 @@ import numpy as np
 import numpy.typing as npt
 import torch
 import torchmetrics.classification
+from einops import rearrange
 from torchmetrics import Metric, MetricCollection
+from torchvision.ops import sigmoid_focal_loss
 
 from rslearn.models.component import FeatureMaps, Predictor
 from rslearn.train.metrics import ConfusionMatrixMetric
@@ -310,24 +312,37 @@ class SegmentationHead(Predictor):
 
     def __init__(
         self,
-        weights: list[float] | None = None,
+        class_weights: list[float] | None = None,
         dice_loss: bool = False,
+        focal_loss: bool = False,
+        focal_loss_alpha: float = 0.25,
+        focal_loss_gamma: float = 2.0,
+        loss_weights: tuple[float, float] = (1.0, 1.0),
         temperature: float = 1.0,
     ):
         """Initialize a new SegmentationTask.
 
         Args:
-            weights: weights for cross entropy loss (Tensor of size C)
-            dice_loss: weather to add dice loss to cross entropy
+            class_weights: weights for cross entropy loss (list of length C)
+            dice_loss: whether to add dice loss to cross entropy
+            focal_loss: whether to use focal loss instead of cross entropy
+            focal_loss_alpha: alpha parameter for focal loss (default 0.25)
+            focal_loss_gamma: gamma parameter for focal loss (default 2.0)
+            loss_weights: tuple of (cls_weight, dice_weight) to scale the
+                classification loss (cross-entropy or focal) and dice loss
             temperature: temperature scaling for softmax, does not affect the loss,
                 only the predictor outputs
         """
         super().__init__()
-        if weights is not None:
-            self.register_buffer("weights", torch.Tensor(weights))
+        if class_weights is not None:
+            self.register_buffer("class_weights", torch.Tensor(class_weights))
         else:
-            self.weights = None
+            self.class_weights = None
         self.dice_loss = dice_loss
+        self.focal_loss = focal_loss
+        self.focal_loss_alpha = focal_loss_alpha
+        self.focal_loss_gamma = focal_loss_gamma
+        self.loss_weights = loss_weights
         self.temperature = temperature
 
     def forward(
@@ -367,21 +382,42 @@ class SegmentationHead(Predictor):
             mask = torch.stack(
                 [target["valid"].get_hw_tensor() for target in targets], dim=0
             )
-            per_pixel_loss = torch.nn.functional.cross_entropy(
-                logits, labels, weight=self.weights, reduction="none"
-            )
+
+            if self.focal_loss:
+                # Convert labels to one-hot for focal loss
+                num_classes = logits.shape[1]
+                labels_one_hot = rearrange(
+                    torch.nn.functional.one_hot(labels, num_classes).float(),
+                    "b h w c -> b c h w",
+                )
+                per_pixel_loss = sigmoid_focal_loss(
+                    logits,
+                    labels_one_hot,
+                    alpha=self.focal_loss_alpha,
+                    gamma=self.focal_loss_gamma,
+                    reduction="none",
+                )
+                # Sum over classes dimension to get per-pixel loss
+                per_pixel_loss = per_pixel_loss.sum(dim=1)
+            else:
+                per_pixel_loss = torch.nn.functional.cross_entropy(
+                    logits, labels, weight=self.class_weights, reduction="none"
+                )
+
             mask_sum = torch.sum(mask)
             if mask_sum > 0:
                 # Compute average loss over valid pixels.
-                losses["cls"] = torch.sum(per_pixel_loss * mask) / torch.sum(mask)
+                cls_loss = torch.sum(per_pixel_loss * mask) / torch.sum(mask)
             else:
                 # If there are no valid pixels, we avoid dividing by zero and just let
                 # the summed mask loss be zero.
-                losses["cls"] = torch.sum(per_pixel_loss * mask)
+                cls_loss = torch.sum(per_pixel_loss * mask)
+            losses["cls"] = cls_loss * self.loss_weights[0]
+
             if self.dice_loss:
                 softmax_woT = torch.nn.functional.softmax(logits, dim=1)
                 dice_loss = DiceLoss()(softmax_woT, labels, mask)
-                losses["dice"] = dice_loss
+                losses["dice"] = dice_loss * self.loss_weights[1]
 
         return ModelOutput(
             outputs=outputs,
@@ -746,10 +782,9 @@ class DiceLoss(torch.nn.Module):
             the mean Dicen Loss across classes
         """
         num_classes = inputs.shape[1]
-        targets_one_hot = (
-            torch.nn.functional.one_hot(targets, num_classes)
-            .permute(0, 3, 1, 2)
-            .float()
+        targets_one_hot = rearrange(
+            torch.nn.functional.one_hot(targets, num_classes).float(),
+            "b h w c -> b c h w",
         )
 
         # Expand mask to [B, C, H, W]
