@@ -23,6 +23,7 @@ from rslearn.dataset.compositing import (
     TemporalMeanCompositor,
     TemporalMinCompositor,
 )
+from rslearn.dataset.sentinel2_scl import Sentinel2SCLFirstValid
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.tile_stores.default import DefaultTileStore
 from rslearn.utils.geometry import STGeometry
@@ -61,6 +62,23 @@ class TestLayerConfigCompositorInstantiation:
         )
         compositor = layer_cfg.instantiate_compositor()
         assert isinstance(compositor, MeanCompositor)
+
+    def test_dict_instantiates_sentinel2_scl_compositor(self) -> None:
+        """A class_path dict should instantiate Sentinel2SCLFirstValid."""
+        layer_cfg = LayerConfig.model_validate(
+            {
+                "type": "raster",
+                "band_sets": [{"bands": ["B1"], "dtype": "uint8"}],
+                "compositing_method": {
+                    "class_path": "rslearn.dataset.sentinel2_scl.Sentinel2SCLFirstValid",
+                    "init_args": {
+                        "scl_band": "SCL",
+                    },
+                },
+            }
+        )
+        compositor = layer_cfg.instantiate_compositor()
+        assert isinstance(compositor, Sentinel2SCLFirstValid)
 
 
 # ---------------------------------------------------------------------------

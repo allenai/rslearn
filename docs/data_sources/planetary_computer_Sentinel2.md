@@ -83,10 +83,14 @@ Here is an example data source configuration to obtain 8-bit RGB imagery. We set
 }
 ```
 
-### OmniCloudMask Ranking
+### Cloud-Aware Ranking
 
-To rank overlapping items using [OmniCloudMask](https://github.com/DPIRD-DMA/OmniCloudMask),
-configure a custom `compositing_method` on the raster layer:
+For Sentinel-2, rslearn supports cloud-aware ranking compositors that reorder
+overlapping items inside each materialized group and then apply FIRST_VALID.
+
+#### OmniCloudMask
+
+To rank with [OmniCloudMask](https://github.com/DPIRD-DMA/OmniCloudMask), configure:
 
 ```jsonc
 {
@@ -119,9 +123,46 @@ configure a custom `compositing_method` on the raster layer:
 }
 ```
 
-OmniCloudMask scoring runs during materialization on each multi-item group and then
-FIRST_VALID is applied in the ranked order. See
-[`DataSourceConfig`](../dataset_config/DataSourceConfig.md) for more details.
+Requires `omnicloudmask` (`pip install .[extra]` in this repo). See
+[`OmniCloudMaskFirstValid`](../compositors/omni_cloud_mask_OmniCloudMaskFirstValid.md)
+for details.
+
+#### Sentinel-2 SCL
+
+To rank with Sentinel-2 Scene Classification Layer (SCL) classes, configure:
+
+```jsonc
+{
+  "layers": {
+    "sentinel2": {
+      "type": "raster",
+      "band_sets": [{"bands": ["R", "G", "B"], "dtype": "uint8"}],
+      "data_source": {
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+        "init_args": {
+          "harmonize": true,
+          "query": {"eo:cloud_cover": {"lt": 80}}
+        },
+        "ingest": false,
+        "query_config": {
+          "max_matches": 1,
+          "space_mode": "MOSAIC"
+        }
+      },
+      "compositing_method": {
+        "class_path": "rslearn.dataset.sentinel2_scl.Sentinel2SCLFirstValid",
+        "init_args": {
+          "scl_band": "SCL"
+        }
+      }
+    }
+  }
+}
+```
+
+See
+[`Sentinel2SCLFirstValid`](../compositors/sentinel2_scl_Sentinel2SCLFirstValid.md)
+for scoring details and available weights.
 
 Save this to a dataset folder like `/path/to/dataset/config.json`. Then we can create a
 sample window, and then run prepare and materialize (skipping ingest since we disabled
