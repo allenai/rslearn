@@ -78,7 +78,8 @@ The overall dataset configuration file looks like this:
       // It is one of "nearest", "bilinear" (default), "cubic", "cubic_spline".
       "resampling_method": "bilinear",
       // The compositing method to use, to handle raster item groups with more than one item.
-      // It can be FIRST_VALID (default), MEAN, MEDIAN, or SPATIAL_MOSAIC_TEMPORAL_STACK.
+      // It can be FIRST_VALID (default), MEAN, MEDIAN, SPATIAL_MOSAIC_TEMPORAL_STACK,
+      // TEMPORAL_MEAN, TEMPORAL_MAX, TEMPORAL_MIN, or a custom compositor config.
       "compositing_method": "FIRST_VALID"
     },
     // ... (additional layers)

@@ -27,7 +27,7 @@ from rslearn.utils.fsspec import (
 )
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.get_utm_ups_crs import get_utm_ups_crs
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 from rslearn.utils.raster_format import (
     METADATA_FNAME,
     GeotiffRasterFormat,
@@ -202,6 +202,14 @@ class DefaultTileStore(TileStore):
                 )
 
     @override
+    def get_raster_metadata(
+        self, layer_name: str, item: Item, bands: list[str]
+    ) -> RasterMetadata:
+        raster_fname = self._get_raster_fname(layer_name, item.name, bands)
+        with open_rasterio_upath_reader(raster_fname) as src:
+            return RasterMetadata(nodata_value=src.nodata)
+
+    @override
     def read_raster(
         self,
         layer_name: str,
@@ -229,13 +237,10 @@ class DefaultTileStore(TileStore):
         projection: Projection,
         bounds: PixelBounds,
         raster: RasterArray,
-        nodata_val: int | float | None = None,
     ) -> None:
         raster_dir = self._get_raster_dir(layer_name, item.name, bands, write=True)
         raster_format = GeotiffRasterFormat(geotiff_options=self.geotiff_options)
-        raster_format.encode_raster(
-            raster_dir, projection, bounds, raster, nodata_val=nodata_val
-        )
+        raster_format.encode_raster(raster_dir, projection, bounds, raster)
         (raster_dir / COMPLETED_FNAME).touch()
 
     @override
@@ -255,6 +260,8 @@ class DefaultTileStore(TileStore):
                 profile = src.profile
                 array = src.read()
                 nodata = src.nodata
+                if nodata is None:
+                    nodata = profile.get("nodata")
                 scales = src.scales
                 offsets = src.offsets
 

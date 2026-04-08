@@ -1,9 +1,23 @@
 """Container class for a CTHW raster that has timestamps and other metadata."""
 
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 from datetime import datetime
 
 import numpy as np
 import numpy.typing as npt
+
+
+@dataclass
+class RasterMetadata:
+    """Extensible metadata attached to a :class:`RasterArray`.
+
+    Currently carries a scalar nodata value for the band set; designed to be
+    extended with fields like ``band_names``, suggested colours, etc.
+    """
+
+    nodata_value: int | float | None = field(default=None)
 
 
 class RasterArray:
@@ -11,6 +25,7 @@ class RasterArray:
 
     array: npt.NDArray[np.generic]  # (C, T, H, W)
     timestamps: list[tuple[datetime, datetime]] | None
+    metadata: RasterMetadata
 
     def __init__(
         self,
@@ -19,6 +34,7 @@ class RasterArray:
         timestamps: list[tuple[datetime, datetime]] | None = None,
         chw_array: npt.NDArray[np.generic] | None = None,
         time_range: tuple[datetime, datetime] | None = None,
+        metadata: RasterMetadata | None = None,
     ) -> None:
         """Initialize a RasterArray.
 
@@ -33,6 +49,8 @@ class RasterArray:
                 for single-timestep data; internally expanded to (C, 1, H, W).
             time_range: optional single (start, end) datetime tuple for the one
                 timestep. Only valid with ``chw_array``.
+            metadata: optional :class:`RasterMetadata`; defaults to an empty
+                instance when ``None``.
 
         Raises:
             ValueError: if both or neither of ``array``/``chw_array`` are given,
@@ -80,6 +98,8 @@ class RasterArray:
                 f"T dimension ({self.array.shape[1]})"
             )
 
+        self.metadata = metadata if metadata is not None else RasterMetadata()
+
     def get_chw_array(self) -> npt.NDArray[np.generic]:
         """Return the array as (C, H, W), requiring T=1.
 
@@ -94,9 +114,5 @@ class RasterArray:
         """Return a string representation of this RasterArray."""
         return (
             f"RasterArray(array=<shape={self.array.shape}, dtype={self.array.dtype}>, "
-            f"timestamps={self.timestamps})"
+            f"timestamps={self.timestamps}, metadata={self.metadata})"
         )
-
-    # -- Proposed future fields --
-    # band_names: list[str] | None = None
-    # nodata_value: int | float | None = None

@@ -30,9 +30,10 @@ from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
+from rslearn.utils.array import nodata_eq, unique_nodata_value
 from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 from .copernicus import get_harmonize_callback
@@ -48,7 +49,7 @@ class EarthDailyItem(Item):
         name: str,
         geometry: STGeometry,
         asset_urls: dict[str, str],
-        asset_scale_offsets: dict[str, list[dict[str, float]]] | None = None,
+        asset_scale_offsets: dict[str, list[dict[str, float | None]]] | None = None,
         product_id: str | None = None,
     ):
         """Creates a new EarthDailyItem.
@@ -165,6 +166,7 @@ class EarthDaily(DataSource, TileStore):
         self.eds_client: EDSClient | None = None
         self.client: pystac_client.Client | None = None
         self.collection: pystac_client.CollectionClient | None = None
+        self._nodata_cache: dict[str, float | None] = {}
 
     def _load_client(
         self,
@@ -209,7 +211,7 @@ class EarthDaily(DataSource, TileStore):
 
         geom = STGeometry(WGS84_PROJECTION, shp, time_range)
         asset_urls: dict[str, str] = {}
-        asset_scale_offsets: dict[str, list[dict[str, float]]] = {}
+        asset_scale_offsets: dict[str, list[dict[str, float | None]]] = {}
         for asset_key, asset_obj in stac_item.assets.items():
             is_metadata_asset = asset_key in self.METADATA_ASSET_KEYS
             if asset_key not in self.asset_bands and not is_metadata_asset:
@@ -241,7 +243,7 @@ class EarthDaily(DataSource, TileStore):
             raster_bands = asset_obj.extra_fields.get("raster:bands", [])
             if not isinstance(raster_bands, list) or not raster_bands:
                 continue
-            scale_offsets: list[dict[str, float]] = []
+            scale_offsets: list[dict[str, float | None]] = []
             for band_meta in raster_bands:
                 if not isinstance(band_meta, dict):
                     continue
@@ -255,10 +257,15 @@ class EarthDaily(DataSource, TileStore):
                     offset = float(raw_offset) if raw_offset is not None else 0.0
                 except (TypeError, ValueError):
                     offset = 0.0
-                parsed: dict[str, float] = {
+                raw_nodata = band_meta.get("nodata")
+                try:
+                    nodata = float(raw_nodata) if raw_nodata is not None else None
+                except (TypeError, ValueError):
+                    nodata = None
+                parsed: dict[str, float | None] = {
                     "scale": scale,
                     "offset": offset,
-                    "nodata": float(band_meta["nodata"]),
+                    "nodata": nodata,
                 }
                 scale_offsets.append(parsed)
             if scale_offsets:
@@ -487,12 +494,16 @@ class EarthDaily(DataSource, TileStore):
         self,
         array: npt.NDArray[Any],
         *,
-        scale_offsets: list[dict[str, float]] | None,
+        scale_offsets: list[dict[str, float | None]] | None,
         item_name: str,
         asset_key: str,
-    ) -> npt.NDArray[Any]:
+        time_range: tuple[datetime, datetime] | None = None,
+        metadata: RasterMetadata | None = None,
+    ) -> RasterArray:
         if not scale_offsets:
-            return array
+            return RasterArray(
+                chw_array=array, time_range=time_range, metadata=metadata
+            )
 
         def _to_float(value: Any, default: float) -> float:
             try:
@@ -501,13 +512,14 @@ class EarthDaily(DataSource, TileStore):
                 return default
 
         num_bands = array.shape[0]
+        nodata_value: int | float | None
         if len(scale_offsets) == 1:
             scale = _to_float(scale_offsets[0].get("scale"), 1.0)
             offset = _to_float(scale_offsets[0].get("offset"), 0.0)
-            nodata = float(scale_offsets[0]["nodata"])
+            raw_nd = scale_offsets[0].get("nodata")
+            nodata_value = float(raw_nd) if raw_nd is not None else None
             scales = np.full((num_bands, 1, 1), scale, dtype=np.float32)
             offsets = np.full((num_bands, 1, 1), offset, dtype=np.float32)
-            nodata_vals = np.full((num_bands, 1, 1), nodata, dtype=np.float32)
         elif len(scale_offsets) == num_bands:
             scales = np.array(
                 [_to_float(so.get("scale"), 1.0) for so in scale_offsets],
@@ -517,10 +529,14 @@ class EarthDaily(DataSource, TileStore):
                 [_to_float(so.get("offset"), 0.0) for so in scale_offsets],
                 dtype=np.float32,
             ).reshape(num_bands, 1, 1)
-            nodata_vals = np.array(
-                [float(so["nodata"]) for so in scale_offsets],
-                dtype=np.float32,
-            ).reshape(num_bands, 1, 1)
+            # For nodata, we don't use a default since a None nodata value is okay.
+            # We still use _to_float for type checking but so["nodata"] should never be None.
+            nd_vals = [
+                _to_float(so["nodata"], 0.0)
+                for so in scale_offsets
+                if so.get("nodata") is not None
+            ]
+            nodata_value = unique_nodata_value(nd_vals) if nd_vals else None
         else:
             logger.debug(
                 "EarthDaily scale/offset band count mismatch for item %s asset %s: "
@@ -532,24 +548,46 @@ class EarthDaily(DataSource, TileStore):
             )
             scale = _to_float(scale_offsets[0].get("scale"), 1.0)
             offset = _to_float(scale_offsets[0].get("offset"), 0.0)
-            nodata = float(scale_offsets[0]["nodata"])
+            raw_nd = scale_offsets[0].get("nodata")
+            nodata_value = float(raw_nd) if raw_nd is not None else None
             scales = np.full((num_bands, 1, 1), scale, dtype=np.float32)
             offsets = np.full((num_bands, 1, 1), offset, dtype=np.float32)
-            nodata_vals = np.full((num_bands, 1, 1), nodata, dtype=np.float32)
+
+        if metadata is None:
+            metadata = RasterMetadata(nodata_value=nodata_value)
+        elif nodata_value is not None:
+            metadata.nodata_value = nodata_value
 
         if np.all(scales == 1.0) and np.all(offsets == 0.0):
-            return array
+            return RasterArray(
+                chw_array=array, time_range=time_range, metadata=metadata
+            )
 
         array = array.astype(np.float32, copy=False)
         scaled = array * scales + offsets
 
-        # Preserve source nodata pixels.
-        nodata_mask = np.equal(array, nodata_vals)
-        # nodata_vals is shaped (bands, 1, 1), so this broadcasts per-band nodata.
-        if nodata_mask.any():
-            scaled[nodata_mask] = array[nodata_mask]
+        if nodata_value is not None:
+            nodata_mask = nodata_eq(array, nodata_value)
+            if nodata_mask.any():
+                scaled[nodata_mask] = array[nodata_mask]
 
-        return scaled
+        return RasterArray(chw_array=scaled, time_range=time_range, metadata=metadata)
+
+    def get_raster_metadata(
+        self, layer_name: str, item: Item, bands: list[str]
+    ) -> RasterMetadata:
+        """Read nodata from the remote file header (cached per asset key)."""
+        if not isinstance(item, EarthDailyItem):
+            return RasterMetadata()
+        asset_key = self._get_asset_by_band(bands)
+        if asset_key not in item.asset_urls:
+            return RasterMetadata()
+        if asset_key not in self._nodata_cache:
+            with rasterio.open(item.asset_urls[asset_key]) as src:
+                self._nodata_cache[asset_key] = src.nodata
+
+        nodata_value = self._nodata_cache[asset_key]
+        return RasterMetadata(nodata_value=nodata_value)
 
     def get_raster_bounds(
         self, layer_name: str, item: Item, bands: list[str], projection: Projection
@@ -613,6 +651,7 @@ class EarthDaily(DataSource, TileStore):
         )
 
         with rasterio.open(asset_url) as src:
+            src_nodata = src.nodata
             with rasterio.vrt.WarpedVRT(
                 src,
                 crs=projection.crs,
@@ -621,9 +660,15 @@ class EarthDaily(DataSource, TileStore):
                 height=bounds[3] - bounds[1],
                 resampling=resampling,
             ) as vrt:
-                return RasterArray(
-                    chw_array=vrt.read(), time_range=item.geometry.time_range
-                )
+                data = vrt.read()
+        raster_metadata = None
+        if src_nodata is not None:
+            raster_metadata = RasterMetadata(nodata_value=src_nodata)
+        return RasterArray(
+            chw_array=data,
+            time_range=item.geometry.time_range,
+            metadata=raster_metadata,
+        )
 
     def materialize(
         self,
@@ -812,13 +857,14 @@ class Sentinel2(EarthDaily):
         if not isinstance(item, EarthDailyItem):
             raise TypeError(f"expected EarthDailyItem, got {type(item)}")
         asset_key = self._get_asset_by_band(bands)
-        result = self._apply_scale_offsets(
+        return self._apply_scale_offsets(
             raster.get_chw_array(),
             scale_offsets=item.asset_scale_offsets.get(asset_key),
             item_name=item.name,
             asset_key=asset_key,
+            time_range=item.geometry.time_range,
+            metadata=raster.metadata,
         )
-        return RasterArray(chw_array=result, time_range=item.geometry.time_range)
 
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
@@ -940,11 +986,19 @@ class Sentinel2(EarthDaily):
 
                     with rasterio.open(local_fname) as src:
                         array = src.read()
-                        array = self._apply_scale_offsets(
+                        src_nodata = src.nodata
+                        src_metadata = (
+                            RasterMetadata(nodata_value=src_nodata)
+                            if src_nodata is not None
+                            else None
+                        )
+                        raster = self._apply_scale_offsets(
                             array,
                             scale_offsets=item.asset_scale_offsets.get(asset_key),
                             item_name=item.name,
                             asset_key=asset_key,
+                            time_range=item.geometry.time_range,
+                            metadata=src_metadata,
                         )
 
                         projection, bounds = get_raster_projection_and_bounds(src)
@@ -953,10 +1007,7 @@ class Sentinel2(EarthDaily):
                         band_names,
                         projection,
                         bounds,
-                        RasterArray(
-                            chw_array=array,
-                            time_range=item.geometry.time_range,
-                        ),
+                        raster,
                     )
 
 
@@ -1077,7 +1128,10 @@ class Sentinel2L2A(EarthDaily):
         def callback(array: npt.NDArray[Any]) -> npt.NDArray[Any]:
             if array.dtype != np.uint16:
                 return array
-            return np.clip(array, offset, None) - offset  # type: ignore
+            was_valid = array > 0
+            result = np.clip(array, offset, None) - offset
+            result[(result == 0) & was_valid] = 1
+            return result
 
         return callback
 
@@ -1125,6 +1179,7 @@ class Sentinel2L2A(EarthDaily):
         return RasterArray(
             chw_array=harmonize_callback(raster.get_chw_array()),
             time_range=item.geometry.time_range,
+            metadata=raster.metadata,
         )
 
     def ingest(
@@ -1161,8 +1216,10 @@ class Sentinel2L2A(EarthDaily):
 
                     with rasterio.open(local_fname) as src:
                         array = src.read()
+                        src_nodata = src.nodata
                         projection, bounds = get_raster_projection_and_bounds(src)
                     array = harmonize_callback(array)
+                    raster_metadata = RasterMetadata(nodata_value=src_nodata)
                     tile_store.write_raster(
                         item,
                         band_names,
@@ -1171,6 +1228,7 @@ class Sentinel2L2A(EarthDaily):
                         RasterArray(
                             chw_array=array,
                             time_range=item.geometry.time_range,
+                            metadata=raster_metadata,
                         ),
                     )
 
