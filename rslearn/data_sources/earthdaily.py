@@ -49,7 +49,7 @@ class EarthDailyItem(Item):
         name: str,
         geometry: STGeometry,
         asset_urls: dict[str, str],
-        asset_scale_offsets: dict[str, list[dict[str, float]]] | None = None,
+        asset_scale_offsets: dict[str, list[dict[str, float | None]]] | None = None,
         product_id: str | None = None,
     ):
         """Creates a new EarthDailyItem.
@@ -211,7 +211,7 @@ class EarthDaily(DataSource, TileStore):
 
         geom = STGeometry(WGS84_PROJECTION, shp, time_range)
         asset_urls: dict[str, str] = {}
-        asset_scale_offsets: dict[str, list[dict[str, float]]] = {}
+        asset_scale_offsets: dict[str, list[dict[str, float | None]]] = {}
         for asset_key, asset_obj in stac_item.assets.items():
             is_metadata_asset = asset_key in self.METADATA_ASSET_KEYS
             if asset_key not in self.asset_bands and not is_metadata_asset:
@@ -243,7 +243,7 @@ class EarthDaily(DataSource, TileStore):
             raster_bands = asset_obj.extra_fields.get("raster:bands", [])
             if not isinstance(raster_bands, list) or not raster_bands:
                 continue
-            scale_offsets: list[dict[str, float]] = []
+            scale_offsets: list[dict[str, float | None]] = []
             for band_meta in raster_bands:
                 if not isinstance(band_meta, dict):
                     continue
@@ -257,10 +257,15 @@ class EarthDaily(DataSource, TileStore):
                     offset = float(raw_offset) if raw_offset is not None else 0.0
                 except (TypeError, ValueError):
                     offset = 0.0
-                parsed: dict[str, float] = {
+                raw_nodata = band_meta.get("nodata")
+                try:
+                    nodata = float(raw_nodata) if raw_nodata is not None else None
+                except (TypeError, ValueError):
+                    nodata = None
+                parsed: dict[str, float | None] = {
                     "scale": scale,
                     "offset": offset,
-                    "nodata": float(band_meta["nodata"]),
+                    "nodata": nodata,
                 }
                 scale_offsets.append(parsed)
             if scale_offsets:
@@ -489,7 +494,7 @@ class EarthDaily(DataSource, TileStore):
         self,
         array: npt.NDArray[Any],
         *,
-        scale_offsets: list[dict[str, float]] | None,
+        scale_offsets: list[dict[str, float | None]] | None,
         item_name: str,
         asset_key: str,
         time_range: tuple[datetime, datetime] | None = None,
@@ -511,7 +516,8 @@ class EarthDaily(DataSource, TileStore):
         if len(scale_offsets) == 1:
             scale = _to_float(scale_offsets[0].get("scale"), 1.0)
             offset = _to_float(scale_offsets[0].get("offset"), 0.0)
-            nodata_value = float(scale_offsets[0]["nodata"])
+            raw_nd = scale_offsets[0].get("nodata")
+            nodata_value = float(raw_nd) if raw_nd is not None else None
             scales = np.full((num_bands, 1, 1), scale, dtype=np.float32)
             offsets = np.full((num_bands, 1, 1), offset, dtype=np.float32)
         elif len(scale_offsets) == num_bands:
@@ -523,9 +529,14 @@ class EarthDaily(DataSource, TileStore):
                 [_to_float(so.get("offset"), 0.0) for so in scale_offsets],
                 dtype=np.float32,
             ).reshape(num_bands, 1, 1)
-            nodata_value = unique_nodata_value(
-                [float(so["nodata"]) for so in scale_offsets]
-            )
+            # For nodata, we don't use a default since a None nodata value is okay.
+            # We still use _to_float for type checking but so["nodata"] should never be None.
+            nd_vals = [
+                _to_float(so["nodata"], 0.0)
+                for so in scale_offsets
+                if so.get("nodata") is not None
+            ]
+            nodata_value = unique_nodata_value(nd_vals) if nd_vals else None
         else:
             logger.debug(
                 "EarthDaily scale/offset band count mismatch for item %s asset %s: "
@@ -537,7 +548,8 @@ class EarthDaily(DataSource, TileStore):
             )
             scale = _to_float(scale_offsets[0].get("scale"), 1.0)
             offset = _to_float(scale_offsets[0].get("offset"), 0.0)
-            nodata_value = float(scale_offsets[0]["nodata"])
+            raw_nd = scale_offsets[0].get("nodata")
+            nodata_value = float(raw_nd) if raw_nd is not None else None
             scales = np.full((num_bands, 1, 1), scale, dtype=np.float32)
             offsets = np.full((num_bands, 1, 1), offset, dtype=np.float32)
 

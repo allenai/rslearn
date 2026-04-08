@@ -158,12 +158,7 @@ class GoogleSatelliteEmbeddingV1(
             with cache_file.open("wb") as f:
                 f.write(content)
 
-        return pd.read_csv(
-            cache_file,
-            header=None,
-            usecols=[0, 2, 3],
-            names=["WKT", "path", "year"],
-        )
+        return pd.read_csv(cache_file)
 
     def _load_index(
         self,
