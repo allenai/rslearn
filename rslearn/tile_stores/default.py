@@ -259,7 +259,7 @@ class DefaultTileStore(TileStore):
             with open_rasterio_upath_reader(fname) as src:
                 profile = src.profile
                 array = src.read()
-                nodata = profile.get("nodata")
+                nodata = src.nodata
 
                 # If raster specifies ground control points, use WarpedVRT to get it in
                 # an appropriate projection.

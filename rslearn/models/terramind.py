@@ -1,6 +1,6 @@
 """Terramind models."""
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import torch
@@ -15,7 +15,7 @@ from .component import FeatureExtractor, FeatureMaps
 
 
 # TerraMind v1 provides two sizes: base and large
-class TerramindSize(str, Enum):
+class TerramindSize(StrEnum):
     """Size of the Terramind model."""
 
     BASE = "base"

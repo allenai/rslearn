@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from enum import Enum
+from enum import StrEnum
 from importlib.resources import files
 from typing import Any
 
@@ -22,7 +22,7 @@ from rslearn.train.transforms.normalize import Normalize
 from rslearn.train.transforms.transform import Transform
 
 
-class ClaySize(str, Enum):
+class ClaySize(StrEnum):
     """Size of the Clay model."""
 
     BASE = "base"
