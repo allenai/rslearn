@@ -281,7 +281,7 @@ def test_chelsa_daily_ingest_preserves_nodata_and_temporal_reducers_ignore_it(
     bounds = (0, -7, 7, 0)
     temporal_max = TemporalMaxCompositor().build_composite(
         group=items,
-        nodata_vals=[65535],
+        nodata_val=65535,
         bands=["tas"],
         bounds=bounds,
         band_dtype=np.uint16,
@@ -292,7 +292,7 @@ def test_chelsa_daily_ingest_preserves_nodata_and_temporal_reducers_ignore_it(
     )
     temporal_mean = TemporalMeanCompositor().build_composite(
         group=items,
-        nodata_vals=[65535],
+        nodata_val=65535,
         bands=["tas"],
         bounds=bounds,
         band_dtype=np.uint16,
