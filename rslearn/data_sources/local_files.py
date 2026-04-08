@@ -217,7 +217,7 @@ class RasterImporter(Importer):
             # We assume files are readable with rasterio.
             fname = join_upath(src_dir, spec.fnames[0])
             with open_rasterio_upath_reader(fname) as src:
-                if src.crs is None and src.gcps:
+                if src.crs is None and len(src.gcps[0]) > 0:
                     gcps, gcp_crs = src.gcps
                     xs = [gcp.x for gcp in gcps]
                     ys = [gcp.y for gcp in gcps]
