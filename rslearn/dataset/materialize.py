@@ -10,12 +10,14 @@ from rslearn.config import (
 )
 from rslearn.data_sources.data_source import ItemType
 from rslearn.tile_stores import TileStoreWithLayer
+from rslearn.utils.array import unique_nodata_value
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, Projection
 from rslearn.utils.raster_array import RasterArray
 
 from .compositing import Compositor
 from .remap import Remapper, load_remapper
+from .tile_utils import get_needed_band_sets_and_indexes
 from .window import Window
 
 
@@ -42,6 +44,38 @@ class Materializer:
             group_time_ranges: optional request time range for each item group
         """
         raise NotImplementedError
+
+
+def resolve_nodata_value(
+    tile_store: TileStoreWithLayer,
+    items: list[ItemType],
+    bands: list[str],
+) -> int | float | None:
+    """Resolve scalar nodata value from the tile store metadata.
+
+    Probes the first item that has matching bands and reads nodata from the
+    raster file header (no pixel data is read). An error is raised if different assets
+    have different nodata values.
+
+    Args:
+        tile_store: the tile store to query.
+        items: candidate items (from one or more item groups).
+        bands: the requested band names.
+
+    Returns:
+        A scalar nodata value, or ``None`` when the source has no nodata.
+    """
+    for item in items:
+        needed = get_needed_band_sets_and_indexes(item, bands, tile_store)
+        if not needed:
+            continue
+        nodata_vals = []
+        for src_bands, _, _ in needed:
+            metadata = tile_store.get_raster_metadata(item, src_bands)
+            if metadata.nodata_value is not None:
+                nodata_vals.append(metadata.nodata_value)
+        return unique_nodata_value(nodata_vals)
+    return None
 
 
 def build_composite(
@@ -71,13 +105,13 @@ def build_composite(
     Returns:
         A RasterArray produced by the chosen compositing method.
     """
-    nodata_vals = band_cfg.nodata_vals
-    if nodata_vals is None:
-        nodata_vals = [0 for _ in band_cfg.bands]
+    nodata_val: int | float | None = band_cfg.nodata_value
+    if nodata_val is None:
+        nodata_val = resolve_nodata_value(tile_store, group, band_cfg.bands)
 
     return compositor.build_composite(
         group=group,
-        nodata_vals=nodata_vals,
+        nodata_val=nodata_val,
         bands=band_cfg.bands,
         bounds=bounds,
         band_dtype=band_cfg.dtype.get_numpy_dtype(),

@@ -1,6 +1,5 @@
 """OmniCloudMask-based compositor for cloud-aware FIRST_VALID compositing."""
 
-from collections.abc import Sequence
 from datetime import datetime
 
 import numpy as np
@@ -89,7 +88,7 @@ class OmniCloudMaskFirstValid(Compositor):
         scoring_bands = [self.red_band, self.green_band, self.nir_band]
         # The NODATA values for the scoring bands are expected to be 0 for both Sentinel-2
         # and Landsat.
-        nodata_vals = [0, 0, 0]
+        nodata_val = 0
 
         # The bands should be available, raise error if not.
         needed_band_sets_and_indexes = get_needed_band_sets_and_indexes(
@@ -106,7 +105,7 @@ class OmniCloudMaskFirstValid(Compositor):
             bands=scoring_bands,
             projection=projection,
             bounds=bounds,
-            nodata_vals=nodata_vals,
+            nodata_val=nodata_val,
             band_dtype=np.float32,
             resampling=resampling_method,
         )
@@ -153,7 +152,7 @@ class OmniCloudMaskFirstValid(Compositor):
     def build_composite(
         self,
         group: list[ItemType],
-        nodata_vals: Sequence[int | float],
+        nodata_val: int | float | None,
         bands: list[str],
         bounds: PixelBounds,
         band_dtype: npt.DTypeLike,
@@ -185,7 +184,7 @@ class OmniCloudMaskFirstValid(Compositor):
 
         return FirstValidCompositor().build_composite(
             group=group,
-            nodata_vals=nodata_vals,
+            nodata_val=nodata_val,
             bands=bands,
             bounds=bounds,
             band_dtype=band_dtype,

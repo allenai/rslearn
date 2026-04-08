@@ -95,7 +95,7 @@ class TestMeanCompositor:
 
     def test_mean_of_two_items(self, tile_store: DefaultTileStore) -> None:
         """Test mean composite of two 2-band rasters with valid values."""
-        nodata_vals = [0, 0]
+        nodata_val = 0
 
         array1 = np.array(
             [np.full((4, 4), 2, dtype=np.uint8), np.full((4, 4), 6, dtype=np.uint8)]
@@ -119,7 +119,7 @@ class TestMeanCompositor:
 
         composite = MeanCompositor().build_composite(
             group=[item1, item2],
-            nodata_vals=nodata_vals,
+            nodata_val=nodata_val,
             bands=self.BANDS,
             bounds=self.BOUNDS,
             band_dtype=np.uint8,
@@ -141,7 +141,7 @@ class TestMeanCompositor:
         self, tile_store: DefaultTileStore
     ) -> None:
         """Test mean composite with 3 items having different spatial extents (float32)."""
-        nodata_vals = [0.0, 0.0]
+        nodata_val = 0.0
 
         def make_array(val1: Any, val2: Any) -> npt.NDArray[np.float32]:
             return np.array(
@@ -179,7 +179,7 @@ class TestMeanCompositor:
 
         composite = MeanCompositor().build_composite(
             group=[item1, item2, item3],
-            nodata_vals=nodata_vals,
+            nodata_val=nodata_val,
             bands=self.BANDS,
             bounds=self.BOUNDS,
             band_dtype=np.float32,
@@ -210,71 +210,6 @@ class TestMeanCompositor:
 
         assert np.array_equal(composite.get_chw_array(), expected)
 
-    def test_mean_with_different_nodata_vals(
-        self, tile_store: DefaultTileStore
-    ) -> None:
-        """Test mean composite where each band has a different nodata value (float32)."""
-
-        # Different nodata values for each band
-        nodata_vals = [0.0, 99.0]  # Band 1 has 0.0 as nodata, Band 2 has 99.0 as nodata
-
-        array1 = np.array(
-            [
-                np.full((4, 4), 2.0, dtype=np.float32),
-                np.full((4, 4), 6.0, dtype=np.float32),
-            ]
-        )
-        array2 = np.array(
-            [
-                np.full((4, 4), 4.0, dtype=np.float32),
-                np.full((4, 4), 10.0, dtype=np.float32),
-            ]
-        )
-
-        # Manually set some pixels to nodata
-        array1[0, 0, 0] = 0.0  # Set (0,0) to nodata in first band
-        array2[1, 1, 1] = 99.0  # Set (1,1) to nodata in second band
-
-        item1 = self.make_item("item1")
-        item2 = self.make_item("item2")
-
-        for item, data in zip([item1, item2], [array1, array2]):
-            tile_store.write_raster(
-                self.LAYER_NAME,
-                item,
-                self.BANDS,
-                self.PROJECTION,
-                self.BOUNDS,
-                RasterArray(chw_array=data),
-            )
-
-        composite = MeanCompositor().build_composite(
-            group=[item1, item2],
-            nodata_vals=nodata_vals,
-            bands=self.BANDS,
-            bounds=self.BOUNDS,
-            band_dtype=np.float32,
-            tile_store=TileStoreWithLayer(tile_store, self.LAYER_NAME),
-            projection=self.PROJECTION,
-            resampling_method=Resampling.bilinear,
-            remapper=None,
-        )
-
-        # Expected float means
-        expected = np.array(
-            [
-                np.full((4, 4), 3.0, dtype=np.float32),  # Mean of 2.0 and 4.0
-                np.full((4, 4), 8.0, dtype=np.float32),  # Mean of 6.0 and 10.0
-            ]
-        )
-
-        # Override the pixels where a nodata was injected:
-        expected[0, 0, 0] = 4.0  # band 1, (0,0): only valid value is 4.0
-        expected[1, 1, 1] = 6.0  # band 2, (1,1): only valid value is 6.0
-
-        # Check that the composite is as expected (allow small float error)
-        assert np.allclose(composite.get_chw_array(), expected, atol=1e-6)
-
 
 class TestMedianCompositor:
     """Unit tests for MedianCompositor."""
@@ -303,7 +238,7 @@ class TestMedianCompositor:
 
     def test_median_of_two_items(self, tile_store: DefaultTileStore) -> None:
         """Median of two 2-band rasters with valid values everywhere."""
-        nodata_vals = [0, 0]
+        nodata_val = 0
 
         array1 = np.array(
             [
@@ -333,7 +268,7 @@ class TestMedianCompositor:
 
         composite = MedianCompositor().build_composite(
             group=[item1, item2],
-            nodata_vals=nodata_vals,
+            nodata_val=nodata_val,
             bands=self.BANDS,
             bounds=self.BOUNDS,
             band_dtype=np.uint8,
@@ -356,7 +291,7 @@ class TestMedianCompositor:
         self, tile_store: DefaultTileStore
     ) -> None:
         """Median with 3 items having different spatial extents."""
-        nodata_vals = [0, 0]
+        nodata_val = 0
 
         def make_array(val1: Any, val2: Any) -> npt.NDArray[np.float32]:
             return np.array(
@@ -393,7 +328,7 @@ class TestMedianCompositor:
 
         composite = MedianCompositor().build_composite(
             group=[item1, item2, item3],
-            nodata_vals=nodata_vals,
+            nodata_val=nodata_val,
             bands=self.BANDS,
             bounds=self.BOUNDS,
             band_dtype=np.uint8,
@@ -426,68 +361,6 @@ class TestMedianCompositor:
             ],
             dtype=np.uint8,
         )
-
-        assert np.array_equal(composite.get_chw_array(), expected)
-
-    def test_median_with_different_nodata_vals(
-        self, tile_store: DefaultTileStore
-    ) -> None:
-        """Median where each band has a different nodata value and per-pixel masks."""
-        nodata_vals = [0, 99]
-
-        array1 = np.array(
-            [
-                np.full((4, 4), 2, dtype=np.uint8),
-                np.full((4, 4), 6, dtype=np.uint8),
-            ]
-        )
-        array2 = np.array(
-            [
-                np.full((4, 4), 4, dtype=np.uint8),
-                np.full((4, 4), 10, dtype=np.uint8),
-            ]
-        )
-
-        # Set some pixels to band-specific nodata
-        array1[0, 0, 0] = 0  # band1 nodata at (0,0)
-        array2[1, 1, 1] = 99  # band2 nodata at (1,1)
-
-        item1 = self.make_item("item1")
-        item2 = self.make_item("item2")
-
-        for item, data in zip([item1, item2], [array1, array2]):
-            tile_store.write_raster(
-                self.LAYER_NAME,
-                item,
-                self.BANDS,
-                self.PROJECTION,
-                self.BOUNDS,
-                RasterArray(chw_array=data),
-            )
-
-        composite = MedianCompositor().build_composite(
-            group=[item1, item2],
-            nodata_vals=nodata_vals,
-            bands=self.BANDS,
-            bounds=self.BOUNDS,
-            band_dtype=np.uint8,
-            tile_store=TileStoreWithLayer(tile_store, self.LAYER_NAME),
-            projection=self.PROJECTION,
-            resampling_method=Resampling.bilinear,
-            remapper=None,
-        )
-
-        # Base median everywhere: (2,4)->3; (6,10)->8.
-        # band1 at (0,0): only 4 is valid -> 4
-        # band2 at (1,1): only 6 is valid -> 6
-        expected = np.array(
-            [
-                np.full((4, 4), 3, dtype=np.uint8),
-                np.full((4, 4), 8, dtype=np.uint8),
-            ]
-        )
-        expected[0, 0, 0] = 4
-        expected[1, 1, 1] = 6
 
         assert np.array_equal(composite.get_chw_array(), expected)
 
@@ -537,7 +410,7 @@ class TestSpatialMosaicTemporalStackCompositor:
 
         result = SpatialMosaicTemporalStackCompositor().build_composite(
             group=[item_a, item_b],
-            nodata_vals=[0],
+            nodata_val=0,
             bands=self.BANDS,
             bounds=self.BOUNDS,
             band_dtype=np.uint8,
@@ -589,7 +462,7 @@ class TestSpatialMosaicTemporalStackCompositor:
 
         result = SpatialMosaicTemporalStackCompositor().build_composite(
             group=[item_a, item_b],
-            nodata_vals=[0],
+            nodata_val=0,
             bands=self.BANDS,
             bounds=self.BOUNDS,
             band_dtype=np.uint8,
@@ -632,7 +505,7 @@ class TestSpatialMosaicTemporalStackCompositor:
 
         result = SpatialMosaicTemporalStackCompositor().build_composite(
             group=[item_a],
-            nodata_vals=[0],
+            nodata_val=0,
             bands=self.BANDS,
             bounds=self.BOUNDS,
             band_dtype=np.uint8,
@@ -698,7 +571,7 @@ class TestSpatialMosaicTemporalStackCompositor:
 
         result = SpatialMosaicTemporalStackCompositor().build_composite(
             group=[item_a, item_b],
-            nodata_vals=[0],
+            nodata_val=0,
             bands=self.BANDS,
             bounds=self.BOUNDS,
             band_dtype=np.uint8,
@@ -727,16 +600,16 @@ class TestSpatialMosaicTemporalStackCompositor:
         assert np.all(result.array[:, 2, 1:4, :] == 20)
 
     def test_temporal_stack_nodata_two_bands(self, tmp_path: pathlib.Path) -> None:
-        """Nodata handling with two bands and per-band nodata values.
+        """Nodata handling with two bands (scalar nodata).
 
-        nodata_vals = [1, 2].
-        Item 1: T=2 [Jan Feb], full coverage, both bands are nodata
-                everywhere ([1, 2]) except topleft pixel (0,0) which is [10, 10].
+        nodata_val = 1.
+        Item 1: T=2 [Jan Feb], full coverage, both bands are 1 (nodata)
+                everywhere except topleft pixel (0,0) which is [10, 10].
         Item 2: T=1 [Feb], full coverage, [20, 20] everywhere.
         Window: [Jan Feb].
 
         Expected:
-          T=0 (Jan): only Item 1. (0,0)=[10,10], rest=[1,2] (nodata).
+          T=0 (Jan): only Item 1. (0,0)=[10,10], rest=[1, 1] (nodata fill).
           T=1 (Feb): Item 1 at topleft pixel, Item 2 elsewhere.
         """
         tile_store = DefaultTileStore()
@@ -747,14 +620,12 @@ class TestSpatialMosaicTemporalStackCompositor:
         mar = datetime(2024, 3, 1, tzinfo=UTC)
 
         bands = ["B1", "B2"]
-        nodata_vals = [1, 2]
+        nodata_val = 1
         bbox = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
 
         # Item 1: nodata everywhere except topleft, two timesteps.
         item_a = Item("a", STGeometry(self.PROJECTION, bbox, (jan, mar)))
-        data_a = np.empty((2, 2, 4, 4), dtype=np.uint8)
-        data_a[0, :, :, :] = 1  # band0 = nodata
-        data_a[1, :, :, :] = 2  # band1 = nodata
+        data_a = np.ones((2, 2, 4, 4), dtype=np.uint8)
         data_a[:, :, 0, 0] = 10  # topleft pixel is valid in both timesteps
         ts_a = [(jan, feb), (feb, mar)]
         tile_store.write_raster(
@@ -782,7 +653,7 @@ class TestSpatialMosaicTemporalStackCompositor:
 
         result = SpatialMosaicTemporalStackCompositor().build_composite(
             group=[item_a, item_b],
-            nodata_vals=nodata_vals,
+            nodata_val=nodata_val,
             bands=bands,
             bounds=self.BOUNDS,
             band_dtype=np.uint8,
@@ -803,14 +674,14 @@ class TestSpatialMosaicTemporalStackCompositor:
         # Rest is nodata.
         assert np.all(result.array[0, 0, 0, 1:] == 1)
         assert np.all(result.array[0, 0, 1:, :] == 1)
-        assert np.all(result.array[1, 0, 0, 1:] == 2)
-        assert np.all(result.array[1, 0, 1:, :] == 2)
+        assert np.all(result.array[1, 0, 0, 1:] == 1)
+        assert np.all(result.array[1, 0, 1:, :] == 1)
 
         # T=1 (Feb): Item 1 first-valid, then Item 2 fills nodata.
         # Topleft: Item 1 has [10,10] (not nodata) -> keeps.
         assert result.array[0, 1, 0, 0] == 10
         assert result.array[1, 1, 0, 0] == 10
-        # Everywhere else: Item 1 had [1,2] (nodata) -> Item 2's [20,20].
+        # Everywhere else: Item 1 had [0,0] (nodata) -> Item 2's [20,20].
         assert np.all(result.array[0, 1, 0, 1:] == 20)
         assert np.all(result.array[0, 1, 1:, :] == 20)
         assert np.all(result.array[1, 1, 0, 1:] == 20)
@@ -863,7 +734,7 @@ class TestMultiTimestepComposites:
 
         result = FirstValidCompositor().build_composite(
             group=[item_a, item_b],
-            nodata_vals=[0],
+            nodata_val=0,
             bands=self.BANDS,
             bounds=self.BOUNDS,
             band_dtype=np.uint8,
@@ -930,7 +801,7 @@ class TestMultiTimestepComposites:
 
         result = MeanCompositor().build_composite(
             group=[item_a, item_b],
-            nodata_vals=[0],
+            nodata_val=0,
             bands=self.BANDS,
             bounds=self.BOUNDS,
             band_dtype=np.uint8,
@@ -988,7 +859,7 @@ class TestMultiTimestepComposites:
         with pytest.raises(ValueError, match="same number of timesteps"):
             MeanCompositor().build_composite(
                 group=[item_a, item_b],
-                nodata_vals=[0],
+                nodata_val=0,
                 bands=self.BANDS,
                 bounds=self.BOUNDS,
                 band_dtype=np.uint8,
@@ -1036,7 +907,7 @@ class TestTemporalReducers:
         request_time_range = (t1, t3)
         common_kwargs = {
             "group": [item],
-            "nodata_vals": [0.0],
+            "nodata_val": 0.0,
             "bands": self.BANDS,
             "bounds": self.BOUNDS,
             "band_dtype": np.float32,
@@ -1062,3 +933,62 @@ class TestTemporalReducers:
         assert mean_result.timestamps == [request_time_range]
         assert max_result.timestamps == [request_time_range]
         assert min_result.timestamps == [request_time_range]
+
+
+class TestNaNNodata:
+    """Tests that NaN nodata is handled correctly through compositing."""
+
+    LAYER_NAME = "layer"
+    BANDS = ["B1"]
+    BOUNDS = (0, 0, 4, 4)
+    PROJECTION = WGS84_PROJECTION
+
+    def test_first_valid_nan_nodata(self, tmp_path: pathlib.Path) -> None:
+        """First-valid compositor should work with NaN nodata value.
+
+        NaN nodata requires special handling since equality check between two NaN
+        values evaluates to false.
+        """
+        tile_store = DefaultTileStore()
+        tile_store.set_dataset_path(UPath(tmp_path))
+
+        bbox = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
+        item_a = Item("a", STGeometry(self.PROJECTION, bbox, None))
+        item_b = Item("b", STGeometry(self.PROJECTION, bbox, None))
+
+        data_a = np.full((1, 4, 4), 10.0, dtype=np.float32)
+        data_a[:, 2:4, :] = np.nan
+        tile_store.write_raster(
+            self.LAYER_NAME,
+            item_a,
+            self.BANDS,
+            self.PROJECTION,
+            self.BOUNDS,
+            RasterArray(chw_array=data_a),
+        )
+
+        data_b = np.full((1, 4, 4), 20.0, dtype=np.float32)
+        tile_store.write_raster(
+            self.LAYER_NAME,
+            item_b,
+            self.BANDS,
+            self.PROJECTION,
+            self.BOUNDS,
+            RasterArray(chw_array=data_b),
+        )
+
+        result = FirstValidCompositor().build_composite(
+            group=[item_a, item_b],
+            nodata_val=np.nan,
+            bands=self.BANDS,
+            bounds=self.BOUNDS,
+            band_dtype=np.float32,
+            tile_store=TileStoreWithLayer(tile_store, self.LAYER_NAME),
+            projection=self.PROJECTION,
+            resampling_method=Resampling.bilinear,
+            remapper=None,
+        )
+
+        chw = result.get_chw_array()
+        assert np.all(chw[:, 0:2, :] == 10.0)
+        assert np.all(chw[:, 2:4, :] == 20.0)
