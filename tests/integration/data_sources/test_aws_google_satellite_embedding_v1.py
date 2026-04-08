@@ -60,25 +60,20 @@ def test_geotiff(tmp_path: pathlib.Path) -> pathlib.Path:
 def _make_csv_content() -> bytes:
     """Create a mock CSV index matching the format expected by the data source.
 
-    The real CSV has 13 columns (with no header):
-      0: WKT geometry
-      1: CRS (e.g. EPSG:32601)
-      2: S3 path to the TIFF file
-      3: year
-      4: UTM zone (e.g. 1N)
-      5-8: CRS bounds (col_min, row_min, col_max, row_max)
-      9-12: WGS84 bounds (west, south, east, north)
-
-    The data source reads only columns 0 (WKT), 2 (path), 3 (year).
+    The real CSV has a header row and 13 columns. The data source reads
+    columns WKT, path, and year by name.
     """
     wkt = shapely.box(*SEATTLE_WGS84_BOUNDS).wkt
     west, south, east, north = SEATTLE_WGS84_BOUNDS
+    header = (
+        "WKT,CRS,path,year,zone,col_min,row_min,col_max,row_max,west,south,east,north\n"
+    )
     line = (
         f'"{wkt}",EPSG:32610,'
         f"s3://us-west-2.opendata.source.coop/tge-labs/aef/v1/annual/2020/test_tile.tiff,"
         f"2020,10N,0,0,8192,8192,{west},{south},{east},{north}\n"
     )
-    return line.encode()
+    return (header + line).encode()
 
 
 def _make_mock_s3(
