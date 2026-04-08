@@ -30,7 +30,7 @@ def test_nodata_persists_through_ingestion_and_materialization(
 ) -> None:
     """Write a raster with nodata metadata, run RasterMaterializer, read it back.
 
-    Verifies that nodata_values propagate end-to-end:
+    Verifies that nodata_value propagates end-to-end:
       tile store write (ingestion) -> RasterMaterializer -> materialized GeoTIFF
     """
     ds_path = UPath(tmp_path)
@@ -51,15 +51,15 @@ def test_nodata_persists_through_ingestion_and_materialization(
         BOUNDS,
         RasterArray(
             chw_array=src,
-            metadata=RasterMetadata(nodata_values=(NODATA_VAL,)),
+            metadata=RasterMetadata(nodata_value=NODATA_VAL),
         ),
     )
 
     # Sanity-check: tile store metadata has the nodata value.
     ts_with_layer = TileStoreWithLayer(tile_store, LAYER_NAME)
-    assert ts_with_layer.get_raster_metadata(item, BANDS).nodata_values == (NODATA_VAL,)
+    assert ts_with_layer.get_raster_metadata(item, BANDS).nodata_value == NODATA_VAL
 
-    # Materialize via RasterMaterializer (no explicit nodata_vals in BandSetConfig).
+    # Materialize via RasterMaterializer (no explicit nodata_value in BandSetConfig).
     layer_cfg = LayerConfig(
         type=LayerType.RASTER,
         band_sets=[BandSetConfig(dtype=DType.FLOAT32, bands=BANDS)],

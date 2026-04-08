@@ -10,6 +10,7 @@ from rslearn.config import (
 )
 from rslearn.data_sources.data_source import ItemType
 from rslearn.tile_stores import TileStoreWithLayer
+from rslearn.utils.array import unique_nodata_value
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, Projection
 from rslearn.utils.raster_array import RasterArray
@@ -45,17 +46,16 @@ class Materializer:
         raise NotImplementedError
 
 
-def resolve_nodata_values(
+def resolve_nodata_value(
     tile_store: TileStoreWithLayer,
     items: list[ItemType],
     bands: list[str],
-) -> tuple[float, ...]:
-    """Resolve per-band nodata values from the tile store metadata.
+) -> int | float | None:
+    """Resolve scalar nodata value from the tile store metadata.
 
     Probes the first item that has matching bands and reads nodata from the
-    raster file header (no pixel data is read). Falls back to 0.0 per band
-    when no item has matching bands or the source has no nodata metadata, to align
-    with previous behavior.
+    raster file header (no pixel data is read). An error is raised if different assets
+    have different nodata values.
 
     Args:
         tile_store: the tile store to query.
@@ -63,20 +63,19 @@ def resolve_nodata_values(
         bands: the requested band names.
 
     Returns:
-        A tuple of nodata values, one per band.
+        A scalar nodata value, or ``None`` when the source has no nodata.
     """
     for item in items:
         needed = get_needed_band_sets_and_indexes(item, bands, tile_store)
         if not needed:
             continue
-        resolved = [0.0] * len(bands)
-        for src_bands, src_indexes, dst_indexes in needed:
+        nodata_vals = []
+        for src_bands, _, _ in needed:
             metadata = tile_store.get_raster_metadata(item, src_bands)
-            if metadata.nodata_values is not None:
-                for src_idx, dst_idx in zip(src_indexes, dst_indexes):
-                    resolved[dst_idx] = float(metadata.nodata_values[src_idx])
-        return tuple(resolved)
-    return (0.0,) * len(bands)
+            if metadata.nodata_value is not None:
+                nodata_vals.append(metadata.nodata_value)
+        return unique_nodata_value(nodata_vals)
+    return None
 
 
 def build_composite(
@@ -106,13 +105,13 @@ def build_composite(
     Returns:
         A RasterArray produced by the chosen compositing method.
     """
-    nodata_vals = band_cfg.nodata_vals
-    if nodata_vals is None:
-        nodata_vals = resolve_nodata_values(tile_store, group, band_cfg.bands)
+    nodata_val: int | float | None = band_cfg.nodata_value
+    if nodata_val is None:
+        nodata_val = resolve_nodata_value(tile_store, group, band_cfg.bands)
 
     return compositor.build_composite(
         group=group,
-        nodata_vals=nodata_vals,
+        nodata_val=nodata_val,
         bands=band_cfg.bands,
         bounds=bounds,
         band_dtype=band_cfg.dtype.get_numpy_dtype(),

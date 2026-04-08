@@ -91,7 +91,7 @@ class TileStore:
             a RasterMetadata instance (may have None fields if the store
             does not track a given piece of metadata).
         """
-        return RasterMetadata()
+        raise NotImplementedError
 
     def read_raster(
         self,

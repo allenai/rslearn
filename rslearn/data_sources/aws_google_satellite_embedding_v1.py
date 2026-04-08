@@ -34,7 +34,7 @@ from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.grid_index import GridIndex
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 # Band names for the 64 embedding channels
@@ -158,12 +158,7 @@ class GoogleSatelliteEmbeddingV1(
             with cache_file.open("wb") as f:
                 f.write(content)
 
-        return pd.read_csv(
-            cache_file,
-            header=None,
-            usecols=[0, 2, 3],
-            names=["WKT", "path", "year"],
-        )
+        return pd.read_csv(cache_file)
 
     def _load_index(
         self,
@@ -286,6 +281,7 @@ class GoogleSatelliteEmbeddingV1(
                         array = src.read()
                         projection, bounds = get_raster_projection_and_bounds(src)
                     array = self._dequantize(array)
+                    raster_metadata = RasterMetadata(nodata_value=-1.0)
                     tile_store.write_raster(
                         item,
                         BANDS,
@@ -294,6 +290,7 @@ class GoogleSatelliteEmbeddingV1(
                         RasterArray(
                             chw_array=array,
                             time_range=item.geometry.time_range,
+                            metadata=raster_metadata,
                         ),
                     )
                 else:
@@ -305,6 +302,14 @@ class GoogleSatelliteEmbeddingV1(
                     )
 
     # --- DirectMaterializeDataSource implementation ---
+
+    def get_raster_metadata(
+        self, layer_name: str, item: Item, bands: list[str]
+    ) -> RasterMetadata:
+        """Return metadata reflecting the effective nodata value."""
+        if self.apply_dequantization:
+            return RasterMetadata(nodata_value=-1.0)
+        return RasterMetadata(nodata_value=-128)
 
     def get_asset_url(
         self, item: GoogleSatelliteEmbeddingV1Item, asset_key: str
@@ -391,4 +396,13 @@ class GoogleSatelliteEmbeddingV1(
         if callback is not None:
             data = callback(data)
 
-        return RasterArray(chw_array=data, time_range=item.geometry.time_range)
+        if self.apply_dequantization:
+            raster_metadata = RasterMetadata(nodata_value=-1.0)
+        else:
+            raster_metadata = RasterMetadata(nodata_value=-128)
+
+        return RasterArray(
+            chw_array=data,
+            time_range=item.geometry.time_range,
+            metadata=raster_metadata,
+        )

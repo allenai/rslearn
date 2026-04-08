@@ -318,6 +318,48 @@ def test_read_raster_processing_baseline_fallback_overrides_geometry_date(
     ).get_chw_array()
 
     expected = np.clip(raw, 1000, None) - 1000
+    expected[(expected == 0) & (raw > 0)] = 1
+    assert out.dtype == np.uint16
+    np.testing.assert_array_equal(out, expected)
+
+
+def test_fallback_harmonize_preserves_nodata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nodata pixels (0) must stay 0; valid pixels that would become 0 get clamped to 1."""
+    tif_path = tmp_path / "B04.tif"
+    raw = np.array([[[0, 500], [1000, 2000]]], dtype=np.uint16)
+    with rasterio.open(
+        tif_path,
+        "w",
+        driver="GTiff",
+        width=2,
+        height=2,
+        count=1,
+        dtype=str(raw.dtype),
+        crs=CRS.from_epsg(3857),
+        transform=Affine(1, 0, 0, 0, -1, 0),
+    ) as dst:
+        dst.write(raw)
+
+    item = _make_item(
+        {"B04": str(tif_path), "product_metadata": "https://example.com/meta.xml"},
+        name="S2A_MSIL2A_20240101T000000_N0400_R080_T15CWM_20240101T150509",
+    )
+    ds = Sentinel2L2A(harmonize=True, assets=["B04"], cache_dir=None)
+    monkeypatch.setattr(ds, "get_item_by_name", lambda _name: item)
+    monkeypatch.setattr(ds, "_get_product_xml", lambda _item: ET.fromstring("<root />"))
+
+    out = ds.read_raster(
+        layer_name="layer",
+        item=item,
+        bands=["B04"],
+        projection=Projection(CRS.from_epsg(3857), 1, -1),
+        bounds=(0, 0, 2, 2),
+    ).get_chw_array()
+
+    expected = np.array([[[0, 1], [1, 1000]]], dtype=np.uint16)
     assert out.dtype == np.uint16
     np.testing.assert_array_equal(out, expected)
 
@@ -361,5 +403,6 @@ def test_read_raster_uses_product_id_processing_baseline_before_item_name(
     ).get_chw_array()
 
     expected = np.clip(raw, 1000, None) - 1000
+    expected[(expected == 0) & (raw > 0)] = 1
     assert out.dtype == np.uint16
     np.testing.assert_array_equal(out, expected)

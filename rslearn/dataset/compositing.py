@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -12,6 +11,7 @@ import numpy.typing as npt
 from rasterio.enums import Resampling
 
 from rslearn.config import CompositingMethod
+from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.array import nodata_eq
 from rslearn.utils.geometry import PixelBounds, Projection
@@ -27,6 +27,14 @@ from .tile_utils import (
 if TYPE_CHECKING:
     from rslearn.data_sources.data_source import ItemType
 
+logger = get_logger(__name__)
+
+_NODATA_REQUIRED_MSG = (
+    "{name} compositing requires explicit nodata values. "
+    "Set nodata_value in BandSetConfig or use a data source that "
+    "provides nodata metadata."
+)
+
 
 class Compositor(ABC):
     """Abstract base for compositing methods.
@@ -39,7 +47,7 @@ class Compositor(ABC):
     def build_composite(
         self,
         group: list[ItemType],
-        nodata_vals: Sequence[int | float],
+        nodata_val: int | float | None,
         bands: list[str],
         bounds: PixelBounds,
         band_dtype: npt.DTypeLike,
@@ -53,7 +61,7 @@ class Compositor(ABC):
 
         Args:
             group: list of items to composite together.
-            nodata_vals: per-band nodata values.
+            nodata_val: scalar nodata value for the band set, or None.
             bands: band names to include in the composite.
             bounds: pixel bounds for the spatial extent.
             band_dtype: numpy dtype for the output.
@@ -75,7 +83,7 @@ class FirstValidCompositor(Compositor):
     def build_composite(
         self,
         group: list[ItemType],
-        nodata_vals: Sequence[int | float],
+        nodata_val: int | float | None,
         bands: list[str],
         bounds: PixelBounds,
         band_dtype: npt.DTypeLike,
@@ -86,6 +94,19 @@ class FirstValidCompositor(Compositor):
         request_time_range: tuple[datetime, datetime] | None = None,
     ) -> RasterArray:
         """Build a first-valid composite."""
+        # When the source has no declared nodata, fall back to 0 for the
+        # first-valid merge logic.  The output metadata will still reflect
+        # the *original* nodata_val (None -> no nodata tag on the file).
+        effective_nodata = nodata_val
+        if effective_nodata is None:
+            logger.warning(
+                "No nodata value available for FIRST_VALID compositing; "
+                "defaulting to 0 for merge logic. Set nodata_value in "
+                "BandSetConfig or use a data source with nodata metadata "
+                "to avoid this warning."
+            )
+            effective_nodata = 0
+
         dst: RasterArray | None = None
         for item in group:
             dst = read_raster_window_from_tiles(
@@ -94,7 +115,7 @@ class FirstValidCompositor(Compositor):
                 bands=bands,
                 projection=projection,
                 bounds=bounds,
-                nodata_vals=nodata_vals,
+                nodata_val=effective_nodata,
                 band_dtype=band_dtype,
                 remapper=remapper,
                 resampling=resampling_method,
@@ -104,14 +125,12 @@ class FirstValidCompositor(Compositor):
         if dst is None:
             height = bounds[3] - bounds[1]
             width = bounds[2] - bounds[0]
-            arr = np.empty((len(bands), 1, height, width), dtype=band_dtype)
-            for idx, nodata_val in enumerate(nodata_vals):
-                arr[idx, :, :, :] = nodata_val
-            dst = RasterArray(
-                array=arr,
-                metadata=RasterMetadata(nodata_values=tuple(nodata_vals)),
+            arr = np.full(
+                (len(bands), 1, height, width), effective_nodata, dtype=band_dtype
             )
+            dst = RasterArray(array=arr)
 
+        dst.metadata.nodata_value = nodata_val
         return dst
 
 
@@ -121,7 +140,7 @@ class MeanCompositor(Compositor):
     def build_composite(
         self,
         group: list[ItemType],
-        nodata_vals: Sequence[int | float],
+        nodata_val: int | float | None,
         bands: list[str],
         bounds: PixelBounds,
         band_dtype: npt.DTypeLike,
@@ -132,13 +151,15 @@ class MeanCompositor(Compositor):
         request_time_range: tuple[datetime, datetime] | None = None,
     ) -> RasterArray:
         """Build a mean composite."""
+        if nodata_val is None:
+            raise ValueError(_NODATA_REQUIRED_MSG.format(name="MEAN"))
         rasters = read_raster_windows(
             group=group,
             bands=bands,
             tile_store=tile_store,
             projection=projection,
             bounds=bounds,
-            nodata_vals=nodata_vals,
+            nodata_val=nodata_val,
             band_dtype=band_dtype,
             remapper=remapper,
             resampling_method=resampling_method,
@@ -153,12 +174,11 @@ class MeanCompositor(Compositor):
                 )
 
         stacked_arrays = np.stack([r.array for r in rasters], axis=0)
-        masked_data = mask_stacked_rasters(stacked_arrays, nodata_vals)
+        masked_data = mask_stacked_rasters(stacked_arrays, nodata_val)
         mean_result = np.ma.mean(masked_data, axis=0)
 
-        fill_vals = np.array(nodata_vals).reshape(-1, 1, 1, 1)
-        cthw = np.ma.filled(mean_result, fill_value=fill_vals).astype(band_dtype)
-        metadata = RasterMetadata(nodata_values=tuple(nodata_vals))
+        cthw = np.ma.filled(mean_result, fill_value=nodata_val).astype(band_dtype)
+        metadata = RasterMetadata(nodata_value=nodata_val)
         return RasterArray(
             array=cthw, timestamps=rasters[0].timestamps, metadata=metadata
         )
@@ -170,7 +190,7 @@ class MedianCompositor(Compositor):
     def build_composite(
         self,
         group: list[ItemType],
-        nodata_vals: Sequence[int | float],
+        nodata_val: int | float | None,
         bands: list[str],
         bounds: PixelBounds,
         band_dtype: npt.DTypeLike,
@@ -181,13 +201,15 @@ class MedianCompositor(Compositor):
         request_time_range: tuple[datetime, datetime] | None = None,
     ) -> RasterArray:
         """Build a median composite."""
+        if nodata_val is None:
+            raise ValueError(_NODATA_REQUIRED_MSG.format(name="MEDIAN"))
         rasters = read_raster_windows(
             group=group,
             bands=bands,
             tile_store=tile_store,
             projection=projection,
             bounds=bounds,
-            nodata_vals=nodata_vals,
+            nodata_val=nodata_val,
             band_dtype=band_dtype,
             remapper=remapper,
             resampling_method=resampling_method,
@@ -202,12 +224,11 @@ class MedianCompositor(Compositor):
                 )
 
         stacked_arrays = np.stack([r.array for r in rasters], axis=0)
-        masked_data = mask_stacked_rasters(stacked_arrays, nodata_vals)
+        masked_data = mask_stacked_rasters(stacked_arrays, nodata_val)
         median_result = np.ma.median(masked_data, axis=0)
 
-        fill_vals = np.array(nodata_vals).reshape(-1, 1, 1, 1)
-        cthw = np.ma.filled(median_result, fill_value=fill_vals).astype(band_dtype)
-        metadata = RasterMetadata(nodata_values=tuple(nodata_vals))
+        cthw = np.ma.filled(median_result, fill_value=nodata_val).astype(band_dtype)
+        metadata = RasterMetadata(nodata_value=nodata_val)
         return RasterArray(
             array=cthw, timestamps=rasters[0].timestamps, metadata=metadata
         )
@@ -219,7 +240,7 @@ class SpatialMosaicTemporalStackCompositor(Compositor):
     def build_composite(
         self,
         group: list[ItemType],
-        nodata_vals: Sequence[int | float],
+        nodata_val: int | float | None,
         bands: list[str],
         bounds: PixelBounds,
         band_dtype: npt.DTypeLike,
@@ -230,6 +251,10 @@ class SpatialMosaicTemporalStackCompositor(Compositor):
         request_time_range: tuple[datetime, datetime] | None = None,
     ) -> RasterArray:
         """Build a spatial-mosaic temporal-stack composite."""
+        if nodata_val is None:
+            raise ValueError(
+                _NODATA_REQUIRED_MSG.format(name="SPATIAL_MOSAIC_TEMPORAL_STACK")
+            )
         height = bounds[3] - bounds[1]
         width = bounds[2] - bounds[0]
 
@@ -239,7 +264,7 @@ class SpatialMosaicTemporalStackCompositor(Compositor):
             tile_store=tile_store,
             projection=projection,
             bounds=bounds,
-            nodata_vals=nodata_vals,
+            nodata_val=nodata_val,
             band_dtype=band_dtype,
             remapper=remapper,
             resampling_method=resampling_method,
@@ -268,7 +293,7 @@ class SpatialMosaicTemporalStackCompositor(Compositor):
                     RasterArray(
                         array=raster.array[:, keep, :, :],
                         timestamps=[raster.timestamps[i] for i in keep],
-                        metadata=RasterMetadata(nodata_values=tuple(nodata_vals)),
+                        metadata=RasterMetadata(nodata_value=nodata_val),
                     )
                 )
             rasters = clipped
@@ -289,10 +314,9 @@ class SpatialMosaicTemporalStackCompositor(Compositor):
         ts_to_idx = {tr: idx for idx, tr in enumerate(sorted_timestamps)}
         num_timesteps = len(sorted_timestamps)
 
-        output = np.empty((len(bands), num_timesteps, height, width), dtype=band_dtype)
-        for band_idx, nv in enumerate(nodata_vals):
-            output[band_idx, :, :, :] = nv
-        nodata_arr = np.array(nodata_vals, dtype=band_dtype).reshape(-1, 1, 1, 1)
+        output = np.full(
+            (len(bands), num_timesteps, height, width), nodata_val, dtype=band_dtype
+        )
 
         for raster in rasters:
             assert raster.timestamps is not None
@@ -300,10 +324,10 @@ class SpatialMosaicTemporalStackCompositor(Compositor):
             dst_slice = output[:, out_idxs, :, :]
             src_slice = raster.array
 
-            mask = nodata_eq(dst_slice, nodata_arr).min(axis=0)
+            mask = nodata_eq(dst_slice, nodata_val).min(axis=0)
             output[:, out_idxs, :, :] = np.where(mask[np.newaxis], src_slice, dst_slice)
 
-        metadata = RasterMetadata(nodata_values=tuple(nodata_vals))
+        metadata = RasterMetadata(nodata_value=nodata_val)
         return RasterArray(
             array=output, timestamps=sorted_timestamps, metadata=metadata
         )
@@ -331,7 +355,7 @@ class _TemporalReducerCompositor(Compositor):
     def build_composite(
         self,
         group: list[ItemType],
-        nodata_vals: Sequence[int | float],
+        nodata_val: int | float | None,
         bands: list[str],
         bounds: PixelBounds,
         band_dtype: npt.DTypeLike,
@@ -342,9 +366,11 @@ class _TemporalReducerCompositor(Compositor):
         request_time_range: tuple[datetime, datetime] | None = None,
     ) -> RasterArray:
         """Build a temporal-stack then reduce along T."""
+        if nodata_val is None:
+            raise ValueError(_NODATA_REQUIRED_MSG.format(name="temporal reducer"))
         stacked = SpatialMosaicTemporalStackCompositor().build_composite(
             group=group,
-            nodata_vals=nodata_vals,
+            nodata_val=nodata_val,
             bands=bands,
             bounds=bounds,
             band_dtype=band_dtype,
@@ -355,14 +381,11 @@ class _TemporalReducerCompositor(Compositor):
             request_time_range=request_time_range,
         )
 
-        nodata_arr = np.array(nodata_vals, dtype=band_dtype).reshape(-1, 1, 1, 1)
         masked_data = np.ma.masked_where(
-            nodata_eq(stacked.array, nodata_arr), stacked.array
+            nodata_eq(stacked.array, nodata_val), stacked.array
         )
         reduced = self.reduce(masked_data)
-
-        fill_vals = np.array(nodata_vals, dtype=band_dtype).reshape(-1, 1, 1)
-        chw = np.ma.filled(reduced, fill_value=fill_vals).astype(band_dtype)
+        chw = np.ma.filled(reduced, fill_value=nodata_val).astype(band_dtype)
 
         output_time_range = request_time_range
         if output_time_range is None and stacked.timestamps:

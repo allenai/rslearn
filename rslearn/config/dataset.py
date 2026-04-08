@@ -25,6 +25,7 @@ from rasterio.enums import Resampling
 from upath import UPath
 
 from rslearn.log_utils import get_logger
+from rslearn.utils.array import unique_nodata_value
 from rslearn.utils.geometry import PixelBounds, Projection, ResolutionFactor
 from rslearn.utils.raster_format import RasterFormat
 from rslearn.utils.vector_format import VectorFormat
@@ -179,11 +180,16 @@ class BandSetConfig(BaseModel):
         description="Optional list of names for the different possible values of each band.",
     )
 
-    # Optional list of nodata values for this band set. This is used during
-    # materialization when creating mosaics, to determine which parts of the source
-    # images should be copied.
+    # Deprecated: use nodata_value instead. Will be removed after 2026-08-01.
     nodata_vals: tuple[int | float, ...] | None = Field(
-        default=None, description="Optional nodata value for each band."
+        default=None,
+        description="Deprecated: per-band nodata tuple. Use nodata_value instead.",
+    )
+
+    nodata_value: int | float | None = Field(
+        default=None,
+        description="Optional nodata value for this band set. Used during materialization "
+        "to determine which pixels are invalid when creating mosaics.",
     )
 
     # Optional explicit spatial dimensions for the materialized output. When set,
@@ -215,6 +221,20 @@ class BandSetConfig(BaseModel):
 
         if self.spatial_size is not None and any(v <= 0 for v in self.spatial_size):
             raise ValueError("spatial_size values must be positive integers")
+
+        if self.nodata_vals is not None:
+            if self.nodata_value is not None:
+                raise ValueError(
+                    "Cannot set both nodata_vals and nodata_value. "
+                    "Use nodata_value only (nodata_vals is deprecated)."
+                )
+            warnings.warn(
+                "nodata_vals is deprecated and will be removed after 2026-08-01. "
+                "Use nodata_value (a single scalar) instead.",
+                FutureWarning,
+            )
+            if len(self.nodata_vals) > 0:
+                self.nodata_value = unique_nodata_value(self.nodata_vals)
 
         return self
 
@@ -388,21 +408,18 @@ class QueryConfig(BaseModel):
                 "time_mode is deprecated and will be removed in a future version. "
                 "Remove it from your config (WITHIN is the only supported behavior).",
                 FutureWarning,
-                stacklevel=6,
             )
         if self.space_mode == SpaceMode.PER_PERIOD_MOSAIC:
             warnings.warn(
                 "SpaceMode.PER_PERIOD_MOSAIC is deprecated and will be removed after "
                 "2026-05-01. Use SpaceMode.MOSAIC with period_duration instead.",
                 FutureWarning,
-                stacklevel=6,
             )
         if "per_period_mosaic_reverse_time_order" in self.model_fields_set:
             warnings.warn(
                 "per_period_mosaic_reverse_time_order is deprecated and will be "
                 "removed after 2026-05-01.",
                 FutureWarning,
-                stacklevel=6,
             )
         return self
 

@@ -25,7 +25,7 @@ from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils import PixelBounds, Projection, STGeometry, get_global_raster_bounds
 from rslearn.utils.array import nodata_eq
 from rslearn.utils.geometry import get_global_geometry
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 from rslearn.utils.raster_format import get_transform_from_projection_and_bounds
 
 from .data_source import DataSource, DataSourceContext, Item
@@ -164,6 +164,12 @@ class SoilGrids(DataSource, TileStore):
         """Return the band sets available for this coverage."""
         return [self.band_names]
 
+    def get_raster_metadata(
+        self, layer_name: str, item: Item, bands: list[str]
+    ) -> RasterMetadata:
+        """Return metadata with the SoilGrids nodata value."""
+        return RasterMetadata(nodata_value=SOILGRIDS_NODATA_VALUE)
+
     def get_raster_bounds(
         self, layer_name: str, item: Item, bands: list[str], projection: Projection
     ) -> PixelBounds:
@@ -282,9 +288,7 @@ class SoilGrids(DataSource, TileStore):
                 offset = float(src.offsets[0]) if src.offsets else 0.0
 
                 if src_nodata is not None:
-                    nodata_f = float(src_nodata)
-                    nodata_arr = np.array([nodata_f], dtype=np.float32)
-                    valid_mask = ~nodata_eq(src_array, nodata_arr)
+                    valid_mask = ~nodata_eq(src_array, src_nodata)
                     src_array[valid_mask] = src_array[valid_mask] * scale + offset
                     dst_nodata = float(src_nodata)
                     src_nodata_val = dst_nodata
@@ -314,7 +318,12 @@ class SoilGrids(DataSource, TileStore):
                     dst_nodata=dst_nodata,
                     resampling=resampling,
                 )
-                return RasterArray(chw_array=dst, time_range=item.geometry.time_range)
+                raster_metadata = RasterMetadata(nodata_value=dst_nodata)
+                return RasterArray(
+                    chw_array=dst,
+                    time_range=item.geometry.time_range,
+                    metadata=raster_metadata,
+                )
 
     def materialize(
         self,
