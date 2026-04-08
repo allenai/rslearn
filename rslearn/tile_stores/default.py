@@ -260,8 +260,6 @@ class DefaultTileStore(TileStore):
                 profile = src.profile
                 array = src.read()
                 nodata = src.nodata
-                if nodata is None:
-                    nodata = profile.get("nodata")
                 scales = src.scales
                 offsets = src.offsets
 
