@@ -11,7 +11,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from urllib.parse import quote
 from zipfile import ZipFile
@@ -669,7 +669,7 @@ class Copernicus(DataSource):
                 self._process_product_zip(tile_store, item, local_zip_fname)
 
 
-class Sentinel2ProductType(str, Enum):
+class Sentinel2ProductType(StrEnum):
     """The Sentinel-2 product type."""
 
     L1C = "S2MSI1C"
@@ -869,19 +869,19 @@ class Sentinel2(Copernicus):
                         )
 
 
-class Sentinel1ProductType(str, Enum):
+class Sentinel1ProductType(StrEnum):
     """The Sentinel-1 product type."""
 
     IW_GRDH = "IW_GRDH_1S"
 
 
-class Sentinel1Polarisation(str, Enum):
+class Sentinel1Polarisation(StrEnum):
     """The Sentinel-1 polarisation."""
 
     VV_VH = "VV&VH"
 
 
-class Sentinel1OrbitDirection(str, Enum):
+class Sentinel1OrbitDirection(StrEnum):
     """The Sentinel-1 orbit direction."""
 
     ASCENDING = "ASCENDING"

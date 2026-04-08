@@ -3,7 +3,7 @@
 import shutil
 import tempfile
 import urllib.request
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import torch
@@ -22,14 +22,14 @@ from .use_croma import PretrainedCROMA
 logger = get_logger(__name__)
 
 
-class CromaSize(str, Enum):
+class CromaSize(StrEnum):
     """CROMA model size."""
 
     BASE = "base"
     LARGE = "large"
 
 
-class CromaModality(str, Enum):
+class CromaModality(StrEnum):
     """CROMA model configured input modalities."""
 
     BOTH = "both"
