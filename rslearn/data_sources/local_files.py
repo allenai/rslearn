@@ -8,6 +8,7 @@ import fiona
 import shapely
 import shapely.geometry
 from rasterio.crs import CRS
+from rasterio.transform import from_gcps
 from upath import UPath
 
 import rslearn.data_sources.utils
@@ -217,18 +218,42 @@ class RasterImporter(Importer):
             # We assume files are readable with rasterio.
             fname = join_upath(src_dir, spec.fnames[0])
             with open_rasterio_upath_reader(fname) as src:
-                crs = src.crs
-                left = src.transform.c
-                top = src.transform.f
-                # Resolutions in projection units per pixel.
-                x_resolution = src.transform.a
-                y_resolution = src.transform.e
-                start = (int(left / x_resolution), int(top / y_resolution))
-                shp = shapely.box(
-                    start[0], start[1], start[0] + src.width, start[1] + src.height
-                )
-                projection = Projection(crs, x_resolution, y_resolution)
-                geometry = STGeometry(projection, shp, None)
+                gcps, gcp_crs = src.gcps
+                if src.crs is None and len(gcps) > 0:
+                    # Fit an affine transform from the GCPs and project the
+                    # image corners to get image's geographic extent.
+                    transform = from_gcps(gcps)
+                    corners = [
+                        transform * (0, 0),
+                        transform * (src.width, 0),
+                        transform * (src.width, src.height),
+                        transform * (0, src.height),
+                    ]
+                    xs = [c[0] for c in corners]
+                    ys = [c[1] for c in corners]
+                    shp = shapely.box(min(xs), min(ys), max(xs), max(ys))
+                    # We use 1 unit/pixel projection so it is compatible with
+                    # the shape above. The actual resolution may differ, but
+                    # it is okay since this geometry is only for item-window
+                    # matching. Re-projection will be handled by the tile
+                    # store, e.g. DefaultTileStore applies WarpedVRT.
+                    projection = Projection(gcp_crs, 1, 1)
+                    geometry = STGeometry(projection, shp, None)
+                else:
+                    crs = src.crs
+                    left = src.transform.c
+                    top = src.transform.f
+                    x_resolution = src.transform.a
+                    y_resolution = src.transform.e
+                    start = (int(left / x_resolution), int(top / y_resolution))
+                    shp = shapely.box(
+                        start[0],
+                        start[1],
+                        start[0] + src.width,
+                        start[1] + src.height,
+                    )
+                    projection = Projection(crs, x_resolution, y_resolution)
+                    geometry = STGeometry(projection, shp, None)
 
             if spec.name:
                 item_name = spec.name
