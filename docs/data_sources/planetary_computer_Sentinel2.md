@@ -43,13 +43,14 @@ These uint16 bands are available:
 
 Note that B10 is not present in L2A.
 
-The following uint8 bands are also available from the TCI (visual) product. These are
-processed from B04, B03, and B02:
+The following uint8 bands are also available:
 
+- SCL (scene classification layer)
 - R
 - G
 - B
 
+R/G/B are from the TCI (visual) product and are processed from B04, B03, and B02.
 
 ### Example
 
@@ -119,9 +120,50 @@ configure a custom `compositing_method` on the raster layer:
 }
 ```
 
+When using this compositor with `rslearn.data_sources.planetary_computer.Sentinel2`,
+rslearn automatically includes the configured scoring bands (`red_band`,
+`green_band`, `nir_band`) for materialization, even if they are not listed in
+`band_sets`.
+
 OmniCloudMask scoring runs during materialization on each multi-item group and then
 FIRST_VALID is applied in the ranked order. See
 [`DataSourceConfig`](../dataset_config/DataSourceConfig.md) for more details.
+
+### Sentinel-2 SCL Ranking
+
+To rank overlapping items using Sentinel-2 SCL classes, configure:
+
+```jsonc
+{
+  "layers": {
+    "sentinel2": {
+      "type": "raster",
+      "band_sets": [{"bands": ["R", "G", "B"], "dtype": "uint8"}],
+      "data_source": {
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+        "init_args": {
+          "harmonize": true,
+          "query": {"eo:cloud_cover": {"lt": 80}}
+        },
+        "ingest": false,
+        "query_config": {
+          "max_matches": 1,
+          "space_mode": "MOSAIC"
+        }
+      },
+      "compositing_method": {
+        "class_path": "rslearn.dataset.sentinel2_scl.Sentinel2SCLFirstValid",
+        "init_args": {
+          "scl_band": "SCL"
+        }
+      }
+    }
+  }
+}
+```
+
+With this compositor, rslearn automatically includes `scl_band` for
+materialization, even if it is not listed in `band_sets`.
 
 Save this to a dataset folder like `/path/to/dataset/config.json`. Then we can create a
 sample window, and then run prepare and materialize (skipping ingest since we disabled
