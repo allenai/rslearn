@@ -236,8 +236,6 @@ def test_chelsa_daily_ingest_preserves_nodata_and_temporal_reducers_ignore_it(
             nodata=65535,
         ) as dst:
             dst.write(arr)
-            dst.scales = (0.1,)
-            dst.offsets = (0.0,)
 
     data_source = CHELSADaily(
         band_names=["tas"],
@@ -271,8 +269,6 @@ def test_chelsa_daily_ingest_preserves_nodata_and_temporal_reducers_ignore_it(
     stored_path = tile_store._get_raster_fname("chelsa", item2.name, ["tas"])
     with rasterio.open(stored_path) as stored:
         assert stored.nodata == 65535
-        assert stored.scales == pytest.approx((0.1,))
-        assert stored.offsets == pytest.approx((0.0,))
 
     # Read with a misaligned target grid so bilinear resampling is exercised.
     # With nodata metadata preserved, nodata pixels are excluded and do not

@@ -77,7 +77,10 @@ class DefaultTileStore(TileStore):
                 the dataset path if it does not contain a protocol string. See
                 rslearn.utils.fsspec.join_upath.
             convert_rasters_to_cogs: whether to re-encode all raster files to tiled
-                GeoTIFFs.
+                GeoTIFFs. Re-encoding will also handle rasters that specify ground
+                control points instead of a CRS and transform; for such rasters, always
+                use convert_rasters_to_cogs since materialization cannot handle those
+                rasters.
             tile_size: if converting to COGs, the tile size to use.
             geotiff_options: other options to pass to rasterio.open (for writes).
             vector_format: format to use for storing vector data.
@@ -257,21 +260,15 @@ class DefaultTileStore(TileStore):
 
         if self.convert_rasters_to_cogs:
             with open_rasterio_upath_reader(fname) as src:
-                profile = src.profile
-                array = src.read()
                 nodata = src.nodata
-                if nodata is None:
-                    nodata = profile.get("nodata")
-                scales = src.scales
-                offsets = src.offsets
 
                 # If raster specifies ground control points, use WarpedVRT to get it in
                 # an appropriate projection.
                 # Previously we used rasterio.transform.from_gcps(gcps) but I think the
                 # problem is that it computes one transform for the entire raster but
                 # the raster might actually need warping.
-                if profile["crs"] is None and src.gcps:
-                    gcps, gcp_crs = src.gcps
+                gcps, gcp_crs = src.gcps
+                if src.crs is None and len(gcps) > 0:
                     # Use the first ground control point to pick a UTM/UPS projection.
                     first_gcp_orig = STGeometry(
                         Projection(gcp_crs, 1, 1),
@@ -287,8 +284,9 @@ class DefaultTileStore(TileStore):
                         transform = vrt.transform
 
                 else:
-                    crs = profile["crs"]
-                    transform = profile["transform"]
+                    array = src.read()
+                    crs = src.crs
+                    transform = src.transform
 
             output_profile = {
                 "driver": "GTiff",
@@ -313,10 +311,6 @@ class DefaultTileStore(TileStore):
                 raster_dir / "geotiff.tif", **output_profile
             ) as dst:
                 dst.write(array)
-                if scales is not None and len(scales) == dst.count:
-                    dst.scales = scales
-                if offsets is not None and len(offsets) == dst.count:
-                    dst.offsets = offsets
 
         else:
             # Just copy the file directly.

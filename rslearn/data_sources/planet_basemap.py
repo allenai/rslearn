@@ -79,7 +79,7 @@ class PlanetBasemap(DataSource):
             series_id: the series of mosaics to use.
             bands: list of band names to use.
             api_key: optional Planet API key (it can also be provided via PL_API_KEY
-                environmnet variable).
+                environment variable).
             context: the data source context
         """
         self.series_id = series_id
