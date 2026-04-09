@@ -281,7 +281,6 @@ def run(
     port: int = 8000,
     host: str = "0.0.0.0",
     groups: list[str] | None = None,
-    options_split: str | None = None,
 ) -> None:
     """Run the visualization server.
 
@@ -302,8 +301,6 @@ def run(
         host: Host to bind to
         groups: Optional list of window group names to load (e.g. ["predict"]).
             If not set, all groups under windows/ are loaded.
-        options_split: If set, only windows whose ``options["split"]`` equals this
-            string (e.g. ``"val"`` or ``"train"``), as stored by dataset tooling.
     """
     dataset_path = UPath(dataset_path)
     dataset = Dataset(dataset_path)
@@ -375,17 +372,6 @@ def run(
 
     logger.info(f"Loading all windows from dataset {dataset_path}")
     windows = dataset.load_windows(groups=groups, workers=128, show_progress=True)
-    if options_split is not None:
-        before_ct = len(windows)
-        windows = [
-            w for w in windows if (w.options or {}).get("split") == options_split
-        ]
-        logger.info(
-            "Filtered by options['split']==%r: %d -> %d windows",
-            options_split,
-            before_ct,
-            len(windows),
-        )
     logger.info(f"Loaded {len(windows)} windows from dataset")
     logger.info(f"Raster groups: {raster_groups}")
     logger.info(f"Vector text groups: {vector_text_groups}")
@@ -537,17 +523,6 @@ def main() -> None:
         default=None,
         help="Window group(s) to load (e.g. predict). If not set, all groups under windows/ are loaded.",
     )
-    parser.add_argument(
-        "--split",
-        type=str,
-        default=None,
-        dest="options_split",
-        metavar="SPLIT",
-        help=(
-            "Only show windows with this value in window metadata options['split'] "
-            '(e.g. "val" or "train"). Matches tags written e.g. by split scripts.'
-        ),
-    )
 
     args = parser.parse_args()
 
@@ -575,7 +550,6 @@ def main() -> None:
         port=args.port,
         host=args.host,
         groups=args.groups,
-        options_split=args.options_split,
     )
 
 
