@@ -41,13 +41,7 @@ class BestLastCheckpoint(Callback):
         self._best_value = state_dict.get("best_value")
 
     def on_validation_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Save last.ckpt always, and best.ckpt when the monitored metric improves.
-
-        All ranks must call ``trainer.save_checkpoint`` under DDP/FSDP: Lightning ends
-        each save with a process-group barrier and may run distributed collectives while
-        building the checkpoint. Running this callback only on rank 0 deadlocks the
-        other ranks (NCCL collective timeout).
-        """
+        """Save last.ckpt always, and best.ckpt when the monitored metric improves."""
         if trainer.sanity_checking:
             return
 
@@ -66,6 +60,9 @@ class BestLastCheckpoint(Callback):
             self._best_value = current_val
             best_path = os.path.join(self.dirpath, "best.ckpt")
             trainer.save_checkpoint(best_path)
+
+            # Previously this entire function was decorated with @rank_zero_only, but this resulted
+            # in NCCL timeout because all ranks must call trainer.save_checkpoint. Log only on rank 0.
             if trainer.is_global_zero:
                 logger.info(
                     "saved best checkpoint to %s (%s=%s)",
