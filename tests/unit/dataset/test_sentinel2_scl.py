@@ -157,3 +157,53 @@ class TestSentinel2SCLFirstValid:
                 resampling_method=Resampling.bilinear,
                 remapper=None,
             )
+
+    def test_all_items_dropped_returns_all_nodata(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """If all scored items are dropped, FIRST_VALID should return nodata image."""
+        store = DefaultTileStore()
+        store.set_dataset_path(UPath(tmp_path))
+
+        item_a = _make_item("a")
+        item_b = _make_item("b")
+        data_a = np.stack(
+            [
+                np.full((4, 4), 10, dtype=np.uint16),
+                np.full((4, 4), 4, dtype=np.uint16),
+            ],
+            axis=0,
+        )
+        data_b = np.stack(
+            [
+                np.full((4, 4), 20, dtype=np.uint16),
+                np.full((4, 4), 4, dtype=np.uint16),
+            ],
+            axis=0,
+        )
+        self._write_items(store, [item_a, item_b], [data_a, data_b])
+
+        compositor = Sentinel2SCLFirstValid(scl_band="SCL")
+
+        def drop_item(*args: object, **kwargs: object) -> float | None:
+            return None
+
+        original_score_item = compositor._score_item
+        compositor._score_item = drop_item  # type: ignore[method-assign]
+        try:
+            result = compositor.build_composite(
+                group=[item_a, item_b],
+                nodata_val=255,
+                bands=OUTPUT_BANDS,
+                bounds=BOUNDS,
+                band_dtype=np.uint16,
+                tile_store=TileStoreWithLayer(store, LAYER_NAME),
+                projection=PROJECTION,
+                resampling_method=Resampling.bilinear,
+                remapper=None,
+            )
+        finally:
+            compositor._score_item = original_score_item  # type: ignore[method-assign]
+
+        assert np.all(result.get_chw_array() == 255)
+        assert result.metadata.nodata_value == 255
