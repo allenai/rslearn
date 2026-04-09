@@ -158,9 +158,7 @@ class TestSentinel2SCLFirstValid:
                 remapper=None,
             )
 
-    def test_all_items_dropped_returns_all_nodata(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_all_items_dropped_returns_all_nodata(self, tmp_path: pathlib.Path) -> None:
         """If all scored items are dropped, FIRST_VALID should return nodata image."""
         store = DefaultTileStore()
         store.set_dataset_path(UPath(tmp_path))
