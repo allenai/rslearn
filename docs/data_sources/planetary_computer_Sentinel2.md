@@ -43,12 +43,14 @@ These uint16 bands are available:
 
 Note that B10 is not present in L2A.
 
-The following uint8 bands are also available from the TCI (visual) product. These are
-processed from B04, B03, and B02:
+The following uint8 bands are also available:
 
+- SCL (scene classification layer)
 - R
 - G
 - B
+
+R/G/B are from the TCI (visual) product. These are processed from B04, B03, and B02.
 
 
 ### Example
@@ -127,6 +129,10 @@ Requires `omnicloudmask` (`pip install .[extra]` in this repo). See
 [`OmniCloudMaskFirstValid`](../compositors/omni_cloud_mask_OmniCloudMaskFirstValid.md)
 for details.
 
+With this compositor, rslearn automatically includes the configured scoring bands
+(`red_band`, `green_band`, `nir_band`) for materialization, even if they are not
+listed in `band_sets`.
+
 #### Sentinel-2 SCL
 
 To rank with Sentinel-2 Scene Classification Layer (SCL) classes, configure:
@@ -163,6 +169,9 @@ To rank with Sentinel-2 Scene Classification Layer (SCL) classes, configure:
 See
 [`Sentinel2SCLFirstValid`](../compositors/sentinel2_scl_Sentinel2SCLFirstValid.md)
 for scoring details and available weights.
+
+With this compositor, rslearn automatically includes `scl_band` for materialization,
+even if it is not listed in `band_sets`.
 
 Save this to a dataset folder like `/path/to/dataset/config.json`. Then we can create a
 sample window, and then run prepare and materialize (skipping ingest since we disabled

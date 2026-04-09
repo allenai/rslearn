@@ -76,6 +76,8 @@ class Sentinel2SCLFirstValid(Compositor):
             when no data is available at all for the requested window.
         """
         scoring_bands = [self.scl_band]
+        # Sentinel-2 SCL class 0 means "no data". This scoring read interprets SCL
+        # classes directly, so we intentionally hardcode nodata to 0 here.
         nodata_val = 0
 
         needed_band_sets_and_indexes = get_needed_band_sets_and_indexes(
