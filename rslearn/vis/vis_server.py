@@ -378,9 +378,7 @@ def run(
     if options_split is not None:
         before_ct = len(windows)
         windows = [
-            w
-            for w in windows
-            if (w.options or {}).get("split") == options_split
+            w for w in windows if (w.options or {}).get("split") == options_split
         ]
         logger.info(
             "Filtered by options['split']==%r: %d -> %d windows",
