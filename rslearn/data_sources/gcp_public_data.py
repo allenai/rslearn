@@ -26,7 +26,7 @@ from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.fsspec import join_upath, open_atomic
 from rslearn.utils.geometry import STGeometry, flatten_shape, split_at_antimeridian
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 from .copernicus import get_harmonize_callback, get_sentinel2_tiles
@@ -885,8 +885,10 @@ class Sentinel2(DataSource):
                         # values, and pass modified array directly to the TileStore.
                         with rasterio.open(fname) as src:
                             array = src.read()
+                            src_nodata = src.nodata
                             projection, bounds = get_raster_projection_and_bounds(src)
                         array = harmonize_callback(array)
+                        raster_metadata = RasterMetadata(nodata_value=src_nodata)
                         tile_store.write_raster(
                             item,
                             band_names,
@@ -895,6 +897,7 @@ class Sentinel2(DataSource):
                             RasterArray(
                                 chw_array=array,
                                 time_range=item.geometry.time_range,
+                                metadata=raster_metadata,
                             ),
                         )
 

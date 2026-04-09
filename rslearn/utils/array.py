@@ -1,11 +1,56 @@
 """Array util functions."""
 
+import math
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import numpy.typing as npt
 
 if TYPE_CHECKING:
     import torch
+
+
+def nodata_eq(
+    array: npt.NDArray[np.generic],
+    nodata_value: int | float,
+) -> npt.NDArray[np.bool_]:
+    """NaN-aware element-wise equality between *array* and a nodata sentinel.
+
+    Equivalent to ``array == nodata_value`` but also matches NaN positions when
+    the nodata sentinel is NaN.
+
+    Args:
+        array: the data array (any shape).
+        nodata_value: scalar nodata sentinel.
+
+    Returns:
+        Boolean mask with the same shape as *array*; True where the value
+        equals (or is NaN-matching) the nodata sentinel.
+    """
+    if isinstance(nodata_value, float) and math.isnan(nodata_value):
+        return np.isnan(array)
+    return array == nodata_value
+
+
+def unique_nodata_value(values: Sequence[int | float]) -> int | float | None:
+    """Return the single unique value from *values*, or None if empty.
+
+    NaN-aware: all NaN entries are treated as equal.
+
+    Raises:
+        ValueError: if *values* contains more than one distinct value.
+    """
+    unique: list[int | float] = []
+    for v in values:
+        is_nan = isinstance(v, float) and math.isnan(v)
+        if not any((math.isnan(u) if is_nan else u == v) for u in unique):
+            unique.append(v)
+    if not unique:
+        return None
+    if len(unique) > 1:
+        raise ValueError(f"Expected exactly one unique nodata value, got {unique}")
+    return unique[0]
 
 
 def copy_spatial_array(

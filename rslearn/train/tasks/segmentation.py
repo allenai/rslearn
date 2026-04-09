@@ -318,7 +318,7 @@ class SegmentationHead(Predictor):
 
         Args:
             weights: weights for cross entropy loss (Tensor of size C)
-            dice_loss: weather to add dice loss to cross entropy
+            dice_loss: whether to add dice loss to cross entropy
             temperature: temperature scaling for softmax, does not affect the loss,
                 only the predictor outputs
         """
@@ -416,7 +416,7 @@ class SegmentationMetric(Metric):
         """
         super().__init__()
         self.metric = metric
-        self.pass_probablities = pass_probabilities
+        self.pass_probabilities = pass_probabilities
         self.class_idx = class_idx
         self.output_key = output_key
 
@@ -442,7 +442,7 @@ class SegmentationMetric(Metric):
         if len(preds) == 0:
             return
 
-        if not self.pass_probablities:
+        if not self.pass_probabilities:
             preds = preds.argmax(dim=1)
 
         self.metric.update(preds, labels)
