@@ -5,7 +5,6 @@ from typing import Any, Literal
 
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
-from lightning.pytorch.utilities import rank_zero_only
 
 from rslearn.log_utils import get_logger
 
@@ -41,9 +40,14 @@ class BestLastCheckpoint(Callback):
         """Restore best value from checkpoint on resume."""
         self._best_value = state_dict.get("best_value")
 
-    @rank_zero_only
     def on_validation_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Save last.ckpt always, and best.ckpt when the monitored metric improves."""
+        """Save last.ckpt always, and best.ckpt when the monitored metric improves.
+
+        All ranks must call ``trainer.save_checkpoint`` under DDP/FSDP: Lightning ends
+        each save with a process-group barrier and may run distributed collectives while
+        building the checkpoint. Running this callback only on rank 0 deadlocks the
+        other ranks (NCCL collective timeout).
+        """
         if trainer.sanity_checking:
             return
 
@@ -62,12 +66,13 @@ class BestLastCheckpoint(Callback):
             self._best_value = current_val
             best_path = os.path.join(self.dirpath, "best.ckpt")
             trainer.save_checkpoint(best_path)
-            logger.info(
-                "saved best checkpoint to %s (%s=%s)",
-                best_path,
-                self.monitor,
-                current_val,
-            )
+            if trainer.is_global_zero:
+                logger.info(
+                    "saved best checkpoint to %s (%s=%s)",
+                    best_path,
+                    self.monitor,
+                    current_val,
+                )
 
         # Save last.ckpt after best.ckpt so that auto-resuming from last.ckpt is always
         # correct.
@@ -77,7 +82,8 @@ class BestLastCheckpoint(Callback):
         #   self._best_value and won't override the checkpoint incorrectly.
         last_path = os.path.join(self.dirpath, "last.ckpt")
         trainer.save_checkpoint(last_path)
-        logger.info("saved checkpoint to %s", last_path)
+        if trainer.is_global_zero:
+            logger.info("saved checkpoint to %s", last_path)
 
 
 class ManagedBestLastCheckpoint(BestLastCheckpoint):
@@ -104,4 +110,5 @@ class ManagedBestLastCheckpoint(BestLastCheckpoint):
     ) -> None:
         """Resolve dirpath from trainer.default_root_dir."""
         self.dirpath = trainer.default_root_dir
-        logger.info("ManagedBestLastCheckpoint using dirpath=%s", self.dirpath)
+        if trainer.is_global_zero:
+            logger.info("ManagedBestLastCheckpoint using dirpath=%s", self.dirpath)
