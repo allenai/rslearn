@@ -416,7 +416,7 @@ class SegmentationMetric(Metric):
         """
         super().__init__()
         self.metric = metric
-        self.pass_probablities = pass_probabilities
+        self.pass_probabilities = pass_probabilities
         self.class_idx = class_idx
         self.output_key = output_key
 
@@ -442,7 +442,7 @@ class SegmentationMetric(Metric):
         if len(preds) == 0:
             return
 
-        if not self.pass_probablities:
+        if not self.pass_probabilities:
             preds = preds.argmax(dim=1)
 
         self.metric.update(preds, labels)
