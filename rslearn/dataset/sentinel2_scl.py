@@ -148,6 +148,9 @@ class Sentinel2SCLFirstValid(Compositor):
                     item, tile_store, projection, bounds, resampling_method
                 )
                 if score is None:
+                    # Missing image at the requested window. We skip this candidate
+                    # since we cannot score it and it likely also has no usable data
+                    # for the final FIRST_VALID compositing pass.
                     logger.debug(
                         "no data for Sentinel-2 SCL scoring of item %s", item.name
                     )
