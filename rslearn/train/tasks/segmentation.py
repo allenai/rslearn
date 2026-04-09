@@ -318,7 +318,7 @@ class SegmentationHead(Predictor):
 
         Args:
             weights: weights for cross entropy loss (Tensor of size C)
-            dice_loss: weather to add dice loss to cross entropy
+            dice_loss: whether to add dice loss to cross entropy
             temperature: temperature scaling for softmax, does not affect the loss,
                 only the predictor outputs
         """
