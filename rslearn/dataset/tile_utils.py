@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -10,8 +9,9 @@ import numpy.typing as npt
 from rasterio.enums import Resampling
 
 from rslearn.tile_stores import TileStoreWithLayer
+from rslearn.utils.array import nodata_eq
 from rslearn.utils.geometry import PixelBounds, Projection
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 
 from .remap import Remapper
 
@@ -67,7 +67,7 @@ def read_raster_window_from_tiles(
     bands: list[str],
     projection: Projection,
     bounds: PixelBounds,
-    nodata_vals: Sequence[int | float],
+    nodata_val: int | float | None,
     band_dtype: npt.DTypeLike,
     remapper: Remapper | None = None,
     resampling: Resampling = Resampling.bilinear,
@@ -76,7 +76,10 @@ def read_raster_window_from_tiles(
     """Read an item's raster data from tiles into a window-aligned RasterArray.
 
     Handles band mapping and spatial intersection internally. Uses first-valid
-    nodata logic: only overwrites pixels where all bands equal their nodata value.
+    nodata logic: only overwrites pixels where all bands equal the nodata value.
+
+    When nodata_val is None, every source pixel unconditionally overwrites the
+    destination, and the destination is initialized as zeros.
 
     Args:
         tile_store: the TileStore to read from.
@@ -84,7 +87,7 @@ def read_raster_window_from_tiles(
         bands: the requested band names (determines dst band order).
         projection: the projection of the window.
         bounds: the pixel bounds of the window.
-        nodata_vals: the nodata values for each requested band.
+        nodata_val: the scalar nodata value for the band set, or ``None``.
         band_dtype: data type for the output array.
         remapper: optional remapper to apply on the source pixel values.
         resampling: how to resample pixels if re-projection is needed.
@@ -118,18 +121,21 @@ def read_raster_window_from_tiles(
 
         if dst is None:
             num_timesteps = src.shape[1]
-            dst_arr = np.empty(
-                (
-                    len(bands),
-                    num_timesteps,
-                    bounds[3] - bounds[1],
-                    bounds[2] - bounds[0],
-                ),
-                dtype=band_dtype,
+            shape = (
+                len(bands),
+                num_timesteps,
+                bounds[3] - bounds[1],
+                bounds[2] - bounds[0],
             )
-            for idx, nodata_val in enumerate(nodata_vals):
-                dst_arr[idx, :, :, :] = nodata_val
-            dst = RasterArray(array=dst_arr, timestamps=raster_array.timestamps)
+            if nodata_val is not None:
+                dst_arr = np.full(shape, nodata_val, dtype=band_dtype)
+            else:
+                dst_arr = np.zeros(shape, dtype=band_dtype)
+            dst = RasterArray(
+                array=dst_arr,
+                timestamps=raster_array.timestamps,
+                metadata=RasterMetadata(nodata_value=nodata_val),
+            )
 
         if src.shape[1] != dst.array.shape[1]:
             raise ValueError(
@@ -151,15 +157,19 @@ def read_raster_window_from_tiles(
             dst_col : dst_col + src_sel.shape[3],
         ]  # (C, T, H_int, W_int) view
 
-        # First-valid: only overwrite pixels where all dst bands are nodata.
-        cur_nodata = np.array(
-            [nodata_vals[dst_index] for dst_index in dst_indexes], dtype=band_dtype
-        ).reshape(-1, 1, 1, 1)
-        mask = (out_crop[dst_indexes] == cur_nodata).min(axis=0)  # (T, H_int, W_int)
-
         src_typed = src_sel.astype(band_dtype)
-        for src_index, dst_index in enumerate(dst_indexes):
-            out_crop[dst_index][mask] = src_typed[src_index][mask]
+
+        if nodata_val is not None:
+            # First-valid: only overwrite pixels where all dst bands are nodata.
+            mask = nodata_eq(out_crop[dst_indexes], nodata_val).min(
+                axis=0
+            )  # (T, H_int, W_int)
+
+            for src_index, dst_index in enumerate(dst_indexes):
+                out_crop[dst_index][mask] = src_typed[src_index][mask]
+        else:
+            for src_index, dst_index in enumerate(dst_indexes):
+                out_crop[dst_index] = src_typed[src_index]
 
     return dst
 
@@ -170,7 +180,7 @@ def read_raster_windows(
     tile_store: TileStoreWithLayer,
     projection: Projection,
     bounds: PixelBounds,
-    nodata_vals: Sequence[int | float],
+    nodata_val: int | float | None,
     band_dtype: npt.DTypeLike,
     remapper: Remapper | None = None,
     resampling_method: Resampling = Resampling.bilinear,
@@ -188,7 +198,7 @@ def read_raster_windows(
         tile_store: tile store containing raster data.
         projection: target projection.
         bounds: target pixel bounds.
-        nodata_vals: nodata values for each band.
+        nodata_val: scalar nodata value for the band set, or ``None``.
         band_dtype: output data type.
         remapper: optional remapper.
         resampling_method: resampling method.
@@ -204,7 +214,7 @@ def read_raster_windows(
             bands=bands,
             projection=projection,
             bounds=bounds,
-            nodata_vals=nodata_vals,
+            nodata_val=nodata_val,
             band_dtype=band_dtype,
             remapper=remapper,
             resampling=resampling_method,
@@ -216,21 +226,18 @@ def read_raster_windows(
 
 def mask_stacked_rasters(
     stacked_rasters: npt.NDArray[np.generic],
-    nodata_vals: Sequence[int | float],
+    nodata_val: int | float,
 ) -> np.ma.MaskedArray:
-    """Mask stacked rasters -- each item's band with the corresponding nodata val.
+    """Mask stacked rasters where pixels equal the nodata value.
 
     Args:
         stacked_rasters: numpy array of shape (num_items, num_bands, T, height, width)
             containing raster values for each item in the group.
-        nodata_vals: Sequence of nodata values, one per band, used to identify invalid
-            pixels in the stacked rasters.
+        nodata_val: scalar nodata value used to identify invalid pixels.
 
     Returns:
         np.ma.MaskedArray with the same shape as `stacked_rasters`, where all
-        pixels equal to the per-band nodata value are masked.
+        pixels equal to the nodata value are masked.
     """
-    nodata_vals_array = np.array(nodata_vals).reshape(1, -1, 1, 1, 1)
-    valid_mask = stacked_rasters != nodata_vals_array
-    masked_data = np.ma.masked_where(~valid_mask, stacked_rasters)
-    return masked_data
+    is_nodata = nodata_eq(stacked_rasters, nodata_val)
+    return np.ma.masked_where(is_nodata, stacked_rasters)

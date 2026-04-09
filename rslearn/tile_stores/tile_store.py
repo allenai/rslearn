@@ -9,7 +9,7 @@ from rasterio.enums import Resampling
 from upath import UPath
 
 from rslearn.utils import Feature, PixelBounds, Projection
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 
 if TYPE_CHECKING:
     from rslearn.data_sources.data_source import Item
@@ -77,6 +77,22 @@ class TileStore:
         """
         raise NotImplementedError
 
+    def get_raster_metadata(
+        self, layer_name: str, item: Item, bands: list[str]
+    ) -> RasterMetadata:
+        """Get metadata for a stored raster without reading pixel data.
+
+        Args:
+            layer_name: the layer name or alias.
+            item: the item.
+            bands: the list of bands identifying which specific raster to read.
+
+        Returns:
+            a RasterMetadata instance (may have None fields if the store
+            does not track a given piece of metadata).
+        """
+        raise NotImplementedError
+
     def read_raster(
         self,
         layer_name: str,
@@ -110,7 +126,6 @@ class TileStore:
         projection: Projection,
         bounds: PixelBounds,
         raster: RasterArray,
-        nodata_val: int | float | None = None,
     ) -> None:
         """Write raster data to the store.
 
@@ -121,9 +136,6 @@ class TileStore:
             projection: the projection of the array.
             bounds: the bounds of the array.
             raster: the raster data.
-            nodata_val: if set, tag the GeoTIFF with this nodata value so that
-                downstream resampling (e.g. via WarpedVRT) excludes nodata
-                pixels from interpolation.
         """
         raise NotImplementedError
 
@@ -248,6 +260,18 @@ class TileStoreWithLayer:
             self.layer_name, item, bands, projection
         )
 
+    def get_raster_metadata(self, item: Item, bands: list[str]) -> RasterMetadata:
+        """Get metadata for a stored raster without reading pixel data.
+
+        Args:
+            item: the item.
+            bands: the list of bands identifying which specific raster to read.
+
+        Returns:
+            a RasterMetadata instance.
+        """
+        return self.tile_store.get_raster_metadata(self.layer_name, item, bands)
+
     def read_raster(
         self,
         item: Item,
@@ -280,7 +304,6 @@ class TileStoreWithLayer:
         projection: Projection,
         bounds: PixelBounds,
         raster: RasterArray,
-        nodata_val: int | float | None = None,
     ) -> None:
         """Write raster data to the store.
 
@@ -290,11 +313,9 @@ class TileStoreWithLayer:
             projection: the projection of the array.
             bounds: the bounds of the array.
             raster: the raster data.
-            nodata_val: if set, tag the GeoTIFF with this nodata value so that
-                downstream resampling excludes nodata pixels from interpolation.
         """
         self.tile_store.write_raster(
-            self.layer_name, item, bands, projection, bounds, raster, nodata_val
+            self.layer_name, item, bands, projection, bounds, raster
         )
 
     def write_raster_file(

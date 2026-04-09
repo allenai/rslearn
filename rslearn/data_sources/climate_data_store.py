@@ -21,7 +21,7 @@ from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 
 logger = get_logger(__name__)
 
@@ -480,12 +480,17 @@ class ERA5LandMonthlyMeans(ERA5Land):
                 array, timestamps, projection, bounds = self._parse_nc(
                     UPath(local_nc_fname)
                 )
+                raster_metadata = RasterMetadata(nodata_value=self.NODATA_VALUE)
                 tile_store.write_raster(
                     item,
                     self.band_names,
                     projection,
                     bounds,
-                    RasterArray(array=array, timestamps=timestamps),
+                    RasterArray(
+                        array=array,
+                        timestamps=timestamps,
+                        metadata=raster_metadata,
+                    ),
                 )
 
 
@@ -593,12 +598,17 @@ class ERA5LandHourly(ERA5Land):
                 array, timestamps, projection, bounds = self._parse_nc(
                     UPath(local_nc_fname)
                 )
+                raster_metadata = RasterMetadata(nodata_value=self.NODATA_VALUE)
                 tile_store.write_raster(
                     item,
                     self.band_names,
                     projection,
                     bounds,
-                    RasterArray(array=array, timestamps=timestamps),
+                    RasterArray(
+                        array=array,
+                        timestamps=timestamps,
+                        metadata=raster_metadata,
+                    ),
                 )
 
 
@@ -969,10 +979,15 @@ class ERA5LandHourlyTimeseries(DataSource):
                 array, timestamps, projection, bounds = self._parse_nc_timeseries(
                     local_nc_paths, lon, lat
                 )
+                raster_metadata = RasterMetadata(nodata_value=self.NODATA_VALUE)
                 tile_store.write_raster(
                     item,
                     self.band_names,
                     projection,
                     bounds,
-                    RasterArray(array=array, timestamps=timestamps),
+                    RasterArray(
+                        array=array,
+                        timestamps=timestamps,
+                        metadata=raster_metadata,
+                    ),
                 )

@@ -11,7 +11,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from urllib.parse import quote
 from zipfile import ZipFile
@@ -37,7 +37,7 @@ from rslearn.utils.geometry import (
     split_shape_at_antimeridian,
 )
 from rslearn.utils.grid_index import GridIndex
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 SENTINEL2_TILE_URL = "https://sentiwiki.copernicus.eu/__attachments/1692737/S2A_OPER_GIP_TILPAR_MPC__20151209T095117_V20150622T000000_21000101T000000_B00.zip"
@@ -669,7 +669,7 @@ class Copernicus(DataSource):
                 self._process_product_zip(tile_store, item, local_zip_fname)
 
 
-class Sentinel2ProductType(str, Enum):
+class Sentinel2ProductType(StrEnum):
     """The Sentinel-2 product type."""
 
     L1C = "S2MSI1C"
@@ -852,8 +852,10 @@ class Sentinel2(Copernicus):
                         # values, and pass modified array directly to the TileStore.
                         with rasterio.open(local_raster_fname) as src:
                             array = src.read()
+                            src_nodata = src.nodata
                             projection, bounds = get_raster_projection_and_bounds(src)
                         array = harmonize_callback(array)
+                        raster_metadata = RasterMetadata(nodata_value=src_nodata)
                         tile_store.write_raster(
                             item,
                             band_names,
@@ -862,23 +864,24 @@ class Sentinel2(Copernicus):
                             RasterArray(
                                 chw_array=array,
                                 time_range=item.geometry.time_range,
+                                metadata=raster_metadata,
                             ),
                         )
 
 
-class Sentinel1ProductType(str, Enum):
+class Sentinel1ProductType(StrEnum):
     """The Sentinel-1 product type."""
 
     IW_GRDH = "IW_GRDH_1S"
 
 
-class Sentinel1Polarisation(str, Enum):
+class Sentinel1Polarisation(StrEnum):
     """The Sentinel-1 polarisation."""
 
     VV_VH = "VV&VH"
 
 
-class Sentinel1OrbitDirection(str, Enum):
+class Sentinel1OrbitDirection(StrEnum):
     """The Sentinel-1 orbit direction."""
 
     ASCENDING = "ASCENDING"

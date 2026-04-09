@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -27,10 +28,10 @@ from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.dataset.window import Window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
-from rslearn.utils.array import copy_spatial_array
+from rslearn.utils.array import copy_spatial_array, unique_nodata_value
 from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
-from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
 from rslearn.utils.raster_format import (
     Resampling,
     get_raster_projection_and_bounds_from_transform,
@@ -54,6 +55,16 @@ class ExportException(Exception):
     """GEE API export error."""
 
     pass
+
+
+@dataclass
+class MergedRaster:
+    """Result of merging one or more GEE-exported raster files."""
+
+    array: npt.NDArray[np.generic]
+    projection: Projection
+    bounds: PixelBounds
+    nodata_value: int | float | None
 
 
 class GEE(DataSource, TileStore):
@@ -118,6 +129,8 @@ class GEE(DataSource, TileStore):
             service_account_name, service_account_credentials
         )
         ee.Initialize(credentials)
+
+        self._cached_nodata_value: int | float | None = None
 
         self.index_cache_dir.mkdir(parents=True, exist_ok=True)
         self.rtree_index = get_cached_rtree(self.index_cache_dir, self._build_index)
@@ -331,7 +344,7 @@ class GEE(DataSource, TileStore):
         blobs: list[storage.Blob],
         crs_bounds: tuple[float, float, float, float] | None = None,
         res: float | None = None,
-    ) -> tuple[npt.NDArray, Projection, PixelBounds]:
+    ) -> MergedRaster:
         """Merge multiple rasters split up during export by GEE.
 
         GEE can produce multiple rasters if it determines the file size exceeds its
@@ -344,8 +357,7 @@ class GEE(DataSource, TileStore):
             res: generate merged output under this resolution.
 
         Returns:
-            a tuple (array, projection, bounds) where the projection and bounds
-                indicate the extent of the array.
+            a MergedRaster with the stitched array, projection, bounds, and nodata.
         """
         with tempfile.TemporaryDirectory() as tmp_dir_name:
             rasterio_datasets = []
@@ -354,6 +366,12 @@ class GEE(DataSource, TileStore):
                 blob.download_to_filename(local_fname)
                 src = rasterio.open(local_fname)
                 rasterio_datasets.append(src)
+
+            nodata_vals: list[int | float] = []
+            for ds in rasterio_datasets:
+                if ds.nodata is not None:
+                    nodata_vals.append(ds.nodata)
+            nodata_value = unique_nodata_value(nodata_vals)
 
             merge_kwargs: dict[str, Any] = dict(
                 sources=rasterio_datasets,
@@ -373,7 +391,12 @@ class GEE(DataSource, TileStore):
             for ds in rasterio_datasets:
                 ds.close()
 
-        return array, projection, bounds
+        return MergedRaster(
+            array=array,
+            projection=projection,
+            bounds=bounds,
+            nodata_value=nodata_value,
+        )
 
     def ingest(
         self,
@@ -415,15 +438,16 @@ class GEE(DataSource, TileStore):
                     )
 
                 else:
-                    array, projection, bounds = self._merge_rasters(blobs)
+                    merged = self._merge_rasters(blobs)
                     tile_store.write_raster(
                         item,
                         self.bands,
-                        projection,
-                        bounds,
+                        merged.projection,
+                        merged.bounds,
                         RasterArray(
-                            chw_array=array,
+                            chw_array=merged.array,
                             time_range=item.geometry.time_range,
+                            metadata=RasterMetadata(nodata_value=merged.nodata_value),
                         ),
                     )
 
@@ -481,6 +505,33 @@ class GEE(DataSource, TileStore):
             int(geom.shp.bounds[2]),
             int(geom.shp.bounds[3]),
         )
+
+    def get_raster_metadata(
+        self, layer_name: str, item: Item, bands: list[str]
+    ) -> RasterMetadata:
+        """Export and read the raster header to obtain nodata.
+
+        The nodata value is cached after the first successful export that
+        yields a non-None value, so subsequent calls skip the export entirely.
+        """
+        if self._cached_nodata_value is not None:
+            return RasterMetadata(nodata_value=self._cached_nodata_value)
+
+        blob_prefix = f"{self.collection_name}/{item.name}.{os.getpid()}/"
+        try:
+            self.export_item(item, blob_prefix)
+        except NoValidPixelsException:
+            return RasterMetadata()
+
+        blobs = list(self.bucket.list_blobs(prefix=blob_prefix))
+        buf = io.BytesIO()
+        blobs[0].download_to_file(buf)
+        buf.seek(0)
+        with rasterio.open(buf) as src:
+            nodata_value = src.nodata
+        if nodata_value is not None:
+            self._cached_nodata_value = nodata_value
+        return RasterMetadata(nodata_value=nodata_value)
 
     def read_raster(
         self,
@@ -542,6 +593,7 @@ class GEE(DataSource, TileStore):
             blobs[0].download_to_file(buf)
             buf.seek(0)
             with rasterio.open(buf) as src:
+                nodata_value = src.nodata
                 with rasterio.vrt.WarpedVRT(
                     src,
                     crs=projection.crs,
@@ -551,7 +603,9 @@ class GEE(DataSource, TileStore):
                     resampling=resampling,
                 ) as vrt:
                     return RasterArray(
-                        chw_array=vrt.read(), time_range=item.geometry.time_range
+                        chw_array=vrt.read(),
+                        time_range=item.geometry.time_range,
+                        metadata=RasterMetadata(nodata_value=nodata_value),
                     )
 
         else:
@@ -561,21 +615,32 @@ class GEE(DataSource, TileStore):
                 raise NotImplementedError(
                     "Only projection with x_res=-y_res is supported for GEE direct materialization"
                 )
-            src_array, _, src_bounds = self._merge_rasters(
+            merged = self._merge_rasters(
                 blobs, crs_bounds=crs_bounds, res=projection.x_resolution
             )
+            metadata = RasterMetadata(nodata_value=merged.nodata_value)
 
             # We copy the array if its bounds don't match exactly.
-            if src_bounds == bounds:
+            if merged.bounds == bounds:
                 return RasterArray(
-                    chw_array=src_array, time_range=item.geometry.time_range
+                    chw_array=merged.array,
+                    time_range=item.geometry.time_range,
+                    metadata=metadata,
                 )
             dst_array = np.zeros(
-                (src_array.shape[0], bounds[3] - bounds[1], bounds[2] - bounds[0]),
-                dtype=src_array.dtype,
+                (
+                    merged.array.shape[0],
+                    bounds[3] - bounds[1],
+                    bounds[2] - bounds[0],
+                ),
+                dtype=merged.array.dtype,
             )
-            copy_spatial_array(src_array, dst_array, src_bounds[0:2], bounds[0:2])
-            return RasterArray(chw_array=dst_array, time_range=item.geometry.time_range)
+            copy_spatial_array(merged.array, dst_array, merged.bounds[0:2], bounds[0:2])
+            return RasterArray(
+                chw_array=dst_array,
+                time_range=item.geometry.time_range,
+                metadata=metadata,
+            )
 
     def materialize(
         self,

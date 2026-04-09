@@ -93,6 +93,40 @@ def test_zstd_compression(tmp_path: pathlib.Path) -> None:
         assert raster.profile["compress"] == "zstd"
 
 
+def test_write_raster_file_preserves_nodata(tmp_path: pathlib.Path) -> None:
+    ds_path = UPath(tmp_path)
+    tile_store = DefaultTileStore()
+    tile_store.set_dataset_path(ds_path)
+
+    source_fname = tmp_path / "source.tif"
+    src_array = np.array([[[7, 65535], [11, 13]]], dtype=np.uint16)
+    with rasterio.open(
+        source_fname,
+        "w",
+        driver="GTiff",
+        width=src_array.shape[2],
+        height=src_array.shape[1],
+        count=src_array.shape[0],
+        dtype=src_array.dtype.name,
+        crs=PROJECTION.crs,
+        transform=rasterio.transform.from_origin(0, 0, 1, 1),
+        nodata=65535,
+    ) as src:
+        src.write(src_array)
+
+    tile_store.write_raster_file(
+        LAYER_NAME,
+        ITEM,
+        BANDS,
+        UPath(source_fname),
+    )
+
+    stored_fname = tile_store._get_raster_fname(LAYER_NAME, ITEM.name, BANDS)
+    with rasterio.open(stored_fname) as raster:
+        assert raster.nodata == 65535
+        np.testing.assert_array_equal(raster.read(), src_array)
+
+
 def test_leftover_tmp_file(tmp_path: pathlib.Path) -> None:
     """Ensure that leftover files from open_atomic do not cause issues.
 

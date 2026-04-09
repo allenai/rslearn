@@ -93,7 +93,7 @@ def test_soilgrids_clay_scale_offset_applied(
             BandSetConfig(
                 dtype=DType.FLOAT32,
                 bands=["B1"],
-                nodata_vals=[SOILGRIDS_NODATA_VALUE],
+                nodata_value=SOILGRIDS_NODATA_VALUE,
             )
         ],
     )
