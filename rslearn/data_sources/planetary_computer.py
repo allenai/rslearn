@@ -320,6 +320,7 @@ class Sentinel2(PlanetaryComputer):
         "B11": ["B11"],
         "B12": ["B12"],
         "B8A": ["B8A"],
+        "SCL": ["SCL"],
         "visual": ["R", "G", "B"],
     }
 

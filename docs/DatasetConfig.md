@@ -101,6 +101,7 @@ The documents below detail the specification of different sections of the datase
 configuration file. Also see [Examples.md](Examples.md) for some examples of dataset
 configuration files for different use cases.
 
+- [Compositors](Compositors.md): built-in and custom raster compositing methods.
 - [LayerConfig](dataset_config/LayerConfig.md): the layer configuration, excluding
   data source options.
 - [DataSourceConfig](dataset_config/DataSourceConfig.md): the portion of the layer

@@ -23,6 +23,7 @@ source from which the layer can be automatically populated.
 - [DataSources](./DataSources.md) details the data sources that are built-in to
   rslearn. For each data source, example usage is provided, including an example
   dataset configuration file.
+- [Compositors](./Compositors.md) details built-in and custom raster compositors.
 - Each example in [Examples](./Examples.md) includes a dataset configuration file.
 
 ## Create Windows

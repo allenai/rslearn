@@ -27,6 +27,8 @@ Other links:
 - [DatasetConfig](docs/DatasetConfig.md) documents the dataset configuration file.
 - [DataSources](docs/DataSources.md) details the built-in data sources in rslearn, from
   which raster and vector data can be imported into rslearn dataset layers.
+- [Compositors](docs/Compositors.md) documents built-in and custom raster compositing
+  methods, including cloud-aware ranking compositors.
 - [ModelConfig](docs/ModelConfig.md) documents the model configuration file.
 - [TasksAndModels](docs/TasksAndModels.md) details the training tasks and model
   components available in rslearn.
