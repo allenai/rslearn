@@ -22,6 +22,7 @@ from rslearn.train.prediction_writer import (
     PendingCropOutput,
     RasterMerger,
     RslearnWriter,
+    WeightedRasterMerger,
 )
 from rslearn.train.tasks.segmentation import SegmentationTask
 from rslearn.train.tasks.task import Task
@@ -220,6 +221,271 @@ class TestRasterMerger:
         )
         assert merged.shape == (1, 4, 4)
         assert merged.dtype == np.uint16
+
+
+class TestWeightedRasterMerger:
+    """Unit tests for WeightedRasterMerger."""
+
+    def _layer_config(self, dtype: DType = DType.FLOAT32) -> LayerConfig:
+        return LayerConfig(
+            type=LayerType.RASTER,
+            band_sets=[BandSetConfig(bands=["output"], dtype=dtype)],
+        )
+
+    def test_single_crop_no_overlap(self, tmp_path: pathlib.Path) -> None:
+        """A single crop covering the entire window should be returned as-is."""
+        storage = FileWindowStorage(tmp_path)
+        window = Window(
+            storage=storage,
+            group="fake",
+            name="fake",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 4, 4),
+            time_range=None,
+        )
+        data = np.arange(16, dtype=np.float32).reshape(1, 4, 4)
+        outputs = [PendingCropOutput(bounds=(0, 0, 4, 4), output=data)]
+        merged = WeightedRasterMerger(overlap_pixels=0).merge(
+            window, outputs, self._layer_config()
+        )
+        assert merged.shape == (1, 4, 4)
+        assert merged.dtype == np.float32
+        np.testing.assert_allclose(merged, data)
+
+    def test_non_overlapping_crops(self, tmp_path: pathlib.Path) -> None:
+        """Non-overlapping crops should tile without any blending."""
+        storage = FileWindowStorage(tmp_path)
+        window = Window(
+            storage=storage,
+            group="fake",
+            name="fake",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 4, 4),
+            time_range=None,
+        )
+        outputs = [
+            PendingCropOutput(
+                bounds=(0, 0, 2, 2),
+                output=1.0 * np.ones((1, 2, 2), dtype=np.float32),
+            ),
+            PendingCropOutput(
+                bounds=(2, 0, 4, 2),
+                output=2.0 * np.ones((1, 2, 2), dtype=np.float32),
+            ),
+            PendingCropOutput(
+                bounds=(0, 2, 2, 4),
+                output=3.0 * np.ones((1, 2, 2), dtype=np.float32),
+            ),
+            PendingCropOutput(
+                bounds=(2, 2, 4, 4),
+                output=4.0 * np.ones((1, 2, 2), dtype=np.float32),
+            ),
+        ]
+        merged = WeightedRasterMerger(overlap_pixels=0).merge(
+            window, outputs, self._layer_config()
+        )
+        assert merged.shape == (1, 4, 4)
+        np.testing.assert_allclose(merged[0, 0:2, 0:2], 1.0)
+        np.testing.assert_allclose(merged[0, 0:2, 2:4], 2.0)
+        np.testing.assert_allclose(merged[0, 2:4, 0:2], 3.0)
+        np.testing.assert_allclose(merged[0, 2:4, 2:4], 4.0)
+
+    def test_uniform_overlap_unchanged(self, tmp_path: pathlib.Path) -> None:
+        """Blending identical values in the overlap zone should yield the same value."""
+        storage = FileWindowStorage(tmp_path)
+        window = Window(
+            storage=storage,
+            group="fake",
+            name="fake",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 6, 6),
+            time_range=None,
+        )
+        val = 5.0
+        outputs = [
+            PendingCropOutput(
+                bounds=(0, 0, 4, 4),
+                output=val * np.ones((1, 4, 4), dtype=np.float32),
+            ),
+            PendingCropOutput(
+                bounds=(2, 0, 6, 4),
+                output=val * np.ones((1, 4, 4), dtype=np.float32),
+            ),
+            PendingCropOutput(
+                bounds=(0, 2, 4, 6),
+                output=val * np.ones((1, 4, 4), dtype=np.float32),
+            ),
+            PendingCropOutput(
+                bounds=(2, 2, 6, 6),
+                output=val * np.ones((1, 4, 4), dtype=np.float32),
+            ),
+        ]
+        merged = WeightedRasterMerger(overlap_pixels=2).merge(
+            window, outputs, self._layer_config()
+        )
+        assert merged.shape == (1, 6, 6)
+        np.testing.assert_allclose(merged, val, atol=1e-6)
+
+    def test_overlap_blends_different_values(self, tmp_path: pathlib.Path) -> None:
+        """Two crops with different constant values should blend in the overlap zone."""
+        storage = FileWindowStorage(tmp_path)
+        window = Window(
+            storage=storage,
+            group="fake",
+            name="fake",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 6, 1),
+            time_range=None,
+        )
+        # Two 4-wide crops with 2-pixel overlap in a 6-wide window.
+        outputs = [
+            PendingCropOutput(
+                bounds=(0, 0, 4, 1),
+                output=0.0 * np.ones((1, 1, 4), dtype=np.float32),
+            ),
+            PendingCropOutput(
+                bounds=(2, 0, 6, 1),
+                output=10.0 * np.ones((1, 1, 4), dtype=np.float32),
+            ),
+        ]
+        merged = WeightedRasterMerger(overlap_pixels=2).merge(
+            window, outputs, self._layer_config()
+        )
+        assert merged.shape == (1, 1, 6)
+        # Non-overlap regions should be unblended.
+        np.testing.assert_allclose(merged[0, 0, 0:2], 0.0, atol=1e-6)
+        np.testing.assert_allclose(merged[0, 0, 4:6], 10.0, atol=1e-6)
+        # Overlap zone (cols 2-3) should be between 0 and 10, monotonically increasing.
+        assert merged[0, 0, 2] > 0.0
+        assert merged[0, 0, 3] > merged[0, 0, 2]
+        assert merged[0, 0, 3] < 10.0
+
+    def test_overlap_symmetry(self, tmp_path: pathlib.Path) -> None:
+        """Blending should be symmetric: swapping crop values mirrors the result."""
+        storage = FileWindowStorage(tmp_path)
+        window = Window(
+            storage=storage,
+            group="fake",
+            name="fake",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 6, 1),
+            time_range=None,
+        )
+        outputs_a = [
+            PendingCropOutput(
+                bounds=(0, 0, 4, 1),
+                output=0.0 * np.ones((1, 1, 4), dtype=np.float32),
+            ),
+            PendingCropOutput(
+                bounds=(2, 0, 6, 1),
+                output=10.0 * np.ones((1, 1, 4), dtype=np.float32),
+            ),
+        ]
+        outputs_b = [
+            PendingCropOutput(
+                bounds=(0, 0, 4, 1),
+                output=10.0 * np.ones((1, 1, 4), dtype=np.float32),
+            ),
+            PendingCropOutput(
+                bounds=(2, 0, 6, 1),
+                output=0.0 * np.ones((1, 1, 4), dtype=np.float32),
+            ),
+        ]
+        cfg = self._layer_config()
+        merger = WeightedRasterMerger(overlap_pixels=2)
+        merged_a = merger.merge(window, outputs_a, cfg)
+        merged_b = merger.merge(window, outputs_b, cfg)
+        # The blended values should be mirrors: a + b = 10 everywhere.
+        np.testing.assert_allclose(merged_a + merged_b, 10.0, atol=1e-6)
+
+    def test_downsample_factor(self, tmp_path: pathlib.Path) -> None:
+        """Output size should be scaled by downsample_factor."""
+        storage = FileWindowStorage(tmp_path)
+        # Window 8x2 at input resolution → 4x1 at output with downsample_factor=2.
+        window = Window(
+            storage=storage,
+            group="fake",
+            name="fake",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 8, 2),
+            time_range=None,
+        )
+        # Two crops with 2-pixel overlap at input (1-pixel at output).
+        # Crop 1: input (0,0)-(6,2) → output 3x1, Crop 2: input (4,0)-(8,2) → output 2x1.
+        outputs = [
+            PendingCropOutput(
+                bounds=(0, 0, 6, 2),
+                output=1.0 * np.ones((1, 1, 3), dtype=np.float32),
+            ),
+            PendingCropOutput(
+                bounds=(4, 0, 8, 2),
+                output=1.0 * np.ones((1, 1, 2), dtype=np.float32),
+            ),
+        ]
+        merged = WeightedRasterMerger(overlap_pixels=1, downsample_factor=2).merge(
+            window, outputs, self._layer_config()
+        )
+        assert merged.shape == (1, 1, 4)
+        np.testing.assert_allclose(merged, 1.0, atol=1e-6)
+
+    def test_respects_output_dtype(self, tmp_path: pathlib.Path) -> None:
+        """Output dtype should match the layer config."""
+        storage = FileWindowStorage(tmp_path)
+        window = Window(
+            storage=storage,
+            group="fake",
+            name="fake",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 4, 4),
+            time_range=None,
+        )
+        outputs = [
+            PendingCropOutput(
+                bounds=(0, 0, 4, 4),
+                output=42.0 * np.ones((1, 4, 4), dtype=np.float32),
+            ),
+        ]
+        merged = WeightedRasterMerger(overlap_pixels=0).merge(
+            window, outputs, self._layer_config(DType.UINT16)
+        )
+        assert merged.dtype == np.uint16
+        np.testing.assert_array_equal(merged, 42)
+
+    def test_multichannel(self, tmp_path: pathlib.Path) -> None:
+        """Blending should work independently per channel."""
+        storage = FileWindowStorage(tmp_path)
+        window = Window(
+            storage=storage,
+            group="fake",
+            name="fake",
+            projection=WGS84_PROJECTION,
+            bounds=(0, 0, 6, 1),
+            time_range=None,
+        )
+        ch = 3
+        left = np.zeros((ch, 1, 4), dtype=np.float32)
+        right = np.zeros((ch, 1, 4), dtype=np.float32)
+        for c in range(ch):
+            left[c] = float(c)
+            right[c] = float(c + 10)
+        outputs = [
+            PendingCropOutput(bounds=(0, 0, 4, 1), output=left),
+            PendingCropOutput(bounds=(2, 0, 6, 1), output=right),
+        ]
+        merged = WeightedRasterMerger(overlap_pixels=2).merge(
+            window,
+            outputs,
+            LayerConfig(
+                type=LayerType.RASTER,
+                band_sets=[BandSetConfig(bands=["a", "b", "c"], dtype=DType.FLOAT32)],
+            ),
+        )
+        assert merged.shape == (ch, 1, 6)
+        for c in range(ch):
+            np.testing.assert_allclose(merged[c, 0, 0:2], float(c), atol=1e-6)
+            np.testing.assert_allclose(merged[c, 0, 4:6], float(c + 10), atol=1e-6)
+            assert merged[c, 0, 2] > float(c)
+            assert merged[c, 0, 3] < float(c + 10)
 
 
 def test_write_raster(tmp_path: pathlib.Path) -> None:

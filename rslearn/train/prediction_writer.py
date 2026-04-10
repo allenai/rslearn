@@ -178,6 +178,112 @@ class RasterMerger(CropPredictionMerger):
         return merged_image
 
 
+class WeightedRasterMerger(CropPredictionMerger):
+    """Merger for raster data that blends overlapping crops using linear weights.
+
+    Instead of hard-trimming overlap regions like RasterMerger, this merger applies a
+    linearly-ramped weight mask to each crop and accumulates weighted sums. In overlap
+    zones, adjacent crops are smoothly blended, reducing seam artifacts.
+    """
+
+    def __init__(
+        self,
+        overlap_pixels: int,
+        downsample_factor: int = 1,
+    ):
+        """Create a new WeightedRasterMerger.
+
+        Args:
+            overlap_pixels: the overlap between adjacent crops at output resolution.
+                This determines the width of the linear blending ramp on interior
+                edges. At window boundaries, no ramp is applied.
+            downsample_factor: the factor by which the model output is lower in
+                resolution relative to the window (input) resolution.
+        """
+        self.overlap_pixels = overlap_pixels
+        self.downsample_factor = downsample_factor
+
+    def _make_weight_1d(
+        self, length: int, ramp_left: bool, ramp_right: bool
+    ) -> npt.NDArray[np.float64]:
+        """Create a 1D weight profile with optional linear ramps at each end.
+
+        Interior edges get a ramp from near-zero up to 1.0 over overlap_pixels.
+        Window-boundary edges stay at 1.0 (no ramp).
+
+        Args:
+            length: number of pixels along this dimension.
+            ramp_left: whether to apply a ramp on the left/top side.
+            ramp_right: whether to apply a ramp on the right/bottom side.
+
+        Returns:
+            1D float64 array of weights with shape (length,).
+        """
+        w = np.ones(length, dtype=np.float64)
+        ramp_size = self.overlap_pixels
+        if ramp_left and ramp_size > 0 and ramp_size <= length:
+            w[:ramp_size] = np.linspace(0, 1, ramp_size + 1)[1:]
+        if ramp_right and ramp_size > 0 and ramp_size <= length:
+            w[-ramp_size:] = np.minimum(
+                w[-ramp_size:], np.linspace(1, 0, ramp_size + 1)[:-1]
+            )
+        return w
+
+    def merge(
+        self,
+        window: Window,
+        outputs: Sequence[PendingCropOutput],
+        layer_config: LayerConfig,
+    ) -> npt.NDArray:
+        """Merge crop outputs using weighted blending."""
+        num_channels = outputs[0].output.shape[0]
+        out_h = (window.bounds[3] - window.bounds[1]) // self.downsample_factor
+        out_w = (window.bounds[2] - window.bounds[0]) // self.downsample_factor
+
+        weighted_sum = np.zeros((num_channels, out_h, out_w), dtype=np.float64)
+        total_weight = np.zeros((out_h, out_w), dtype=np.float64)
+
+        win_col0 = window.bounds[0] // self.downsample_factor
+        win_row0 = window.bounds[1] // self.downsample_factor
+
+        for output in outputs:
+            src = output.output.astype(np.float64)
+            crop_h, crop_w = src.shape[1], src.shape[2]
+
+            dst_col = output.bounds[0] // self.downsample_factor - win_col0
+            dst_row = output.bounds[1] // self.downsample_factor - win_row0
+
+            at_left = output.bounds[0] == window.bounds[0]
+            at_top = output.bounds[1] == window.bounds[1]
+            at_right = output.bounds[2] >= window.bounds[2]
+            at_bottom = output.bounds[3] >= window.bounds[3]
+
+            wx = self._make_weight_1d(
+                crop_w, ramp_left=not at_left, ramp_right=not at_right
+            )
+            wy = self._make_weight_1d(
+                crop_h, ramp_left=not at_top, ramp_right=not at_bottom
+            )
+            weight_2d = wy[:, None] * wx[None, :]
+
+            # Clip to output array bounds.
+            sh = min(crop_h, out_h - dst_row)
+            sw = min(crop_w, out_w - dst_col)
+            if sh <= 0 or sw <= 0:
+                continue
+
+            weighted_sum[:, dst_row : dst_row + sh, dst_col : dst_col + sw] += (
+                src[:, :sh, :sw] * weight_2d[None, :sh, :sw]
+            )
+            total_weight[dst_row : dst_row + sh, dst_col : dst_col + sw] += weight_2d[
+                :sh, :sw
+            ]
+
+        total_weight = np.maximum(total_weight, 1e-10)
+        result = weighted_sum / total_weight[None, :, :]
+        return result.astype(layer_config.band_sets[0].dtype.get_numpy_dtype())
+
+
 class RslearnWriter(BasePredictionWriter):
     """A writer that writes predictions back into the rslearn dataset.
 
