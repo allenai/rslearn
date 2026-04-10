@@ -193,6 +193,42 @@ class EarthDaily(DataSource, TileStore):
 
         return self.eds_client, self.client, self.collection
 
+    @staticmethod
+    def _resolve_asset_href(
+        stac_item_id: str,
+        asset_key: str,
+        asset_obj: pystac.Asset,
+        *,
+        allow_direct_href_fallback: bool,
+    ) -> str:
+        """Resolve the downloadable href for a STAC asset.
+
+        Args:
+            stac_item_id: STAC item id for error context.
+            asset_key: STAC asset key for error context.
+            asset_obj: STAC asset object.
+            allow_direct_href_fallback: whether `asset.href` is accepted when
+                `alternate.download.href` is missing.
+        """
+        href: str | None = None
+        alt = asset_obj.extra_fields.get("alternate")
+        if isinstance(alt, dict):
+            download = alt.get("download")
+            if isinstance(download, dict):
+                raw_href = download.get("href")
+                if isinstance(raw_href, str) and raw_href:
+                    href = raw_href
+
+        if href is not None:
+            return href
+
+        if allow_direct_href_fallback and isinstance(asset_obj.href, str):
+            return asset_obj.href
+
+        raise ValueError(
+            f"item {stac_item_id} asset {asset_key} is missing alternate.download.href"
+        )
+
     def _stac_item_to_item(self, stac_item: pystac.Item) -> EarthDailyItem:
         shp = shapely.geometry.shape(stac_item.geometry)
 
@@ -217,23 +253,12 @@ class EarthDaily(DataSource, TileStore):
             if asset_key not in self.asset_bands and not is_metadata_asset:
                 continue
 
-            href: str | None = None
-            alt = asset_obj.extra_fields.get("alternate")
-            if isinstance(alt, dict):
-                download = alt.get("download")
-                if isinstance(download, dict):
-                    raw_href = download.get("href")
-                    if isinstance(raw_href, str) and raw_href:
-                        href = raw_href
-
-            if href is None:
-                if is_metadata_asset and isinstance(asset_obj.href, str):
-                    href = asset_obj.href
-                else:
-                    raise ValueError(
-                        f"item {stac_item.id} asset {asset_key} is missing "
-                        "alternate.download.href"
-                    )
+            href = self._resolve_asset_href(
+                stac_item.id,
+                asset_key,
+                asset_obj,
+                allow_direct_href_fallback=is_metadata_asset,
+            )
 
             asset_urls[asset_key] = href
 
@@ -705,6 +730,11 @@ class Sentinel2(EarthDaily):
     """
 
     COLLECTION_NAME = "sentinel-2-c1-l2a"
+    EDA_CLOUD_MASK_COLLECTION_NAME = "sentinel-2-eda-cloud-mask"
+    EDA_CLOUD_MASK_ASSET_KEY = "eda_cloud_mask"
+    EDA_CLOUD_MASK_EXCLUDE_ASSETS = frozenset(
+        {"thumbnail", "overview", "product_metadata", "granule_metadata"}
+    )
 
     # EarthDaily Sentinel-2 asset keys to rslearn band names.
     # For spectral bands, we use Sentinel-2 band IDs as rslearn band names.
@@ -726,7 +756,144 @@ class Sentinel2(EarthDaily):
         "scl": ["scl"],
         "aot": ["aot"],
         "wvp": ["wvp"],
+        # Linked from `sentinel-2-eda-cloud-mask` via
+        # properties["eda:derived_from_item_id"].
+        "eda_cloud_mask": ["eda_cloud_mask"],
     }
+
+    @staticmethod
+    def _get_compositor_scoring_bands(context: DataSourceContext) -> set[str]:
+        """Get extra bands needed by known cloud-aware ranking compositors."""
+        if context.layer_config is None:
+            return set()
+
+        compositing_method = context.layer_config.compositing_method
+        if not isinstance(compositing_method, dict):
+            return set()
+
+        class_path = compositing_method.get("class_path")
+        init_args = compositing_method.get("init_args", {})
+        if not isinstance(init_args, dict):
+            init_args = {}
+
+        if class_path == "rslearn.dataset.omni_cloud_mask.OmniCloudMaskFirstValid":
+            return {
+                str(init_args.get("red_band", "B04")),
+                str(init_args.get("green_band", "B03")),
+                str(init_args.get("nir_band", "B8A")),
+            }
+
+        if class_path == "rslearn.dataset.sentinel2_scl.Sentinel2SCLFirstValid":
+            return {str(init_args.get("scl_band", "scl"))}
+
+        if (
+            class_path
+            == "rslearn.dataset.sentinel2_eda_cloud_mask.Sentinel2EDACloudMaskFirstValid"
+        ):
+            return {
+                str(
+                    init_args.get(
+                        "cloud_mask_band", Sentinel2.EDA_CLOUD_MASK_ASSET_KEY
+                    )
+                )
+            }
+
+        return set()
+
+    def _pick_eda_cloud_mask_asset_key(self, stac_item: pystac.Item) -> str | None:
+        """Pick the most likely cloud-mask data asset key from a mask STAC item."""
+        preferred_key: str | None = None
+        for asset_key in stac_item.assets:
+            if asset_key in self.EDA_CLOUD_MASK_EXCLUDE_ASSETS:
+                continue
+            if preferred_key is None:
+                preferred_key = asset_key
+            lowered = asset_key.lower()
+            if "cloud" in lowered and "mask" in lowered:
+                return asset_key
+        return preferred_key
+
+    def _get_eda_cloud_mask_asset_url_from_stac_item(
+        self, stac_item: pystac.Item
+    ) -> tuple[str, str] | None:
+        """Extract `(source_item_id, mask_url)` from an EDA cloud-mask STAC item."""
+        source_item_id = stac_item.properties.get("eda:derived_from_item_id")
+        if not isinstance(source_item_id, str) or not source_item_id:
+            return None
+
+        asset_key = self._pick_eda_cloud_mask_asset_key(stac_item)
+        if asset_key is None:
+            return None
+        asset = stac_item.assets.get(asset_key)
+        if asset is None:
+            return None
+
+        href = self._resolve_asset_href(
+            stac_item.id,
+            asset_key,
+            asset,
+            allow_direct_href_fallback=True,
+        )
+        return source_item_id, href
+
+    def _search_eda_cloud_mask_by_source_item_id(
+        self, client: pystac_client.Client, source_item_id: str
+    ) -> str | None:
+        """Lookup cloud-mask URL for one Sentinel-2 source item id."""
+        result = client.search(
+            collections=[self.EDA_CLOUD_MASK_COLLECTION_NAME],
+            query={"eda:derived_from_item_id": {"eq": source_item_id}},
+            max_items=1,
+        )
+        for stac_item in result.item_collection():
+            parsed = self._get_eda_cloud_mask_asset_url_from_stac_item(stac_item)
+            if parsed is None:
+                continue
+            _, href = parsed
+            return href
+        return None
+
+    def _cache_eda_cloud_masks_for_window(
+        self,
+        client: pystac_client.Client,
+        wgs84_geometry: STGeometry,
+    ) -> None:
+        """Populate the source-item->mask-url cache from one window query."""
+        result = client.search(
+            collections=[self.EDA_CLOUD_MASK_COLLECTION_NAME],
+            intersects=shapely.to_geojson(wgs84_geometry.shp),
+            datetime=wgs84_geometry.time_range,
+            max_items=self.search_max_items,
+        )
+        for stac_item in result.item_collection():
+            parsed = self._get_eda_cloud_mask_asset_url_from_stac_item(stac_item)
+            if parsed is None:
+                continue
+            source_item_id, href = parsed
+            self._eda_cloud_mask_asset_url_cache[source_item_id] = href
+
+    def _attach_eda_cloud_mask_asset(
+        self,
+        item: EarthDailyItem,
+        client: pystac_client.Client,
+    ) -> bool:
+        """Attach linked EDA cloud-mask URL to the item when available.
+
+        Returns:
+            True if the item has a usable cloud-mask URL after this call.
+        """
+        source_item_id = item.name
+        if source_item_id in self._eda_cloud_mask_asset_url_cache:
+            href = self._eda_cloud_mask_asset_url_cache[source_item_id]
+        else:
+            href = self._search_eda_cloud_mask_by_source_item_id(client, source_item_id)
+            self._eda_cloud_mask_asset_url_cache[source_item_id] = href
+
+        if href is None:
+            return False
+
+        item.asset_urls[self.EDA_CLOUD_MASK_ASSET_KEY] = href
+        return True
 
     def __init__(
         self,
@@ -796,6 +963,7 @@ class Sentinel2(EarthDaily):
             wanted_bands: set[str] = set()
             for band_set in context.layer_config.band_sets:
                 wanted_bands.update(band_set.bands)
+            wanted_bands.update(self._get_compositor_scoring_bands(context))
             for asset_key, band_names in self.ASSET_BANDS.items():
                 if wanted_bands.intersection(set(band_names)):
                     asset_bands[asset_key] = band_names
@@ -834,6 +1002,18 @@ class Sentinel2(EarthDaily):
         self.search_max_items = search_max_items
         self.sort_items_by = sort_items_by
         self.apply_scale_offset = apply_scale_offset
+        self._needs_eda_cloud_mask = self.EDA_CLOUD_MASK_ASSET_KEY in self.asset_bands
+        self._eda_cloud_mask_asset_url_cache: dict[str, str | None] = {}
+
+    def get_item_by_name(self, name: str) -> EarthDailyItem:
+        """Get Sentinel-2 item by id, with optional linked EDA cloud-mask asset."""
+        item = super().get_item_by_name(name)
+        if not self._needs_eda_cloud_mask:
+            return item
+
+        _, client, _ = self._load_client()
+        self._attach_eda_cloud_mask_asset(item, client)
+        return item
 
     def read_raster(
         self,
@@ -942,9 +1122,18 @@ class Sentinel2(EarthDaily):
                     f"invalid sort_items_by setting ({self.sort_items_by})"
                 )
 
+            if self._needs_eda_cloud_mask:
+                self._cache_eda_cloud_masks_for_window(client, wgs84_geometry)
+
             candidate_items = [
                 self.get_item_by_name(stac_item.id) for stac_item in stac_items
             ]
+            if self._needs_eda_cloud_mask and self.skip_items_missing_assets:
+                candidate_items = [
+                    item
+                    for item in candidate_items
+                    if self.EDA_CLOUD_MASK_ASSET_KEY in item.asset_urls
+                ]
             cur_groups = match_candidate_items_to_window(
                 geometry, candidate_items, query_config
             )

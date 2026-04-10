@@ -47,7 +47,7 @@ Source: <https://github.com/Element84/earth-search>
     // - "assets" uses EarthDaily STAC asset keys (e.g. "red", "nir", "visual", "scl").
     // - "band_sets[].bands" uses rslearn band names (e.g. "B04", "B08", "R", "scl").
     //
-    // Example: ["red", "green", "blue", "nir", "swir16", "swir22", "visual", "scl"]
+    // Example: ["red", "green", "blue", "nir", "swir16", "swir22", "visual", "scl", "eda_cloud_mask"]
     "assets": null,
     // Optional: maximum cloud cover (%) to filter items at search time.
     // If set, it takes precedence over cloud_cover_threshold and overrides any
@@ -122,6 +122,7 @@ EarthDaily assets when `assets` is null):
 - B8A
 - R, G, B (from the `visual` asset)
 - scl, aot, wvp
+- eda_cloud_mask (linked from collection `sentinel-2-eda-cloud-mask`)
 
 Common EarthDaily asset key to rslearn band name mapping:
 - coastal → B01
@@ -140,3 +141,12 @@ Common EarthDaily asset key to rslearn band name mapping:
 - scl → scl
 - aot → aot
 - wvp → wvp
+- eda_cloud_mask → eda_cloud_mask (fetched from `sentinel-2-eda-cloud-mask` using `eda:derived_from_item_id`)
+
+### EDA Cloud-Mask Compositing
+
+`rslearn.dataset.sentinel2_eda_cloud_mask.Sentinel2EDACloudMaskFirstValid` can rank
+Sentinel-2 items using EarthDaily EDA cloud-mask classes and then apply FIRST_VALID.
+
+With `assets: null`, rslearn automatically includes `eda_cloud_mask` when that
+compositor is configured in `compositing_method`.
