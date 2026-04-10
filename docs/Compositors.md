@@ -29,3 +29,4 @@ FIRST_VALID in that ranked order.
 |---|---|
 | [rslearn.dataset.omni_cloud_mask.OmniCloudMaskFirstValid](compositors/omni_cloud_mask_OmniCloudMaskFirstValid.md) | Uses OmniCloudMask model inference on R/G/NIR. |
 | [rslearn.dataset.sentinel2_scl.Sentinel2SCLFirstValid](compositors/sentinel2_scl_Sentinel2SCLFirstValid.md) | Uses Sentinel-2 SCL classes to score cloudiness. |
+| [rslearn.dataset.sentinel2_eda_cloud_mask.Sentinel2EDACloudMaskFirstValid](compositors/sentinel2_eda_cloud_mask_Sentinel2EDACloudMaskFirstValid.md) | Uses EarthDaily Sentinel-2 EDA cloud-mask classes (`sentinel-2-eda-cloud-mask`). |

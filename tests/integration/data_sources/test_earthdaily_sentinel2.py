@@ -13,6 +13,7 @@ from upath import UPath
 
 from rslearn.config.dataset import QueryConfig
 from rslearn.const import WGS84_PROJECTION
+from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
 
@@ -323,6 +324,118 @@ def test_sentinel2_get_items_passes_query_to_helper(
         "eo:cloud_cover": {"lt": 15.0},
     }
     assert captured["max_items"] == 500
+
+
+def test_sentinel2_get_items_links_eda_cloud_mask_asset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("earthdaily")
+
+    from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2
+
+    class StubAsset:
+        def __init__(self, href: str):
+            self.href = href
+            self.extra_fields = {"alternate": {"download": {"href": href}}}
+
+    class StubStacItem:
+        def __init__(
+            self,
+            item_id: str,
+            *,
+            properties: dict[str, object] | None = None,
+            assets: dict[str, StubAsset] | None = None,
+        ):
+            self.id = item_id
+            self.properties = properties or {}
+            self.assets = assets or {}
+            self.datetime = None
+
+    class StubSearchResult:
+        def __init__(self, items: list[StubStacItem]):
+            self._items = items
+
+        def item_collection(self) -> list[StubStacItem]:
+            return self._items
+
+    class StubClient:
+        def __init__(self):
+            self.calls: list[dict[str, object]] = []
+
+        def search(self, **kwargs: object) -> StubSearchResult:
+            self.calls.append(kwargs)
+            collections = kwargs.get("collections")
+            if collections == [Sentinel2.COLLECTION_NAME]:
+                return StubSearchResult(
+                    [
+                        StubStacItem("src1", properties={"eo:cloud_cover": 10.0}),
+                        StubStacItem("src2", properties={"eo:cloud_cover": 20.0}),
+                    ]
+                )
+
+            if collections == [Sentinel2.EDA_CLOUD_MASK_COLLECTION_NAME]:
+                query = kwargs.get("query")
+                if query is None:
+                    # Window-level prefetch.
+                    return StubSearchResult(
+                        [
+                            StubStacItem(
+                                "cm-src1",
+                                properties={"eda:derived_from_item_id": "src1"},
+                                assets={
+                                    "cloud_mask": StubAsset(
+                                        "https://example.com/src1_cloud_mask.tif"
+                                    )
+                                },
+                            )
+                        ]
+                    )
+                if query == {"eda:derived_from_item_id": {"eq": "src2"}}:
+                    return StubSearchResult([])
+
+            return StubSearchResult([])
+
+    data_source = Sentinel2(
+        assets=["red", "eda_cloud_mask"],
+        apply_scale_offset=False,
+    )
+    client = StubClient()
+    monkeypatch.setattr(
+        data_source, "_load_client", lambda: (object(), client, object())
+    )
+
+    geometry = STGeometry(
+        WGS84_PROJECTION,
+        shapely.box(-1, -1, 1, 1),
+        (datetime(2020, 1, 1), datetime(2020, 1, 2)),
+    )
+
+    def fake_get_item_by_name(name: str) -> EarthDailyItem:
+        item = EarthDailyItem(
+            name=name,
+            geometry=geometry,
+            asset_urls={"red": f"https://example.com/{name}_red.tif"},
+        )
+        data_source._attach_eda_cloud_mask_asset(item, client)
+        return item
+
+    monkeypatch.setattr(data_source, "get_item_by_name", fake_get_item_by_name)
+    monkeypatch.setattr(
+        "rslearn.data_sources.earthdaily.match_candidate_items_to_window",
+        lambda _geometry, items, _query_config: [
+            MatchedItemGroup(items=items, request_time_range=_geometry.time_range)
+        ],
+    )
+
+    groups = data_source.get_items([geometry], QueryConfig())
+
+    assert len(groups) == 1
+    assert len(groups[0]) == 1
+    # src2 should be filtered out because linked cloud-mask was missing.
+    assert [item.name for item in groups[0][0].items] == ["src1"]
+    assert groups[0][0].items[0].asset_urls["eda_cloud_mask"] == (
+        "https://example.com/src1_cloud_mask.tif"
+    )
 
 
 def test_sentinel2_ingest_raises_on_download_failure(

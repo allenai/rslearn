@@ -209,3 +209,20 @@ def test_init_allows_non_float32_when_scale_offset_disabled() -> None:
         assets=["red"],
         context=DataSourceContext(layer_config=layer_cfg),
     )
+
+
+def test_context_rgb_with_eda_cloud_mask_ranking_adds_mask_asset() -> None:
+    layer_cfg = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.FLOAT32, bands=["R", "G", "B"])],
+        compositing_method={
+            "class_path": (
+                "rslearn.dataset.sentinel2_eda_cloud_mask."
+                "Sentinel2EDACloudMaskFirstValid"
+            ),
+            "init_args": {"cloud_mask_band": "eda_cloud_mask"},
+        },
+    )
+
+    data_source = Sentinel2(context=DataSourceContext(layer_config=layer_cfg))
+    assert set(data_source.asset_bands.keys()) == {"visual", "eda_cloud_mask"}
