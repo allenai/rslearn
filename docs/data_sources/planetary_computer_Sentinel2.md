@@ -99,7 +99,10 @@ To rank with [OmniCloudMask](https://github.com/DPIRD-DMA/OmniCloudMask), config
   "layers": {
     "sentinel2": {
       "type": "raster",
-      "band_sets": [{"bands": ["R", "G", "B"], "dtype": "uint8"}],
+      "band_sets": [
+        {"bands": ["R", "G", "B"], "dtype": "uint8"},
+        {"bands": ["B04", "B03", "B8A"], "dtype": "uint16"}
+      ],
       "data_source": {
         "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
         "init_args": {
@@ -129,9 +132,9 @@ Requires `omnicloudmask` (`pip install .[extra]` in this repo). See
 [`OmniCloudMaskFirstValid`](../compositors/omni_cloud_mask_OmniCloudMaskFirstValid.md)
 for details.
 
-With this compositor, rslearn automatically includes the configured scoring bands
-(`red_band`, `green_band`, `nir_band`) for materialization, even if they are not
-listed in `band_sets`.
+When using this compositor with `context.layer_config`, include the scoring bands in a
+configured `band_sets` entry (for example, `B04`, `B03`, `B8A`). These are not
+automatically inferred from `compositing_method`.
 
 #### Sentinel-2 SCL
 
@@ -142,7 +145,10 @@ To rank with Sentinel-2 Scene Classification Layer (SCL) classes, configure:
   "layers": {
     "sentinel2": {
       "type": "raster",
-      "band_sets": [{"bands": ["R", "G", "B"], "dtype": "uint8"}],
+      "band_sets": [
+        {"bands": ["R", "G", "B"], "dtype": "uint8"},
+        {"bands": ["SCL"], "dtype": "uint8"}
+      ],
       "data_source": {
         "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
         "init_args": {
@@ -170,8 +176,9 @@ See
 [`Sentinel2SCLFirstValid`](../compositors/sentinel2_scl_Sentinel2SCLFirstValid.md)
 for scoring details and available weights.
 
-With this compositor, rslearn automatically includes `scl_band` for materialization,
-even if it is not listed in `band_sets`.
+When using this compositor with `context.layer_config`, include `scl_band` (default
+`SCL`) in a configured `band_sets` entry. It is not automatically inferred from
+`compositing_method`.
 
 Save this to a dataset folder like `/path/to/dataset/config.json`. Then we can create a
 sample window, and then run prepare and materialize (skipping ingest since we disabled

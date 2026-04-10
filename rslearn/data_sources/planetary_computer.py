@@ -324,33 +324,6 @@ class Sentinel2(PlanetaryComputer):
         "visual": ["R", "G", "B"],
     }
 
-    @staticmethod
-    def _get_compositor_scoring_bands(context: DataSourceContext) -> set[str]:
-        """Get extra bands needed by known cloud-aware ranking compositors."""
-        if context.layer_config is None:
-            return set()
-
-        compositing_method = context.layer_config.compositing_method
-        if not isinstance(compositing_method, dict):
-            return set()
-
-        class_path = compositing_method.get("class_path")
-        init_args = compositing_method.get("init_args", {})
-        if not isinstance(init_args, dict):
-            init_args = {}
-
-        if class_path == "rslearn.dataset.omni_cloud_mask.OmniCloudMaskFirstValid":
-            return {
-                str(init_args.get("red_band", "B04")),
-                str(init_args.get("green_band", "B03")),
-                str(init_args.get("nir_band", "B8A")),
-            }
-
-        if class_path == "rslearn.dataset.sentinel2_scl.Sentinel2SCLFirstValid":
-            return {str(init_args.get("scl_band", "SCL"))}
-
-        return set()
-
     def __init__(
         self,
         harmonize: bool = False,
@@ -372,17 +345,15 @@ class Sentinel2(PlanetaryComputer):
 
         # Determine which assets we need based on the bands in the layer config.
         if context.layer_config is not None:
-            wanted_bands: set[str] = set()
-            for band_set in context.layer_config.band_sets:
-                wanted_bands.update(band_set.bands)
-            wanted_bands.update(self._get_compositor_scoring_bands(context))
-
             asset_bands: dict[str, list[str]] = {}
             for asset_key, band_names in self.BANDS.items():
                 # See if the bands provided by this asset intersect with the bands in
                 # at least one configured band set.
-                if wanted_bands.intersection(band_names):
+                for band_set in context.layer_config.band_sets:
+                    if not set(band_set.bands).intersection(set(band_names)):
+                        continue
                     asset_bands[asset_key] = band_names
+                    break
         elif assets is not None:
             asset_bands = {asset_key: self.BANDS[asset_key] for asset_key in assets}
         else:

@@ -128,7 +128,7 @@ def test_sentinel2_context_rgb_without_cloud_ranking_uses_visual_only() -> None:
     assert set(data_source.asset_bands.keys()) == {"visual"}
 
 
-def test_sentinel2_context_rgb_with_scl_ranking_adds_scl_asset() -> None:
+def test_sentinel2_context_rgb_with_scl_ranking_keeps_visual_only() -> None:
     layer_cfg = LayerConfig(
         type=LayerType.RASTER,
         band_sets=[BandSetConfig(dtype=DType.UINT8, bands=["R", "G", "B"])],
@@ -140,10 +140,10 @@ def test_sentinel2_context_rgb_with_scl_ranking_adds_scl_asset() -> None:
     context = DataSourceContext(layer_config=layer_cfg)
 
     data_source = Sentinel2(context=context)
-    assert set(data_source.asset_bands.keys()) == {"visual", "SCL"}
+    assert set(data_source.asset_bands.keys()) == {"visual"}
 
 
-def test_sentinel2_context_rgb_with_omni_ranking_adds_scoring_assets() -> None:
+def test_sentinel2_context_rgb_with_omni_ranking_keeps_visual_only() -> None:
     layer_cfg = LayerConfig(
         type=LayerType.RASTER,
         band_sets=[BandSetConfig(dtype=DType.UINT8, bands=["R", "G", "B"])],
@@ -155,7 +155,22 @@ def test_sentinel2_context_rgb_with_omni_ranking_adds_scoring_assets() -> None:
     context = DataSourceContext(layer_config=layer_cfg)
 
     data_source = Sentinel2(context=context)
-    assert set(data_source.asset_bands.keys()) == {"visual", "B04", "B03", "B8A"}
+    assert set(data_source.asset_bands.keys()) == {"visual"}
+
+
+def test_sentinel2_context_explicit_scoring_bands_are_included() -> None:
+    layer_cfg = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[
+            BandSetConfig(dtype=DType.UINT8, bands=["R", "G", "B"]),
+            BandSetConfig(dtype=DType.UINT8, bands=["SCL"]),
+            BandSetConfig(dtype=DType.UINT16, bands=["B04", "B03", "B8A"]),
+        ],
+    )
+    context = DataSourceContext(layer_config=layer_cfg)
+
+    data_source = Sentinel2(context=context)
+    assert set(data_source.asset_bands.keys()) == {"visual", "SCL", "B04", "B03", "B8A"}
 
 
 def test_hls2_s30_defaults_to_reflectance_bands() -> None:
