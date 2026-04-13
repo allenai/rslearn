@@ -281,6 +281,7 @@ def run(
     port: int = 8000,
     host: str = "0.0.0.0",
     groups: list[str] | None = None,
+    split: str | None = None,
 ) -> None:
     """Run the visualization server.
 
@@ -301,6 +302,8 @@ def run(
         host: Host to bind to
         groups: Optional list of window group names to load (e.g. ["predict"]).
             If not set, all groups under windows/ are loaded.
+        split: If set, only windows whose metadata ``options["split"]`` equals this
+            string (e.g. ``"train"`` or ``"val"``) are shown.
     """
     dataset_path = UPath(dataset_path)
     dataset = Dataset(dataset_path)
@@ -373,6 +376,21 @@ def run(
     logger.info(f"Loading all windows from dataset {dataset_path}")
     windows = dataset.load_windows(groups=groups, workers=128, show_progress=True)
     logger.info(f"Loaded {len(windows)} windows from dataset")
+
+    if split is not None:
+        before = len(windows)
+        windows = [w for w in windows if w.options.get("split") == split]
+        logger.info(
+            "After split filter %r: %d -> %d windows",
+            split,
+            before,
+            len(windows),
+        )
+        if not windows:
+            logger.warning(
+                "No windows match split=%r; the index page will be empty.",
+                split,
+            )
     logger.info(f"Raster groups: {raster_groups}")
     logger.info(f"Vector text groups: {vector_text_groups}")
     logger.info(f"Vector image groups: {vector_image_groups}")
@@ -523,6 +541,15 @@ def main() -> None:
         default=None,
         help="Window group(s) to load (e.g. predict). If not set, all groups under windows/ are loaded.",
     )
+    parser.add_argument(
+        "--split",
+        type=str,
+        default=None,
+        help=(
+            "Only windows whose metadata has options['split'] equal to this value "
+            "(e.g. val or train). Omit to include all loaded windows."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -550,6 +577,7 @@ def main() -> None:
         port=args.port,
         host=args.host,
         groups=args.groups,
+        split=args.split,
     )
 
 
