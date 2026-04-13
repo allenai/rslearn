@@ -2,11 +2,14 @@
 
 from datetime import datetime, timedelta
 
+import pytest
 import torch
+from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.nn.flexi_vit import TokensAndMasks
 from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import MaskValue
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.models.attention_pooling import AttentionPool, SimpleAttentionPool
+from rslearn.models.component import FeatureVector
 from rslearn.models.olmoearth_pretrain.model import OlmoEarth
 from rslearn.train.model_context import ModelContext, RasterImage, SampleMetadata
 
@@ -23,6 +26,22 @@ def _make_metadata(crop_bounds: tuple[int, int, int, int]) -> SampleMetadata:
         projection=WGS84_PROJECTION,
         dataset_source=None,
     )
+
+
+def _make_timestamps(num_timesteps: int) -> list[tuple[datetime, datetime]]:
+    return [
+        (datetime(2025, x, 1), datetime(2025, x, 1))
+        for x in range(1, num_timesteps + 1)
+    ]
+
+
+class _DummyTokenModel(torch.nn.Module):
+    def __init__(self, tokens_and_masks: TokensAndMasks):
+        super().__init__()
+        self.tokens_and_masks = tokens_and_masks
+
+    def forward(self, sample: object, patch_size: int, **kwargs: object) -> dict:
+        return {"tokens_and_masks": self.tokens_and_masks}
 
 
 def test_forward() -> None:
@@ -105,6 +124,236 @@ def test_forward_no_pooling() -> None:
 
     # Backbone channels should match patch size and depth.
     assert model.get_backbone_channels() == [(4, 128)]
+
+
+def test_forward_instance_pooling() -> None:
+    """Token instance pooling should return a FeatureVector."""
+    model = OlmoEarth(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        token_pooling=False,
+        token_instance_pooling=True,
+    )
+
+    t = 2
+    h = 4
+    w = 4
+    inputs = [
+        {
+            "sentinel2_l2a": RasterImage(
+                image=torch.zeros((12, t, h, w), dtype=torch.float32),
+                timestamps=_make_timestamps(t),
+            )
+        }
+    ]
+    features = model(
+        ModelContext(inputs=inputs, metadatas=[_make_metadata((0, 0, h, w))])
+    )
+
+    assert isinstance(features, FeatureVector)
+    assert features.feature_vector.shape == (1, 128)
+
+
+def test_instance_pooling_and_token_pooling_are_mutually_exclusive() -> None:
+    """The two pooling modes should not be enabled together."""
+    with pytest.raises(
+        ValueError,
+        match="token_pooling and token_instance_pooling cannot both be True",
+    ):
+        OlmoEarth(
+            checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+            random_initialization=True,
+            patch_size=4,
+            embedding_size=128,
+            token_pooling=True,
+            token_instance_pooling=True,
+        )
+
+
+def test_forward_instance_pooling_nonlegacy() -> None:
+    """Instance pooling should work with non-legacy timestamp preparation too."""
+    model = OlmoEarth(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        token_pooling=False,
+        token_instance_pooling=True,
+        use_legacy_timestamps=False,
+    )
+
+    h = 4
+    w = 4
+    inputs = [
+        {
+            "sentinel2_l2a": RasterImage(
+                image=torch.zeros((12, 3, h, w), dtype=torch.float32),
+                timestamps=_make_timestamps(3),
+            ),
+            "sentinel1": RasterImage(
+                image=torch.zeros((2, 2, h, w), dtype=torch.float32),
+                timestamps=_make_timestamps(2),
+            ),
+        },
+        {
+            "sentinel2_l2a": RasterImage(
+                image=torch.zeros((12, 2, h, w), dtype=torch.float32),
+                timestamps=_make_timestamps(2),
+            ),
+            "sentinel1": RasterImage(
+                image=torch.zeros((2, 1, h, w), dtype=torch.float32),
+                timestamps=_make_timestamps(1),
+            ),
+        },
+    ]
+    features = model(
+        ModelContext(
+            inputs=inputs,
+            metadatas=[_make_metadata((0, 0, h, w)), _make_metadata((0, 0, h, w))],
+        )
+    )
+
+    assert isinstance(features, FeatureVector)
+    assert features.feature_vector.shape == (2, 128)
+
+
+def test_instance_pooling_weights_modalities_by_token_count() -> None:
+    """Instance pooling should match a global token mean, not per-modality averaging."""
+    model = OlmoEarth(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        autocast_dtype=None,
+        token_pooling=False,
+        token_instance_pooling=True,
+    )
+    model.model = _DummyTokenModel(
+        TokensAndMasks(
+            sentinel2_l2a=torch.zeros((1, 1, 1, 1, 3, 1), dtype=torch.float32),
+            sentinel2_l2a_mask=torch.full(
+                (1, 1, 1, 1, 3), MaskValue.ONLINE_ENCODER.value, dtype=torch.int32
+            ),
+            sentinel1=torch.full((1, 1, 1, 1, 1, 1), 10.0, dtype=torch.float32),
+            sentinel1_mask=torch.full(
+                (1, 1, 1, 1, 1), MaskValue.ONLINE_ENCODER.value, dtype=torch.int32
+            ),
+        )
+    )
+
+    h = 4
+    w = 4
+    context = ModelContext(
+        inputs=[
+            {
+                "sentinel2_l2a": RasterImage(
+                    image=torch.zeros((12, 1, h, w), dtype=torch.float32),
+                    timestamps=_make_timestamps(1),
+                ),
+                "sentinel1": RasterImage(
+                    image=torch.zeros((2, 1, h, w), dtype=torch.float32),
+                    timestamps=_make_timestamps(1),
+                ),
+            }
+        ],
+        metadatas=[_make_metadata((0, 0, h, w))],
+    )
+
+    features = model(context)
+
+    assert isinstance(features, FeatureVector)
+    assert features.feature_vector.shape == (1, 1)
+    assert torch.allclose(features.feature_vector, torch.tensor([[2.5]]))
+
+
+def test_instance_pooling_excludes_masked_tokens() -> None:
+    """Masked tokens should not contribute to the pooled instance embedding."""
+    model = OlmoEarth(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        autocast_dtype=None,
+        token_pooling=False,
+        token_instance_pooling=True,
+        use_legacy_timestamps=False,
+    )
+    model.model = _DummyTokenModel(
+        TokensAndMasks(
+            sentinel2_l2a=torch.tensor(
+                [
+                    [[[[[2.0], [2.0], [2.0]], [[2.0], [2.0], [2.0]]]]],
+                    [[[[[4.0], [4.0], [4.0]], [[100.0], [100.0], [100.0]]]]],
+                ],
+                dtype=torch.float32,
+            ),
+            sentinel2_l2a_mask=torch.tensor(
+                [
+                    [
+                        [
+                            [
+                                [
+                                    MaskValue.ONLINE_ENCODER.value,
+                                    MaskValue.ONLINE_ENCODER.value,
+                                    MaskValue.ONLINE_ENCODER.value,
+                                ],
+                                [
+                                    MaskValue.ONLINE_ENCODER.value,
+                                    MaskValue.ONLINE_ENCODER.value,
+                                    MaskValue.ONLINE_ENCODER.value,
+                                ],
+                            ]
+                        ]
+                    ],
+                    [
+                        [
+                            [
+                                [
+                                    MaskValue.ONLINE_ENCODER.value,
+                                    MaskValue.ONLINE_ENCODER.value,
+                                    MaskValue.ONLINE_ENCODER.value,
+                                ],
+                                [
+                                    MaskValue.MISSING.value,
+                                    MaskValue.MISSING.value,
+                                    MaskValue.MISSING.value,
+                                ],
+                            ]
+                        ]
+                    ],
+                ],
+                dtype=torch.int32,
+            ),
+        )
+    )
+
+    h = 4
+    w = 4
+    context = ModelContext(
+        inputs=[
+            {
+                "sentinel2_l2a": RasterImage(
+                    image=torch.zeros((12, 2, h, w), dtype=torch.float32),
+                    timestamps=_make_timestamps(2),
+                )
+            },
+            {
+                "sentinel2_l2a": RasterImage(
+                    image=torch.zeros((12, 1, h, w), dtype=torch.float32),
+                    timestamps=_make_timestamps(1),
+                )
+            },
+        ],
+        metadatas=[_make_metadata((0, 0, h, w)), _make_metadata((0, 0, h, w))],
+    )
+
+    features = model(context)
+
+    assert isinstance(features, FeatureVector)
+    assert features.feature_vector.shape == (2, 1)
+    assert torch.allclose(features.feature_vector, torch.tensor([[2.0], [4.0]]))
 
 
 def test_with_attnpool() -> None:

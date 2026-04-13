@@ -24,7 +24,12 @@ from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (
 from upath import UPath
 
 from rslearn.log_utils import get_logger
-from rslearn.models.component import FeatureExtractor, FeatureMaps, TokenFeatureMaps
+from rslearn.models.component import (
+    FeatureExtractor,
+    FeatureMaps,
+    FeatureVector,
+    TokenFeatureMaps,
+)
 from rslearn.train.model_context import ModelContext, RasterImage
 
 logger = get_logger(__name__)
@@ -66,6 +71,7 @@ class OlmoEarth(FeatureExtractor):
         embedding_size: int | None = None,
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
+        token_instance_pooling: bool = False,
         use_legacy_timestamps: bool = True,
         timestamp_error_tolerance: timedelta = timedelta(days=15),
     ):
@@ -91,9 +97,14 @@ class OlmoEarth(FeatureExtractor):
             embedding_size: optional embedding size to report via
                 get_backbone_channels (if model_id is not set).
             autocast_dtype: which dtype to use for autocasting, or set None to disable.
-            token_pooling: whether or not to pool the tokens. If True, the output will be BxCxHxW. If False,
-                there will be an extra dimension, N, (BxCxHxWxN) representing the temporal and channel
-                dimensions.
+            token_pooling: whether or not to pool the tokens into a spatial
+                feature map. If True, the output will be BxCxHxW. If False,
+                there will be an extra dimension N, so the output is
+                BxCxHxWxN, where N is the concatenation of per-modality
+                timestep/band-set tokens.
+            token_instance_pooling: whether to pool all valid tokens into a
+                single BxC instance embedding. This cannot be enabled at the
+                same time as token_pooling. Returns a FeatureVector.
             use_legacy_timestamps: set timestamps to dummy values [1 January 2024, 1 February 2024, ...]
                 instead of the actual timestamps of the input. The option to do this is preserved
                 for backwards compatability with finetuned models which were trained against this
@@ -110,6 +121,11 @@ class OlmoEarth(FeatureExtractor):
                 "For new projects, don't use legacy timesteps. "
                 "Support will be removed after 2026-04-01.",
                 FutureWarning,
+            )
+
+        if token_pooling and token_instance_pooling:
+            raise ValueError(
+                "token_pooling and token_instance_pooling cannot both be True"
             )
 
         if (
@@ -162,8 +178,71 @@ class OlmoEarth(FeatureExtractor):
                 model = model[part]
         self.model = model
         self.token_pooling = token_pooling
+        self.token_instance_pooling = token_instance_pooling
         self.use_legacy_timestamps = use_legacy_timestamps
         self.timestamp_error_tolerance = timestamp_error_tolerance
+
+    @staticmethod
+    def _pool_instance_tokens(
+        tokens_and_masks: TokensAndMasks,
+        present_modalities: list[str],
+        missing_tokens: bool,
+    ) -> torch.Tensor:
+        """Pool all valid tokens into one feature vector per sample.
+
+        This matches the OLMOEarth instance embedding behavior more closely than the
+        existing token_pooling=True path by weighting modalities by their valid token
+        counts instead of averaging each modality equally.
+
+        Args:
+            tokens_and_masks: encoder outputs containing one token tensor and mask per
+                modality.
+            present_modalities: modalities that are present in at least one sample in
+                the current batch.
+            missing_tokens: whether any modality contains MISSING tokens and therefore
+                requires mask-aware pooling.
+
+        Returns:
+            a BxC tensor containing one pooled embedding vector per sample.
+        """
+        total_sum = None
+        total_count = None
+
+        for modality in present_modalities:
+            modality_features = getattr(tokens_and_masks, modality)  # BHWTSC
+            if missing_tokens:
+                modality_masks = getattr(tokens_and_masks, f"{modality}_mask")  # BHWTS
+                modality_masks_bool = (
+                    modality_masks != MaskValue.MISSING.value
+                ).unsqueeze(-1)
+                modality_sum = (modality_features * modality_masks_bool).sum(
+                    dim=[1, 2, 3, 4]
+                )
+                modality_count = (
+                    (modality_masks != MaskValue.MISSING.value)
+                    .sum(dim=[1, 2, 3, 4])
+                    .to(modality_features.dtype)
+                )
+            else:
+                modality_sum = modality_features.sum(dim=[1, 2, 3, 4])
+                modality_count = modality_features.new_full(
+                    (modality_features.shape[0],),
+                    fill_value=float(
+                        modality_features.shape[1]
+                        * modality_features.shape[2]
+                        * modality_features.shape[3]
+                        * modality_features.shape[4]
+                    ),
+                )
+
+            total_sum = modality_sum if total_sum is None else total_sum + modality_sum
+            total_count = (
+                modality_count if total_count is None else total_count + modality_count
+            )
+
+        if total_sum is None or total_count is None:
+            raise ValueError("No modalities present to pool")
+        return total_sum / total_count.clamp(min=1).unsqueeze(-1)
 
     def _patch_legacy_encoder_config(self, config_dict: dict) -> dict:
         """Patch checkpoint config dicts that predate use_linear_patch_embed.
@@ -596,16 +675,20 @@ class OlmoEarth(FeatureExtractor):
 
         return MaskedOlmoEarthSample(**kwargs), present_modalities, device
 
-    def forward(self, context: ModelContext) -> FeatureMaps | TokenFeatureMaps:
-        """Compute feature maps from the OlmoEarth backbone.
+    def forward(
+        self, context: ModelContext
+    ) -> FeatureMaps | TokenFeatureMaps | FeatureVector:
+        """Compute features from the OlmoEarth backbone.
 
         Args:
             context: the model context. Input dicts should include keys corresponding
                 to the modalities that should be passed to the OlmoEarth model.
 
         Returns:
-            a FeatureMaps consisting of one feature map, at 1/patch_size of the input
-                resolution. Embeddings will be pooled across modalities and timesteps.
+            a FeatureMaps consisting of one feature map at 1/patch_size of the input
+                resolution, a TokenFeatureMaps with an additional token dimension when
+                token_pooling is disabled, or a FeatureVector when
+                token_instance_pooling is enabled.
         """
         if self.use_legacy_timestamps:
             sample, present_modalities, device = self._prepare_modality_inputs_legacy(
@@ -648,8 +731,14 @@ class OlmoEarth(FeatureExtractor):
                     sample, patch_size=self.patch_size, **self.forward_kwargs
                 )["tokens_and_masks"]
 
-        # Apply temporal/modality pooling so we just have one feature per patch.
+        # Apply temporal/modality pooling so we just have one feature per patch, or
+        # one vector per instance when token_instance_pooling is enabled.
         features = []
+        if self.token_instance_pooling:
+            pooled = self._pool_instance_tokens(
+                tokens_and_masks, present_modalities, missing_tokens
+            )
+            return FeatureVector(feature_vector=pooled)
         if self.token_pooling:
             for modality in present_modalities:
                 modality_features = getattr(tokens_and_masks, modality)  # BHWTSC

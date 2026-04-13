@@ -42,6 +42,7 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
         embedding_size: int | None = None,
         autocast_dtype: str | None = "bfloat16",
         token_pooling: bool = True,
+        token_instance_pooling: bool = False,
     ):
         """Create a new OlmoEarthPeriodTimestamps model.
 
@@ -58,6 +59,8 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             embedding_size: optional embedding size override.
             autocast_dtype: dtype for autocasting, or None to disable.
             token_pooling: whether to pool tokens (BxCxHxW) or keep them (BxCxHxWxN).
+            token_instance_pooling: whether to pool all valid tokens into a BxC
+                FeatureVector instead of returning spatial feature maps.
         """
         super().__init__(
             patch_size=patch_size,
@@ -70,6 +73,7 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             embedding_size=embedding_size,
             autocast_dtype=autocast_dtype,
             token_pooling=token_pooling,
+            token_instance_pooling=token_instance_pooling,
             use_legacy_timestamps=False,
         )
         self.period_duration = period_duration
