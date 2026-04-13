@@ -286,11 +286,24 @@ class OlmoEarth(FeatureExtractor):
                 assert isinstance(raster_img, RasterImage)
                 max_timesteps = max(max_timesteps, raster_img.image.shape[1])
 
-        # Determine height/width from first sample.
-        # All samples must have the same size.
-        crop_bounds = context.metadatas[0].crop_bounds
-        width = crop_bounds[2] - crop_bounds[0]
-        height = crop_bounds[3] - crop_bounds[1]
+        # Determine height/width from the first available input tensor rather than
+        # crop_bounds, since transforms like Pad may have changed the tensor's spatial
+        # dimensions without updating the metadata.
+        height: int | None = None
+        width: int | None = None
+        for input_dict in context.inputs:
+            for modality in present_modalities:
+                if modality in input_dict:
+                    height = input_dict[modality].image.shape[-2]
+                    width = input_dict[modality].image.shape[-1]
+                    break
+            if height is not None:
+                break
+
+        if height is None or width is None:
+            raise ValueError(
+                "Could not determine spatial dimensions from any input tensor"
+            )
 
         # Process each modality.
         kwargs = {}
@@ -491,11 +504,24 @@ class OlmoEarth(FeatureExtractor):
             for sample_timestamps in all_sample_timestamps
         )
 
-        # Determine height/width from first sample.
-        # All samples must have the same size.
-        crop_bounds = context.metadatas[0].crop_bounds
-        width = crop_bounds[2] - crop_bounds[0]
-        height = crop_bounds[3] - crop_bounds[1]
+        # Determine height/width from the first available input tensor rather than
+        # crop_bounds, since transforms like Pad may have changed the tensor's spatial
+        # dimensions without updating the metadata.
+        height: int | None = None
+        width: int | None = None
+        for input_dict in context.inputs:
+            for modality in present_modalities:
+                if modality in input_dict:
+                    height = input_dict[modality].image.shape[-2]
+                    width = input_dict[modality].image.shape[-1]
+                    break
+            if height is not None:
+                break
+
+        if height is None or width is None:
+            raise ValueError(
+                "Could not determine spatial dimensions from any input tensor"
+            )
 
         # Process each modality
         kwargs = {}
