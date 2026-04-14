@@ -9,9 +9,12 @@ import shapely
 import torch
 
 from rslearn.dataset import Window
+from rslearn.log_utils import get_logger
 from rslearn.train.dataset import DataInput, ModelDataset
 from rslearn.train.model_context import RasterImage, SampleMetadata
 from rslearn.utils.geometry import PixelBounds, STGeometry
+
+logger = get_logger(__name__)
 
 
 def get_window_crop_options(
@@ -281,7 +284,9 @@ class IterableAllCropsDataset(torch.utils.data.IterableDataset):
     ) -> Iterator[tuple[dict[str, Any], dict[str, Any], SampleMetadata]]:
         """Iterate over all crops in each element of the underlying ModelDataset."""
         # Iterate over the window IDs until we have returned enough samples.
+        logger.debug("Getting worker iteration data")
         window_ids, num_samples_needed = self._get_worker_iteration_data()
+        logger.debug("Got %d needed samples", num_samples_needed)
         num_samples_returned = 0
 
         for iteration_idx in itertools.count():
