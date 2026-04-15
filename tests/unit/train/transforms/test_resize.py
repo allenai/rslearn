@@ -7,7 +7,7 @@ from rslearn.train.transforms.resize import Resize
 
 
 def test_resize() -> None:
-    """Verify that converting to decibels works."""
+    """Verify nearest-neighbor resize on a 4D raster image."""
     target_class_4D = torch.tensor(
         [[[1, 1, 2, 2], [1, 1, 2, 2], [3, 3, 4, 4], [3, 3, 4, 4]]], dtype=torch.float32
     ).unsqueeze(dim=1)
