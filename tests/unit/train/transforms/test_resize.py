@@ -47,3 +47,23 @@ def test_max_pool_resize_single_positive_pixel() -> None:
     # The output should not be all zeros — the region containing the positive pixel is 1
     assert out_target["classes"].image.sum().item() == 1
     assert out_target["classes"].image[0, 0, 0, 1] == 1
+
+
+def test_max_pool_resize_bool_multi_timestep() -> None:
+    """MaxPoolResize should pool each boolean timestep independently."""
+    label = torch.zeros(1, 2, 4, 4, dtype=torch.bool)
+    label[0, 0, 0, 0] = True
+    label[0, 1, 3, 2] = True
+
+    transform = MaxPoolResize((2, 2), ["target/classes"])
+    input_dict: dict[str, Any] = {}
+    target_dict: dict[str, Any] = {"classes": RasterImage(label)}
+    _, out_target = transform(input_dict, target_dict)
+
+    expected = torch.tensor(
+        [[[[True, False], [False, False]], [[False, False], [False, True]]]],
+        dtype=torch.bool,
+    )
+    assert out_target["classes"].image.shape == (1, 2, 2, 2)
+    assert out_target["classes"].image.dtype == torch.bool
+    assert torch.equal(out_target["classes"].image, expected)
