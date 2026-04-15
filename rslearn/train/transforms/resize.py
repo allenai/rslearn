@@ -73,9 +73,8 @@ class Resize(Transform):
 class MaxPoolResize(Transform):
     """Resizes inputs to a target size using adaptive max pooling.
 
-    Unlike Resize (which uses interpolation), this uses max pooling over each
-    spatial region.  This is useful for binary label masks: if *any* pixel in a
-    pooling region is positive, the output pixel is positive.
+    Unlike Resize (which uses interpolation), this uses adaptive 2D max pooling
+    over each spatial region.
     """
 
     def __init__(
