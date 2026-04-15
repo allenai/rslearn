@@ -11,6 +11,7 @@ from rslearn.data_sources.planetary_computer import (
     Hls2S30,
     LandsatC2L2,
     PlanetaryComputer,
+    Sentinel2,
     Sentinel3SlstrLST,
 )
 from rslearn.utils.stac import StacAsset, StacItem
@@ -114,6 +115,62 @@ def test_landsat_c2_l2_uses_user_query_unmodified() -> None:
     query = {"eo:cloud_cover": {"lt": 5}}
     data_source = LandsatC2L2(query=query)
     assert data_source.query == query
+
+
+def test_sentinel2_context_rgb_without_cloud_ranking_uses_visual_only() -> None:
+    layer_cfg = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT8, bands=["R", "G", "B"])],
+    )
+    context = DataSourceContext(layer_config=layer_cfg)
+
+    data_source = Sentinel2(context=context)
+    assert set(data_source.asset_bands.keys()) == {"visual"}
+
+
+def test_sentinel2_context_rgb_with_scl_ranking_keeps_visual_only() -> None:
+    layer_cfg = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT8, bands=["R", "G", "B"])],
+        compositing_method={
+            "class_path": "rslearn.dataset.sentinel2_scl.Sentinel2SCLFirstValid",
+            "init_args": {"scl_band": "SCL"},
+        },
+    )
+    context = DataSourceContext(layer_config=layer_cfg)
+
+    data_source = Sentinel2(context=context)
+    assert set(data_source.asset_bands.keys()) == {"visual"}
+
+
+def test_sentinel2_context_rgb_with_omni_ranking_keeps_visual_only() -> None:
+    layer_cfg = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[BandSetConfig(dtype=DType.UINT8, bands=["R", "G", "B"])],
+        compositing_method={
+            "class_path": "rslearn.dataset.omni_cloud_mask.OmniCloudMaskFirstValid",
+            "init_args": {"red_band": "B04", "green_band": "B03", "nir_band": "B8A"},
+        },
+    )
+    context = DataSourceContext(layer_config=layer_cfg)
+
+    data_source = Sentinel2(context=context)
+    assert set(data_source.asset_bands.keys()) == {"visual"}
+
+
+def test_sentinel2_context_explicit_scoring_bands_are_included() -> None:
+    layer_cfg = LayerConfig(
+        type=LayerType.RASTER,
+        band_sets=[
+            BandSetConfig(dtype=DType.UINT8, bands=["R", "G", "B"]),
+            BandSetConfig(dtype=DType.UINT8, bands=["SCL"]),
+            BandSetConfig(dtype=DType.UINT16, bands=["B04", "B03", "B8A"]),
+        ],
+    )
+    context = DataSourceContext(layer_config=layer_cfg)
+
+    data_source = Sentinel2(context=context)
+    assert set(data_source.asset_bands.keys()) == {"visual", "SCL", "B04", "B03", "B8A"}
 
 
 def test_hls2_s30_defaults_to_reflectance_bands() -> None:

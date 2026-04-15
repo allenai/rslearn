@@ -57,7 +57,8 @@ options beyond those detailed in [LayerConfig](./LayerConfig.md):
 ```
 
 The `class_path` and `init_args` options configure the data source itself. See
-[DataSources](DataSources.md) for details on all of the built-in data sources in rslearn.
+[DataSources](../DataSources.md) for details on all of the built-in data sources in
+rslearn.
 
 rslearn retrieves data from data sources in three steps: prepare, ingest, and materialize.
 
@@ -248,98 +249,23 @@ pixel and band.
 The `compositing_method` can instead be set to MEAN or MEDIAN to compute the mean or
 median across all items in the group that are not NODATA at that pixel and band.
 
-The `compositing_method` can also be configured as a jsonargparse object
-(`class_path` + `init_args`) to use a custom compositor implementation.
-
-#### OmniCloudMask
-
-`OmniCloudMaskFirstValid` is a custom compositor that ranks each item in a group using
-pixel-level [`omnicloudmask` (OmniCloudMask)](https://github.com/DPIRD-DMA/OmniCloudMask)
-inference over the requested window extent, then runs
-FIRST_VALID in that ranked order.
-
-It is configured through `compositing_method` (not data-source `init_args`):
+`compositing_method` can also be configured as a jsonargparse object
+(`class_path` + `init_args`) to use a custom compositor implementation:
 
 ```jsonc
 {
   "compositing_method": {
-    "class_path": "rslearn.dataset.omni_cloud_mask.OmniCloudMaskFirstValid",
+    "class_path": "your.module.YourCompositor",
     "init_args": {
-      // Bands used for cloud scoring (set these to your source's band names).
-      "red_band": "B04",
-      "green_band": "B03",
-      "nir_band": "B8A",
-      // Lower score is better. Defaults shown below.
-      "clear_weight": 0,
-      "thick_cloud_weight": 5,
-      "thin_cloud_weight": 1,
-      "cloud_shadow_weight": 1
+      "...": "..."
     }
   }
 }
 ```
 
-Scoring details:
-
-- OmniCloudMask classes are: `0=clear`, `1=thick cloud`, `2=thin cloud`, `3=cloud shadow`.
-- Score is a weighted sum of class fractions over the window.
-- With default weights, score is `5*thick + thin + shadow` (clear has weight 0).
-- Lower score is preferred.
-
-Execution behavior:
-
-- Ranking runs during **materialize**, not **prepare**.
-- It runs for item groups with more than one item; single-item groups skip inference.
-- This is true for both `ingest: true` and `ingest: false` (direct materialization).
-
-Compared with metadata-based sorting:
-
-- `sort_by` (for example `eo:cloud_cover`) sorts by item-level metadata before grouping.
-- OmniCloudMask ranking is window-specific and reorders items inside each materialized group.
-
-You can combine both approaches by using a coarse metadata filter to reduce candidates,
-then using OmniCloudMask ranking for final ordering:
-
-```jsonc
-{
-  "data_source": {
-    "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
-    "init_args": {
-      "harmonize": true,
-      "query": {"eo:cloud_cover": {"lt": 80}}
-    },
-    "query_config": {
-      "max_matches": 1,
-      "space_mode": "MOSAIC"
-    }
-  },
-  "compositing_method": {
-    "class_path": "rslearn.dataset.omni_cloud_mask.OmniCloudMaskFirstValid",
-    "init_args": {
-      "red_band": "B04",
-      "green_band": "B03",
-      "nir_band": "B8A"
-    }
-  }
-}
-```
-
-Requires the optional `omnicloudmask` package (for this repo, `pip install .[extra]`).
-
-#### SPATIAL_MOSAIC_TEMPORAL_STACK
-
-The SPATIAL_MOSAIC_TEMPORAL_STACK compositing method is also available to handle
-multi-temporal rasters (typically used with SINGLE_COMPOSITE).
-
-Suppose the data source returns items spanning calendar months with hourly observations
-(e.g., hourly precipitation). For a window spanning January 15 - February 15, we would
-match with the January and February items. SPATIAL_MOSAIC_TEMPORAL_STACK will first
-compute the union of time ranges across the items in the item group clipped to the
-window time range; in this case, that is every hour from January 15 to February 15.
-Then, it initializes a 3D THW grid where the T dimension corresponds to those time
-ranges, while the H/W dimensions correspond to the window's spatial extent. It populates
-the grid by iterating over items and copying them into output cells that are still
-NODATA.
+See [Compositors](../Compositors.md) for detailed docs on built-in and custom
+compositors, including cloud-aware Sentinel-2 ranking compositors and
+SPATIAL_MOSAIC_TEMPORAL_STACK.
 
 ### Resampling Method
 
