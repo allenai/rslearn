@@ -19,7 +19,7 @@ from rslearn.dataset import Window
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.tile_stores import TileStore, TileStoreWithLayer
 from rslearn.utils import Feature
-from rslearn.utils.geometry import PixelBounds, Projection
+from rslearn.utils.geometry import PixelBounds, Projection, get_global_raster_bounds
 from rslearn.utils.raster_array import RasterArray, RasterMetadata
 
 
@@ -144,6 +144,10 @@ class DirectMaterializeDataSource(DataSource[ItemType], TileStore, Generic[ItemT
     def get_raster_bounds(
         self, layer_name: str, item: Item, bands: list[str], projection: Projection
     ) -> PixelBounds:
+        if item.geometry.is_global():
+            # Avoid reprojecting full-world footprints into local CRSs (e.g. UTM/BNG),
+            # which can collapse to degenerate bounds.
+            return get_global_raster_bounds(projection)
         geom = item.geometry.to_projection(projection)
         return (
             int(geom.shp.bounds[0]),
