@@ -225,3 +225,34 @@ got included, e.g.:
   }
 }
 ```
+
+### Processing Baseline Filtering
+
+Planetary Computer searches can return scenes from multiple Sentinel-2 processing
+baselines within the same AOI/TOI. If you want reproducible scene selection and
+cross-provider comparisons, pin a single baseline with a STAC `query` filter:
+
+```json
+{
+  "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+  "init_args": {
+    "query": {
+      "s2:processing_baseline": {"eq": "05.10"}
+    }
+  }
+}
+```
+
+You can combine this with other query constraints such as cloud cover:
+
+```json
+{
+  "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+  "init_args": {
+    "query": {
+      "eo:cloud_cover": {"lt": 20},
+      "s2:processing_baseline": {"eq": "05.10"}
+    }
+  }
+}
+```
