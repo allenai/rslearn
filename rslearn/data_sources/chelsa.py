@@ -22,7 +22,13 @@ from rslearn.data_sources.direct_materialize_data_source import (
 )
 from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.tile_stores import TileStoreWithLayer
-from rslearn.utils.geometry import STGeometry, get_global_geometry
+from rslearn.utils.geometry import (
+    PixelBounds,
+    Projection,
+    STGeometry,
+    get_global_geometry,
+    get_global_raster_bounds,
+)
 
 
 class CHELSADailyItem(Item):
@@ -256,6 +262,20 @@ class CHELSADaily(
     @override
     def deserialize_item(self, serialized_item: dict) -> CHELSADailyItem:
         return CHELSADailyItem.deserialize(serialized_item)
+
+    @override
+    def get_raster_bounds(
+        self,
+        layer_name: str,
+        item: Item,
+        bands: list[str],
+        projection: Projection,
+    ) -> PixelBounds:
+        # CHELSA rasters are global; avoid reprojecting full-world geometry into
+        # local CRSs where the projected bounds can collapse to a degenerate line.
+        if item.geometry.is_global():
+            return get_global_raster_bounds(projection)
+        return super().get_raster_bounds(layer_name, item, bands, projection)
 
     @override
     def get_item_by_name(self, name: str) -> CHELSADailyItem:
