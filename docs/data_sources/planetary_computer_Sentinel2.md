@@ -229,8 +229,8 @@ got included, e.g.:
 
 ### Common STAC Query Filters
 
-Planetary Computer supports many STAC metadata filters. A common pattern is to
-combine cloud cover, processing baseline, platform (S2A/S2B/S2C), and MGRS tile:
+Planetary Computer supports many STAC metadata filters. Here is an example combining filters
+for several commonly used attributes: cloud cover, processing baseline, platform (S2A/S2B/S2C), and MGRS tile:
 
 ```json
 {
