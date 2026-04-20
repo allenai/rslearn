@@ -129,6 +129,10 @@ To rank with [OmniCloudMask](https://github.com/DPIRD-DMA/OmniCloudMask), config
 }
 ```
 
+For reliable ranking quality with OmniCloudMask, create windows with at least
+`96x96` pixels (per dimension). Smaller windows can run, but accuracy may be
+lower even when inference padding is enabled.
+
 Requires `omnicloudmask` (`pip install .[extra]` in this repo). See
 [`OmniCloudMaskFirstValid`](../compositors/omni_cloud_mask_OmniCloudMaskFirstValid.md)
 for details.
