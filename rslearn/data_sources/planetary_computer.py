@@ -323,6 +323,7 @@ class Sentinel2(PlanetaryComputer):
         "SCL": ["SCL"],
         "visual": ["R", "G", "B"],
     }
+    NON_REFLECTANCE_ASSETS = frozenset({"SCL", "visual"})
 
     def __init__(
         self,
@@ -374,6 +375,10 @@ class Sentinel2(PlanetaryComputer):
         response.raise_for_status()
         return ET.fromstring(response.content)
 
+    def _should_harmonize_asset(self, asset_key: str) -> bool:
+        """Return whether harmonization should be applied for this Sentinel-2 asset."""
+        return self.harmonize and asset_key not in self.NON_REFLECTANCE_ASSETS
+
     def ingest(
         self,
         tile_store: TileStoreWithLayer,
@@ -416,10 +421,9 @@ class Sentinel2(PlanetaryComputer):
                         asset_key,
                     )
 
-                    # Harmonize values if needed.
-                    # TCI does not need harmonization.
+                    # Harmonize reflectance assets if needed.
                     harmonize_callback = None
-                    if self.harmonize and asset_key != "visual":
+                    if self._should_harmonize_asset(asset_key):
                         harmonize_callback = get_harmonize_callback(
                             self._get_product_xml(item)
                         )
@@ -471,8 +475,7 @@ class Sentinel2(PlanetaryComputer):
         Returns:
             A callback function for harmonization, or None if not needed.
         """
-        # TCI (visual) image does not need harmonization.
-        if not self.harmonize or asset_key == "visual":
+        if not self._should_harmonize_asset(asset_key):
             return None
 
         return get_harmonize_callback(self._get_product_xml(item))
