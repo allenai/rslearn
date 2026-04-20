@@ -13,7 +13,8 @@ Sentinel-2 satellite images from https://planetarycomputer.microsoft.com/dataset
     // baselines (recommended), see
     // https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
     "harmonize": false,
-    // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
+    // Optional STAC query filter. Below are examples of filtering by commonly
+    // used attributes.
     "query": null,
     "sort_by": null,
     "sort_ascending": true,
@@ -221,6 +222,25 @@ got included, e.g.:
     "harmonize": false,
     "query": {
       "s2:processing_baseline": {"gte": "04.00"}
+    }
+  }
+}
+```
+
+### Common STAC Query Filters
+
+Planetary Computer supports many STAC metadata filters. Here is an example combining filters
+for several commonly used attributes: cloud cover, processing baseline, platform (S2A/S2B/S2C), and MGRS tile:
+
+```json
+{
+  "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+  "init_args": {
+    "query": {
+      "eo:cloud_cover": {"lt": 20},
+      "platform": {"in": ["sentinel-2a", "sentinel-2b", "sentinel-2c"]},
+      "s2:mgrs_tile": {"eq": "10TET"},
+      "s2:processing_baseline": {"eq": "05.10"}
     }
   }
 }
