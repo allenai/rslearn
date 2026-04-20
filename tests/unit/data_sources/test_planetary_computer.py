@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -14,6 +15,7 @@ from rslearn.data_sources.planetary_computer import (
     Sentinel2,
     Sentinel3SlstrLST,
 )
+from rslearn.data_sources.stac import SourceItem
 from rslearn.utils.stac import StacAsset, StacItem
 
 
@@ -171,6 +173,20 @@ def test_sentinel2_context_explicit_scoring_bands_are_included() -> None:
 
     data_source = Sentinel2(context=context)
     assert set(data_source.asset_bands.keys()) == {"visual", "SCL", "B04", "B03", "B8A"}
+
+
+def test_sentinel2_get_read_callback_skips_scl_harmonization() -> None:
+    data_source = Sentinel2(harmonize=True)
+    item = cast(SourceItem, object())
+
+    with patch.object(
+        Sentinel2,
+        "_get_product_xml",
+        side_effect=AssertionError("SCL should not request product XML"),
+    ):
+        callback = data_source.get_read_callback(item=item, asset_key="SCL")
+
+    assert callback is None
 
 
 def test_hls2_s30_defaults_to_reflectance_bands() -> None:
