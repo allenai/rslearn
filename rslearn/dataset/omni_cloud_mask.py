@@ -32,6 +32,9 @@ class OmniCloudMaskFirstValid(Compositor):
     Note that the R/G/NIR bands will be read twice during materialization: once to
     perform cloudiness scoring, and once during compositing to form the materialized
     image.
+
+    For best ranking quality, use windows with at least 96x96 pixels. Smaller
+    windows can run with padding but may have reduced cloud-mask accuracy.
     """
 
     def __init__(
@@ -52,7 +55,9 @@ class OmniCloudMaskFirstValid(Compositor):
             green_band: band name for green (e.g. "B03" or "green").
             nir_band: band name for NIR (e.g. "B8A" or "nir08").
             min_inference_size: OmniCloudMask requires at least this many pixels
-                per spatial dimension; smaller windows are padded.
+                per spatial dimension; smaller windows are padded. Padding
+                does not add spatial context, so it is still recommended to use
+                windows of at least 96x96 pixels.
             clear_weight: weight for clear pixels when computing the score.
             thick_cloud_weight: weight for thick cloud pixels when computing the score.
             thin_cloud_weight: weight for thin cloud pixels when computing the score.
