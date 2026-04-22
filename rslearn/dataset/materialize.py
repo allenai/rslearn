@@ -163,6 +163,7 @@ class RasterMaterializer(Materializer):
             default_request_time_range = window.time_range
 
         compositor = layer_cfg.instantiate_compositor()
+        compositor.prepare_for_window(window.projection, window.bounds)
 
         for band_cfg in layer_cfg.band_sets:
             projection, bounds = band_cfg.get_final_projection_and_bounds(

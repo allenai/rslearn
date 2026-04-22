@@ -121,7 +121,8 @@ To rank with [OmniCloudMask](https://github.com/DPIRD-DMA/OmniCloudMask), config
         "init_args": {
           "red_band": "B04",
           "green_band": "B03",
-          "nir_band": "B8A"
+          "nir_band": "B8A",
+          "use_canonical_b8a_20m_grid": true
         }
       }
     }
@@ -132,6 +133,12 @@ To rank with [OmniCloudMask](https://github.com/DPIRD-DMA/OmniCloudMask), config
 For reliable ranking quality with OmniCloudMask, create windows with at least
 `96x96` pixels (per dimension). Smaller windows can run, but accuracy may be
 lower even when inference padding is enabled.
+
+With `nir_band="B8A"`, OmniCloudMask defaults to scoring once on a canonical
+20 m RGB+NIR grid and reusing that item ordering across the layer's band sets.
+Set `use_canonical_b8a_20m_grid: false` to disable that behavior. Setting it to
+`true` requires `nir_band="B8A"` and requires `B8A` scoring data to be
+available during materialization.
 
 Requires `omnicloudmask` (`pip install .[extra]` in this repo). See
 [`OmniCloudMaskFirstValid`](../compositors/omni_cloud_mask_OmniCloudMaskFirstValid.md)

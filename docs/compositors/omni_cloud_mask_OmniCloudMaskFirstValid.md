@@ -16,6 +16,7 @@ Configure as a custom compositor in `compositing_method`:
       "red_band": "B04",
       "green_band": "B03",
       "nir_band": "B8A",
+      "use_canonical_b8a_20m_grid": true,
       "clear_weight": 0,
       "thick_cloud_weight": 5,
       "thin_cloud_weight": 1,
@@ -32,6 +33,13 @@ Configure as a custom compositor in `compositing_method`:
 - Score is a weighted sum of class fractions.
 - Lower score is better.
 - With defaults: `5*thick + thin + shadow` (`clear_weight=0`).
+- By default, if `nir_band="B8A"`, scoring is run once on a canonical 20 m
+  RGB+NIR grid and that item ordering is reused across all band-set
+  materialization passes for the window.
+- Set `use_canonical_b8a_20m_grid: false` to disable that reuse and score on
+  each band set's materialization grid instead.
+- Setting `use_canonical_b8a_20m_grid: true` requires `nir_band="B8A"` and
+  requires `B8A` scoring data to be available during materialization.
 
 ### Execution Notes
 

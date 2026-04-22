@@ -43,6 +43,19 @@ class Compositor(ABC):
     share this interface.
     """
 
+    def prepare_for_window(
+        self,
+        projection: Projection,
+        bounds: PixelBounds,
+    ) -> None:
+        """Prepare internal state for a materialization window.
+
+        Materializers call this once before invoking ``build_composite`` for the
+        different band sets in a window. Most compositors do not need any per-window
+        setup, so the default implementation is a no-op.
+        """
+        del projection, bounds
+
     @abstractmethod
     def build_composite(
         self,
