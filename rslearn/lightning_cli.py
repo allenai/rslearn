@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import multiprocessing
 import os
 import shutil
 import sys
@@ -10,7 +11,7 @@ import tempfile
 import fsspec
 import jsonargparse
 import wandb
-from lightning.pytorch import LightningModule, Trainer
+from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
 from lightning.pytorch.utilities import rank_zero_only
@@ -18,8 +19,6 @@ from upath import UPath
 
 from rslearn.arg_parser import RslearnArgumentParser
 from rslearn.log_utils import get_logger
-from rslearn.train.data_module import RslearnDataModule
-from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.utils.fsspec import open_atomic
 from rslearn.utils.jsonargparse import init_jsonargparse
 
@@ -407,9 +406,29 @@ def model_handler() -> None:
     """Handler for any rslearn model X commands."""
     init_jsonargparse()
 
+    # Set forkserver preload since torch can take a long time to load in each process.
+    logger.debug("Configuring forkserver preload")
+    multiprocessing.set_forkserver_preload(
+        [
+            "fiona",
+            "jsonargparse",
+            "numpy",
+            "pickle",
+            "PIL",
+            "torch",
+            "torch.multiprocessing",
+            "torchvision",
+            "upath",
+            "wandb",
+            "rslearn.main",
+            "rslearn.train.dataset",
+            "rslearn.train.data_module",
+        ]
+    )
+
     RslearnLightningCLI(
-        model_class=RslearnLightningModule,
-        datamodule_class=RslearnDataModule,
+        model_class=LightningModule,
+        datamodule_class=LightningDataModule,
         args=sys.argv[2:],
         subclass_mode_model=True,
         subclass_mode_data=True,

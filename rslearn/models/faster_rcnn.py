@@ -199,16 +199,19 @@ class FasterRCNN(Predictor):
 
         # Fix target labels to be 1 size in case it's empty.
         # For some reason this is needed.
+        # Builds new list so the caller's targets are never modified.
         if targets:
-            for i, target_dict in enumerate(targets):
-                if len(target_dict["labels"]) != 0:
-                    continue
-                targets[i] = dict(
+            targets = [
+                dict(
                     target_dict,
                     labels=torch.zeros(
                         (1,), dtype=torch.int64, device=target_dict["labels"].device
                     ),
                 )
+                if len(target_dict["labels"]) == 0
+                else target_dict
+                for target_dict in targets
+            ]
 
         # take the first (and assumed to be only) timestep
         image_list = [inp["image"].image[:, 0] for inp in context.inputs]

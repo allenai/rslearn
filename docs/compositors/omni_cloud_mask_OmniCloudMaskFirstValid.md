@@ -39,5 +39,8 @@ Configure as a custom compositor in `compositing_method`:
 - It runs only for item groups with more than one item.
 - This works for both `ingest: true` and `ingest: false`.
 - The scoring bands are read in addition to output bands.
+- For reliable ranking quality, create windows with at least `96x96` pixels.
+- `min_inference_size` only pads small windows; it does not add context from
+  outside the window, so very small windows can still have lower accuracy.
 
 Requires the optional `omnicloudmask` package (`pip install .[extra]` in this repo).
