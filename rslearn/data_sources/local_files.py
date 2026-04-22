@@ -25,6 +25,7 @@ from rslearn.utils.fsspec import (
     open_rasterio_upath_reader,
 )
 from rslearn.utils.geometry import Projection, STGeometry
+from rslearn.utils.grid_index import GridIndex
 
 from .data_source import DataSource, DataSourceContext, Item, QueryConfig
 
@@ -473,6 +474,15 @@ class LocalFiles(DataSource):
             for serialized_item in serialized_items
         ]
 
+    @functools.cache
+    def _get_spatial_index(self) -> GridIndex:
+        """Build an in-memory GridIndex over items in WGS84 for fast spatial lookup."""
+        grid_index = GridIndex(1.0)
+        for item in self.list_items():
+            wgs84_geom = item.geometry.to_wgs84()
+            grid_index.insert(wgs84_geom.shp.bounds, item)
+        return grid_index
+
     def get_items(
         self, geometries: list[STGeometry], query_config: QueryConfig
     ) -> list[list[MatchedItemGroup[Item]]]:
@@ -485,10 +495,13 @@ class LocalFiles(DataSource):
         Returns:
             List of groups of items that should be retrieved for each geometry.
         """
+        grid_index = self._get_spatial_index()
+
         groups = []
         for geometry in geometries:
+            wgs84_geometry = geometry.to_wgs84()
             cur_items = []
-            for item in self.list_items():
+            for item in grid_index.query(wgs84_geometry.shp.bounds):
                 if not item.geometry.intersects(geometry):
                     continue
                 cur_items.append(item)
