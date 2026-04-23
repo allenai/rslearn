@@ -32,15 +32,13 @@ class OmniCloudMaskFirstValid(Compositor):
 
     Note that the R/G/NIR bands will be read twice during materialization: once to
     perform cloudiness scoring, and once during compositing to form the materialized
-    image. By default, when ``nir_band`` is ``"B8A"``, scoring is done once on a
-    canonical 20 m grid for the whole window and the resulting item order is
-    reused across band-set materialization passes.
+    image. When ``scoring_resolution`` is set, scoring is done once on a grid at
+    that resolution for the whole window and the resulting item order is reused
+    across band-set materialization passes.
 
     For best ranking quality, use windows with at least 96x96 pixels. Smaller
     windows can run with padding but may have reduced cloud-mask accuracy.
     """
-
-    B8A_CANONICAL_RESOLUTION = 20.0
 
     def __init__(
         self,
@@ -48,7 +46,7 @@ class OmniCloudMaskFirstValid(Compositor):
         green_band: str = "B03",
         nir_band: str = "B8A",
         min_inference_size: int = 32,
-        use_canonical_b8a_20m_grid: bool | None = None,
+        scoring_resolution: float | None = None,
         clear_weight: int = 0,
         thick_cloud_weight: int = 5,
         thin_cloud_weight: int = 1,
@@ -64,11 +62,10 @@ class OmniCloudMaskFirstValid(Compositor):
                 per spatial dimension; smaller windows are padded. Padding
                 does not add spatial context, so it is still recommended to use
                 windows of at least 96x96 pixels.
-            use_canonical_b8a_20m_grid: whether to score once on a canonical
-                20 m RGB+NIR grid and reuse that item order across band sets
-                when ``nir_band`` is ``"B8A"``. The default (``None``) behaves
-                like enabled for ``B8A`` and disabled otherwise. Setting this to
-                ``True`` requires ``nir_band`` to be ``"B8A"``.
+            scoring_resolution: optional pixel size for the scoring grid. When
+                set, scoring is done once on a window-level grid at this
+                resolution and the resulting ranking is reused across band sets.
+                When unset, scoring is performed on each materialization grid.
             clear_weight: weight for clear pixels when computing the score.
             thick_cloud_weight: weight for thick cloud pixels when computing the score.
             thin_cloud_weight: weight for thin cloud pixels when computing the score.
@@ -78,7 +75,7 @@ class OmniCloudMaskFirstValid(Compositor):
         self.green_band = green_band
         self.nir_band = nir_band
         self.min_inference_size = min_inference_size
-        self.use_canonical_b8a_20m_grid = use_canonical_b8a_20m_grid
+        self.scoring_resolution = scoring_resolution
         self.clear_weight = clear_weight
         self.thick_cloud_weight = thick_cloud_weight
         self.thin_cloud_weight = thin_cloud_weight
@@ -96,8 +93,8 @@ class OmniCloudMaskFirstValid(Compositor):
             tuple[str, ...],
         ] = {}
 
-        if self.use_canonical_b8a_20m_grid is True and self.nir_band.upper() != "B8A":
-            raise ValueError("use_canonical_b8a_20m_grid=True requires nir_band='B8A'")
+        if self.scoring_resolution is not None and self.scoring_resolution <= 0:
+            raise ValueError("scoring_resolution must be positive")
 
     def prepare_for_window(
         self,
@@ -109,21 +106,17 @@ class OmniCloudMaskFirstValid(Compositor):
         self._window_bounds = bounds
         self._sorted_group_cache.clear()
 
-    def _get_canonical_b8a_scoring_grid(self) -> tuple[Projection, PixelBounds]:
-        """Get the canonical 20 m scoring grid for Sentinel-2 B8A ranking."""
-        if self._window_projection is None or self._window_bounds is None:
-            raise ValueError("window context is required for canonical B8A scoring")
-
-        projection = self._window_projection
-        bounds = self._window_bounds
-        target_x_resolution = math.copysign(
-            self.B8A_CANONICAL_RESOLUTION, projection.x_resolution
-        )
-        target_y_resolution = math.copysign(
-            self.B8A_CANONICAL_RESOLUTION, projection.y_resolution
-        )
-        x_factor = abs(projection.x_resolution) / self.B8A_CANONICAL_RESOLUTION
-        y_factor = abs(projection.y_resolution) / self.B8A_CANONICAL_RESOLUTION
+    def _rescale_grid(
+        self,
+        projection: Projection,
+        bounds: PixelBounds,
+        target_resolution: float,
+    ) -> tuple[Projection, PixelBounds]:
+        """Return a grid with the same spatial extent at a different resolution."""
+        target_x_resolution = math.copysign(target_resolution, projection.x_resolution)
+        target_y_resolution = math.copysign(target_resolution, projection.y_resolution)
+        x_factor = abs(projection.x_resolution) / target_resolution
+        y_factor = abs(projection.y_resolution) / target_resolution
         target_width = round((bounds[2] - bounds[0]) * x_factor)
         target_height = round((bounds[3] - bounds[1]) * y_factor)
         target_left = round(bounds[0] * x_factor)
@@ -142,23 +135,28 @@ class OmniCloudMaskFirstValid(Compositor):
             ),
         )
 
+    def _get_window_grid(
+        self,
+        projection: Projection,
+        bounds: PixelBounds,
+        target_resolution: float | None,
+    ) -> tuple[Projection, PixelBounds]:
+        """Get a window-level scoring grid, optionally rescaled to a target resolution."""
+        window_projection = self._window_projection or projection
+        window_bounds = self._window_bounds or bounds
+        if target_resolution is None:
+            return window_projection, window_bounds
+        return self._rescale_grid(window_projection, window_bounds, target_resolution)
+
     def _get_scoring_grid(
         self,
         projection: Projection,
         bounds: PixelBounds,
     ) -> tuple[Projection, PixelBounds]:
         """Get the grid on which cloud ranking should be evaluated."""
-        use_canonical_b8a_grid = self.use_canonical_b8a_20m_grid
-        if use_canonical_b8a_grid is None:
-            use_canonical_b8a_grid = self.nir_band.upper() == "B8A"
+        if self.scoring_resolution is not None:
+            return self._get_window_grid(projection, bounds, self.scoring_resolution)
 
-        if (
-            use_canonical_b8a_grid
-            and self.nir_band.upper() == "B8A"
-            and self._window_projection is not None
-            and self._window_bounds is not None
-        ):
-            return self._get_canonical_b8a_scoring_grid()
         return projection, bounds
 
     def _score_item(
@@ -189,14 +187,6 @@ class OmniCloudMaskFirstValid(Compositor):
             item, scoring_bands, tile_store
         )
         if len(needed_band_sets_and_indexes) == 0:
-            if (
-                self.use_canonical_b8a_20m_grid is True
-                and self.nir_band.upper() == "B8A"
-            ):
-                raise ValueError(
-                    "use_canonical_b8a_20m_grid=True requires B8A scoring data to "
-                    f"be available; missing scoring bands {scoring_bands} for item {item.name}"
-                )
             raise ValueError(
                 f"missing scoring bands {scoring_bands} for item {item.name}"
             )

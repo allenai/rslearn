@@ -16,7 +16,7 @@ Configure as a custom compositor in `compositing_method`:
       "red_band": "B04",
       "green_band": "B03",
       "nir_band": "B8A",
-      "use_canonical_b8a_20m_grid": true,
+      "scoring_resolution": 20.0,
       "clear_weight": 0,
       "thick_cloud_weight": 5,
       "thin_cloud_weight": 1,
@@ -33,13 +33,17 @@ Configure as a custom compositor in `compositing_method`:
 - Score is a weighted sum of class fractions.
 - Lower score is better.
 - With defaults: `5*thick + thin + shadow` (`clear_weight=0`).
-- By default, if `nir_band="B8A"`, scoring is run once on a canonical 20 m
-  RGB+NIR grid and that item ordering is reused across all band-set
-  materialization passes for the window.
-- Set `use_canonical_b8a_20m_grid: false` to disable that reuse and score on
-  each band set's materialization grid instead.
-- Setting `use_canonical_b8a_20m_grid: true` requires `nir_band="B8A"` and
-  requires `B8A` scoring data to be available during materialization.
+- If `scoring_resolution` is unset, ranking is evaluated on each band set's
+  materialization grid.
+- If `scoring_resolution` is set, ranking is evaluated once on a window-level
+  grid at that resolution and reused across band sets.
+- For Sentinel-2 with `nir_band="B8A"`, `scoring_resolution: 20.0` is a good
+  speed-focused choice. It is typically faster, but can trade away a small
+  amount of ranking accuracy compared to scoring on the materialization grid.
+- For finer-than-10 m sensors, a good explicit choice is often
+  `scoring_resolution: 10.0`.
+- For coarser-than-10 m sensors, a good explicit choice is usually the native
+  resolution.
 
 ### Execution Notes
 

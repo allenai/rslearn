@@ -122,7 +122,7 @@ To rank with [OmniCloudMask](https://github.com/DPIRD-DMA/OmniCloudMask), config
           "red_band": "B04",
           "green_band": "B03",
           "nir_band": "B8A",
-          "use_canonical_b8a_20m_grid": true
+          "scoring_resolution": 20.0
         }
       }
     }
@@ -134,11 +134,17 @@ For reliable ranking quality with OmniCloudMask, create windows with at least
 `96x96` pixels (per dimension). Smaller windows can run, but accuracy may be
 lower even when inference padding is enabled.
 
-With `nir_band="B8A"`, OmniCloudMask defaults to scoring once on a canonical
-20 m RGB+NIR grid and reusing that item ordering across the layer's band sets.
-Set `use_canonical_b8a_20m_grid: false` to disable that behavior. Setting it to
-`true` requires `nir_band="B8A"` and requires `B8A` scoring data to be
-available during materialization.
+For Sentinel-2 with `nir_band="B8A"`, `scoring_resolution: 20.0` is a good
+speed-focused choice because it scores once on a 20 m window-level grid and
+reuses that ordering across the layer's band sets.
+
+That setting is not always optimal for accuracy. If you want the most direct
+ranking on the output grid, leave `scoring_resolution` unset so scoring runs on
+each materialization grid instead.
+
+This same API can be used for other sensors. A good explicit choice for
+finer-than-10 m imagery is often `scoring_resolution: 10.0`, while coarser
+imagery usually works best at its native resolution.
 
 Requires `omnicloudmask` (`pip install .[extra]` in this repo). See
 [`OmniCloudMaskFirstValid`](../compositors/omni_cloud_mask_OmniCloudMaskFirstValid.md)

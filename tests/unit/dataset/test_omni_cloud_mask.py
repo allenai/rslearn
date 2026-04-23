@@ -155,14 +155,14 @@ class TestOmniCloudMaskFirstValid:
                 remapper=None,
             )
 
-    def test_b8a_scoring_uses_canonical_20m_grid_once_per_window(self) -> None:
-        """B8A ranking should score once on the canonical 20 m grid and reuse it."""
+    def test_scoring_resolution_uses_window_grid_once_per_window(self) -> None:
+        """Explicit scoring resolution should reuse one window-level scoring grid."""
         base_projection = Projection(PROJECTION.crs, 10, 10)
         base_bounds: PixelBounds = (0, 0, 8, 8)
         coarse_projection = Projection(PROJECTION.crs, 40, 40)
         coarse_bounds: PixelBounds = (0, 0, 2, 2)
-        canonical_projection = Projection(PROJECTION.crs, 20, 20)
-        canonical_bounds: PixelBounds = (0, 0, 4, 4)
+        scoring_projection = Projection(PROJECTION.crs, 20, 20)
+        scoring_bounds: PixelBounds = (0, 0, 4, 4)
 
         item_cloudy = _make_item("cloudy")
         item_clear = _make_item("clear")
@@ -171,6 +171,7 @@ class TestOmniCloudMaskFirstValid:
             green_band=BANDS[1],
             nir_band=BANDS[2],
             min_inference_size=1,
+            scoring_resolution=20,
         )
         compositor.prepare_for_window(base_projection, base_bounds)
 
@@ -203,7 +204,7 @@ class TestOmniCloudMaskFirstValid:
         def mock_predict(input_array: Any) -> np.ndarray:
             if input_array.shape != (3, 4, 4):
                 raise AssertionError(
-                    f"expected canonical 20 m scoring shape (3, 4, 4), got {input_array.shape}"
+                    f"expected 20 m scoring shape (3, 4, 4), got {input_array.shape}"
                 )
             if input_array[0, 0, 0] == 100:
                 return np.ones((4, 4), dtype=np.uint8)
@@ -279,13 +280,13 @@ class TestOmniCloudMaskFirstValid:
             )
 
         assert scoring_reads == [
-            ("cloudy", canonical_projection, canonical_bounds),
-            ("clear", canonical_projection, canonical_bounds),
+            ("cloudy", scoring_projection, scoring_bounds),
+            ("clear", scoring_projection, scoring_bounds),
         ]
         assert sorted_groups == [["clear", "cloudy"], ["clear", "cloudy"]]
 
-    def test_can_disable_canonical_b8a_20m_grid(self) -> None:
-        """Disabling canonical B8A scoring should rank on each materialization grid."""
+    def test_default_scoring_uses_each_materialization_grid(self) -> None:
+        """Unset scoring resolution should rank on each materialization grid."""
         base_projection = Projection(PROJECTION.crs, 10, 10)
         base_bounds: PixelBounds = (0, 0, 8, 8)
         coarse_projection = Projection(PROJECTION.crs, 40, 40)
@@ -298,7 +299,6 @@ class TestOmniCloudMaskFirstValid:
             green_band=BANDS[1],
             nir_band=BANDS[2],
             min_inference_size=1,
-            use_canonical_b8a_20m_grid=False,
         )
         compositor.prepare_for_window(base_projection, base_bounds)
 
@@ -379,42 +379,110 @@ class TestOmniCloudMaskFirstValid:
             ("clear", base_projection, base_bounds),
         ]
 
-    def test_explicit_canonical_b8a_20m_grid_requires_b8a_nir_band(self) -> None:
-        """Explicit canonical B8A scoring should reject non-B8A NIR bands."""
-        with pytest.raises(
-            ValueError,
-            match="use_canonical_b8a_20m_grid=True requires nir_band='B8A'",
+    def test_scoring_resolution_supports_non_b8a_sensors(self) -> None:
+        """Explicit scoring resolution should also work for non-B8A sensors."""
+        base_projection = Projection(PROJECTION.crs, 3, 3)
+        base_bounds: PixelBounds = (0, 0, 20, 20)
+        coarse_projection = Projection(PROJECTION.crs, 6, 6)
+        coarse_bounds: PixelBounds = (0, 0, 10, 10)
+        scoring_projection = Projection(PROJECTION.crs, 10, 10)
+        scoring_bounds: PixelBounds = (0, 0, 6, 6)
+
+        item_cloudy = _make_item("cloudy")
+        item_clear = _make_item("clear")
+        compositor = OmniCloudMaskFirstValid(
+            red_band="B04",
+            green_band="B03",
+            nir_band="B08",
+            min_inference_size=1,
+            scoring_resolution=10,
+        )
+        compositor.prepare_for_window(base_projection, base_bounds)
+
+        scoring_reads: list[tuple[str, Projection, PixelBounds]] = []
+
+        def mock_read_raster_window_from_tiles(
+            tile_store: TileStoreWithLayer,
+            item: Item,
+            bands: list[str],
+            projection: Projection,
+            bounds: PixelBounds,
+            nodata_val: int | float | None,
+            band_dtype: npt.DTypeLike,
+            remapper: Any = None,
+            resampling: Resampling = Resampling.bilinear,
+            dst: RasterArray | None = None,
+        ) -> RasterArray:
+            del tile_store, nodata_val, band_dtype, remapper, resampling, dst
+            scoring_reads.append((item.name, projection, bounds))
+            fill_value = 100 if item.name == "cloudy" else 200
+            height = bounds[3] - bounds[1]
+            width = bounds[2] - bounds[0]
+            return RasterArray(
+                array=np.full(
+                    (len(bands), 1, height, width), fill_value, dtype=np.float32
+                )
+            )
+
+        def mock_predict(input_array: Any) -> np.ndarray:
+            if input_array.shape != (3, 6, 6):
+                raise AssertionError(
+                    f"expected explicit window scoring shape (3, 6, 6), got {input_array.shape}"
+                )
+            if input_array[0, 0, 0] == 100:
+                return np.ones((6, 6), dtype=np.uint8)
+            return np.zeros((6, 6), dtype=np.uint8)
+
+        tile_store = TileStoreWithLayer(DefaultTileStore(), LAYER_NAME)
+        with (
+            patch(
+                "rslearn.dataset.omni_cloud_mask.get_needed_band_sets_and_indexes",
+                return_value=[(["B04", "B03", "B08"], [0, 1, 2], [0, 1, 2])],
+            ),
+            patch(
+                "rslearn.dataset.omni_cloud_mask.read_raster_window_from_tiles",
+                side_effect=mock_read_raster_window_from_tiles,
+            ),
+            patch("rslearn.dataset.omni_cloud_mask.predict_from_array", mock_predict),
+            patch(
+                "rslearn.dataset.omni_cloud_mask.FirstValidCompositor.build_composite",
+                return_value=RasterArray(array=np.zeros((1, 1, 1, 1), dtype=np.uint8)),
+            ),
         ):
+            compositor.build_composite(
+                group=[item_cloudy, item_clear],
+                nodata_val=0,
+                bands=["B04"],
+                bounds=coarse_bounds,
+                band_dtype=np.uint8,
+                tile_store=tile_store,
+                projection=coarse_projection,
+                resampling_method=Resampling.bilinear,
+                remapper=None,
+            )
+            compositor.build_composite(
+                group=[item_cloudy, item_clear],
+                nodata_val=0,
+                bands=["B04"],
+                bounds=base_bounds,
+                band_dtype=np.uint8,
+                tile_store=tile_store,
+                projection=base_projection,
+                resampling_method=Resampling.bilinear,
+                remapper=None,
+            )
+
+        assert scoring_reads == [
+            ("cloudy", scoring_projection, scoring_bounds),
+            ("clear", scoring_projection, scoring_bounds),
+        ]
+
+    def test_scoring_resolution_must_be_positive(self) -> None:
+        """Explicit scoring_resolution should be positive."""
+        with pytest.raises(ValueError, match="scoring_resolution must be positive"):
             OmniCloudMaskFirstValid(
                 red_band="B04",
                 green_band="B03",
                 nir_band="B08",
-                use_canonical_b8a_20m_grid=True,
-            )
-
-    def test_explicit_canonical_b8a_20m_grid_requires_b8a_data(self) -> None:
-        """Explicit canonical B8A scoring should fail clearly when B8A is unavailable."""
-        compositor = OmniCloudMaskFirstValid(
-            red_band="B04",
-            green_band="B03",
-            nir_band="B8A",
-            use_canonical_b8a_20m_grid=True,
-        )
-
-        with (
-            patch(
-                "rslearn.dataset.omni_cloud_mask.get_needed_band_sets_and_indexes",
-                return_value=[],
-            ),
-            pytest.raises(
-                ValueError,
-                match="use_canonical_b8a_20m_grid=True requires B8A scoring data to be available",
-            ),
-        ):
-            compositor._score_item(
-                item=_make_item("missing-b8a"),
-                tile_store=TileStoreWithLayer(DefaultTileStore(), LAYER_NAME),
-                projection=PROJECTION,
-                bounds=BOUNDS,
-                resampling_method=Resampling.bilinear,
+                scoring_resolution=0,
             )
