@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -36,6 +37,19 @@ _NODATA_REQUIRED_MSG = (
 )
 
 
+@dataclass(frozen=True)
+class BandSetCompositeRequest:
+    """All inputs needed to composite one materialized band set."""
+
+    nodata_val: int | float | None
+    bands: list[str]
+    bounds: PixelBounds
+    band_dtype: npt.DTypeLike
+    projection: Projection
+    resampling_method: Resampling
+    remapper: Remapper | None
+
+
 class Compositor(ABC):
     """Abstract base for compositing methods.
 
@@ -48,13 +62,46 @@ class Compositor(ABC):
         projection: Projection,
         bounds: PixelBounds,
     ) -> None:
-        """Prepare internal state for a materialization window.
+        """Legacy hook for per-window setup.
 
-        Materializers call this once before invoking ``build_composite`` for the
-        different band sets in a window. Most compositors do not need any per-window
-        setup, so the default implementation is a no-op.
+        Materializers now prefer ``build_composites`` for whole-window work. This
+        hook is retained for compatibility with external/custom compositors that may
+        still use it.
         """
         del projection, bounds
+
+    def build_composites(
+        self,
+        group: list[ItemType],
+        requests: list[BandSetCompositeRequest],
+        tile_store: TileStoreWithLayer,
+        window_projection: Projection | None = None,
+        window_bounds: PixelBounds | None = None,
+        request_time_range: tuple[datetime, datetime] | None = None,
+    ) -> list[RasterArray]:
+        """Build composites for multiple band sets in a window.
+
+        The default implementation preserves the existing per-band-set behavior by
+        iterating over ``requests`` and delegating to ``build_composite``. Custom
+        compositors can override this to enforce consistency across band sets or
+        to share expensive preprocessing work.
+        """
+        del window_projection, window_bounds
+        return [
+            self.build_composite(
+                group=group,
+                nodata_val=request.nodata_val,
+                bands=request.bands,
+                bounds=request.bounds,
+                band_dtype=request.band_dtype,
+                tile_store=tile_store,
+                projection=request.projection,
+                resampling_method=request.resampling_method,
+                remapper=request.remapper,
+                request_time_range=request_time_range,
+            )
+            for request in requests
+        ]
 
     @abstractmethod
     def build_composite(

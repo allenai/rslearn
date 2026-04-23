@@ -13,6 +13,7 @@ from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import Item
+from rslearn.dataset.compositing import BandSetCompositeRequest
 from rslearn.dataset.omni_cloud_mask import OmniCloudMaskFirstValid
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.tile_stores.default import DefaultTileStore
@@ -173,7 +174,6 @@ class TestOmniCloudMaskFirstValid:
             min_inference_size=1,
             scoring_resolution=20,
         )
-        compositor.prepare_for_window(base_projection, base_bounds)
 
         scoring_reads: list[tuple[str, Projection, PixelBounds]] = []
         sorted_groups: list[list[str]] = []
@@ -256,27 +256,31 @@ class TestOmniCloudMaskFirstValid:
                 new=mock_first_valid_build_composite,
             ),
         ):
-            compositor.build_composite(
+            compositor.build_composites(
                 group=[item_cloudy, item_clear],
-                nodata_val=0,
-                bands=["B04"],
-                bounds=coarse_bounds,
-                band_dtype=np.uint8,
+                requests=[
+                    BandSetCompositeRequest(
+                        nodata_val=0,
+                        bands=["B04"],
+                        bounds=coarse_bounds,
+                        band_dtype=np.uint8,
+                        projection=coarse_projection,
+                        resampling_method=Resampling.bilinear,
+                        remapper=None,
+                    ),
+                    BandSetCompositeRequest(
+                        nodata_val=0,
+                        bands=["B04"],
+                        bounds=base_bounds,
+                        band_dtype=np.uint8,
+                        projection=base_projection,
+                        resampling_method=Resampling.bilinear,
+                        remapper=None,
+                    ),
+                ],
                 tile_store=tile_store,
-                projection=coarse_projection,
-                resampling_method=Resampling.bilinear,
-                remapper=None,
-            )
-            compositor.build_composite(
-                group=[item_cloudy, item_clear],
-                nodata_val=0,
-                bands=["B04"],
-                bounds=base_bounds,
-                band_dtype=np.uint8,
-                tile_store=tile_store,
-                projection=base_projection,
-                resampling_method=Resampling.bilinear,
-                remapper=None,
+                window_projection=base_projection,
+                window_bounds=base_bounds,
             )
 
         assert scoring_reads == [
@@ -300,7 +304,6 @@ class TestOmniCloudMaskFirstValid:
             nir_band=BANDS[2],
             min_inference_size=1,
         )
-        compositor.prepare_for_window(base_projection, base_bounds)
 
         scoring_reads: list[tuple[str, Projection, PixelBounds]] = []
 
@@ -349,27 +352,31 @@ class TestOmniCloudMaskFirstValid:
                 return_value=RasterArray(array=np.zeros((1, 1, 1, 1), dtype=np.uint8)),
             ),
         ):
-            compositor.build_composite(
+            compositor.build_composites(
                 group=[item_cloudy, item_clear],
-                nodata_val=0,
-                bands=["B04"],
-                bounds=coarse_bounds,
-                band_dtype=np.uint8,
+                requests=[
+                    BandSetCompositeRequest(
+                        nodata_val=0,
+                        bands=["B04"],
+                        bounds=coarse_bounds,
+                        band_dtype=np.uint8,
+                        projection=coarse_projection,
+                        resampling_method=Resampling.bilinear,
+                        remapper=None,
+                    ),
+                    BandSetCompositeRequest(
+                        nodata_val=0,
+                        bands=["B04"],
+                        bounds=base_bounds,
+                        band_dtype=np.uint8,
+                        projection=base_projection,
+                        resampling_method=Resampling.bilinear,
+                        remapper=None,
+                    ),
+                ],
                 tile_store=tile_store,
-                projection=coarse_projection,
-                resampling_method=Resampling.bilinear,
-                remapper=None,
-            )
-            compositor.build_composite(
-                group=[item_cloudy, item_clear],
-                nodata_val=0,
-                bands=["B04"],
-                bounds=base_bounds,
-                band_dtype=np.uint8,
-                tile_store=tile_store,
-                projection=base_projection,
-                resampling_method=Resampling.bilinear,
-                remapper=None,
+                window_projection=base_projection,
+                window_bounds=base_bounds,
             )
 
         assert scoring_reads == [
@@ -397,7 +404,6 @@ class TestOmniCloudMaskFirstValid:
             min_inference_size=1,
             scoring_resolution=10,
         )
-        compositor.prepare_for_window(base_projection, base_bounds)
 
         scoring_reads: list[tuple[str, Projection, PixelBounds]] = []
 
@@ -449,27 +455,31 @@ class TestOmniCloudMaskFirstValid:
                 return_value=RasterArray(array=np.zeros((1, 1, 1, 1), dtype=np.uint8)),
             ),
         ):
-            compositor.build_composite(
+            compositor.build_composites(
                 group=[item_cloudy, item_clear],
-                nodata_val=0,
-                bands=["B04"],
-                bounds=coarse_bounds,
-                band_dtype=np.uint8,
+                requests=[
+                    BandSetCompositeRequest(
+                        nodata_val=0,
+                        bands=["B04"],
+                        bounds=coarse_bounds,
+                        band_dtype=np.uint8,
+                        projection=coarse_projection,
+                        resampling_method=Resampling.bilinear,
+                        remapper=None,
+                    ),
+                    BandSetCompositeRequest(
+                        nodata_val=0,
+                        bands=["B04"],
+                        bounds=base_bounds,
+                        band_dtype=np.uint8,
+                        projection=base_projection,
+                        resampling_method=Resampling.bilinear,
+                        remapper=None,
+                    ),
+                ],
                 tile_store=tile_store,
-                projection=coarse_projection,
-                resampling_method=Resampling.bilinear,
-                remapper=None,
-            )
-            compositor.build_composite(
-                group=[item_cloudy, item_clear],
-                nodata_val=0,
-                bands=["B04"],
-                bounds=base_bounds,
-                band_dtype=np.uint8,
-                tile_store=tile_store,
-                projection=base_projection,
-                resampling_method=Resampling.bilinear,
-                remapper=None,
+                window_projection=base_projection,
+                window_bounds=base_bounds,
             )
 
         assert scoring_reads == [
