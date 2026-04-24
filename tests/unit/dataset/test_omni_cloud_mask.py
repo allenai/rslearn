@@ -1,6 +1,7 @@
 """Tests for rslearn.dataset.omni_cloud_mask (OmniCloudMaskFirstValid compositor)."""
 
 import pathlib
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -167,6 +168,7 @@ class TestOmniCloudMaskFirstValid:
 
         item_cloudy = _make_item("cloudy")
         item_clear = _make_item("clear")
+        window = SimpleNamespace(projection=base_projection, bounds=base_bounds)
         compositor = OmniCloudMaskFirstValid(
             red_band=BANDS[0],
             green_band=BANDS[1],
@@ -279,8 +281,7 @@ class TestOmniCloudMaskFirstValid:
                     ),
                 ],
                 tile_store=tile_store,
-                window_projection=base_projection,
-                window_bounds=base_bounds,
+                window=window,
             )
 
         assert scoring_reads == [
@@ -298,6 +299,7 @@ class TestOmniCloudMaskFirstValid:
 
         item_cloudy = _make_item("cloudy")
         item_clear = _make_item("clear")
+        window = SimpleNamespace(projection=base_projection, bounds=base_bounds)
         compositor = OmniCloudMaskFirstValid(
             red_band=BANDS[0],
             green_band=BANDS[1],
@@ -375,8 +377,7 @@ class TestOmniCloudMaskFirstValid:
                     ),
                 ],
                 tile_store=tile_store,
-                window_projection=base_projection,
-                window_bounds=base_bounds,
+                window=window,
             )
 
         assert scoring_reads == [
@@ -397,6 +398,7 @@ class TestOmniCloudMaskFirstValid:
 
         item_cloudy = _make_item("cloudy")
         item_clear = _make_item("clear")
+        window = SimpleNamespace(projection=base_projection, bounds=base_bounds)
         compositor = OmniCloudMaskFirstValid(
             red_band="B04",
             green_band="B03",
@@ -478,8 +480,7 @@ class TestOmniCloudMaskFirstValid:
                     ),
                 ],
                 tile_store=tile_store,
-                window_projection=base_projection,
-                window_bounds=base_bounds,
+                window=window,
             )
 
         assert scoring_reads == [

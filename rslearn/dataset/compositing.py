@@ -28,6 +28,8 @@ from .tile_utils import (
 if TYPE_CHECKING:
     from rslearn.data_sources.data_source import ItemType
 
+    from .window import Window
+
 logger = get_logger(__name__)
 
 _NODATA_REQUIRED_MSG = (
@@ -75,8 +77,7 @@ class Compositor(ABC):
         group: list[ItemType],
         requests: list[BandSetCompositeRequest],
         tile_store: TileStoreWithLayer,
-        window_projection: Projection | None = None,
-        window_bounds: PixelBounds | None = None,
+        window: Window | None = None,
         request_time_range: tuple[datetime, datetime] | None = None,
     ) -> list[RasterArray]:
         """Build composites for multiple band sets in a window.
@@ -86,7 +87,7 @@ class Compositor(ABC):
         compositors can override this to enforce consistency across band sets or
         to share expensive preprocessing work.
         """
-        del window_projection, window_bounds
+        del window
         return [
             self.build_composite(
                 group=group,

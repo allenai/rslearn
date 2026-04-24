@@ -208,8 +208,7 @@ class RasterMaterializer(Materializer):
                 group=group,
                 requests=requests,
                 tile_store=tile_store,
-                window_projection=window.projection,
-                window_bounds=window.bounds,
+                window=window,
                 request_time_range=request_time_range,
             )
 

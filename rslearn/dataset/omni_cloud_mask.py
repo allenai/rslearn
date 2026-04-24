@@ -17,6 +17,7 @@ from rslearn.utils.raster_array import RasterArray
 from .compositing import BandSetCompositeRequest, Compositor, FirstValidCompositor
 from .remap import Remapper
 from .tile_utils import get_needed_band_sets_and_indexes, read_raster_window_from_tiles
+from .window import Window
 
 logger = get_logger(__name__)
 
@@ -117,13 +118,12 @@ class OmniCloudMaskFirstValid(Compositor):
         self,
         projection: Projection,
         bounds: PixelBounds,
-        window_projection: Projection | None = None,
-        window_bounds: PixelBounds | None = None,
+        window: Window | None = None,
         target_resolution: float | None = None,
     ) -> tuple[Projection, PixelBounds]:
         """Get a window-level scoring grid, optionally rescaled to a target resolution."""
-        base_projection = window_projection or projection
-        base_bounds = window_bounds or bounds
+        base_projection = window.projection if window is not None else projection
+        base_bounds = window.bounds if window is not None else bounds
         if target_resolution is None:
             return base_projection, base_bounds
         return self._rescale_grid(base_projection, base_bounds, target_resolution)
@@ -132,16 +132,14 @@ class OmniCloudMaskFirstValid(Compositor):
         self,
         projection: Projection,
         bounds: PixelBounds,
-        window_projection: Projection | None = None,
-        window_bounds: PixelBounds | None = None,
+        window: Window | None = None,
     ) -> tuple[Projection, PixelBounds]:
         """Get the grid on which cloud ranking should be evaluated."""
         if self.scoring_resolution is not None:
             return self._get_window_grid(
                 projection,
                 bounds,
-                window_projection,
-                window_bounds,
+                window,
                 self.scoring_resolution,
             )
 
@@ -262,8 +260,7 @@ class OmniCloudMaskFirstValid(Compositor):
         group: list[ItemType],
         requests: list[BandSetCompositeRequest],
         tile_store: TileStoreWithLayer,
-        window_projection: Projection | None = None,
-        window_bounds: PixelBounds | None = None,
+        window: Window | None = None,
         request_time_range: tuple[datetime, datetime] | None = None,
     ) -> list[RasterArray]:
         """Build composites for all band sets, sharing ranking work when possible."""
@@ -279,8 +276,7 @@ class OmniCloudMaskFirstValid(Compositor):
                 scoring_projection, scoring_bounds = self._get_scoring_grid(
                     request.projection,
                     request.bounds,
-                    window_projection=window_projection,
-                    window_bounds=window_bounds,
+                    window=window,
                 )
                 cache_key = (
                     scoring_projection,

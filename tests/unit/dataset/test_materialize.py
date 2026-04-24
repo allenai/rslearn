@@ -269,8 +269,7 @@ class RecordingCompositor(Compositor):
             tuple[
                 list[ItemType],
                 list[BandSetCompositeRequest],
-                Projection | None,
-                PixelBounds | None,
+                Window | None,
             ]
         ] = []
 
@@ -279,12 +278,11 @@ class RecordingCompositor(Compositor):
         group: list[ItemType],
         requests: list[BandSetCompositeRequest],
         tile_store: TileStoreWithLayer,
-        window_projection: Projection | None = None,
-        window_bounds: PixelBounds | None = None,
+        window: Window | None = None,
         request_time_range: tuple | None = None,
     ) -> list[RasterArray]:
         del tile_store, request_time_range
-        self.calls.append((group, requests, window_projection, window_bounds))
+        self.calls.append((group, requests, window))
         return [
             RasterArray(
                 array=np.zeros(
@@ -367,8 +365,7 @@ def test_raster_materializer_passes_all_band_sets_to_compositor(
     )
 
     assert len(compositor.calls) == 1
-    group, requests, window_projection, window_bounds = compositor.calls[0]
+    group, requests, call_window = compositor.calls[0]
     assert group == []
     assert [request.bands for request in requests] == [["B1"], ["B2"]]
-    assert window_projection == WGS84_PROJECTION
-    assert window_bounds == (0, 0, 4, 4)
+    assert call_window is window
