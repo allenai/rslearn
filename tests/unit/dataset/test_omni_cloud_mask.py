@@ -258,30 +258,32 @@ class TestOmniCloudMaskFirstValid:
                 new=mock_first_valid_build_composite,
             ),
         ):
-            compositor.build_composites(
-                group=[item_cloudy, item_clear],
-                requests=[
-                    BandSetCompositeRequest(
-                        nodata_val=0,
-                        bands=["B04"],
-                        bounds=coarse_bounds,
-                        band_dtype=np.uint8,
-                        projection=coarse_projection,
-                        resampling_method=Resampling.bilinear,
-                        remapper=None,
-                    ),
-                    BandSetCompositeRequest(
-                        nodata_val=0,
-                        bands=["B04"],
-                        bounds=base_bounds,
-                        band_dtype=np.uint8,
-                        projection=base_projection,
-                        resampling_method=Resampling.bilinear,
-                        remapper=None,
-                    ),
-                ],
-                tile_store=tile_store,
-                window=window,
+            list(
+                compositor.build_composites(
+                    group=[item_cloudy, item_clear],
+                    requests=[
+                        BandSetCompositeRequest(
+                            nodata_val=0,
+                            bands=["B04"],
+                            bounds=coarse_bounds,
+                            band_dtype=np.uint8,
+                            projection=coarse_projection,
+                            resampling_method=Resampling.bilinear,
+                            remapper=None,
+                        ),
+                        BandSetCompositeRequest(
+                            nodata_val=0,
+                            bands=["B04"],
+                            bounds=base_bounds,
+                            band_dtype=np.uint8,
+                            projection=base_projection,
+                            resampling_method=Resampling.bilinear,
+                            remapper=None,
+                        ),
+                    ],
+                    tile_store=tile_store,
+                    window=window,
+                )
             )
 
         assert scoring_reads == [
@@ -354,30 +356,32 @@ class TestOmniCloudMaskFirstValid:
                 return_value=RasterArray(array=np.zeros((1, 1, 1, 1), dtype=np.uint8)),
             ),
         ):
-            compositor.build_composites(
-                group=[item_cloudy, item_clear],
-                requests=[
-                    BandSetCompositeRequest(
-                        nodata_val=0,
-                        bands=["B04"],
-                        bounds=coarse_bounds,
-                        band_dtype=np.uint8,
-                        projection=coarse_projection,
-                        resampling_method=Resampling.bilinear,
-                        remapper=None,
-                    ),
-                    BandSetCompositeRequest(
-                        nodata_val=0,
-                        bands=["B04"],
-                        bounds=base_bounds,
-                        band_dtype=np.uint8,
-                        projection=base_projection,
-                        resampling_method=Resampling.bilinear,
-                        remapper=None,
-                    ),
-                ],
-                tile_store=tile_store,
-                window=window,
+            list(
+                compositor.build_composites(
+                    group=[item_cloudy, item_clear],
+                    requests=[
+                        BandSetCompositeRequest(
+                            nodata_val=0,
+                            bands=["B04"],
+                            bounds=coarse_bounds,
+                            band_dtype=np.uint8,
+                            projection=coarse_projection,
+                            resampling_method=Resampling.bilinear,
+                            remapper=None,
+                        ),
+                        BandSetCompositeRequest(
+                            nodata_val=0,
+                            bands=["B04"],
+                            bounds=base_bounds,
+                            band_dtype=np.uint8,
+                            projection=base_projection,
+                            resampling_method=Resampling.bilinear,
+                            remapper=None,
+                        ),
+                    ],
+                    tile_store=tile_store,
+                    window=window,
+                )
             )
 
         assert scoring_reads == [

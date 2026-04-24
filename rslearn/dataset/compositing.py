@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -66,16 +67,16 @@ class Compositor(ABC):
         tile_store: TileStoreWithLayer,
         window: Window | None = None,
         request_time_range: tuple[datetime, datetime] | None = None,
-    ) -> list[RasterArray]:
-        """Build composites for multiple band sets in a window.
+    ) -> Iterator[RasterArray]:
+        """Yield composites for multiple band sets in a window.
 
         The default implementation preserves the existing per-band-set behavior by
         iterating over ``requests`` and delegating to ``build_composite``. Custom
         compositors can override this to enforce consistency across band sets or
         to share expensive preprocessing work.
         """
-        return [
-            self.build_composite(
+        for request in requests:
+            yield self.build_composite(
                 group=group,
                 nodata_val=request.nodata_val,
                 bands=request.bands,
@@ -87,8 +88,6 @@ class Compositor(ABC):
                 remapper=request.remapper,
                 request_time_range=request_time_range,
             )
-            for request in requests
-        ]
 
     @abstractmethod
     def build_composite(

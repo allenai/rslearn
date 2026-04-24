@@ -1,6 +1,7 @@
 """OmniCloudMask-based compositor for cloud-aware FIRST_VALID compositing."""
 
 import math
+from collections.abc import Iterator
 from datetime import datetime
 
 import numpy as np
@@ -262,13 +263,12 @@ class OmniCloudMaskFirstValid(Compositor):
         tile_store: TileStoreWithLayer,
         window: Window | None = None,
         request_time_range: tuple[datetime, datetime] | None = None,
-    ) -> list[RasterArray]:
-        """Build composites for all band sets, sharing ranking work when possible."""
+    ) -> Iterator[RasterArray]:
+        """Yield composites for all band sets, sharing ranking work when possible."""
         sorted_groups: dict[
             tuple[Projection, PixelBounds, Resampling],
             list[ItemType],
         ] = {}
-        rasters: list[RasterArray] = []
 
         for request in requests:
             cur_group = group
@@ -294,7 +294,7 @@ class OmniCloudMaskFirstValid(Compositor):
                     )
                     sorted_groups[cache_key] = cur_group
 
-            rasters.append(
+            yield (
                 FirstValidCompositor().build_composite(
                     group=cur_group,
                     nodata_val=request.nodata_val,
@@ -308,8 +308,6 @@ class OmniCloudMaskFirstValid(Compositor):
                     request_time_range=request_time_range,
                 )
             )
-
-        return rasters
 
     def build_composite(
         self,

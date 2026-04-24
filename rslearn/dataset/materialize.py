@@ -212,11 +212,6 @@ class RasterMaterializer(Materializer):
                 request_time_range=request_time_range,
             )
 
-            if len(rasters) != len(prepared_band_sets):
-                raise ValueError(
-                    "compositor.build_composites must return one raster per band set"
-                )
-
             for (band_cfg, projection, bounds, _, raster_format), raster in zip(
                 prepared_band_sets, rasters, strict=True
             ):
