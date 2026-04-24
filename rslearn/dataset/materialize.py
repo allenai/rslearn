@@ -123,47 +123,6 @@ def build_composite(
     )
 
 
-def build_composites(
-    group: list[ItemType],
-    compositor: Compositor,
-    tile_store: TileStoreWithLayer,
-    layer_cfg: LayerConfig,
-    band_set_requests: list[
-        tuple[BandSetConfig, Projection, PixelBounds, Remapper | None]
-    ],
-    window_projection: Projection,
-    window_bounds: PixelBounds,
-    request_time_range: tuple[datetime, datetime] | None = None,
-) -> list[RasterArray]:
-    """Build composites for all requested band sets from items in the group."""
-    requests: list[BandSetCompositeRequest] = []
-    for band_cfg, projection, bounds, remapper in band_set_requests:
-        nodata_val: int | float | None = band_cfg.nodata_value
-        if nodata_val is None:
-            nodata_val = resolve_nodata_value(tile_store, group, band_cfg.bands)
-
-        requests.append(
-            BandSetCompositeRequest(
-                nodata_val=nodata_val,
-                bands=band_cfg.bands,
-                bounds=bounds,
-                band_dtype=band_cfg.dtype.get_numpy_dtype(),
-                projection=projection,
-                resampling_method=layer_cfg.resampling_method.get_rasterio_resampling(),
-                remapper=remapper,
-            )
-        )
-
-    return compositor.build_composites(
-        group=group,
-        requests=requests,
-        tile_store=tile_store,
-        window_projection=window_projection,
-        window_bounds=window_bounds,
-        request_time_range=request_time_range,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Materializers
 # ---------------------------------------------------------------------------
@@ -227,15 +186,28 @@ class RasterMaterializer(Materializer):
                 if group_time_ranges is not None
                 else default_request_time_range
             )
-            rasters = build_composites(
+            requests: list[BandSetCompositeRequest] = []
+            for band_cfg, projection, bounds, remapper, _ in prepared_band_sets:
+                nodata_val: int | float | None = band_cfg.nodata_value
+                if nodata_val is None:
+                    nodata_val = resolve_nodata_value(tile_store, group, band_cfg.bands)
+
+                requests.append(
+                    BandSetCompositeRequest(
+                        nodata_val=nodata_val,
+                        bands=band_cfg.bands,
+                        bounds=bounds,
+                        band_dtype=band_cfg.dtype.get_numpy_dtype(),
+                        projection=projection,
+                        resampling_method=layer_cfg.resampling_method.get_rasterio_resampling(),
+                        remapper=remapper,
+                    )
+                )
+
+            rasters = compositor.build_composites(
                 group=group,
-                compositor=compositor,
+                requests=requests,
                 tile_store=tile_store,
-                layer_cfg=layer_cfg,
-                band_set_requests=[
-                    (band_cfg, projection, bounds, remapper)
-                    for band_cfg, projection, bounds, remapper, _ in prepared_band_sets
-                ],
                 window_projection=window.projection,
                 window_bounds=window.bounds,
                 request_time_range=request_time_range,
