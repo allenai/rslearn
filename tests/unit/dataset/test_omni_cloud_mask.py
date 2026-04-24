@@ -2,7 +2,7 @@
 
 import pathlib
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import numpy as np
@@ -14,6 +14,7 @@ from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import Item
+from rslearn.dataset import Window
 from rslearn.dataset.compositing import BandSetCompositeRequest
 from rslearn.dataset.omni_cloud_mask import OmniCloudMaskFirstValid
 from rslearn.tile_stores import TileStoreWithLayer
@@ -168,7 +169,10 @@ class TestOmniCloudMaskFirstValid:
 
         item_cloudy = _make_item("cloudy")
         item_clear = _make_item("clear")
-        window = SimpleNamespace(projection=base_projection, bounds=base_bounds)
+        window = cast(
+            Window,
+            SimpleNamespace(projection=base_projection, bounds=base_bounds),
+        )
         compositor = OmniCloudMaskFirstValid(
             red_band=BANDS[0],
             green_band=BANDS[1],
@@ -301,7 +305,10 @@ class TestOmniCloudMaskFirstValid:
 
         item_cloudy = _make_item("cloudy")
         item_clear = _make_item("clear")
-        window = SimpleNamespace(projection=base_projection, bounds=base_bounds)
+        window = cast(
+            Window,
+            SimpleNamespace(projection=base_projection, bounds=base_bounds),
+        )
         compositor = OmniCloudMaskFirstValid(
             red_band=BANDS[0],
             green_band=BANDS[1],

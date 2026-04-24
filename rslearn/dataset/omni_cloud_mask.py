@@ -283,8 +283,9 @@ class OmniCloudMaskFirstValid(Compositor):
                     scoring_bounds,
                     request.resampling_method,
                 )
-                cur_group = sorted_groups.get(cache_key)
-                if cur_group is None:
+                if cache_key in sorted_groups:
+                    cur_group = sorted_groups[cache_key]
+                else:
                     cur_group = self._sort_group(
                         group,
                         tile_store,

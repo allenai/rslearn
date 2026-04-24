@@ -1,9 +1,12 @@
 """Tests for rslearn.dataset.tile_utils (read_raster_window_from_tiles)."""
 
 import pathlib
+from collections.abc import Iterator, Sequence
+from datetime import datetime
 
 import numpy as np
 import pytest
+from rasterio.enums import Resampling
 from shapely.geometry import Polygon
 from upath import UPath
 
@@ -13,6 +16,7 @@ from rslearn.data_sources.data_source import Item, ItemType
 from rslearn.dataset import Window
 from rslearn.dataset.compositing import BandSetCompositeRequest, Compositor
 from rslearn.dataset.materialize import RasterMaterializer, resolve_nodata_value
+from rslearn.dataset.remap import Remapper
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.tile_utils import read_raster_window_from_tiles
 from rslearn.tile_stores.default import DefaultTileStore
@@ -267,7 +271,7 @@ class RecordingCompositor(Compositor):
     def __init__(self) -> None:
         self.calls: list[
             tuple[
-                list[ItemType],
+                Sequence[Item],
                 list[BandSetCompositeRequest],
                 Window | None,
             ]
@@ -279,12 +283,12 @@ class RecordingCompositor(Compositor):
         requests: list[BandSetCompositeRequest],
         tile_store: TileStoreWithLayer,
         window: Window | None = None,
-        request_time_range: tuple | None = None,
-    ) -> list[RasterArray]:
+        request_time_range: tuple[datetime, datetime] | None = None,
+    ) -> Iterator[RasterArray]:
         del tile_store, request_time_range
         self.calls.append((group, requests, window))
-        return [
-            RasterArray(
+        for request in requests:
+            yield RasterArray(
                 array=np.zeros(
                     (
                         len(request.bands),
@@ -295,8 +299,6 @@ class RecordingCompositor(Compositor):
                     dtype=request.band_dtype,
                 )
             )
-            for request in requests
-        ]
 
     def build_composite(
         self,
@@ -307,9 +309,9 @@ class RecordingCompositor(Compositor):
         band_dtype: np.dtype,
         tile_store: TileStoreWithLayer,
         projection: Projection,
-        resampling_method,
-        remapper,
-        request_time_range: tuple | None = None,
+        resampling_method: Resampling,
+        remapper: Remapper | None,
+        request_time_range: tuple[datetime, datetime] | None = None,
     ) -> RasterArray:
         del (
             group,

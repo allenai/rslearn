@@ -14,6 +14,7 @@ from rslearn.utils.array import unique_nodata_value
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, Projection
 from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_format import RasterFormat
 
 from .compositing import BandSetCompositeRequest, Compositor
 from .remap import Remapper, load_remapper
@@ -164,7 +165,13 @@ class RasterMaterializer(Materializer):
 
         compositor = layer_cfg.instantiate_compositor()
         prepared_band_sets: list[
-            tuple[BandSetConfig, Projection, PixelBounds, Remapper | None, object]
+            tuple[
+                BandSetConfig,
+                Projection,
+                PixelBounds,
+                Remapper | None,
+                RasterFormat,
+            ]
         ] = []
         for band_cfg in layer_cfg.band_sets:
             projection, bounds = band_cfg.get_final_projection_and_bounds(
