@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import tempfile
@@ -68,8 +67,6 @@ class _EarthdataAuth:
     def __init__(
         self,
         earthdata_token: str | None,
-        earthdata_username: str | None,
-        earthdata_password: str | None,
         s3_credentials_url: str,
         aws_region: str,
         timeout: timedelta,
@@ -77,22 +74,11 @@ class _EarthdataAuth:
         self.earthdata_token = earthdata_token or _first_set_env(
             "EARTHDATA_TOKEN", "NASA_EARTHDATA_TOKEN"
         )
-        self.earthdata_username = earthdata_username or _first_set_env(
-            "EARTHDATA_USERNAME", "NASA_EARTHDATA_USERNAME"
-        )
-        self.earthdata_password = earthdata_password or _first_set_env(
-            "EARTHDATA_PASSWORD", "NASA_EARTHDATA_PASSWORD"
-        )
         self.s3_credentials_url = s3_credentials_url
         self.aws_region = aws_region
         self.timeout = timeout
         self.session = create_retry_session()
         self._credentials: _S3Credentials | None = None
-
-    def _has_username_password(self) -> bool:
-        return (
-            self.earthdata_username is not None and self.earthdata_password is not None
-        )
 
     def _parse_credentials(self, data: dict[str, Any]) -> _S3Credentials:
         expiration = datetime.fromisoformat(data["expiration"])
@@ -117,44 +103,6 @@ class _EarthdataAuth:
         response.raise_for_status()
         return self._parse_credentials(response.json())
 
-    def _refresh_with_username_password(self) -> _S3Credentials:
-        if not self._has_username_password():
-            raise ValueError("earthdata username/password are not configured")
-
-        login_resp = self.session.get(
-            self.s3_credentials_url,
-            allow_redirects=False,
-            timeout=self.timeout.total_seconds(),
-        )
-        login_resp.raise_for_status()
-
-        auth = f"{self.earthdata_username}:{self.earthdata_password}"
-        encoded_auth = base64.b64encode(auth.encode("ascii")).decode("ascii")
-
-        auth_redirect = self.session.post(
-            login_resp.headers["location"],
-            data={"credentials": encoded_auth},
-            headers={"Origin": self.s3_credentials_url},
-            allow_redirects=False,
-            timeout=self.timeout.total_seconds(),
-        )
-        auth_redirect.raise_for_status()
-
-        final = self.session.get(
-            auth_redirect.headers["location"],
-            allow_redirects=False,
-            timeout=self.timeout.total_seconds(),
-        )
-        final.raise_for_status()
-
-        response = self.session.get(
-            self.s3_credentials_url,
-            cookies={"accessToken": final.cookies["accessToken"]},
-            timeout=self.timeout.total_seconds(),
-        )
-        response.raise_for_status()
-        return self._parse_credentials(response.json())
-
     def get_s3_credentials(self, refresh: bool = False) -> _S3Credentials:
         """Return temporary S3 credentials, refreshing them as needed."""
         now = datetime.now(tz=UTC)
@@ -165,29 +113,14 @@ class _EarthdataAuth:
         ):
             return self._credentials
 
-        last_error: Exception | None = None
-        if self.earthdata_token is not None:
-            try:
-                self._credentials = self._refresh_with_token()
-                return self._credentials
-            except Exception as exc:  # pragma: no cover - fallback path is tested
-                last_error = exc
-                logger.debug(
-                    "failed to fetch LP DAAC S3 credentials with bearer token: %s",
-                    exc,
-                )
+        if self.earthdata_token is None:
+            raise ValueError(
+                "NASA HLS requires an Earthdata bearer token. Set EARTHDATA_TOKEN "
+                "(NASA_EARTHDATA_TOKEN also supported)."
+            )
 
-        if self._has_username_password():
-            self._credentials = self._refresh_with_username_password()
-            return self._credentials
-
-        msg = (
-            "NASA HLS requires Earthdata credentials. Set EARTHDATA_TOKEN or "
-            "EARTHDATA_USERNAME/EARTHDATA_PASSWORD (NASA_EARTHDATA_* also supported)."
-        )
-        if last_error is not None:
-            raise ValueError(msg) from last_error
-        raise ValueError(msg)
+        self._credentials = self._refresh_with_token()
+        return self._credentials
 
     def get_boto3_session(self) -> boto3.session.Session:
         """Return a boto3 session configured with current temporary credentials."""
@@ -249,16 +182,12 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
         sort_ascending: bool = True,
         timeout: timedelta = timedelta(seconds=30),
         earthdata_token: str | None = None,
-        earthdata_username: str | None = None,
-        earthdata_password: str | None = None,
         s3_credentials_url: str = S3_CREDENTIALS_URL,
         context: DataSourceContext = DataSourceContext(),
     ) -> None:
         self.timeout = timeout
         self.auth = _EarthdataAuth(
             earthdata_token=earthdata_token,
-            earthdata_username=earthdata_username,
-            earthdata_password=earthdata_password,
             s3_credentials_url=s3_credentials_url,
             aws_region=self.AWS_REGION,
             timeout=timeout,
@@ -736,8 +665,6 @@ class Hls2(_NasaHlsBase):
         sort_ascending: bool = True,
         timeout: timedelta = timedelta(seconds=30),
         earthdata_token: str | None = None,
-        earthdata_username: str | None = None,
-        earthdata_password: str | None = None,
         s3_credentials_url: str = _NasaHlsBase.S3_CREDENTIALS_URL,
         context: DataSourceContext = DataSourceContext(),
     ) -> None:
@@ -751,16 +678,12 @@ class Hls2(_NasaHlsBase):
             sort_ascending: whether the sort should be ascending.
             timeout: timeout for auth and asset requests.
             earthdata_token: optional Earthdata bearer token override.
-            earthdata_username: optional Earthdata username override.
-            earthdata_password: optional Earthdata password override.
             s3_credentials_url: LP DAAC temporary credentials endpoint.
             context: optional datasource context from rslearn.
         """
         self.timeout = timeout
         self.auth = _EarthdataAuth(
             earthdata_token=earthdata_token,
-            earthdata_username=earthdata_username,
-            earthdata_password=earthdata_password,
             s3_credentials_url=s3_credentials_url,
             aws_region=self.AWS_REGION,
             timeout=timeout,

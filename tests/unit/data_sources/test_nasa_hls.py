@@ -192,12 +192,8 @@ def test_hls2_read_raster_falls_back_to_http_asset() -> None:
     np.testing.assert_array_equal(actual_array, expected_array)
 
 
-def test_hls2_auth_uses_token_before_username_password() -> None:
-    data_source = Hls2S30(
-        earthdata_token="token",
-        earthdata_username="user",
-        earthdata_password="pass",
-    )
+def test_hls2_auth_uses_token() -> None:
+    data_source = Hls2S30(earthdata_token="token")
     creds = data_source.auth._parse_credentials(
         {
             "accessKeyId": "key",
@@ -210,42 +206,19 @@ def test_hls2_auth_uses_token_before_username_password() -> None:
     with patch.object(
         data_source.auth, "_refresh_with_token", return_value=creds
     ) as token:
-        with patch.object(
-            data_source.auth,
-            "_refresh_with_username_password",
-            side_effect=AssertionError("unexpected username/password fallback"),
-        ):
-            actual = data_source.auth.get_s3_credentials(refresh=True)
+        actual = data_source.auth.get_s3_credentials(refresh=True)
 
     token.assert_called_once()
     assert actual.access_key_id == "key"
 
 
-def test_hls2_auth_falls_back_to_username_password() -> None:
-    data_source = Hls2S30(
-        earthdata_token="token", earthdata_username="user", earthdata_password="pass"
-    )
-    creds = data_source.auth._parse_credentials(
-        {
-            "accessKeyId": "key",
-            "secretAccessKey": "secret",
-            "sessionToken": "session",
-            "expiration": "2030-01-01 00:00:00+00:00",
-        }
-    )
+def test_hls2_auth_requires_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("EARTHDATA_TOKEN", raising=False)
+    monkeypatch.delenv("NASA_EARTHDATA_TOKEN", raising=False)
+    data_source = Hls2S30(earthdata_token=None)
 
-    with patch.object(
-        data_source.auth, "_refresh_with_token", side_effect=RuntimeError("bad token")
-    ):
-        with patch.object(
-            data_source.auth,
-            "_refresh_with_username_password",
-            return_value=creds,
-        ) as username_password:
-            actual = data_source.auth.get_s3_credentials(refresh=True)
-
-    username_password.assert_called_once()
-    assert actual.access_key_id == "key"
+    with pytest.raises(ValueError, match="EARTHDATA_TOKEN"):
+        data_source.auth.get_s3_credentials(refresh=True)
 
 
 def test_hls2_auth_reuses_cached_credentials() -> None:

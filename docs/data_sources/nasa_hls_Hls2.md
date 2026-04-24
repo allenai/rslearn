@@ -4,13 +4,11 @@ NASA LP DAAC HLS v2.0 Sentinel-2 ([HLSS30](https://hls.gsfc.nasa.gov/)) data on
 CMR STAC / LP DAAC cloud storage. Direct materialization is supported.
 
 This data source prefers LP DAAC `s3_*` assets and automatically fetches temporary
-AWS credentials from the LP DAAC `s3credentials` endpoint. Set either:
+AWS credentials from the LP DAAC `s3credentials` endpoint. Set:
 
-- `EARTHDATA_TOKEN` (preferred), or
-- `EARTHDATA_USERNAME` + `EARTHDATA_PASSWORD`
+- `EARTHDATA_TOKEN`
 
-The aliases `NASA_EARTHDATA_TOKEN`, `NASA_EARTHDATA_USERNAME`, and
-`NASA_EARTHDATA_PASSWORD` are also supported.
+The alias `NASA_EARTHDATA_TOKEN` is also supported.
 
 ### Region Behavior
 
@@ -37,10 +35,8 @@ with best support/performance in `us-west-2`.
     // Optional STAC sort property, e.g. "eo:cloud_cover".
     "sort_by": null,
     "sort_ascending": true,
-    // Optional Earthdata auth overrides (otherwise env vars are used).
+    // Optional Earthdata bearer token override (otherwise env vars are used).
     "earthdata_token": null,
-    "earthdata_username": null,
-    "earthdata_password": null,
     "timeout_seconds": 30
   }
 }
@@ -102,8 +98,6 @@ Like other rslearn datasources, the default query behavior only returns a single
     "sort_by": "datetime",
     "sort_ascending": true,
     "earthdata_token": null,
-    "earthdata_username": null,
-    "earthdata_password": null,
     "timeout_seconds": 30
   }
 }
@@ -158,8 +152,6 @@ HTTPS otherwise.
     "sort_by": null,
     "sort_ascending": true,
     "earthdata_token": null,
-    "earthdata_username": null,
-    "earthdata_password": null,
     "timeout_seconds": 30
   }
 }
