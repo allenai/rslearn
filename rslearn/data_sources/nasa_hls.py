@@ -871,10 +871,11 @@ class Hls2(_NasaHlsBase):
             )
 
             if self.sort_by is not None:
+                sort_by = self.sort_by
                 stac_items.sort(
                     key=lambda stac_item: (
-                        stac_item.properties.get(self.sort_by) is None,
-                        stac_item.properties.get(self.sort_by),
+                        stac_item.properties.get(sort_by) is None,
+                        stac_item.properties.get(sort_by),
                     ),
                     reverse=not self.sort_ascending,
                 )
