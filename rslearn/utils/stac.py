@@ -149,31 +149,46 @@ class StacClient:
 
         # Handle pagination.
         cur_url = self.endpoint + "/search"
+        cur_method = "POST"
         items: list[StacItem] = []
         while True:
             logger.debug(
                 "Reading STAC items from %s with request data %s", cur_url, request_data
             )
-            response = self.session.post(url=cur_url, json=request_data)
+            if cur_method == "POST":
+                response = self.session.post(url=cur_url, json=request_data)
+            elif cur_method == "GET":
+                response = self.session.get(url=cur_url)
+            else:  # pragma: no cover - defensive check
+                raise ValueError(f"unsupported STAC pagination method {cur_method!r}")
             response.raise_for_status()
             data = response.json()
             for item_dict in data["features"]:
                 items.append(StacItem.from_dict(item_dict))
 
             next_link = None
+            next_method = "GET"
             next_request_data: dict[str, Any] = {}
             for link in data.get("links", []):
                 if "rel" not in link or link["rel"] != "next":
                     continue
-                assert link["method"] == "POST"
                 next_link = link["href"]
-                next_request_data = link["body"]
+                next_method = link.get("method", "GET").upper()
+                if next_method == "POST":
+                    next_request_data = link.get("body", {})
+                elif next_method == "GET":
+                    next_request_data = {}
+                else:
+                    raise ValueError(
+                        f"unsupported STAC pagination method {next_method!r}"
+                    )
                 break
 
             if next_link is None:
                 break
 
             cur_url = next_link
+            cur_method = next_method
             request_data = next_request_data
 
         return items

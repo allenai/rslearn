@@ -46,6 +46,8 @@ detailed page with configuration options and available bands. See
 |---|---|---|
 | [planetary_computer.Hls2S30](data_sources/planetary_computer_Hls2.md#rslearndatasourcesplanetary_computerhls2s30) | Microsoft Planetary Computer | HLS v2 Sentinel-2 (30m) |
 | [planetary_computer.Hls2L30](data_sources/planetary_computer_Hls2.md#rslearndatasourcesplanetary_computerhls2l30) | Microsoft Planetary Computer | HLS v2 Landsat (30m) |
+| [nasa_hls.Hls2S30](data_sources/nasa_hls_Hls2.md#rslearndatasourcesnasa_hlshls2s30) | NASA LP DAAC | HLSS30 v2.0, direct materialization via protected S3 |
+| [nasa_hls.Hls2L30](data_sources/nasa_hls_Hls2.md#rslearndatasourcesnasa_hlshls2l30) | NASA LP DAAC | HLSL30 v2.0, direct materialization via protected S3 |
 
 #### NAIP
 
