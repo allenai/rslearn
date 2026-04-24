@@ -173,7 +173,9 @@ def test_search_pagination_supports_get_next_links() -> None:
     }
 
     with patch.object(client.session, "post", return_value=first_response) as mock_post:
-        with patch.object(client.session, "get", return_value=second_response) as mock_get:
+        with patch.object(
+            client.session, "get", return_value=second_response
+        ) as mock_get:
             items = client.search(limit=1)
 
     mock_post.assert_called_once()

@@ -12,6 +12,18 @@ AWS credentials from the LP DAAC `s3credentials` endpoint. Set either:
 The aliases `NASA_EARTHDATA_TOKEN`, `NASA_EARTHDATA_USERNAME`, and
 `NASA_EARTHDATA_PASSWORD` are also supported.
 
+### Region Behavior
+
+LP DAAC's temporary AWS credentials are intended for same-region direct S3 access,
+with best support/performance in `us-west-2`.
+
+- If your job is running in or near `us-west-2`, rslearn will try the LP DAAC
+  `s3://` asset first.
+- If direct S3 access is denied or unavailable, rslearn falls back to the
+  authenticated HTTPS asset URL from STAC.
+- The HTTPS fallback is intended to make local development and non-`us-west-2`
+  runs work, but it will usually be slower than direct in-region S3 access.
+
 ### Configuration
 
 ```jsonc
@@ -67,6 +79,10 @@ CMR STAC / LP DAAC cloud storage. Direct materialization is supported.
 
 Authentication and temporary S3 credential handling are the same as for
 `rslearn.data_sources.nasa_hls.Hls2S30`.
+
+The same region behavior applies here: direct `s3://` reads are preferred when
+same-region LP DAAC access is available, and rslearn falls back to authenticated
+HTTPS otherwise.
 
 ### Configuration
 

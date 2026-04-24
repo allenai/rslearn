@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import boto3
 import rasterio
 import shapely
+from rasterio.errors import RasterioIOError
 from rasterio.session import AWSSession
 from typing_extensions import override
 from upath import UPath
@@ -34,6 +35,7 @@ from rslearn.utils.retry_session import create_retry_session
 from rslearn.utils.stac import StacItem
 
 logger = get_logger(__name__)
+_HTTP_URL_PROPERTY_PREFIX = "_http_url_"
 
 
 def _first_set_env(*names: str) -> str | None:
@@ -286,6 +288,13 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
             properties_to_record=list(self.PROPERTIES_TO_RECORD),
         )
 
+    def _get_http_asset_url(self, item: SourceItem, asset_key: str) -> str | None:
+        """Return the HTTPS asset URL recorded for the given item and asset key."""
+        value = item.properties.get(f"{_HTTP_URL_PROPERTY_PREFIX}{asset_key}")
+        if isinstance(value, str):
+            return value
+        return None
+
     @contextmanager
     def _rasterio_env(self, asset_url: str) -> Iterator[None]:
         """Create a rasterio environment for the given asset URL."""
@@ -294,6 +303,29 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
                 yield
             return
         yield
+
+    def _read_raster_from_local_copy(
+        self,
+        asset_url: str,
+        projection: Any,
+        bounds: Any,
+        resampling: Any,
+    ) -> tuple[Any, float | None]:
+        """Download an asset locally, then read it with rasterio."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            local_fname = os.path.join(tmp_dir, "asset.tif")
+            self._download_asset(asset_url, local_fname)
+            return super()._read_raster_from_url(
+                f"file://{local_fname}", projection, bounds, resampling
+            )
+
+    def _get_nodata_from_local_copy(self, asset_url: str) -> float | None:
+        """Download an asset locally to inspect its nodata metadata."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            local_fname = os.path.join(tmp_dir, "asset.tif")
+            self._download_asset(asset_url, local_fname)
+            with rasterio.open(local_fname) as src:
+                return src.nodata
 
     def _download_asset(self, asset_url: str, local_fname: str) -> None:
         """Download an asset to a local path for ingest."""
@@ -331,14 +363,18 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
         shp = shapely.geometry.shape(stac_item.geometry)
         geometry = STGeometry(WGS84_PROJECTION, shp, stac_item.time_range)
         asset_urls = {}
+        properties: dict[str, Any] = {}
         for asset_key in self.asset_bands:
             s3_asset_key = f"s3_{asset_key}"
             if s3_asset_key in stac_item.assets:
                 asset_urls[asset_key] = stac_item.assets[s3_asset_key].href
-            elif asset_key in stac_item.assets:
-                asset_urls[asset_key] = stac_item.assets[asset_key].href
+            if asset_key in stac_item.assets:
+                properties[f"{_HTTP_URL_PROPERTY_PREFIX}{asset_key}"] = (
+                    stac_item.assets[asset_key].href
+                )
+                if asset_key not in asset_urls:
+                    asset_urls[asset_key] = stac_item.assets[asset_key].href
 
-        properties = {}
         for prop_name in self.properties_to_record:
             if prop_name in stac_item.properties:
                 properties[prop_name] = stac_item.properties[prop_name]
@@ -358,6 +394,68 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
             for asset_key, band_names in self.asset_bands.items()
             if asset_key in item.asset_urls
         ]
+
+    def _download_asset_with_fallback(
+        self, item: SourceItem, asset_key: str, local_fname: str
+    ) -> None:
+        """Download an asset, retrying via HTTPS if direct S3 access fails."""
+        asset_url = self.get_asset_url(item, asset_key)
+        try:
+            self._download_asset(asset_url, local_fname)
+        except Exception:
+            http_asset_url = self._get_http_asset_url(item, asset_key)
+            if not asset_url.startswith("s3://") or http_asset_url is None:
+                raise
+            logger.info(
+                "falling back to HTTPS download for %s asset %s", item.name, asset_key
+            )
+            self._download_asset(http_asset_url, local_fname)
+
+    def _read_raster_for_item(
+        self,
+        item: SourceItem,
+        asset_key: str,
+        projection: Any,
+        bounds: Any,
+        resampling: Any,
+    ) -> tuple[Any, float | None]:
+        """Read an asset, retrying via HTTPS download if direct S3 access fails."""
+        asset_url = self.get_asset_url(item, asset_key)
+        try:
+            with self._rasterio_env(asset_url):
+                return super()._read_raster_from_url(
+                    asset_url, projection, bounds, resampling
+                )
+        except RasterioIOError:
+            http_asset_url = self._get_http_asset_url(item, asset_key)
+            if not asset_url.startswith("s3://") or http_asset_url is None:
+                raise
+            logger.info(
+                "falling back to HTTPS raster read for %s asset %s",
+                item.name,
+                asset_key,
+            )
+            return self._read_raster_from_local_copy(
+                http_asset_url, projection, bounds, resampling
+            )
+
+    def _get_nodata_for_item(self, item: SourceItem, asset_key: str) -> float | None:
+        """Read nodata metadata, retrying via HTTPS download if needed."""
+        asset_url = self.get_asset_url(item, asset_key)
+        try:
+            with self._rasterio_env(asset_url):
+                with rasterio.open(asset_url) as src:
+                    return src.nodata
+        except RasterioIOError:
+            http_asset_url = self._get_http_asset_url(item, asset_key)
+            if not asset_url.startswith("s3://") or http_asset_url is None:
+                raise
+            logger.info(
+                "falling back to HTTPS nodata read for %s asset %s",
+                item.name,
+                asset_key,
+            )
+            return self._get_nodata_from_local_copy(http_asset_url)
 
     @override
     def _read_raster_from_url(
@@ -380,15 +478,52 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
 
         asset_key = self._get_asset_key_by_bands(bands)
         if asset_key not in self._nodata_cache:
-            asset_url = self.get_asset_url(typed_item, asset_key)
-            with self._rasterio_env(asset_url):
-                with rasterio.open(asset_url) as src:
-                    self._nodata_cache[asset_key] = src.nodata
+            self._nodata_cache[asset_key] = self._get_nodata_for_item(
+                typed_item, asset_key
+            )
 
         nodata = self._nodata_cache[asset_key]
         if nodata is not None:
             return RasterMetadata(nodata_value=nodata)
         return RasterMetadata()
+
+    @override
+    def read_raster(
+        self,
+        layer_name: str,
+        item: Item,
+        bands: list[str],
+        projection: Any,
+        bounds: Any,
+        resampling: Any = rasterio.enums.Resampling.bilinear,
+    ) -> Any:
+        typed_item = item
+        if not isinstance(typed_item, SourceItem):
+            raise TypeError(f"expected SourceItem, got {type(item)}")
+
+        asset_key = self._get_asset_key_by_bands(bands)
+        raw_data, src_nodata = self._read_raster_for_item(
+            typed_item, asset_key, projection, bounds, resampling
+        )
+
+        if asset_key not in self._nodata_cache:
+            self._nodata_cache[asset_key] = src_nodata
+
+        callback = self.get_read_callback(typed_item, asset_key)
+        if callback is not None:
+            raw_data = callback(raw_data)
+
+        raster_metadata = None
+        if src_nodata is not None:
+            raster_metadata = RasterMetadata(nodata_value=src_nodata)
+
+        from rslearn.utils.raster_array import RasterArray
+
+        return RasterArray(
+            chw_array=raw_data,
+            time_range=item.geometry.time_range,
+            metadata=raster_metadata,
+        )
 
     @override
     def ingest(
@@ -404,10 +539,9 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
                 if tile_store.is_raster_ready(item, band_names):
                     continue
 
-                asset_url = item.asset_urls[asset_key]
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     local_fname = os.path.join(tmp_dir, f"{asset_key}.tif")
-                    self._download_asset(asset_url, local_fname)
+                    self._download_asset_with_fallback(item, asset_key, local_fname)
                     tile_store.write_raster_file(
                         item,
                         band_names,
