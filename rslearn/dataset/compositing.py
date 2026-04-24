@@ -59,19 +59,6 @@ class Compositor(ABC):
     share this interface.
     """
 
-    def prepare_for_window(
-        self,
-        projection: Projection,
-        bounds: PixelBounds,
-    ) -> None:
-        """Legacy hook for per-window setup.
-
-        Materializers now prefer ``build_composites`` for whole-window work. This
-        hook is retained for compatibility with external/custom compositors that may
-        still use it.
-        """
-        del projection, bounds
-
     def build_composites(
         self,
         group: list[ItemType],
