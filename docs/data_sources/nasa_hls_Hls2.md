@@ -72,6 +72,69 @@ Additional supported raster assets:
 
 Band names may be provided as either asset keys or the aliases above.
 
+## rslearn.data_sources.nasa_hls.Hls2
+
+Combined NASA LP DAAC HLS v2.0 time-series datasource with a shared semantic band
+schema across Sentinel-2 and Landsat observations.
+
+This datasource is intended for single chronological time-series use. It does **not**
+expose raw `Bxx` asset keys, because those keys do not mean the same thing across
+HLSS30 and HLSL30. Instead it exposes semantic band names shared by both sensors.
+
+Authentication, direct S3 preference, and HTTPS fallback behavior are the same as
+for `rslearn.data_sources.nasa_hls.Hls2S30`.
+
+For multi-item chronological series, configure the layer query with `max_matches > 1`.
+Like other rslearn datasources, the default query behavior only returns a single match.
+
+### Configuration
+
+```jsonc
+{
+  "class_path": "rslearn.data_sources.nasa_hls.Hls2",
+  "init_args": {
+    // Optional semantic band list. Defaults to the common reflectance bands below.
+    "band_names": null,
+    // Optional source subset. Valid values are "sentinel" and "landsat".
+    "sources": ["sentinel", "landsat"],
+    "query": null,
+    // Defaults to datetime so the merged series is chronological.
+    "sort_by": "datetime",
+    "sort_ascending": true,
+    "earthdata_token": null,
+    "earthdata_username": null,
+    "earthdata_password": null,
+    "timeout_seconds": 30
+  }
+}
+```
+
+### Available Bands
+
+Default bands:
+- coastal
+- blue
+- green
+- red
+- nir
+- swir16
+- swir22
+
+Optional additional shared bands:
+- cirrus
+- fmask
+- solar_azimuth
+- solar_zenith
+- view_azimuth
+- view_zenith
+
+Supported aliases:
+- `nir08` → `nir`
+- `qa` / `FMASK` → `fmask`
+
+Use `Hls2S30` or `Hls2L30` instead if you need source-specific raw bands like
+Sentinel red-edge bands or Landsat thermal bands.
+
 ## rslearn.data_sources.nasa_hls.Hls2L30
 
 NASA LP DAAC HLS v2.0 Landsat ([HLSL30](https://hls.gsfc.nasa.gov/)) data on

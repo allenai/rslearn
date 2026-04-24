@@ -7,12 +7,21 @@ import pytest
 import shapely
 from rasterio.errors import RasterioIOError
 
-from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType
+from rslearn.config import (
+    BandSetConfig,
+    DType,
+    LayerConfig,
+    LayerType,
+    QueryConfig,
+    SpaceMode,
+)
+from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSourceContext
 from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
-from rslearn.data_sources.nasa_hls import Hls2L30, Hls2S30
+from rslearn.data_sources.nasa_hls import Hls2, Hls2L30, Hls2S30
+from rslearn.utils.geometry import STGeometry
 from rslearn.utils.stac import StacAsset, StacItem
 
 SEATTLE_WGS84_BOUNDS = (-122.34, 47.60, -122.32, 47.62)
@@ -261,3 +270,152 @@ def test_hls2_auth_reuses_cached_credentials() -> None:
         actual = data_source.auth.get_s3_credentials()
 
     assert actual is creds
+
+
+def test_combined_hls2_defaults_to_common_semantic_bands() -> None:
+    data_source = Hls2()
+    assert list(data_source.asset_bands.keys()) == Hls2.DEFAULT_BANDS
+    assert data_source.sources == ["sentinel", "landsat"]
+
+
+def test_combined_hls2_accepts_source_filter() -> None:
+    data_source = Hls2(sources=["landsat"], band_names=["red", "nir", "fmask"])
+    assert data_source.collection_names == [Hls2L30.COLLECTION_NAME]
+    assert list(data_source.asset_bands.keys()) == ["red", "nir", "fmask"]
+
+
+def test_combined_hls2_rejects_unknown_source() -> None:
+    with pytest.raises(ValueError, match="unsupported Hls2 source"):
+        Hls2(sources=["sentinel", "planet"])
+
+
+def test_combined_hls2_maps_semantic_bands_per_collection() -> None:
+    data_source = Hls2(band_names=["red", "nir", "swir16", "fmask"])
+
+    sentinel_item = StacItem(
+        id="HLSS30.example",
+        properties={"datetime": "2020-07-20T00:00:00Z"},
+        collection=Hls2S30.COLLECTION_NAME,
+        bbox=SEATTLE_WGS84_BOUNDS,
+        geometry=shapely.geometry.mapping(shapely.box(*SEATTLE_WGS84_BOUNDS)),
+        assets={
+            "B04": StacAsset(
+                href="https://example.com/s_red.tif", title=None, type=None, roles=None
+            ),
+            "s3_B04": StacAsset(
+                href="s3://bucket/s_red.tif", title=None, type=None, roles=None
+            ),
+            "B08": StacAsset(
+                href="https://example.com/s_nir.tif", title=None, type=None, roles=None
+            ),
+            "B11": StacAsset(
+                href="https://example.com/s_swir16.tif",
+                title=None,
+                type=None,
+                roles=None,
+            ),
+            "Fmask": StacAsset(
+                href="https://example.com/s_fmask.tif",
+                title=None,
+                type=None,
+                roles=None,
+            ),
+        },
+        time_range=(
+            datetime(2020, 7, 20, tzinfo=UTC),
+            datetime(2020, 7, 21, tzinfo=UTC),
+        ),
+    )
+    landsat_item = StacItem(
+        id="HLSL30.example",
+        properties={"datetime": "2020-07-21T00:00:00Z"},
+        collection=Hls2L30.COLLECTION_NAME,
+        bbox=SEATTLE_WGS84_BOUNDS,
+        geometry=shapely.geometry.mapping(shapely.box(*SEATTLE_WGS84_BOUNDS)),
+        assets={
+            "B04": StacAsset(
+                href="https://example.com/l_red.tif", title=None, type=None, roles=None
+            ),
+            "B05": StacAsset(
+                href="https://example.com/l_nir.tif", title=None, type=None, roles=None
+            ),
+            "B06": StacAsset(
+                href="https://example.com/l_swir16.tif",
+                title=None,
+                type=None,
+                roles=None,
+            ),
+            "Fmask": StacAsset(
+                href="https://example.com/l_fmask.tif",
+                title=None,
+                type=None,
+                roles=None,
+            ),
+        },
+        time_range=(
+            datetime(2020, 7, 21, tzinfo=UTC),
+            datetime(2020, 7, 22, tzinfo=UTC),
+        ),
+    )
+
+    sentinel_source_item = data_source._stac_item_to_item(sentinel_item)
+    landsat_source_item = data_source._stac_item_to_item(landsat_item)
+
+    assert sentinel_source_item.asset_urls["red"] == "s3://bucket/s_red.tif"
+    assert sentinel_source_item.asset_urls["nir"] == "https://example.com/s_nir.tif"
+    assert sentinel_source_item.properties["sensor"] == "sentinel"
+    assert landsat_source_item.asset_urls["nir"] == "https://example.com/l_nir.tif"
+    assert (
+        landsat_source_item.asset_urls["swir16"] == "https://example.com/l_swir16.tif"
+    )
+    assert landsat_source_item.properties["sensor"] == "landsat"
+
+
+def test_combined_hls2_get_items_merges_and_sorts_chronologically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_source = Hls2(band_names=["red"], sort_by="datetime", sort_ascending=True)
+    geometry = STGeometry(
+        WGS84_PROJECTION,
+        shapely.box(*SEATTLE_WGS84_BOUNDS),
+        (datetime(2020, 7, 1, tzinfo=UTC), datetime(2020, 8, 1, tzinfo=UTC)),
+    )
+    later = StacItem(
+        id="later",
+        properties={"datetime": "2020-07-21T00:00:00Z"},
+        collection=Hls2L30.COLLECTION_NAME,
+        bbox=SEATTLE_WGS84_BOUNDS,
+        geometry=shapely.geometry.mapping(shapely.box(*SEATTLE_WGS84_BOUNDS)),
+        assets={
+            "B04": StacAsset(
+                href="https://example.com/l_red.tif", title=None, type=None, roles=None
+            )
+        },
+        time_range=(
+            datetime(2020, 7, 21, tzinfo=UTC),
+            datetime(2020, 7, 22, tzinfo=UTC),
+        ),
+    )
+    earlier = StacItem(
+        id="earlier",
+        properties={"datetime": "2020-07-20T00:00:00Z"},
+        collection=Hls2S30.COLLECTION_NAME,
+        bbox=SEATTLE_WGS84_BOUNDS,
+        geometry=shapely.geometry.mapping(shapely.box(*SEATTLE_WGS84_BOUNDS)),
+        assets={
+            "B04": StacAsset(
+                href="https://example.com/s_red.tif", title=None, type=None, roles=None
+            )
+        },
+        time_range=(
+            datetime(2020, 7, 20, tzinfo=UTC),
+            datetime(2020, 7, 21, tzinfo=UTC),
+        ),
+    )
+
+    monkeypatch.setattr(data_source.client, "search", lambda **kw: [later, earlier])
+    groups = data_source.get_items(
+        [geometry], QueryConfig(space_mode=SpaceMode.INTERSECTS, max_matches=5)
+    )[0]
+
+    assert [group.items[0].name for group in groups] == ["earlier", "later"]

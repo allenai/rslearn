@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import tempfile
 from collections.abc import Iterator
@@ -20,6 +21,7 @@ from rasterio.session import AWSSession
 from typing_extensions import override
 from upath import UPath
 
+from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSourceContext
 from rslearn.data_sources.data_source import Item
@@ -27,12 +29,13 @@ from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
 from rslearn.data_sources.stac import SourceItem, StacDataSource
+from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.raster_array import RasterMetadata
 from rslearn.utils.retry_session import create_retry_session
-from rslearn.utils.stac import StacItem
+from rslearn.utils.stac import StacClient, StacItem
 
 logger = get_logger(__name__)
 _HTTP_URL_PROPERTY_PREFIX = "_http_url_"
@@ -642,3 +645,251 @@ class Hls2L30(_NasaHlsBase):
         "B10",
         "B11",
     ]
+
+
+class Hls2(_NasaHlsBase):
+    """Combined NASA HLS v2.0 time-series datasource with semantic band names."""
+
+    COLLECTION_NAME = "HLS2"
+    SOURCE_TO_COLLECTION = {
+        "sentinel": Hls2S30.COLLECTION_NAME,
+        "landsat": Hls2L30.COLLECTION_NAME,
+    }
+    COLLECTION_TO_SOURCE = {
+        collection_name: source
+        for source, collection_name in SOURCE_TO_COLLECTION.items()
+    }
+    SENTINEL_SEMANTIC_BANDS = {
+        "coastal": "B01",
+        "blue": "B02",
+        "green": "B03",
+        "red": "B04",
+        "nir": "B08",
+        "cirrus": "B10",
+        "swir16": "B11",
+        "swir22": "B12",
+        "fmask": "Fmask",
+        "solar_azimuth": "SAA",
+        "solar_zenith": "SZA",
+        "view_azimuth": "VAA",
+        "view_zenith": "VZA",
+    }
+    LANDSAT_SEMANTIC_BANDS = {
+        "coastal": "B01",
+        "blue": "B02",
+        "green": "B03",
+        "red": "B04",
+        "nir": "B05",
+        "cirrus": "B09",
+        "swir16": "B06",
+        "swir22": "B07",
+        "fmask": "Fmask",
+        "solar_azimuth": "SAA",
+        "solar_zenith": "SZA",
+        "view_azimuth": "VAA",
+        "view_zenith": "VZA",
+    }
+    BAND_ALIASES = {
+        "nir08": "nir",
+        "qa": "fmask",
+        "FMASK": "fmask",
+        "saa": "solar_azimuth",
+        "sza": "solar_zenith",
+        "vaa": "view_azimuth",
+        "vza": "view_zenith",
+    }
+    DEFAULT_BANDS = [
+        "coastal",
+        "blue",
+        "green",
+        "red",
+        "nir",
+        "swir16",
+        "swir22",
+    ]
+
+    @classmethod
+    def _asset_key_map_for_collection(cls, collection_name: str) -> dict[str, str]:
+        if collection_name == Hls2S30.COLLECTION_NAME:
+            return cls.SENTINEL_SEMANTIC_BANDS
+        if collection_name == Hls2L30.COLLECTION_NAME:
+            return cls.LANDSAT_SEMANTIC_BANDS
+        raise ValueError(f"unsupported HLS2 collection {collection_name!r}")
+
+    @classmethod
+    def _normalize_band_name(cls, band: str) -> str:
+        normalized_band = cls.BAND_ALIASES.get(band, band)
+        if normalized_band not in cls.SENTINEL_SEMANTIC_BANDS:
+            raise ValueError(
+                f"unsupported Hls2 band '{band}'. Use one of "
+                f"{sorted(cls.SENTINEL_SEMANTIC_BANDS.keys())} or "
+                f"{sorted(cls.BAND_ALIASES.keys())}."
+            )
+        return normalized_band
+
+    def __init__(
+        self,
+        band_names: list[str] | None = None,
+        sources: list[str] | None = None,
+        query: dict[str, Any] | None = None,
+        sort_by: str | None = "datetime",
+        sort_ascending: bool = True,
+        timeout: timedelta = timedelta(seconds=30),
+        earthdata_token: str | None = None,
+        earthdata_username: str | None = None,
+        earthdata_password: str | None = None,
+        s3_credentials_url: str = _NasaHlsBase.S3_CREDENTIALS_URL,
+        context: DataSourceContext = DataSourceContext(),
+    ) -> None:
+        """Create a combined HLS datasource with semantic bands.
+
+        Args:
+            band_names: optional semantic bands to expose.
+            sources: optional subset of sources to include: sentinel, landsat, or both.
+            query: optional STAC query dict to include in searches.
+            sort_by: sort merged STAC results by this property.
+            sort_ascending: whether the sort should be ascending.
+            timeout: timeout for auth and asset requests.
+            earthdata_token: optional Earthdata bearer token override.
+            earthdata_username: optional Earthdata username override.
+            earthdata_password: optional Earthdata password override.
+            s3_credentials_url: LP DAAC temporary credentials endpoint.
+            context: optional datasource context from rslearn.
+        """
+        self.timeout = timeout
+        self.auth = _EarthdataAuth(
+            earthdata_token=earthdata_token,
+            earthdata_username=earthdata_username,
+            earthdata_password=earthdata_password,
+            s3_credentials_url=s3_credentials_url,
+            aws_region=self.AWS_REGION,
+            timeout=timeout,
+        )
+        self.client = StacClient(self.STAC_ENDPOINT)
+
+        if sources is None:
+            sources = ["sentinel", "landsat"]
+        normalized_sources: list[str] = []
+        for source in sources:
+            if source not in self.SOURCE_TO_COLLECTION:
+                raise ValueError(
+                    f"unsupported Hls2 source '{source}'. Use one of "
+                    f"{sorted(self.SOURCE_TO_COLLECTION.keys())}."
+                )
+            if source not in normalized_sources:
+                normalized_sources.append(source)
+        self.sources = normalized_sources
+        self.collection_names = [
+            self.SOURCE_TO_COLLECTION[source] for source in self.sources
+        ]
+
+        if context.layer_config is not None:
+            requested_bands: list[str] = []
+            for band_set in context.layer_config.band_sets:
+                for band in band_set.bands:
+                    normalized_band = self._normalize_band_name(band)
+                    if normalized_band not in requested_bands:
+                        requested_bands.append(normalized_band)
+            band_names = requested_bands
+        elif band_names is None:
+            band_names = list(self.DEFAULT_BANDS)
+        else:
+            band_names = [self._normalize_band_name(band) for band in band_names]
+
+        asset_bands = {band: [band] for band in band_names}
+
+        self.query = query
+        self.sort_by = sort_by
+        self.sort_ascending = sort_ascending
+        self.limit = 100
+        self.properties_to_record = list(self.PROPERTIES_TO_RECORD)
+        DirectMaterializeDataSource.__init__(self, asset_bands=asset_bands)
+
+    @override
+    def _stac_item_to_item(self, stac_item: StacItem) -> SourceItem:
+        if stac_item.collection is None:
+            raise ValueError("got unexpected item with no collection")
+        if stac_item.geometry is None:
+            raise ValueError("got unexpected item with no geometry")
+        if stac_item.time_range is None:
+            raise ValueError("got unexpected item with no time range")
+        if stac_item.assets is None:
+            raise ValueError("got unexpected item with no assets")
+
+        asset_key_map = self._asset_key_map_for_collection(stac_item.collection)
+        shp = shapely.geometry.shape(stac_item.geometry)
+        geometry = STGeometry(WGS84_PROJECTION, shp, stac_item.time_range)
+        asset_urls = {}
+        properties: dict[str, Any] = {
+            "sensor": self.COLLECTION_TO_SOURCE[stac_item.collection],
+            "collection": stac_item.collection,
+        }
+        for semantic_band in self.asset_bands:
+            stac_asset_key = asset_key_map.get(semantic_band)
+            if stac_asset_key is None:
+                continue
+            s3_asset_key = f"s3_{stac_asset_key}"
+            if s3_asset_key in stac_item.assets:
+                asset_urls[semantic_band] = stac_item.assets[s3_asset_key].href
+            if stac_asset_key in stac_item.assets:
+                properties[f"{_HTTP_URL_PROPERTY_PREFIX}{semantic_band}"] = (
+                    stac_item.assets[stac_asset_key].href
+                )
+                if semantic_band not in asset_urls:
+                    asset_urls[semantic_band] = stac_item.assets[stac_asset_key].href
+
+        for prop_name in self.properties_to_record:
+            if prop_name in stac_item.properties:
+                properties[prop_name] = stac_item.properties[prop_name]
+
+        return SourceItem(stac_item.id, geometry, asset_urls, properties)
+
+    @override
+    def get_item_by_name(self, name: str) -> SourceItem:
+        stac_items = self.client.search(ids=[name], collections=self.collection_names)
+        if len(stac_items) == 0:
+            raise ValueError(
+                f"Item {name} not found in collections {self.collection_names}"
+            )
+        if len(stac_items) > 1:
+            raise ValueError(f"Multiple items found for ID {name}")
+        return self._stac_item_to_item(stac_items[0])
+
+    @override
+    def get_items(
+        self, geometries: list[STGeometry], query_config: QueryConfig
+    ) -> list[list[MatchedItemGroup[SourceItem]]]:
+        groups = []
+        for geometry in geometries:
+            wgs84_geometry = geometry.to_wgs84()
+            stac_items = self.client.search(
+                collections=self.collection_names,
+                intersects=json.loads(shapely.to_geojson(wgs84_geometry.shp)),
+                date_time=wgs84_geometry.time_range,
+                query=self.query,
+                limit=self.limit,
+            )
+
+            if self.sort_by is not None:
+                stac_items.sort(
+                    key=lambda stac_item: (
+                        stac_item.properties.get(self.sort_by) is None,
+                        stac_item.properties.get(self.sort_by),
+                    ),
+                    reverse=not self.sort_ascending,
+                )
+
+            candidate_items = []
+            for stac_item in stac_items:
+                candidate_item = self._stac_item_to_item(stac_item)
+                if not all(
+                    band in candidate_item.asset_urls for band in self.asset_bands
+                ):
+                    continue
+                candidate_items.append(candidate_item)
+
+            groups.append(
+                match_candidate_items_to_window(geometry, candidate_items, query_config)
+            )
+
+        return groups
