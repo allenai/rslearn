@@ -36,6 +36,18 @@ def _make_item(name: str) -> Item:
 class TestOmniCloudMaskFirstValid:
     """Tests for OmniCloudMaskFirstValid compositor with mocked omnicloudmask."""
 
+    @staticmethod
+    def _make_request(bounds: PixelBounds = BOUNDS) -> BandSetCompositeRequest:
+        return BandSetCompositeRequest(
+            nodata_val=0,
+            bands=BANDS,
+            bounds=bounds,
+            band_dtype=np.uint8,
+            projection=PROJECTION,
+            resampling_method=Resampling.bilinear,
+            remapper=None,
+        )
+
     def _write_items(
         self,
         store: DefaultTileStore,
@@ -73,17 +85,13 @@ class TestOmniCloudMaskFirstValid:
 
         with patch("rslearn.dataset.omni_cloud_mask.predict_from_array", mock_predict):
             # Pass cloudy first, clear second -- compositor should reorder.
-            result = compositor.build_composite(
-                group=[item_cloudy, item_clear],
-                nodata_val=0,
-                bands=BANDS,
-                bounds=BOUNDS,
-                band_dtype=np.uint8,
-                tile_store=TileStoreWithLayer(store, LAYER_NAME),
-                projection=PROJECTION,
-                resampling_method=Resampling.bilinear,
-                remapper=None,
-            )
+            result = list(
+                compositor.build_composites(
+                    group=[item_cloudy, item_clear],
+                    requests=[self._make_request()],
+                    tile_store=TileStoreWithLayer(store, LAYER_NAME),
+                )
+            )[0]
 
         # Clear item (200) should come first in FIRST_VALID compositing.
         assert np.all(result.get_chw_array() == 200)
@@ -106,17 +114,13 @@ class TestOmniCloudMaskFirstValid:
             "rslearn.dataset.omni_cloud_mask.predict_from_array",
             side_effect=AssertionError("should not be called"),
         ):
-            result = compositor.build_composite(
-                group=[item],
-                nodata_val=0,
-                bands=BANDS,
-                bounds=BOUNDS,
-                band_dtype=np.uint8,
-                tile_store=TileStoreWithLayer(store, LAYER_NAME),
-                projection=PROJECTION,
-                resampling_method=Resampling.bilinear,
-                remapper=None,
-            )
+            result = list(
+                compositor.build_composites(
+                    group=[item],
+                    requests=[self._make_request()],
+                    tile_store=TileStoreWithLayer(store, LAYER_NAME),
+                )
+            )[0]
 
         assert np.all(result.get_chw_array() == 42)
 
@@ -146,16 +150,12 @@ class TestOmniCloudMaskFirstValid:
             patch("rslearn.dataset.omni_cloud_mask.predict_from_array", mock_predict),
             pytest.raises(RuntimeError, match="simulated failure"),
         ):
-            compositor.build_composite(
-                group=[item_fail, item_ok],
-                nodata_val=0,
-                bands=BANDS,
-                bounds=BOUNDS,
-                band_dtype=np.uint8,
-                tile_store=TileStoreWithLayer(store, LAYER_NAME),
-                projection=PROJECTION,
-                resampling_method=Resampling.bilinear,
-                remapper=None,
+            list(
+                compositor.build_composites(
+                    group=[item_fail, item_ok],
+                    requests=[self._make_request()],
+                    tile_store=TileStoreWithLayer(store, LAYER_NAME),
+                )
             )
 
     def test_scoring_resolution_uses_window_grid_once_per_window(self) -> None:

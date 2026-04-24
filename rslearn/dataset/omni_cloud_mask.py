@@ -323,29 +323,12 @@ class OmniCloudMaskFirstValid(Compositor):
         remapper: Remapper | None,
         request_time_range: tuple[datetime, datetime] | None = None,
     ) -> RasterArray:
-        """Score items by cloud cover, sort, then delegate to FIRST_VALID."""
-        if len(group) > 1:
-            scoring_projection, scoring_bounds = self._get_scoring_grid(
-                projection,
-                bounds,
-            )
-            group = self._sort_group(
-                group,
-                tile_store,
-                scoring_projection,
-                scoring_bounds,
-                resampling_method,
-            )
+        """Build a single-band-set composite.
 
-        return FirstValidCompositor().build_composite(
-            group=group,
-            nodata_val=nodata_val,
-            bands=bands,
-            bounds=bounds,
-            band_dtype=band_dtype,
-            tile_store=tile_store,
-            projection=projection,
-            resampling_method=resampling_method,
-            remapper=remapper,
-            request_time_range=request_time_range,
+        OmniCloudMaskFirstValid now relies on the whole-window ``build_composites``
+        entry point so it can share scoring work consistently across band sets.
+        """
+        raise NotImplementedError(
+            "OmniCloudMaskFirstValid only supports build_composites(); "
+            "call the whole-window API instead."
         )
