@@ -74,7 +74,6 @@ class Compositor(ABC):
         compositors can override this to enforce consistency across band sets or
         to share expensive preprocessing work.
         """
-        del window
         return [
             self.build_composite(
                 group=group,
