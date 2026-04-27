@@ -1,8 +1,11 @@
 ## rslearn.data_sources.earthdaily.Sentinel2
 
-Sentinel-2 L2A data on [EarthDaily](https://earthdaily.com/) platform (collection: `sentinel-2-c1-l2a`).
-For EarthDaily collection `sentinel-2-l2a` with Planetary Computer-style asset keys and
-optional harmonization, use `rslearn.data_sources.earthdaily.Sentinel2L2A`.
+Sentinel-2 L2A data on [EarthDaily](https://earthdaily.com/) platform using the
+Collection 1 archive (`sentinel-2-c1-l2a`).
+
+Naming note: `earthdaily.Sentinel2` means the EarthDaily Collection 1 source. For the
+older EarthDaily `sentinel-2-l2a` collection with Planetary Computer-style asset keys
+and optional DN harmonization, use `rslearn.data_sources.earthdaily.Sentinel2L2A`.
 
 See [EarthDaily Setup](earthdaily.md) for required dependency/credentials.
 

@@ -698,10 +698,11 @@ class EarthDaily(DataSource, TileStore):
 
 
 class Sentinel2(EarthDaily):
-    """Sentinel-2 L2A on EarthDaily platform.
+    """EarthDaily Sentinel-2 Collection 1 L2A source.
 
     Uses the `sentinel-2-c1-l2a` collection and applies per-asset scale/offset metadata
-    from STAC `raster:bands` when present.
+    from STAC `raster:bands` when present. For the older `sentinel-2-l2a` collection
+    with Planetary Computer-style asset keys, use `Sentinel2L2A`.
     """
 
     COLLECTION_NAME = "sentinel-2-c1-l2a"
@@ -1012,9 +1013,10 @@ class Sentinel2(EarthDaily):
 
 
 class Sentinel2L2A(EarthDaily):
-    """Sentinel-2 L2A on EarthDaily platform using `sentinel-2-l2a` collection.
+    """EarthDaily Sentinel-2 `sentinel-2-l2a` compatibility source.
 
     This collection exposes the same asset keys as Planetary Computer Sentinel-2.
+    For EarthDaily Collection 1 (`sentinel-2-c1-l2a`), use `Sentinel2`.
     """
 
     COLLECTION_NAME = "sentinel-2-l2a"
@@ -1032,8 +1034,10 @@ class Sentinel2L2A(EarthDaily):
         "B11": ["B11"],
         "B12": ["B12"],
         "B8A": ["B8A"],
+        "SCL": ["SCL"],
         "visual": ["R", "G", "B"],
     }
+    NON_REFLECTANCE_ASSETS = frozenset({"SCL", "visual"})
     PROCESSING_BASELINE_PATTERN = re.compile(r"(?:^|_)N(?P<baseline>\d{4})(?:_|$)")
     HARMONIZE_PROCESSING_BASELINE = 400
     HARMONIZE_CUTOFF = datetime(2022, 1, 25)
@@ -1138,7 +1142,7 @@ class Sentinel2L2A(EarthDaily):
     def _get_harmonize_callback_for_item(
         self, item: EarthDailyItem, asset_key: str
     ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
-        if not self.harmonize or asset_key == "visual":
+        if not self.harmonize or asset_key in self.NON_REFLECTANCE_ASSETS:
             return None
         if item.name in self._harmonize_callback_cache:
             return self._harmonize_callback_cache[item.name]
