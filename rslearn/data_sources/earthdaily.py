@@ -700,9 +700,13 @@ class EarthDaily(DataSource, TileStore):
 class Sentinel2(EarthDaily):
     """EarthDaily Sentinel-2 Collection 1 L2A source.
 
-    Uses the `sentinel-2-c1-l2a` collection and applies per-asset scale/offset metadata
-    from STAC `raster:bands` when present. For the older `sentinel-2-l2a` collection
-    with Planetary Computer-style asset keys, use `Sentinel2L2A`.
+    Uses the `sentinel-2-c1-l2a` collection. The COG pixels are stored as integer
+    DN/sample values, not physical reflectance values; by default rslearn applies
+    per-asset scale/offset metadata from STAC `raster:bands` during
+    read/materialization. This scale/offset decoding is not Sentinel-2
+    processing-baseline harmonization. For the older `sentinel-2-l2a` collection with
+    Planetary Computer-style asset keys and optional DN harmonization, use
+    `Sentinel2L2A`.
     """
 
     COLLECTION_NAME = "sentinel-2-c1-l2a"
@@ -772,7 +776,10 @@ class Sentinel2(EarthDaily):
             retry_backoff_factor: backoff factor for EarthDaily API client retries.
             context: rslearn data source context.
             apply_scale_offset: apply per-asset scale/offset metadata from STAC
-                `raster:bands` (defaults to True). Set to False to use raw values.
+                `raster:bands` during read/materialization (defaults to True).
+                This decodes C1 COG storage values to physical values; it is not
+                Sentinel-2 processing-baseline harmonization. Set to False to use the
+                raw integer DN/sample values from the COG.
         """
         if apply_scale_offset and context.layer_config is not None:
             invalid_band_sets = [
