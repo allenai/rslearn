@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -27,6 +29,8 @@ from .tile_utils import (
 if TYPE_CHECKING:
     from rslearn.data_sources.data_source import ItemType
 
+    from .window import Window
+
 logger = get_logger(__name__)
 
 _NODATA_REQUIRED_MSG = (
@@ -36,12 +40,54 @@ _NODATA_REQUIRED_MSG = (
 )
 
 
+@dataclass(frozen=True)
+class BandSetCompositeRequest:
+    """All inputs needed to composite one materialized band set."""
+
+    nodata_val: int | float | None
+    bands: list[str]
+    bounds: PixelBounds
+    band_dtype: npt.DTypeLike
+    projection: Projection
+    resampling_method: Resampling
+    remapper: Remapper | None
+
+
 class Compositor(ABC):
     """Abstract base for compositing methods.
 
     All built-in compositing methods and custom (jsonargparse-injectable) ones
     share this interface.
     """
+
+    def build_composites(
+        self,
+        group: list[ItemType],
+        requests: list[BandSetCompositeRequest],
+        tile_store: TileStoreWithLayer,
+        window: Window | None = None,
+        request_time_range: tuple[datetime, datetime] | None = None,
+    ) -> Iterator[RasterArray]:
+        """Yield composites for multiple band sets in a window.
+
+        The default implementation preserves the existing per-band-set behavior by
+        iterating over ``requests`` and delegating to ``build_composite``. Custom
+        compositors can override this to enforce consistency across band sets or
+        to share expensive preprocessing work.
+        """
+        for request in requests:
+            yield self.build_composite(
+                group=group,
+                nodata_val=request.nodata_val,
+                bands=request.bands,
+                bounds=request.bounds,
+                band_dtype=request.band_dtype,
+                tile_store=tile_store,
+                projection=request.projection,
+                resampling_method=request.resampling_method,
+                remapper=request.remapper,
+                request_time_range=request_time_range,
+            )
 
     @abstractmethod
     def build_composite(
