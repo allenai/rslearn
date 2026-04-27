@@ -77,6 +77,15 @@ vector or raster file for that window. The following options affect prepare:
 - `time_offset`
 - `duration`
 
+Some data sources can also inspect item groups already prepared for another layer. This
+is useful for products derived from specific source scenes, where geometry/time matching
+is not strict enough. For example,
+[`earthdaily.Biophysical`](../data_sources/earthdaily_Biophysical.md#matching-a-sentinel-2-layer)
+can use `match_source_layer` to select the LAI/FAPAR/FCOVER product derived from the
+exact Sentinel-2 scene selected by an earlier Sentinel-2 layer. In these cases, the
+source layer should appear earlier in the dataset config so it is prepared before the
+dependent layer.
+
 ### Ingest
 
 In the ingest stage, we download items from the data source that matched with at least

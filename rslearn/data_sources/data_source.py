@@ -82,6 +82,30 @@ class DataSource(ABC, Generic[ItemType]):
         """
         raise NotImplementedError
 
+    def get_items_for_windows(
+        self,
+        windows: list[Window],
+        geometries: list[STGeometry],
+        query_config: QueryConfig,
+    ) -> list[list["MatchedItemGroup[ItemType]"]]:
+        """Get items for windows during dataset prepare.
+
+        Most data sources only need the prepared geometry, so the default
+        implementation delegates to get_items. Data sources that depend on other
+        already-prepared layers can override this method and inspect the windows.
+
+        Args:
+            windows: the windows being prepared, in the same order as geometries.
+            geometries: the spatiotemporal geometries.
+            query_config: the query configuration.
+
+        Returns:
+            List of groups of items that should be retrieved for each window.
+        """
+        if len(windows) != len(geometries):
+            raise ValueError("windows and geometries must have the same length")
+        return self.get_items(geometries, query_config)
+
     @abstractmethod
     def deserialize_item(self, serialized_item: dict) -> ItemType:
         """Deserializes an item from JSON-decoded data."""

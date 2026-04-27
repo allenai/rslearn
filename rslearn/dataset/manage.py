@@ -180,7 +180,9 @@ def prepare_dataset_windows(
                 geometries.append(geometry)
 
             results = retry(
-                fn=lambda: data_source.get_items(geometries, query_config),
+                fn=lambda: data_source.get_items_for_windows(
+                    needed_windows, geometries, query_config
+                ),
                 retry_max_attempts=retry_max_attempts,
                 retry_backoff=retry_backoff,
                 attempts_counter=attempts_counter,

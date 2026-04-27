@@ -4,6 +4,7 @@ import copy
 import json
 import os
 import re
+import string
 import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
@@ -309,6 +310,8 @@ class EarthDaily(DataSource, TileStore):
         # No cache or not in cache, so we need to make the STAC request.
         _, _, collection = self._load_client()
         stac_item = collection.get_item(name)
+        if stac_item is None:
+            raise KeyError(f"EarthDaily item not found: {name}")
         item = self._stac_item_to_item(stac_item)
 
         # Finally we cache it if cache_dir is set.
@@ -1252,6 +1255,8 @@ class Biophysical(EarthDaily):
         self,
         variable: Literal["lai", "fapar", "fcover"],
         *,
+        match_source_layer: str | None = None,
+        match_source_item_template: str | None = None,
         query: dict[str, Any] | None = None,
         sort_by: str | None = None,
         sort_ascending: bool = True,
@@ -1265,6 +1270,14 @@ class Biophysical(EarthDaily):
 
         Args:
             variable: one of `lai`, `fapar`, or `fcover`.
+            match_source_layer: optional layer name whose prepared item groups should
+                be mirrored. When set, this source selects items by formatting each
+                source item through match_source_item_template instead of doing an
+                independent STAC geometry/time search.
+            match_source_item_template: format string used to derive this layer's item
+                IDs from source items. Available fields are `source_item_name`,
+                `source_product_id`, `variable`, and `variable_upper`. Defaults to
+                `{source_item_name}_{variable_upper}` when match_source_layer is set.
             query: optional STAC API `query` filter passed to searches.
             sort_by: optional STAC item property to sort by before grouping/matching.
             sort_ascending: whether to sort ascending when sort_by is set.
@@ -1281,6 +1294,14 @@ class Biophysical(EarthDaily):
             )
         cfg = self.VARIABLES[variable]
         self.variable = variable
+        if match_source_layer is None and match_source_item_template is not None:
+            raise ValueError(
+                "match_source_item_template requires match_source_layer to be set"
+            )
+        self.match_source_layer = match_source_layer
+        if match_source_item_template is None and match_source_layer is not None:
+            match_source_item_template = "{source_item_name}_{variable_upper}"
+        self.match_source_item_template = match_source_item_template
 
         asset_key = cfg["asset"]
         super().__init__(
@@ -1296,3 +1317,143 @@ class Biophysical(EarthDaily):
             retry_backoff_factor=retry_backoff_factor,
             context=context,
         )
+
+    def _format_match_source_item_name(self, serialized_source_item: Any) -> str:
+        """Format the target item name for one serialized source item."""
+        if not isinstance(serialized_source_item, dict):
+            raise ValueError(
+                "match_source_layer requires source items serialized as dictionaries"
+            )
+        source_item_name = serialized_source_item.get("name")
+        if not isinstance(source_item_name, str) or not source_item_name:
+            raise ValueError(
+                "match_source_layer requires source item dictionaries with a non-empty "
+                "'name' field"
+            )
+
+        source_product_id = serialized_source_item.get("product_id")
+        if source_product_id is not None and not isinstance(source_product_id, str):
+            raise ValueError("source item 'product_id' must be a string when present")
+
+        if self.match_source_item_template is None:
+            raise ValueError("match_source_item_template is not configured")
+
+        format_fields = {
+            "source_item_name": source_item_name,
+            "source_product_id": source_product_id,
+            "variable": self.variable,
+            "variable_upper": self.variable.upper(),
+        }
+        used_fields = {
+            field_name.split(".")[0].split("[")[0]
+            for _, field_name, _, _ in string.Formatter().parse(
+                self.match_source_item_template
+            )
+            if field_name
+        }
+        if "source_product_id" in used_fields and source_product_id is None:
+            raise ValueError(
+                "match_source_item_template uses source_product_id, but the source "
+                "item does not have a product_id"
+            )
+        try:
+            target_item_name = self.match_source_item_template.format(**format_fields)
+        except KeyError as e:
+            raise ValueError(
+                f"unknown match_source_item_template field {e.args[0]!r}; "
+                f"supported fields are {sorted(format_fields.keys())}"
+            ) from e
+        return target_item_name
+
+    def get_items_for_windows(
+        self,
+        windows: list[Window],
+        geometries: list[STGeometry],
+        query_config: QueryConfig,
+    ) -> list[list[MatchedItemGroup[EarthDailyItem]]]:
+        """Get biophysical items, optionally matched to another prepared layer."""
+        if self.match_source_layer is None:
+            return super().get_items_for_windows(windows, geometries, query_config)
+
+        if len(windows) != len(geometries):
+            raise ValueError("windows and geometries must have the same length")
+
+        results: list[list[MatchedItemGroup[EarthDailyItem]]] = []
+        for window, geometry in zip(windows, geometries, strict=True):
+            layer_datas = window.load_layer_datas()
+            source_layer_data = layer_datas.get(self.match_source_layer)
+            if source_layer_data is None:
+                raise ValueError(
+                    f"Biophysical layer is configured with match_source_layer="
+                    f"{self.match_source_layer!r}, but window {window.group}/"
+                    f"{window.name} has no prepared data for that layer. Ensure the "
+                    "source layer appears earlier in the dataset config and has been "
+                    "prepared."
+                )
+
+            cur_groups: list[MatchedItemGroup[EarthDailyItem]] = []
+            for group_idx, serialized_source_group in enumerate(
+                source_layer_data.serialized_item_groups
+            ):
+                target_items: list[EarthDailyItem] = []
+                missing_item_names: list[str] = []
+
+                for serialized_source_item in serialized_source_group:
+                    target_item_name = self._format_match_source_item_name(
+                        serialized_source_item
+                    )
+                    try:
+                        target_item = self.get_item_by_name(target_item_name)
+                    except KeyError:
+                        missing_item_names.append(target_item_name)
+                        continue
+
+                    missing_asset_keys = [
+                        asset_key
+                        for asset_key in self.asset_bands
+                        if asset_key not in target_item.asset_urls
+                    ]
+                    if missing_asset_keys:
+                        missing_item_names.append(
+                            f"{target_item_name} missing assets {missing_asset_keys}"
+                        )
+                        continue
+                    target_items.append(target_item)
+
+                if missing_item_names:
+                    logger.warning(
+                        "Skipping matched biophysical group for window %s/%s because "
+                        "EarthDaily items are missing: %s",
+                        window.group,
+                        window.name,
+                        missing_item_names,
+                    )
+                    continue
+                if not target_items:
+                    continue
+
+                request_time_range = geometry.time_range
+                if source_layer_data.group_time_ranges is not None and group_idx < len(
+                    source_layer_data.group_time_ranges
+                ):
+                    request_time_range = source_layer_data.group_time_ranges[group_idx]
+
+                cur_groups.append(
+                    MatchedItemGroup(
+                        items=target_items,
+                        request_time_range=request_time_range,
+                    )
+                )
+
+            if len(cur_groups) < query_config.min_matches:
+                logger.warning(
+                    "Window rejected: found %d matched biophysical groups "
+                    "(required: %d) for source layer %s",
+                    len(cur_groups),
+                    query_config.min_matches,
+                    self.match_source_layer,
+                )
+                cur_groups = []
+            results.append(cur_groups)
+
+        return results
