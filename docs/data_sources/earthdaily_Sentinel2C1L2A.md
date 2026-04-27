@@ -1,8 +1,11 @@
 ## rslearn.data_sources.earthdaily.Sentinel2
 
-Sentinel-2 L2A data on [EarthDaily](https://earthdaily.com/) platform (collection: `sentinel-2-c1-l2a`).
-For EarthDaily collection `sentinel-2-l2a` with Planetary Computer-style asset keys and
-optional harmonization, use `rslearn.data_sources.earthdaily.Sentinel2L2A`.
+Sentinel-2 L2A data on [EarthDaily](https://earthdaily.com/) platform using the
+Collection 1 archive (`sentinel-2-c1-l2a`).
+
+Naming note: `earthdaily.Sentinel2` means the EarthDaily Collection 1 source. For the
+older EarthDaily `sentinel-2-l2a` collection with Planetary Computer-style asset keys
+and optional DN harmonization, use `rslearn.data_sources.earthdaily.Sentinel2L2A`.
 
 See [EarthDaily Setup](earthdaily.md) for required dependency/credentials.
 
@@ -10,8 +13,16 @@ By default, this data source applies per-asset scale/offset values from STAC
 `raster:bands` metadata (`apply_scale_offset: true`) to convert raw pixel values into
 physical units using `physical = raw * scale + offset`. Set `apply_scale_offset: false`
 to keep raw values.
+The underlying COG pixels are stored as integer DN/sample values, not physical
+reflectance values. rslearn applies the scale/offset during read/materialization unless
+`apply_scale_offset: false` is configured.
 For Sentinel-2 spectral bands, this physical unit is reflectance (typically BOA
 reflectance for L2A products), e.g. raw `10000` with scale `0.0001` maps to `1.0`.
+
+`apply_scale_offset` is not Sentinel-2 processing-baseline harmonization. It decodes
+the C1 COG storage values into reflectance. The `harmonize` option used by
+Planetary Computer-style Sentinel-2 sources adjusts DN values across processing
+baselines; this C1 source does not expose a `harmonize` argument.
 
 When `apply_scale_offset: true`, configure the target `band_sets[].dtype` as `float32`.
 rslearn will raise during initialization if a non-float dtype is configured through the

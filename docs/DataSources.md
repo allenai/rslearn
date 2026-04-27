@@ -14,14 +14,20 @@ detailed page with configuration options and available bands. See
 
 #### Sentinel-2
 
+EarthDaily has two Sentinel-2 L2A sources with similar names:
+`earthdaily.Sentinel2` uses EarthDaily's Collection 1 (`sentinel-2-c1-l2a`) and returns
+scale/offset-applied reflectance by default, while `earthdaily.Sentinel2L2A` uses the
+older `sentinel-2-l2a` collection with Planetary Computer-style asset names and optional
+DN harmonization.
+
 | Data Source | Provider | Notes |
 |---|---|---|
 | [planetary_computer.Sentinel2](data_sources/planetary_computer_Sentinel2.md) | Microsoft Planetary Computer | L2A COGs, direct materialization |
 | [aws_open_data.Sentinel2](data_sources/aws_open_data_Sentinel2.md) | AWS (Element 84) | L1C and L2A |
 | [aws_sentinel2_element84.Sentinel2](data_sources/aws_sentinel2_element84_Sentinel2.md) | AWS (Element 84) | L2A COGs, direct materialization |
 | [copernicus.Sentinel2](data_sources/copernicus.md#rslearndatasourcescopernicussentinel2) | ESA Copernicus OData API | L1C and L2A |
-| [earthdaily.Sentinel2](data_sources/earthdaily_Sentinel2.md) | EarthDaily | L2A Collection 1 (`sentinel-2-c1-l2a`), supports scale/offset |
-| [earthdaily.Sentinel2L2A](data_sources/earthdaily_Sentinel2L2A.md) | EarthDaily | `sentinel-2-l2a` (PC-style assets), optional harmonization |
+| [earthdaily.Sentinel2 (C1 L2A)](data_sources/earthdaily_Sentinel2C1L2A.md) | EarthDaily | Collection 1 L2A (`sentinel-2-c1-l2a`), scale/offset reflectance |
+| [earthdaily.Sentinel2L2A](data_sources/earthdaily_Sentinel2L2A.md) | EarthDaily | Legacy/PC-style L2A (`sentinel-2-l2a`), optional DN harmonization |
 | [gcp_public_data.Sentinel2](data_sources/gcp_public_data_Sentinel2.md) | Google Cloud Storage | L1C scenes |
 
 #### Sentinel-1

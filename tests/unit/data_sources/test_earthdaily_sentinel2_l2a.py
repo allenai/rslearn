@@ -132,9 +132,56 @@ def test_read_raster_does_not_harmonize_visual(
     np.testing.assert_array_equal(out, raw)
 
 
+def test_read_raster_does_not_harmonize_scl(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tif_path = tmp_path / "SCL.tif"
+    raw = np.array([[[0, 4], [8, 11]]], dtype=np.uint8)
+    with rasterio.open(
+        tif_path,
+        "w",
+        driver="GTiff",
+        width=2,
+        height=2,
+        count=1,
+        dtype=str(raw.dtype),
+        crs=CRS.from_epsg(3857),
+        transform=Affine(1, 0, 0, 0, -1, 0),
+    ) as dst:
+        dst.write(raw)
+
+    item = _make_item(
+        {"SCL": str(tif_path), "product_metadata": "https://example.com/meta.xml"}
+    )
+    ds = Sentinel2L2A(harmonize=True, assets=["SCL"], cache_dir=None)
+    monkeypatch.setattr(ds, "get_item_by_name", lambda _name: item)
+    monkeypatch.setattr(
+        ds,
+        "_get_product_xml",
+        lambda _item: (_ for _ in ()).throw(AssertionError("should not be called")),
+    )
+
+    out = ds.read_raster(
+        layer_name="layer",
+        item=item,
+        bands=["SCL"],
+        projection=Projection(CRS.from_epsg(3857), 1, -1),
+        bounds=(0, 0, 2, 2),
+    ).get_chw_array()
+
+    assert out.dtype == np.uint8
+    np.testing.assert_array_equal(out, raw)
+
+
 def test_rejects_unknown_assets() -> None:
     with pytest.raises(ValueError, match="unknown EarthDaily Sentinel-2 L2A assets"):
         Sentinel2L2A(assets=["red"], cache_dir=None)
+
+
+def test_sentinel2_l2a_exposes_scl() -> None:
+    ds = Sentinel2L2A(assets=["SCL"], cache_dir=None)
+    assert ds.asset_bands == {"SCL": ["SCL"]}
 
 
 def test_sentinel2_l2a_disables_scale_offset_parsing() -> None:
