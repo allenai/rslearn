@@ -1,18 +1,16 @@
-"""Align prepared rslearn item groups between layers.
+"""Align prepared rslearn item groups between layers by item name.
 
 This example utility runs after ``rslearn dataset prepare`` and before materialization.
 It rewrites one or more target layers' prepared item groups so their group order follows
-a reference layer. It is useful when two independent data sources expose related items
-that should be materialized in matching temporal slots.
+a reference layer. Each target group is selected by formatting the first item name in
+the corresponding reference group.
 """
 
 import argparse
-import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
-import pytimeparse
 from upath import UPath
 
 from rslearn.dataset import Dataset, WindowLayerData
@@ -24,53 +22,15 @@ class CandidateGroup:
 
     serialized_group: list[dict[str, Any]]
     group_time_range: tuple[datetime, datetime] | None
-    midpoint: datetime | None
     names: set[str]
 
 
-def parse_timedelta(value: str) -> timedelta:
-    """Parse a human-friendly duration such as ``1h`` or ``2 days``."""
-    seconds = pytimeparse.parse(value)
-    if seconds is None:
-        raise argparse.ArgumentTypeError(f"invalid duration: {value}")
-    return timedelta(seconds=seconds)
-
-
-def item_time_range(
-    serialized_item: dict[str, Any],
-) -> tuple[datetime, datetime] | None:
-    """Return an item's serialized geometry time range."""
-    geometry = serialized_item.get("geometry")
-    if not isinstance(geometry, dict):
-        return None
-    time_range = geometry.get("time_range")
-    if not time_range:
-        return None
-    return (
-        datetime.fromisoformat(time_range[0]),
-        datetime.fromisoformat(time_range[1]),
-    )
-
-
-def time_range_midpoint(time_range: tuple[datetime, datetime]) -> datetime:
-    """Return the midpoint of a time range."""
-    return time_range[0] + (time_range[1] - time_range[0]) / 2
-
-
-def group_midpoint(serialized_group: list[dict[str, Any]]) -> datetime | None:
-    """Return the average midpoint of items in a serialized item group."""
-    midpoints = []
-    for serialized_item in serialized_group:
-        time_range = item_time_range(serialized_item)
-        if time_range is not None:
-            midpoints.append(time_range_midpoint(time_range))
-    if not midpoints:
-        return None
-
-    timestamps = [midpoint.timestamp() for midpoint in midpoints]
-    return datetime.fromtimestamp(
-        sum(timestamps) / len(timestamps), tz=midpoints[0].tzinfo
-    )
+def get_item_name(serialized_item: dict[str, Any]) -> str:
+    """Return a serialized item's name."""
+    item_name = serialized_item.get("name")
+    if not isinstance(item_name, str) or not item_name:
+        raise ValueError("serialized item is missing a non-empty string name")
+    return item_name
 
 
 def make_candidates(layer_data: WindowLayerData) -> list[CandidateGroup]:
@@ -91,53 +51,51 @@ def make_candidates(layer_data: WindowLayerData) -> list[CandidateGroup]:
             CandidateGroup(
                 serialized_group=serialized_group,
                 group_time_range=group_time_range,
-                midpoint=group_midpoint(serialized_group),
                 names=names,
             )
         )
     return candidates
 
 
-def nearest_timestamp_match(
+def format_target_name(
     reference_group: list[dict[str, Any]],
-    candidates: list[CandidateGroup],
-    max_delta: timedelta,
-) -> CandidateGroup | None:
-    """Find the target candidate closest in time to a reference group."""
-    reference_midpoint = group_midpoint(reference_group)
-    if reference_midpoint is None:
-        return None
-
-    best_candidate = None
-    best_delta = None
-    for candidate in candidates:
-        if candidate.midpoint is None:
-            continue
-        delta = abs(candidate.midpoint - reference_midpoint)
-        if best_delta is None or delta < best_delta:
-            best_candidate = candidate
-            best_delta = delta
-
-    if best_candidate is None or best_delta is None:
-        return None
-    if best_delta > max_delta:
-        return None
-    return best_candidate
-
-
-def name_regex_match(
-    reference_group: list[dict[str, Any]],
-    candidates: list[CandidateGroup],
-    reference_name_regex: str,
-    target_name_replacement: str,
-) -> CandidateGroup | None:
-    """Find a target candidate by transforming the first reference item name."""
+    target_layer: str,
+    target_name_template: str,
+) -> str:
+    """Format the target item name expected for a reference group."""
     if not reference_group:
-        return None
-    reference_name = reference_group[0].get("name")
-    if not isinstance(reference_name, str):
-        return None
-    target_name = re.sub(reference_name_regex, target_name_replacement, reference_name)
+        raise ValueError("reference group is empty")
+    reference_item_name = get_item_name(reference_group[0])
+    try:
+        return target_name_template.format(
+            reference_item_name=reference_item_name,
+            target_layer=target_layer,
+            target_layer_upper=target_layer.upper(),
+        )
+    except KeyError as e:
+        supported_fields = [
+            "reference_item_name",
+            "target_layer",
+            "target_layer_upper",
+        ]
+        raise ValueError(
+            f"unknown target_name_template field {e.args[0]!r}; supported fields "
+            f"are {supported_fields}"
+        ) from e
+
+
+def name_template_match(
+    reference_group: list[dict[str, Any]],
+    candidates: list[CandidateGroup],
+    target_layer: str,
+    target_name_template: str,
+) -> CandidateGroup | None:
+    """Find a target candidate by formatting the first reference item name."""
+    target_name = format_target_name(
+        reference_group,
+        target_layer,
+        target_name_template,
+    )
     for candidate in candidates:
         if target_name in candidate.names:
             return candidate
@@ -155,24 +113,21 @@ def align_target_layer(
     aligned_time_ranges = []
 
     for group_idx, reference_group in enumerate(reference_data.serialized_item_groups):
-        if args.match_mode == "nearest_timestamp":
-            candidate = nearest_timestamp_match(
-                reference_group, candidates, args.max_delta
-            )
-        elif args.match_mode == "name_regex":
-            candidate = name_regex_match(
-                reference_group,
-                candidates,
-                args.reference_name_regex,
-                args.target_name_replacement,
-            )
-        else:
-            raise ValueError(f"unsupported match mode: {args.match_mode}")
-
+        candidate = name_template_match(
+            reference_group,
+            candidates,
+            target_data.layer_name,
+            args.target_name_template,
+        )
         if candidate is None:
+            target_name = format_target_name(
+                reference_group,
+                target_data.layer_name,
+                args.target_name_template,
+            )
             raise ValueError(
-                f"no {args.match_mode} match for reference group {group_idx} "
-                f"in target layer {target_data.layer_name}"
+                f"no target item named {target_name!r} for reference group "
+                f"{group_idx} in target layer {target_data.layer_name}"
             )
 
         aligned_groups.append(candidate.serialized_group)
@@ -207,7 +162,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Align prepared item groups in one or more target layers to a reference "
-            "layer by nearest timestamp or name transformation."
+            "layer by transforming reference item names."
         )
     )
     parser.add_argument(
@@ -225,6 +180,14 @@ def get_parser() -> argparse.ArgumentParser:
         help="Prepared layer(s) to rewrite so they align with the reference layer.",
     )
     parser.add_argument(
+        "--target-name-template",
+        default="{reference_item_name}_{target_layer_upper}",
+        help=(
+            "Template for target item names. Supported fields: "
+            "{reference_item_name}, {target_layer}, {target_layer_upper}."
+        ),
+    )
+    parser.add_argument(
         "--groups",
         nargs="*",
         default=None,
@@ -235,28 +198,6 @@ def get_parser() -> argparse.ArgumentParser:
         nargs="*",
         default=None,
         help="Optional window names to process.",
-    )
-    parser.add_argument(
-        "--match-mode",
-        choices=["nearest_timestamp", "name_regex"],
-        default="nearest_timestamp",
-        help="How to select a target group for each reference group.",
-    )
-    parser.add_argument(
-        "--max-delta",
-        type=parse_timedelta,
-        default=timedelta(days=1),
-        help="Maximum timestamp difference for nearest_timestamp matching.",
-    )
-    parser.add_argument(
-        "--reference-name-regex",
-        default=None,
-        help="Regex to replace in the first reference item name for name_regex matching.",
-    )
-    parser.add_argument(
-        "--target-name-replacement",
-        default=None,
-        help="Replacement string used with --reference-name-regex.",
     )
     parser.add_argument(
         "--group-time-range-source",
@@ -279,13 +220,6 @@ def main() -> None:
     """Run the item-group alignment utility."""
     parser = get_parser()
     args = parser.parse_args()
-    if args.match_mode == "name_regex" and (
-        args.reference_name_regex is None or args.target_name_replacement is None
-    ):
-        parser.error(
-            "--reference-name-regex and --target-name-replacement are required for "
-            "--match-mode name_regex"
-        )
 
     dataset = Dataset(UPath(args.root))
     windows = dataset.load_windows(groups=args.groups, names=args.windows)
