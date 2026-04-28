@@ -309,6 +309,8 @@ class EarthDaily(DataSource, TileStore):
         # No cache or not in cache, so we need to make the STAC request.
         _, _, collection = self._load_client()
         stac_item = collection.get_item(name)
+        if stac_item is None:
+            raise KeyError(f"EarthDaily item not found: {name}")
         item = self._stac_item_to_item(stac_item)
 
         # Finally we cache it if cache_dir is set.
