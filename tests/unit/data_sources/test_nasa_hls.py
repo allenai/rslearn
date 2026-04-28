@@ -51,24 +51,24 @@ def test_hls2_s30_defaults_to_reflectance_bands() -> None:
     assert list(data_source.asset_bands.keys()) == Hls2S30.DEFAULT_BANDS
 
 
-def test_hls2_s30_accepts_common_names() -> None:
-    data_source = Hls2S30(band_names=["coastal", "red", "nir", "fmask"])
+def test_hls2_s30_accepts_asset_keys() -> None:
+    data_source = Hls2S30(band_names=["B01", "B04", "B08", "Fmask"])
     assert set(data_source.asset_bands.keys()) == {"B01", "B04", "B08", "Fmask"}
 
 
-def test_hls2_s30_rejects_removed_extra_aliases() -> None:
+def test_hls2_s30_rejects_common_names() -> None:
     with pytest.raises(ValueError, match="unsupported Hls2S30 band"):
-        Hls2S30(band_names=["nir08a"])
+        Hls2S30(band_names=["red"])
 
 
-def test_hls2_l30_accepts_common_names() -> None:
-    data_source = Hls2L30(band_names=["coastal", "red", "nir", "fmask"])
+def test_hls2_l30_accepts_asset_keys() -> None:
+    data_source = Hls2L30(band_names=["B01", "B04", "B05", "Fmask"])
     assert set(data_source.asset_bands.keys()) == {"B01", "B04", "B05", "Fmask"}
 
 
-def test_hls2_l30_rejects_removed_extra_aliases() -> None:
+def test_hls2_l30_rejects_common_names() -> None:
     with pytest.raises(ValueError, match="unsupported Hls2L30 band"):
-        Hls2L30(band_names=["qa"])
+        Hls2L30(band_names=["nir"])
 
 
 def test_hls2_rejects_unknown_band() -> None:
@@ -76,9 +76,9 @@ def test_hls2_rejects_unknown_band() -> None:
         Hls2S30(band_names=["B01", "NOT_A_BAND"])
 
 
-def test_combined_hls2_rejects_removed_aliases() -> None:
+def test_combined_hls2_rejects_raw_asset_keys() -> None:
     with pytest.raises(ValueError, match="unsupported Hls2 band"):
-        Hls2(band_names=["qa"])
+        Hls2(band_names=["B04"])
 
 
 def test_hls2_prefers_s3_assets_in_stac_items() -> None:

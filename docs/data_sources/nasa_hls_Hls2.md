@@ -43,28 +43,28 @@ with best support/performance in `us-west-2`.
 ### Available Bands
 
 The default band set includes:
-- B01 (coastal)
-- B02 (blue)
-- B03 (green)
-- B04 (red)
-- B05 (rededge1)
-- B06 (rededge2)
-- B07 (rededge3)
-- B08 (nir)
-- B8A (nir_narrow)
-- B11 (swir16)
-- B12 (swir22)
+- B01
+- B02
+- B03
+- B04
+- B05
+- B06
+- B07
+- B08
+- B8A
+- B11
+- B12
 
 Additional supported raster assets:
-- B09 (water_vapor)
-- B10 (cirrus)
-- Fmask (fmask)
-- SAA (solar_azimuth)
-- SZA (solar_zenith)
-- VAA (view_azimuth)
-- VZA (view_zenith)
+- B09
+- B10
+- Fmask
+- SAA
+- SZA
+- VAA
+- VZA
 
-Band names may be provided as either asset keys or the common names in parentheses.
+Band names are the HLS asset keys listed above.
 
 ## rslearn.data_sources.nasa_hls.Hls2
 
@@ -154,22 +154,22 @@ HTTPS otherwise.
 ### Available Bands
 
 The default band set includes:
-- B01 (coastal)
-- B02 (blue)
-- B03 (green)
-- B04 (red)
-- B05 (nir)
-- B06 (swir16)
-- B07 (swir22)
-- B09 (cirrus)
-- B10 (lwir11)
-- B11 (lwir12)
+- B01
+- B02
+- B03
+- B04
+- B05
+- B06
+- B07
+- B09
+- B10
+- B11
 
 Additional supported raster assets:
-- Fmask (fmask)
-- SAA (solar_azimuth)
-- SZA (solar_zenith)
-- VAA (view_azimuth)
-- VZA (view_zenith)
+- Fmask
+- SAA
+- SZA
+- VAA
+- VZA
 
-Band names may be provided as either asset keys or the common names in parentheses.
+Band names are the HLS asset keys listed above.

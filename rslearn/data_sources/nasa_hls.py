@@ -131,32 +131,18 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
     AWS_REGION = "us-west-2"
     PROPERTIES_TO_RECORD = ["eo:cloud_cover"]
 
-    ASSET_KEY_TO_COMMON_NAME: dict[str, str] = {}
+    SUPPORTED_BANDS: list[str] = []
     DEFAULT_BANDS: list[str] = []
     COLLECTION_NAME = ""
 
     @classmethod
-    def _build_band_names(cls) -> dict[str, str]:
-        band_names = {
-            asset_key: asset_key for asset_key in cls.ASSET_KEY_TO_COMMON_NAME.keys()
-        }
-        band_names.update(
-            {
-                common_name: asset_key
-                for asset_key, common_name in cls.ASSET_KEY_TO_COMMON_NAME.items()
-            }
-        )
-        return band_names
-
-    @classmethod
     def _normalize_band_name(cls, band: str) -> str:
-        band_names = cls._build_band_names()
-        if band not in band_names:
+        if band not in cls.SUPPORTED_BANDS:
             raise ValueError(
                 f"unsupported {cls.__name__} band '{band}'. Use one of "
-                f"{sorted(band_names.keys())}."
+                f"{sorted(cls.SUPPORTED_BANDS)}."
             )
-        return band_names[band]
+        return band
 
     def __init__(
         self,
@@ -470,26 +456,6 @@ class Hls2S30(_NasaHlsBase):
     """NASA LP DAAC HLS v2.0 Sentinel-2 (HLSS30) data source."""
 
     COLLECTION_NAME = "HLSS30_2.0"
-    ASSET_KEY_TO_COMMON_NAME = {
-        "B01": "coastal",
-        "B02": "blue",
-        "B03": "green",
-        "B04": "red",
-        "B05": "rededge1",
-        "B06": "rededge2",
-        "B07": "rededge3",
-        "B08": "nir",
-        "B8A": "nir_narrow",
-        "B09": "water_vapor",
-        "B10": "cirrus",
-        "B11": "swir16",
-        "B12": "swir22",
-        "Fmask": "fmask",
-        "SAA": "solar_azimuth",
-        "SZA": "solar_zenith",
-        "VAA": "view_azimuth",
-        "VZA": "view_zenith",
-    }
     DEFAULT_BANDS = [
         "B01",
         "B02",
@@ -503,29 +469,22 @@ class Hls2S30(_NasaHlsBase):
         "B11",
         "B12",
     ]
+    SUPPORTED_BANDS = [
+        *DEFAULT_BANDS,
+        "B09",
+        "B10",
+        "Fmask",
+        "SAA",
+        "SZA",
+        "VAA",
+        "VZA",
+    ]
 
 
 class Hls2L30(_NasaHlsBase):
     """NASA LP DAAC HLS v2.0 Landsat (HLSL30) data source."""
 
     COLLECTION_NAME = "HLSL30_2.0"
-    ASSET_KEY_TO_COMMON_NAME = {
-        "B01": "coastal",
-        "B02": "blue",
-        "B03": "green",
-        "B04": "red",
-        "B05": "nir",
-        "B06": "swir16",
-        "B07": "swir22",
-        "B09": "cirrus",
-        "B10": "lwir11",
-        "B11": "lwir12",
-        "Fmask": "fmask",
-        "SAA": "solar_azimuth",
-        "SZA": "solar_zenith",
-        "VAA": "view_azimuth",
-        "VZA": "view_zenith",
-    }
     DEFAULT_BANDS = [
         "B01",
         "B02",
@@ -537,6 +496,14 @@ class Hls2L30(_NasaHlsBase):
         "B09",
         "B10",
         "B11",
+    ]
+    SUPPORTED_BANDS = [
+        *DEFAULT_BANDS,
+        "Fmask",
+        "SAA",
+        "SZA",
+        "VAA",
+        "VZA",
     ]
 
 
