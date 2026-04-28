@@ -8,6 +8,10 @@ collections. Rather than adding a special combined data source, prepare each lay
 independently, then align the biophysical layer item groups to the Sentinel-2 item
 groups by item name before materialization.
 
+Use `earthdaily.Sentinel2L2A` for the Sentinel-2 layer in this workflow. Its
+`sentinel-2-l2a` item IDs match the naming scheme used by the EarthDaily biophysical
+products.
+
 ### Layers
 
 Here is a representative dataset configuration snippet. The target biophysical layers
@@ -22,14 +26,14 @@ choose from.
       "band_sets": [
         {
           "bands": ["B02", "B03", "B04", "B08"],
-          "dtype": "float32"
+          "dtype": "uint16"
         }
       ],
       "data_source": {
-        "class_path": "rslearn.data_sources.earthdaily.Sentinel2",
+        "class_path": "rslearn.data_sources.earthdaily.Sentinel2L2A",
         "init_args": {
-          "assets": ["blue", "green", "red", "nir"],
-          "apply_scale_offset": true
+          "assets": ["B02", "B03", "B04", "B08"],
+          "harmonize": true
         },
         "query_config": {
           "space_mode": "INTERSECTS",
