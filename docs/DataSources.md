@@ -14,12 +14,6 @@ detailed page with configuration options and available bands. See
 
 #### Sentinel-2
 
-EarthDaily has two Sentinel-2 L2A sources with similar names:
-`earthdaily.Sentinel2` uses EarthDaily's Collection 1 (`sentinel-2-c1-l2a`) and returns
-scale/offset-applied reflectance by default, while `earthdaily.Sentinel2L2A` uses the
-older `sentinel-2-l2a` collection with Planetary Computer-style asset names and optional
-DN harmonization.
-
 | Data Source | Provider | Notes |
 |---|---|---|
 | [planetary_computer.Sentinel2](data_sources/planetary_computer_Sentinel2.md) | Microsoft Planetary Computer | L2A COGs, direct materialization |
