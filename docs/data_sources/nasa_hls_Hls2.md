@@ -35,7 +35,7 @@ with best support/performance in `us-west-2`.
     "sort_ascending": true,
     // Optional Earthdata bearer token override (otherwise EARTHDATA_TOKEN is used).
     "earthdata_token": null,
-    "timeout_seconds": 30
+    "timeout": "30s"
   }
 }
 ```
@@ -96,7 +96,7 @@ Like other rslearn datasources, the default query behavior only returns a single
     "sort_by": "datetime",
     "sort_ascending": true,
     "earthdata_token": null,
-    "timeout_seconds": 30
+    "timeout": "30s"
   }
 }
 ```
@@ -146,7 +146,7 @@ HTTPS otherwise.
     "sort_by": null,
     "sort_ascending": true,
     "earthdata_token": null,
-    "timeout_seconds": 30
+    "timeout": "30s"
   }
 }
 ```
