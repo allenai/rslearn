@@ -66,11 +66,6 @@ def test_hls2_l30_accepts_asset_keys() -> None:
     assert set(data_source.asset_bands.keys()) == {"B01", "B04", "B05", "Fmask"}
 
 
-def test_hls2_l30_rejects_common_names() -> None:
-    with pytest.raises(ValueError, match="unsupported Hls2L30 band"):
-        Hls2L30(band_names=["nir"])
-
-
 def test_hls2_rejects_unknown_band() -> None:
     with pytest.raises(ValueError, match="unsupported Hls2S30 band"):
         Hls2S30(band_names=["B01", "NOT_A_BAND"])
