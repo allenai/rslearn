@@ -92,7 +92,6 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
                 are retained in the SourceItem when we initialize it.
         """
         self.client = StacClient(endpoint)
-        self.collection_name = collection_name
         if isinstance(collection_name, str):
             self.collection_names = [collection_name]
         else:
