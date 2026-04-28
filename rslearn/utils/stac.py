@@ -158,6 +158,8 @@ class StacClient:
             if cur_method == "POST":
                 response = self.session.post(url=cur_url, json=request_data)
             elif cur_method == "GET":
+                # GET pagination links are complete URLs from the previous response,
+                # so request_data is intentionally not passed separately.
                 response = self.session.get(url=cur_url)
             else:  # pragma: no cover - defensive check
                 raise ValueError(f"unsupported STAC pagination method {cur_method!r}")
