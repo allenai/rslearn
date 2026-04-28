@@ -34,7 +34,7 @@ from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.raster_array import RasterMetadata
 from rslearn.utils.retry_session import create_retry_session
-from rslearn.utils.stac import StacClient, StacItem
+from rslearn.utils.stac import StacItem
 
 logger = get_logger(__name__)
 _HTTP_URL_PROPERTY_PREFIX = "_http_url_"
@@ -677,7 +677,6 @@ class Hls2(_NasaHlsBase):
             aws_region=self.AWS_REGION,
             timeout=timeout,
         )
-        self.client = StacClient(self.STAC_ENDPOINT)
 
         if sources is None:
             sources = ["sentinel", "landsat"]
@@ -710,12 +709,16 @@ class Hls2(_NasaHlsBase):
 
         asset_bands = {band: [band] for band in band_names}
 
-        self.query = query
-        self.sort_by = sort_by
-        self.sort_ascending = sort_ascending
-        self.limit = 100
-        self.properties_to_record = list(self.PROPERTIES_TO_RECORD)
         DirectMaterializeDataSource.__init__(self, asset_bands=asset_bands)
+        StacDataSource.__init__(
+            self,
+            endpoint=self.STAC_ENDPOINT,
+            collection_name=self.collection_names,
+            query=query,
+            sort_by=sort_by,
+            sort_ascending=sort_ascending,
+            properties_to_record=list(self.PROPERTIES_TO_RECORD),
+        )
 
     @override
     def _stac_item_to_item(self, stac_item: StacItem) -> SourceItem:
@@ -755,17 +758,6 @@ class Hls2(_NasaHlsBase):
                 properties[prop_name] = stac_item.properties[prop_name]
 
         return SourceItem(stac_item.id, geometry, asset_urls, properties)
-
-    @override
-    def get_item_by_name(self, name: str) -> SourceItem:
-        stac_items = self.client.search(ids=[name], collections=self.collection_names)
-        if len(stac_items) == 0:
-            raise ValueError(
-                f"Item {name} not found in collections {self.collection_names}"
-            )
-        if len(stac_items) > 1:
-            raise ValueError(f"Multiple items found for ID {name}")
-        return self._stac_item_to_item(stac_items[0])
 
     @override
     def get_items(

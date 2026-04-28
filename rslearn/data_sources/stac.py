@@ -68,7 +68,7 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
     def __init__(
         self,
         endpoint: str,
-        collection_name: str,
+        collection_name: str | list[str],
         query: dict[str, Any] | None = None,
         sort_by: str | None = None,
         sort_ascending: bool = True,
@@ -80,7 +80,7 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
 
         Args:
             endpoint: the STAC endpoint to use.
-            collection_name: the STAC collection name.
+            collection_name: the STAC collection name or names.
             query: optional STAC query dict to include in searches, e.g. {"eo:cloud_cover": {"lt": 50}}.
             sort_by: sort results by this STAC property.
             sort_ascending: if sort_by is set, sort in ascending order (default).
@@ -93,12 +93,22 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
         """
         self.client = StacClient(endpoint)
         self.collection_name = collection_name
+        if isinstance(collection_name, str):
+            self.collection_names = [collection_name]
+        else:
+            self.collection_names = list(collection_name)
         self.query = query
         self.sort_by = sort_by
         self.sort_ascending = sort_ascending
         self.required_assets = required_assets
         self.limit = limit
         self.properties_to_record = properties_to_record
+
+    def _collection_description(self) -> str:
+        """Return a human-readable description of the configured collection filter."""
+        if len(self.collection_names) == 1:
+            return f"collection {self.collection_names[0]}"
+        return f"collections {self.collection_names}"
 
     def _stac_item_to_item(self, stac_item: StacItem) -> SourceItem:
         # Make sure geometry, time range, and assets are set.
@@ -153,15 +163,15 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
             the item object
         """
         logger.debug(f"Getting STAC item {name}")
-        stac_items = self.client.search(ids=[name], collections=[self.collection_name])
+        stac_items = self.client.search(ids=[name], collections=self.collection_names)
 
         if len(stac_items) == 0:
             raise ValueError(
-                f"Item {name} not found in collection {self.collection_name}"
+                f"Item {name} not found in {self._collection_description()}"
             )
         if len(stac_items) > 1:
             raise ValueError(
-                f"Multiple items found for ID {name} in collection {self.collection_name}"
+                f"Multiple items found for ID {name} in {self._collection_description()}"
             )
 
         stac_item = stac_items[0]
@@ -187,7 +197,7 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
             logger.debug("performing STAC search for geometry %s", wgs84_geometry)
             search_time_range = self._get_search_time_range(wgs84_geometry)
             stac_items = self.client.search(
-                collections=[self.collection_name],
+                collections=self.collection_names,
                 intersects=json.loads(shapely.to_geojson(wgs84_geometry.shp)),
                 date_time=search_time_range,
                 query=self.query,

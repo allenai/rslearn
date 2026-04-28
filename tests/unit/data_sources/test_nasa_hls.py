@@ -343,6 +343,29 @@ def test_combined_hls2_maps_semantic_bands_per_collection() -> None:
     assert landsat_source_item.properties["sensor"] == "landsat"
 
 
+def test_combined_hls2_get_item_by_name_searches_selected_collections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_source = Hls2(
+        sources=["landsat"],
+        band_names=["red"],
+    )
+    stac_item = _make_stac_item(Hls2L30.COLLECTION_NAME, ["B04"])
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_search(**kwargs: object) -> list[StacItem]:
+        captured_kwargs.update(kwargs)
+        return [stac_item]
+
+    monkeypatch.setattr(data_source.client, "search", fake_search)
+
+    item = data_source.get_item_by_name(stac_item.id)
+
+    assert item.name == stac_item.id
+    assert item.asset_urls["red"] == "https://example.com/B04.tif"
+    assert captured_kwargs["collections"] == [Hls2L30.COLLECTION_NAME]
+
+
 def test_combined_hls2_get_items_merges_and_sorts_chronologically(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
