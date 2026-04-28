@@ -35,7 +35,7 @@ from rslearn.utils.stac import StacItem
 
 logger = get_logger(__name__)
 _HTTP_URL_PROPERTY_PREFIX = "_http_url_"
-_EARTHDATA_TOKEN_ENV = "EARTHDATA_TOKEN"
+_EARTHDATA_TOKEN_ENV = "EARTHDATA_TOKEN"  # nosec B105
 
 
 @dataclass(frozen=True)
