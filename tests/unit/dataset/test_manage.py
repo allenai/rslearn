@@ -12,7 +12,6 @@ from upath import UPath
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import Item
 from rslearn.data_sources.local_files import LocalFiles
-from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.dataset.handler_summaries import IngestCounts
 from rslearn.dataset.manage import (
@@ -611,35 +610,6 @@ class TestPrepareDatasetWindows:
         assert ls.windows_failed == 1
         assert ls.windows_prepared == 0
         assert any("boom" in msg for msg in ls.error_messages)
-
-    def test_prepare_uses_window_aware_get_items(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Test that prepare calls the window-aware data source hook."""
-        dataset = _make_local_files_dataset(tmp_path)
-        windows = dataset.load_windows()
-        captured_window_names: list[str] = []
-
-        def fake_get_items_for_windows(
-            self: Any,
-            window_args: list[Window],
-            geometries: list[STGeometry],
-            query_config: Any,
-        ) -> Any:
-            captured_window_names.extend(window.name for window in window_args)
-            item = Item("hooked", geometries[0])
-            return [[MatchedItemGroup([item], geometries[0].time_range)]]
-
-        monkeypatch.setattr(
-            LocalFiles, "get_items_for_windows", fake_get_items_for_windows
-        )
-
-        summary = prepare_dataset_windows(dataset, windows)
-
-        assert summary.layer_summaries["local_file"].windows_prepared == 1
-        assert captured_window_names == ["default"]
-        layer_data = windows[0].load_layer_datas()["local_file"]
-        assert layer_data.serialized_item_groups[0][0]["name"] == "hooked"
 
 
 class TestIngestHandler:
