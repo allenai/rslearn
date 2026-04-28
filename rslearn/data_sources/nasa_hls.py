@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 from collections.abc import Iterator
@@ -20,7 +19,6 @@ from rasterio.session import AWSSession
 from typing_extensions import override
 from upath import UPath
 
-from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSourceContext
 from rslearn.data_sources.data_source import Item
@@ -28,7 +26,6 @@ from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
 from rslearn.data_sources.stac import SourceItem, StacDataSource
-from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
@@ -760,41 +757,13 @@ class Hls2(_NasaHlsBase):
         return SourceItem(stac_item.id, geometry, asset_urls, properties)
 
     @override
-    def get_items(
-        self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[MatchedItemGroup[SourceItem]]]:
-        groups = []
-        for geometry in geometries:
-            wgs84_geometry = geometry.to_wgs84()
-            stac_items = self.client.search(
-                collections=self.collection_names,
-                intersects=json.loads(shapely.to_geojson(wgs84_geometry.shp)),
-                date_time=wgs84_geometry.time_range,
-                query=self.query,
-                limit=self.limit,
-            )
+    def _get_sort_key(self, stac_item: StacItem) -> Any:
+        assert self.sort_by is not None
+        return (
+            stac_item.properties.get(self.sort_by) is None,
+            stac_item.properties.get(self.sort_by),
+        )
 
-            if self.sort_by is not None:
-                sort_by = self.sort_by
-                stac_items.sort(
-                    key=lambda stac_item: (
-                        stac_item.properties.get(sort_by) is None,
-                        stac_item.properties.get(sort_by),
-                    ),
-                    reverse=not self.sort_ascending,
-                )
-
-            candidate_items = []
-            for stac_item in stac_items:
-                candidate_item = self._stac_item_to_item(stac_item)
-                if not all(
-                    band in candidate_item.asset_urls for band in self.asset_bands
-                ):
-                    continue
-                candidate_items.append(candidate_item)
-
-            groups.append(
-                match_candidate_items_to_window(geometry, candidate_items, query_config)
-            )
-
-        return groups
+    @override
+    def _should_include_item(self, item: SourceItem) -> bool:
+        return all(band in item.asset_urls for band in self.asset_bands)

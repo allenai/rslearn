@@ -153,6 +153,15 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
         # Note: StacClient.search accepts either a datetime or a (start, end) tuple.
         return geometry.time_range
 
+    def _get_sort_key(self, stac_item: StacItem) -> Any:
+        """Return the key to use when sorting STAC items."""
+        assert self.sort_by is not None
+        return stac_item.properties[self.sort_by]
+
+    def _should_include_item(self, item: SourceItem) -> bool:
+        """Return whether the converted item should be included in search results."""
+        return True
+
     def get_item_by_name(self, name: str) -> SourceItem:
         """Gets an item by name.
 
@@ -228,15 +237,17 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
                 stac_items = good_stac_items
 
             if self.sort_by is not None:
-                sort_by = self.sort_by
                 stac_items.sort(
-                    key=lambda stac_item: stac_item.properties[sort_by],
+                    key=self._get_sort_key,
                     reverse=not self.sort_ascending,
                 )
 
-            candidate_items = [
-                self._stac_item_to_item(stac_item) for stac_item in stac_items
-            ]
+            candidate_items = []
+            for stac_item in stac_items:
+                candidate_item = self._stac_item_to_item(stac_item)
+                if not self._should_include_item(candidate_item):
+                    continue
+                candidate_items.append(candidate_item)
 
             cur_groups = match_candidate_items_to_window(
                 geometry, candidate_items, query_config
