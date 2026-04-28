@@ -167,13 +167,13 @@ class StacClient:
                 items.append(StacItem.from_dict(item_dict))
 
             next_link = None
-            next_method = "GET"
+            next_method = cur_method
             next_request_data: dict[str, Any] = {}
             for link in data.get("links", []):
                 if "rel" not in link or link["rel"] != "next":
                     continue
                 next_link = link["href"]
-                next_method = link.get("method", "GET").upper()
+                next_method = link.get("method", cur_method).upper()
                 if next_method == "POST":
                     next_request_data = link.get("body", {})
                 elif next_method == "GET":
