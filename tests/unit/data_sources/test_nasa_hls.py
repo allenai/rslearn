@@ -7,16 +7,8 @@ import pytest
 import shapely
 from rasterio.errors import RasterioIOError
 
-from rslearn.config import (
-    BandSetConfig,
-    DType,
-    LayerConfig,
-    LayerType,
-    QueryConfig,
-    SpaceMode,
-)
+from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources import DataSourceContext
 from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
@@ -59,31 +51,34 @@ def test_hls2_s30_defaults_to_reflectance_bands() -> None:
     assert list(data_source.asset_bands.keys()) == Hls2S30.DEFAULT_BANDS
 
 
-def test_hls2_s30_accepts_common_name_aliases() -> None:
+def test_hls2_s30_accepts_common_names() -> None:
     data_source = Hls2S30(band_names=["coastal", "red", "nir", "fmask"])
     assert set(data_source.asset_bands.keys()) == {"B01", "B04", "B08", "Fmask"}
 
 
-def test_hls2_s30_accepts_context_band_aliases() -> None:
-    layer_cfg = LayerConfig(
-        type=LayerType.RASTER,
-        band_sets=[
-            BandSetConfig(dtype=DType.UINT16, bands=["red", "nir08a"]),
-            BandSetConfig(dtype=DType.UINT8, bands=["qa"]),
-        ],
-    )
-    data_source = Hls2S30(context=DataSourceContext(layer_config=layer_cfg))
-    assert list(data_source.asset_bands.keys()) == ["B04", "B8A", "Fmask"]
+def test_hls2_s30_rejects_removed_extra_aliases() -> None:
+    with pytest.raises(ValueError, match="unsupported Hls2S30 band"):
+        Hls2S30(band_names=["nir08a"])
 
 
-def test_hls2_l30_accepts_common_name_aliases() -> None:
-    data_source = Hls2L30(band_names=["coastal", "red", "nir08", "fmask"])
+def test_hls2_l30_accepts_common_names() -> None:
+    data_source = Hls2L30(band_names=["coastal", "red", "nir", "fmask"])
     assert set(data_source.asset_bands.keys()) == {"B01", "B04", "B05", "Fmask"}
+
+
+def test_hls2_l30_rejects_removed_extra_aliases() -> None:
+    with pytest.raises(ValueError, match="unsupported Hls2L30 band"):
+        Hls2L30(band_names=["qa"])
 
 
 def test_hls2_rejects_unknown_band() -> None:
     with pytest.raises(ValueError, match="unsupported Hls2S30 band"):
         Hls2S30(band_names=["B01", "NOT_A_BAND"])
+
+
+def test_combined_hls2_rejects_removed_aliases() -> None:
+    with pytest.raises(ValueError, match="unsupported Hls2 band"):
+        Hls2(band_names=["qa"])
 
 
 def test_hls2_prefers_s3_assets_in_stac_items() -> None:

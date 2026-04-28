@@ -58,13 +58,13 @@ The default band set includes:
 Additional supported raster assets:
 - B09 (water_vapor)
 - B10 (cirrus)
-- Fmask (fmask / qa)
+- Fmask (fmask)
 - SAA (solar_azimuth)
 - SZA (solar_zenith)
 - VAA (view_azimuth)
 - VZA (view_zenith)
 
-Band names may be provided as either asset keys or the aliases above.
+Band names may be provided as either asset keys or the common names in parentheses.
 
 ## rslearn.data_sources.nasa_hls.Hls2
 
@@ -120,10 +120,6 @@ Optional additional shared bands:
 - view_azimuth
 - view_zenith
 
-Supported aliases:
-- `nir08` → `nir`
-- `qa` / `FMASK` → `fmask`
-
 Use `Hls2S30` or `Hls2L30` instead if you need source-specific raw bands like
 Sentinel red-edge bands or Landsat thermal bands.
 
@@ -170,10 +166,10 @@ The default band set includes:
 - B11 (lwir12)
 
 Additional supported raster assets:
-- Fmask (fmask / qa)
+- Fmask (fmask)
 - SAA (solar_azimuth)
 - SZA (solar_zenith)
 - VAA (view_azimuth)
 - VZA (view_zenith)
 
-Band names may be provided as either asset keys or the aliases above.
+Band names may be provided as either asset keys or the common names in parentheses.

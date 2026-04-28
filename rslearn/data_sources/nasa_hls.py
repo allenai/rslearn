@@ -132,33 +132,31 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
     PROPERTIES_TO_RECORD = ["eo:cloud_cover"]
 
     ASSET_KEY_TO_COMMON_NAME: dict[str, str] = {}
-    EXTRA_BAND_ALIASES: dict[str, str] = {}
     DEFAULT_BANDS: list[str] = []
     COLLECTION_NAME = ""
 
     @classmethod
-    def _build_band_aliases(cls) -> dict[str, str]:
-        aliases = {
+    def _build_band_names(cls) -> dict[str, str]:
+        band_names = {
             asset_key: asset_key for asset_key in cls.ASSET_KEY_TO_COMMON_NAME.keys()
         }
-        aliases.update(
+        band_names.update(
             {
                 common_name: asset_key
                 for asset_key, common_name in cls.ASSET_KEY_TO_COMMON_NAME.items()
             }
         )
-        aliases.update(cls.EXTRA_BAND_ALIASES)
-        return aliases
+        return band_names
 
     @classmethod
     def _normalize_band_name(cls, band: str) -> str:
-        aliases = cls._build_band_aliases()
-        if band not in aliases:
+        band_names = cls._build_band_names()
+        if band not in band_names:
             raise ValueError(
                 f"unsupported {cls.__name__} band '{band}'. Use one of "
-                f"{sorted(aliases.keys())}."
+                f"{sorted(band_names.keys())}."
             )
-        return aliases[band]
+        return band_names[band]
 
     def __init__(
         self,
@@ -492,17 +490,6 @@ class Hls2S30(_NasaHlsBase):
         "VAA": "view_azimuth",
         "VZA": "view_zenith",
     }
-    EXTRA_BAND_ALIASES = {
-        "nir08": "B08",
-        "nir_broad": "B08",
-        "nir08a": "B8A",
-        "qa": "Fmask",
-        "FMASK": "Fmask",
-        "saa": "SAA",
-        "sza": "SZA",
-        "vaa": "VAA",
-        "vza": "VZA",
-    }
     DEFAULT_BANDS = [
         "B01",
         "B02",
@@ -538,15 +525,6 @@ class Hls2L30(_NasaHlsBase):
         "SZA": "solar_zenith",
         "VAA": "view_azimuth",
         "VZA": "view_zenith",
-    }
-    EXTRA_BAND_ALIASES = {
-        "nir08": "B05",
-        "qa": "Fmask",
-        "FMASK": "Fmask",
-        "saa": "SAA",
-        "sza": "SZA",
-        "vaa": "VAA",
-        "vza": "VZA",
     }
     DEFAULT_BANDS = [
         "B01",
@@ -604,15 +582,6 @@ class Hls2(_NasaHlsBase):
         "view_azimuth": "VAA",
         "view_zenith": "VZA",
     }
-    BAND_ALIASES = {
-        "nir08": "nir",
-        "qa": "fmask",
-        "FMASK": "fmask",
-        "saa": "solar_azimuth",
-        "sza": "solar_zenith",
-        "vaa": "view_azimuth",
-        "vza": "view_zenith",
-    }
     DEFAULT_BANDS = [
         "coastal",
         "blue",
@@ -633,14 +602,12 @@ class Hls2(_NasaHlsBase):
 
     @classmethod
     def _normalize_band_name(cls, band: str) -> str:
-        normalized_band = cls.BAND_ALIASES.get(band, band)
-        if normalized_band not in cls.SENTINEL_SEMANTIC_BANDS:
+        if band not in cls.SENTINEL_SEMANTIC_BANDS:
             raise ValueError(
                 f"unsupported Hls2 band '{band}'. Use one of "
-                f"{sorted(cls.SENTINEL_SEMANTIC_BANDS.keys())} or "
-                f"{sorted(cls.BAND_ALIASES.keys())}."
+                f"{sorted(cls.SENTINEL_SEMANTIC_BANDS.keys())}."
             )
-        return normalized_band
+        return band
 
     def __init__(
         self,
