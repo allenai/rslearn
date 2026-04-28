@@ -1,5 +1,6 @@
 """Unit tests for rslearn.data_sources.stac."""
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -10,6 +11,7 @@ from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.stac import StacDataSource
 from rslearn.utils.geometry import Projection, STGeometry
+from rslearn.utils.stac import StacAsset, StacItem
 
 
 def _make_antimeridian_utm_geometry() -> STGeometry:
@@ -60,3 +62,66 @@ def test_antimeridian_geometry_produces_multipolygon_intersects(
         assert lon_extent < 1.0, (
             f"MultiPolygon component spans {lon_extent}° longitude, expected < 1°"
         )
+
+
+def test_multi_collection_get_item_by_name_searches_all_collections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ds = StacDataSource(
+        endpoint="https://example.com/stac",
+        collection_name=["collection-a", "collection-b"],
+    )
+
+    captured_kwargs: dict[str, Any] = {}
+    stac_item = StacItem(
+        id="item-id",
+        properties={},
+        collection="collection-b",
+        bbox=(-1, -1, 1, 1),
+        geometry=shapely.geometry.mapping(shapely.box(-1, -1, 1, 1)),
+        assets={
+            "image": StacAsset(
+                href="https://example.com/image.tif",
+                title=None,
+                type=None,
+                roles=None,
+            )
+        },
+        time_range=(
+            datetime(2020, 1, 1, tzinfo=UTC),
+            datetime(2020, 1, 2, tzinfo=UTC),
+        ),
+    )
+
+    def fake_search(**kwargs: Any) -> list[StacItem]:
+        captured_kwargs.update(kwargs)
+        return [stac_item]
+
+    monkeypatch.setattr(ds.client, "search", fake_search)
+
+    item = ds.get_item_by_name("item-id")
+
+    assert item.name == "item-id"
+    assert captured_kwargs["ids"] == ["item-id"]
+    assert captured_kwargs["collections"] == ["collection-a", "collection-b"]
+
+
+def test_multi_collection_get_items_searches_all_collections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ds = StacDataSource(
+        endpoint="https://example.com/stac",
+        collection_name=["collection-a", "collection-b"],
+    )
+    captured_kwargs: dict[str, Any] = {}
+
+    def fake_search(**kwargs: Any) -> list[StacItem]:
+        captured_kwargs.update(kwargs)
+        return []
+
+    monkeypatch.setattr(ds.client, "search", fake_search)
+
+    geom = STGeometry(WGS84_PROJECTION, shapely.box(-1, -1, 1, 1), None)
+    ds.get_items([geom], QueryConfig())
+
+    assert captured_kwargs["collections"] == ["collection-a", "collection-b"]
