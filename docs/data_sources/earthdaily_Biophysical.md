@@ -4,6 +4,11 @@ Biophysical variables on [EarthDaily](https://earthdaily.com/) platform (EDAgro 
 
 See [EarthDaily Setup](earthdaily.md) for required dependency/credentials.
 
+When using these variables alongside EarthDaily Sentinel-2 imagery, see
+[EarthDaily Sentinel-2 + Biophysical Products](../examples/EarthDailySentinel2Biophysical.md)
+for an example workflow that aligns independently prepared Sentinel-2 and biophysical
+item groups by timestamp before materialization.
+
 ### Configuration
 
 ```jsonc
