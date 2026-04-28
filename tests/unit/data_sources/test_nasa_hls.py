@@ -214,7 +214,6 @@ def test_hls2_auth_uses_token() -> None:
 
 def test_hls2_auth_requires_token(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("EARTHDATA_TOKEN", raising=False)
-    monkeypatch.delenv("NASA_EARTHDATA_TOKEN", raising=False)
     data_source = Hls2S30(earthdata_token=None)
 
     with pytest.raises(ValueError, match="EARTHDATA_TOKEN"):

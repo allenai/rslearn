@@ -38,15 +38,7 @@ from rslearn.utils.stac import StacClient, StacItem
 
 logger = get_logger(__name__)
 _HTTP_URL_PROPERTY_PREFIX = "_http_url_"
-
-
-def _first_set_env(*names: str) -> str | None:
-    """Return the first non-empty environment variable among the provided names."""
-    for name in names:
-        value = os.environ.get(name)
-        if value:
-            return value
-    return None
+_EARTHDATA_TOKEN_ENV = "EARTHDATA_TOKEN"
 
 
 @dataclass(frozen=True)
@@ -71,9 +63,7 @@ class _EarthdataAuth:
         aws_region: str,
         timeout: timedelta,
     ) -> None:
-        self.earthdata_token = earthdata_token or _first_set_env(
-            "EARTHDATA_TOKEN", "NASA_EARTHDATA_TOKEN"
-        )
+        self.earthdata_token = earthdata_token or os.environ.get(_EARTHDATA_TOKEN_ENV)
         self.s3_credentials_url = s3_credentials_url
         self.aws_region = aws_region
         self.timeout = timeout
@@ -115,8 +105,7 @@ class _EarthdataAuth:
 
         if self.earthdata_token is None:
             raise ValueError(
-                "NASA HLS requires an Earthdata bearer token. Set EARTHDATA_TOKEN "
-                "(NASA_EARTHDATA_TOKEN also supported)."
+                f"NASA HLS requires an Earthdata bearer token. Set {_EARTHDATA_TOKEN_ENV}."
             )
 
         self._credentials = self._refresh_with_token()

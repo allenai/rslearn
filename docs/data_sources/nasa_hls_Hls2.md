@@ -8,8 +8,6 @@ AWS credentials from the LP DAAC `s3credentials` endpoint. Set:
 
 - `EARTHDATA_TOKEN`
 
-The alias `NASA_EARTHDATA_TOKEN` is also supported.
-
 ### Region Behavior
 
 LP DAAC's temporary AWS credentials are intended for same-region direct S3 access,
@@ -35,7 +33,7 @@ with best support/performance in `us-west-2`.
     // Optional STAC sort property, e.g. "eo:cloud_cover".
     "sort_by": null,
     "sort_ascending": true,
-    // Optional Earthdata bearer token override (otherwise env vars are used).
+    // Optional Earthdata bearer token override (otherwise EARTHDATA_TOKEN is used).
     "earthdata_token": null,
     "timeout_seconds": 30
   }
