@@ -515,6 +515,8 @@ class Hls2L30(_NasaHlsBase):
 class Hls2(_NasaHlsBase):
     """Combined NASA HLS v2.0 time-series datasource with semantic band names."""
 
+    # Internal label for the combined datasource; CMR STAC searches use
+    # SOURCE_TO_COLLECTION below rather than a real "HLS2" collection.
     COLLECTION_NAME = "HLS2"
     SOURCE_TO_COLLECTION = {
         "sentinel": Hls2S30.COLLECTION_NAME,
