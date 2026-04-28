@@ -154,6 +154,8 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
         earthdata_token: str | None = None,
         s3_credentials_url: str = S3_CREDENTIALS_URL,
         context: DataSourceContext = DataSourceContext(),
+        collection_name: str | list[str] | None = None,
+        require_asset_filter: bool = True,
     ) -> None:
         self.timeout = timeout
         self.auth = _EarthdataAuth(
@@ -177,16 +179,19 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
             band_names = [self._normalize_band_name(band) for band in band_names]
 
         asset_bands = {band: [band] for band in band_names}
+        if collection_name is None:
+            collection_name = self.COLLECTION_NAME
+        required_assets = list(asset_bands.keys()) if require_asset_filter else None
 
         DirectMaterializeDataSource.__init__(self, asset_bands=asset_bands)
         StacDataSource.__init__(
             self,
             endpoint=self.STAC_ENDPOINT,
-            collection_name=self.COLLECTION_NAME,
+            collection_name=collection_name,
             query=query,
             sort_by=sort_by,
             sort_ascending=sort_ascending,
-            required_assets=list(asset_bands.keys()),
+            required_assets=required_assets,
             properties_to_record=list(self.PROPERTIES_TO_RECORD),
         )
 
@@ -601,14 +606,6 @@ class Hls2(_NasaHlsBase):
             s3_credentials_url: LP DAAC temporary credentials endpoint.
             context: optional datasource context from rslearn.
         """
-        self.timeout = timeout
-        self.auth = _EarthdataAuth(
-            earthdata_token=earthdata_token,
-            s3_credentials_url=s3_credentials_url,
-            aws_region=self.AWS_REGION,
-            timeout=timeout,
-        )
-
         if sources is None:
             sources = ["sentinel", "landsat"]
         normalized_sources: list[str] = []
@@ -625,30 +622,17 @@ class Hls2(_NasaHlsBase):
             self.SOURCE_TO_COLLECTION[source] for source in self.sources
         ]
 
-        if context.layer_config is not None:
-            requested_bands: list[str] = []
-            for band_set in context.layer_config.band_sets:
-                for band in band_set.bands:
-                    normalized_band = self._normalize_band_name(band)
-                    if normalized_band not in requested_bands:
-                        requested_bands.append(normalized_band)
-            band_names = requested_bands
-        elif band_names is None:
-            band_names = list(self.DEFAULT_BANDS)
-        else:
-            band_names = [self._normalize_band_name(band) for band in band_names]
-
-        asset_bands = {band: [band] for band in band_names}
-
-        DirectMaterializeDataSource.__init__(self, asset_bands=asset_bands)
-        StacDataSource.__init__(
-            self,
-            endpoint=self.STAC_ENDPOINT,
-            collection_name=self.collection_names,
+        super().__init__(
+            band_names=band_names,
             query=query,
             sort_by=sort_by,
             sort_ascending=sort_ascending,
-            properties_to_record=list(self.PROPERTIES_TO_RECORD),
+            timeout=timeout,
+            earthdata_token=earthdata_token,
+            s3_credentials_url=s3_credentials_url,
+            context=context,
+            collection_name=self.collection_names,
+            require_asset_filter=False,
         )
 
     @override
