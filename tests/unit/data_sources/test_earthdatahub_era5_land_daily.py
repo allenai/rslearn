@@ -23,6 +23,7 @@ from rslearn.dataset.manage import (
 from rslearn.dataset.window import Window
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
+from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import NumpyRasterFormat
 
 ERA5_TEST_BANDS = ["t2m", "tp"]
@@ -144,7 +145,7 @@ def _materialize_numpy_era5_window(
     return dataset, window
 
 
-def _decode_numpy_era5_raster(dataset: Dataset, window: Window):
+def _decode_numpy_era5_raster(dataset: Dataset, window: Window) -> RasterArray:
     """Decode the materialized ERA5 NumPy raster."""
     raster_dir = window.get_raster_dir("era5", ERA5_TEST_BANDS, group_idx=0)
     assert (raster_dir / "data.npy").exists()
@@ -240,8 +241,12 @@ def test_era5land_dailyutc_v1_materializes_temporal_stack_as_numpy(
         (datetime(2020, 1, 3, tzinfo=UTC), datetime(2020, 1, 4, tzinfo=UTC)),
         (datetime(2020, 1, 4, tzinfo=UTC), datetime(2020, 1, 5, tzinfo=UTC)),
     ]
-    np.testing.assert_allclose(raster.array[0, :, 0, 0], [281, 282, 283])
-    np.testing.assert_allclose(raster.array[1, :, 0, 0], [0.001, 0.002, 0.003])
+    assert [float(v) for v in raster.array[0, :, 0, 0].tolist()] == pytest.approx(
+        [281, 282, 283]
+    )
+    assert [float(v) for v in raster.array[1, :, 0, 0].tolist()] == pytest.approx(
+        [0.001, 0.002, 0.003]
+    )
 
 
 @pytest.mark.parametrize(
@@ -268,7 +273,9 @@ def test_era5land_dailyutc_v1_materializes_temporal_reducer_as_numpy(
     assert raster.timestamps == [
         (datetime(2020, 1, 2, tzinfo=UTC), datetime(2020, 1, 5, tzinfo=UTC))
     ]
-    np.testing.assert_allclose(raster.array[:, 0, 0, 0], expected_values)
+    assert [float(v) for v in raster.array[:, 0, 0, 0].tolist()] == pytest.approx(
+        expected_values
+    )
 
 
 def test_era5land_dailyutc_v1_requires_single_composite(tmp_path: Path) -> None:
