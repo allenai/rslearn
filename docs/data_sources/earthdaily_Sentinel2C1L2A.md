@@ -1,11 +1,12 @@
-## rslearn.data_sources.earthdaily.Sentinel2
+## rslearn.data_sources.earthdaily.Sentinel2C1L2A
 
 Sentinel-2 L2A data on [EarthDaily](https://earthdaily.com/) platform using the
 Collection 1 archive (`sentinel-2-c1-l2a`).
 
-Naming note: `earthdaily.Sentinel2` means the EarthDaily Collection 1 source. For the
-older EarthDaily `sentinel-2-l2a` collection with Planetary Computer-style asset keys
-and optional DN harmonization, use `rslearn.data_sources.earthdaily.Sentinel2L2A`.
+If you are migrating from Planetary Computer or want PC-compatible asset keys and band
+names, use [`rslearn.data_sources.earthdaily.Sentinel2L2A`](earthdaily_Sentinel2L2A.md)
+instead — it targets the `sentinel-2-l2a` collection and exposes the same band names as
+`rslearn.data_sources.planetary_computer.Sentinel2`.
 
 See [EarthDaily Setup](earthdaily.md) for required dependency/credentials.
 
@@ -45,7 +46,7 @@ Source: <https://github.com/Element84/earth-search>
 
 ```jsonc
 {
-  "class_path": "rslearn.data_sources.earthdaily.Sentinel2",
+  "class_path": "rslearn.data_sources.earthdaily.Sentinel2C1L2A",
   "init_args": {
     // Whether to apply STAC `raster:bands` scale/offset (default true). Set to false to
     // keep raw values.
@@ -107,7 +108,7 @@ Example layer snippet:
     // "nodata_vals": [0, 0, 0]
   }],
   "data_source": {
-    "class_path": "rslearn.data_sources.earthdaily.Sentinel2",
+    "class_path": "rslearn.data_sources.earthdaily.Sentinel2C1L2A",
     "init_args": {
       "apply_scale_offset": true
     }

@@ -1,23 +1,24 @@
 ## rslearn.data_sources.earthdaily.Sentinel2L2A
 
-Sentinel-2 L2A data on [EarthDaily](https://earthdaily.com/) platform using collection
-`sentinel-2-l2a`. The underlying assets are from the AWS Open Data Sentinel-2 L2A COG
-collection.
+Sentinel-2 L2A data on [EarthDaily](https://earthdaily.com/) platform using the
+`sentinel-2-l2a` collection.
 
-Naming note: `earthdaily.Sentinel2L2A` is the compatibility source for the older
-`sentinel-2-l2a` collection. For EarthDaily Collection 1 (`sentinel-2-c1-l2a`) with
-scale/offset-applied reflectance, use `rslearn.data_sources.earthdaily.Sentinel2`.
+**This is the recommended source for users migrating from Planetary Computer.** It
+exposes the same asset keys and band names as
+`rslearn.data_sources.planetary_computer.Sentinel2` (`B01`–`B12` except `B10`, plus
+`B8A`, `SCL`, and `visual`), so existing layer configs and band references can be reused
+without changes.
 
-This class uses the same Sentinel-2 asset keys as
-`rslearn.data_sources.planetary_computer.Sentinel2` (`B01`-`B12` except `B10`, plus
-`B8A`, `SCL`, and `visual`).
+For the newer EarthDaily Collection 1 (`sentinel-2-c1-l2a`) with different asset keys
+and scale/offset-applied reflectance, use
+[`rslearn.data_sources.earthdaily.Sentinel2C1L2A`](earthdaily_Sentinel2C1L2A.md).
 
-Authentication and dependency requirements are the same as
-`rslearn.data_sources.earthdaily.Sentinel2` (optional `earthdaily[platform]`,
-`EDS_CLIENT_ID`, `EDS_SECRET`, `EDS_AUTH_URL`, `EDS_API_URL`).
+Authentication and dependency requirements are the same as `Sentinel2C1L2A` (optional
+`earthdaily[platform]`, `EDS_CLIENT_ID`, `EDS_SECRET`, `EDS_AUTH_URL`, `EDS_API_URL`).
+See [EarthDaily Setup](earthdaily.md).
 
 For collection lifecycle context (`sentinel-2-c1-l2a` replacing `sentinel-2-l2a`) and
-known archive gaps, see [earthdaily.Sentinel2 (C1 L2A)](earthdaily_Sentinel2C1L2A.md#collection-status).
+known archive gaps, see [earthdaily.Sentinel2C1L2A](earthdaily_Sentinel2C1L2A.md#collection-status).
 
 ### Configuration
 
@@ -31,12 +32,29 @@ known archive gaps, see [earthdaily.Sentinel2 (C1 L2A)](earthdaily_Sentinel2C1L2
     // Optional: list of Sentinel-2 asset keys to fetch.
     // Example: ["B02", "B03", "B04", "B08"]
     "assets": null,
-    // Optional STAC query/sorting controls from rslearn.data_sources.earthdaily.EarthDaily.
+    // Optional: maximum cloud cover (%) to filter items at search time.
+    // If set, it takes precedence over cloud_cover_threshold and overrides any
+    // `eo:cloud_cover` filter in `query`.
+    "cloud_cover_max": null,
+    // Optional: default max cloud cover (%) to apply when cloud_cover_max is not set.
+    "cloud_cover_threshold": null,
+    // Maximum number of STAC items to fetch per window before rslearn grouping/matching.
+    "search_max_items": 500,
+    // Optional ordering of items before grouping (useful with SpaceMode.COMPOSITE +
+    // CompositingMethod.FIRST_VALID): "cloud_cover" (default), "datetime", or null.
+    "sort_items_by": "cloud_cover",
+    // Optional: STAC API `query` filter passed to searches.
     "query": null,
+    // Optional: STAC item property to sort by before grouping/matching (default null).
+    // If set, it takes precedence over sort_items_by.
     "sort_by": null,
+    // Whether to sort ascending when sort_by is set (default true).
     "sort_ascending": true,
+    // Optional cache directory for cached item metadata.
     "cache_dir": null,
+    // Timeout for HTTP asset downloads.
     "timeout": "10s",
+    // Retry settings for EarthDaily API client requests (search/get item).
     "max_retries": 3,
     "retry_backoff_factor": 5.0
   }
@@ -44,8 +62,6 @@ known archive gaps, see [earthdaily.Sentinel2 (C1 L2A)](earthdaily_Sentinel2C1L2
 ```
 
 ### Available Bands
-
-These bands are available:
 
 - B01
 - B02
@@ -60,9 +76,7 @@ These bands are available:
 - B12
 - B8A
 - SCL
-- R
-- G
-- B
+- R, G, B (from the `visual` asset)
 
 ### Harmonization
 

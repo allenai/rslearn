@@ -699,7 +699,7 @@ class EarthDaily(DataSource, TileStore):
         )
 
 
-class Sentinel2(EarthDaily):
+class Sentinel2C1L2A(EarthDaily):
     """EarthDaily Sentinel-2 Collection 1 L2A source.
 
     Uses the `sentinel-2-c1-l2a` collection. The COG pixels are stored as integer
@@ -1025,7 +1025,7 @@ class Sentinel2L2A(EarthDaily):
     """EarthDaily Sentinel-2 `sentinel-2-l2a` compatibility source.
 
     This collection exposes the same asset keys as Planetary Computer Sentinel-2.
-    For EarthDaily Collection 1 (`sentinel-2-c1-l2a`), use `Sentinel2`.
+    For EarthDaily Collection 1 (`sentinel-2-c1-l2a`), use `Sentinel2C1L2A`.
     """
 
     COLLECTION_NAME = "sentinel-2-l2a"
