@@ -1060,7 +1060,9 @@ class Sentinel2L2A(EarthDaily):
                     f"unknown EarthDaily Sentinel-2 L2A assets {unknown_assets}; "
                     f"supported assets are {sorted(self.ASSET_BANDS.keys())}"
                 )
-            asset_bands = {asset_key: self.ASSET_BANDS[asset_key] for asset_key in assets}
+            asset_bands = {
+                asset_key: self.ASSET_BANDS[asset_key] for asset_key in assets
+            }
         else:
             asset_bands = dict(self.ASSET_BANDS)
 
