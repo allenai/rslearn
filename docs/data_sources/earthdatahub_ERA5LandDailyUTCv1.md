@@ -30,6 +30,59 @@ machine data.earthdatahub.destine.eu
 }
 ```
 
+### Recommended materialized time-series layer
+
+For small spatial windows with many daily timesteps, use the data source with
+`SINGLE_COMPOSITE`, `SPATIAL_MOSAIC_TEMPORAL_STACK`, and `NumpyRasterFormat`.
+This materializes one `(C, T, H, W)` NumPy array per window/layer/band set instead
+of one GeoTIFF per timestep.
+
+```jsonc
+{
+  "layers": {
+    "era5": {
+      "type": "raster",
+      "compositing_method": "SPATIAL_MOSAIC_TEMPORAL_STACK",
+      "band_sets": [
+        {
+          "dtype": "float32",
+          "bands": ["t2m", "tp"],
+          "nodata_value": -9999.0,
+          // Optional, but useful for point-like windows where ERA5 should be
+          // loaded as one pixel per timestep.
+          "spatial_size": [1, 1],
+          "format": {
+            "class_path": "rslearn.utils.raster_format.NumpyRasterFormat"
+          }
+        }
+      ],
+      "data_source": {
+        "class_path": "rslearn.data_sources.earthdatahub.ERA5LandDailyUTCv1",
+        "init_args": {
+          "band_names": ["t2m", "tp"],
+          "trust_env": true
+        },
+        "query_config": {
+          "space_mode": "SINGLE_COMPOSITE"
+        }
+      }
+    }
+  }
+}
+```
+
+To materialize temporal aggregates instead, keep the same `NumpyRasterFormat` and
+`SINGLE_COMPOSITE` setup but replace the compositing method with one of:
+
+- `TEMPORAL_MEAN`
+- `TEMPORAL_MAX`
+- `TEMPORAL_MIN`
+
+Each reducer first builds the same clipped spatial mosaic temporal stack, then
+reduces across the T dimension to one timestep. For example, if dataset windows are
+bi-weekly, changing `SPATIAL_MOSAIC_TEMPORAL_STACK` to `TEMPORAL_MEAN` writes one
+mean aggregate per bi-weekly window.
+
 ### Available Bands
 
 - `d2m`: 2m dewpoint temperature (units: K)
