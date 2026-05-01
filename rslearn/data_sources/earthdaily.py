@@ -109,6 +109,10 @@ class EarthDaily(DataSource, TileStore):
         query: dict[str, Any] | None = None,
         sort_by: str | None = None,
         sort_ascending: bool = True,
+        cloud_cover_threshold: float | None = None,
+        cloud_cover_max: float | None = None,
+        search_max_items: int | None = None,
+        sort_items_by: Literal["cloud_cover", "datetime"] | None = None,
         timeout: timedelta = timedelta(seconds=10),
         skip_items_missing_assets: bool = False,
         cache_dir: str | None = None,
@@ -126,6 +130,13 @@ class EarthDaily(DataSource, TileStore):
             query: optional query argument to STAC searches.
             sort_by: sort by this property in the STAC items.
             sort_ascending: whether to sort ascending (or descending).
+            cloud_cover_threshold: default max cloud cover (%) when cloud_cover_max is
+                not set.
+            cloud_cover_max: max cloud cover (%) injected into the STAC query. Takes
+                precedence over cloud_cover_threshold.
+            search_max_items: max STAC items fetched per geometry. None means no limit.
+            sort_items_by: secondary sort applied after search: "cloud_cover", "datetime",
+                or None.
             timeout: timeout for API requests.
             skip_items_missing_assets: skip STAC items that are missing any of the
                 assets in asset_bands during get_items.
@@ -146,6 +157,10 @@ class EarthDaily(DataSource, TileStore):
         self.query = query
         self.sort_by = sort_by
         self.sort_ascending = sort_ascending
+        self.cloud_cover_threshold = cloud_cover_threshold
+        self.cloud_cover_max = cloud_cover_max
+        self.search_max_items = search_max_items
+        self.sort_items_by = sort_items_by
         self.timeout = timeout
         self.skip_items_missing_assets = skip_items_missing_assets
         self.max_retries = max_retries
@@ -333,21 +348,33 @@ class EarthDaily(DataSource, TileStore):
 
         groups = []
         for geometry in geometries:
-            # Get potentially relevant items from the collection by performing one search
-            # for each requested geometry.
             wgs84_geometry = geometry.to_wgs84()
             logger.debug("performing STAC search for geometry %s", wgs84_geometry)
+
+            max_cloud_cover = (
+                self.cloud_cover_max
+                if self.cloud_cover_max is not None
+                else self.cloud_cover_threshold
+            )
+            effective_query: dict[str, Any] | None = (
+                copy.deepcopy(self.query) if self.query is not None else None
+            )
+            if max_cloud_cover is not None:
+                if effective_query is None:
+                    effective_query = {}
+                effective_query["eo:cloud_cover"] = {"lt": max_cloud_cover}
+
             result = client.search(
                 collections=[self.collection_name],
                 intersects=shapely.to_geojson(wgs84_geometry.shp),
                 datetime=wgs84_geometry.time_range,
-                query=self.query,
+                query=effective_query,
+                max_items=self.search_max_items,
             )
-            stac_items = [item for item in result.item_collection()]
+            stac_items = list(result.item_collection())
             logger.debug("STAC search yielded %d items", len(stac_items))
 
             if self.skip_items_missing_assets:
-                # Filter out items that are missing any of the assets in self.asset_bands.
                 good_stac_items = []
                 for stac_item in stac_items:
                     good = True
@@ -366,17 +393,38 @@ class EarthDaily(DataSource, TileStore):
                 stac_items = good_stac_items
 
             if self.sort_by is not None:
+                if self.sort_by == "datetime":
+                    stac_items.sort(
+                        key=lambda item: (item.datetime is None, item.datetime),
+                        reverse=not self.sort_ascending,
+                    )
+                else:
+                    stac_items.sort(
+                        key=lambda item: (
+                            item.properties.get(self.sort_by) is None,
+                            item.properties.get(self.sort_by),
+                        ),
+                        reverse=not self.sort_ascending,
+                    )
+            elif self.sort_items_by == "cloud_cover":
                 stac_items.sort(
-                    key=lambda stac_item: stac_item.properties[self.sort_by],
-                    reverse=not self.sort_ascending,
+                    key=lambda item: (
+                        item.properties.get("eo:cloud_cover") is None,
+                        item.properties.get("eo:cloud_cover", 0.0),
+                    )
+                )
+            elif self.sort_items_by == "datetime":
+                stac_items.sort(
+                    key=lambda item: (item.datetime is None, item.datetime)
+                )
+            elif self.sort_items_by is not None:
+                raise ValueError(
+                    f"invalid sort_items_by setting ({self.sort_items_by})"
                 )
 
             candidate_items = [
-                # The only way to get the asset URLs is to get the item by name.
-                self.get_item_by_name(stac_item.id)
-                for stac_item in stac_items
+                self.get_item_by_name(stac_item.id) for stac_item in stac_items
             ]
-
             cur_groups = match_candidate_items_to_window(
                 geometry, candidate_items, query_config
             )
@@ -826,6 +874,10 @@ class Sentinel2C1L2A(EarthDaily):
             query=query,
             sort_by=sort_by,
             sort_ascending=sort_ascending,
+            cloud_cover_threshold=cloud_cover_threshold,
+            cloud_cover_max=cloud_cover_max,
+            search_max_items=search_max_items,
+            sort_items_by=sort_items_by,
             timeout=timeout,
             skip_items_missing_assets=True,
             cache_dir=cache_dir,
@@ -835,10 +887,6 @@ class Sentinel2C1L2A(EarthDaily):
             context=context,
         )
 
-        self.cloud_cover_threshold = cloud_cover_threshold
-        self.cloud_cover_max = cloud_cover_max
-        self.search_max_items = search_max_items
-        self.sort_items_by = sort_items_by
         self.apply_scale_offset = apply_scale_offset
 
     def read_raster(
@@ -871,92 +919,6 @@ class Sentinel2C1L2A(EarthDaily):
             time_range=item.geometry.time_range,
             metadata=raster.metadata,
         )
-
-    def get_items(
-        self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[MatchedItemGroup[EarthDailyItem]]]:
-        """Get Sentinel-2 items intersecting the given geometries.
-
-        Uses raw STAC search (not Sentinel2CollectionHelper) so that collection
-        configuration is controlled by `collection_name`.
-        """
-        _, client, _ = self._load_client()
-
-        groups = []
-        for geometry in geometries:
-            wgs84_geometry = geometry.to_wgs84()
-            if wgs84_geometry.time_range is None:
-                raise ValueError(
-                    "EarthDaily Sentinel-2 requires geometry time ranges to be set"
-                )
-
-            max_cloud_cover = (
-                self.cloud_cover_max
-                if self.cloud_cover_max is not None
-                else self.cloud_cover_threshold
-            )
-            effective_query: dict[str, Any] | None = (
-                copy.deepcopy(self.query) if self.query is not None else None
-            )
-            if max_cloud_cover is not None:
-                if effective_query is None:
-                    effective_query = {}
-                effective_query["eo:cloud_cover"] = {"lt": max_cloud_cover}
-
-            result = client.search(
-                collections=[self.collection_name],
-                intersects=shapely.to_geojson(wgs84_geometry.shp),
-                datetime=wgs84_geometry.time_range,
-                query=effective_query,
-                max_items=self.search_max_items,
-            )
-            stac_items = list(result.item_collection())
-
-            if self.sort_by is not None:
-                if self.sort_by == "datetime":
-                    stac_items.sort(
-                        key=lambda item: (
-                            item.datetime is None,
-                            item.datetime,
-                        ),
-                        reverse=not self.sort_ascending,
-                    )
-                else:
-                    stac_items.sort(
-                        key=lambda item: (
-                            item.properties.get(self.sort_by) is None,
-                            item.properties.get(self.sort_by),
-                        ),
-                        reverse=not self.sort_ascending,
-                    )
-            elif self.sort_items_by == "cloud_cover":
-                stac_items.sort(
-                    key=lambda item: (
-                        item.properties.get("eo:cloud_cover") is None,
-                        item.properties.get("eo:cloud_cover", 0.0),
-                    )
-                )
-            elif self.sort_items_by == "datetime":
-                stac_items.sort(
-                    key=lambda item: (
-                        item.datetime is None,
-                        item.datetime,
-                    )
-                )
-            elif self.sort_items_by is not None:
-                raise ValueError(
-                    f"invalid sort_items_by setting ({self.sort_items_by})"
-                )
-
-            candidate_items = [
-                self.get_item_by_name(stac_item.id) for stac_item in stac_items
-            ]
-            cur_groups = match_candidate_items_to_window(
-                geometry, candidate_items, query_config
-            )
-            groups.append(cur_groups)
-
-        return groups
 
     def ingest(
         self,
@@ -1089,10 +1051,6 @@ class Sentinel2L2A(EarthDaily):
         self._harmonize_callback_cache: dict[
             str, Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None
         ] = {}
-        self.cloud_cover_threshold = cloud_cover_threshold
-        self.cloud_cover_max = cloud_cover_max
-        self.search_max_items = search_max_items
-        self.sort_items_by = sort_items_by
 
         if context.layer_config is not None:
             asset_bands: dict[str, list[str]] = {}
@@ -1120,6 +1078,10 @@ class Sentinel2L2A(EarthDaily):
             query=query,
             sort_by=sort_by,
             sort_ascending=sort_ascending,
+            cloud_cover_threshold=cloud_cover_threshold,
+            cloud_cover_max=cloud_cover_max,
+            search_max_items=search_max_items,
+            sort_items_by=sort_items_by,
             timeout=timeout,
             skip_items_missing_assets=True,
             cache_dir=cache_dir,
@@ -1128,88 +1090,6 @@ class Sentinel2L2A(EarthDaily):
             read_scale_offsets=False,
             context=context,
         )
-
-    def get_items(
-        self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[MatchedItemGroup[EarthDailyItem]]]:
-        """Get Sentinel-2 L2A items intersecting the given geometries."""
-        _, client, _ = self._load_client()
-
-        groups = []
-        for geometry in geometries:
-            wgs84_geometry = geometry.to_wgs84()
-            if wgs84_geometry.time_range is None:
-                raise ValueError(
-                    "EarthDaily Sentinel-2 L2A requires geometry time ranges to be set"
-                )
-
-            max_cloud_cover = (
-                self.cloud_cover_max
-                if self.cloud_cover_max is not None
-                else self.cloud_cover_threshold
-            )
-            effective_query: dict[str, Any] | None = (
-                copy.deepcopy(self.query) if self.query is not None else None
-            )
-            if max_cloud_cover is not None:
-                if effective_query is None:
-                    effective_query = {}
-                effective_query["eo:cloud_cover"] = {"lt": max_cloud_cover}
-
-            result = client.search(
-                collections=[self.collection_name],
-                intersects=shapely.to_geojson(wgs84_geometry.shp),
-                datetime=wgs84_geometry.time_range,
-                query=effective_query,
-                max_items=self.search_max_items,
-            )
-            stac_items = list(result.item_collection())
-
-            if self.sort_by is not None:
-                if self.sort_by == "datetime":
-                    stac_items.sort(
-                        key=lambda item: (
-                            item.datetime is None,
-                            item.datetime,
-                        ),
-                        reverse=not self.sort_ascending,
-                    )
-                else:
-                    stac_items.sort(
-                        key=lambda item: (
-                            item.properties.get(self.sort_by) is None,
-                            item.properties.get(self.sort_by),
-                        ),
-                        reverse=not self.sort_ascending,
-                    )
-            elif self.sort_items_by == "cloud_cover":
-                stac_items.sort(
-                    key=lambda item: (
-                        item.properties.get("eo:cloud_cover") is None,
-                        item.properties.get("eo:cloud_cover", 0.0),
-                    )
-                )
-            elif self.sort_items_by == "datetime":
-                stac_items.sort(
-                    key=lambda item: (
-                        item.datetime is None,
-                        item.datetime,
-                    )
-                )
-            elif self.sort_items_by is not None:
-                raise ValueError(
-                    f"invalid sort_items_by setting ({self.sort_items_by})"
-                )
-
-            candidate_items = [
-                self.get_item_by_name(stac_item.id) for stac_item in stac_items
-            ]
-            cur_groups = match_candidate_items_to_window(
-                geometry, candidate_items, query_config
-            )
-            groups.append(cur_groups)
-
-        return groups
 
     def _normalize_dt(self, dt: datetime) -> datetime:
         if dt.tzinfo is None:
