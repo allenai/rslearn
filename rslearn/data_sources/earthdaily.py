@@ -561,14 +561,7 @@ class EarthDaily(DataSource, TileStore):
 
         num_bands = array.shape[0]
         nodata_value: int | float | None
-        if len(scale_offsets) == 1:
-            scale = _to_float(scale_offsets[0].get("scale"), 1.0)
-            offset = _to_float(scale_offsets[0].get("offset"), 0.0)
-            raw_nd = scale_offsets[0].get("nodata")
-            nodata_value = float(raw_nd) if raw_nd is not None else None
-            scales = np.full((num_bands, 1, 1), scale, dtype=np.float32)
-            offsets = np.full((num_bands, 1, 1), offset, dtype=np.float32)
-        elif len(scale_offsets) == num_bands:
+        if len(scale_offsets) == num_bands:
             scales = np.array(
                 [_to_float(so.get("scale"), 1.0) for so in scale_offsets],
                 dtype=np.float32,
@@ -586,14 +579,15 @@ class EarthDaily(DataSource, TileStore):
             ]
             nodata_value = unique_nodata_value(nd_vals) if nd_vals else None
         else:
-            logger.debug(
-                "EarthDaily scale/offset band count mismatch for item %s asset %s: "
-                "%d metadata bands vs %d raster bands; using first entry for all bands",
-                item_name,
-                asset_key,
-                len(scale_offsets),
-                num_bands,
-            )
+            if len(scale_offsets) != 1:
+                logger.debug(
+                    "EarthDaily scale/offset band count mismatch for item %s asset %s: "
+                    "%d metadata bands vs %d raster bands; using first entry for all bands",
+                    item_name,
+                    asset_key,
+                    len(scale_offsets),
+                    num_bands,
+                )
             scale = _to_float(scale_offsets[0].get("scale"), 1.0)
             offset = _to_float(scale_offsets[0].get("offset"), 0.0)
             raw_nd = scale_offsets[0].get("nodata")
