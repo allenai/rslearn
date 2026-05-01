@@ -700,15 +700,11 @@ class EarthDaily(DataSource, TileStore):
 
 
 class Sentinel2C1L2A(EarthDaily):
-    """EarthDaily Sentinel-2 Collection 1 L2A source.
+    """EarthDaily Sentinel-2 Collection 1 L2A (`sentinel-2-c1-l2a`) source.
 
-    Uses the `sentinel-2-c1-l2a` collection. The COG pixels are stored as integer
-    DN/sample values, not physical reflectance values; by default rslearn applies
-    per-asset scale/offset metadata from STAC `raster:bands` during
-    read/materialization. This scale/offset decoding is not Sentinel-2
-    processing-baseline harmonization. For the older `sentinel-2-l2a` collection with
-    Planetary Computer-style asset keys and optional DN harmonization, use
-    `Sentinel2L2A`.
+    Applies per-asset scale/offset from STAC `raster:bands` by default (not
+    processing-baseline harmonization). For Planetary Computer-compatible asset keys
+    use `Sentinel2L2A`.
     """
 
     COLLECTION_NAME = "sentinel-2-c1-l2a"
@@ -1022,9 +1018,8 @@ class Sentinel2C1L2A(EarthDaily):
 
 
 class Sentinel2L2A(EarthDaily):
-    """EarthDaily Sentinel-2 `sentinel-2-l2a` compatibility source.
+    """EarthDaily Sentinel-2 `sentinel-2-l2a` source with Planetary Computer-compatible asset keys.
 
-    This collection exposes the same asset keys as Planetary Computer Sentinel-2.
     For EarthDaily Collection 1 (`sentinel-2-c1-l2a`), use `Sentinel2C1L2A`.
     """
 
