@@ -414,9 +414,7 @@ class EarthDaily(DataSource, TileStore):
                     )
                 )
             elif self.sort_items_by == "datetime":
-                stac_items.sort(
-                    key=lambda item: (item.datetime is None, item.datetime)
-                )
+                stac_items.sort(key=lambda item: (item.datetime is None, item.datetime))
             elif self.sort_items_by is not None:
                 raise ValueError(
                     f"invalid sort_items_by setting ({self.sort_items_by})"
