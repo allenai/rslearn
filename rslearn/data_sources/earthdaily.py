@@ -1056,14 +1056,48 @@ class Sentinel2L2A(EarthDaily):
         self,
         harmonize: bool = False,
         assets: list[str] | None = None,
+        cloud_cover_threshold: float | None = None,
+        cloud_cover_max: float | None = None,
+        search_max_items: int = 500,
+        sort_items_by: Literal["cloud_cover", "datetime"] | None = "cloud_cover",
+        query: dict[str, Any] | None = None,
+        sort_by: str | None = None,
+        sort_ascending: bool = True,
+        timeout: timedelta = timedelta(seconds=10),
+        cache_dir: str | None = None,
+        max_retries: int = 3,
+        retry_backoff_factor: float = 5.0,
         context: DataSourceContext = DataSourceContext(),
-        **kwargs: Any,
     ) -> None:
-        """Initialize a new EarthDaily Sentinel2L2A data source."""
+        """Initialize a new EarthDaily Sentinel2L2A data source.
+
+        Args:
+            harmonize: apply processing-baseline harmonization to reflectance values.
+            assets: optional list of asset keys to ingest. If omitted and a LayerConfig
+                is provided via context, assets are inferred from that layer's band sets.
+            cloud_cover_threshold: default max cloud cover (%) used when cloud_cover_max
+                is not provided at query time.
+            cloud_cover_max: max cloud cover (%) applied in searches. If set, overrides
+                any ``eo:cloud_cover`` filter in ``query``.
+            search_max_items: max number of STAC items to fetch per window.
+            sort_items_by: optional ordering applied before grouping.
+            query: optional STAC API ``query`` filter passed to searches.
+            sort_by: optional STAC item property to sort by.
+            sort_ascending: whether to sort ascending when sort_by is set.
+            timeout: timeout for HTTP asset downloads.
+            cache_dir: optional directory to cache item metadata by item id.
+            max_retries: max retries for EarthDaily API client.
+            retry_backoff_factor: backoff factor for EarthDaily API client retries.
+            context: rslearn data source context.
+        """
         self.harmonize = harmonize
         self._harmonize_callback_cache: dict[
             str, Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None
         ] = {}
+        self.cloud_cover_threshold = cloud_cover_threshold
+        self.cloud_cover_max = cloud_cover_max
+        self.search_max_items = search_max_items
+        self.sort_items_by = sort_items_by
 
         if context.layer_config is not None:
             asset_bands: dict[str, list[str]] = {}
@@ -1088,11 +1122,99 @@ class Sentinel2L2A(EarthDaily):
         super().__init__(
             collection_name=self.COLLECTION_NAME,
             asset_bands=asset_bands,
+            query=query,
+            sort_by=sort_by,
+            sort_ascending=sort_ascending,
+            timeout=timeout,
             skip_items_missing_assets=True,
+            cache_dir=cache_dir,
+            max_retries=max_retries,
+            retry_backoff_factor=retry_backoff_factor,
             read_scale_offsets=False,
             context=context,
-            **kwargs,
         )
+
+    def get_items(
+        self, geometries: list[STGeometry], query_config: QueryConfig
+    ) -> list[list[MatchedItemGroup[EarthDailyItem]]]:
+        """Get Sentinel-2 L2A items intersecting the given geometries."""
+        _, client, _ = self._load_client()
+
+        groups = []
+        for geometry in geometries:
+            wgs84_geometry = geometry.to_wgs84()
+            if wgs84_geometry.time_range is None:
+                raise ValueError(
+                    "EarthDaily Sentinel-2 L2A requires geometry time ranges to be set"
+                )
+
+            max_cloud_cover = (
+                self.cloud_cover_max
+                if self.cloud_cover_max is not None
+                else self.cloud_cover_threshold
+            )
+            effective_query: dict[str, Any] | None = (
+                copy.deepcopy(self.query) if self.query is not None else None
+            )
+            if max_cloud_cover is not None:
+                if effective_query is None:
+                    effective_query = {}
+                effective_query["eo:cloud_cover"] = {"lt": max_cloud_cover}
+
+            result = client.search(
+                collections=[self.collection_name],
+                intersects=shapely.to_geojson(wgs84_geometry.shp),
+                datetime=wgs84_geometry.time_range,
+                query=effective_query,
+                max_items=self.search_max_items,
+            )
+            stac_items = list(result.item_collection())
+
+            if self.sort_by is not None:
+                if self.sort_by == "datetime":
+                    stac_items.sort(
+                        key=lambda item: (
+                            item.datetime is None,
+                            item.datetime,
+                        ),
+                        reverse=not self.sort_ascending,
+                    )
+                else:
+                    stac_items.sort(
+                        key=lambda item: (
+                            item.properties.get(self.sort_by) is None,
+                            item.properties.get(self.sort_by),
+                        ),
+                        reverse=not self.sort_ascending,
+                    )
+            elif self.sort_items_by == "cloud_cover":
+                stac_items.sort(
+                    key=lambda item: (
+                        item.properties.get("eo:cloud_cover") is None,
+                        item.properties.get("eo:cloud_cover", 0.0),
+                    )
+                )
+            elif self.sort_items_by == "datetime":
+                stac_items.sort(
+                    key=lambda item: (
+                        item.datetime is None,
+                        item.datetime,
+                    )
+                )
+            elif self.sort_items_by is not None:
+                raise ValueError(
+                    f"invalid sort_items_by setting ({self.sort_items_by})"
+                )
+
+            candidate_items = [
+                self.get_item_by_name(stac_item.id) for stac_item in stac_items
+            ]
+            cur_groups = match_candidate_items_to_window(
+                geometry, candidate_items, query_config
+            )
+            groups.append(cur_groups)
+
+        return groups
 
     def _normalize_dt(self, dt: datetime) -> datetime:
         if dt.tzinfo is None:
