@@ -985,7 +985,7 @@ class Sentinel2L2A(EarthDaily):
 
     COLLECTION_NAME = "sentinel-2-l2a"
 
-    BANDS = {
+    ASSET_BANDS = {
         "B01": ["B01"],
         "B02": ["B02"],
         "B03": ["B03"],
@@ -1052,23 +1052,23 @@ class Sentinel2L2A(EarthDaily):
 
         if context.layer_config is not None:
             asset_bands: dict[str, list[str]] = {}
-            for asset_key, band_names in self.BANDS.items():
+            for asset_key, band_names in self.ASSET_BANDS.items():
                 for band_set in context.layer_config.band_sets:
                     if set(band_set.bands).intersection(set(band_names)):
                         asset_bands[asset_key] = band_names
                         break
         elif assets is not None:
             unknown_assets = [
-                asset_key for asset_key in assets if asset_key not in self.BANDS
+                asset_key for asset_key in assets if asset_key not in self.ASSET_BANDS
             ]
             if unknown_assets:
                 raise ValueError(
                     f"unknown EarthDaily Sentinel-2 L2A assets {unknown_assets}; "
-                    f"supported assets are {sorted(self.BANDS.keys())}"
+                    f"supported assets are {sorted(self.ASSET_BANDS.keys())}"
                 )
-            asset_bands = {asset_key: self.BANDS[asset_key] for asset_key in assets}
+            asset_bands = {asset_key: self.ASSET_BANDS[asset_key] for asset_key in assets}
         else:
-            asset_bands = dict(self.BANDS)
+            asset_bands = dict(self.ASSET_BANDS)
 
         super().__init__(
             collection_name=self.COLLECTION_NAME,
