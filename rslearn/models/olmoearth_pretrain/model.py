@@ -11,10 +11,6 @@ from typing import Any
 import torch
 from einops import rearrange
 from olmoearth_pretrain_minimal import ModelID, load_model_from_id, load_model_from_path
-from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.nn.flexi_vit import (
-    Encoder,
-    TokensAndMasks,
-)
 from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.config import Config
 from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
 from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (
@@ -659,20 +655,12 @@ class OlmoEarth(FeatureExtractor):
 
         with torch_context:
             # Currently we assume the provided model always returns a TokensAndMasks object.
-            tokens_and_masks: TokensAndMasks
-            if isinstance(self.model, Encoder):
-                # Encoder has a fast_pass argument to indicate mask is not needed.
-                tokens_and_masks = self.model(
-                    sample,
-                    fast_pass=not missing_tokens,
-                    patch_size=self.patch_size,
-                    **self.forward_kwargs,
-                )["tokens_and_masks"]
-            else:
-                # Other models like STEncoder do not have this option supported.
-                tokens_and_masks = self.model(
-                    sample, patch_size=self.patch_size, **self.forward_kwargs
-                )["tokens_and_masks"]
+            tokens_and_masks = self.model(
+                sample,
+                fast_pass=not missing_tokens,
+                patch_size=self.patch_size,
+                **self.forward_kwargs,
+            )["tokens_and_masks"]
 
         # Apply temporal/modality pooling so we just have one feature per patch.
         features = []
