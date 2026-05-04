@@ -152,7 +152,7 @@ model:
           # The SegmentationHead computes softmax and cross entropy loss.
           - class_path: rslearn.train.tasks.segmentation.SegmentationHead
     optimizer:
-      class_path: rslearn.train.optimizer.AdamW
+      class_path: rslearn.models.olmoearth_pretrain.optimizer.LayerDecayAdamW
       init_args:
         lr: 0.0001
 data:
@@ -215,13 +215,6 @@ data:
 trainer:
   max_epochs: 100
   callbacks:
-    # We find that freezing the model for the first few epochs helps to improve the
-    # performance of the fine-tuned models.
-    - class_path: rslearn.train.callbacks.freeze_unfreeze.FreezeUnfreeze
-      init_args:
-        module_selector: ["model", "encoder", 0]
-        unfreeze_at_epoch: 10
-        unfreeze_lr_factor: 10
     # The RslearnWriter is used during `model predict` to save the predicted outputs to
     # the rslearn dataset.
     - class_path: rslearn.train.prediction_writer.RslearnWriter
