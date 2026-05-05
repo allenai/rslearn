@@ -309,6 +309,8 @@ class EarthDaily(DataSource, TileStore):
         # No cache or not in cache, so we need to make the STAC request.
         _, _, collection = self._load_client()
         stac_item = collection.get_item(name)
+        if stac_item is None:
+            raise KeyError(f"EarthDaily item not found: {name}")
         item = self._stac_item_to_item(stac_item)
 
         # Finally we cache it if cache_dir is set.
@@ -698,10 +700,15 @@ class EarthDaily(DataSource, TileStore):
 
 
 class Sentinel2(EarthDaily):
-    """Sentinel-2 L2A on EarthDaily platform.
+    """EarthDaily Sentinel-2 Collection 1 L2A source.
 
-    Uses the `sentinel-2-c1-l2a` collection and applies per-asset scale/offset metadata
-    from STAC `raster:bands` when present.
+    Uses the `sentinel-2-c1-l2a` collection. The COG pixels are stored as integer
+    DN/sample values, not physical reflectance values; by default rslearn applies
+    per-asset scale/offset metadata from STAC `raster:bands` during
+    read/materialization. This scale/offset decoding is not Sentinel-2
+    processing-baseline harmonization. For the older `sentinel-2-l2a` collection with
+    Planetary Computer-style asset keys and optional DN harmonization, use
+    `Sentinel2L2A`.
     """
 
     COLLECTION_NAME = "sentinel-2-c1-l2a"
@@ -771,7 +778,10 @@ class Sentinel2(EarthDaily):
             retry_backoff_factor: backoff factor for EarthDaily API client retries.
             context: rslearn data source context.
             apply_scale_offset: apply per-asset scale/offset metadata from STAC
-                `raster:bands` (defaults to True). Set to False to use raw values.
+                `raster:bands` during read/materialization (defaults to True).
+                This decodes C1 COG storage values to physical values; it is not
+                Sentinel-2 processing-baseline harmonization. Set to False to use the
+                raw integer DN/sample values from the COG.
         """
         if apply_scale_offset and context.layer_config is not None:
             invalid_band_sets = [
@@ -1012,9 +1022,10 @@ class Sentinel2(EarthDaily):
 
 
 class Sentinel2L2A(EarthDaily):
-    """Sentinel-2 L2A on EarthDaily platform using `sentinel-2-l2a` collection.
+    """EarthDaily Sentinel-2 `sentinel-2-l2a` compatibility source.
 
     This collection exposes the same asset keys as Planetary Computer Sentinel-2.
+    For EarthDaily Collection 1 (`sentinel-2-c1-l2a`), use `Sentinel2`.
     """
 
     COLLECTION_NAME = "sentinel-2-l2a"
@@ -1032,8 +1043,10 @@ class Sentinel2L2A(EarthDaily):
         "B11": ["B11"],
         "B12": ["B12"],
         "B8A": ["B8A"],
+        "SCL": ["SCL"],
         "visual": ["R", "G", "B"],
     }
+    NON_REFLECTANCE_ASSETS = frozenset({"SCL", "visual"})
     PROCESSING_BASELINE_PATTERN = re.compile(r"(?:^|_)N(?P<baseline>\d{4})(?:_|$)")
     HARMONIZE_PROCESSING_BASELINE = 400
     HARMONIZE_CUTOFF = datetime(2022, 1, 25)
@@ -1138,7 +1151,7 @@ class Sentinel2L2A(EarthDaily):
     def _get_harmonize_callback_for_item(
         self, item: EarthDailyItem, asset_key: str
     ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
-        if not self.harmonize or asset_key == "visual":
+        if not self.harmonize or asset_key in self.NON_REFLECTANCE_ASSETS:
             return None
         if item.name in self._harmonize_callback_cache:
             return self._harmonize_callback_cache[item.name]

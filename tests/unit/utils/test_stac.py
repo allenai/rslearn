@@ -135,3 +135,105 @@ def test_search_response_parsing() -> None:
         assert item.time_range is not None
         assert item.time_range[0] == datetime(2025, 1, 1, 0, 59, 58, 336000, tzinfo=UTC)
         assert item.time_range[1] == datetime(2025, 1, 1, 0, 59, 58, 336000, tzinfo=UTC)
+
+
+def test_search_pagination_supports_get_next_links() -> None:
+    """STAC pagination supports explicit GET next links."""
+    client = StacClient("https://example.com/stac")
+
+    first_response = MagicMock()
+    first_response.raise_for_status = MagicMock()
+    first_response.json.return_value = {
+        "features": [
+            {
+                "id": "item-1",
+                "properties": {"datetime": "2025-01-01T00:00:00Z"},
+                "assets": {},
+            }
+        ],
+        "links": [
+            {
+                "rel": "next",
+                "href": "https://example.com/stac/search?cursor=abc",
+                "method": "GET",
+            }
+        ],
+    }
+
+    second_response = MagicMock()
+    second_response.raise_for_status = MagicMock()
+    second_response.json.return_value = {
+        "features": [
+            {
+                "id": "item-2",
+                "properties": {"datetime": "2025-01-02T00:00:00Z"},
+                "assets": {},
+            }
+        ],
+        "links": [],
+    }
+
+    with patch.object(client.session, "post", return_value=first_response) as mock_post:
+        with patch.object(
+            client.session, "get", return_value=second_response
+        ) as mock_get:
+            items = client.search(limit=1)
+
+    mock_post.assert_called_once()
+    mock_get.assert_called_once_with(url="https://example.com/stac/search?cursor=abc")
+    assert [item.id for item in items] == ["item-1", "item-2"]
+
+
+def test_search_pagination_defaults_next_link_to_current_method() -> None:
+    """Next links without method inherit the current request method."""
+    client = StacClient("https://example.com/stac")
+
+    first_response = MagicMock()
+    first_response.raise_for_status = MagicMock()
+    first_response.json.return_value = {
+        "features": [
+            {
+                "id": "item-1",
+                "properties": {"datetime": "2025-01-01T00:00:00Z"},
+                "assets": {},
+            }
+        ],
+        "links": [
+            {
+                "rel": "next",
+                "href": "https://example.com/stac/search",
+                "body": {"page": 2},
+            }
+        ],
+    }
+
+    second_response = MagicMock()
+    second_response.raise_for_status = MagicMock()
+    second_response.json.return_value = {
+        "features": [
+            {
+                "id": "item-2",
+                "properties": {"datetime": "2025-01-02T00:00:00Z"},
+                "assets": {},
+            }
+        ],
+        "links": [],
+    }
+
+    with patch.object(
+        client.session, "post", side_effect=[first_response, second_response]
+    ) as mock_post:
+        with patch.object(client.session, "get") as mock_get:
+            items = client.search(limit=1)
+
+    assert mock_post.call_count == 2
+    mock_post.assert_any_call(
+        url="https://example.com/stac/search",
+        json={"limit": 1},
+    )
+    mock_post.assert_any_call(
+        url="https://example.com/stac/search",
+        json={"page": 2},
+    )
+    mock_get.assert_not_called()
+    assert [item.id for item in items] == ["item-1", "item-2"]

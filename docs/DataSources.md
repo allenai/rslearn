@@ -20,8 +20,8 @@ detailed page with configuration options and available bands. See
 | [aws_open_data.Sentinel2](data_sources/aws_open_data_Sentinel2.md) | AWS (Element 84) | L1C and L2A |
 | [aws_sentinel2_element84.Sentinel2](data_sources/aws_sentinel2_element84_Sentinel2.md) | AWS (Element 84) | L2A COGs, direct materialization |
 | [copernicus.Sentinel2](data_sources/copernicus.md#rslearndatasourcescopernicussentinel2) | ESA Copernicus OData API | L1C and L2A |
-| [earthdaily.Sentinel2](data_sources/earthdaily_Sentinel2.md) | EarthDaily | L2A Collection 1 (`sentinel-2-c1-l2a`), supports scale/offset |
-| [earthdaily.Sentinel2L2A](data_sources/earthdaily_Sentinel2L2A.md) | EarthDaily | `sentinel-2-l2a` (PC-style assets), optional harmonization |
+| [earthdaily.Sentinel2 (C1 L2A)](data_sources/earthdaily_Sentinel2C1L2A.md) | EarthDaily | Collection 1 L2A (`sentinel-2-c1-l2a`), scale/offset reflectance |
+| [earthdaily.Sentinel2L2A](data_sources/earthdaily_Sentinel2L2A.md) | EarthDaily | Legacy/PC-style L2A (`sentinel-2-l2a`), optional DN harmonization |
 | [gcp_public_data.Sentinel2](data_sources/gcp_public_data_Sentinel2.md) | Google Cloud Storage | L1C scenes |
 
 #### Sentinel-1
@@ -46,6 +46,9 @@ detailed page with configuration options and available bands. See
 |---|---|---|
 | [planetary_computer.Hls2S30](data_sources/planetary_computer_Hls2.md#rslearndatasourcesplanetary_computerhls2s30) | Microsoft Planetary Computer | HLS v2 Sentinel-2 (30m) |
 | [planetary_computer.Hls2L30](data_sources/planetary_computer_Hls2.md#rslearndatasourcesplanetary_computerhls2l30) | Microsoft Planetary Computer | HLS v2 Landsat (30m) |
+| [nasa_hls.Hls2](data_sources/nasa_hls_Hls2.md#rslearndatasourcesnasa_hlshls2) | NASA LP DAAC | Combined semantic-band HLS v2.0 time-series across Sentinel and Landsat |
+| [nasa_hls.Hls2S30](data_sources/nasa_hls_Hls2.md#rslearndatasourcesnasa_hlshls2s30) | NASA LP DAAC | HLSS30 v2.0, direct materialization via protected S3 |
+| [nasa_hls.Hls2L30](data_sources/nasa_hls_Hls2.md#rslearndatasourcesnasa_hlshls2l30) | NASA LP DAAC | HLSL30 v2.0, direct materialization via protected S3 |
 
 #### NAIP
 

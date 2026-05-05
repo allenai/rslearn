@@ -4,16 +4,20 @@ Sentinel-2 L2A data on [EarthDaily](https://earthdaily.com/) platform using coll
 `sentinel-2-l2a`. The underlying assets are from the AWS Open Data Sentinel-2 L2A COG
 collection.
 
+Naming note: `earthdaily.Sentinel2L2A` is the compatibility source for the older
+`sentinel-2-l2a` collection. For EarthDaily Collection 1 (`sentinel-2-c1-l2a`) with
+scale/offset-applied reflectance, use `rslearn.data_sources.earthdaily.Sentinel2`.
+
 This class uses the same Sentinel-2 asset keys as
 `rslearn.data_sources.planetary_computer.Sentinel2` (`B01`-`B12` except `B10`, plus
-`B8A` and `visual`).
+`B8A`, `SCL`, and `visual`).
 
 Authentication and dependency requirements are the same as
 `rslearn.data_sources.earthdaily.Sentinel2` (optional `earthdaily[platform]`,
 `EDS_CLIENT_ID`, `EDS_SECRET`, `EDS_AUTH_URL`, `EDS_API_URL`).
 
 For collection lifecycle context (`sentinel-2-c1-l2a` replacing `sentinel-2-l2a`) and
-known archive gaps, see [earthdaily.Sentinel2](earthdaily_Sentinel2.md#collection-status).
+known archive gaps, see [earthdaily.Sentinel2 (C1 L2A)](earthdaily_Sentinel2C1L2A.md#collection-status).
 
 ### Configuration
 
@@ -55,6 +59,7 @@ These bands are available:
 - B11
 - B12
 - B8A
+- SCL
 - R
 - G
 - B
@@ -72,9 +77,9 @@ present, rslearn falls back to the processing baseline encoded in STAC
 `properties["sentinel:product_id"]` when available, then to the item ID, and
 otherwise to the acquisition date:
 
-- scenes with baseline 04.00+ include a +1000 DN offset for non-visual bands,
+- scenes with baseline 04.00+ include a +1000 DN offset for reflectance bands,
 - harmonization undoes this by subtracting 1000 DN (with clipping at zero),
 - fallback applies this adjustment when the scene ID encodes baseline 04.00+,
 - if the scene ID does not expose a processing baseline, fallback applies the
   adjustment for acquisitions on/after 2022-01-25,
-- `visual` (TCI RGB) is not harmonized.
+- `SCL` and `visual` (TCI RGB) are not harmonized.
