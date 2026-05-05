@@ -1,6 +1,7 @@
 """STAC API client."""
 
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -154,8 +155,32 @@ class StacClient:
             logger.debug(
                 "Reading STAC items from %s with request data %s", cur_url, request_data
             )
-            response = self.session.post(url=cur_url, json=request_data)
-            response.raise_for_status()
+            for attempt in range(4):
+                try:
+                    response = self.session.post(url=cur_url, json=request_data)
+                    response.raise_for_status()
+                    break
+                except requests.exceptions.HTTPError as e:
+                    if response.status_code < 500 or attempt == 3:
+                        raise
+                    wait = 2**attempt
+                    logger.warning(
+                        "STAC search got %d, retrying in %ds (attempt %d/4)",
+                        response.status_code,
+                        wait,
+                        attempt + 1,
+                    )
+                    time.sleep(wait)
+                except requests.exceptions.ConnectionError:
+                    if attempt == 3:
+                        raise
+                    wait = 2**attempt
+                    logger.warning(
+                        "STAC search connection error, retrying in %ds (attempt %d/4)",
+                        wait,
+                        attempt + 1,
+                    )
+                    time.sleep(wait)
             data = response.json()
             for item_dict in data["features"]:
                 items.append(StacItem.from_dict(item_dict))
