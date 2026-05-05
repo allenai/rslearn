@@ -24,7 +24,7 @@ from rslearn.utils.geometry import flatten_shape
 logger = get_logger(__name__)
 
 
-class FeatureType(Enum):
+class FeatureType(str, Enum):
     """OpenStreetMap feature type."""
 
     NODE = "node"

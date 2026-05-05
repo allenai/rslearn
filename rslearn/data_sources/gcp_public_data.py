@@ -341,20 +341,27 @@ class Sentinel2(DataSource):
             elif row["base_url"] is not None and row["base_url"] != "":
                 product_folder = row["base_url"].split(f"gs://{self.BUCKET_NAME}/")[1]
             else:
-                raise ValueError(
-                    f"Unexpected value '{row['source_url']}' in column 'source_url'"
-                    + f" and '{row['base_url']} in column 'base_url'"
-                    + f"for product {row['product_id']}"
-                )
+                # BigQuery rows sometimes use placeholder source_url (index.csv.gz) with
+                # no base_url; derive tiles/.../PRODUCT.SAFE/ from product_id.
+                product_folder = self._build_product_folder_name(product_id)
 
             # Build the blob prefix based on the product ID and granule ID.
             # The blob prefix is the prefix to the JP2 image files on GCS.
             granule_id = row["granule_id"]
-            blob_prefix = (
-                f"{product_folder}/GRANULE/{granule_id}/IMG_DATA/{tile_id}_{time_str}_"
-            )
+            if granule_id is None or granule_id == "":
+                continue
 
             # Extract the spatial and temporal bounds of the image.
+            sensing_time = row["sensing_time"]
+            if (
+                row["west_lon"] is None
+                or row["south_lat"] is None
+                or row["east_lon"] is None
+                or row["north_lat"] is None
+                or sensing_time is None
+            ):
+                continue
+
             bounds = (
                 float(row["west_lon"]),
                 float(row["south_lat"]),
@@ -362,12 +369,14 @@ class Sentinel2(DataSource):
                 float(row["north_lat"]),
             )
             shp = shapely.box(*bounds)
-            sensing_time = row["sensing_time"]
             geometry = STGeometry(WGS84_PROJECTION, shp, (sensing_time, sensing_time))
             geometry = split_at_antimeridian(geometry)
 
-            cloud_cover = float(row["cloud_cover"])
+            cloud_cover = float(row["cloud_cover"]) if row["cloud_cover"] is not None else 0.0
 
+            blob_prefix = (
+                f"{product_folder}/GRANULE/{granule_id}/IMG_DATA/{tile_id}_{time_str}_"
+            )
             yield Sentinel2Item(product_id, geometry, blob_prefix, cloud_cover)
 
     def _build_cell_folder_name(self, cell_id: str) -> str:
