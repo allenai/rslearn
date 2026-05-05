@@ -366,6 +366,18 @@ def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
         default=True,
         action=argparse.BooleanOptionalAction,
     )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Config filename within the dataset root (default: config.json)",
+    )
+    parser.add_argument(
+        "--enabled-layers",
+        type=parse_disabled_layers,
+        default=None,
+        help="Only enable these layers e.g. 'layer1,layer2' (opposite of --disabled-layers)",
+    )
 
 
 def apply_on_windows(
@@ -460,7 +472,12 @@ def apply_on_windows_args(
     f: Callable[..., Any], args: argparse.Namespace
 ) -> Generator[Any, None, None]:
     """Call apply_on_windows with arguments passed via command-line interface."""
-    dataset = Dataset(UPath(args.root), disabled_layers=args.disabled_layers)
+    dataset_kwargs: dict = {"disabled_layers": args.disabled_layers}
+    if args.config is not None:
+        dataset_kwargs["config_filename"] = args.config
+    if args.enabled_layers is not None:
+        dataset_kwargs["enabled_layers"] = args.enabled_layers
+    dataset = Dataset(UPath(args.root), **dataset_kwargs)
     yield from apply_on_windows(
         f=f,
         dataset=dataset,
