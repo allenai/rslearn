@@ -182,7 +182,9 @@ class CHELSADaily(
 
         min_lon, min_lat, max_lon, max_lat = [float(v) for v in bounds]
         if min_lon >= max_lon or min_lat >= max_lat:
-            raise ValueError("bounds must satisfy min_lon < max_lon and min_lat < max_lat")
+            raise ValueError(
+                "bounds must satisfy min_lon < max_lon and min_lat < max_lat"
+            )
         if min_lon < -180 or max_lon > 180 or min_lat < -90 or max_lat > 90:
             raise ValueError("bounds must be within WGS84 longitude/latitude limits")
         return (min_lon, min_lat, max_lon, max_lat)
