@@ -17,8 +17,10 @@ from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.chelsa import CHELSADaily, CHELSADailyItem
 from rslearn.dataset.compositing import TemporalMaxCompositor, TemporalMeanCompositor
+from rslearn.dataset.tile_utils import read_raster_window_from_tiles
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
-from rslearn.utils.geometry import Projection, STGeometry
+from rslearn.utils.geometry import Projection, STGeometry, get_global_raster_bounds
+from rslearn.utils.raster_array import RasterArray
 
 
 def _window(start: datetime, end: datetime) -> STGeometry:
@@ -176,6 +178,65 @@ def test_chelsa_daily_item_serialization_roundtrip() -> None:
     assert restored.name == item.name
     assert restored.item_date == item.item_date
     assert restored.geometry.serialize() == item.geometry.serialize()
+
+
+def test_chelsa_daily_get_raster_bounds_global_item_local_crs() -> None:
+    data_source = CHELSADaily(band_names=["tas"])
+    item = data_source.get_item_by_name("chelsa_daily_20190907")
+    projection = Projection(CRS.from_epsg(27700), 10.0, -10.0)
+
+    bounds = data_source.get_raster_bounds("chelsa_daily", item, ["tas"], projection)
+
+    assert bounds == get_global_raster_bounds(projection)
+    assert bounds[2] > bounds[0]
+    assert bounds[3] > bounds[1]
+
+
+def test_chelsa_daily_read_raster_window_from_tiles_local_crs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_source = CHELSADaily(band_names=["tas"])
+    item = data_source.get_item_by_name("chelsa_daily_20190907")
+    projection = Projection(CRS.from_epsg(27700), 10.0, -10.0)
+    bounds = (62072, -28746, 62168, -28650)
+
+    def _fake_read_raster(
+        layer_name: str,
+        read_item: CHELSADailyItem,
+        bands: list[str],
+        read_projection: Projection,
+        read_bounds: tuple[int, int, int, int],
+        resampling: Resampling = Resampling.bilinear,
+    ) -> RasterArray:
+        assert layer_name == "chelsa_daily"
+        assert read_item == item
+        assert bands == ["tas"]
+        assert read_projection == projection
+        assert read_bounds == bounds
+        assert resampling == Resampling.bilinear
+        width = read_bounds[2] - read_bounds[0]
+        height = read_bounds[3] - read_bounds[1]
+        return RasterArray(
+            chw_array=np.ones((1, height, width), dtype=np.float32),
+            time_range=read_item.geometry.time_range,
+        )
+
+    monkeypatch.setattr(data_source, "read_raster", _fake_read_raster)
+
+    raster = read_raster_window_from_tiles(
+        tile_store=TileStoreWithLayer(data_source, "chelsa_daily"),
+        item=item,
+        bands=["tas"],
+        projection=projection,
+        bounds=bounds,
+        nodata_val=0.0,
+        band_dtype=np.float32,
+        resampling=Resampling.bilinear,
+    )
+
+    assert raster is not None
+    assert raster.array.shape == (1, 1, 96, 96)
+    assert np.all(raster.array == 1.0)
 
 
 def test_chelsa_daily_ingest_preserves_nodata_and_temporal_reducers_ignore_it(

@@ -1,8 +1,12 @@
-## rslearn.data_sources.earthdaily.Sentinel2
+## rslearn.data_sources.earthdaily.Sentinel2C1L2A
 
-Sentinel-2 L2A data on [EarthDaily](https://earthdaily.com/) platform (collection: `sentinel-2-c1-l2a`).
-For EarthDaily collection `sentinel-2-l2a` with Planetary Computer-style asset keys and
-optional harmonization, use `rslearn.data_sources.earthdaily.Sentinel2L2A`.
+Sentinel-2 L2A data on [EarthDaily](https://earthdaily.com/) platform using the
+Collection 1 archive (`sentinel-2-c1-l2a`).
+
+If you are migrating from Planetary Computer or want PC-compatible asset keys and band
+names, use [`rslearn.data_sources.earthdaily.Sentinel2L2A`](earthdaily_Sentinel2L2A.md)
+instead — it targets the `sentinel-2-l2a` collection and exposes the same band names as
+`rslearn.data_sources.planetary_computer.Sentinel2`.
 
 See [EarthDaily Setup](earthdaily.md) for required dependency/credentials.
 
@@ -10,8 +14,16 @@ By default, this data source applies per-asset scale/offset values from STAC
 `raster:bands` metadata (`apply_scale_offset: true`) to convert raw pixel values into
 physical units using `physical = raw * scale + offset`. Set `apply_scale_offset: false`
 to keep raw values.
+The underlying COG pixels are stored as integer DN/sample values, not physical
+reflectance values. rslearn applies the scale/offset during read/materialization unless
+`apply_scale_offset: false` is configured.
 For Sentinel-2 spectral bands, this physical unit is reflectance (typically BOA
 reflectance for L2A products), e.g. raw `10000` with scale `0.0001` maps to `1.0`.
+
+`apply_scale_offset` is not Sentinel-2 processing-baseline harmonization. It decodes
+the C1 COG storage values into reflectance. The `harmonize` option used by
+Planetary Computer-style Sentinel-2 sources adjusts DN values across processing
+baselines; this C1 source does not expose a `harmonize` argument.
 
 When `apply_scale_offset: true`, configure the target `band_sets[].dtype` as `float32`.
 rslearn will raise during initialization if a non-float dtype is configured through the
@@ -34,7 +46,7 @@ Source: <https://github.com/Element84/earth-search>
 
 ```jsonc
 {
-  "class_path": "rslearn.data_sources.earthdaily.Sentinel2",
+  "class_path": "rslearn.data_sources.earthdaily.Sentinel2C1L2A",
   "init_args": {
     // Whether to apply STAC `raster:bands` scale/offset (default true). Set to false to
     // keep raw values.
@@ -49,15 +61,9 @@ Source: <https://github.com/Element84/earth-search>
     //
     // Example: ["red", "green", "blue", "nir", "swir16", "swir22", "visual", "scl"]
     "assets": null,
-    // Optional: maximum cloud cover (%) to filter items at search time.
-    // If set, it takes precedence over cloud_cover_threshold and overrides any
-    // `eo:cloud_cover` filter in `query`.
+    // Optional: maximum cloud cover (%) to filter items at search time. If set,
+    // injects an `eo:cloud_cover` upper bound into the STAC query.
     "cloud_cover_max": null,
-    // Optional: default max cloud cover (%) to apply when cloud_cover_max is not set.
-    // If set, it overrides any `eo:cloud_cover` filter in `query`.
-    // If both cloud_cover_max and cloud_cover_threshold are null, `query` (including
-    // any `eo:cloud_cover` filter) is passed through unchanged.
-    "cloud_cover_threshold": null,
     // Maximum number of STAC items to fetch per window before rslearn grouping/matching.
     "search_max_items": 500,
     // Optional ordering of items before grouping (useful with SpaceMode.COMPOSITE +
@@ -65,8 +71,6 @@ Source: <https://github.com/Element84/earth-search>
     "sort_items_by": "cloud_cover",
     // Optional: STAC API `query` filter passed to searches.
     // Example: {"s2:product_type": {"eq": "S2MSI2A"}}
-    // Note: if cloud_cover_max/cloud_cover_threshold is set, the effective query also
-    // includes an `eo:cloud_cover` upper bound.
     "query": null,
     // Optional: STAC item property to sort by before grouping/matching (default null).
     // If set, it takes precedence over sort_items_by.
@@ -96,7 +100,7 @@ Example layer snippet:
     // "nodata_vals": [0, 0, 0]
   }],
   "data_source": {
-    "class_path": "rslearn.data_sources.earthdaily.Sentinel2",
+    "class_path": "rslearn.data_sources.earthdaily.Sentinel2C1L2A",
     "init_args": {
       "apply_scale_offset": true
     }

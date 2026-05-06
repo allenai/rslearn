@@ -14,8 +14,9 @@ from rslearn.utils.array import unique_nodata_value
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, Projection
 from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_format import RasterFormat
 
-from .compositing import Compositor
+from .compositing import BandSetCompositeRequest, Compositor
 from .remap import Remapper, load_remapper
 from .tile_utils import get_needed_band_sets_and_indexes
 from .window import Window
@@ -163,7 +164,15 @@ class RasterMaterializer(Materializer):
             default_request_time_range = window.time_range
 
         compositor = layer_cfg.instantiate_compositor()
-
+        prepared_band_sets: list[
+            tuple[
+                BandSetConfig,
+                Projection,
+                PixelBounds,
+                Remapper | None,
+                RasterFormat,
+            ]
+        ] = []
         for band_cfg in layer_cfg.band_sets:
             projection, bounds = band_cfg.get_final_projection_and_bounds(
                 window.projection, window.bounds
@@ -174,25 +183,45 @@ class RasterMaterializer(Materializer):
                 remapper = load_remapper(band_cfg.remap)
 
             raster_format = band_cfg.instantiate_raster_format()
+            prepared_band_sets.append(
+                (band_cfg, projection, bounds, remapper, raster_format)
+            )
 
-            for group_id, group in enumerate(item_groups):
-                request_time_range = (
-                    group_time_ranges[group_id]
-                    if group_time_ranges is not None
-                    else default_request_time_range
-                )
-                raster = build_composite(
-                    group=group,
-                    compositor=compositor,
-                    tile_store=tile_store,
-                    layer_cfg=layer_cfg,
-                    band_cfg=band_cfg,
-                    projection=projection,
-                    bounds=bounds,
-                    remapper=remapper,
-                    request_time_range=request_time_range,
+        for group_id, group in enumerate(item_groups):
+            request_time_range = (
+                group_time_ranges[group_id]
+                if group_time_ranges is not None
+                else default_request_time_range
+            )
+            requests: list[BandSetCompositeRequest] = []
+            for band_cfg, projection, bounds, remapper, _ in prepared_band_sets:
+                nodata_val: int | float | None = band_cfg.nodata_value
+                if nodata_val is None:
+                    nodata_val = resolve_nodata_value(tile_store, group, band_cfg.bands)
+
+                requests.append(
+                    BandSetCompositeRequest(
+                        nodata_val=nodata_val,
+                        bands=band_cfg.bands,
+                        bounds=bounds,
+                        band_dtype=band_cfg.dtype.get_numpy_dtype(),
+                        projection=projection,
+                        resampling_method=layer_cfg.resampling_method.get_rasterio_resampling(),
+                        remapper=remapper,
+                    )
                 )
 
+            rasters = compositor.build_composites(
+                group=group,
+                requests=requests,
+                tile_store=tile_store,
+                window=window,
+                request_time_range=request_time_range,
+            )
+
+            for (band_cfg, projection, bounds, _, raster_format), raster in zip(
+                prepared_band_sets, rasters, strict=True
+            ):
                 raster_format.encode_raster(
                     window.get_raster_dir(layer_name, band_cfg.bands, group_id),
                     projection,

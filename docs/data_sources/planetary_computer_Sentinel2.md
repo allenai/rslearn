@@ -13,7 +13,8 @@ Sentinel-2 satellite images from https://planetarycomputer.microsoft.com/dataset
     // baselines (recommended), see
     // https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED
     "harmonize": false,
-    // See rslearn.data_sources.planetary_computer.PlanetaryComputer.
+    // Optional STAC query filter. Below are examples of filtering by commonly
+    // used attributes.
     "query": null,
     "sort_by": null,
     "sort_ascending": true,
@@ -120,13 +121,30 @@ To rank with [OmniCloudMask](https://github.com/DPIRD-DMA/OmniCloudMask), config
         "init_args": {
           "red_band": "B04",
           "green_band": "B03",
-          "nir_band": "B8A"
+          "nir_band": "B8A",
+          "scoring_resolution": 20.0
         }
       }
     }
   }
 }
 ```
+
+For reliable ranking quality with OmniCloudMask, create windows with at least
+`96x96` pixels (per dimension). Smaller windows can run, but accuracy may be
+lower even when inference padding is enabled.
+
+For Sentinel-2 with `nir_band="B8A"`, `scoring_resolution: 20.0` is a good
+speed-focused choice because it scores once on a 20 m window-level grid and
+reuses that ordering across the layer's band sets.
+
+That setting is not always optimal for accuracy. If you want the most direct
+ranking on the output grid, leave `scoring_resolution` unset so scoring runs on
+each materialization grid instead.
+
+This same API can be used for other sensors. A good explicit choice for
+finer-than-10 m imagery is often `scoring_resolution: 10.0`, while coarser
+imagery usually works best at its native resolution.
 
 Requires `omnicloudmask` (`pip install .[extra]` in this repo). See
 [`OmniCloudMaskFirstValid`](../compositors/omni_cloud_mask_OmniCloudMaskFirstValid.md)
@@ -221,6 +239,25 @@ got included, e.g.:
     "harmonize": false,
     "query": {
       "s2:processing_baseline": {"gte": "04.00"}
+    }
+  }
+}
+```
+
+### Common STAC Query Filters
+
+Planetary Computer supports many STAC metadata filters. Here is an example combining filters
+for several commonly used attributes: cloud cover, processing baseline, platform (S2A/S2B/S2C), and MGRS tile:
+
+```json
+{
+  "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+  "init_args": {
+    "query": {
+      "eo:cloud_cover": {"lt": 20},
+      "platform": {"in": ["sentinel-2a", "sentinel-2b", "sentinel-2c"]},
+      "s2:mgrs_tile": {"eq": "10TET"},
+      "s2:processing_baseline": {"eq": "05.10"}
     }
   }
 }

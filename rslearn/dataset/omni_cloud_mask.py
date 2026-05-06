@@ -1,5 +1,7 @@
 """OmniCloudMask-based compositor for cloud-aware FIRST_VALID compositing."""
 
+import math
+from collections.abc import Iterator
 from datetime import datetime
 
 import numpy as np
@@ -13,9 +15,10 @@ from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import PixelBounds, Projection
 from rslearn.utils.raster_array import RasterArray
 
-from .compositing import Compositor, FirstValidCompositor
+from .compositing import BandSetCompositeRequest, Compositor, FirstValidCompositor
 from .remap import Remapper
 from .tile_utils import get_needed_band_sets_and_indexes, read_raster_window_from_tiles
+from .window import Window
 
 logger = get_logger(__name__)
 
@@ -31,7 +34,12 @@ class OmniCloudMaskFirstValid(Compositor):
 
     Note that the R/G/NIR bands will be read twice during materialization: once to
     perform cloudiness scoring, and once during compositing to form the materialized
-    image.
+    image. When ``scoring_resolution`` is set, scoring is done once on a grid at
+    that resolution for the whole window and the resulting item order is reused
+    across band-set materialization passes.
+
+    For best ranking quality, use windows with at least 96x96 pixels. Smaller
+    windows can run with padding but may have reduced cloud-mask accuracy.
     """
 
     def __init__(
@@ -40,6 +48,7 @@ class OmniCloudMaskFirstValid(Compositor):
         green_band: str = "B03",
         nir_band: str = "B8A",
         min_inference_size: int = 32,
+        scoring_resolution: float | None = None,
         clear_weight: int = 0,
         thick_cloud_weight: int = 5,
         thin_cloud_weight: int = 1,
@@ -52,7 +61,13 @@ class OmniCloudMaskFirstValid(Compositor):
             green_band: band name for green (e.g. "B03" or "green").
             nir_band: band name for NIR (e.g. "B8A" or "nir08").
             min_inference_size: OmniCloudMask requires at least this many pixels
-                per spatial dimension; smaller windows are padded.
+                per spatial dimension; smaller windows are padded. Padding
+                does not add spatial context, so it is still recommended to use
+                windows of at least 96x96 pixels.
+            scoring_resolution: optional pixel size for the scoring grid. When
+                set, scoring is done once on a window-level grid at this
+                resolution and the resulting ranking is reused across band sets.
+                When unset, scoring is performed on each materialization grid.
             clear_weight: weight for clear pixels when computing the score.
             thick_cloud_weight: weight for thick cloud pixels when computing the score.
             thin_cloud_weight: weight for thin cloud pixels when computing the score.
@@ -62,10 +77,74 @@ class OmniCloudMaskFirstValid(Compositor):
         self.green_band = green_band
         self.nir_band = nir_band
         self.min_inference_size = min_inference_size
+        self.scoring_resolution = scoring_resolution
         self.clear_weight = clear_weight
         self.thick_cloud_weight = thick_cloud_weight
         self.thin_cloud_weight = thin_cloud_weight
         self.cloud_shadow_weight = cloud_shadow_weight
+
+        if self.scoring_resolution is not None and self.scoring_resolution <= 0:
+            raise ValueError("scoring_resolution must be positive")
+
+    def _rescale_grid(
+        self,
+        projection: Projection,
+        bounds: PixelBounds,
+        target_resolution: float,
+    ) -> tuple[Projection, PixelBounds]:
+        """Return a grid with the same spatial extent at a different resolution."""
+        target_x_resolution = math.copysign(target_resolution, projection.x_resolution)
+        target_y_resolution = math.copysign(target_resolution, projection.y_resolution)
+        x_factor = abs(projection.x_resolution) / target_resolution
+        y_factor = abs(projection.y_resolution) / target_resolution
+        target_width = round((bounds[2] - bounds[0]) * x_factor)
+        target_height = round((bounds[3] - bounds[1]) * y_factor)
+        target_left = round(bounds[0] * x_factor)
+        target_top = round(bounds[1] * y_factor)
+        return (
+            Projection(
+                projection.crs,
+                target_x_resolution,
+                target_y_resolution,
+            ),
+            (
+                target_left,
+                target_top,
+                target_left + target_width,
+                target_top + target_height,
+            ),
+        )
+
+    def _get_window_grid(
+        self,
+        projection: Projection,
+        bounds: PixelBounds,
+        window: Window | None = None,
+        target_resolution: float | None = None,
+    ) -> tuple[Projection, PixelBounds]:
+        """Get a window-level scoring grid, optionally rescaled to a target resolution."""
+        base_projection = window.projection if window is not None else projection
+        base_bounds = window.bounds if window is not None else bounds
+        if target_resolution is None:
+            return base_projection, base_bounds
+        return self._rescale_grid(base_projection, base_bounds, target_resolution)
+
+    def _get_scoring_grid(
+        self,
+        projection: Projection,
+        bounds: PixelBounds,
+        window: Window | None = None,
+    ) -> tuple[Projection, PixelBounds]:
+        """Get the grid on which cloud ranking should be evaluated."""
+        if self.scoring_resolution is not None:
+            return self._get_window_grid(
+                projection,
+                bounds,
+                window,
+                self.scoring_resolution,
+            )
+
+        return projection, bounds
 
     def _score_item(
         self,
@@ -149,6 +228,88 @@ class OmniCloudMaskFirstValid(Compositor):
         )
         return score
 
+    def _sort_group(
+        self,
+        group: list[ItemType],
+        tile_store: TileStoreWithLayer,
+        scoring_projection: Projection,
+        scoring_bounds: PixelBounds,
+        resampling_method: Resampling,
+    ) -> list[ItemType]:
+        """Sort a group once for the requested scoring grid."""
+        scored: list[tuple[float, ItemType]] = []
+        for item in group:
+            score = self._score_item(
+                item,
+                tile_store,
+                scoring_projection,
+                scoring_bounds,
+                resampling_method,
+            )
+            if score is None:
+                # Missing image. We skip this item since we can't score it and
+                # anyway it likely also doesn't have the bands needed for compositing.
+                logger.debug("no data for OmniCloudMask scoring of item %s", item.name)
+                continue
+            scored.append((score, item))
+
+        scored.sort(key=lambda t: t[0])
+        return [item for _, item in scored]
+
+    def build_composites(
+        self,
+        group: list[ItemType],
+        requests: list[BandSetCompositeRequest],
+        tile_store: TileStoreWithLayer,
+        window: Window | None = None,
+        request_time_range: tuple[datetime, datetime] | None = None,
+    ) -> Iterator[RasterArray]:
+        """Yield composites for all band sets, sharing ranking work when possible."""
+        sorted_groups: dict[
+            tuple[Projection, PixelBounds, Resampling],
+            list[ItemType],
+        ] = {}
+
+        for request in requests:
+            cur_group = group
+            if len(group) > 1:
+                scoring_projection, scoring_bounds = self._get_scoring_grid(
+                    request.projection,
+                    request.bounds,
+                    window=window,
+                )
+                cache_key = (
+                    scoring_projection,
+                    scoring_bounds,
+                    request.resampling_method,
+                )
+                if cache_key in sorted_groups:
+                    cur_group = sorted_groups[cache_key]
+                else:
+                    cur_group = self._sort_group(
+                        group,
+                        tile_store,
+                        scoring_projection,
+                        scoring_bounds,
+                        request.resampling_method,
+                    )
+                    sorted_groups[cache_key] = cur_group
+
+            yield (
+                FirstValidCompositor().build_composite(
+                    group=cur_group,
+                    nodata_val=request.nodata_val,
+                    bands=request.bands,
+                    bounds=request.bounds,
+                    band_dtype=request.band_dtype,
+                    tile_store=tile_store,
+                    projection=request.projection,
+                    resampling_method=request.resampling_method,
+                    remapper=request.remapper,
+                    request_time_range=request_time_range,
+                )
+            )
+
     def build_composite(
         self,
         group: list[ItemType],
@@ -162,35 +323,12 @@ class OmniCloudMaskFirstValid(Compositor):
         remapper: Remapper | None,
         request_time_range: tuple[datetime, datetime] | None = None,
     ) -> RasterArray:
-        """Score items by cloud cover, sort, then delegate to FIRST_VALID."""
-        if len(group) > 1:
-            scored: list[tuple[float, ItemType]] = []
-            for item in group:
-                score = self._score_item(
-                    item, tile_store, projection, bounds, resampling_method
-                )
-                if score is None:
-                    # Missing image. We skip this item since we can't score it and
-                    # anyway it likely also doesn't have the bands needed for
-                    # copmositing.
-                    logger.debug(
-                        f"no data for OmniCloudMask scoring of item {item.name}"
-                    )
-                    continue
-                scored.append((score, item))
+        """Build a single-band-set composite.
 
-            scored.sort(key=lambda t: t[0])
-            group = [item for _, item in scored]
-
-        return FirstValidCompositor().build_composite(
-            group=group,
-            nodata_val=nodata_val,
-            bands=bands,
-            bounds=bounds,
-            band_dtype=band_dtype,
-            tile_store=tile_store,
-            projection=projection,
-            resampling_method=resampling_method,
-            remapper=remapper,
-            request_time_range=request_time_range,
+        OmniCloudMaskFirstValid now relies on the whole-window ``build_composites``
+        entry point so it can share scoring work consistently across band sets.
+        """
+        raise NotImplementedError(
+            "OmniCloudMaskFirstValid only supports build_composites(); "
+            "call the whole-window API instead."
         )
