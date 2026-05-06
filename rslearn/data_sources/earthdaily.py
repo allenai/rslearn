@@ -109,7 +109,6 @@ class EarthDaily(DataSource, TileStore):
         query: dict[str, Any] | None = None,
         sort_by: str | None = None,
         sort_ascending: bool = True,
-        cloud_cover_threshold: float | None = None,
         cloud_cover_max: float | None = None,
         search_max_items: int | None = None,
         sort_items_by: Literal["cloud_cover", "datetime"] | None = None,
@@ -130,10 +129,7 @@ class EarthDaily(DataSource, TileStore):
             query: optional query argument to STAC searches.
             sort_by: sort by this property in the STAC items.
             sort_ascending: whether to sort ascending (or descending).
-            cloud_cover_threshold: default max cloud cover (%) when cloud_cover_max is
-                not set.
-            cloud_cover_max: max cloud cover (%) injected into the STAC query. Takes
-                precedence over cloud_cover_threshold.
+            cloud_cover_max: max cloud cover (%) injected into the STAC query.
             search_max_items: max STAC items fetched per geometry. None means no limit.
             sort_items_by: secondary sort applied after search: "cloud_cover", "datetime",
                 or None.
@@ -157,7 +153,6 @@ class EarthDaily(DataSource, TileStore):
         self.query = query
         self.sort_by = sort_by
         self.sort_ascending = sort_ascending
-        self.cloud_cover_threshold = cloud_cover_threshold
         self.cloud_cover_max = cloud_cover_max
         self.search_max_items = search_max_items
         self.sort_items_by = sort_items_by
@@ -351,11 +346,7 @@ class EarthDaily(DataSource, TileStore):
             wgs84_geometry = geometry.to_wgs84()
             logger.debug("performing STAC search for geometry %s", wgs84_geometry)
 
-            max_cloud_cover = (
-                self.cloud_cover_max
-                if self.cloud_cover_max is not None
-                else self.cloud_cover_threshold
-            )
+            max_cloud_cover = self.cloud_cover_max
             effective_query: dict[str, Any] | None = (
                 copy.deepcopy(self.query) if self.query is not None else None
             )
@@ -775,7 +766,6 @@ class Sentinel2C1L2A(EarthDaily):
         self,
         apply_scale_offset: bool = True,
         assets: list[str] | None = None,
-        cloud_cover_threshold: float | None = None,
         cloud_cover_max: float | None = None,
         search_max_items: int = 500,
         sort_items_by: Literal["cloud_cover", "datetime"] | None = "cloud_cover",
@@ -794,17 +784,13 @@ class Sentinel2C1L2A(EarthDaily):
             assets: optional list of EarthDaily Sentinel-2 asset keys (e.g. ["red",
                 "green", "blue", "nir", "swir16"]). If omitted and a LayerConfig is
                 provided via context, assets are inferred from that layer's band sets.
-            cloud_cover_threshold: default max cloud cover (%) used when cloud_cover_max
-                is not provided at query time.
-            cloud_cover_max: max cloud cover (%) applied in searches. If set, overrides
-                any `eo:cloud_cover` filter in `query`.
+            cloud_cover_max: max cloud cover (%) applied in searches. If set, injects
+                an `eo:cloud_cover` upper bound into the STAC query.
             search_max_items: max number of STAC items to fetch per window before
                 rslearn's grouping/matching logic runs.
             sort_items_by: optional ordering applied before grouping; useful when
                 using `SpaceMode.COMPOSITE` with `CompositingMethod.FIRST_VALID`.
-            query: optional STAC API `query` filter passed to searches. If
-                cloud_cover_max/cloud_cover_threshold is set, the effective query also
-                includes an `eo:cloud_cover` upper bound.
+            query: optional STAC API `query` filter passed to searches.
             sort_by: optional STAC item property to sort by before grouping/matching.
                 If set, it takes precedence over sort_items_by.
             sort_ascending: whether to sort ascending when sort_by is set.
@@ -866,7 +852,6 @@ class Sentinel2C1L2A(EarthDaily):
             query=query,
             sort_by=sort_by,
             sort_ascending=sort_ascending,
-            cloud_cover_threshold=cloud_cover_threshold,
             cloud_cover_max=cloud_cover_max,
             search_max_items=search_max_items,
             sort_items_by=sort_items_by,
@@ -1005,7 +990,6 @@ class Sentinel2L2A(EarthDaily):
         self,
         harmonize: bool = False,
         assets: list[str] | None = None,
-        cloud_cover_threshold: float | None = None,
         cloud_cover_max: float | None = None,
         search_max_items: int = 500,
         sort_items_by: Literal["cloud_cover", "datetime"] | None = "cloud_cover",
@@ -1024,10 +1008,8 @@ class Sentinel2L2A(EarthDaily):
             harmonize: apply processing-baseline harmonization to reflectance values.
             assets: optional list of asset keys to ingest. If omitted and a LayerConfig
                 is provided via context, assets are inferred from that layer's band sets.
-            cloud_cover_threshold: default max cloud cover (%) used when cloud_cover_max
-                is not provided at query time.
-            cloud_cover_max: max cloud cover (%) applied in searches. If set, overrides
-                any ``eo:cloud_cover`` filter in ``query``.
+            cloud_cover_max: max cloud cover (%) applied in searches. If set, injects
+                an ``eo:cloud_cover`` upper bound into the STAC query.
             search_max_items: max number of STAC items to fetch per window.
             sort_items_by: optional ordering applied before grouping.
             query: optional STAC API ``query`` filter passed to searches.
@@ -1072,7 +1054,6 @@ class Sentinel2L2A(EarthDaily):
             query=query,
             sort_by=sort_by,
             sort_ascending=sort_ascending,
-            cloud_cover_threshold=cloud_cover_threshold,
             cloud_cover_max=cloud_cover_max,
             search_max_items=search_max_items,
             sort_items_by=sort_items_by,

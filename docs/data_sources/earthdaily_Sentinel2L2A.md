@@ -32,12 +32,9 @@ known archive gaps, see [earthdaily.Sentinel2C1L2A](earthdaily_Sentinel2C1L2A.md
     // Optional: list of Sentinel-2 asset keys to fetch.
     // Example: ["B02", "B03", "B04", "B08"]
     "assets": null,
-    // Optional: maximum cloud cover (%) to filter items at search time.
-    // If set, it takes precedence over cloud_cover_threshold and overrides any
-    // `eo:cloud_cover` filter in `query`.
+    // Optional: maximum cloud cover (%) to filter items at search time. If set,
+    // injects an `eo:cloud_cover` upper bound into the STAC query.
     "cloud_cover_max": null,
-    // Optional: default max cloud cover (%) to apply when cloud_cover_max is not set.
-    "cloud_cover_threshold": null,
     // Maximum number of STAC items to fetch per window before rslearn grouping/matching.
     "search_max_items": 500,
     // Optional ordering of items before grouping (useful with SpaceMode.COMPOSITE +
