@@ -1,3 +1,4 @@
+import inspect
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,6 +40,10 @@ def test_chelsa_daily_get_asset_url() -> None:
         "https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/daily/tas/2023/"
         "CHELSA_tas_16_06_2023_V.2.1.tif"
     )
+
+
+def test_chelsa_daily_has_no_extent_init_arg() -> None:
+    assert "extent" not in inspect.signature(CHELSADaily.__init__).parameters
 
 
 def test_chelsa_daily_precipitation_alias_switches_for_pr_band() -> None:

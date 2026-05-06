@@ -77,7 +77,7 @@ class CHELSADaily(
     """Data source for CHELSA-daily global climate rasters.
 
     URL pattern:
-    ``https://os.unil.cloud.switch.ch/chelsa02/chelsa/{extent}/daily/{variable}/{year}/CHELSA_{variable}_{day}_{month}_{year}_{version}.tif``
+    ``https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/daily/{variable}/{year}/CHELSA_{variable}_{day}_{month}_{year}_{version}.tif``
     """
 
     BASE_URL = "https://os.unil.cloud.switch.ch/chelsa02/chelsa"
@@ -106,7 +106,6 @@ class CHELSADaily(
     def __init__(
         self,
         band_names: list[str] | None = None,
-        extent: str = "global",
         start_date: date | str = DEFAULT_START_DATE,
         end_date: date | str = DEFAULT_END_DATE,
         bounds: list[float] | None = None,
@@ -120,7 +119,6 @@ class CHELSADaily(
         Args:
             band_names: CHELSA variable names (e.g. "tas", "pr"). If omitted and
                 context.layer_config is present, uses the unique bands from the layer.
-            extent: CHELSA extent in URL path, usually "global".
             start_date: earliest available date (inclusive).
             end_date: latest available date (inclusive).
             bounds: optional bounding box as [min_lon, min_lat, max_lon, max_lat].
@@ -131,7 +129,6 @@ class CHELSADaily(
             timeout: HTTP timeout for ingest downloads.
             context: data source context.
         """
-        self.extent = extent
         self.base_url = base_url.rstrip("/")
         self.version = version
         self.timeout = timeout
@@ -452,6 +449,6 @@ class CHELSADaily(
         resolved_variable = self._resolve_variable_for_date(asset_key, d)
 
         return (
-            f"{self.base_url}/{self.extent}/daily/{resolved_variable}/{yyyy}/"
+            f"{self.base_url}/global/daily/{resolved_variable}/{yyyy}/"
             f"CHELSA_{resolved_variable}_{dd}_{mm}_{yyyy}_{self.version}.tif"
         )

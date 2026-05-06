@@ -1,11 +1,11 @@
 ## rslearn.data_sources.chelsa.CHELSADaily
 
 CHELSA-daily is a global (~1km) climate dataset with one GeoTIFF per day and
-variable.
+variable. See the [official CHELSA-daily dataset page](https://www.chelsa-climate.org/datasets/chelsa_daily).
 
 This data source currently targets:
 - URL base: `https://os.unil.cloud.switch.ch/chelsa02/chelsa`
-- Dataset path: `{extent}/daily/{variable}/{year}/CHELSA_{variable}_{dd}_{mm}_{yyyy}_V.2.1.tif`
+- Dataset path: `global/daily/{variable}/{year}/CHELSA_{variable}_{dd}_{mm}_{yyyy}_V.2.1.tif`
 - Default time range: 1979-01-01 to 2025-08-29 (inclusive)
 
 Use `query_config.space_mode = SINGLE_COMPOSITE` so all matching daily items are
@@ -22,9 +22,6 @@ returned in one group.
     // switches URL variable by year (before 2020 -> "pr", after 2020 -> "prec",
     // overlap year 2020 preserves your requested alias).
     "band_names": ["tas", "pr"],
-
-    // URL path extent, usually "global".
-    "extent": "global",
 
     // Optional dataset bounds (inclusive). Can be date or YYYY-MM-DD string.
     // Tighten this to your actual window time range to avoid preparing extra days.
@@ -46,9 +43,9 @@ returned in one group.
 }
 ```
 
-`extent` is the CHELSA URL path segment, not a spatial filter. For regional work,
-keep `extent: "global"` and set `bounds` to the area of interest. If `bounds` is
-omitted, ingestion stores the full global source GeoTIFF for every matched day.
+CHELSA-daily is distributed as global GeoTIFFs. For regional work, set `bounds`
+to the area of interest. If `bounds` is omitted, ingestion stores the full global
+source GeoTIFF for every matched day.
 
 ### Precipitation Alias Handling
 
