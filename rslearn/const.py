@@ -8,7 +8,7 @@ TILE_SIZE = 512
 SHAPEFILE_AUX_EXTENSIONS = [".cpg", ".dbf", ".prj", ".sbn", ".sbx", ".shx", ".txt"]
 """Extensions of potential auxiliary files to .shp file."""
 
-TOKENS_PER_SAMPLE_KEY = "tokens_per_sample"
+TOKENS_IN_BATCH_KEY = "tokens_in_batch"
 
 __all__ = (
     "WGS84_PROJECTION",
@@ -16,5 +16,5 @@ __all__ = (
     "WGS84_BOUNDS",
     "TILE_SIZE",
     "SHAPEFILE_AUX_EXTENSIONS",
-    "TOKENS_PER_SAMPLE_KEY",
+    "TOKENS_IN_BATCH_KEY",
 )

@@ -23,7 +23,7 @@ from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (
 )
 from upath import UPath
 
-from rslearn.const import TOKENS_PER_SAMPLE_KEY
+from rslearn.const import TOKENS_IN_BATCH_KEY
 from rslearn.log_utils import get_logger
 from rslearn.models.component import FeatureExtractor, FeatureMaps, TokenFeatureMaps
 from rslearn.train.model_context import ModelContext, RasterImage
@@ -624,22 +624,22 @@ class OlmoEarth(FeatureExtractor):
         return MaskedOlmoEarthSample(**kwargs), present_modalities, device
 
     @staticmethod
-    def compute_tokens_per_sample(
+    def compute_tokens_in_batch(
         tokens_and_masks: TokensAndMasks, present_modalities: list[str]
     ) -> int:
-        """Count the total tokens per sample from the encoder output shapes.
+        """Count the total tokens in the batch from the encoder output shapes.
 
         Args:
             tokens_and_masks: encoder output with BHWTSC tensors per modality.
             present_modalities: modality names that were fed to the encoder.
 
         Returns:
-            total token count (H * W * T * S summed across modalities).
+            total token count (B * H * W * T * S summed across modalities).
         """
         total = 0
         for modality in present_modalities:
-            _, h, w, t, s, _ = getattr(tokens_and_masks, modality).shape
-            total += h * w * t * s
+            b, h, w, t, s, _ = getattr(tokens_and_masks, modality).shape
+            total += b * h * w * t * s
         return total
 
     def forward(self, context: ModelContext) -> FeatureMaps | TokenFeatureMaps:
@@ -694,7 +694,7 @@ class OlmoEarth(FeatureExtractor):
                     sample, patch_size=self.patch_size, **self.forward_kwargs
                 )["tokens_and_masks"]
 
-        context.context_dict[TOKENS_PER_SAMPLE_KEY] = self.compute_tokens_per_sample(
+        context.context_dict[TOKENS_IN_BATCH_KEY] = self.compute_tokens_in_batch(
             tokens_and_masks, present_modalities
         )
 

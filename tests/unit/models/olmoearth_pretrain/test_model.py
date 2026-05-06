@@ -936,8 +936,8 @@ def test_normal_timestamps_two_modalities_1hr_tolerance() -> None:
         )
 
 
-def test_compute_tokens_per_sample() -> None:
-    """Verify token count is H*W*T*S summed across present modalities."""
+def test_compute_tokens_in_batch() -> None:
+    """Verify token count is B*H*W*T*S summed across present modalities."""
     # H, W, T are shared across modalities; S (band sets) differs.
     #                                   B  H  W  T  S  C
     tokens_and_masks = TokensAndMasks(
@@ -945,10 +945,10 @@ def test_compute_tokens_per_sample() -> None:
         sentinel1=torch.zeros(4, 4, 4, 3, 1, 1),
     )
 
-    result = OlmoEarth.compute_tokens_per_sample(
+    result = OlmoEarth.compute_tokens_in_batch(
         tokens_and_masks, ["sentinel2_l2a", "sentinel1"]
     )
-    assert result == 4 * 4 * 3 * 2 + 4 * 4 * 3 * 1
+    assert result == 4 * (4 * 4 * 3 * 2 + 4 * 4 * 3 * 1)
 
-    single = OlmoEarth.compute_tokens_per_sample(tokens_and_masks, ["sentinel2_l2a"])
-    assert single == 4 * 4 * 3 * 2
+    single = OlmoEarth.compute_tokens_in_batch(tokens_and_masks, ["sentinel2_l2a"])
+    assert single == 4 * 4 * 4 * 3 * 2
