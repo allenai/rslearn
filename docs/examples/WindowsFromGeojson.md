@@ -129,9 +129,9 @@ containing the GeoJSON, and it should not contain other files.
 Run prepare, ingest, and materialize again to get the labels:
 
 ```
-rslearn dataset prepare --root $DATASET_PATH --disabled-layers sentinel2 --workers 32
-rslearn dataset ingest --root $DATASET_PATH --disabled-layers sentinel2 --workers 8 --no-use-initial-job --jobs-per-process 1
-rslearn dataset materialize --root $DATASET_PATH --disabled-layers sentinel2 --workers 8 --no-use-initial-job
+rslearn dataset prepare --root $DATASET_PATH --enabled-layers label --workers 32
+rslearn dataset ingest --root $DATASET_PATH --enabled-layers label --workers 8 --no-use-initial-job --jobs-per-process 1
+rslearn dataset materialize --root $DATASET_PATH --enabled-layers label --workers 8 --no-use-initial-job
 ```
 
 You should be able to view the resulting cropped GeoJSON labels alongside the
