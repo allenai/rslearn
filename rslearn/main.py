@@ -370,7 +370,10 @@ def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
         "--config",
         type=str,
         default=None,
-        help="Config filename within the dataset root (default: config.json)",
+        help=(
+            "Path to dataset config JSON. Default is <root>/config.json. "
+            "Otherwise resolved like a normal path (relative to cwd unless absolute)."
+        ),
     )
     parser.add_argument(
         "--enabled-layers",
@@ -474,7 +477,7 @@ def apply_on_windows_args(
     """Call apply_on_windows with arguments passed via command-line interface."""
     dataset_kwargs: dict = {"disabled_layers": args.disabled_layers}
     if args.config is not None:
-        dataset_kwargs["config_filename"] = args.config
+        dataset_kwargs["config_filepath"] = UPath(args.config)
     if args.enabled_layers is not None:
         dataset_kwargs["enabled_layers"] = args.enabled_layers
     dataset = Dataset(UPath(args.root), **dataset_kwargs)

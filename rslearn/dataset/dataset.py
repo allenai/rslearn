@@ -45,7 +45,7 @@ class Dataset:
         path: UPath,
         disabled_layers: list[str] = [],
         dataset_config: DatasetConfig | None = None,
-        config_filename: str = "config.json",
+        config_filepath: UPath | None = None,
         enabled_layers: list[str] | None = None,
     ) -> None:
         """Initializes a new Dataset.
@@ -54,14 +54,19 @@ class Dataset:
             path: the root directory of the dataset
             disabled_layers: list of layers to disable
             dataset_config: optional dataset configuration to use instead of loading from the dataset directory
-            config_filename: config filename to load from the dataset directory (default: config.json)
+            config_filepath: JSON config to load when ``dataset_config`` is None. If None,
+                uses ``path / "config.json"``. May be any path (for example outside ``path``).
             enabled_layers: if set, only these layers are active (disabled_layers still applies within this set)
         """
         self.path = path
 
         if dataset_config is None:
-            # Load dataset configuration from the dataset directory.
-            with (self.path / config_filename).open("r") as f:
+            resolved_config = (
+                self.path / "config.json"
+                if config_filepath is None
+                else config_filepath
+            )
+            with resolved_config.open("r") as f:
                 config_content = f.read()
                 config_content = substitute_env_vars_in_string(config_content)
                 dataset_config = DatasetConfig.model_validate(
