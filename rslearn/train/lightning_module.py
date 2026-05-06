@@ -11,7 +11,6 @@ from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
 from PIL import Image
 from upath import UPath
 
-from rslearn.const import TOKENS_IN_BATCH_KEY
 from rslearn.log_utils import get_logger
 
 from .metrics import NonScalarMetricOutput
@@ -470,11 +469,7 @@ class RslearnLightningModule(L.LightningModule):
             metadatas=metadatas,
         )
         model_outputs = self(context)
-
-        model_outputs.metadata[TOKENS_IN_BATCH_KEY] = context.context_dict.get(
-            TOKENS_IN_BATCH_KEY
-        )
-
+        model_outputs.metadata["context_dict"] = context.context_dict
         return model_outputs
 
     def forward(

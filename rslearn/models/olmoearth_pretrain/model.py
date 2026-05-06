@@ -23,7 +23,6 @@ from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (
 )
 from upath import UPath
 
-from rslearn.const import TOKENS_IN_BATCH_KEY
 from rslearn.log_utils import get_logger
 from rslearn.models.component import FeatureExtractor, FeatureMaps, TokenFeatureMaps
 from rslearn.train.model_context import ModelContext, RasterImage
@@ -37,6 +36,8 @@ MODALITY_NAMES = [
     "openstreetmap_raster",
     "landsat",
 ]
+
+TOKENS_IN_BATCH_KEY = "tokens_in_batch"
 
 AUTOCAST_DTYPE_MAP = {
     "bfloat16": torch.bfloat16,
