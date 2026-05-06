@@ -85,9 +85,9 @@ def parse_time_range(
     return (parse_time(start), parse_time(end))
 
 
-def parse_disabled_layers(disabled_layers: str) -> list[str]:
-    """Parse the disabled layers string."""
-    return disabled_layers.split(",") if disabled_layers else []
+def parse_layers(layers: str) -> list[str]:
+    """Parse a comma-separated list of layer names."""
+    return layers.split(",") if layers else []
 
 
 @register_handler("dataset", "add_windows")
@@ -377,9 +377,9 @@ def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--enabled-layers",
-        type=parse_disabled_layers,
+        type=parse_layers,
         default=None,
-        help="Only enable these layers e.g. 'layer1,layer2' (opposite of --disabled-layers)",
+        help="Only these layers are loaded e.g. 'layer1,layer2' (comma-separated)",
     )
 
 
@@ -475,7 +475,7 @@ def apply_on_windows_args(
     f: Callable[..., Any], args: argparse.Namespace
 ) -> Generator[Any, None, None]:
     """Call apply_on_windows with arguments passed via command-line interface."""
-    dataset_kwargs: dict = {"disabled_layers": args.disabled_layers}
+    dataset_kwargs: dict = {}
     if args.config is not None:
         dataset_kwargs["config_filepath"] = UPath(args.config)
     if args.enabled_layers is not None:
@@ -557,12 +557,6 @@ def dataset_prepare() -> None:
         default=False,
         action=argparse.BooleanOptionalAction,
         help="Prepare windows even if they were previously prepared",
-    )
-    parser.add_argument(
-        "--disabled-layers",
-        type=parse_disabled_layers,
-        default="",
-        help="List of layers to disable e.g 'layer1,layer2'",
     )
     parser.add_argument(
         "--ignore-errors",
@@ -820,12 +814,6 @@ def dataset_ingest() -> None:
         description="rslearn dataset ingest: ingest items in retrieved data sources",
     )
     parser.add_argument(
-        "--disabled-layers",
-        type=parse_disabled_layers,
-        default="",
-        help="List of layers to disable e.g 'layer1,layer2'",
-    )
-    parser.add_argument(
         "--ignore-errors",
         type=bool,
         default=True,
@@ -933,12 +921,6 @@ def dataset_materialize() -> None:
             "rslearn dataset materialize: "
             + "materialize data from retrieved data sources"
         ),
-    )
-    parser.add_argument(
-        "--disabled-layers",
-        type=parse_disabled_layers,
-        default="",
-        help="List of layers to disable e.g 'layer1,layer2'",
     )
     parser.add_argument(
         "--ignore-errors",

@@ -161,8 +161,8 @@ class TestIngestion:
             "ingest",
             "--root",
             str(prepared_dataset.path),
-            "--disabled-layers",
-            "sentinel2",
+            "--enabled-layers",
+            "local_files",
         ]
         monkeypatch.setattr(sys, "argv", mock_args)
 
@@ -179,8 +179,8 @@ class TestIngestion:
             "ingest",
             "--root",
             str(prepared_dataset.path),
-            "--disabled-layers",
-            "local_files,sentinel2",
+            "--enabled-layers",
+            "",
         ]
         monkeypatch.setattr(sys, "argv", mock_args)
 
@@ -197,8 +197,8 @@ class TestIngestion:
             "ingest",
             "--root",
             str(prepared_dataset.path),
-            "--disabled-layers",
-            "sentinel2",
+            "--enabled-layers",
+            "local_files",
         ]
         monkeypatch.setattr(sys, "argv", args)
 
@@ -377,8 +377,8 @@ class TestMaterialization:
             "ingest",
             "--root",
             str(prepared_dataset.path),
-            "--disabled-layers",
-            "sentinel2",
+            "--enabled-layers",
+            "local_files",
         ]
         monkeypatch.setattr(sys, "argv", mock_args)
 
