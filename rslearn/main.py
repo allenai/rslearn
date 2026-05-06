@@ -7,6 +7,7 @@ import os
 import random
 import sys
 import time
+import warnings
 from collections.abc import Callable, Generator
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
@@ -88,6 +89,22 @@ def parse_time_range(
 def parse_layers(layers: str) -> list[str]:
     """Parse a comma-separated list of layer names."""
     return layers.split(",") if layers else []
+
+
+_DISABLED_LAYERS_DEPRECATION_MSG = (
+    "The --disabled-layers option is deprecated and will be removed in a future "
+    "release. Use --enabled-layers to select which layers to load."
+)
+
+
+def warn_deprecated_disabled_layers(disabled_layers: list[str]) -> None:
+    """Emit FutureWarning when deprecated --disabled-layers is used."""
+    if disabled_layers:
+        warnings.warn(
+            _DISABLED_LAYERS_DEPRECATION_MSG,
+            FutureWarning,
+            stacklevel=3,
+        )
 
 
 @register_handler("dataset", "add_windows")
@@ -475,11 +492,16 @@ def apply_on_windows_args(
     f: Callable[..., Any], args: argparse.Namespace
 ) -> Generator[Any, None, None]:
     """Call apply_on_windows with arguments passed via command-line interface."""
+    disabled_layers: list[str] = getattr(args, "disabled_layers", [])
+    warn_deprecated_disabled_layers(disabled_layers)
+
     dataset_kwargs: dict = {}
     if args.config is not None:
         dataset_kwargs["config_filepath"] = UPath(args.config)
     if args.enabled_layers is not None:
         dataset_kwargs["enabled_layers"] = args.enabled_layers
+    if disabled_layers:
+        dataset_kwargs["disabled_layers"] = disabled_layers
     dataset = Dataset(UPath(args.root), **dataset_kwargs)
     yield from apply_on_windows(
         f=f,
@@ -557,6 +579,15 @@ def dataset_prepare() -> None:
         default=False,
         action=argparse.BooleanOptionalAction,
         help="Prepare windows even if they were previously prepared",
+    )
+    parser.add_argument(
+        "--disabled-layers",
+        type=parse_layers,
+        default="",
+        help=(
+            "Deprecated: comma-separated layers to skip; prefer --enabled-layers. "
+            "Will be removed in a future release."
+        ),
     )
     parser.add_argument(
         "--ignore-errors",
@@ -814,6 +845,15 @@ def dataset_ingest() -> None:
         description="rslearn dataset ingest: ingest items in retrieved data sources",
     )
     parser.add_argument(
+        "--disabled-layers",
+        type=parse_layers,
+        default="",
+        help=(
+            "Deprecated: comma-separated layers to skip; prefer --enabled-layers. "
+            "Will be removed in a future release."
+        ),
+    )
+    parser.add_argument(
         "--ignore-errors",
         type=bool,
         default=True,
@@ -920,6 +960,15 @@ def dataset_materialize() -> None:
         description=(
             "rslearn dataset materialize: "
             + "materialize data from retrieved data sources"
+        ),
+    )
+    parser.add_argument(
+        "--disabled-layers",
+        type=parse_layers,
+        default="",
+        help=(
+            "Deprecated: comma-separated layers to skip; prefer --enabled-layers. "
+            "Will be removed in a future release."
         ),
     )
     parser.add_argument(
