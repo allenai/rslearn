@@ -4,6 +4,7 @@ import json
 import pathlib
 from datetime import UTC, datetime
 
+import jsonargparse
 import osmium
 import pytest
 import shapely
@@ -11,9 +12,11 @@ from upath import UPath
 
 from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
+from rslearn.data_sources.data_source import DataSource
 from rslearn.data_sources.openstreetmap import FeatureType, Filter, OpenStreetMap
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
+from rslearn.utils.jsonargparse import init_jsonargparse
 
 # A small area for the test (subset of Seattle).
 TEST_BOUNDS = (-122.34, 47.60, -122.32, 47.62)
@@ -105,3 +108,41 @@ def test_ingest(tmp_path: pathlib.Path, test_pbf: pathlib.Path) -> None:
         geojson = json.load(f)
     assert len(geojson["features"]) == 1
     assert geojson["features"][0]["properties"]["category"] == "building"
+
+
+def test_openstreetmap_jsonargparse_accepts_osm_feature_type_strings(
+    tmp_path: pathlib.Path,
+) -> None:
+    """JSON configs often use OSM-style type names (way, relation) instead of enum names."""
+    init_jsonargparse()
+    pbf = tmp_path / "dummy.osm.pbf"
+    pbf.write_bytes(b"")
+    bounds = tmp_path / "bounds.json"
+    bounds.write_text("[]")
+
+    parser = jsonargparse.ArgumentParser()
+    parser.add_argument("--data_source", type=DataSource)
+    cfg = parser.parse_object(
+        {
+            "data_source": {
+                "class_path": "rslearn.data_sources.openstreetmap.OpenStreetMap",
+                "init_args": {
+                    "pbf_fnames": [str(pbf)],
+                    "bounds_fname": str(bounds),
+                    "categories": {
+                        "building": {
+                            "feature_types": ["way", "relation"],
+                            "tag_conditions": {"building": []},
+                            "to_geometry": "Polygon",
+                        }
+                    },
+                },
+            }
+        }
+    )
+    ds = parser.instantiate_classes(cfg).data_source
+    assert isinstance(ds, OpenStreetMap)
+    assert ds.categories["building"].feature_types == [
+        FeatureType.WAY,
+        FeatureType.RELATION,
+    ]
