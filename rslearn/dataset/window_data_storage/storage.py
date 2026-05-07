@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
 from rasterio.enums import Resampling
-from upath import UPath
 
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, Projection
@@ -24,10 +23,6 @@ class LayerWriter(ABC):
     Returned by :meth:`WindowDataStorage.open_layer_writer`. Callers iterate
     over item groups, calling :meth:`write_raster` / :meth:`write_vector`,
     and the writer's ``__exit__`` flushes any buffered data.
-
-    Per-item-group implementations write each call out immediately, so the
-    default mode never holds more than one group in memory. Per-layer
-    implementations buffer all groups until ``__exit__``.
     """
 
     @abstractmethod
@@ -64,11 +59,11 @@ class LayerWriter(ABC):
 
 
 class WindowDataStorage(ABC):
-    """Storage backend for materialized window data (raster + vector).
+    """Storage backend for per-window materialized raster and vector data.
 
     A WindowDataStorage is dataset-level: one instance per dataset, used for
     all windows and layers in that dataset. The dataset config selects which
-    implementation to use via a :class:`WindowDataStorageFactory`.
+    implementation to use via :class:`WindowDataStorageConfig`.
     """
 
     @abstractmethod
@@ -96,7 +91,7 @@ class WindowDataStorage(ABC):
         group_idx: int = 0,
         resampling: Resampling = Resampling.bilinear,
     ) -> RasterArray:
-        """Read a single item group's raster (CTHW)."""
+        """Read a single item group's raster.."""
 
     def read_rasters(
         self,
@@ -138,16 +133,3 @@ class WindowDataStorage(ABC):
         group_idx: int = 0,
     ) -> list[Feature]:
         """Read a single item group's vector features."""
-
-
-class WindowDataStorageFactory(ABC):
-    """An abstract class for a configurable WindowDataStorage backend.
-
-    The dataset config includes a WindowDataStorageConfig that configures a
-    WindowDataStorageFactory, which in turn creates a WindowDataStorage for a
-    specific dataset path.
-    """
-
-    @abstractmethod
-    def get_storage(self, ds_path: UPath) -> WindowDataStorage:
-        """Get a WindowDataStorage for the given dataset path."""

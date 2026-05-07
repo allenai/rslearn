@@ -18,7 +18,7 @@ from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import RasterFormat, get_bandset_dirname
 from rslearn.utils.vector_format import VectorFormat
 
-from .storage import LayerWriter, WindowDataStorage, WindowDataStorageFactory
+from .storage import LayerWriter, WindowDataStorage
 
 if TYPE_CHECKING:
     from rslearn.dataset.window import Window
@@ -43,7 +43,7 @@ def _per_item_group_raster_dir(
 
 
 class _PerItemGroupLayerWriter(LayerWriter):
-    """Writer for :class:`PerItemGroupStorage`. Writes immediately (no buffering)."""
+    """Writer for :class:`PerItemGroupStorage`. Writes each item group immediately."""
 
     def __init__(self, window: Window, layer_name: str) -> None:
         """Initialize a writer bound to ``window`` and ``layer_name``."""
@@ -100,7 +100,7 @@ class PerItemGroupStorage(WindowDataStorage):
         window: Window,
         layer_name: str,
     ) -> LayerWriter:
-        """Return a writer that flushes each ``write_*`` call immediately."""
+        """Return a writer that writes each raster individually upon ``write_raster`` call."""
         return _PerItemGroupLayerWriter(window, layer_name)
 
     @override
@@ -134,12 +134,3 @@ class PerItemGroupStorage(WindowDataStorage):
         """Decode the vector features from the per-group directory."""
         layer_dir = _per_item_group_layer_dir(window.window_root, layer_name, group_idx)
         return vector_format.decode_vector(layer_dir, projection, bounds)
-
-
-class PerItemGroupStorageFactory(WindowDataStorageFactory):
-    """Factory for :class:`PerItemGroupStorage`."""
-
-    @override
-    def get_storage(self, ds_path: UPath) -> PerItemGroupStorage:
-        """Return a :class:`PerItemGroupStorage` (does not depend on ``ds_path``)."""
-        return PerItemGroupStorage()

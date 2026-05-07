@@ -211,7 +211,9 @@ def test_migrate_window_storage(
         window.group, window.name, "layer_name", group_idx=0
     )
 
-    migrated = migrate_window_storage(source_storage, target_storage)
+    migrated = migrate_window_storage(
+        source_storage, target_storage, PerItemGroupStorage()
+    )
     assert migrated == 1
 
     target_windows = target_storage.get_windows(data_storage=PerItemGroupStorage())
@@ -269,7 +271,7 @@ def test_migrate_window_storage_requires_empty_target(
     )
 
     with pytest.raises(ValueError, match="not empty"):
-        migrate_window_storage(source_storage, target_storage)
+        migrate_window_storage(source_storage, target_storage, PerItemGroupStorage())
 
 
 def test_sqlite_rejects_wrong_schema_version(tmp_path: pathlib.Path) -> None:

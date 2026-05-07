@@ -13,7 +13,6 @@ from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.window_data_storage.per_layer import (
     PER_LAYER_STORAGE_META_FNAME,
     PerLayerStorage,
-    PerLayerStorageFactory,
 )
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import STGeometry
@@ -40,12 +39,6 @@ def _make_window(tmp_path: pathlib.Path) -> Window:
     )
     window.save()
     return window
-
-
-def test_factory_returns_per_layer_storage(tmp_path: pathlib.Path) -> None:
-    """The factory returns a fresh PerLayerStorage."""
-    storage = PerLayerStorageFactory().get_storage(UPath(tmp_path))
-    assert isinstance(storage, PerLayerStorage)
 
 
 def test_raster_roundtrip(tmp_path: pathlib.Path) -> None:

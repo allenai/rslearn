@@ -344,8 +344,8 @@ class RslearnWriter(BasePredictionWriter):
 
         # Likewise for the WindowDataStorage.
         if self.window_data_storage_config:
-            window_data_storage = self.window_data_storage_config.instantiate_window_data_storage_factory().get_storage(
-                output_upath
+            window_data_storage = (
+                self.window_data_storage_config.instantiate_window_data_storage()
             )
 
         if not self.layer_config or not dataset_storage:
@@ -372,8 +372,8 @@ class RslearnWriter(BasePredictionWriter):
             # Only honor the dataset config's window_data_storage when the
             # caller didn't override it explicitly.
             if not window_data_storage:
-                window_data_storage = dataset_config.window_data_storage.instantiate_window_data_storage_factory().get_storage(
-                    output_upath
+                window_data_storage = (
+                    dataset_config.window_data_storage.instantiate_window_data_storage()
                 )
 
         if not window_data_storage:

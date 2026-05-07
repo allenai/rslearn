@@ -4,7 +4,9 @@ Stores combined rasters at ``layers/{layer_name}/{bandset_dir}/...`` with a
 ``window_storage_meta.json`` sidecar recording each group's number of
 timesteps. Item groups are concatenated along the T axis, so reading back any
 individual group requires the sidecar to know which T-slice corresponds to
-which group. Vector data is not supported.
+which group.
+
+Vector data is still stored per-item-group.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from rslearn.utils.raster_format import RasterFormat, get_bandset_dirname
 from rslearn.utils.vector_format import VectorFormat
 
 from .per_item_group import PerItemGroupStorage
-from .storage import LayerWriter, WindowDataStorage, WindowDataStorageFactory
+from .storage import LayerWriter, WindowDataStorage
 
 if TYPE_CHECKING:
     from rslearn.dataset.window import Window
@@ -42,9 +44,7 @@ def _per_layer_raster_dir(
     """Per-layer raster directory: ``layers/{layer_name}/{bandset}/``.
 
     Note this matches the location used by ``PerItemGroupStorage`` for
-    ``group_idx=0``. ``PerLayerStorage`` is a distinct on-disk layout because
-    of the sidecar at :data:`PER_LAYER_STORAGE_META_FNAME` and the combined
-    T axis.
+    ``group_idx=0``.
     """
     dirname = get_bandset_dirname(bands)
     return window_root / "layers" / layer_name / dirname
@@ -250,8 +250,7 @@ class PerLayerStorage(WindowDataStorage):
 
     def __init__(self) -> None:
         """Initialize the storage."""
-        # PerLayerStorage delegates vector ops to PerItemGroupStorage so
-        # mixed-modality datasets work out of the box.
+        # PerLayerStorage delegates vector ops to PerItemGroupStorage.
         self._per_item_group_storage = PerItemGroupStorage()
 
     @override
@@ -355,12 +354,3 @@ class PerLayerStorage(WindowDataStorage):
             bounds,
             group_idx=group_idx,
         )
-
-
-class PerLayerStorageFactory(WindowDataStorageFactory):
-    """Factory for :class:`PerLayerStorage`."""
-
-    @override
-    def get_storage(self, ds_path: UPath) -> PerLayerStorage:
-        """Return a :class:`PerLayerStorage` (does not depend on ``ds_path``)."""
-        return PerLayerStorage()

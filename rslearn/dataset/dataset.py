@@ -88,8 +88,8 @@ class Dataset:
                 self.path
             )
         )
-        self.window_data_storage = dataset_config.window_data_storage.instantiate_window_data_storage_factory().get_storage(
-            self.path
+        self.window_data_storage = (
+            dataset_config.window_data_storage.instantiate_window_data_storage()
         )
 
     def load_windows(

@@ -325,6 +325,7 @@ def dataset_migrate() -> None:
     num_windows = migrate_window_storage(
         dataset.storage,
         target_storage,
+        dataset.window_data_storage,
         fail_if_target_nonempty=args.fail_if_target_nonempty,
         source_get_windows_kwargs=source_get_windows_kwargs,
     )
