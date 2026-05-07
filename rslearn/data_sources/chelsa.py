@@ -321,6 +321,10 @@ class CHELSADaily(
                 and not matched_groups
                 and query_config.min_matches == 0
             ):
+                # A bounded CHELSA source can legitimately have no items for a
+                # window outside the configured bounds. Return one empty group so
+                # materialization writes an empty/nodata raster instead of treating
+                # the layer as having no groups to materialize.
                 matched_groups = [
                     MatchedItemGroup(items=[], request_time_range=geometry.time_range)
                 ]
