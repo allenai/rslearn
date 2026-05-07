@@ -1,43 +1,32 @@
 """rslearn windows."""
 
+import warnings
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import shapely
+from rasterio.enums import Resampling
 from upath import UPath
 
 from rslearn.dataset.storage.storage import WindowStorage
+from rslearn.dataset.window_data_storage.per_item_group import (
+    _per_item_group_layer_dir,
+    _per_item_group_raster_dir,
+)
 from rslearn.log_utils import get_logger
 from rslearn.utils import Projection, STGeometry
-from rslearn.utils.raster_format import get_bandset_dirname
+from rslearn.utils.feature import Feature
+from rslearn.utils.raster_array import RasterArray
+from rslearn.utils.raster_format import RasterFormat
+from rslearn.utils.vector_format import VectorFormat
+
+if TYPE_CHECKING:
+    from rslearn.dataset.window_data_storage.storage import (
+        LayerWriter,
+        WindowDataStorage,
+    )
 
 logger = get_logger(__name__)
-
-LAYERS_DIRECTORY_NAME = "layers"
-
-
-def get_window_layer_dir(
-    window_path: UPath, layer_name: str, group_idx: int = 0
-) -> UPath:
-    """Get the directory containing materialized data for the specified item group.
-
-    A layer may have multiple item groups (different timesteps/mosaics). The directory
-    for group_idx=0 is named after the layer (e.g. ``layers/sentinel2``), while
-    subsequent groups append the index (e.g. ``layers/sentinel2.1``).
-
-    Args:
-        window_path: the window directory.
-        layer_name: the layer name.
-        group_idx: the item group index within the layer (default 0).
-
-    Returns:
-        the path where data for this item group is or should be materialized.
-    """
-    if group_idx == 0:
-        folder_name = layer_name
-    else:
-        folder_name = f"{layer_name}.{group_idx}"
-    return window_path / LAYERS_DIRECTORY_NAME / folder_name
 
 
 def get_layer_and_group_from_dir_name(layer_dir_name: str) -> tuple[str, int]:
@@ -58,25 +47,6 @@ def get_layer_and_group_from_dir_name(layer_dir_name: str) -> tuple[str, int]:
         return (parts[0], int(parts[1]))
     else:
         return (layer_dir_name, 0)
-
-
-def get_window_raster_dir(
-    window_path: UPath, layer_name: str, bands: list[str], group_idx: int = 0
-) -> UPath:
-    """Get the directory where the raster is materialized for a specific item group.
-
-    Args:
-        window_path: the window directory.
-        layer_name: the layer name.
-        bands: the bands in the raster. It should match a band set defined for this
-            layer.
-        group_idx: the item group index within the layer (default 0).
-
-    Returns:
-        the directory containing the raster for this item group.
-    """
-    dirname = get_bandset_dirname(bands)
-    return get_window_layer_dir(window_path, layer_name, group_idx) / dirname
 
 
 class WindowLayerData:
@@ -177,6 +147,7 @@ class Window:
         bounds: tuple[int, int, int, int],
         time_range: tuple[datetime, datetime] | None,
         options: dict[str, Any] = {},
+        data_storage: "WindowDataStorage | None" = None,
     ) -> None:
         """Creates a new Window instance.
 
@@ -184,13 +155,16 @@ class Window:
         stored in metadata.json.
 
         Args:
-            storage: the dataset storage for the underlying rslearn dataset.
+            storage: the metadata storage for the underlying rslearn dataset.
             group: the group the window belongs to
             name: the unique name for this window
             projection: the projection of the window
             bounds: the bounds of the window in pixel coordinates
             time_range: optional time range of the window
             options: additional options (?)
+            data_storage: the WindowDataStorage to use for materialized raster/
+                vector data on this window. The Dataset normally injects the
+                dataset-configured WindowDataStorage when loading windows.
         """
         self.storage = storage
         self.group = group
@@ -200,6 +174,16 @@ class Window:
         self.time_range = time_range
         self.options = options
 
+        if data_storage is None:
+            # Lazy import to avoid a circular import with window_data_storage,
+            # which imports back from rslearn.dataset.window.
+            from rslearn.dataset.window_data_storage.per_item_group import (
+                PerItemGroupStorage,
+            )
+
+            data_storage = PerItemGroupStorage()
+        self.data_storage: WindowDataStorage = data_storage
+
     def get_geometry(self) -> STGeometry:
         """Computes the STGeometry corresponding to this window."""
         return STGeometry(
@@ -207,6 +191,11 @@ class Window:
             shp=shapely.geometry.box(*self.bounds),
             time_range=self.time_range,
         )
+
+    @property
+    def window_root(self) -> UPath:
+        """The root directory of this window in its WindowStorage."""
+        return self.storage.get_window_root(self.group, self.name)
 
     def load_layer_datas(self) -> dict[str, WindowLayerData]:
         """Load layer datas describing items in retrieved layers from items.json."""
@@ -227,6 +216,12 @@ class Window:
     def get_layer_dir(self, layer_name: str, group_idx: int = 0) -> UPath:
         """Get the directory containing materialized data for the specified item group.
 
+        .. deprecated::
+            This returns the per-item-group layout used by
+            :class:`rslearn.dataset.window_storage.PerItemGroupStorage`. It is
+            not valid for other ``WindowDataStorage`` implementations. Read
+            and write materialized data through ``WindowDataStorage`` instead.
+
         Args:
             layer_name: the layer name.
             group_idx: the item group index within the layer (default 0).
@@ -234,9 +229,13 @@ class Window:
         Returns:
             the path where data for this item group is or should be materialized.
         """
-        return get_window_layer_dir(
-            self.storage.get_window_root(self.group, self.name), layer_name, group_idx
+        warnings.warn(
+            "Window.get_layer_dir is deprecated; access materialized data via "
+            "Window.data_storage (WindowDataStorage).",
+            DeprecationWarning,
+            stacklevel=2,
         )
+        return _per_item_group_layer_dir(self.window_root, layer_name, group_idx)
 
     def is_layer_completed(self, layer_name: str, group_idx: int = 0) -> bool:
         """Check whether the specified item group is completed (materialized).
@@ -267,10 +266,117 @@ class Window:
         """
         self.storage.mark_layer_completed(self.group, self.name, layer_name, group_idx)
 
+    def open_layer_writer(self, layer_name: str) -> "LayerWriter":
+        """Open a writer for one materialization pass over a layer.
+
+        Args:
+            layer_name: the layer name.
+
+        Returns:
+            a context-managed LayerWriter.
+        """
+        return self.data_storage.open_layer_writer(self, layer_name)
+
+    def read_raster(
+        self,
+        layer_name: str,
+        bands: list[str],
+        raster_format: RasterFormat,
+        group_idx: int = 0,
+        projection: Projection | None = None,
+        bounds: tuple[int, int, int, int] | None = None,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> RasterArray:
+        """Read a single item group's raster.
+
+        Args:
+            layer_name: the layer name.
+            bands: the band set to read.
+            raster_format: the raster format to decode with.
+            group_idx: the item group index (default 0).
+            projection: target projection (defaults to window projection).
+            bounds: target bounds (defaults to window bounds).
+            resampling: resampling method (defaults to bilinear).
+        """
+        return self.data_storage.read_raster(
+            self,
+            layer_name,
+            bands,
+            raster_format,
+            projection if projection is not None else self.projection,
+            bounds if bounds is not None else self.bounds,
+            group_idx=group_idx,
+            resampling=resampling,
+        )
+
+    def read_all_rasters(
+        self,
+        layer_name: str,
+        bands: list[str],
+        num_groups: int,
+        raster_format: RasterFormat,
+        projection: Projection | None = None,
+        bounds: tuple[int, int, int, int] | None = None,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> list[RasterArray]:
+        """Read all item groups' rasters for a layer.
+
+        Args:
+            layer_name: the layer name.
+            bands: the band set to read.
+            num_groups: number of item groups.
+            raster_format: the raster format to decode with.
+            projection: target projection (defaults to window projection).
+            bounds: target bounds (defaults to window bounds).
+            resampling: resampling method (defaults to bilinear).
+        """
+        return self.data_storage.read_all_rasters(
+            self,
+            layer_name,
+            bands,
+            num_groups,
+            raster_format,
+            projection if projection is not None else self.projection,
+            bounds if bounds is not None else self.bounds,
+            resampling=resampling,
+        )
+
+    def read_vector(
+        self,
+        layer_name: str,
+        vector_format: VectorFormat,
+        group_idx: int = 0,
+        projection: Projection | None = None,
+        bounds: tuple[int, int, int, int] | None = None,
+    ) -> list[Feature]:
+        """Read a single item group's vector features.
+
+        Args:
+            layer_name: the layer name.
+            vector_format: the vector format to decode with.
+            group_idx: the item group index (default 0).
+            projection: target projection (defaults to window projection).
+            bounds: target bounds (defaults to window bounds).
+        """
+        return self.data_storage.read_vector(
+            self,
+            layer_name,
+            vector_format,
+            projection if projection is not None else self.projection,
+            bounds if bounds is not None else self.bounds,
+            group_idx=group_idx,
+        )
+
     def get_raster_dir(
         self, layer_name: str, bands: list[str], group_idx: int = 0
     ) -> UPath:
         """Get the directory where the raster is materialized for a specific item group.
+
+        .. deprecated::
+            This returns the per-item-group layout used by
+            :class:`rslearn.dataset.window_storage.PerItemGroupStorage`. It is
+            not valid for other ``WindowDataStorage`` implementations. Read
+            and write raster data through ``WindowDataStorage`` instead.
 
         Args:
             layer_name: the layer name.
@@ -281,8 +387,14 @@ class Window:
         Returns:
             the directory containing the raster for this item group.
         """
-        return get_window_raster_dir(
-            self.storage.get_window_root(self.group, self.name),
+        warnings.warn(
+            "Window.get_raster_dir is deprecated; access raster data via "
+            "Window.data_storage (WindowDataStorage).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return _per_item_group_raster_dir(
+            self.window_root,
             layer_name,
             bands,
             group_idx,

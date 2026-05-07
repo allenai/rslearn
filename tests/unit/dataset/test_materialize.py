@@ -19,6 +19,10 @@ from rslearn.dataset.materialize import RasterMaterializer, resolve_nodata_value
 from rslearn.dataset.remap import Remapper
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.tile_utils import read_raster_window_from_tiles
+from rslearn.dataset.window_data_storage.per_layer import (
+    PER_LAYER_STORAGE_META_FNAME,
+    PerLayerStorage,
+)
 from rslearn.tile_stores.default import DefaultTileStore
 from rslearn.tile_stores.tile_store import TileStoreWithLayer
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
@@ -371,3 +375,67 @@ def test_raster_materializer_passes_all_band_sets_to_compositor(
     assert group == []
     assert [request.bands for request in requests] == [["B1"], ["B2"]]
     assert call_window is window
+
+
+def test_raster_materializer_with_per_layer_storage(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RasterMaterializer + PerLayerStorage produces a single combined raster."""
+    layer_cfg = LayerConfig.model_validate(
+        {
+            "type": "raster",
+            "band_sets": [
+                {
+                    "bands": ["B1"],
+                    "dtype": "uint8",
+                    "format": {
+                        "class_path": "rslearn.utils.raster_format.GeotiffRasterFormat",
+                    },
+                },
+            ],
+        }
+    )
+    compositor = RecordingCompositor()
+    monkeypatch.setattr(LayerConfig, "instantiate_compositor", lambda self: compositor)
+
+    per_layer_storage = PerLayerStorage()
+    window = Window(
+        storage=FileWindowStorage(UPath(tmp_path / "dataset")),
+        group="default",
+        name="window",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 4, 4),
+        time_range=None,
+        data_storage=per_layer_storage,
+    )
+    window.save()
+
+    tile_store = DefaultTileStore()
+    tile_store.set_dataset_path(UPath(tmp_path / "tile_store"))
+
+    RasterMaterializer().materialize(
+        tile_store=TileStoreWithLayer(tile_store, "layer"),
+        window=window,
+        layer_name="layer",
+        layer_cfg=layer_cfg,
+        item_groups=[[], []],
+    )
+
+    # PerLayerStorage writes a single combined directory (no per-group dir).
+    layer_dir = window.window_root / "layers" / "layer" / "B1"
+    assert (layer_dir / PER_LAYER_STORAGE_META_FNAME).exists()
+    assert not (window.window_root / "layers" / "layer.1" / "B1").exists()
+
+    # Per-group completion markers should still exist.
+    assert window.is_layer_completed("layer", 0)
+    assert window.is_layer_completed("layer", 1)
+
+    # Reading back via window.read_all_rasters should yield two
+    # RasterArrays.
+    raster_format = layer_cfg.band_sets[0].instantiate_raster_format()
+    arrays = per_layer_storage.read_all_rasters(
+        window, "layer", ["B1"], 2, raster_format, WGS84_PROJECTION, (0, 0, 4, 4)
+    )
+    assert len(arrays) == 2
+    for arr in arrays:
+        assert arr.array.shape == (1, 1, 4, 4)

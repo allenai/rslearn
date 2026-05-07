@@ -93,6 +93,11 @@ The overall dataset configuration file looks like this:
   // storage scheme (no database).
   "storage": {
     // Window storage config.
+  },
+  // The window data storage config is optional. It defaults to writing one
+  // directory per item group on disk. See "Window Data Storage" below.
+  "window_data_storage": {
+    // Window data storage config.
   }
 }
 ```
@@ -109,3 +114,4 @@ configuration files for different use cases.
   `resampling_method`, and `compositing_method` above).
 - [TileStoreConfig](dataset_config/TileStoreConfig.md): the tile store config.
 - [WindowStorageConfig](dataset_config/WindowStorageConfig.md): the window storage config.
+- [WindowDataStorageConfig](dataset_config/WindowDataStorageConfig.md): the window data storage config.

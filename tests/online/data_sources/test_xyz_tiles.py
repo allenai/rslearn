@@ -53,8 +53,7 @@ class TestXyzTiles:
             "raster",
             layer_config,
         )
-        expected_path = window.get_raster_dir("raster", self.TEST_BANDS) / "geotiff.tif"
-        assert expected_path.exists()
+        assert window.is_layer_completed("raster")
 
     def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         """Test ingesting to local filesystem."""

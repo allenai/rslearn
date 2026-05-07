@@ -8,11 +8,9 @@ from typing_extensions import override
 from upath import UPath
 
 from rslearn.dataset.window import (
-    LAYERS_DIRECTORY_NAME,
     Window,
     WindowLayerData,
     get_layer_and_group_from_dir_name,
-    get_window_layer_dir,
 )
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import iter_nonhidden, iter_nonhidden_subdirs, open_atomic
@@ -22,6 +20,14 @@ from rslearn.utils.mp import make_pool_and_star_imap_unordered
 from .storage import WindowStorage, WindowStorageFactory
 
 logger = get_logger(__name__)
+
+LAYERS_SUBDIR = "layers"
+
+
+def _file_layer_dir(window_path: UPath, layer_name: str, group_idx: int = 0) -> UPath:
+    """Build the per-item-group layer directory used by FileWindowStorage."""
+    folder_name = layer_name if group_idx == 0 else f"{layer_name}.{group_idx}"
+    return window_path / LAYERS_SUBDIR / folder_name
 
 
 def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window:
@@ -203,7 +209,7 @@ class FileWindowStorage(WindowStorage):
     @override
     def list_completed_layers(self, group: str, name: str) -> list[tuple[str, int]]:
         window_path = self.get_window_root(group, name)
-        layers_directory = window_path / LAYERS_DIRECTORY_NAME
+        layers_directory = window_path / LAYERS_SUBDIR
         if not layers_directory.exists():
             return []
 
@@ -222,7 +228,7 @@ class FileWindowStorage(WindowStorage):
     ) -> bool:
         self._validate_layer_name(layer_name)
         window_path = self.get_window_root(group, name)
-        layer_dir = get_window_layer_dir(
+        layer_dir = _file_layer_dir(
             window_path,
             layer_name,
             group_idx,
@@ -235,9 +241,8 @@ class FileWindowStorage(WindowStorage):
     ) -> None:
         self._validate_layer_name(layer_name)
         window_path = self.get_window_root(group, name)
-        layer_dir = get_window_layer_dir(window_path, layer_name, group_idx)
-        # We assume the directory exists because the item group should be materialized
-        # before being marked completed.
+        layer_dir = _file_layer_dir(window_path, layer_name, group_idx)
+        layer_dir.mkdir(parents=True, exist_ok=True)
         (layer_dir / "completed").touch()
 
 

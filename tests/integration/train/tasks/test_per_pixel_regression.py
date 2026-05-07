@@ -79,25 +79,27 @@ def regression_dataset(tmp_path: pathlib.Path) -> Dataset:
     # Add a simple input image.
     image = np.random.randint(0, 255, size=(1, 32, 32), dtype=np.uint8)
     layer_name = "image"
-    layer_dir = window.get_layer_dir(layer_name)
-    GeotiffRasterFormat().encode_raster(
-        layer_dir / "band",
-        window.projection,
-        window.bounds,
-        RasterArray(chw_array=image),
-    )
+    with window.open_layer_writer(layer_name) as writer:
+        writer.write_raster(
+            ["band"],
+            GeotiffRasterFormat(),
+            window.projection,
+            window.bounds,
+            RasterArray(chw_array=image),
+        )
     window.mark_layer_completed(layer_name)
 
     # Add regression target values (float values between 0 and 1).
     targets = np.random.rand(1, 32, 32).astype(np.float32)
     layer_name = "targets"
-    layer_dir = window.get_layer_dir(layer_name)
-    GeotiffRasterFormat().encode_raster(
-        layer_dir / "value",
-        window.projection,
-        window.bounds,
-        RasterArray(chw_array=targets),
-    )
+    with window.open_layer_writer(layer_name) as writer:
+        writer.write_raster(
+            ["value"],
+            GeotiffRasterFormat(),
+            window.projection,
+            window.bounds,
+            RasterArray(chw_array=targets),
+        )
     window.mark_layer_completed(layer_name)
 
     return dataset
@@ -226,15 +228,11 @@ def test_per_pixel_regression_prediction_writes_to_dataset(
     # Verify that predictions were written to the dataset.
     window = regression_dataset.load_windows()[0]
     assert window.is_layer_completed("predictions")
-    array = (
-        GeotiffRasterFormat()
-        .decode_raster(
-            window.get_raster_dir("predictions", ["value"]),
-            window.projection,
-            window.bounds,
-        )
-        .get_chw_array()
-    )
+    array = window.read_raster(
+        "predictions",
+        ["value"],
+        GeotiffRasterFormat(),
+    ).get_chw_array()
     assert array.shape == (1, 32, 32)
 
 

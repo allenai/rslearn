@@ -44,9 +44,7 @@ class TestLocalFiles:
         window = windows[0]
         layer_config = local_files_dataset.layers["local_file"]
         vector_format = layer_config.instantiate_vector_format()
-        features = vector_format.decode_vector(
-            window.get_layer_dir("local_file"), window.projection, window.bounds
-        )
+        features = window.read_vector("local_file", vector_format)
 
         assert len(features) == 2
 
@@ -128,9 +126,7 @@ class TestLocalFiles:
         window = windows[0]
         layer_config = dataset.layers["local_file"]
         vector_format = layer_config.instantiate_vector_format()
-        features = vector_format.decode_vector(
-            window.get_layer_dir("local_file"), window.projection, window.bounds
-        )
+        features = window.read_vector("local_file", vector_format)
         assert len(features) == 1
         assert features[0].properties is not None
         assert features[0].properties["check"]
@@ -201,9 +197,10 @@ class TestLocalFiles:
 
         # Verify that b1 is 0s and b2 is 1s.
         window = windows[0]
-        raster_dir = window.get_raster_dir(layer_name, ["b1", "b2"])
-        materialized_image = GeotiffRasterFormat().decode_raster(
-            raster_dir, window.projection, window.bounds
+        materialized_image = window.read_raster(
+            layer_name,
+            ["b1", "b2"],
+            GeotiffRasterFormat(),
         )
         arr = materialized_image.get_chw_array()
         assert arr[0, :, :].min() == 0 and arr[0, :, :].max() == 0
@@ -282,11 +279,10 @@ class TestLocalFiles:
         materialize_dataset_windows(dataset, windows)
 
         window = windows[0]
-        raster_dir = window.get_raster_dir(layer_name, ["B1"])
-        assert raster_dir.exists()
-
-        materialized_image = GeotiffRasterFormat().decode_raster(
-            raster_dir, window.projection, window.bounds
+        materialized_image = window.read_raster(
+            layer_name,
+            ["B1"],
+            GeotiffRasterFormat(),
         )
         arr = materialized_image.get_chw_array()
         assert arr.shape[0] == 1
@@ -374,7 +370,7 @@ class TestCoordinateModes:
         prepare_dataset_windows(dataset, windows)
         ingest_dataset_windows(dataset, windows)
         materialize_dataset_windows(dataset, windows)
-        assert not (bad_window.get_layer_dir("local_file") / "data.geojson").exists()
+        assert not bad_window.is_layer_completed("local_file")
 
     def test_match_in_different_crs(
         self, seattle_point: STGeometry, vector_ds_path: UPath
@@ -404,4 +400,4 @@ class TestCoordinateModes:
         prepare_dataset_windows(dataset, windows)
         ingest_dataset_windows(dataset, windows)
         materialize_dataset_windows(dataset, windows)
-        assert (good_window.get_layer_dir("local_file") / "data.geojson").exists()
+        assert good_window.is_layer_completed("local_file")

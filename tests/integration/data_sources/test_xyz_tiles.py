@@ -98,11 +98,10 @@ def test_materialize(
         "raster",
         layer_config,
     )
-    raster_dir = window.get_raster_dir("raster", ["R", "G", "B"])
-    assert (raster_dir / "geotiff.tif").exists()
-
-    array = (
-        GeotiffRasterFormat().decode_raster(raster_dir, proj, bounds).get_chw_array()
-    )
+    array = window.read_raster(
+        "raster",
+        ["R", "G", "B"],
+        GeotiffRasterFormat(),
+    ).get_chw_array()
     assert array.shape == (3, 64, 64)
     assert np.all(array == PIXEL_VALUE)

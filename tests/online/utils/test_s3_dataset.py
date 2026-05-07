@@ -86,9 +86,7 @@ class TestLocalFiles:
         window = windows[0]
         layer_config = dataset.layers["local_file"]
         vector_format = layer_config.instantiate_vector_format()
-        features = vector_format.decode_vector(
-            window.get_layer_dir("local_file"), window.projection, window.bounds
-        )
+        features = window.read_vector("local_file", vector_format)
 
         assert len(features) == 2
 

@@ -9,7 +9,7 @@ from rasterio.warp import Resampling
 from rslearn.config import DType, LayerConfig
 from rslearn.dataset import Window
 from rslearn.log_utils import get_logger
-from rslearn.train.dataset import DataInput, read_raster_layer_for_data_input
+from rslearn.train.dataset import DataInput, read_raster_layer_groups_for_data_input
 from rslearn.utils.colors import DEFAULT_COLORS
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
 
@@ -36,7 +36,7 @@ def read_raster_layer(
     """Read a raster layer for visualization.
 
     This reads bands from potentially multiple band sets to get the requested bands.
-    Uses read_raster_layer_for_data_input from rslearn.train.dataset.
+    Uses read_raster_layer_groups_for_data_input from rslearn.train.dataset.
 
     Args:
         window: The window to read from
@@ -61,11 +61,11 @@ def read_raster_layer(
         resampling=Resampling.nearest,
     )
 
-    image_tensor, _ = read_raster_layer_for_data_input(
-        window, bounds, layer_name, group_idx, layer_config, data_input
+    image_tensors, _ = read_raster_layer_groups_for_data_input(
+        window, bounds, layer_name, [group_idx], layer_config, data_input
     )
 
-    array = image_tensor.numpy().astype(np.float32)  # (C, T, H, W)
+    array = image_tensors[0].numpy().astype(np.float32)  # (C, T, H, W)
     array = array[:, 0, :, :]
     return array
 

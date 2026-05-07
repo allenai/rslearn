@@ -146,16 +146,20 @@ class TestDataset:
         window.save()
 
         # Write raster data for group_idx=0 (value 1) and group_idx=1 (value 2).
-        for group_idx, pixel_value in [(0, 1), (1, 2)]:
-            raster_dir = window.get_raster_dir(
-                "raster_layer", ["B1"], group_idx=group_idx
-            )
-            GeotiffRasterFormat().encode_raster(
-                raster_dir,
-                projection,
-                bounds,
-                RasterArray(chw_array=np.full((1, 4, 4), pixel_value, dtype=np.uint8)),
-            )
+        raster_format = GeotiffRasterFormat()
+        with window.open_layer_writer("raster_layer") as writer:
+            for group_idx, pixel_value in [(0, 1), (1, 2)]:
+                writer.write_raster(
+                    ["B1"],
+                    raster_format,
+                    projection,
+                    bounds,
+                    RasterArray(
+                        chw_array=np.full((1, 4, 4), pixel_value, dtype=np.uint8)
+                    ),
+                    group_idx=group_idx,
+                )
+        for group_idx in [0, 1]:
             window.mark_layer_completed("raster_layer", group_idx=group_idx)
 
         # Build ModelDataset with both item groups specified explicitly.
@@ -238,22 +242,28 @@ class TestResolutionFactor:
         )
         window.save()
 
+        raster_format = GeotiffRasterFormat()
+
         # Add image layer.
-        GeotiffRasterFormat().encode_raster(
-            window.get_raster_dir("image", ["B1"]),
-            window.projection,
-            window.bounds,
-            RasterArray(chw_array=np.ones((1, 4, 4), dtype=np.uint8)),
-        )
+        with window.open_layer_writer("image") as writer:
+            writer.write_raster(
+                ["B1"],
+                raster_format,
+                window.projection,
+                window.bounds,
+                RasterArray(chw_array=np.ones((1, 4, 4), dtype=np.uint8)),
+            )
         window.mark_layer_completed("image")
 
         # Add label layer.
-        GeotiffRasterFormat().encode_raster(
-            window.get_raster_dir("label", ["B1"]),
-            window.projection,
-            window.bounds,
-            RasterArray(chw_array=2 * np.ones((1, 4, 4), dtype=np.uint8)),
-        )
+        with window.open_layer_writer("label") as writer:
+            writer.write_raster(
+                ["B1"],
+                raster_format,
+                window.projection,
+                window.bounds,
+                RasterArray(chw_array=2 * np.ones((1, 4, 4), dtype=np.uint8)),
+            )
         window.mark_layer_completed("label")
 
         return window

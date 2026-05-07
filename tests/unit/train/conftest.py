@@ -86,13 +86,24 @@ def add_window(
     )
     window.save()
 
+    raster_format = GeotiffRasterFormat()
+    # Group raster writes by layer so each layer has a single writer context.
+    images_by_layer: dict[str, list[tuple[int, npt.NDArray]]] = {}
     for (layer_name, group_idx), image in images.items():
-        raster_dir = window.get_raster_dir(layer_name, ["band"], group_idx=group_idx)
-        raster = RasterArray(chw_array=image)
-        GeotiffRasterFormat().encode_raster(
-            raster_dir, window.projection, window.bounds, raster
-        )
-        window.mark_layer_completed(layer_name, group_idx=group_idx)
+        images_by_layer.setdefault(layer_name, []).append((group_idx, image))
+    for layer_name, group_images in images_by_layer.items():
+        with window.open_layer_writer(layer_name) as writer:
+            for group_idx, image in group_images:
+                writer.write_raster(
+                    ["band"],
+                    raster_format,
+                    window.projection,
+                    window.bounds,
+                    RasterArray(chw_array=image),
+                    group_idx=group_idx,
+                )
+        for group_idx, _ in group_images:
+            window.mark_layer_completed(layer_name, group_idx=group_idx)
 
     # Add label.
     feature = Feature(
@@ -101,11 +112,9 @@ def add_window(
             "label": 1,
         },
     )
-    layer_dir = window.get_layer_dir("vector_layer")
-    GeojsonVectorFormat().encode_vector(
-        layer_dir,
-        [feature],
-    )
+    vector_format = GeojsonVectorFormat()
+    with window.open_layer_writer("vector_layer") as writer:
+        writer.write_vector(vector_format, [feature])
     window.mark_layer_completed("vector_layer")
 
     return window

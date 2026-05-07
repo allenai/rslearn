@@ -81,25 +81,27 @@ def segmentation_dataset(tmp_path: pathlib.Path) -> Dataset:
     # Add a simple input image.
     image = np.random.randint(0, 255, size=(1, 32, 32), dtype=np.uint8)
     layer_name = "image"
-    layer_dir = window.get_layer_dir(layer_name)
-    GeotiffRasterFormat().encode_raster(
-        layer_dir / "band",
-        window.projection,
-        window.bounds,
-        RasterArray(chw_array=image),
-    )
+    with window.open_layer_writer(layer_name) as writer:
+        writer.write_raster(
+            ["band"],
+            GeotiffRasterFormat(),
+            window.projection,
+            window.bounds,
+            RasterArray(chw_array=image),
+        )
     window.mark_layer_completed(layer_name)
 
     # Add segmentation target labels (class IDs from 0 to NUM_CLASSES-1).
     targets = np.random.randint(0, NUM_CLASSES, size=(1, 32, 32), dtype=np.uint8)
     layer_name = "targets"
-    layer_dir = window.get_layer_dir(layer_name)
-    GeotiffRasterFormat().encode_raster(
-        layer_dir / "class",
-        window.projection,
-        window.bounds,
-        RasterArray(chw_array=targets),
-    )
+    with window.open_layer_writer(layer_name) as writer:
+        writer.write_raster(
+            ["class"],
+            GeotiffRasterFormat(),
+            window.projection,
+            window.bounds,
+            RasterArray(chw_array=targets),
+        )
     window.mark_layer_completed(layer_name)
 
     return dataset
@@ -229,15 +231,11 @@ def test_segmentation_prediction_writes_to_dataset(
     # Verify that predictions were written to the dataset.
     window = segmentation_dataset.load_windows()[0]
     assert window.is_layer_completed("predictions")
-    array = (
-        GeotiffRasterFormat()
-        .decode_raster(
-            window.get_raster_dir("predictions", ["class"]),
-            window.projection,
-            window.bounds,
-        )
-        .get_chw_array()
-    )
+    array = window.read_raster(
+        "predictions",
+        ["class"],
+        GeotiffRasterFormat(),
+    ).get_chw_array()
     assert array.shape == (1, 32, 32)
     # Verify predictions are valid class IDs.
     assert array.min() >= 0

@@ -153,5 +153,4 @@ def test_materialize(
         "layer",
         layer_config,
     )
-    raster_dir = window.get_raster_dir("layer", ["B04"])
-    assert (raster_dir / "geotiff.tif").exists()
+    assert window.is_layer_completed("layer")

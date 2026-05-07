@@ -248,13 +248,11 @@ def test_sentinel2_materialize(
         layer_config,
     )
 
-    # Verify it was materialized.
-    raster_dir = window.get_raster_dir("layer", ["B04"])
-    assert (raster_dir / "geotiff.tif").exists()
-
     # Read back and verify pixel values match expected harmonization behavior.
-    raster_array = GeotiffRasterFormat().decode_raster(
-        raster_dir, seattle2020.projection, bounds
+    raster_array = window.read_raster(
+        "layer",
+        ["B04"],
+        GeotiffRasterFormat(),
     )
     array = raster_array.get_chw_array()
     assert array.shape == (1, bounds[3] - bounds[1], bounds[2] - bounds[0])

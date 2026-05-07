@@ -3,7 +3,6 @@
 import pathlib
 
 import numpy as np
-import rasterio
 from shapely.geometry import Polygon
 from upath import UPath
 
@@ -17,6 +16,7 @@ from rslearn.tile_stores.default import DefaultTileStore
 from rslearn.tile_stores.tile_store import TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.raster_array import RasterArray, RasterMetadata
+from rslearn.utils.raster_format import GeotiffRasterFormat
 
 LAYER_NAME = "layer"
 BANDS = ["band1"]
@@ -83,10 +83,7 @@ def test_nodata_persists_through_ingestion_and_materialization(
         item_groups=[[item]],
     )
 
-    # -- Read back the materialized GeoTIFF and verify nodata is set. --
-    raster_dir = window.get_raster_dir(LAYER_NAME, BANDS)
-    tif_path = raster_dir / "geotiff.tif"
-    with rasterio.open(tif_path) as src_ds:
-        assert src_ds.nodata == NODATA_VAL
-        data = src_ds.read()
-    np.testing.assert_array_equal(data, 42.0)
+    # -- Read back via Window.read_raster and verify nodata is set. --
+    raster = window.read_raster(LAYER_NAME, BANDS, GeotiffRasterFormat())
+    assert raster.metadata.nodata_value == NODATA_VAL
+    np.testing.assert_array_equal(raster.get_chw_array(), 42.0)

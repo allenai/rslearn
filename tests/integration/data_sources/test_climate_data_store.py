@@ -456,10 +456,11 @@ class TestERA5LandHourlyTimeseries:
         materialize_dataset_windows(dataset, windows)
 
         # Read the materialized raster
-        layer_dir = window.get_raster_dir("era5_layer", [band_name], group_idx=0)
         raster_format = GeotiffRasterFormat()
-        raster = raster_format.decode_raster(
-            layer_dir, window.projection, window.bounds
+        raster = window.read_raster(
+            "era5_layer",
+            [band_name],
+            raster_format,
         )
 
         # Verify shape: (1 band, 744 timesteps, height, width)

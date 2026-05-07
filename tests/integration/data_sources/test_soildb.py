@@ -146,8 +146,7 @@ def test_materialize_auto_asset(
         "layer",
         layer_config,
     )
-    raster_dir = window.get_raster_dir("layer", [band_name])
-    assert (raster_dir / "geotiff.tif").exists()
+    assert window.is_layer_completed("layer")
 
 
 def test_requires_explicit_asset_key_when_disabled(

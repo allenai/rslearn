@@ -44,7 +44,6 @@ class TestMigrate:
                 )
             }
         )
-        window.get_layer_dir("layer_name").mkdir(parents=True, exist_ok=True)
         window.mark_layer_completed("layer_name", group_idx=0)
 
         storage_config = json.dumps(

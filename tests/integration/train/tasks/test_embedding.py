@@ -76,13 +76,14 @@ def embedding_dataset(tmp_path: pathlib.Path) -> Dataset:
     # Add a simple image.
     image = np.random.randint(0, 255, size=(1, 32, 32), dtype=np.uint8)
     layer_name = "image"
-    layer_dir = window.get_layer_dir(layer_name)
-    SingleImageRasterFormat().encode_raster(
-        layer_dir / "band",
-        window.projection,
-        window.bounds,
-        RasterArray(chw_array=image),
-    )
+    with window.open_layer_writer(layer_name) as writer:
+        writer.write_raster(
+            ["band"],
+            SingleImageRasterFormat(),
+            window.projection,
+            window.bounds,
+            RasterArray(chw_array=image),
+        )
     window.mark_layer_completed(layer_name)
 
     return dataset
