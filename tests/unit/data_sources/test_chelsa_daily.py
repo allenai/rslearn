@@ -188,7 +188,7 @@ def test_chelsa_daily_item_serialization_roundtrip() -> None:
 def test_chelsa_daily_bounds_limit_item_geometry() -> None:
     data_source = CHELSADaily(
         band_names=["tas"],
-        bounds=[-8.0, 49.0, 2.0, 61.0],
+        bounds=(-8.0, 49.0, 2.0, 61.0),
     )
     item = data_source.get_item_by_name("chelsa_daily_20190907")
 
@@ -200,7 +200,7 @@ def test_chelsa_daily_bounds_limit_item_geometry() -> None:
 def test_chelsa_daily_get_items_outside_bounds_returns_empty_group() -> None:
     data_source = CHELSADaily(
         band_names=["tas"],
-        bounds=[-8.0, 49.0, 2.0, 61.0],
+        bounds=(-8.0, 49.0, 2.0, 61.0),
     )
     time_range = (
         datetime(2023, 6, 16, 0, tzinfo=UTC),
@@ -308,7 +308,7 @@ def test_chelsa_daily_ingest_with_bounds_writes_spatial_subset(
         band_names=["tas"],
         start_date="2020-03-28",
         end_date="2020-03-28",
-        bounds=[0.5, 0.5, 1.5, 1.5],
+        bounds=(0.5, 0.5, 1.5, 1.5),
     )
     item = data_source.get_item_by_name("chelsa_daily_20200328")
     monkeypatch.setattr(

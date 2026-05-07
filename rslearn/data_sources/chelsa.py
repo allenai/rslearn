@@ -108,7 +108,7 @@ class CHELSADaily(
         band_names: list[str] | None = None,
         start_date: date | str = DEFAULT_START_DATE,
         end_date: date | str = DEFAULT_END_DATE,
-        bounds: list[float] | None = None,
+        bounds: tuple[float, float, float, float] | None = None,
         base_url: str = BASE_URL,
         version: str = DEFAULT_VERSION,
         timeout: timedelta = timedelta(seconds=60),
@@ -121,7 +121,7 @@ class CHELSADaily(
                 context.layer_config is present, uses the unique bands from the layer.
             start_date: earliest available date (inclusive).
             end_date: latest available date (inclusive).
-            bounds: optional bounding box as [min_lon, min_lat, max_lon, max_lat].
+            bounds: optional bounding box as (min_lon, min_lat, max_lon, max_lat).
                 If specified, items and ingested rasters are clipped to this AOI.
                 If omitted, the whole source GeoTIFF is ingested.
             base_url: CHELSA base URL.
@@ -132,7 +132,7 @@ class CHELSADaily(
         self.base_url = base_url.rstrip("/")
         self.version = version
         self.timeout = timeout
-        self.bounds = self._parse_bounds(bounds)
+        self.bounds = bounds
 
         self.start_date = self._parse_date(start_date)
         self.end_date = self._parse_date(end_date)
@@ -167,24 +167,6 @@ class CHELSADaily(
         if isinstance(value, date):
             return value
         return date.fromisoformat(value)
-
-    @staticmethod
-    def _parse_bounds(
-        bounds: list[float] | None,
-    ) -> tuple[float, float, float, float] | None:
-        if bounds is None:
-            return None
-        if len(bounds) != 4:
-            raise ValueError("bounds must be [min_lon, min_lat, max_lon, max_lat]")
-
-        min_lon, min_lat, max_lon, max_lat = [float(v) for v in bounds]
-        if min_lon >= max_lon or min_lat >= max_lat:
-            raise ValueError(
-                "bounds must satisfy min_lon < max_lon and min_lat < max_lat"
-            )
-        if min_lon < -180 or max_lon > 180 or min_lat < -90 or max_lat > 90:
-            raise ValueError("bounds must be within WGS84 longitude/latitude limits")
-        return (min_lon, min_lat, max_lon, max_lat)
 
     @staticmethod
     def _to_utc(t: datetime) -> datetime:
