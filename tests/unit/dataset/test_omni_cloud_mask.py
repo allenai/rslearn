@@ -1,7 +1,8 @@
 """Tests for rslearn.dataset.omni_cloud_mask (OmniCloudMaskFirstValid compositor)."""
 
 import pathlib
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import patch
 
 import numpy as np
@@ -13,10 +14,12 @@ from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import Item
+from rslearn.dataset import Window
+from rslearn.dataset.compositing import BandSetCompositeRequest
 from rslearn.dataset.omni_cloud_mask import OmniCloudMaskFirstValid
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.tile_stores.default import DefaultTileStore
-from rslearn.utils.geometry import PixelBounds, STGeometry
+from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.raster_array import RasterArray
 
 LAYER_NAME = "layer"
@@ -32,6 +35,18 @@ def _make_item(name: str) -> Item:
 
 class TestOmniCloudMaskFirstValid:
     """Tests for OmniCloudMaskFirstValid compositor with mocked omnicloudmask."""
+
+    @staticmethod
+    def _make_request(bounds: PixelBounds = BOUNDS) -> BandSetCompositeRequest:
+        return BandSetCompositeRequest(
+            nodata_val=0,
+            bands=BANDS,
+            bounds=bounds,
+            band_dtype=np.uint8,
+            projection=PROJECTION,
+            resampling_method=Resampling.bilinear,
+            remapper=None,
+        )
 
     def _write_items(
         self,
@@ -70,17 +85,13 @@ class TestOmniCloudMaskFirstValid:
 
         with patch("rslearn.dataset.omni_cloud_mask.predict_from_array", mock_predict):
             # Pass cloudy first, clear second -- compositor should reorder.
-            result = compositor.build_composite(
-                group=[item_cloudy, item_clear],
-                nodata_val=0,
-                bands=BANDS,
-                bounds=BOUNDS,
-                band_dtype=np.uint8,
-                tile_store=TileStoreWithLayer(store, LAYER_NAME),
-                projection=PROJECTION,
-                resampling_method=Resampling.bilinear,
-                remapper=None,
-            )
+            result = list(
+                compositor.build_composites(
+                    group=[item_cloudy, item_clear],
+                    requests=[self._make_request()],
+                    tile_store=TileStoreWithLayer(store, LAYER_NAME),
+                )
+            )[0]
 
         # Clear item (200) should come first in FIRST_VALID compositing.
         assert np.all(result.get_chw_array() == 200)
@@ -103,17 +114,13 @@ class TestOmniCloudMaskFirstValid:
             "rslearn.dataset.omni_cloud_mask.predict_from_array",
             side_effect=AssertionError("should not be called"),
         ):
-            result = compositor.build_composite(
-                group=[item],
-                nodata_val=0,
-                bands=BANDS,
-                bounds=BOUNDS,
-                band_dtype=np.uint8,
-                tile_store=TileStoreWithLayer(store, LAYER_NAME),
-                projection=PROJECTION,
-                resampling_method=Resampling.bilinear,
-                remapper=None,
-            )
+            result = list(
+                compositor.build_composites(
+                    group=[item],
+                    requests=[self._make_request()],
+                    tile_store=TileStoreWithLayer(store, LAYER_NAME),
+                )
+            )[0]
 
         assert np.all(result.get_chw_array() == 42)
 
@@ -143,14 +150,260 @@ class TestOmniCloudMaskFirstValid:
             patch("rslearn.dataset.omni_cloud_mask.predict_from_array", mock_predict),
             pytest.raises(RuntimeError, match="simulated failure"),
         ):
-            compositor.build_composite(
-                group=[item_fail, item_ok],
-                nodata_val=0,
-                bands=BANDS,
-                bounds=BOUNDS,
-                band_dtype=np.uint8,
-                tile_store=TileStoreWithLayer(store, LAYER_NAME),
-                projection=PROJECTION,
-                resampling_method=Resampling.bilinear,
-                remapper=None,
+            list(
+                compositor.build_composites(
+                    group=[item_fail, item_ok],
+                    requests=[self._make_request()],
+                    tile_store=TileStoreWithLayer(store, LAYER_NAME),
+                )
+            )
+
+    def test_scoring_resolution_uses_window_grid_once_per_window(self) -> None:
+        """Explicit scoring resolution should reuse one window-level scoring grid."""
+        base_projection = Projection(PROJECTION.crs, 10, 10)
+        base_bounds: PixelBounds = (0, 0, 8, 8)
+        coarse_projection = Projection(PROJECTION.crs, 40, 40)
+        coarse_bounds: PixelBounds = (0, 0, 2, 2)
+        scoring_projection = Projection(PROJECTION.crs, 20, 20)
+        scoring_bounds: PixelBounds = (0, 0, 4, 4)
+
+        item_cloudy = _make_item("cloudy")
+        item_clear = _make_item("clear")
+        window = cast(
+            Window,
+            SimpleNamespace(projection=base_projection, bounds=base_bounds),
+        )
+        compositor = OmniCloudMaskFirstValid(
+            red_band=BANDS[0],
+            green_band=BANDS[1],
+            nir_band=BANDS[2],
+            min_inference_size=1,
+            scoring_resolution=20,
+        )
+
+        scoring_reads: list[tuple[str, Projection, PixelBounds]] = []
+        sorted_groups: list[list[str]] = []
+
+        def mock_read_raster_window_from_tiles(
+            tile_store: TileStoreWithLayer,
+            item: Item,
+            bands: list[str],
+            projection: Projection,
+            bounds: PixelBounds,
+            nodata_val: int | float | None,
+            band_dtype: npt.DTypeLike,
+            remapper: Any = None,
+            resampling: Resampling = Resampling.bilinear,
+            dst: RasterArray | None = None,
+        ) -> RasterArray:
+            del tile_store, nodata_val, band_dtype, remapper, resampling, dst
+            scoring_reads.append((item.name, projection, bounds))
+            fill_value = 100 if item.name == "cloudy" else 200
+            height = bounds[3] - bounds[1]
+            width = bounds[2] - bounds[0]
+            return RasterArray(
+                array=np.full(
+                    (len(bands), 1, height, width), fill_value, dtype=np.float32
+                )
+            )
+
+        def mock_predict(input_array: Any) -> np.ndarray:
+            if input_array.shape != (3, 4, 4):
+                raise AssertionError(
+                    f"expected 20 m scoring shape (3, 4, 4), got {input_array.shape}"
+                )
+            if input_array[0, 0, 0] == 100:
+                return np.ones((4, 4), dtype=np.uint8)
+            return np.zeros((4, 4), dtype=np.uint8)
+
+        def mock_first_valid_build_composite(
+            self: Any,
+            group: list[Item],
+            nodata_val: int | float | None,
+            bands: list[str],
+            bounds: PixelBounds,
+            band_dtype: npt.DTypeLike,
+            tile_store: TileStoreWithLayer,
+            projection: Projection,
+            resampling_method: Resampling,
+            remapper: Any,
+            request_time_range: tuple[Any, Any] | None = None,
+        ) -> RasterArray:
+            del (
+                self,
+                nodata_val,
+                band_dtype,
+                tile_store,
+                projection,
+                resampling_method,
+                remapper,
+                request_time_range,
+            )
+            sorted_groups.append([item.name for item in group])
+            height = bounds[3] - bounds[1]
+            width = bounds[2] - bounds[0]
+            return RasterArray(
+                array=np.zeros((len(bands), 1, height, width), dtype=np.uint8)
+            )
+
+        tile_store = TileStoreWithLayer(DefaultTileStore(), LAYER_NAME)
+        with (
+            patch(
+                "rslearn.dataset.omni_cloud_mask.get_needed_band_sets_and_indexes",
+                return_value=[(BANDS, [0, 1, 2], [0, 1, 2])],
+            ),
+            patch(
+                "rslearn.dataset.omni_cloud_mask.read_raster_window_from_tiles",
+                side_effect=mock_read_raster_window_from_tiles,
+            ),
+            patch("rslearn.dataset.omni_cloud_mask.predict_from_array", mock_predict),
+            patch(
+                "rslearn.dataset.omni_cloud_mask.FirstValidCompositor.build_composite",
+                new=mock_first_valid_build_composite,
+            ),
+        ):
+            list(
+                compositor.build_composites(
+                    group=[item_cloudy, item_clear],
+                    requests=[
+                        BandSetCompositeRequest(
+                            nodata_val=0,
+                            bands=["B04"],
+                            bounds=coarse_bounds,
+                            band_dtype=np.uint8,
+                            projection=coarse_projection,
+                            resampling_method=Resampling.bilinear,
+                            remapper=None,
+                        ),
+                        BandSetCompositeRequest(
+                            nodata_val=0,
+                            bands=["B04"],
+                            bounds=base_bounds,
+                            band_dtype=np.uint8,
+                            projection=base_projection,
+                            resampling_method=Resampling.bilinear,
+                            remapper=None,
+                        ),
+                    ],
+                    tile_store=tile_store,
+                    window=window,
+                )
+            )
+
+        assert scoring_reads == [
+            ("cloudy", scoring_projection, scoring_bounds),
+            ("clear", scoring_projection, scoring_bounds),
+        ]
+        assert sorted_groups == [["clear", "cloudy"], ["clear", "cloudy"]]
+
+    def test_default_scoring_uses_each_materialization_grid(self) -> None:
+        """Unset scoring resolution should rank on each materialization grid."""
+        base_projection = Projection(PROJECTION.crs, 10, 10)
+        base_bounds: PixelBounds = (0, 0, 8, 8)
+        coarse_projection = Projection(PROJECTION.crs, 40, 40)
+        coarse_bounds: PixelBounds = (0, 0, 2, 2)
+
+        item_cloudy = _make_item("cloudy")
+        item_clear = _make_item("clear")
+        window = cast(
+            Window,
+            SimpleNamespace(projection=base_projection, bounds=base_bounds),
+        )
+        compositor = OmniCloudMaskFirstValid(
+            red_band=BANDS[0],
+            green_band=BANDS[1],
+            nir_band=BANDS[2],
+            min_inference_size=1,
+        )
+
+        scoring_reads: list[tuple[str, Projection, PixelBounds]] = []
+
+        def mock_read_raster_window_from_tiles(
+            tile_store: TileStoreWithLayer,
+            item: Item,
+            bands: list[str],
+            projection: Projection,
+            bounds: PixelBounds,
+            nodata_val: int | float | None,
+            band_dtype: npt.DTypeLike,
+            remapper: Any = None,
+            resampling: Resampling = Resampling.bilinear,
+            dst: RasterArray | None = None,
+        ) -> RasterArray:
+            del tile_store, nodata_val, band_dtype, remapper, resampling, dst
+            scoring_reads.append((item.name, projection, bounds))
+            fill_value = 100 if item.name == "cloudy" else 200
+            height = bounds[3] - bounds[1]
+            width = bounds[2] - bounds[0]
+            return RasterArray(
+                array=np.full(
+                    (len(bands), 1, height, width), fill_value, dtype=np.float32
+                )
+            )
+
+        def mock_predict(input_array: Any) -> np.ndarray:
+            h, w = input_array.shape[1], input_array.shape[2]
+            if input_array[0, 0, 0] == 100:
+                return np.ones((h, w), dtype=np.uint8)
+            return np.zeros((h, w), dtype=np.uint8)
+
+        tile_store = TileStoreWithLayer(DefaultTileStore(), LAYER_NAME)
+        with (
+            patch(
+                "rslearn.dataset.omni_cloud_mask.get_needed_band_sets_and_indexes",
+                return_value=[(BANDS, [0, 1, 2], [0, 1, 2])],
+            ),
+            patch(
+                "rslearn.dataset.omni_cloud_mask.read_raster_window_from_tiles",
+                side_effect=mock_read_raster_window_from_tiles,
+            ),
+            patch("rslearn.dataset.omni_cloud_mask.predict_from_array", mock_predict),
+            patch(
+                "rslearn.dataset.omni_cloud_mask.FirstValidCompositor.build_composite",
+                return_value=RasterArray(array=np.zeros((1, 1, 1, 1), dtype=np.uint8)),
+            ),
+        ):
+            list(
+                compositor.build_composites(
+                    group=[item_cloudy, item_clear],
+                    requests=[
+                        BandSetCompositeRequest(
+                            nodata_val=0,
+                            bands=["B04"],
+                            bounds=coarse_bounds,
+                            band_dtype=np.uint8,
+                            projection=coarse_projection,
+                            resampling_method=Resampling.bilinear,
+                            remapper=None,
+                        ),
+                        BandSetCompositeRequest(
+                            nodata_val=0,
+                            bands=["B04"],
+                            bounds=base_bounds,
+                            band_dtype=np.uint8,
+                            projection=base_projection,
+                            resampling_method=Resampling.bilinear,
+                            remapper=None,
+                        ),
+                    ],
+                    tile_store=tile_store,
+                    window=window,
+                )
+            )
+
+        assert scoring_reads == [
+            ("cloudy", coarse_projection, coarse_bounds),
+            ("clear", coarse_projection, coarse_bounds),
+            ("cloudy", base_projection, base_bounds),
+            ("clear", base_projection, base_bounds),
+        ]
+
+    def test_scoring_resolution_must_be_positive(self) -> None:
+        """Explicit scoring_resolution should be positive."""
+        with pytest.raises(ValueError, match="scoring_resolution must be positive"):
+            OmniCloudMaskFirstValid(
+                red_band="B04",
+                green_band="B03",
+                nir_band="B08",
+                scoring_resolution=0,
             )

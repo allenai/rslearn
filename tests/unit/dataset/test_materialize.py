@@ -1,18 +1,27 @@
 """Tests for rslearn.dataset.tile_utils (read_raster_window_from_tiles)."""
 
 import pathlib
+from collections.abc import Iterator, Sequence
+from datetime import datetime
 
 import numpy as np
+import pytest
+from rasterio.enums import Resampling
 from shapely.geometry import Polygon
 from upath import UPath
 
+from rslearn.config import LayerConfig
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources.data_source import Item
-from rslearn.dataset.materialize import resolve_nodata_value
+from rslearn.data_sources.data_source import Item, ItemType
+from rslearn.dataset import Window
+from rslearn.dataset.compositing import BandSetCompositeRequest, Compositor
+from rslearn.dataset.materialize import RasterMaterializer, resolve_nodata_value
+from rslearn.dataset.remap import Remapper
+from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.tile_utils import read_raster_window_from_tiles
 from rslearn.tile_stores.default import DefaultTileStore
 from rslearn.tile_stores.tile_store import TileStoreWithLayer
-from rslearn.utils.geometry import STGeometry
+from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.raster_array import RasterArray, RasterMetadata
 
 
@@ -254,3 +263,111 @@ class TestResolveNodataValue:
             self.BANDS,
         )
         assert result == 255.0
+
+
+class RecordingCompositor(Compositor):
+    """Test compositor that records whole-window band-set requests."""
+
+    def __init__(self) -> None:
+        self.calls: list[
+            tuple[
+                Sequence[Item],
+                list[BandSetCompositeRequest],
+                Window | None,
+            ]
+        ] = []
+
+    def build_composites(
+        self,
+        group: list[ItemType],
+        requests: list[BandSetCompositeRequest],
+        tile_store: TileStoreWithLayer,
+        window: Window | None = None,
+        request_time_range: tuple[datetime, datetime] | None = None,
+    ) -> Iterator[RasterArray]:
+        del tile_store, request_time_range
+        self.calls.append((group, requests, window))
+        for request in requests:
+            yield RasterArray(
+                array=np.zeros(
+                    (
+                        len(request.bands),
+                        1,
+                        request.bounds[3] - request.bounds[1],
+                        request.bounds[2] - request.bounds[0],
+                    ),
+                    dtype=request.band_dtype,
+                )
+            )
+
+    def build_composite(
+        self,
+        group: list[ItemType],
+        nodata_val: int | float | None,
+        bands: list[str],
+        bounds: PixelBounds,
+        band_dtype: np.dtype,
+        tile_store: TileStoreWithLayer,
+        projection: Projection,
+        resampling_method: Resampling,
+        remapper: Remapper | None,
+        request_time_range: tuple[datetime, datetime] | None = None,
+    ) -> RasterArray:
+        del (
+            group,
+            nodata_val,
+            bands,
+            bounds,
+            band_dtype,
+            tile_store,
+            projection,
+            resampling_method,
+            remapper,
+            request_time_range,
+        )
+        raise AssertionError(
+            "build_composite should not be called by RasterMaterializer"
+        )
+
+
+def test_raster_materializer_passes_all_band_sets_to_compositor(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layer_cfg = LayerConfig.model_validate(
+        {
+            "type": "raster",
+            "band_sets": [
+                {"bands": ["B1"], "dtype": "uint8"},
+                {"bands": ["B2"], "dtype": "uint8"},
+            ],
+        }
+    )
+    compositor = RecordingCompositor()
+    monkeypatch.setattr(LayerConfig, "instantiate_compositor", lambda self: compositor)
+
+    window = Window(
+        storage=FileWindowStorage(UPath(tmp_path / "dataset")),
+        group="default",
+        name="window",
+        projection=WGS84_PROJECTION,
+        bounds=(0, 0, 4, 4),
+        time_range=None,
+    )
+    window.save()
+
+    tile_store = DefaultTileStore()
+    tile_store.set_dataset_path(UPath(tmp_path / "tile_store"))
+
+    RasterMaterializer().materialize(
+        tile_store=TileStoreWithLayer(tile_store, "layer"),
+        window=window,
+        layer_name="layer",
+        layer_cfg=layer_cfg,
+        item_groups=[[]],
+    )
+
+    assert len(compositor.calls) == 1
+    group, requests, call_window = compositor.calls[0]
+    assert group == []
+    assert [request.bands for request in requests] == [["B1"], ["B2"]]
+    assert call_window is window

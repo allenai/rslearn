@@ -109,6 +109,9 @@ class EarthDaily(DataSource, TileStore):
         query: dict[str, Any] | None = None,
         sort_by: str | None = None,
         sort_ascending: bool = True,
+        cloud_cover_max: float | None = None,
+        search_max_items: int | None = None,
+        sort_items_by: Literal["cloud_cover", "datetime"] | None = None,
         timeout: timedelta = timedelta(seconds=10),
         skip_items_missing_assets: bool = False,
         cache_dir: str | None = None,
@@ -126,6 +129,10 @@ class EarthDaily(DataSource, TileStore):
             query: optional query argument to STAC searches.
             sort_by: sort by this property in the STAC items.
             sort_ascending: whether to sort ascending (or descending).
+            cloud_cover_max: max cloud cover (%) injected into the STAC query.
+            search_max_items: max STAC items fetched per geometry. None means no limit.
+            sort_items_by: secondary sort applied after search: "cloud_cover", "datetime",
+                or None.
             timeout: timeout for API requests.
             skip_items_missing_assets: skip STAC items that are missing any of the
                 assets in asset_bands during get_items.
@@ -146,6 +153,9 @@ class EarthDaily(DataSource, TileStore):
         self.query = query
         self.sort_by = sort_by
         self.sort_ascending = sort_ascending
+        self.cloud_cover_max = cloud_cover_max
+        self.search_max_items = search_max_items
+        self.sort_items_by = sort_items_by
         self.timeout = timeout
         self.skip_items_missing_assets = skip_items_missing_assets
         self.max_retries = max_retries
@@ -309,6 +319,8 @@ class EarthDaily(DataSource, TileStore):
         # No cache or not in cache, so we need to make the STAC request.
         _, _, collection = self._load_client()
         stac_item = collection.get_item(name)
+        if stac_item is None:
+            raise KeyError(f"EarthDaily item not found: {name}")
         item = self._stac_item_to_item(stac_item)
 
         # Finally we cache it if cache_dir is set.
@@ -331,21 +343,29 @@ class EarthDaily(DataSource, TileStore):
 
         groups = []
         for geometry in geometries:
-            # Get potentially relevant items from the collection by performing one search
-            # for each requested geometry.
             wgs84_geometry = geometry.to_wgs84()
             logger.debug("performing STAC search for geometry %s", wgs84_geometry)
+
+            max_cloud_cover = self.cloud_cover_max
+            effective_query: dict[str, Any] | None = (
+                copy.deepcopy(self.query) if self.query is not None else None
+            )
+            if max_cloud_cover is not None:
+                if effective_query is None:
+                    effective_query = {}
+                effective_query["eo:cloud_cover"] = {"lt": max_cloud_cover}
+
             result = client.search(
                 collections=[self.collection_name],
                 intersects=shapely.to_geojson(wgs84_geometry.shp),
                 datetime=wgs84_geometry.time_range,
-                query=self.query,
+                query=effective_query,
+                max_items=self.search_max_items,
             )
-            stac_items = [item for item in result.item_collection()]
+            stac_items = list(result.item_collection())
             logger.debug("STAC search yielded %d items", len(stac_items))
 
             if self.skip_items_missing_assets:
-                # Filter out items that are missing any of the assets in self.asset_bands.
                 good_stac_items = []
                 for stac_item in stac_items:
                     good = True
@@ -364,17 +384,36 @@ class EarthDaily(DataSource, TileStore):
                 stac_items = good_stac_items
 
             if self.sort_by is not None:
+                if self.sort_by == "datetime":
+                    stac_items.sort(
+                        key=lambda item: (item.datetime is None, item.datetime),
+                        reverse=not self.sort_ascending,
+                    )
+                else:
+                    stac_items.sort(
+                        key=lambda item: (
+                            item.properties.get(self.sort_by) is None,
+                            item.properties.get(self.sort_by),
+                        ),
+                        reverse=not self.sort_ascending,
+                    )
+            elif self.sort_items_by == "cloud_cover":
                 stac_items.sort(
-                    key=lambda stac_item: stac_item.properties[self.sort_by],
-                    reverse=not self.sort_ascending,
+                    key=lambda item: (
+                        item.properties.get("eo:cloud_cover") is None,
+                        item.properties.get("eo:cloud_cover", 0.0),
+                    )
+                )
+            elif self.sort_items_by == "datetime":
+                stac_items.sort(key=lambda item: (item.datetime is None, item.datetime))
+            elif self.sort_items_by is not None:
+                raise ValueError(
+                    f"invalid sort_items_by setting ({self.sort_items_by})"
                 )
 
             candidate_items = [
-                # The only way to get the asset URLs is to get the item by name.
-                self.get_item_by_name(stac_item.id)
-                for stac_item in stac_items
+                self.get_item_by_name(stac_item.id) for stac_item in stac_items
             ]
-
             cur_groups = match_candidate_items_to_window(
                 geometry, candidate_items, query_config
             )
@@ -513,14 +552,7 @@ class EarthDaily(DataSource, TileStore):
 
         num_bands = array.shape[0]
         nodata_value: int | float | None
-        if len(scale_offsets) == 1:
-            scale = _to_float(scale_offsets[0].get("scale"), 1.0)
-            offset = _to_float(scale_offsets[0].get("offset"), 0.0)
-            raw_nd = scale_offsets[0].get("nodata")
-            nodata_value = float(raw_nd) if raw_nd is not None else None
-            scales = np.full((num_bands, 1, 1), scale, dtype=np.float32)
-            offsets = np.full((num_bands, 1, 1), offset, dtype=np.float32)
-        elif len(scale_offsets) == num_bands:
+        if len(scale_offsets) == num_bands:
             scales = np.array(
                 [_to_float(so.get("scale"), 1.0) for so in scale_offsets],
                 dtype=np.float32,
@@ -538,14 +570,15 @@ class EarthDaily(DataSource, TileStore):
             ]
             nodata_value = unique_nodata_value(nd_vals) if nd_vals else None
         else:
-            logger.debug(
-                "EarthDaily scale/offset band count mismatch for item %s asset %s: "
-                "%d metadata bands vs %d raster bands; using first entry for all bands",
-                item_name,
-                asset_key,
-                len(scale_offsets),
-                num_bands,
-            )
+            if len(scale_offsets) != 1:
+                logger.debug(
+                    "EarthDaily scale/offset band count mismatch for item %s asset %s: "
+                    "%d metadata bands vs %d raster bands; using first entry for all bands",
+                    item_name,
+                    asset_key,
+                    len(scale_offsets),
+                    num_bands,
+                )
             scale = _to_float(scale_offsets[0].get("scale"), 1.0)
             offset = _to_float(scale_offsets[0].get("offset"), 0.0)
             raw_nd = scale_offsets[0].get("nodata")
@@ -697,11 +730,12 @@ class EarthDaily(DataSource, TileStore):
         )
 
 
-class Sentinel2(EarthDaily):
-    """Sentinel-2 L2A on EarthDaily platform.
+class Sentinel2C1L2A(EarthDaily):
+    """EarthDaily Sentinel-2 Collection 1 L2A (`sentinel-2-c1-l2a`) source.
 
-    Uses the `sentinel-2-c1-l2a` collection and applies per-asset scale/offset metadata
-    from STAC `raster:bands` when present.
+    Applies per-asset scale/offset from STAC `raster:bands` by default (not
+    processing-baseline harmonization). For Planetary Computer-compatible asset keys
+    use `Sentinel2L2A`.
     """
 
     COLLECTION_NAME = "sentinel-2-c1-l2a"
@@ -732,7 +766,6 @@ class Sentinel2(EarthDaily):
         self,
         apply_scale_offset: bool = True,
         assets: list[str] | None = None,
-        cloud_cover_threshold: float | None = None,
         cloud_cover_max: float | None = None,
         search_max_items: int = 500,
         sort_items_by: Literal["cloud_cover", "datetime"] | None = "cloud_cover",
@@ -751,17 +784,13 @@ class Sentinel2(EarthDaily):
             assets: optional list of EarthDaily Sentinel-2 asset keys (e.g. ["red",
                 "green", "blue", "nir", "swir16"]). If omitted and a LayerConfig is
                 provided via context, assets are inferred from that layer's band sets.
-            cloud_cover_threshold: default max cloud cover (%) used when cloud_cover_max
-                is not provided at query time.
-            cloud_cover_max: max cloud cover (%) applied in searches. If set, overrides
-                any `eo:cloud_cover` filter in `query`.
+            cloud_cover_max: max cloud cover (%) applied in searches. If set, injects
+                an `eo:cloud_cover` upper bound into the STAC query.
             search_max_items: max number of STAC items to fetch per window before
                 rslearn's grouping/matching logic runs.
             sort_items_by: optional ordering applied before grouping; useful when
                 using `SpaceMode.COMPOSITE` with `CompositingMethod.FIRST_VALID`.
-            query: optional STAC API `query` filter passed to searches. If
-                cloud_cover_max/cloud_cover_threshold is set, the effective query also
-                includes an `eo:cloud_cover` upper bound.
+            query: optional STAC API `query` filter passed to searches.
             sort_by: optional STAC item property to sort by before grouping/matching.
                 If set, it takes precedence over sort_items_by.
             sort_ascending: whether to sort ascending when sort_by is set.
@@ -771,7 +800,10 @@ class Sentinel2(EarthDaily):
             retry_backoff_factor: backoff factor for EarthDaily API client retries.
             context: rslearn data source context.
             apply_scale_offset: apply per-asset scale/offset metadata from STAC
-                `raster:bands` (defaults to True). Set to False to use raw values.
+                `raster:bands` during read/materialization (defaults to True).
+                This decodes C1 COG storage values to physical values; it is not
+                Sentinel-2 processing-baseline harmonization. Set to False to use the
+                raw integer DN/sample values from the COG.
         """
         if apply_scale_offset and context.layer_config is not None:
             invalid_band_sets = [
@@ -820,6 +852,9 @@ class Sentinel2(EarthDaily):
             query=query,
             sort_by=sort_by,
             sort_ascending=sort_ascending,
+            cloud_cover_max=cloud_cover_max,
+            search_max_items=search_max_items,
+            sort_items_by=sort_items_by,
             timeout=timeout,
             skip_items_missing_assets=True,
             cache_dir=cache_dir,
@@ -829,10 +864,6 @@ class Sentinel2(EarthDaily):
             context=context,
         )
 
-        self.cloud_cover_threshold = cloud_cover_threshold
-        self.cloud_cover_max = cloud_cover_max
-        self.search_max_items = search_max_items
-        self.sort_items_by = sort_items_by
         self.apply_scale_offset = apply_scale_offset
 
     def read_raster(
@@ -865,92 +896,6 @@ class Sentinel2(EarthDaily):
             time_range=item.geometry.time_range,
             metadata=raster.metadata,
         )
-
-    def get_items(
-        self, geometries: list[STGeometry], query_config: QueryConfig
-    ) -> list[list[MatchedItemGroup[EarthDailyItem]]]:
-        """Get Sentinel-2 items intersecting the given geometries.
-
-        Uses raw STAC search (not Sentinel2CollectionHelper) so that collection
-        configuration is controlled by `collection_name`.
-        """
-        _, client, _ = self._load_client()
-
-        groups = []
-        for geometry in geometries:
-            wgs84_geometry = geometry.to_wgs84()
-            if wgs84_geometry.time_range is None:
-                raise ValueError(
-                    "EarthDaily Sentinel-2 requires geometry time ranges to be set"
-                )
-
-            max_cloud_cover = (
-                self.cloud_cover_max
-                if self.cloud_cover_max is not None
-                else self.cloud_cover_threshold
-            )
-            effective_query: dict[str, Any] | None = (
-                copy.deepcopy(self.query) if self.query is not None else None
-            )
-            if max_cloud_cover is not None:
-                if effective_query is None:
-                    effective_query = {}
-                effective_query["eo:cloud_cover"] = {"lt": max_cloud_cover}
-
-            result = client.search(
-                collections=[self.collection_name],
-                intersects=shapely.to_geojson(wgs84_geometry.shp),
-                datetime=wgs84_geometry.time_range,
-                query=effective_query,
-                max_items=self.search_max_items,
-            )
-            stac_items = list(result.item_collection())
-
-            if self.sort_by is not None:
-                if self.sort_by == "datetime":
-                    stac_items.sort(
-                        key=lambda item: (
-                            item.datetime is None,
-                            item.datetime,
-                        ),
-                        reverse=not self.sort_ascending,
-                    )
-                else:
-                    stac_items.sort(
-                        key=lambda item: (
-                            item.properties.get(self.sort_by) is None,
-                            item.properties.get(self.sort_by),
-                        ),
-                        reverse=not self.sort_ascending,
-                    )
-            elif self.sort_items_by == "cloud_cover":
-                stac_items.sort(
-                    key=lambda item: (
-                        item.properties.get("eo:cloud_cover") is None,
-                        item.properties.get("eo:cloud_cover", 0.0),
-                    )
-                )
-            elif self.sort_items_by == "datetime":
-                stac_items.sort(
-                    key=lambda item: (
-                        item.datetime is None,
-                        item.datetime,
-                    )
-                )
-            elif self.sort_items_by is not None:
-                raise ValueError(
-                    f"invalid sort_items_by setting ({self.sort_items_by})"
-                )
-
-            candidate_items = [
-                self.get_item_by_name(stac_item.id) for stac_item in stac_items
-            ]
-            cur_groups = match_candidate_items_to_window(
-                geometry, candidate_items, query_config
-            )
-            groups.append(cur_groups)
-
-        return groups
 
     def ingest(
         self,
@@ -1012,14 +957,14 @@ class Sentinel2(EarthDaily):
 
 
 class Sentinel2L2A(EarthDaily):
-    """Sentinel-2 L2A on EarthDaily platform using `sentinel-2-l2a` collection.
+    """EarthDaily Sentinel-2 `sentinel-2-l2a` source with Planetary Computer-compatible asset keys.
 
-    This collection exposes the same asset keys as Planetary Computer Sentinel-2.
+    For EarthDaily Collection 1 (`sentinel-2-c1-l2a`), use `Sentinel2C1L2A`.
     """
 
     COLLECTION_NAME = "sentinel-2-l2a"
 
-    BANDS = {
+    ASSET_BANDS = {
         "B01": ["B01"],
         "B02": ["B02"],
         "B03": ["B03"],
@@ -1032,8 +977,10 @@ class Sentinel2L2A(EarthDaily):
         "B11": ["B11"],
         "B12": ["B12"],
         "B8A": ["B8A"],
+        "SCL": ["SCL"],
         "visual": ["R", "G", "B"],
     }
+    NON_REFLECTANCE_ASSETS = frozenset({"SCL", "visual"})
     PROCESSING_BASELINE_PATTERN = re.compile(r"(?:^|_)N(?P<baseline>\d{4})(?:_|$)")
     HARMONIZE_PROCESSING_BASELINE = 400
     HARMONIZE_CUTOFF = datetime(2022, 1, 25)
@@ -1043,10 +990,37 @@ class Sentinel2L2A(EarthDaily):
         self,
         harmonize: bool = False,
         assets: list[str] | None = None,
+        cloud_cover_max: float | None = None,
+        search_max_items: int = 500,
+        sort_items_by: Literal["cloud_cover", "datetime"] | None = "cloud_cover",
+        query: dict[str, Any] | None = None,
+        sort_by: str | None = None,
+        sort_ascending: bool = True,
+        timeout: timedelta = timedelta(seconds=10),
+        cache_dir: str | None = None,
+        max_retries: int = 3,
+        retry_backoff_factor: float = 5.0,
         context: DataSourceContext = DataSourceContext(),
-        **kwargs: Any,
     ) -> None:
-        """Initialize a new EarthDaily Sentinel2L2A data source."""
+        """Initialize a new EarthDaily Sentinel2L2A data source.
+
+        Args:
+            harmonize: apply processing-baseline harmonization to reflectance values.
+            assets: optional list of asset keys to ingest. If omitted and a LayerConfig
+                is provided via context, assets are inferred from that layer's band sets.
+            cloud_cover_max: max cloud cover (%) applied in searches. If set, injects
+                an ``eo:cloud_cover`` upper bound into the STAC query.
+            search_max_items: max number of STAC items to fetch per window.
+            sort_items_by: optional ordering applied before grouping.
+            query: optional STAC API ``query`` filter passed to searches.
+            sort_by: optional STAC item property to sort by.
+            sort_ascending: whether to sort ascending when sort_by is set.
+            timeout: timeout for HTTP asset downloads.
+            cache_dir: optional directory to cache item metadata by item id.
+            max_retries: max retries for EarthDaily API client.
+            retry_backoff_factor: backoff factor for EarthDaily API client retries.
+            context: rslearn data source context.
+        """
         self.harmonize = harmonize
         self._harmonize_callback_cache: dict[
             str, Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None
@@ -1054,31 +1028,42 @@ class Sentinel2L2A(EarthDaily):
 
         if context.layer_config is not None:
             asset_bands: dict[str, list[str]] = {}
-            for asset_key, band_names in self.BANDS.items():
+            for asset_key, band_names in self.ASSET_BANDS.items():
                 for band_set in context.layer_config.band_sets:
                     if set(band_set.bands).intersection(set(band_names)):
                         asset_bands[asset_key] = band_names
                         break
         elif assets is not None:
             unknown_assets = [
-                asset_key for asset_key in assets if asset_key not in self.BANDS
+                asset_key for asset_key in assets if asset_key not in self.ASSET_BANDS
             ]
             if unknown_assets:
                 raise ValueError(
                     f"unknown EarthDaily Sentinel-2 L2A assets {unknown_assets}; "
-                    f"supported assets are {sorted(self.BANDS.keys())}"
+                    f"supported assets are {sorted(self.ASSET_BANDS.keys())}"
                 )
-            asset_bands = {asset_key: self.BANDS[asset_key] for asset_key in assets}
+            asset_bands = {
+                asset_key: self.ASSET_BANDS[asset_key] for asset_key in assets
+            }
         else:
-            asset_bands = dict(self.BANDS)
+            asset_bands = dict(self.ASSET_BANDS)
 
         super().__init__(
             collection_name=self.COLLECTION_NAME,
             asset_bands=asset_bands,
+            query=query,
+            sort_by=sort_by,
+            sort_ascending=sort_ascending,
+            cloud_cover_max=cloud_cover_max,
+            search_max_items=search_max_items,
+            sort_items_by=sort_items_by,
+            timeout=timeout,
             skip_items_missing_assets=True,
+            cache_dir=cache_dir,
+            max_retries=max_retries,
+            retry_backoff_factor=retry_backoff_factor,
             read_scale_offsets=False,
             context=context,
-            **kwargs,
         )
 
     def _normalize_dt(self, dt: datetime) -> datetime:
@@ -1138,7 +1123,7 @@ class Sentinel2L2A(EarthDaily):
     def _get_harmonize_callback_for_item(
         self, item: EarthDailyItem, asset_key: str
     ) -> Callable[[npt.NDArray[Any]], npt.NDArray[Any]] | None:
-        if not self.harmonize or asset_key == "visual":
+        if not self.harmonize or asset_key in self.NON_REFLECTANCE_ASSETS:
             return None
         if item.name in self._harmonize_callback_cache:
             return self._harmonize_callback_cache[item.name]
