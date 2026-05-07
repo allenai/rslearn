@@ -222,7 +222,6 @@ for tif_fname, category in tqdm.tqdm(examples):
     ]
     with window.open_layer_writer("sentinel2") as writer:
         writer.write_raster(
-            0,
             sentinel2_bands,
             GeotiffRasterFormat(),
             projection,

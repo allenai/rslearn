@@ -96,29 +96,6 @@ class _PerLayerStorageMeta:
         return slice(start, end)
 
 
-def _split_per_layer_raster(
-    raster: RasterArray, meta: _PerLayerStorageMeta
-) -> list[RasterArray]:
-    """Split a packed CTHW raster back into one RasterArray per item group."""
-    out: list[RasterArray] = []
-    for group_idx in range(meta.num_groups):
-        t_slice = meta.t_slice_for_group(group_idx)
-        sub_array = raster.array[:, t_slice, :, :]
-        sub_timestamps: list[tuple[datetime, datetime]] | None
-        if raster.timestamps is None:
-            sub_timestamps = None
-        else:
-            sub_timestamps = list(raster.timestamps[t_slice])
-        out.append(
-            RasterArray(
-                array=sub_array,
-                timestamps=sub_timestamps,
-                metadata=RasterMetadata(nodata_value=raster.metadata.nodata_value),
-            )
-        )
-    return out
-
-
 @dataclass
 class _BandsetBuffer:
     """Per-bandset buffer accumulated by :class:`_PerLayerStorageLayerWriter`."""
@@ -299,48 +276,38 @@ class PerLayerStorage(WindowDataStorage):
         resampling: Resampling = Resampling.bilinear,
     ) -> RasterArray:
         """Decode the combined raster and slice out the requested item group."""
-        raster_dir = _per_layer_raster_dir(window.window_root, layer_name, bands)
-        meta = _PerLayerStorageMeta.read(raster_dir)
-        combined = raster_format.decode_raster(
-            raster_dir, projection, bounds, resampling
-        )
-        if combined.array.shape[1] != sum(meta.group_timestep_counts):
-            raise ValueError(
-                f"PerLayerStorage: combined raster T={combined.array.shape[1]} "
-                f"does not match sidecar sum {sum(meta.group_timestep_counts)}"
-            )
-        t_slice = meta.t_slice_for_group(group_idx)
-        sub_timestamps: list[tuple[datetime, datetime]] | None
-        if combined.timestamps is None:
-            sub_timestamps = None
-        else:
-            sub_timestamps = list(combined.timestamps[t_slice])
-        return RasterArray(
-            array=combined.array[:, t_slice, :, :],
-            timestamps=sub_timestamps,
-            metadata=RasterMetadata(nodata_value=combined.metadata.nodata_value),
-        )
+        return self.read_rasters(
+            window,
+            layer_name,
+            bands,
+            [group_idx],
+            raster_format,
+            projection,
+            bounds,
+            resampling,
+        )[0]
 
     @override
-    def read_all_rasters(
+    def read_rasters(
         self,
         window: Window,
         layer_name: str,
         bands: list[str],
-        num_groups: int,
+        group_idxs: list[int],
         raster_format: RasterFormat,
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
     ) -> list[RasterArray]:
-        """Decode the combined raster once and split into per-group RasterArrays."""
+        """Decode the combined raster once and slice out the requested groups."""
         raster_dir = _per_layer_raster_dir(window.window_root, layer_name, bands)
         meta = _PerLayerStorageMeta.read(raster_dir)
-        if meta.num_groups != num_groups:
-            raise ValueError(
-                f"PerLayerStorage: expected {num_groups} groups but sidecar has "
-                f"{meta.num_groups}"
-            )
+        for group_idx in group_idxs:
+            if group_idx < 0 or group_idx >= meta.num_groups:
+                raise ValueError(
+                    f"PerLayerStorage: group_idx {group_idx} out of range "
+                    f"[0, {meta.num_groups})"
+                )
         combined = raster_format.decode_raster(
             raster_dir, projection, bounds, resampling
         )
@@ -349,7 +316,25 @@ class PerLayerStorage(WindowDataStorage):
                 f"PerLayerStorage: combined raster T={combined.array.shape[1]} "
                 f"does not match sidecar sum {sum(meta.group_timestep_counts)}"
             )
-        return _split_per_layer_raster(combined, meta)
+        out: list[RasterArray] = []
+        for group_idx in group_idxs:
+            t_slice = meta.t_slice_for_group(group_idx)
+            sub_array = combined.array[:, t_slice, :, :]
+            sub_timestamps: list[tuple[datetime, datetime]] | None
+            if combined.timestamps is None:
+                sub_timestamps = None
+            else:
+                sub_timestamps = list(combined.timestamps[t_slice])
+            out.append(
+                RasterArray(
+                    array=sub_array,
+                    timestamps=sub_timestamps,
+                    metadata=RasterMetadata(
+                        nodata_value=combined.metadata.nodata_value
+                    ),
+                )
+            )
+        return out
 
     @override
     def read_vector(

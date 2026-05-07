@@ -76,8 +76,8 @@ def test_raster_roundtrip(tmp_path: pathlib.Path) -> None:
     assert np.all(out0.get_chw_array() == 1)
     assert np.all(out1.get_chw_array() == 7)
 
-    all_rasters = storage.read_all_rasters(
-        window, LAYER_NAME, BANDS, 2, raster_format, PROJECTION, BOUNDS
+    all_rasters = storage.read_rasters(
+        window, LAYER_NAME, BANDS, [0, 1], raster_format, PROJECTION, BOUNDS
     )
     assert len(all_rasters) == 2
     assert np.all(all_rasters[0].get_chw_array() == 1)

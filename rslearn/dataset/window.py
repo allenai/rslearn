@@ -298,32 +298,32 @@ class Window:
             resampling=resampling,
         )
 
-    def read_all_rasters(
+    def read_rasters(
         self,
         layer_name: str,
         bands: list[str],
-        num_groups: int,
+        group_idxs: list[int],
         raster_format: RasterFormat,
         projection: Projection | None = None,
         bounds: tuple[int, int, int, int] | None = None,
         resampling: Resampling = Resampling.bilinear,
     ) -> list[RasterArray]:
-        """Read all item groups' rasters for a layer.
+        """Read rasters for the specified item groups.
 
         Args:
             layer_name: the layer name.
             bands: the band set to read.
-            num_groups: number of item groups.
+            group_idxs: ordered list of item group indices to read.
             raster_format: the raster format to decode with.
             projection: target projection (defaults to window projection).
             bounds: target bounds (defaults to window bounds).
             resampling: resampling method (defaults to bilinear).
         """
-        return self.data_storage.read_all_rasters(
+        return self.data_storage.read_rasters(
             self,
             layer_name,
             bands,
-            num_groups,
+            group_idxs,
             raster_format,
             projection if projection is not None else self.projection,
             bounds if bounds is not None else self.bounds,

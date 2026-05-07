@@ -98,21 +98,20 @@ class WindowDataStorage(ABC):
     ) -> RasterArray:
         """Read a single item group's raster (CTHW)."""
 
-    def read_all_rasters(
+    def read_rasters(
         self,
         window: Window,
         layer_name: str,
         bands: list[str],
-        num_groups: int,
+        group_idxs: list[int],
         raster_format: RasterFormat,
         projection: Projection,
         bounds: PixelBounds,
         resampling: Resampling = Resampling.bilinear,
     ) -> list[RasterArray]:
-        """Read all item groups' rasters.
+        """Read rasters for the specified item groups.
 
-        The default implementation loops over :meth:`read_raster`. Per-layer
-        implementations override this to read the combined file once.
+        The default implementation loops over :meth:`read_raster`.
         """
         return [
             self.read_raster(
@@ -125,7 +124,7 @@ class WindowDataStorage(ABC):
                 group_idx=group_idx,
                 resampling=resampling,
             )
-            for group_idx in range(num_groups)
+            for group_idx in group_idxs
         ]
 
     @abstractmethod

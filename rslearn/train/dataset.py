@@ -37,7 +37,6 @@ from rslearn.train.model_context import RasterImage
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, ResolutionFactor
 from rslearn.utils.mp import make_pool_and_star_imap_unordered
-from rslearn.utils.raster_array import RasterArray
 
 from .model_context import SampleMetadata
 from .tasks import Task
@@ -386,35 +385,15 @@ def read_raster_layer_groups_for_data_input(
         # resampling. If it really is much faster to handle it via torch, then it may
         # make sense to bring back that functionality.
 
-        # If the requested group_idxs are exactly [0, 1, ..., N-1], use
-        # read_all_rasters since it may be optimized for some storage backends.
-        # Warning: this will use read_all_rasters whenever a prefix of item groups is
-        # requested, since we don't have access to the total number of groups available
-        # here.
-        per_group_arrays: list[RasterArray]
-        if group_idxs == list(range(len(group_idxs))):
-            per_group_arrays = window.read_all_rasters(
-                layer_name,
-                band_set.bands,
-                len(group_idxs),
-                raster_format,
-                projection=final_projection,
-                bounds=final_bounds,
-                resampling=Resampling.nearest,
-            )
-        else:
-            per_group_arrays = [
-                window.read_raster(
-                    layer_name,
-                    band_set.bands,
-                    raster_format,
-                    group_idx=group_idx,
-                    projection=final_projection,
-                    bounds=final_bounds,
-                    resampling=Resampling.nearest,
-                )
-                for group_idx in group_idxs
-            ]
+        per_group_arrays = window.read_rasters(
+            layer_name,
+            band_set.bands,
+            group_idxs,
+            raster_format,
+            projection=final_projection,
+            bounds=final_bounds,
+            resampling=Resampling.nearest,
+        )
 
         for slot, raster_array in enumerate(per_group_arrays):
             src = raster_array.array  # (C, T, H, W)

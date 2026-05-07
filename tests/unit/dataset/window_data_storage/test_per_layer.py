@@ -78,7 +78,7 @@ def test_raster_roundtrip(tmp_path: pathlib.Path) -> None:
         arr = window.read_raster(LAYER_NAME, BANDS, raster_format, group_idx=i)
         assert np.all(arr.get_chw_array() == i + 1)
 
-    all_rasters = window.read_all_rasters(LAYER_NAME, BANDS, 3, raster_format)
+    all_rasters = window.read_rasters(LAYER_NAME, BANDS, [0, 1, 2], raster_format)
     assert len(all_rasters) == 3
     for i, arr in enumerate(all_rasters):
         assert np.all(arr.get_chw_array() == i + 1)

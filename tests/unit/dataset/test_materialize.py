@@ -432,11 +432,10 @@ def test_raster_materializer_with_per_layer_storage(
     assert window.is_layer_completed("layer", 0)
     assert window.is_layer_completed("layer", 1)
 
-    # Reading back via window.read_all_rasters should yield two
-    # RasterArrays.
+    # Reading back via read_rasters should yield two RasterArrays.
     raster_format = layer_cfg.band_sets[0].instantiate_raster_format()
-    arrays = per_layer_storage.read_all_rasters(
-        window, "layer", ["B1"], 2, raster_format, WGS84_PROJECTION, (0, 0, 4, 4)
+    arrays = per_layer_storage.read_rasters(
+        window, "layer", ["B1"], [0, 1], raster_format, WGS84_PROJECTION, (0, 0, 4, 4)
     )
     assert len(arrays) == 2
     for arr in arrays:
