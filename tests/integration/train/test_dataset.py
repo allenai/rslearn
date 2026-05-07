@@ -62,6 +62,7 @@ class TestDataset:
                 projection=projection,
                 bounds=bounds,
                 time_range=None,
+                data_storage=dataset.window_data_storage,
                 options=options,
             ).save()
 
@@ -142,6 +143,7 @@ class TestDataset:
             projection=projection,
             bounds=bounds,
             time_range=None,
+            data_storage=dataset.window_data_storage,
         )
         window.save()
 
@@ -239,6 +241,7 @@ class TestResolutionFactor:
             projection=Projection(CRS.from_epsg(3857), 1, -1),
             bounds=(0, 0, 4, 4),
             time_range=None,
+            data_storage=dataset.window_data_storage,
         )
         window.save()
 

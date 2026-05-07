@@ -235,6 +235,7 @@ def test_read_data_input_timestamps(tmp_path: UPath) -> None:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
+        data_storage=dataset.window_data_storage,
     )
     window.save()
 
@@ -316,6 +317,7 @@ def test_read_data_input_use_all_bands_single_band_set(tmp_path: UPath) -> None:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
+        data_storage=dataset.window_data_storage,
     )
     window.save()
 
@@ -390,6 +392,7 @@ def test_read_data_input_use_all_bands_with_band_set_index(tmp_path: UPath) -> N
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
+        data_storage=dataset.window_data_storage,
     )
     window.save()
 

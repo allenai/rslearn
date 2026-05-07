@@ -5,6 +5,7 @@ from pathlib import Path
 
 from upath import UPath
 
+from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
 from rslearn.train.dataset_index import INDEX_DIR_NAME, DatasetIndex
 
 
@@ -44,6 +45,7 @@ def make_index(
         inputs = {"image": MockDataInput(["layer1"])}
     return DatasetIndex(
         storage=MockStorage(),  # type: ignore
+        data_storage=PerItemGroupStorage(),
         dataset_path=UPath(tmp_path),
         groups=groups,
         names=names,

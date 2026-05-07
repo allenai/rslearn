@@ -135,6 +135,7 @@ def _materialize_numpy_era5_window(
             datetime(2020, 1, 2, tzinfo=UTC),
             datetime(2020, 1, 5, tzinfo=UTC),
         ),
+        data_storage=dataset.window_data_storage,
     )
     window.save()
 

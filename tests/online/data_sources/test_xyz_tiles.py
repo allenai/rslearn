@@ -14,6 +14,7 @@ from rslearn.config import (
 from rslearn.data_sources.xyz_tiles import XyzTiles
 from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
+from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
 from rslearn.utils import STGeometry
 
 
@@ -44,6 +45,7 @@ class TestXyzTiles:
             projection=seattle2020.projection,
             bounds=tuple([int(x) for x in seattle2020.shp.bounds]),  # type: ignore
             time_range=seattle2020.time_range,
+            data_storage=PerItemGroupStorage(),
         )
         window.save()
         print("materialize")

@@ -74,6 +74,7 @@ class TestLocalFiles:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 10, 10),
             time_range=None,
+            data_storage=dataset.window_data_storage,
         ).save()
 
         windows = dataset.load_windows()

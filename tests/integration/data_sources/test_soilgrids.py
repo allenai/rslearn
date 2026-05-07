@@ -18,6 +18,7 @@ from rslearn.config import (
 from rslearn.data_sources.soilgrids import SOILGRIDS_NODATA_VALUE, SoilGrids
 from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
+from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
 from rslearn.utils.geometry import Projection
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
@@ -85,6 +86,7 @@ def test_soilgrids_clay_scale_offset_applied(
         projection=projection,
         bounds=bounds,
         time_range=None,
+        data_storage=PerItemGroupStorage(),
     )
     window.save()
 

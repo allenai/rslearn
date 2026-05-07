@@ -89,6 +89,7 @@ class TestPredictLoader:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 4, 4),
             time_range=None,
+            data_storage=empty_image_dataset.window_data_storage,
         )
         window.save()
         image = np.zeros((1, 4, 4), dtype=np.uint8)

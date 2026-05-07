@@ -67,6 +67,7 @@ def regression_dataset(tmp_path: pathlib.Path) -> Dataset:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 32, 32),
         time_range=None,
+        data_storage=dataset.window_data_storage,
     )
     window.save()
 

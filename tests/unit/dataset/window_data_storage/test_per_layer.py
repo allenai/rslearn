@@ -36,6 +36,7 @@ def _make_window(tmp_path: pathlib.Path) -> Window:
         projection=PROJECTION,
         bounds=BOUNDS,
         time_range=None,
+        data_storage=PerLayerStorage(),
     )
     window.save()
     return window
@@ -50,7 +51,6 @@ def test_factory_returns_per_layer_storage(tmp_path: pathlib.Path) -> None:
 def test_raster_roundtrip(tmp_path: pathlib.Path) -> None:
     """Per-layer raster writes produce a single combined file and round-trip cleanly."""
     window = _make_window(tmp_path)
-    storage = PerLayerStorage()
     raster_format = GeotiffRasterFormat()
 
     rasters = [
@@ -61,7 +61,7 @@ def test_raster_roundtrip(tmp_path: pathlib.Path) -> None:
         for i in range(3)
     ]
 
-    with storage.open_layer_writer(window, LAYER_NAME) as writer:
+    with window.open_layer_writer(LAYER_NAME) as writer:
         for i, raster in enumerate(rasters):
             writer.write_raster(
                 BANDS, raster_format, PROJECTION, BOUNDS, raster, group_idx=i
@@ -75,14 +75,10 @@ def test_raster_roundtrip(tmp_path: pathlib.Path) -> None:
     assert not (window.window_root / f"layers/{LAYER_NAME}.2/B1_B2").exists()
 
     for i in range(3):
-        arr = storage.read_raster(
-            window, LAYER_NAME, BANDS, raster_format, PROJECTION, BOUNDS, group_idx=i
-        )
+        arr = window.read_raster(LAYER_NAME, BANDS, raster_format, group_idx=i)
         assert np.all(arr.get_chw_array() == i + 1)
 
-    all_rasters = storage.read_all_rasters(
-        window, LAYER_NAME, BANDS, 3, raster_format, PROJECTION, BOUNDS
-    )
+    all_rasters = window.read_all_rasters(LAYER_NAME, BANDS, 3, raster_format)
     assert len(all_rasters) == 3
     for i, arr in enumerate(all_rasters):
         assert np.all(arr.get_chw_array() == i + 1)
@@ -91,7 +87,6 @@ def test_raster_roundtrip(tmp_path: pathlib.Path) -> None:
 def test_groups_can_be_written_out_of_order(tmp_path: pathlib.Path) -> None:
     """Buffered groups are sorted by group_idx on flush."""
     window = _make_window(tmp_path)
-    storage = PerLayerStorage()
     raster_format = GeotiffRasterFormat()
 
     raster_for_group_0 = RasterArray(
@@ -103,8 +98,7 @@ def test_groups_can_be_written_out_of_order(tmp_path: pathlib.Path) -> None:
         metadata=RasterMetadata(nodata_value=0),
     )
 
-    with storage.open_layer_writer(window, LAYER_NAME) as writer:
-        # Write group 1 first, then 0.
+    with window.open_layer_writer(LAYER_NAME) as writer:
         writer.write_raster(
             BANDS, raster_format, PROJECTION, BOUNDS, raster_for_group_1, group_idx=1
         )
@@ -112,12 +106,8 @@ def test_groups_can_be_written_out_of_order(tmp_path: pathlib.Path) -> None:
             BANDS, raster_format, PROJECTION, BOUNDS, raster_for_group_0, group_idx=0
         )
 
-    arr0 = storage.read_raster(
-        window, LAYER_NAME, BANDS, raster_format, PROJECTION, BOUNDS, group_idx=0
-    )
-    arr1 = storage.read_raster(
-        window, LAYER_NAME, BANDS, raster_format, PROJECTION, BOUNDS, group_idx=1
-    )
+    arr0 = window.read_raster(LAYER_NAME, BANDS, raster_format, group_idx=0)
+    arr1 = window.read_raster(LAYER_NAME, BANDS, raster_format, group_idx=1)
     assert np.all(arr0.get_chw_array() == 9)
     assert np.all(arr1.get_chw_array() == 5)
 
@@ -125,7 +115,6 @@ def test_groups_can_be_written_out_of_order(tmp_path: pathlib.Path) -> None:
 def test_inconsistent_bounds_rejected(tmp_path: pathlib.Path) -> None:
     """All groups must share the same bounds in PerLayerStorage."""
     window = _make_window(tmp_path)
-    storage = PerLayerStorage()
     raster_format = GeotiffRasterFormat()
     other_bounds = (0, 0, 8, 8)
     raster_4 = RasterArray(
@@ -136,7 +125,7 @@ def test_inconsistent_bounds_rejected(tmp_path: pathlib.Path) -> None:
         chw_array=np.full((2, 8, 8), 1, dtype=np.uint8),
         metadata=RasterMetadata(nodata_value=0),
     )
-    with storage.open_layer_writer(window, LAYER_NAME) as writer:
+    with window.open_layer_writer(LAYER_NAME) as writer:
         writer.write_raster(
             BANDS, raster_format, PROJECTION, BOUNDS, raster_4, group_idx=0
         )
@@ -149,7 +138,6 @@ def test_inconsistent_bounds_rejected(tmp_path: pathlib.Path) -> None:
 def test_vector_falls_back_to_per_item_group(tmp_path: pathlib.Path) -> None:
     """PerLayerStorage delegates vector ops to per-item-group on-disk layout."""
     window = _make_window(tmp_path)
-    storage = PerLayerStorage()
     vector_format = GeojsonVectorFormat()
 
     feat0 = Feature(
@@ -161,7 +149,7 @@ def test_vector_falls_back_to_per_item_group(tmp_path: pathlib.Path) -> None:
         properties={"label": "b"},
     )
 
-    with storage.open_layer_writer(window, LAYER_NAME) as writer:
+    with window.open_layer_writer(LAYER_NAME) as writer:
         writer.write_vector(vector_format, [feat0], group_idx=0)
         writer.write_vector(vector_format, [feat1], group_idx=1)
 
@@ -169,12 +157,8 @@ def test_vector_falls_back_to_per_item_group(tmp_path: pathlib.Path) -> None:
     assert (window.window_root / "layers" / LAYER_NAME / "data.geojson").exists()
     assert (window.window_root / f"layers/{LAYER_NAME}.1" / "data.geojson").exists()
 
-    out0 = storage.read_vector(
-        window, LAYER_NAME, vector_format, PROJECTION, BOUNDS, group_idx=0
-    )
-    out1 = storage.read_vector(
-        window, LAYER_NAME, vector_format, PROJECTION, BOUNDS, group_idx=1
-    )
+    out0 = window.read_vector(LAYER_NAME, vector_format, group_idx=0)
+    out1 = window.read_vector(LAYER_NAME, vector_format, group_idx=1)
     assert len(out0) == 1 and out0[0].properties["label"] == "a"
     assert len(out1) == 1 and out1[0].properties["label"] == "b"
 
@@ -182,7 +166,6 @@ def test_vector_falls_back_to_per_item_group(tmp_path: pathlib.Path) -> None:
 def test_writer_skips_flush_on_exception(tmp_path: pathlib.Path) -> None:
     """If the with-block raises, no combined file should be flushed."""
     window = _make_window(tmp_path)
-    storage = PerLayerStorage()
     raster_format = GeotiffRasterFormat()
 
     raster = RasterArray(
@@ -194,7 +177,7 @@ def test_writer_skips_flush_on_exception(tmp_path: pathlib.Path) -> None:
         pass
 
     with pytest.raises(BoomError):
-        with storage.open_layer_writer(window, LAYER_NAME) as writer:
+        with window.open_layer_writer(LAYER_NAME) as writer:
             writer.write_raster(BANDS, raster_format, PROJECTION, BOUNDS, raster)
             raise BoomError
 

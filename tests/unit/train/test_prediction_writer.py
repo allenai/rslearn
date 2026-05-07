@@ -16,6 +16,7 @@ from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType, Storage
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
 from rslearn.dataset.storage.file import FileWindowStorage
+from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
 from rslearn.train.lightning_module import RslearnLightningModule
 from rslearn.train.model_context import ModelOutput, RasterImage, SampleMetadata
 from rslearn.train.prediction_writer import (
@@ -104,6 +105,7 @@ class TestRasterMerger:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 4, 4),
             time_range=None,
+            data_storage=PerItemGroupStorage(),
         )
         outputs = [
             PendingCropOutput(
@@ -150,6 +152,7 @@ class TestRasterMerger:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 4, 4),
             time_range=None,
+            data_storage=PerItemGroupStorage(),
         )
         # We make four 3x3 patches:
         # - (0, 0, 3, 3)
@@ -204,6 +207,7 @@ class TestRasterMerger:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 4, 4),
             time_range=None,
+            data_storage=PerItemGroupStorage(),
         )
         outputs = [
             PendingCropOutput(
@@ -256,6 +260,7 @@ def test_write_raster(tmp_path: pathlib.Path) -> None:
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         bounds=(0, 0, 1, 1),
         time_range=None,
+        data_storage=dataset.window_data_storage,
     )
     window.save()
 
@@ -348,6 +353,7 @@ def test_write_raster_with_custom_output_path(tmp_path: pathlib.Path) -> None:
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         bounds=(0, 0, 1, 1),
         time_range=None,
+        data_storage=dataset.window_data_storage,
     )
     window.save()
 
@@ -406,6 +412,7 @@ def test_write_raster_with_custom_output_path(tmp_path: pathlib.Path) -> None:
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         bounds=(0, 0, 1, 1),
         time_range=None,
+        data_storage=PerItemGroupStorage(),
     )
     assert custom_window.is_layer_completed(output_layer_name)
     raster = custom_window.read_raster(
@@ -498,6 +505,7 @@ def test_write_raster_with_layer_config(tmp_path: pathlib.Path) -> None:
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         bounds=(0, 0, 1, 1),
         time_range=None,
+        data_storage=writer.window_data_storage,
     )
     assert window.is_layer_completed(output_layer_name)
     raster = window.read_raster(
@@ -594,6 +602,7 @@ def test_selector_with_dictionary_output(tmp_path: pathlib.Path) -> None:
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         bounds=(0, 0, 5, 5),
         time_range=None,
+        data_storage=writer.window_data_storage,
     )
     assert window.is_layer_completed(output_layer_name)
     raster = window.read_raster(
@@ -724,6 +733,7 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         bounds=(0, 0, 3, 3),
         time_range=None,
+        data_storage=writer.window_data_storage,
     )
     assert window.is_layer_completed(output_layer_name)
     raster = window.read_raster(
@@ -761,6 +771,7 @@ def test_write_raster_with_path_from_datamodule(tmp_path: pathlib.Path) -> None:
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         bounds=(0, 0, 1, 1),
         time_range=None,
+        data_storage=dataset.window_data_storage,
     )
     window.save()
 

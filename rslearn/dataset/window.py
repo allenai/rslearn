@@ -2,7 +2,7 @@
 
 import warnings
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import shapely
 from rasterio.enums import Resampling
@@ -13,18 +13,16 @@ from rslearn.dataset.window_data_storage.per_item_group import (
     _per_item_group_layer_dir,
     _per_item_group_raster_dir,
 )
+from rslearn.dataset.window_data_storage.storage import (
+    LayerWriter,
+    WindowDataStorage,
+)
 from rslearn.log_utils import get_logger
 from rslearn.utils import Projection, STGeometry
 from rslearn.utils.feature import Feature
 from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import RasterFormat
 from rslearn.utils.vector_format import VectorFormat
-
-if TYPE_CHECKING:
-    from rslearn.dataset.window_data_storage.storage import (
-        LayerWriter,
-        WindowDataStorage,
-    )
 
 logger = get_logger(__name__)
 
@@ -146,8 +144,8 @@ class Window:
         projection: Projection,
         bounds: tuple[int, int, int, int],
         time_range: tuple[datetime, datetime] | None,
+        data_storage: WindowDataStorage,
         options: dict[str, Any] = {},
-        data_storage: "WindowDataStorage | None" = None,
     ) -> None:
         """Creates a new Window instance.
 
@@ -161,10 +159,10 @@ class Window:
             projection: the projection of the window
             bounds: the bounds of the window in pixel coordinates
             time_range: optional time range of the window
-            options: additional options (?)
-            data_storage: the WindowDataStorage to use for materialized raster/
-                vector data on this window. The Dataset normally injects the
-                dataset-configured WindowDataStorage when loading windows.
+            data_storage: the WindowDataStorage for materialized raster/vector data.
+            options: additional options. This is typically used to store metadata on
+                the window. Train, val, and test splits can filter for key-value pairs
+                (called "tags" in DataInput) in this options dictionary.
         """
         self.storage = storage
         self.group = group
@@ -173,16 +171,7 @@ class Window:
         self.bounds = bounds
         self.time_range = time_range
         self.options = options
-
-        if data_storage is None:
-            # Lazy import to avoid a circular import with window_data_storage,
-            # which imports back from rslearn.dataset.window.
-            from rslearn.dataset.window_data_storage.per_item_group import (
-                PerItemGroupStorage,
-            )
-
-            data_storage = PerItemGroupStorage()
-        self.data_storage: WindowDataStorage = data_storage
+        self.data_storage = data_storage
 
     def get_geometry(self) -> STGeometry:
         """Computes the STGeometry corresponding to this window."""
@@ -266,7 +255,7 @@ class Window:
         """
         self.storage.mark_layer_completed(self.group, self.name, layer_name, group_idx)
 
-    def open_layer_writer(self, layer_name: str) -> "LayerWriter":
+    def open_layer_writer(self, layer_name: str) -> LayerWriter:
         """Open a writer for one materialization pass over a layer.
 
         Args:
@@ -420,12 +409,17 @@ class Window:
         self.storage.create_or_update_window(self)
 
     @staticmethod
-    def from_metadata(storage: WindowStorage, metadata: dict[str, Any]) -> "Window":
+    def from_metadata(
+        storage: WindowStorage,
+        metadata: dict[str, Any],
+        data_storage: WindowDataStorage,
+    ) -> "Window":
         """Create a Window from the WindowStorage and the window's metadata dictionary.
 
         Args:
             storage: the WindowStorage for the underlying dataset.
             metadata: the window metadata.
+            data_storage: the WindowDataStorage for materialized raster/vector data.
 
         Returns:
             the Window
@@ -452,6 +446,7 @@ class Window:
                 if metadata["time_range"]
                 else None
             ),
+            data_storage=data_storage,
             options=metadata["options"],
         )
 

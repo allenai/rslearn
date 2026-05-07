@@ -446,6 +446,7 @@ class TestERA5LandHourlyTimeseries:
                 datetime(2025, 1, 15, tzinfo=UTC),
                 datetime(2025, 2, 15, tzinfo=UTC),
             ),
+            data_storage=dataset.window_data_storage,
         )
         window.save()
 

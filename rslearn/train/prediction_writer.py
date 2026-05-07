@@ -22,6 +22,7 @@ from rslearn.config import (
 )
 from rslearn.dataset import Window
 from rslearn.dataset.storage.storage import WindowStorage
+from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
 from rslearn.dataset.window_data_storage.storage import WindowDataStorage
 from rslearn.log_utils import get_logger
 from rslearn.train.model_context import SampleMetadata
@@ -380,10 +381,6 @@ class RslearnWriter(BasePredictionWriter):
             # didn't load config.json) but didn't provide
             # window_data_storage_config. Fall back to the default
             # PerItemGroupStorage to preserve legacy behavior.
-            from rslearn.dataset.window_data_storage.per_item_group import (
-                PerItemGroupStorage,
-            )
-
             window_data_storage = PerItemGroupStorage()
 
         self.dataset_storage: WindowStorage = dataset_storage

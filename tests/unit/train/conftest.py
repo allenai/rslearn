@@ -83,6 +83,7 @@ def add_window(
         projection=WGS84_PROJECTION,
         bounds=bounds,
         time_range=None,
+        data_storage=dataset.window_data_storage,
     )
     window.save()
 

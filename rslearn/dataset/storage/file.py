@@ -1,7 +1,10 @@
 """The default file-based window storage backend."""
 
+from __future__ import annotations
+
 import json
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 import tqdm
 from typing_extensions import override
@@ -19,6 +22,9 @@ from rslearn.utils.mp import make_pool_and_star_imap_unordered
 
 from .storage import WindowStorage, WindowStorageFactory
 
+if TYPE_CHECKING:
+    from rslearn.dataset.window_data_storage.storage import WindowDataStorage
+
 logger = get_logger(__name__)
 
 LAYERS_SUBDIR = "layers"
@@ -30,7 +36,11 @@ def _file_layer_dir(window_path: UPath, layer_name: str, group_idx: int = 0) -> 
     return window_path / LAYERS_SUBDIR / folder_name
 
 
-def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window:
+def load_window(
+    storage: FileWindowStorage,
+    window_dir: UPath,
+    data_storage: WindowDataStorage,
+) -> Window:
     """Load the window from its directory by reading metadata.json.
 
     The group and window name are derived from the filesystem path.
@@ -38,6 +48,7 @@ def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window:
     Args:
         storage: the underlying FileWindowStorage.
         window_dir: the path where the window is stored.
+        data_storage: the WindowDataStorage to inject into the Window.
 
     Returns:
         the window object.
@@ -74,6 +85,7 @@ def load_window(storage: "FileWindowStorage", window_dir: UPath) -> Window:
         projection=Projection.deserialize(metadata["projection"]),
         bounds=bounds,
         time_range=time_range,
+        data_storage=data_storage,
         options=metadata.get("options", {}),
     )
 
@@ -98,14 +110,17 @@ class FileWindowStorage(WindowStorage):
         self,
         groups: list[str] | None = None,
         names: list[str] | None = None,
+        *,
+        data_storage: WindowDataStorage,
         show_progress: bool = False,
         workers: int = 0,
-    ) -> list["Window"]:
+    ) -> list[Window]:
         """Load the windows in the dataset.
 
         Args:
             groups: an optional list of groups to filter loading
             names: an optional list of window names to filter loading
+            data_storage: the WindowDataStorage to inject into each Window.
             show_progress: whether to show tqdm progress bar
             workers: number of parallel workers, default 0 (use main thread only to load windows)
         """
@@ -147,7 +162,10 @@ class FileWindowStorage(WindowStorage):
         with make_pool_and_star_imap_unordered(
             workers,
             load_window,
-            [dict(storage=self, window_dir=window_dir) for window_dir in window_dirs],
+            [
+                dict(storage=self, window_dir=window_dir, data_storage=data_storage)
+                for window_dir in window_dirs
+            ],
         ) as outputs:
             if show_progress:
                 outputs = tqdm.tqdm(
@@ -182,7 +200,7 @@ class FileWindowStorage(WindowStorage):
             json.dump(metadata, f)
 
     @override
-    def get_layer_datas(self, group: str, name: str) -> dict[str, "WindowLayerData"]:
+    def get_layer_datas(self, group: str, name: str) -> dict[str, WindowLayerData]:
         window_path = self.get_window_root(group, name)
         items_fname = window_path / "items.json"
         if not items_fname.exists():
@@ -197,7 +215,7 @@ class FileWindowStorage(WindowStorage):
 
     @override
     def save_layer_datas(
-        self, group: str, name: str, layer_datas: dict[str, "WindowLayerData"]
+        self, group: str, name: str, layer_datas: dict[str, WindowLayerData]
     ) -> None:
         window_path = self.get_window_root(group, name)
         json_data = [layer_data.serialize() for layer_data in layer_datas.values()]

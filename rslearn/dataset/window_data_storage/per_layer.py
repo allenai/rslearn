@@ -215,6 +215,11 @@ class _PerLayerStorageLayerWriter(LayerWriter):
         """Concatenate buffered groups along T and write the combined raster."""
         # Sort groups by group_idx so the on-disk T axis order is deterministic.
         group_idxs = sorted(buf.rasters.keys())
+        if group_idxs != list(range(len(group_idxs))):
+            raise ValueError(
+                f"PerLayerStorage requires contiguous group indices [0, ..., N-1], "
+                f"but got {group_idxs} for bands={buf.bands}"
+            )
         arrays = [buf.rasters[i] for i in group_idxs]
 
         nodata = unique_nodata_value(

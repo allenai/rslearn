@@ -19,6 +19,7 @@ from rslearn.dataset.materialize import RasterMaterializer, resolve_nodata_value
 from rslearn.dataset.remap import Remapper
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.tile_utils import read_raster_window_from_tiles
+from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
 from rslearn.dataset.window_data_storage.per_layer import (
     PER_LAYER_STORAGE_META_FNAME,
     PerLayerStorage,
@@ -356,6 +357,7 @@ def test_raster_materializer_passes_all_band_sets_to_compositor(
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
+        data_storage=PerItemGroupStorage(),
     )
     window.save()
 

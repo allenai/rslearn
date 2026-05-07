@@ -6,6 +6,7 @@ from pathlib import Path
 from upath import UPath
 
 from rslearn.dataset.storage.file import FileWindowStorage
+from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
 from rslearn.utils.geometry import WGS84_PROJECTION
 
 
@@ -34,7 +35,7 @@ def test_get_windows_ignores_ds_store_files(tmp_path: Path) -> None:
     _write_window_metadata(dataset_path, group="group1", name="w1")
 
     storage = FileWindowStorage(dataset_path)
-    windows = storage.get_windows()
+    windows = storage.get_windows(data_storage=PerItemGroupStorage())
 
     assert [(w.group, w.name) for w in windows] == [("group1", "w1")]
 
@@ -46,7 +47,9 @@ def test_get_windows_skips_non_directory_group(tmp_path: Path) -> None:
         f.write("junk")
 
     storage = FileWindowStorage(dataset_path)
-    windows = storage.get_windows(groups=[".DS_Store"])
+    windows = storage.get_windows(
+        groups=[".DS_Store"], data_storage=PerItemGroupStorage()
+    )
 
     assert windows == []
 
@@ -64,7 +67,7 @@ def test_window_survives_move_to_different_group(tmp_path: Path) -> None:
     src.rename(dst)
 
     storage = FileWindowStorage(dataset_path)
-    windows = storage.get_windows()
+    windows = storage.get_windows(data_storage=PerItemGroupStorage())
     assert len(windows) == 1
     assert windows[0].group == "group2"
     assert windows[0].name == "w1"

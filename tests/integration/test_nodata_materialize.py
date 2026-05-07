@@ -12,6 +12,7 @@ from rslearn.data_sources.data_source import Item
 from rslearn.dataset.materialize import RasterMaterializer
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.window import Window
+from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
 from rslearn.tile_stores.default import DefaultTileStore
 from rslearn.tile_stores.tile_store import TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
@@ -72,6 +73,7 @@ def test_nodata_persists_through_ingestion_and_materialization(
         projection=PROJECTION,
         bounds=BOUNDS,
         time_range=None,
+        data_storage=PerItemGroupStorage(),
     )
     window.save()
 

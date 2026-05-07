@@ -1,5 +1,7 @@
 """SQLite-based window storage backend."""
 
+from __future__ import annotations
+
 import functools
 import json
 import os
@@ -9,7 +11,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fsspec.implementations.local import LocalFileSystem
 from pyproj import CRS
@@ -21,6 +23,9 @@ from rslearn.log_utils import get_logger
 from rslearn.utils import Projection
 
 from .storage import WindowStorage, WindowStorageFactory
+
+if TYPE_CHECKING:
+    from rslearn.dataset.window_data_storage.storage import WindowDataStorage
 
 logger = get_logger(__name__)
 
@@ -226,12 +231,15 @@ class SQLiteWindowStorage(WindowStorage):
         self,
         groups: list[str] | None = None,
         names: list[str] | None = None,
+        *,
+        data_storage: WindowDataStorage,
     ) -> list[Window]:
         """Load the windows in the dataset.
 
         Args:
             groups: an optional list of groups to filter loading
             names: an optional list of window names to filter loading
+            data_storage: the WindowDataStorage to inject into each Window.
         """
         conn = self._get_connection()
         query = """
@@ -285,6 +293,7 @@ class SQLiteWindowStorage(WindowStorage):
                 projection=projection,
                 bounds=bounds,
                 time_range=time_range,
+                data_storage=data_storage,
                 options=options,
             )
             windows.append(window)

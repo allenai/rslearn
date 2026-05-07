@@ -105,10 +105,12 @@ class Dataset:
             names: an optional list of window names to filter loading
             kwargs: optional keyword arguments to pass to WindowStorage.get_windows.
         """
-        windows = self.storage.get_windows(groups=groups, names=names, **kwargs)
-        for window in windows:
-            window.data_storage = self.window_data_storage
-        return windows
+        return self.storage.get_windows(
+            groups=groups,
+            names=names,
+            data_storage=self.window_data_storage,
+            **kwargs,
+        )
 
     def get_tile_store(self) -> TileStore:
         """Get the tile store associated with this dataset.

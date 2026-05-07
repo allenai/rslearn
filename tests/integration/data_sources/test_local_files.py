@@ -115,6 +115,7 @@ class TestLocalFiles:
             projection=utm_proj,
             bounds=dst_bounds,
             time_range=None,
+            data_storage=dataset.window_data_storage,
         ).save()
 
         # Now materialize the windows and check that it was done correctly.
@@ -189,6 +190,7 @@ class TestLocalFiles:
             projection=projection,
             bounds=bounds,
             time_range=None,
+            data_storage=dataset.window_data_storage,
         ).save()
         windows = dataset.load_windows()
         prepare_dataset_windows(dataset, windows)
@@ -271,6 +273,7 @@ class TestLocalFiles:
             projection=projection,
             bounds=window_bounds,
             time_range=None,
+            data_storage=dataset.window_data_storage,
         ).save()
 
         windows = dataset.load_windows()
@@ -363,6 +366,7 @@ class TestCoordinateModes:
                 int(window_center.y) + 10,
             ),
             time_range=None,
+            data_storage=dataset.window_data_storage,
         )
         bad_window.save()
 
@@ -393,6 +397,7 @@ class TestCoordinateModes:
                 int(window_center.y) + 10,
             ),
             time_range=None,
+            data_storage=dataset.window_data_storage,
         )
         good_window.save()
 

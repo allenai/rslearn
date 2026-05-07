@@ -22,6 +22,7 @@ from rslearn.data_sources.data_source import DataSourceContext
 from rslearn.data_sources.soildb import SoilDB
 from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
+from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
 from rslearn.utils.geometry import Projection, STGeometry
 from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import GeotiffRasterFormat
@@ -137,6 +138,7 @@ def test_materialize_auto_asset(
             datetime(2020, 7, 20, tzinfo=UTC),
             datetime(2020, 7, 21, tzinfo=UTC),
         ),
+        data_storage=PerItemGroupStorage(),
     )
     window.save()
 

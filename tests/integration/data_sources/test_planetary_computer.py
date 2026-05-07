@@ -23,6 +23,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.planetary_computer import Sentinel2
 from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
+from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
 from rslearn.utils.raster_array import RasterArray
@@ -238,6 +239,7 @@ def test_sentinel2_materialize(
         projection=seattle2020.projection,
         bounds=bounds,
         time_range=seattle2020.time_range,
+        data_storage=PerItemGroupStorage(),
     )
     window.save()
 

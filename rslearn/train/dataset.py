@@ -388,6 +388,9 @@ def read_raster_layer_groups_for_data_input(
 
         # If the requested group_idxs are exactly [0, 1, ..., N-1], use
         # read_all_rasters since it may be optimized for some storage backends.
+        # Warning: this will use read_all_rasters whenever a prefix of item groups is
+        # requested, since we don't have access to the total number of groups available
+        # here.
         per_group_arrays: list[RasterArray]
         if group_idxs == list(range(len(group_idxs))):
             per_group_arrays = window.read_all_rasters(
@@ -562,18 +565,21 @@ def read_data_input(
             tuple[str, int],
             tuple[torch.Tensor, list[tuple[datetime, datetime]] | None],
         ] = {}
-        for layer_name, group_idxs in groups_by_layer.items():
+        for layer_name, group_idxs_set in groups_by_layer.items():
+            # Convert the set to a list, while also sorting so that if we are reading
+            # all item groups then we go through the fast path.
+            sorted_group_idxs = list(sorted(group_idxs_set))
             layer_config = dataset.layers[layer_name]
             layer_images, layer_timestamps = read_raster_layer_groups_for_data_input(
                 window,
                 bounds,
                 layer_name,
-                list(sorted(group_idxs)),
+                sorted_group_idxs,
                 layer_config,
                 data_input,
             )
             for group_idx, image, timestamps in zip(
-                group_idxs, layer_images, layer_timestamps, strict=True
+                sorted_group_idxs, layer_images, layer_timestamps, strict=True
             ):
                 per_group_results[(layer_name, group_idx)] = (image, timestamps)
 
@@ -1108,6 +1114,7 @@ class ModelDataset(torch.utils.data.Dataset):
             logger.info(f"Checking index for dataset {self.dataset.path}")
             index = DatasetIndex(
                 storage=self.dataset.storage,
+                data_storage=self.dataset.window_data_storage,
                 dataset_path=self.dataset.path,
                 groups=split_config.groups,
                 names=split_config.names,
@@ -1217,6 +1224,7 @@ class ModelDataset(torch.utils.data.Dataset):
         return Window.from_metadata(
             self.dataset.storage,
             d,
+            data_storage=self.dataset.window_data_storage,
         )
 
     def get_dataset_examples(self) -> list[Window]:

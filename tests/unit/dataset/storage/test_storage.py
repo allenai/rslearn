@@ -17,6 +17,7 @@ from rslearn.dataset.storage.sqlite import (
 )
 from rslearn.dataset.storage.storage import WindowStorageFactory
 from rslearn.dataset.window import Window, WindowLayerData
+from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
 
 STORAGE_FACTORIES: list[WindowStorageFactory] = [
     FileWindowStorageFactory(),
@@ -34,7 +35,7 @@ def test_empty_dataset(
 ) -> None:
     """Make sure there are no windows in a new dataset."""
     storage = storage_factory.get_storage(UPath(tmp_path))
-    assert storage.get_windows() == []
+    assert storage.get_windows(data_storage=PerItemGroupStorage()) == []
 
 
 @pytest.mark.parametrize("storage_factory", STORAGE_FACTORIES)
@@ -52,11 +53,12 @@ def test_create_and_update_window(
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
+        data_storage=PerItemGroupStorage(),
     )
     metadata = window.get_metadata()
     storage.create_or_update_window(window)
 
-    get_result = storage.get_windows()
+    get_result = storage.get_windows(data_storage=PerItemGroupStorage())
     assert len(get_result) == 1
     assert get_result[0].get_metadata() == metadata
 
@@ -64,7 +66,7 @@ def test_create_and_update_window(
     window.bounds = (0, 0, 5, 5)
     storage.create_or_update_window(window)
 
-    get_result = storage.get_windows()
+    get_result = storage.get_windows(data_storage=PerItemGroupStorage())
     assert len(get_result) == 1
     assert get_result[0].bounds == (0, 0, 5, 5)
 
@@ -87,6 +89,7 @@ def test_mark_one_layer_completed(
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 4, 4),
             time_range=None,
+            data_storage=PerItemGroupStorage(),
         )
         windows.append(window)
         storage.create_or_update_window(window)
@@ -109,6 +112,7 @@ def test_mark_two_item_groups_completed(
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
+        data_storage=PerItemGroupStorage(),
     )
     storage.create_or_update_window(window)
 
@@ -132,6 +136,7 @@ def test_save_layer_datas(
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
+        data_storage=PerItemGroupStorage(),
     )
     storage.create_or_update_window(window)
     assert storage.get_layer_datas("group", "name") == {}
@@ -189,6 +194,7 @@ def test_migrate_window_storage(
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
+        data_storage=PerItemGroupStorage(),
     )
     source_storage.create_or_update_window(window)
     item = Item(f"item-{window.name}", window.get_geometry())
@@ -208,7 +214,7 @@ def test_migrate_window_storage(
     migrated = migrate_window_storage(source_storage, target_storage)
     assert migrated == 1
 
-    target_windows = target_storage.get_windows()
+    target_windows = target_storage.get_windows(data_storage=PerItemGroupStorage())
     assert len(target_windows) == 1
     target_window = target_windows[0]
     assert target_window.group == "group1"
@@ -247,6 +253,7 @@ def test_migrate_window_storage_requires_empty_target(
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 4, 4),
             time_range=None,
+            data_storage=PerItemGroupStorage(),
         )
     )
     target_storage.create_or_update_window(
@@ -257,6 +264,7 @@ def test_migrate_window_storage_requires_empty_target(
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 4, 4),
             time_range=None,
+            data_storage=PerItemGroupStorage(),
         )
     )
 
