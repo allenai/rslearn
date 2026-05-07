@@ -9,6 +9,10 @@ The source exposes the first band of the `cloud-mask` STAC asset as a single-ban
 categorical raster. Use `resampling_method: "nearest"` for this layer to preserve
 class values.
 
+For a workflow that ranks cloud-mask items by AOI clear cover and then retrieves the
+related Sentinel-2 L2A item, see
+[EarthDaily Cloud-Mask Clear-Cover Selection](../examples/EarthDailyCloudMaskClearCover.md).
+
 ### Configuration
 
 ```jsonc
