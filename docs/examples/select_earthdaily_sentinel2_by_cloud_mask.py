@@ -10,6 +10,7 @@ that single selected item group.
 import argparse
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from dotenv import load_dotenv
 from earthdaily import EDSClient, EDSConfig
@@ -39,7 +40,7 @@ class ScoredCloudMask:
 def score_cloud_mask_item(
     *,
     cloud_mask_source: Sentinel2EDACloudMask,
-    cloud_mask_collection,
+    cloud_mask_collection: Any,
     window: Window,
     serialized_group: list[dict],
     group_time_range: tuple[datetime, datetime] | None,
@@ -96,7 +97,7 @@ def score_cloud_mask_item(
 def score_window_cloud_masks(
     *,
     cloud_mask_source: Sentinel2EDACloudMask,
-    cloud_mask_collection,
+    cloud_mask_collection: Any,
     window: Window,
     cloud_mask_data: WindowLayerData,
 ) -> list[ScoredCloudMask]:
@@ -207,9 +208,9 @@ def main() -> None:
     cloud_mask_collection = EDSClient(
         EDSConfig()
     ).platform.pystac_client.get_collection(Sentinel2EDACloudMask.COLLECTION_NAME)
-    sentinel2_source = dataset.layers[args.sentinel2_layer].instantiate_data_source(
-        dataset.path
-    )
+    sentinel2_source: Any = dataset.layers[
+        args.sentinel2_layer
+    ].instantiate_data_source(dataset.path)
 
     windows = dataset.load_windows(groups=args.groups, names=args.windows)
     updated = 0
