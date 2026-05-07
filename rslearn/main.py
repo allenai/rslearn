@@ -7,6 +7,7 @@ import os
 import random
 import sys
 import time
+import warnings
 from collections.abc import Callable, Generator
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
@@ -85,9 +86,25 @@ def parse_time_range(
     return (parse_time(start), parse_time(end))
 
 
-def parse_disabled_layers(disabled_layers: str) -> list[str]:
-    """Parse the disabled layers string."""
-    return disabled_layers.split(",") if disabled_layers else []
+def parse_layers(layers: str) -> list[str]:
+    """Parse a comma-separated list of layer names."""
+    return layers.split(",") if layers else []
+
+
+_DISABLED_LAYERS_DEPRECATION_MSG = (
+    "The --disabled-layers option is deprecated and will be removed in a future "
+    "release. Use --enabled-layers to select which layers to load."
+)
+
+
+def warn_deprecated_disabled_layers(disabled_layers: list[str]) -> None:
+    """Emit FutureWarning when deprecated --disabled-layers is used."""
+    if disabled_layers:
+        warnings.warn(
+            _DISABLED_LAYERS_DEPRECATION_MSG,
+            FutureWarning,
+            stacklevel=3,
+        )
 
 
 @register_handler("dataset", "add_windows")
@@ -366,6 +383,21 @@ def add_apply_on_windows_args(parser: argparse.ArgumentParser) -> None:
         default=True,
         action=argparse.BooleanOptionalAction,
     )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help=(
+            "Path to dataset config JSON. Default is <root>/config.json. "
+            "Otherwise resolved like a normal path (relative to cwd unless absolute)."
+        ),
+    )
+    parser.add_argument(
+        "--enabled-layers",
+        type=parse_layers,
+        default=None,
+        help="Only these layers are loaded e.g. 'layer1,layer2' (comma-separated)",
+    )
 
 
 def apply_on_windows(
@@ -460,7 +492,17 @@ def apply_on_windows_args(
     f: Callable[..., Any], args: argparse.Namespace
 ) -> Generator[Any, None, None]:
     """Call apply_on_windows with arguments passed via command-line interface."""
-    dataset = Dataset(UPath(args.root), disabled_layers=args.disabled_layers)
+    disabled_layers: list[str] = getattr(args, "disabled_layers", [])
+    warn_deprecated_disabled_layers(disabled_layers)
+
+    dataset_kwargs: dict = {}
+    if args.config is not None:
+        dataset_kwargs["config_filepath"] = UPath(args.config)
+    if args.enabled_layers is not None:
+        dataset_kwargs["enabled_layers"] = args.enabled_layers
+    if disabled_layers:
+        dataset_kwargs["disabled_layers"] = disabled_layers
+    dataset = Dataset(UPath(args.root), **dataset_kwargs)
     yield from apply_on_windows(
         f=f,
         dataset=dataset,
@@ -540,9 +582,12 @@ def dataset_prepare() -> None:
     )
     parser.add_argument(
         "--disabled-layers",
-        type=parse_disabled_layers,
+        type=parse_layers,
         default="",
-        help="List of layers to disable e.g 'layer1,layer2'",
+        help=(
+            "Deprecated: comma-separated layers to skip; prefer --enabled-layers. "
+            "Will be removed in a future release."
+        ),
     )
     parser.add_argument(
         "--ignore-errors",
@@ -801,9 +846,12 @@ def dataset_ingest() -> None:
     )
     parser.add_argument(
         "--disabled-layers",
-        type=parse_disabled_layers,
+        type=parse_layers,
         default="",
-        help="List of layers to disable e.g 'layer1,layer2'",
+        help=(
+            "Deprecated: comma-separated layers to skip; prefer --enabled-layers. "
+            "Will be removed in a future release."
+        ),
     )
     parser.add_argument(
         "--ignore-errors",
@@ -916,9 +964,12 @@ def dataset_materialize() -> None:
     )
     parser.add_argument(
         "--disabled-layers",
-        type=parse_disabled_layers,
+        type=parse_layers,
         default="",
-        help="List of layers to disable e.g 'layer1,layer2'",
+        help=(
+            "Deprecated: comma-separated layers to skip; prefer --enabled-layers. "
+            "Will be removed in a future release."
+        ),
     )
     parser.add_argument(
         "--ignore-errors",

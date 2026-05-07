@@ -37,6 +37,8 @@ MODALITY_NAMES = [
     "landsat",
 ]
 
+TOKENS_IN_BATCH_KEY = "tokens_in_batch"
+
 AUTOCAST_DTYPE_MAP = {
     "bfloat16": torch.bfloat16,
     "float16": torch.float16,
@@ -622,6 +624,25 @@ class OlmoEarth(FeatureExtractor):
 
         return MaskedOlmoEarthSample(**kwargs), present_modalities, device
 
+    @staticmethod
+    def compute_tokens_in_batch(
+        tokens_and_masks: TokensAndMasks, present_modalities: list[str]
+    ) -> int:
+        """Count the total tokens in the batch from the encoder output shapes.
+
+        Args:
+            tokens_and_masks: encoder output with BHWTSC tensors per modality.
+            present_modalities: modality names that were fed to the encoder.
+
+        Returns:
+            total token count (B * H * W * T * S summed across modalities).
+        """
+        total = 0
+        for modality in present_modalities:
+            b, h, w, t, s, _ = getattr(tokens_and_masks, modality).shape
+            total += b * h * w * t * s
+        return total
+
     def forward(self, context: ModelContext) -> FeatureMaps | TokenFeatureMaps:
         """Compute feature maps from the OlmoEarth backbone.
 
@@ -673,6 +694,10 @@ class OlmoEarth(FeatureExtractor):
                 tokens_and_masks = self.model(
                     sample, patch_size=self.patch_size, **self.forward_kwargs
                 )["tokens_and_masks"]
+
+        context.context_dict[TOKENS_IN_BATCH_KEY] = self.compute_tokens_in_batch(
+            tokens_and_masks, present_modalities
+        )
 
         # Apply temporal/modality pooling so we just have one feature per patch.
         features = []
