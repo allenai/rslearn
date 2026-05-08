@@ -206,6 +206,17 @@ Consider a window covering a 10km x 10km region with a time range of January 1 t
 - Item C: covers the right half of the window (5km x 10km), from March 10
 - Item D: covers the full window (10km x 10km), from March 20
 
+```text
+Window footprint:
+
+  A and D: full window         B: left half              C: right half
+  +------------------+         +---------+---------+     +---------+---------+
+  |                  |         |/////////|         |     |         |/////////|
+  |                  |         |/////////|         |     |         |/////////|
+  |                  |         |/////////|         |     |         |/////////|
+  +------------------+         +---------+---------+     +---------+---------+
+```
+
 With `max_matches=2`:
 
 - **CONTAINS** returns `[[A], [D]]`. Both A and D fully contain the window. B and C are
