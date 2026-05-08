@@ -67,7 +67,7 @@ rslearn retrieves data from data sources in up to three stages: prepare, ingest,
 materialize. Ingest can be skipped for data sources that support direct materialization.
 
 ```mermaid
-flowchart TD
+flowchart LR
     subgraph prepare["Prepare"]
         window["Window geometry and time range"] --> request["Apply time_offset and duration"]
         request --> get_items["DataSource.get_items"]
