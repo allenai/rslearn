@@ -252,6 +252,18 @@ March, items C and D are combined into one mosaic. February is skipped since the
 no matching items. For January, item A covers the full window. In other words, we end
 up with one monthly mosaic for each 30-day period in the request time range.
 
+```text
+Request time range split into 30-day periods:
+
+  January period          February period         March period
+  +----------------+      +----------------+      +----------------+
+  | A              |      | no matches     |      | C + D          |
+  | full mosaic    |      | skipped        |      | full mosaic    |
+  +----------------+      +----------------+      +----------------+
+
+  Resulting item groups: [[A], [C, D]]
+```
+
 ### Compositing Overlaps
 
 For MOSAIC, the default behavior is to create item groups that cover the window's
