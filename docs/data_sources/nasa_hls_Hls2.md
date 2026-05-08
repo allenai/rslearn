@@ -76,7 +76,7 @@ To rank HLS items by per-window cloudiness before FIRST_VALID compositing, confi
     "hls": {
       "type": "raster",
       "band_sets": [
-        {"bands": ["red", "green", "blue"], "dtype": "uint16"},
+        {"bands": ["red", "green", "blue"], "dtype": "int16", "nodata_value": -9999},
         {"bands": ["fmask"], "dtype": "uint8"}
       ],
       "data_source": {
