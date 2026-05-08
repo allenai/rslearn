@@ -28,6 +28,50 @@ def _make_antimeridian_utm_geometry() -> STGeometry:
     )
 
 
+def _make_british_national_grid_geometry() -> STGeometry:
+    """Build an EPSG:27700 box whose WGS84 reprojection is not axis-aligned."""
+    bng_proj = Projection(CRS.from_epsg(27700), 1, 1)
+    p1 = STGeometry(WGS84_PROJECTION, shapely.Point(-0.5604, 52.7040), None)
+    p2 = STGeometry(WGS84_PROJECTION, shapely.Point(-0.5526, 52.7059), None)
+    p1 = p1.to_projection(bng_proj)
+    p2 = p2.to_projection(bng_proj)
+    return STGeometry(
+        bng_proj, shapely.box(p1.shp.x, p1.shp.y, p2.shp.x, p2.shp.y), None
+    )
+
+
+def test_non_wgs84_geometry_uses_axis_aligned_envelope_for_intersects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CMR rejects rotated polygons, so STAC searches use an axis-aligned envelope."""
+    ds = StacDataSource(
+        endpoint="https://example.com/stac",
+        collection_name="test-collection",
+    )
+
+    captured_kwargs: dict[str, Any] = {}
+
+    def fake_search(**kwargs: Any) -> list:
+        captured_kwargs.update(kwargs)
+        return []
+
+    monkeypatch.setattr(ds.client, "search", fake_search)
+
+    geom = _make_british_national_grid_geometry()
+    wgs84_shp = geom.to_wgs84().shp
+    assert not shapely.equals_exact(wgs84_shp, wgs84_shp.envelope, tolerance=0)
+
+    ds.get_items([geom], QueryConfig())
+
+    intersects_geojson = captured_kwargs.get("intersects")
+    assert intersects_geojson is not None
+
+    shp = shapely.geometry.shape(intersects_geojson)
+    assert shp.geom_type == "Polygon"
+    assert shapely.equals_exact(shp, shp.envelope, tolerance=0)
+    assert shp.covers(wgs84_shp)
+
+
 def test_antimeridian_geometry_produces_multipolygon_intersects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

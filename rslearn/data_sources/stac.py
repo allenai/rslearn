@@ -17,6 +17,17 @@ from rslearn.utils.stac import StacClient, StacItem
 logger = get_logger(__name__)
 
 
+def _get_search_intersects_shape(shp: shapely.Geometry) -> shapely.Geometry:
+    """Return an axis-aligned geometry suitable for STAC intersects searches."""
+    if isinstance(shp, shapely.MultiPolygon):
+        envelopes = [part.envelope for part in shp.geoms if not part.is_empty]
+        if len(envelopes) == 1:
+            return envelopes[0]
+        return shapely.MultiPolygon(envelopes)
+
+    return shp.envelope
+
+
 class SourceItem(Item):
     """An item in the StacDataSource data source."""
 
@@ -206,7 +217,9 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
             search_time_range = self._get_search_time_range(wgs84_geometry)
             stac_items = self.client.search(
                 collections=self.collection_names,
-                intersects=json.loads(shapely.to_geojson(wgs84_geometry.shp)),
+                intersects=json.loads(
+                    shapely.to_geojson(_get_search_intersects_shape(wgs84_geometry.shp))
+                ),
                 date_time=search_time_range,
                 query=self.query,
                 limit=self.limit,
