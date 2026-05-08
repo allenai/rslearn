@@ -283,21 +283,23 @@ class Sentinel2(DataSource):
             SELECT  source_url, base_url, product_id, sensing_time, granule_id,
                     east_lon, south_lat, west_lon, north_lat, cloud_cover
             FROM    `{self.TABLE_NAME}`
+            WHERE   west_lon IS NOT NULL
+                    AND south_lat IS NOT NULL
+                    AND east_lon IS NOT NULL
+                    AND north_lat IS NOT NULL
+                    AND cloud_cover IS NOT NULL
         """
-        clauses = []
         if time_range is not None:
-            clauses.append(f"""(
-                sensing_time >= "{time_range[0]}" AND sensing_time <= "{time_range[1]}"
-            )""")
+            query_str += f"""
+                AND sensing_time >= "{time_range[0]}" AND sensing_time <= "{time_range[1]}"
+            """
         if wgs84_bbox is not None:
-            clauses.append(f"""(
-                west_lon < {wgs84_bbox[2]} AND
-                east_lon > {wgs84_bbox[0]} AND
-                south_lat < {wgs84_bbox[3]} AND
-                north_lat > {wgs84_bbox[1]}
-            )""")
-        if clauses:
-            query_str += " WHERE " + " AND ".join(clauses)
+            query_str += f"""
+                AND west_lon < {wgs84_bbox[2]}
+                AND east_lon > {wgs84_bbox[0]}
+                AND south_lat < {wgs84_bbox[3]}
+                AND north_lat > {wgs84_bbox[1]}
+            """
 
         client = bigquery.Client()
         result = client.query(query_str)
