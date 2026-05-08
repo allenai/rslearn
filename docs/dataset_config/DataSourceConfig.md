@@ -63,7 +63,8 @@ The `class_path` and `init_args` options configure the data source itself. See
 [DataSources](../DataSources.md) for details on all of the built-in data sources in
 rslearn.
 
-rslearn retrieves data from data sources in three steps: prepare, ingest, and materialize.
+rslearn retrieves data from data sources in up to three stages: prepare, ingest, and
+materialize. Ingest can be skipped for data sources that support direct materialization.
 
 ```mermaid
 flowchart TD
@@ -74,6 +75,8 @@ flowchart TD
         matched_groups --> items_json["Write items.json metadata\nserialized_item_groups + group_time_ranges"]
     end
 
+    items_json --> ingest_flag{"ingest: true?"}
+
     subgraph ingest_phase["Ingest"]
         ingest["Download matched items"]
         ingest --> tile_store["Tile store assets"]
@@ -81,11 +84,14 @@ flowchart TD
 
     subgraph materialize_phase["Materialize"]
         read_metadata["Read item groups and time ranges"]
+        direct_reads["Windowed reads from data source"]
         read_metadata --> materialize["Materialize each item group"]
         tile_store --> materialize
+        direct_reads --> materialize
     end
 
-    items_json --> ingest
+    ingest_flag -->|yes| ingest
+    ingest_flag -->|no| direct_reads
     items_json --> read_metadata
     materialize --> outputs["Window layer outputs"]
 ```
@@ -249,8 +255,9 @@ the window once, but it is still returned.
 
 ## Ingest Stage Configuration
 
-During the ingest stage, rslearn downloads all items that appear in an item group for at
-least one window.
+When `ingest` is true, rslearn downloads all items that appear in an item group for at
+least one window into the tile store. When `ingest` is false, this stage is skipped and
+materialization reads windowed data directly from the data source.
 
 ### Ingest Flag
 
