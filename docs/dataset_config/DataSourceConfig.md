@@ -66,7 +66,7 @@ rslearn.
 rslearn retrieves data from data sources in three steps: prepare, ingest, and materialize.
 
 ```mermaid
-flowchart LR
+flowchart TD
     subgraph prepare["Prepare"]
         window["Window geometry and time range"] --> request["Apply time_offset and duration"]
         request --> get_items["DataSource.get_items"]
