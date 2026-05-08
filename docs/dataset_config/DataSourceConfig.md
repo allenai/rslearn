@@ -75,15 +75,19 @@ flowchart TD
     end
 
     subgraph ingest_phase["Ingest"]
-        items_json --> ingest["Download matched items"]
+        ingest["Download matched items"]
         ingest --> tile_store["Tile store assets"]
     end
 
     subgraph materialize_phase["Materialize"]
-        items_json --> materialize["Read item groups and time ranges"]
+        read_metadata["Read item groups and time ranges"]
+        read_metadata --> materialize["Materialize each item group"]
         tile_store --> materialize
-        materialize --> outputs["Window layer outputs"]
     end
+
+    items_json --> ingest
+    items_json --> read_metadata
+    materialize --> outputs["Window layer outputs"]
 ```
 
 ### Prepare
