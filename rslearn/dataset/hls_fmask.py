@@ -104,9 +104,7 @@ class HlsFmaskFirstValid(Compositor):
         base_bounds = window.bounds if window is not None else bounds
         if self.scoring_resolution is None:
             return base_projection, base_bounds
-        return self._rescale_grid(
-            base_projection, base_bounds, self.scoring_resolution
-        )
+        return self._rescale_grid(base_projection, base_bounds, self.scoring_resolution)
 
     def _score_item(
         self,
