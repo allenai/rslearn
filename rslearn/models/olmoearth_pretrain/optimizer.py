@@ -51,6 +51,9 @@ class LayerDecayAdamW(OptimizerFactory):
     base_lr * layer_decay_rate ** (num_layers - i). Includes all params
     (even frozen ones) so it composes with SimpleFreeze.
 
+    num_layers should be set based on the model size (12 for tiny and base,
+    4 for nano).
+
     encoder_prefix: path from the LightningModule root to the OlmoEarth module,
         typically "model.encoder.0" when OlmoEarth is the first encoder in
         MultiTaskModel.
@@ -69,7 +72,21 @@ class LayerDecayAdamW(OptimizerFactory):
         groups: dict[int, list] = defaultdict(list)
         for name, param in lm.named_parameters():
             layer_id = get_layer_id(name, self.num_layers, self.encoder_prefix)
+            logger.debug("param %s -> layer_id %d", name, layer_id)
+            if layer_id > self.num_layers:
+                raise ValueError(
+                    f"param {name!r} mapped to layer_id={layer_id} "
+                    f"which exceeds num_layers={self.num_layers}"
+                )
             groups[layer_id].append(param)
+
+        expected = set(range(self.num_layers + 1))
+        missing = expected - groups.keys()
+        if missing:
+            raise ValueError(
+                f"layer decay expected layers 0..{self.num_layers} but "
+                f"missing layers: {sorted(missing)}"
+            )
 
         param_groups = []
         for layer_id in sorted(groups.keys()):

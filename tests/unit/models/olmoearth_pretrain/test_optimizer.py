@@ -72,6 +72,18 @@ class TestLayerDecayAdamW:
         assert lrs[0] == pytest.approx(base_lr * decay**num_blocks, rel=1e-6)
         assert lrs[-1] == pytest.approx(base_lr, rel=1e-6)
 
+    def test_raises_when_num_layers_exceeds_model(self) -> None:
+        lm = FakeLightningModule(num_blocks=4)
+
+        factory = LayerDecayAdamW(
+            lr=0.01,
+            layer_decay_rate=0.5,
+            num_layers=12,
+            encoder_prefix=ENCODER_PREFIX,
+        )
+        with pytest.raises(ValueError, match="missing layers"):
+            factory.build(lm)
+
     def test_includes_frozen_params(self) -> None:
         lm = FakeLightningModule(num_blocks=4)
         for p in lm.model.encoder[0].model.blocks[0].parameters():
