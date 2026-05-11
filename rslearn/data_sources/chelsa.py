@@ -316,19 +316,6 @@ class CHELSADaily(
             matched_groups = match_candidate_items_to_window(
                 geometry, items, query_config
             )
-            if (
-                self.bounds is not None
-                and not matched_groups
-                and query_config.min_matches == 0
-            ):
-                # A window outside the configured CHELSA bounds is still a valid
-                # prepared window for this layer; it should produce the layer's
-                # expected output with nodata pixels. Returning no groups would
-                # leave nothing to materialize, making the layer look missing
-                # rather than empty.
-                matched_groups = [
-                    MatchedItemGroup(items=[], request_time_range=geometry.time_range)
-                ]
             groups.append(matched_groups)
 
         return groups

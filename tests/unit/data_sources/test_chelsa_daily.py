@@ -192,7 +192,7 @@ def test_chelsa_daily_bounds_limit_item_geometry() -> None:
     )
 
 
-def test_chelsa_daily_get_items_outside_bounds_returns_empty_group() -> None:
+def test_chelsa_daily_get_items_outside_bounds_returns_no_groups() -> None:
     data_source = CHELSADaily(
         band_names=["tas"],
         bounds=(-8.0, 49.0, 2.0, 61.0),
@@ -213,9 +213,7 @@ def test_chelsa_daily_get_items_outside_bounds_returns_empty_group() -> None:
     )
 
     assert len(groups) == 1
-    assert len(groups[0]) == 1
-    assert groups[0][0].items == []
-    assert groups[0][0].request_time_range == geometry.time_range
+    assert groups[0] == []
 
 
 def test_chelsa_daily_get_raster_bounds_global_item_local_crs() -> None:
