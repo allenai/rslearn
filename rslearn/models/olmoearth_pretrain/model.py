@@ -11,6 +11,9 @@ from typing import Any
 import torch
 from einops import rearrange
 from olmoearth_pretrain_minimal import ModelID, load_model_from_id, load_model_from_path
+from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.nn.flexi_vit import (
+    TokensAndMasks,
+)
 from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.config import Config
 from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
 from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (
