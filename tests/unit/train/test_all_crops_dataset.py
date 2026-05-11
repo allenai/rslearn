@@ -5,15 +5,13 @@ from collections.abc import Callable
 import numpy as np
 
 from rslearn.dataset import Dataset
-from rslearn.train.all_crops_dataset import (
-    InMemoryAllCropsDataset,
-    IterableAllCropsDataset,
-)
+from rslearn.train.all_crops_dataset import IterableAllCropsDataset
 from rslearn.train.dataset import (
     DataInput,
     ModelDataset,
     SplitConfig,
 )
+from rslearn.train.in_memory_dataset import InMemoryAllCropsDataset
 from rslearn.train.model_context import RasterImage
 from rslearn.train.tasks.classification import ClassificationTask
 from rslearn.train.tasks.segmentation import SegmentationTask

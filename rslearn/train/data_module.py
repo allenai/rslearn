@@ -15,10 +15,7 @@ from rslearn.dataset import Dataset
 from rslearn.log_utils import get_logger
 from rslearn.train.tasks import Task
 
-from .all_crops_dataset import (
-    InMemoryAllCropsDataset,
-    IterableAllCropsDataset,
-)
+from .all_crops_dataset import IterableAllCropsDataset
 from .dataset import (
     DataInput,
     IndexMode,
@@ -27,6 +24,7 @@ from .dataset import (
     RetryDataset,
     SplitConfig,
 )
+from .in_memory_dataset import InMemoryAllCropsDataset, InMemoryRandomCropDataset
 
 logger = get_logger(__name__)
 
@@ -71,7 +69,8 @@ class RslearnDataModule(L.LightningDataModule):
         predict_config: SplitConfig = SplitConfig(),
         name: str | None = None,
         retries: int = 0,
-        use_in_memory_all_crops_dataset: bool = False,
+        use_in_memory_dataset: bool = False,
+        use_in_memory_all_crops_dataset: bool | None = None,
         index_mode: IndexMode = IndexMode.OFF,
     ) -> None:
         """Initialize a new RslearnDataModule.
@@ -94,8 +93,11 @@ class RslearnDataModule(L.LightningDataModule):
             predict_config: split config for predict split
             name: name of the dataset
             retries: number of retries to attempt for getitem calls
-            use_in_memory_all_crops_dataset: whether to use InMemoryAllCropsDataset
-                instead of IterableAllCropsDataset if load_all_crops is set to true.
+            use_in_memory_dataset: whether to cache windows in memory. When
+                load_all_crops is set, uses InMemoryAllCropsDataset; otherwise
+                uses InMemoryRandomCropDataset.
+            use_in_memory_all_crops_dataset: deprecated alias for
+                use_in_memory_dataset. If set, overrides use_in_memory_dataset.
             index_mode: controls dataset index caching behavior (default: IndexMode.OFF)
         """
         super().__init__()
@@ -107,7 +109,18 @@ class RslearnDataModule(L.LightningDataModule):
         self.init_workers = init_workers if init_workers > 0 else self.num_workers
         self.name = name
         self.retries = retries
-        self.use_in_memory_all_crops_dataset = use_in_memory_all_crops_dataset
+        if use_in_memory_all_crops_dataset is not None:
+            import warnings
+
+            warnings.warn(
+                "use_in_memory_all_crops_dataset is deprecated, "
+                "use use_in_memory_dataset instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.use_in_memory_dataset = use_in_memory_all_crops_dataset
+        else:
+            self.use_in_memory_dataset = use_in_memory_dataset
         self.index_mode = index_mode
         self.split_configs = {
             "train": SplitConfig.merge_and_validate([default_config, train_config]),
@@ -116,17 +129,17 @@ class RslearnDataModule(L.LightningDataModule):
             "predict": SplitConfig.merge_and_validate([default_config, predict_config]),
         }
 
-    def setup(
-        self, stage: str, use_in_memory_all_crops_dataset: bool | None = None
-    ) -> None:
+    def setup(self, stage: str, use_in_memory_dataset: bool | None = None) -> None:
         """Set up datasets and samplers.
 
         Args:
             stage: Either 'fit', 'validate', 'test', or 'predict'.
-            use_in_memory_all_crops_dataset: whether to use InMemoryAllCropsDataset
-                instead of IterableAllCropsDataset if load_all_crops is set to true.
-                If None, uses the value of self.use_in_memory_all_crops_dataset.
+            use_in_memory_dataset: whether to use in-memory dataset wrappers.
+                If None, uses the value of self.use_in_memory_dataset.
         """
+        if use_in_memory_dataset is None:
+            use_in_memory_dataset = self.use_in_memory_dataset
+
         stage_to_splits = {
             "fit": ["train", "val"],
             "validate": ["val"],
@@ -136,24 +149,28 @@ class RslearnDataModule(L.LightningDataModule):
         self.datasets = {}
         for split in stage_to_splits[stage]:
             split_config = self.split_configs[split]
+            load_all_crops = split_config.get_load_all_crops()
+
+            # When wrapping with an in-memory dataset, ModelDataset must load
+            # entire windows so the wrapper can cache and crop them.
+            needs_full_windows = load_all_crops or use_in_memory_dataset
+
             dataset = ModelDataset(
                 dataset=Dataset(path=self.path),
-                split_config=self.split_configs[split],
+                split_config=split_config,
                 inputs=self.inputs,
                 task=self.task,
                 workers=self.init_workers,
                 name=self.name,
                 fix_crop_pick=(split != "train"),
                 index_mode=self.index_mode,
+                load_full_windows=needs_full_windows,
             )
             logger.info(f"got {len(dataset)} examples in split {split}")
-            if split_config.get_load_all_crops():
-                if use_in_memory_all_crops_dataset is None:
-                    use_in_memory_all_crops_dataset = (
-                        self.use_in_memory_all_crops_dataset
-                    )
+
+            if load_all_crops:
                 logger.info(
-                    f"using AllCropsDataset (in_memory={use_in_memory_all_crops_dataset})"
+                    f"using AllCropsDataset (in_memory={use_in_memory_dataset})"
                 )
                 crop_size = split_config.get_crop_size()
                 if crop_size is None:
@@ -161,29 +178,34 @@ class RslearnDataModule(L.LightningDataModule):
                         "crop_size is not set but must be set if load_all_crops is set"
                     )
 
-                all_crops_cls = IterableAllCropsDataset
-                kwargs = dict(
-                    dataset=dataset,
-                    crop_size=crop_size,
-                    overlap_pixels=split_config.get_overlap_pixels(),
-                    rank=self.trainer.global_rank if self.trainer else 0,
-                    world_size=self.trainer.world_size if self.trainer else 1,
-                )
-                if use_in_memory_all_crops_dataset:
-                    kwargs.pop("rank")
-                    kwargs.pop("world_size")
-                    all_crops_cls = InMemoryAllCropsDataset  # type: ignore
-
-                    # In memory should not be enabled for prediction since it will
-                    # split the same window across different ranks, which means the
-                    # RslearnWriter won't be able to merge those outputs.
+                if use_in_memory_dataset:
                     if split == "predict":
                         logger.warning(
-                            "use_in_memory_all_crops_dataset is enabled for prediction, "
+                            "use_in_memory_dataset is enabled for prediction, "
                             "but this may split windows across ranks leading to incomplete prediction outputs"
                         )
+                    dataset = InMemoryAllCropsDataset(
+                        dataset=dataset,
+                        crop_size=crop_size,
+                        overlap_pixels=split_config.get_overlap_pixels(),
+                    )
+                else:
+                    dataset = IterableAllCropsDataset(
+                        dataset=dataset,
+                        crop_size=crop_size,
+                        overlap_pixels=split_config.get_overlap_pixels(),
+                        rank=self.trainer.global_rank if self.trainer else 0,
+                        world_size=self.trainer.world_size if self.trainer else 1,
+                    )
 
-                dataset = all_crops_cls(**kwargs)  # type: ignore
+            elif use_in_memory_dataset:
+                crop_size = split_config.get_crop_size()
+                logger.info("using InMemoryRandomCropDataset")
+                dataset = InMemoryRandomCropDataset(
+                    dataset=dataset,
+                    crop_size=crop_size,
+                    fix_crop_pick=(split != "train"),
+                )
 
             if self.retries > 0:
                 dataset = RetryDataset(dataset, retries=self.retries)
@@ -223,7 +245,7 @@ class RslearnDataModule(L.LightningDataModule):
         if (
             split_config.get_load_all_crops()
             and len(dataset.get_dataset_examples()) > 0
-            and not self.use_in_memory_all_crops_dataset
+            and not self.use_in_memory_dataset
         ):
             num_windows = len(dataset.get_dataset_examples())
             if num_windows == 0:
@@ -397,7 +419,7 @@ class MultiDatasetDataModule(L.LightningDataModule):
             stage: The stage to set up ('fit', 'validate', 'test', 'predict')
         """
         for name, data_module in self.data_modules.items():
-            data_module.setup(stage, use_in_memory_all_crops_dataset=True)  # type: ignore
+            data_module.setup(stage, use_in_memory_dataset=True)  # type: ignore
             data_module.set_name(name)
 
     def _get_dataloader(self, split: str) -> DataLoader[dict[str, torch.Tensor]]:
