@@ -174,7 +174,7 @@ specifies the maximum number of item groups to produce.
 `min_matches` specifies the minimum number of item groups required. If matching produces
 fewer than `min_matches` groups, the window is rejected for that layer and prepare stores
 no item groups for it. The default is 0, so windows with no matching items are not
-rejected unless a data source implements stricter custom behavior.
+rejected unless the user configures stricter behavior.
 
 **CONTAINS.** Use items that fully contain the window bounds. The resulting item groups
 will each consist of exactly one item. This strategy iterates over the items in the
