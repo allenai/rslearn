@@ -23,6 +23,7 @@ from rslearn.dataset.compositing import (
     TemporalMeanCompositor,
     TemporalMinCompositor,
 )
+from rslearn.dataset.hls_fmask import HlsFmaskFirstValid
 from rslearn.dataset.sentinel2_scl import Sentinel2SCLFirstValid
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.tile_stores.default import DefaultTileStore
@@ -79,6 +80,23 @@ class TestLayerConfigCompositorInstantiation:
         )
         compositor = layer_cfg.instantiate_compositor()
         assert isinstance(compositor, Sentinel2SCLFirstValid)
+
+    def test_dict_instantiates_hls_fmask_compositor(self) -> None:
+        """A class_path dict should instantiate HlsFmaskFirstValid."""
+        layer_cfg = LayerConfig.model_validate(
+            {
+                "type": "raster",
+                "band_sets": [{"bands": ["B1"], "dtype": "uint8"}],
+                "compositing_method": {
+                    "class_path": "rslearn.dataset.hls_fmask.HlsFmaskFirstValid",
+                    "init_args": {
+                        "fmask_band": "fmask",
+                    },
+                },
+            }
+        )
+        compositor = layer_cfg.instantiate_compositor()
+        assert isinstance(compositor, HlsFmaskFirstValid)
 
 
 # ---------------------------------------------------------------------------
