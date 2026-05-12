@@ -9,7 +9,7 @@ from pyproj import CRS
 
 from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources.stac import StacDataSource
+from rslearn.data_sources.stac import AxisAlignedStacDataSource, StacDataSource
 from rslearn.utils.geometry import Projection, STGeometry
 from rslearn.utils.stac import StacAsset, StacItem
 
@@ -40,11 +40,43 @@ def _make_british_national_grid_geometry() -> STGeometry:
     )
 
 
-def test_non_wgs84_geometry_uses_axis_aligned_envelope_for_intersects(
+def test_non_wgs84_geometry_uses_actual_geometry_for_intersects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """CMR rejects rotated polygons, so STAC searches use an axis-aligned envelope."""
+    """Generic STAC searches should preserve the reprojected window geometry."""
     ds = StacDataSource(
+        endpoint="https://example.com/stac",
+        collection_name="test-collection",
+    )
+
+    captured_kwargs: dict[str, Any] = {}
+
+    def fake_search(**kwargs: Any) -> list:
+        captured_kwargs.update(kwargs)
+        return []
+
+    monkeypatch.setattr(ds.client, "search", fake_search)
+
+    geom = _make_british_national_grid_geometry()
+    wgs84_shp = geom.to_wgs84().shp
+    assert not shapely.equals_exact(wgs84_shp, wgs84_shp.envelope, tolerance=0)
+
+    ds.get_items([geom], QueryConfig())
+
+    intersects_geojson = captured_kwargs.get("intersects")
+    assert intersects_geojson is not None
+
+    shp = shapely.geometry.shape(intersects_geojson)
+    assert shp.geom_type == "Polygon"
+    assert not shapely.equals_exact(shp, shp.envelope, tolerance=0)
+    assert shapely.equals_exact(shp, wgs84_shp, tolerance=1e-12)
+
+
+def test_axis_aligned_stac_data_source_uses_envelope_for_intersects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Some STAC APIs reject rotated polygons, so they can use the envelope subclass."""
+    ds = AxisAlignedStacDataSource(
         endpoint="https://example.com/stac",
         collection_name="test-collection",
     )
