@@ -56,6 +56,27 @@ input resolution. The embedding size depends on the `model_id`:
 - OLMOEARTH_V1_BASE: 768
 - OLMOEARTH_V1_LARGE: 1024
 
+## Fine-tuning Optimizer
+
+When fine-tuning OlmoEarth, we recommend using `LayerDecayAdamW` which applies
+per-layer learning rate decay to the encoder. Earlier layers receive a lower learning
+rate, which preserves pre-trained features while allowing the later layers and decoder
+to adapt more freely.
+
+This works well across tasks compared to the previously recommended recipe, which was
+to freeze the backbone for 10 to 20 epochs and then unfreeze with a learning rate 1/10
+of the head learning rate.
+
+```yaml
+    optimizer:
+      class_path: rslearn.models.olmoearth_pretrain.optimizer.LayerDecayAdamW
+      init_args:
+        lr: 0.0001
+```
+
+The default `layer_decay_rate` of 0.65 and `num_layers` of 12 match OlmoEarth-v1-Base.
+If using a different model size, adjust `num_layers` to match the encoder depth.
+
 ## Examples
 
 Here are some tutorials and examples of applying OlmoEarth.
