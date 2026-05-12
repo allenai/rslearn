@@ -28,3 +28,6 @@ Examples
   on a location and time range of interest.
 - [EarthDailySentinel2Biophysical](examples/EarthDailySentinel2Biophysical.md): align
   EarthDaily Sentinel-2 scenes with derived LAI/FAPAR/FCOVER products.
+- [EarthDailyCloudMaskClearCover](examples/EarthDailyCloudMaskClearCover.md): rank
+  EarthDaily Sentinel-2 EDA cloud masks by AOI clear cover, then retrieve the related
+  Sentinel-2 L2A scene.
