@@ -5,9 +5,9 @@ platform using the `sentinel-2-eda-cloud-mask` collection.
 
 See [EarthDaily Setup](earthdaily.md) for required dependency/credentials.
 
-The source exposes the first band of the `cloud-mask` STAC asset as a single-band
-categorical raster. Use `resampling_method: "nearest"` for this layer to preserve
-class values.
+By default, the source exposes both thematic bands from the `cloud-mask` STAC asset:
+`cloud-mask` and `cirrus-mask`. Use `resampling_method: "nearest"` for this layer to
+preserve class values.
 
 For a workflow that ranks cloud-mask items by AOI clear cover and then retrieves the
 related Sentinel-2 L2A item, see
@@ -23,6 +23,9 @@ related Sentinel-2 L2A item, see
     // If null and the layer config is available, assets are inferred from the layer's
     // requested band names. The only supported asset is "cloud-mask".
     "assets": null,
+    // Optional: ordered rslearn names for bands to retain from the cloud-mask GeoTIFF.
+    // The first name maps to GeoTIFF band 1; the second maps to GeoTIFF band 2.
+    "band_names": ["cloud-mask", "cirrus-mask"],
     // Optional: maximum cloud cover (%) to filter items at search time. If set,
     // injects an `eo:cloud_cover` upper bound into the STAC query.
     "cloud_cover_max": null,
@@ -67,7 +70,7 @@ Example layer snippet:
 }
 ```
 
-### Available Band
+### Available Bands
 
 The `cloud-mask` band contains categorical cloud-mask values:
 
@@ -76,6 +79,15 @@ The `cloud-mask` band contains categorical cloud-mask values:
 - `2`: cloud
 - `3`: cloud shadow
 - `4`: thin cloud
+
+The `cirrus-mask` band contains categorical cirrus-mask values:
+
+- `0`: nodata
+- `1`: non-cirrus
+- `2`: cirrus
+
+If you only need the first band, request `["cloud-mask"]` in the layer band set or
+set `band_names: ["cloud-mask"]`.
 
 The STAC items include `eda:derived_from_collection_id` and
 `eda:derived_from_item_id` properties that identify the source Sentinel-2 item.
