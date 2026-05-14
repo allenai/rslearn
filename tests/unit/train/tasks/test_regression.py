@@ -167,3 +167,23 @@ def test_regression_head_loss_modes(
         targets=targets,
     )
     assert output.loss_dict["regress"] == pytest.approx(expected)
+
+
+def test_regression_head_in_channels_projects_to_scalar() -> None:
+    """RegressionHead with in_channels accepts multi-channel FeatureVector."""
+    in_channels = 128
+    batch_size = 4
+    head = RegressionHead(in_channels=in_channels)
+    features = torch.randn(batch_size, in_channels)
+    intermediates = FeatureVector(feature_vector=features)
+    targets = [
+        {"value": torch.tensor(1.0), "valid": torch.tensor(1.0)}
+        for _ in range(batch_size)
+    ]
+    output = head(
+        intermediates=intermediates,
+        context=ModelContext(inputs=[], metadatas=[]),
+        targets=targets,
+    )
+    assert output.outputs.shape == (batch_size,)
+    assert "regress" in output.loss_dict
