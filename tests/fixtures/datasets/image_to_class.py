@@ -60,6 +60,7 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
+        data_storage=dataset.window_data_storage,
     )
     window.save()
 
@@ -67,13 +68,15 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
     image = np.arange(0, 4 * 4, dtype=np.uint8)
     image = image.reshape(1, 4, 4)
     layer_name = "image"
-    layer_dir = window.get_layer_dir(layer_name)
-    SingleImageRasterFormat().encode_raster(
-        layer_dir / "band",
-        window.projection,
-        window.bounds,
-        RasterArray(chw_array=image),
-    )
+    raster_format = SingleImageRasterFormat()
+    with window.open_layer_writer(layer_name) as writer:
+        writer.write_raster(
+            ["band"],
+            raster_format,
+            window.projection,
+            window.bounds,
+            RasterArray(chw_array=image),
+        )
     window.mark_layer_completed(layer_name)
 
     # Add label.
@@ -84,11 +87,9 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
         },
     )
     layer_name = "label"
-    layer_dir = window.get_layer_dir(layer_name)
-    GeojsonVectorFormat().encode_vector(
-        layer_dir,
-        [feature],
-    )
+    vector_format = GeojsonVectorFormat()
+    with window.open_layer_writer(layer_name) as writer:
+        writer.write_vector(vector_format, [feature])
     window.mark_layer_completed(layer_name)
 
     return dataset

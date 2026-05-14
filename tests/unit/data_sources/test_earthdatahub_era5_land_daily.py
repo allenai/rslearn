@@ -135,6 +135,7 @@ def _materialize_numpy_era5_window(
             datetime(2020, 1, 2, tzinfo=UTC),
             datetime(2020, 1, 5, tzinfo=UTC),
         ),
+        data_storage=dataset.window_data_storage,
     )
     window.save()
 
@@ -147,15 +148,17 @@ def _materialize_numpy_era5_window(
 
 def _decode_numpy_era5_raster(dataset: Dataset, window: Window) -> RasterArray:
     """Decode the materialized ERA5 NumPy raster."""
-    raster_dir = window.get_raster_dir("era5", ERA5_TEST_BANDS, group_idx=0)
-    assert (raster_dir / "data.npy").exists()
-    assert not (raster_dir / "geotiff.tif").exists()
-
     band_set = dataset.layers["era5"].band_sets[0]
     projection, bounds = band_set.get_final_projection_and_bounds(
         window.projection, window.bounds
     )
-    return NumpyRasterFormat().decode_raster(raster_dir, projection, bounds)
+    return window.read_raster(
+        "era5",
+        ERA5_TEST_BANDS,
+        NumpyRasterFormat(),
+        projection=projection,
+        bounds=bounds,
+    )
 
 
 def test_era5land_dailyutc_v1_chunk_items_and_ingest(tmp_path: Path) -> None:

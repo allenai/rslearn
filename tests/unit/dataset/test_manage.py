@@ -72,6 +72,7 @@ def _make_local_files_dataset(tmp_path: pathlib.Path, ingest: bool = True) -> Da
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 10, 10),
         time_range=None,
+        data_storage=dataset.window_data_storage,
     ).save()
 
     return Dataset(ds_path)
@@ -169,6 +170,7 @@ class TestPrepareDatasetWindows:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 5, 5),  # Intersects file_0 and file_1
             time_range=None,
+            data_storage=dataset.window_data_storage,
         ).save()
 
         Window(
@@ -178,6 +180,7 @@ class TestPrepareDatasetWindows:
             projection=WGS84_PROJECTION,
             bounds=(10, 10, 20, 20),  # Intersects file2_0, file2_1, file2_2, file2_3
             time_range=None,
+            data_storage=dataset.window_data_storage,
         ).save()
 
         # Run prepare_dataset_windows
@@ -272,6 +275,7 @@ class TestPrepareDatasetWindows:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 10, 10),
             time_range=None,
+            data_storage=dataset.window_data_storage,
         ).save()
 
         # Run prepare_dataset_windows
@@ -376,6 +380,7 @@ class TestPrepareDatasetWindows:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 1, 1),  # Doesn't intersect any files
             time_range=None,
+            data_storage=dataset.window_data_storage,
         )
         window1.save()
         # Manually mark window1 as prepared by creating empty layer data
@@ -393,6 +398,7 @@ class TestPrepareDatasetWindows:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 10, 10),  # Intersects data_1.geojson (1 file)
             time_range=None,
+            data_storage=dataset.window_data_storage,
         ).save()
 
         Window(
@@ -402,6 +408,7 @@ class TestPrepareDatasetWindows:
             projection=WGS84_PROJECTION,
             bounds=(10, 10, 20, 20),  # Intersects data_2_0 and data_2_1 (2 files)
             time_range=None,
+            data_storage=dataset.window_data_storage,
         ).save()
 
         # Run prepare_dataset_windows
@@ -484,6 +491,7 @@ class TestPrepareDatasetWindows:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 10, 10),  # Intersects data.geojson (1 file)
             time_range=None,
+            data_storage=dataset.window_data_storage,
         ).save()
 
         dataset = Dataset(ds_path)
@@ -561,6 +569,7 @@ class TestPrepareDatasetWindows:
                 datetime(2024, 1, 1, tzinfo=UTC),
                 datetime(2024, 2, 26, tzinfo=UTC),
             ),
+            data_storage=dataset.window_data_storage,
         )
         window.save()
 

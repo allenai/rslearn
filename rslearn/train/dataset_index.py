@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from upath import UPath
 
 from rslearn.dataset.window import Window
+from rslearn.dataset.window_data_storage.storage import WindowDataStorage
 from rslearn.log_utils import get_logger
 from rslearn.utils.fsspec import open_atomic
 
@@ -33,6 +34,7 @@ class DatasetIndex:
     def __init__(
         self,
         storage: "WindowStorage",
+        data_storage: WindowDataStorage,
         dataset_path: UPath,
         groups: list[str] | None,
         names: list[str] | None,
@@ -45,6 +47,7 @@ class DatasetIndex:
 
         Args:
             storage: WindowStorage for deserializing windows.
+            data_storage: WindowDataStorage to inject into deserialized windows.
             dataset_path: Path to the dataset directory.
             groups: list of window groups to include.
             names: list of window names to include.
@@ -54,6 +57,7 @@ class DatasetIndex:
             inputs: dict mapping input names to DataInput objects.
         """
         self.storage = storage
+        self.data_storage = data_storage
         self.dataset_path = dataset_path
         self.index_dir = dataset_path / INDEX_DIR_NAME
 
@@ -130,7 +134,10 @@ class DatasetIndex:
             return None
 
         # Deserialize windows
-        return [Window.from_metadata(self.storage, w) for w in index_data["windows"]]
+        return [
+            Window.from_metadata(self.storage, w, data_storage=self.data_storage)
+            for w in index_data["windows"]
+        ]
 
     def save_windows(self, windows: list[Window]) -> None:
         """Save processed windows to index with atomic write.

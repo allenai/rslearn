@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from rslearn.data_sources.data_source import DataSource
     from rslearn.dataset.compositing import Compositor
     from rslearn.dataset.storage.storage import WindowStorageFactory
+    from rslearn.dataset.window_data_storage.storage import WindowDataStorage
 
 logger = get_logger("__name__")
 
@@ -804,6 +805,45 @@ class StorageConfig(BaseModel):
         return wsf
 
 
+class WindowDataStorageConfig(BaseModel):
+    """Configuration for the WindowDataStorage of the dataset.
+
+    The WindowDataStorage controls the on-disk layout of materialized raster
+    and vector data within each window.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    class_path: str = Field(
+        default="rslearn.dataset.window_data_storage.per_item_group.PerItemGroupStorage",
+        description="Class path for the WindowDataStorage.",
+    )
+    init_args: dict[str, Any] = Field(
+        default_factory=lambda: {},
+        description="jsonargparse init args for the WindowDataStorage.",
+    )
+
+    def instantiate_window_data_storage(self) -> "WindowDataStorage":
+        """Instantiate the WindowDataStorage specified by this config."""
+        from rslearn.dataset.window_data_storage.storage import (
+            WindowDataStorage,
+        )
+        from rslearn.utils.jsonargparse import init_jsonargparse
+
+        init_jsonargparse()
+        parser = jsonargparse.ArgumentParser()
+        parser.add_argument("--wds", type=WindowDataStorage)
+        cfg = parser.parse_object(
+            {
+                "wds": dict(
+                    class_path=self.class_path,
+                    init_args=self.init_args,
+                )
+            }
+        )
+        return parser.instantiate_classes(cfg).wds
+
+
 class DatasetConfig(BaseModel):
     """Overall dataset configuration."""
 
@@ -817,6 +857,15 @@ class DatasetConfig(BaseModel):
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(),
         description="jsonargparse configuration for the WindowStorageFactory.",
+    )
+    window_data_storage: WindowDataStorageConfig = Field(
+        default_factory=lambda: WindowDataStorageConfig(),
+        description=(
+            "jsonargparse configuration for the WindowDataStorage. "
+            "Controls how materialized raster/vector data is laid out on "
+            "disk inside each window. Defaults to per-item-group layout, "
+            "compatible with all existing rslearn datasets."
+        ),
     )
 
     @field_validator("layers", mode="after")

@@ -89,16 +89,19 @@ class TestPredictLoader:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 4, 4),
             time_range=None,
+            data_storage=empty_image_dataset.window_data_storage,
         )
         window.save()
         image = np.zeros((1, 4, 4), dtype=np.uint8)
         image[0, 0, 0] = 1
-        GeotiffRasterFormat().encode_raster(
-            window.get_raster_dir(self.LAYER_NAME, self.BANDS),
-            window.projection,
-            window.bounds,
-            RasterArray(chw_array=image),
-        )
+        with window.open_layer_writer(self.LAYER_NAME) as writer:
+            writer.write_raster(
+                self.BANDS,
+                GeotiffRasterFormat(),
+                window.projection,
+                window.bounds,
+                RasterArray(chw_array=image),
+            )
         window.mark_layer_completed(self.LAYER_NAME)
 
         data_module = RslearnDataModule(

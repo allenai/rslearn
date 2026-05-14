@@ -187,47 +187,52 @@ class RasterMaterializer(Materializer):
                 (band_cfg, projection, bounds, remapper, raster_format)
             )
 
-        for group_id, group in enumerate(item_groups):
-            request_time_range = (
-                group_time_ranges[group_id]
-                if group_time_ranges is not None
-                else default_request_time_range
-            )
-            requests: list[BandSetCompositeRequest] = []
-            for band_cfg, projection, bounds, remapper, _ in prepared_band_sets:
-                nodata_val: int | float | None = band_cfg.nodata_value
-                if nodata_val is None:
-                    nodata_val = resolve_nodata_value(tile_store, group, band_cfg.bands)
+        with window.open_layer_writer(layer_name) as writer:
+            for group_id, group in enumerate(item_groups):
+                request_time_range = (
+                    group_time_ranges[group_id]
+                    if group_time_ranges is not None
+                    else default_request_time_range
+                )
+                requests: list[BandSetCompositeRequest] = []
+                for band_cfg, projection, bounds, remapper, _ in prepared_band_sets:
+                    nodata_val: int | float | None = band_cfg.nodata_value
+                    if nodata_val is None:
+                        nodata_val = resolve_nodata_value(
+                            tile_store, group, band_cfg.bands
+                        )
 
-                requests.append(
-                    BandSetCompositeRequest(
-                        nodata_val=nodata_val,
-                        bands=band_cfg.bands,
-                        bounds=bounds,
-                        band_dtype=band_cfg.dtype.get_numpy_dtype(),
-                        projection=projection,
-                        resampling_method=layer_cfg.resampling_method.get_rasterio_resampling(),
-                        remapper=remapper,
+                    requests.append(
+                        BandSetCompositeRequest(
+                            nodata_val=nodata_val,
+                            bands=band_cfg.bands,
+                            bounds=bounds,
+                            band_dtype=band_cfg.dtype.get_numpy_dtype(),
+                            projection=projection,
+                            resampling_method=layer_cfg.resampling_method.get_rasterio_resampling(),
+                            remapper=remapper,
+                        )
                     )
+
+                rasters = compositor.build_composites(
+                    group=group,
+                    requests=requests,
+                    tile_store=tile_store,
+                    window=window,
+                    request_time_range=request_time_range,
                 )
 
-            rasters = compositor.build_composites(
-                group=group,
-                requests=requests,
-                tile_store=tile_store,
-                window=window,
-                request_time_range=request_time_range,
-            )
-
-            for (band_cfg, projection, bounds, _, raster_format), raster in zip(
-                prepared_band_sets, rasters, strict=True
-            ):
-                raster_format.encode_raster(
-                    window.get_raster_dir(layer_name, band_cfg.bands, group_id),
-                    projection,
-                    bounds,
-                    raster,
-                )
+                for (band_cfg, projection, bounds, _, raster_format), raster in zip(
+                    prepared_band_sets, rasters, strict=True
+                ):
+                    writer.write_raster(
+                        band_cfg.bands,
+                        raster_format,
+                        projection,
+                        bounds,
+                        raster,
+                        group_idx=group_id,
+                    )
 
         for group_id in range(len(item_groups)):
             window.mark_layer_completed(layer_name, group_id)
@@ -257,18 +262,17 @@ class VectorMaterializer(Materializer):
         """
         vector_format = layer_cfg.instantiate_vector_format()
 
-        for group_id, group in enumerate(item_groups):
-            features: list[Feature] = []
+        with window.open_layer_writer(layer_name) as writer:
+            for group_id, group in enumerate(item_groups):
+                features: list[Feature] = []
 
-            for item in group:
-                cur_features = tile_store.read_vector(
-                    item, window.projection, window.bounds
-                )
-                features.extend(cur_features)
+                for item in group:
+                    cur_features = tile_store.read_vector(
+                        item, window.projection, window.bounds
+                    )
+                    features.extend(cur_features)
 
-            vector_format.encode_vector(
-                window.get_layer_dir(layer_name, group_id), features
-            )
+                writer.write_vector(vector_format, features, group_idx=group_id)
 
         for group_id in range(len(item_groups)):
             window.mark_layer_completed(layer_name, group_id)

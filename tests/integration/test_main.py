@@ -107,6 +107,7 @@ class TestIngestion:
                 datetime(2024, 1, 1, tzinfo=UTC),
                 datetime(2024, 2, 1, tzinfo=UTC),
             ),
+            data_storage=dataset.window_data_storage,
         )
         window.save()
 
@@ -300,6 +301,7 @@ class TestMaterialization:
                 datetime(2024, 1, 1, tzinfo=UTC),
                 datetime(2024, 2, 1, tzinfo=UTC),
             ),
+            data_storage=dataset.window_data_storage,
         )
         window1.save()
 
@@ -314,6 +316,7 @@ class TestMaterialization:
                 datetime(2024, 2, 1, tzinfo=UTC),
                 datetime(2024, 3, 1, tzinfo=UTC),  # Different time range
             ),
+            data_storage=dataset.window_data_storage,
         )
         window2.save()
 

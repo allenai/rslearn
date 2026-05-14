@@ -18,7 +18,9 @@ from rslearn.config import (
 from rslearn.data_sources.soilgrids import SOILGRIDS_NODATA_VALUE, SoilGrids
 from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
+from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
 from rslearn.utils.geometry import Projection
+from rslearn.utils.raster_format import GeotiffRasterFormat
 
 
 def test_soilgrids_clay_scale_offset_applied(
@@ -84,6 +86,7 @@ def test_soilgrids_clay_scale_offset_applied(
         projection=projection,
         bounds=bounds,
         time_range=None,
+        data_storage=PerItemGroupStorage(),
     )
     window.save()
 
@@ -115,9 +118,12 @@ def test_soilgrids_clay_scale_offset_applied(
         layer_cfg,
     )
 
-    out_path = window.get_raster_dir("clay", ["B1"]) / "geotiff.tif"
-    with rasterio.open(out_path) as src:
-        out = src.read(1)
+    raster = window.read_raster(
+        "clay",
+        ["B1"],
+        GeotiffRasterFormat(),
+    )
+    out = raster.get_chw_array()[0]
 
     # Expected: 10 * 0.1 + 5.0 == 6.0
     assert float(out.max()) == pytest.approx(6.0)

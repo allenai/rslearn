@@ -67,19 +67,21 @@ def regression_dataset(tmp_path: pathlib.Path) -> Dataset:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 32, 32),
         time_range=None,
+        data_storage=dataset.window_data_storage,
     )
     window.save()
 
     # Add a simple input image.
     image = np.random.randint(0, 255, size=(1, 32, 32), dtype=np.uint8)
     layer_name = "image"
-    layer_dir = window.get_layer_dir(layer_name)
-    GeotiffRasterFormat().encode_raster(
-        layer_dir / "band",
-        window.projection,
-        window.bounds,
-        RasterArray(chw_array=image),
-    )
+    with window.open_layer_writer(layer_name) as writer:
+        writer.write_raster(
+            ["band"],
+            GeotiffRasterFormat(),
+            window.projection,
+            window.bounds,
+            RasterArray(chw_array=image),
+        )
     window.mark_layer_completed(layer_name)
 
     # Add vector regression target (a point feature with value property).
@@ -93,8 +95,8 @@ def regression_dataset(tmp_path: pathlib.Path) -> Dataset:
         {PROPERTY_NAME: target_value},
     )
     layer_name = "targets"
-    layer_dir = window.get_layer_dir(layer_name)
-    GeojsonVectorFormat().encode_vector(layer_dir, [feature])
+    with window.open_layer_writer(layer_name) as writer:
+        writer.write_vector(GeojsonVectorFormat(), [feature])
     window.mark_layer_completed(layer_name)
 
     return dataset
@@ -208,10 +210,9 @@ def test_regression_prediction_writes_to_dataset(
     # Verify that predictions were written to the dataset.
     window = regression_dataset.load_windows()[0]
     assert window.is_layer_completed("predictions")
-    features = GeojsonVectorFormat().decode_vector(
-        window.get_layer_dir("predictions"),
-        window.projection,
-        window.bounds,
+    features = window.read_vector(
+        "predictions",
+        GeojsonVectorFormat(),
     )
     assert len(features) == 1
     # Verify the predicted value is a number.

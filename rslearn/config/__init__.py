@@ -12,6 +12,7 @@ from .dataset import (
     SpaceMode,
     StorageConfig,
     TimeMode,
+    WindowDataStorageConfig,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "SpaceMode",
     "StorageConfig",
     "TimeMode",
+    "WindowDataStorageConfig",
 ]

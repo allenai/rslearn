@@ -18,9 +18,12 @@ from rslearn.config import (
     LayerConfig,
     LayerType,
     StorageConfig,
+    WindowDataStorageConfig,
 )
 from rslearn.dataset import Window
 from rslearn.dataset.storage.storage import WindowStorage
+from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
+from rslearn.dataset.window_data_storage.storage import WindowDataStorage
 from rslearn.log_utils import get_logger
 from rslearn.train.model_context import SampleMetadata
 from rslearn.utils.array import copy_spatial_array
@@ -195,6 +198,7 @@ class RslearnWriter(BasePredictionWriter):
         output_path: str | Path | None = None,
         layer_config: LayerConfig | None = None,
         storage_config: StorageConfig | None = None,
+        window_data_storage_config: WindowDataStorageConfig | None = None,
     ):
         """Create a new RslearnWriter.
 
@@ -211,8 +215,12 @@ class RslearnWriter(BasePredictionWriter):
             layer_config: optional layer configuration. If provided, this config will be
                 used instead of reading from the dataset config, allowing usage without
                 requiring dataset config at the output path.
-            storage_config: optional storage configuration, needed similar to layer_config
-                if there is no dataset config.
+            storage_config: optional metadata storage configuration, needed similar to
+                layer_config if there is no dataset config at the output path.
+            window_data_storage_config: optional WindowDataStorage configuration.
+                Like ``storage_config``, this lets the writer be used without a
+                dataset config at the output path. If neither this nor a
+                ``config.json`` is provided, defaults to per-item-group layout.
         """
         super().__init__(write_interval="batch")
         self.output_layer = output_layer
@@ -224,6 +232,7 @@ class RslearnWriter(BasePredictionWriter):
         self._output_path = output_path
         self.layer_config = layer_config
         self.storage_config = storage_config
+        self.window_data_storage_config = window_data_storage_config
         self.merger = merger
 
         # Map from window name to pending data to write.
@@ -305,25 +314,25 @@ class RslearnWriter(BasePredictionWriter):
     ) -> None:
         """Set the layer config and dataset storage fields.
 
-        This is a helper function for _initialize. self.layer_config and
-        self.storage_config should be populated with the argument to __init__.
+        This is a helper function for _initialize. self.layer_config,
+        self.storage_config, and self.window_data_storage_config should be
+        populated with the argument to __init__ if available.
 
-        If self.layer_config is set, we keep it as is. If self.storage_config is set,
-        we use it to instantiate self.storage as a WindowStorage using the output_upath.
-
-        If one of them is not set, we load the dataset config from the ds_upath and use
-        it to populate the field(s). Otherwise, we avoid reading the dataset config;
-        this way, RslearnWriter can be used with output directories that do not contain
-        the dataset config, as long as layer_config and storage_config are both provided.
+        If all three are provided, we avoid reading the dataset config; this way,
+        RslearnWriter can be used with output directories that do not contain
+        the dataset config. Otherwise we load it from ``ds_upath`` to fill in
+        the missing field(s).
 
         Args:
             ds_upath: the dataset path, where a dataset config can be loaded from if
-                layer_config or storage_config is not provided.
+                layer_config, storage_config, or window_data_storage_config is not
+                provided.
             output_upath: the output directory, which could be different from the
                 dataset path.
 
         """
         dataset_storage: WindowStorage | None = None
+        window_data_storage: WindowDataStorage | None = None
 
         # Instantiate the WindowStorage from the storage_config if provided.
         if self.storage_config:
@@ -333,11 +342,18 @@ class RslearnWriter(BasePredictionWriter):
                 )
             )
 
+        # Likewise for the WindowDataStorage.
+        if self.window_data_storage_config:
+            window_data_storage = (
+                self.window_data_storage_config.instantiate_window_data_storage()
+            )
+
         if not self.layer_config or not dataset_storage:
-            # Need to load dataset config since one of LayerConfig/StorageConfig is missing.
-            # We use DatasetConfig.model_validate instead of initializing the Dataset
-            # because we want to get a WindowStorage that has the dataset path set to
-            # output_upath instead of ds_upath.
+            # Need to load dataset config since one of layer_config /
+            # storage_config is missing. We use DatasetConfig.model_validate
+            # instead of initializing the Dataset because we want to get
+            # storages that have the dataset path set to output_upath instead
+            # of ds_upath.
             with (ds_upath / "config.json").open() as f:
                 dataset_config = DatasetConfig.model_validate(json.load(f))
 
@@ -353,7 +369,22 @@ class RslearnWriter(BasePredictionWriter):
                     output_upath
                 )
 
+            # Only honor the dataset config's window_data_storage when the
+            # caller didn't override it explicitly.
+            if not window_data_storage:
+                window_data_storage = (
+                    dataset_config.window_data_storage.instantiate_window_data_storage()
+                )
+
+        if not window_data_storage:
+            # Caller provided both layer_config and storage_config (so we
+            # didn't load config.json) but didn't provide
+            # window_data_storage_config. Fall back to the default
+            # PerItemGroupStorage to preserve legacy behavior.
+            window_data_storage = PerItemGroupStorage()
+
         self.dataset_storage: WindowStorage = dataset_storage
+        self.window_data_storage: WindowDataStorage = window_data_storage
 
     def write_on_batch_end(
         self,
@@ -422,6 +453,7 @@ class RslearnWriter(BasePredictionWriter):
                 projection=metadata.projection,
                 bounds=metadata.window_bounds,
                 time_range=metadata.time_range,
+                data_storage=self.window_data_storage,
             )
             self.process_output(
                 window,
@@ -469,24 +501,26 @@ class RslearnWriter(BasePredictionWriter):
         assert self.layer_config is not None and self.merger is not None
         merged_output = self.merger.merge(window, pending_output, self.layer_config)
 
-        if self.layer_config.type == LayerType.RASTER:
-            raster_dir = window.get_raster_dir(
-                self.output_layer, self.layer_config.band_sets[0].bands
-            )
-            assert isinstance(self.format, RasterFormat)
+        with window.open_layer_writer(self.output_layer) as writer:
+            if self.layer_config.type == LayerType.RASTER:
+                assert isinstance(self.format, RasterFormat)
 
-            # In case the merged_output is at a different resolution than the window,
-            # get adjusted projection and bounds for writing it.
-            projection, bounds = adjust_projection_and_bounds_for_array(
-                window.projection, window.bounds, merged_output
-            )
-            # Wrap CHW ndarray as CTHW RasterArray.
-            raster = RasterArray(chw_array=merged_output)
-            self.format.encode_raster(raster_dir, projection, bounds, raster)
+                # In case the merged_output is at a different resolution than the
+                # window, get adjusted projection and bounds for writing it.
+                projection, bounds = adjust_projection_and_bounds_for_array(
+                    window.projection, window.bounds, merged_output
+                )
+                raster = RasterArray(chw_array=merged_output)
+                writer.write_raster(
+                    self.layer_config.band_sets[0].bands,
+                    self.format,
+                    projection,
+                    bounds,
+                    raster,
+                )
 
-        elif self.layer_config.type == LayerType.VECTOR:
-            layer_dir = window.get_layer_dir(self.output_layer)
-            assert isinstance(self.format, VectorFormat)
-            self.format.encode_vector(layer_dir, merged_output)
+            elif self.layer_config.type == LayerType.VECTOR:
+                assert isinstance(self.format, VectorFormat)
+                writer.write_vector(self.format, merged_output)
 
         window.mark_layer_completed(self.output_layer)

@@ -22,6 +22,7 @@ from rslearn.config import (
 from rslearn.data_sources.xyz_tiles import XyzTiles
 from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
+from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
@@ -89,6 +90,7 @@ def test_materialize(
         projection=proj,
         bounds=bounds,
         time_range=TIME_RANGE,
+        data_storage=PerItemGroupStorage(),
     )
     window.save()
 
@@ -98,11 +100,10 @@ def test_materialize(
         "raster",
         layer_config,
     )
-    raster_dir = window.get_raster_dir("raster", ["R", "G", "B"])
-    assert (raster_dir / "geotiff.tif").exists()
-
-    array = (
-        GeotiffRasterFormat().decode_raster(raster_dir, proj, bounds).get_chw_array()
-    )
+    array = window.read_raster(
+        "raster",
+        ["R", "G", "B"],
+        GeotiffRasterFormat(),
+    ).get_chw_array()
     assert array.shape == (3, 64, 64)
     assert np.all(array == PIXEL_VALUE)

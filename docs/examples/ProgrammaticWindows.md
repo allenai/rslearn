@@ -214,10 +214,20 @@ for tif_fname, category in tqdm.tqdm(examples):
     window.save()
 
     # We manually populate the sentinel2 layer with the satellite image content.
-    raster_dir = window.get_raster_dir("sentinel2", ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B09", "B10", "B11", "B12", "B8A"])
-    # The projection and bounds here are used to set the georeference metadata in the
-    # GeoTIFF.
-    GeotiffRasterFormat().encode_raster(raster_dir, projection, bounds, RasterArray(chw_array=array))
+    # The projection and bounds passed to write_raster are used to set the georeference
+    # metadata in the resulting GeoTIFF.
+    sentinel2_bands = [
+        "B01", "B02", "B03", "B04", "B05", "B06", "B07",
+        "B08", "B09", "B10", "B11", "B12", "B8A",
+    ]
+    with window.open_layer_writer("sentinel2") as writer:
+        writer.write_raster(
+            sentinel2_bands,
+            GeotiffRasterFormat(),
+            projection,
+            bounds,
+            RasterArray(chw_array=array),
+        )
     window.mark_layer_completed("sentinel2")
 
     # We manually populate the label layer with a single GeoJSON feature corresponding
@@ -225,8 +235,8 @@ for tif_fname, category in tqdm.tqdm(examples):
     feature = Feature(window.get_geometry(), {
         "category": category,
     })
-    layer_dir = window.get_layer_dir("label")
-    GeojsonVectorFormat().encode_vector(layer_dir, [feature])
+    with window.open_layer_writer("label") as writer:
+        writer.write_vector(GeojsonVectorFormat(), [feature])
     window.mark_layer_completed("label")
 ```
 

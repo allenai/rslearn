@@ -1,14 +1,12 @@
 import pathlib
 
-import numpy as np
 import pytest
 from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
-from rslearn.utils.raster_array import RasterArray
-from rslearn.utils.raster_format import GeotiffRasterFormat
+from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
 
 
 @pytest.fixture
@@ -20,20 +18,15 @@ def empty_window(tmp_path: pathlib.Path) -> Window:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 1, 1),
         time_range=None,
+        data_storage=PerItemGroupStorage(),
     )
     window.save()
     return window
 
 
 def test_completed_layer(empty_window: Window) -> None:
-    # Mark a layer completed and make sure is_layer_completed is True.
-    # We need to write some files there, mark_layer_completed assumes the directory
-    # exists already (otherwise it couldn't possible be completed).
+    """Mark a layer completed and verify is_layer_completed flips."""
     layer_name = "layer"
-    layer_dir = empty_window.get_layer_dir(layer_name)
-    layer_dir.mkdir(parents=True)
-    (layer_dir / "somefiles").touch()
-
     assert not empty_window.is_layer_completed(layer_name)
     empty_window.mark_layer_completed(layer_name)
     assert empty_window.is_layer_completed(layer_name)
@@ -47,21 +40,3 @@ def test_window_location(tmp_path: pathlib.Path) -> None:
     window_name = "window"
     window_dir = Window.get_window_root(ds_path, group_name, window_name)
     assert window_dir == ds_path / "windows" / group_name / window_name
-
-
-def test_underscore_band_name(empty_window: Window) -> None:
-    """Verify that we can have undescore in the raster band name."""
-    raster_dir = empty_window.get_raster_dir("layer", ["_"])
-    arr = np.zeros((1, 4, 4), dtype=np.uint8)
-    GeotiffRasterFormat().encode_raster(
-        raster_dir, WGS84_PROJECTION, (0, 0, 4, 4), RasterArray(chw_array=arr)
-    )
-    empty_window.mark_layer_completed("layer")
-    assert empty_window.is_layer_completed("layer")
-    # There should be one subfolder containing the GeoTIFF.
-    subfolders = [
-        dir_name
-        for dir_name in empty_window.get_layer_dir("layer").iterdir()
-        if dir_name.is_dir()
-    ]
-    assert len(subfolders) == 1

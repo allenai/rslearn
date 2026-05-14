@@ -78,19 +78,21 @@ def multi_task_dataset(tmp_path: pathlib.Path) -> Dataset:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 32, 32),
         time_range=None,
+        data_storage=dataset.window_data_storage,
     )
     window.save()
 
     # Add a simple input image.
     image = np.random.randint(0, 255, size=(1, 32, 32), dtype=np.uint8)
     layer_name = "image"
-    layer_dir = window.get_layer_dir(layer_name)
-    GeotiffRasterFormat().encode_raster(
-        layer_dir / "band",
-        window.projection,
-        window.bounds,
-        RasterArray(chw_array=image),
-    )
+    with window.open_layer_writer(layer_name) as writer:
+        writer.write_raster(
+            ["band"],
+            GeotiffRasterFormat(),
+            window.projection,
+            window.bounds,
+            RasterArray(chw_array=image),
+        )
     window.mark_layer_completed(layer_name)
 
     # Add vector regression target (a point feature with score property).
@@ -104,8 +106,8 @@ def multi_task_dataset(tmp_path: pathlib.Path) -> Dataset:
         {REGRESSION_PROPERTY: target_value},
     )
     layer_name = "regression_targets"
-    layer_dir = window.get_layer_dir(layer_name)
-    GeojsonVectorFormat().encode_vector(layer_dir, [feature])
+    with window.open_layer_writer(layer_name) as writer:
+        writer.write_vector(GeojsonVectorFormat(), [feature])
     window.mark_layer_completed(layer_name)
 
     # Add vector classification target (a point feature with category property).
@@ -118,8 +120,8 @@ def multi_task_dataset(tmp_path: pathlib.Path) -> Dataset:
         {CLASSIFICATION_PROPERTY: "medium"},
     )
     layer_name = "classification_targets"
-    layer_dir = window.get_layer_dir(layer_name)
-    GeojsonVectorFormat().encode_vector(layer_dir, [feature])
+    with window.open_layer_writer(layer_name) as writer:
+        writer.write_vector(GeojsonVectorFormat(), [feature])
     window.mark_layer_completed(layer_name)
 
     return dataset
@@ -325,10 +327,9 @@ def test_multi_task_prediction_writes_to_dataset(
     # Verify that regression predictions were written to the dataset.
     window = multi_task_dataset.load_windows()[0]
     assert window.is_layer_completed("regression_predictions")
-    features = GeojsonVectorFormat().decode_vector(
-        window.get_layer_dir("regression_predictions"),
-        window.projection,
-        window.bounds,
+    features = window.read_vector(
+        "regression_predictions",
+        GeojsonVectorFormat(),
     )
     assert len(features) == 1
     # Verify the predicted value is a number.
@@ -336,10 +337,9 @@ def test_multi_task_prediction_writes_to_dataset(
 
     # Verify that classification predictions were written to the dataset.
     assert window.is_layer_completed("classification_predictions")
-    features = GeojsonVectorFormat().decode_vector(
-        window.get_layer_dir("classification_predictions"),
-        window.projection,
-        window.bounds,
+    features = window.read_vector(
+        "classification_predictions",
+        GeojsonVectorFormat(),
     )
     assert len(features) == 1
     # Verify the predicted class is one of the valid classes.

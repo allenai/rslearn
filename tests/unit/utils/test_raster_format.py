@@ -385,27 +385,15 @@ class TestNumpyRasterFormat:
         assert (path / "data.npy").exists()
         assert (path / "metadata.json").exists()
 
-    def test_bounds_mismatch_raises_by_default(self, tmp_path: pathlib.Path) -> None:
-        """Decoding with different bounds should raise when mismatch is unexpected."""
-        path = UPath(tmp_path)
-        data = np.zeros((1, 1, 2, 2), dtype=np.float32)
-        fmt = NumpyRasterFormat()
-        fmt.encode_raster(path, self.PROJECTION, (0, 0, 2, 2), RasterArray(array=data))
-
-        with pytest.raises(ValueError, match="bounds .* differ"):
-            fmt.decode_raster(path, self.PROJECTION, (10, 10, 12, 12))
-
-    def test_bounds_mismatch_ok_when_expected(self, tmp_path: pathlib.Path) -> None:
-        """Decoding with different bounds should succeed when mismatch is expected."""
+    def test_bounds_mismatch_raises(self, tmp_path: pathlib.Path) -> None:
+        """Decoding with different bounds should raise ValueError."""
         path = UPath(tmp_path)
         data = np.ones((1, 1, 2, 2), dtype=np.float32)
         fmt = NumpyRasterFormat()
         fmt.encode_raster(path, self.PROJECTION, (0, 0, 2, 2), RasterArray(array=data))
 
-        decoded = fmt.decode_raster(
-            path, self.PROJECTION, (10, 10, 12, 12), expect_bounds_mismatch=True
-        )
-        np.testing.assert_array_equal(decoded.array, data)
+        with pytest.raises(ValueError, match="bounds .* differ"):
+            fmt.decode_raster(path, self.PROJECTION, (10, 10, 12, 12))
 
     def test_nodata_value_roundtrip(self, tmp_path: pathlib.Path) -> None:
         """nodata_value should round-trip through NumpyRasterFormat."""
