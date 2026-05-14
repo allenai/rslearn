@@ -250,3 +250,152 @@ def test_regression_training(
     )
 
     # If we get here without exception, training completed successfully.
+
+
+@pytest.fixture
+def regression_global_pool_model_config() -> dict:
+    """Model config using Swin-Tiny + GlobalPool + RegressionHead(in_channels=768).
+
+    This mirrors the OlmoEarth pattern where the backbone produces FeatureMaps that
+    must be pooled to a FeatureVector before the RegressionHead.
+    """
+    return {
+        "model": {
+            "class_path": "rslearn.train.lightning_module.RslearnLightningModule",
+            "init_args": {
+                "model": {
+                    "class_path": "rslearn.models.singletask.SingleTaskModel",
+                    "init_args": {
+                        "encoder": [
+                            {
+                                "class_path": "rslearn.models.swin.Swin",
+                                "init_args": {
+                                    "input_channels": 1,
+                                    "arch": "swin_v2_t",
+                                    "output_layers": [7],
+                                },
+                            }
+                        ],
+                        "decoder": [
+                            {
+                                "class_path": "rslearn.models.global_pool.GlobalPool",
+                            },
+                            {
+                                "class_path": "rslearn.train.tasks.regression.RegressionHead",
+                                "init_args": {
+                                    "in_channels": 768,
+                                },
+                            },
+                        ],
+                    },
+                },
+                "optimizer": {"class_path": "rslearn.train.optimizer.AdamW"},
+            },
+        },
+        "data": {
+            "class_path": "rslearn.train.data_module.RslearnDataModule",
+            "init_args": {
+                "path": "${DATASET_PATH}",
+                "inputs": {
+                    "image": {
+                        "data_type": "raster",
+                        "layers": ["image"],
+                        "bands": ["band"],
+                        "passthrough": True,
+                        "dtype": "FLOAT32",
+                    },
+                    "targets": {
+                        "data_type": "vector",
+                        "layers": ["targets"],
+                    },
+                },
+                "task": {
+                    "class_path": "rslearn.train.tasks.regression.RegressionTask",
+                    "init_args": {
+                        "property_name": PROPERTY_NAME,
+                    },
+                },
+                "batch_size": 1,
+            },
+        },
+        "trainer": {
+            "max_epochs": 1,
+            "callbacks": [
+                {
+                    "class_path": "rslearn.train.prediction_writer.RslearnWriter",
+                    "init_args": {
+                        "path": "${DATASET_PATH}",
+                        "output_layer": "predictions",
+                    },
+                }
+            ],
+        },
+    }
+
+
+def test_regression_global_pool_training(
+    regression_dataset: Dataset,
+    regression_global_pool_model_config: dict,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test FeatureMaps backbone + GlobalPool + RegressionHead(in_channels) trains.
+
+    Validates the pattern used with OlmoEarth and similar backbones that produce
+    spatial FeatureMaps rather than a FeatureVector directly.
+    """
+    init_jsonargparse()
+
+    tmp_fname = tmp_path / "regression_global_pool_training.yaml"
+    with tmp_fname.open("w") as f:
+        json.dump(regression_global_pool_model_config, f)
+
+    monkeypatch.setenv("DATASET_PATH", str(regression_dataset.path))
+    RslearnLightningCLI(
+        model_class=RslearnLightningModule,
+        datamodule_class=RslearnDataModule,
+        args=["fit", "--config", str(tmp_fname)],
+        subclass_mode_model=True,
+        subclass_mode_data=True,
+        save_config_kwargs={"overwrite": True},
+        parser_class=RslearnArgumentParser,
+    )
+
+
+def test_regression_global_pool_prediction_writes_to_dataset(
+    regression_dataset: Dataset,
+    regression_global_pool_model_config: dict,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test FeatureMaps backbone + GlobalPool + RegressionHead(in_channels) predicts.
+
+    Validates the pattern used with OlmoEarth and similar backbones that produce
+    spatial FeatureMaps rather than a FeatureVector directly.
+    """
+    init_jsonargparse()
+
+    tmp_fname = tmp_path / "regression_global_pool_predict.yaml"
+    with tmp_fname.open("w") as f:
+        json.dump(regression_global_pool_model_config, f)
+
+    monkeypatch.setenv("DATASET_PATH", str(regression_dataset.path))
+    RslearnLightningCLI(
+        model_class=RslearnLightningModule,
+        datamodule_class=RslearnDataModule,
+        args=["predict", "--config", str(tmp_fname)],
+        subclass_mode_model=True,
+        subclass_mode_data=True,
+        save_config_kwargs={"overwrite": True},
+        parser_class=RslearnArgumentParser,
+    )
+
+    window = regression_dataset.load_windows()[0]
+    assert window.is_layer_completed("predictions")
+    features = GeojsonVectorFormat().decode_vector(
+        window.get_layer_dir("predictions"),
+        window.projection,
+        window.bounds,
+    )
+    assert len(features) == 1
+    assert isinstance(features[0].properties[PROPERTY_NAME], float)
