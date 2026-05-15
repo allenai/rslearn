@@ -25,7 +25,7 @@ from rslearn.data_sources.data_source import Item
 from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
-from rslearn.data_sources.stac import SourceItem, StacDataSource
+from rslearn.data_sources.stac import AxisAlignedStacDataSource, SourceItem
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
@@ -123,8 +123,12 @@ class _EarthdataAuth:
         return self.get_boto3_session().client("s3", region_name=self.aws_region)
 
 
-class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
-    """Shared implementation for NASA HLS v2.0 raster data sources."""
+class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], AxisAlignedStacDataSource):
+    """Shared implementation for NASA HLS v2.0 raster data sources.
+
+    CMR rejects non-axis-aligned ``intersects`` polygons, so searches use the
+    axis-aligned STAC data source variant.
+    """
 
     STAC_ENDPOINT = "https://cmr.earthdata.nasa.gov/stac/LPCLOUD"
     S3_CREDENTIALS_URL = "https://data.lpdaac.earthdatacloud.nasa.gov/s3credentials"
@@ -184,7 +188,7 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
         required_assets = list(asset_bands.keys()) if require_asset_filter else None
 
         DirectMaterializeDataSource.__init__(self, asset_bands=asset_bands)
-        StacDataSource.__init__(
+        AxisAlignedStacDataSource.__init__(
             self,
             endpoint=self.STAC_ENDPOINT,
             collection_name=collection_name,
