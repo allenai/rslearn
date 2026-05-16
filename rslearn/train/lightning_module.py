@@ -469,6 +469,7 @@ class RslearnLightningModule(L.LightningModule):
             metadatas=metadatas,
         )
         model_outputs = self(context)
+        model_outputs.metadata["context_dict"] = context.context_dict
         return model_outputs
 
     def forward(
