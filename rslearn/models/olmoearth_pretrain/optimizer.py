@@ -38,7 +38,9 @@ def get_layer_id(
     relative = name[len(encoder_prefix) + 1 :]
     if relative.startswith("model.blocks."):
         return int(relative.split(".")[2])
-    if relative.startswith("model.patch_embeddings"):
+    if relative.startswith("model.patch_embeddings") or relative.startswith(
+        "model.composite_encodings"
+    ):
         return 0
     return num_layers
 
