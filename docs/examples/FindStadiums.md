@@ -67,7 +67,8 @@ make two more modifications:
   close to the stadium that we are not sure about due to the coordinate imprecision.
 - Finally, we assume the rest of the area is "background".
 
-Here is an example label and corresponding Sentinel-2 image:
+Here is an example label and corresponding Sentinel-2 image. Red is "stadium", green is
+"background", and black is nodata (will have masked loss).
 
 <p float="left">
 <img src="FindStadiums/sentinel2.jpg" width="45%" />
