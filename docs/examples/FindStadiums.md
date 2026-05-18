@@ -29,8 +29,8 @@ One issue with the data is that, while some of these coordinates are at the cent
 the stadium, others are off to the side:
 
 <p float="left">
-<img src="FindStadiums/michigan_stadium.png" width="45%" />
-<img src="FindStadiums/johnson_hagood_stadium.png" width="45%" />
+<img src="FindStadiums/michigan_stadium.jpg" width="45%" />
+<img src="FindStadiums/johnson_hagood_stadium.jpg" width="45%" />
 </p>
 
 ## Data Strategy
