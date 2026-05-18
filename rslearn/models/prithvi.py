@@ -396,7 +396,9 @@ def _interpolate_pos_encoding(
         new_pos_embed = get_3d_sincos_pos_embed(
             pos_embed.shape[-1], new_grid_size, add_cls_token=True
         )
-        new_pos_embed = torch.from_numpy(new_pos_embed).float().unsqueeze(0)
+        new_pos_embed = (
+            torch.from_numpy(new_pos_embed).float().unsqueeze(0).to(pos_embed.device)
+        )
     else:
         new_grid_size = grid_size  # type: ignore
         new_pos_embed = pos_embed
