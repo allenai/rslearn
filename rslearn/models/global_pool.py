@@ -10,12 +10,17 @@ from .component import FeatureMaps, FeatureVector, IntermediateComponent
 
 
 class GlobalPool(IntermediateComponent):
-    """Apply global pooling to reduce spatial dimensions.
+    """Apply global pooling to reduce spatial dimensions while preserving all channels.
 
     This component applies global average or max pooling over the spatial dimensions
-    of input feature maps. By default, it produces FeatureVector (BxC) suitable for
-    ClassificationHead or RegressionHead. When keep_spatial_dims=True, it produces
-    1x1 FeatureMaps suitable for EmbeddingHead.
+    of input feature maps, producing a BxC FeatureVector that retains all embedding
+    channels. Use this when the downstream head consumes the full channel vector (e.g.
+    ClassificationHead). When keep_spatial_dims=True, it produces 1x1 FeatureMaps
+    suitable for EmbeddingHead.
+
+    For regression from a spatial backbone (FeatureMaps → scalar), prefer
+    PoolingDecoder(in_channels=C, out_channels=1), which pools and projects in one
+    step and feeds directly into RegressionHead.
     """
 
     def __init__(
@@ -48,8 +53,8 @@ class GlobalPool(IntermediateComponent):
             context: the model context.
 
         Returns:
-            If keep_spatial_dims=False (default): FeatureVector (BxC) suitable for
-                ClassificationHead or RegressionHead.
+            If keep_spatial_dims=False (default): FeatureVector (BxC) preserving all
+                channels, suitable for ClassificationHead.
             If keep_spatial_dims=True: FeatureMaps with 1x1 spatial dimensions suitable
                 for EmbeddingHead.
         """

@@ -256,7 +256,6 @@ class RegressionHead(Predictor):
         loss_mode: Literal["mse", "l1", "huber"] = "mse",
         use_sigmoid: bool = False,
         huber_delta: float = 1.0,
-        in_channels: int | None = None,
     ):
         """Initialize a new RegressionHead.
 
@@ -266,16 +265,11 @@ class RegressionHead(Predictor):
                 requires targets to be between 0-1.
             huber_delta: delta parameter for Huber loss (only used when
                 loss_mode="huber").
-            in_channels: if set, adds a linear projection from in_channels to 1 before
-                the regression output. Use this when the upstream component (e.g.
-                GlobalPool on OlmoEarth) produces a multi-channel FeatureVector rather
-                than a single-channel one.
         """
         super().__init__()
         self.loss_mode = loss_mode
         self.use_sigmoid = use_sigmoid
         self.huber_delta = huber_delta
-        self.projection = torch.nn.Linear(in_channels, 1) if in_channels else None
 
     def forward(
         self,
@@ -287,8 +281,7 @@ class RegressionHead(Predictor):
 
         Args:
             intermediates: output from previous model component, which must be a
-                FeatureVector. If in_channels was set, the channel dimension may be
-                in_channels; otherwise it must be 1 (Bx1).
+                FeatureVector with channel dimension 1 (Bx1).
             context: the model context.
             targets: target dicts, which each must contain a "value" key containing the
                 regression label, along with a "valid" key containing a flag indicating
@@ -302,8 +295,6 @@ class RegressionHead(Predictor):
             raise ValueError("the input to RegressionHead must be a FeatureVector")
 
         features = intermediates.feature_vector
-        if self.projection is not None:
-            features = self.projection(features)
 
         if features.shape[1] != 1:
             raise ValueError(
