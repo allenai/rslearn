@@ -210,7 +210,11 @@ class LandsatOliTirs(
                         for item_dict in json.load(f)
                     ]
 
-            yield from items
+            # OLI-only products (LO08_*/LO09_*) lack thermal bands B10/B11;
+            # only yield OLI-TIRS scenes (LC08_*/LC09_*).
+            yield from (
+                item for item in items if not item.name.startswith(("LO08_", "LO09_"))
+            )
 
     def _get_wrs2_polygons(self) -> list[tuple[shapely.Geometry, str, str]]:
         """Get polygons for each (path, row) in the WRS2 grid.

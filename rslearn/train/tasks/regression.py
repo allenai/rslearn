@@ -281,7 +281,7 @@ class RegressionHead(Predictor):
 
         Args:
             intermediates: output from previous model component, which must be a
-                FeatureVector with channel dimension size 1 (Bx1).
+                FeatureVector with channel dimension 1 (Bx1).
             context: the model context.
             targets: target dicts, which each must contain a "value" key containing the
                 regression label, along with a "valid" key containing a flag indicating
@@ -293,12 +293,15 @@ class RegressionHead(Predictor):
         """
         if not isinstance(intermediates, FeatureVector):
             raise ValueError("the input to RegressionHead must be a FeatureVector")
-        if intermediates.feature_vector.shape[1] != 1:
+
+        features = intermediates.feature_vector
+
+        if features.shape[1] != 1:
             raise ValueError(
-                f"the input to RegressionHead must have channel dimension size 1, but got shape {intermediates.feature_vector.shape}"
+                f"the input to RegressionHead must have channel dimension size 1, but got shape {features.shape}"
             )
 
-        logits = intermediates.feature_vector[:, 0]
+        logits = features[:, 0]
 
         if self.use_sigmoid:
             outputs = torch.nn.functional.sigmoid(logits)

@@ -2869,17 +2869,18 @@ wheels = [
 
 [[package]]
 name = "olmoearth-pretrain-minimal"
-version = "0.0.2"
+version = "0.0.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "einops" },
     { name = "huggingface-hub" },
     { name = "numpy" },
+    { name = "torch" },
     { name = "universal-pathlib" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/76/0e/6a9318dae9269c453787f000ee4bcfcad94e4bc517bcf173668cdf03f564/olmoearth_pretrain_minimal-0.0.2.tar.gz", hash = "sha256:832fad5311e9827ebc74093335d774ba03cd0b9b8fba17d6bec5168b14b6c7a7", size = 60641, upload-time = "2026-02-04T17:45:13.376Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/74/33/fa53d53fff852310a99711a6533c261f4d8420d7a67a9eb7ba1b029fe52d/olmoearth_pretrain_minimal-0.0.5.tar.gz", hash = "sha256:ea2e4f913dd63f67d5fa93fd95724170b843fc631c6a95c16b4fcd9153b867f3", size = 65485, upload-time = "2026-05-19T15:54:54.517Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c4/5e/4b5f88029eabf50029b3ad6608ecb3c2d7ada04671fb521f7ecd1d85c9fe/olmoearth_pretrain_minimal-0.0.2-py3-none-any.whl", hash = "sha256:165693ecd1e22dc39956a8620cbf9d498f5df151ef60c7f60128f89b1e68f6fe", size = 65784, upload-time = "2026-02-04T17:45:12.036Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/4b/6ec9bb1b17f4516eb7d8a318073859ce80246c24a86c8bc4dd29fe31fb76/olmoearth_pretrain_minimal-0.0.5-py3-none-any.whl", hash = "sha256:93a088fd3c514954b7a3e9a1b8d152cd7ace4675a0317664cdbda261c04fb139", size = 68358, upload-time = "2026-05-19T15:54:53.138Z" },
 ]
 
 [[package]]
@@ -4410,7 +4411,7 @@ wheels = [
 
 [[package]]
 name = "rslearn"
-version = "0.1.4"
+version = "0.1.6"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
@@ -4500,7 +4501,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.17.1,<2" },
     { name = "netcdf4", marker = "extra == 'extra'", specifier = ">=1.7.2" },
     { name = "numcodecs", marker = "extra == 'extra'", specifier = ">=0.16" },
-    { name = "olmoearth-pretrain-minimal", marker = "extra == 'extra'", specifier = ">=0.0.2" },
+    { name = "olmoearth-pretrain-minimal", marker = "extra == 'extra'", specifier = ">=0.0.5" },
     { name = "omnicloudmask", marker = "extra == 'extra'", specifier = ">=1.7.1" },
     { name = "osmium", marker = "extra == 'extra'", specifier = ">=4.0.2" },
     { name = "pillow", specifier = ">=11.3" },

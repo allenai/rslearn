@@ -17,6 +17,19 @@ from rslearn.utils.stac import StacClient, StacItem
 logger = get_logger(__name__)
 
 
+def _get_axis_aligned_search_intersects_shape(
+    shp: shapely.Geometry,
+) -> shapely.Geometry:
+    """Return an axis-aligned geometry suitable for STAC intersects searches."""
+    if isinstance(shp, shapely.MultiPolygon):
+        envelopes = [part.envelope for part in shp.geoms if not part.is_empty]
+        if len(envelopes) == 1:
+            return envelopes[0]
+        return shapely.MultiPolygon(envelopes)
+
+    return shp.envelope
+
+
 class SourceItem(Item):
     """An item in the StacDataSource data source."""
 
@@ -157,6 +170,10 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
         assert self.sort_by is not None
         return stac_item.properties[self.sort_by]
 
+    def _get_search_intersects_shape(self, shp: shapely.Geometry) -> shapely.Geometry:
+        """Return the geometry to use for STAC intersects searches."""
+        return shp
+
     def _should_include_item(self, item: SourceItem) -> bool:
         """Return whether the converted item should be included in search results."""
         return True
@@ -206,7 +223,11 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
             search_time_range = self._get_search_time_range(wgs84_geometry)
             stac_items = self.client.search(
                 collections=self.collection_names,
-                intersects=json.loads(shapely.to_geojson(wgs84_geometry.shp)),
+                intersects=json.loads(
+                    shapely.to_geojson(
+                        self._get_search_intersects_shape(wgs84_geometry.shp)
+                    )
+                ),
                 date_time=search_time_range,
                 query=self.query,
                 limit=self.limit,
@@ -258,3 +279,11 @@ class StacDataSource(ItemLookupDataSource[SourceItem]):
     def deserialize_item(self, serialized_item: dict) -> SourceItem:
         """Deserializes an item from JSON-decoded data."""
         return SourceItem.deserialize(serialized_item)
+
+
+class AxisAlignedStacDataSource(StacDataSource):
+    """STAC data source variant for APIs requiring axis-aligned search geometry."""
+
+    def _get_search_intersects_shape(self, shp: shapely.Geometry) -> shapely.Geometry:
+        """Return an axis-aligned geometry to use for STAC intersects searches."""
+        return _get_axis_aligned_search_intersects_shape(shp)

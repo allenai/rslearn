@@ -123,8 +123,8 @@ rslearn dataset add_windows --root $DATASET_PATH --group default --name default 
 Now, we can use rslearn to materialize the satellite images for the window(s):
 
 ```
-rslearn dataset prepare --root $DATASET_PATH --workers 32 --disabled-layers landsat --retry-max-attempts 5 --retry-backoff-seconds 5
-rslearn dataset materialize --root $DATASET_PATH --workers 32 --no-use-initial-job --disabled-layers landsat --retry-max-attempts 5 --retry-backoff-seconds 5
+rslearn dataset prepare --root $DATASET_PATH --workers 32 --enabled-layers sentinel2_l2a,sentinel1 --retry-max-attempts 5 --retry-backoff-seconds 5
+rslearn dataset materialize --root $DATASET_PATH --workers 32 --no-use-initial-job --enabled-layers sentinel2_l2a,sentinel1 --retry-max-attempts 5 --retry-backoff-seconds 5
 ```
 
 Here, we only obtain Sentinel-2 and Sentinel-1 images. To also obtain Landsat images,

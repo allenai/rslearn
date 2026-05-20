@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 
 import torch
+from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.nn.flexi_vit import TokensAndMasks
 from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import MaskValue
 
 from rslearn.const import WGS84_PROJECTION
@@ -117,6 +118,7 @@ def test_with_attnpool() -> None:
         embedding_size=128,
         # we now expect an extra N dimension on the back of this.
         token_pooling=False,
+        autocast_dtype=None,
     )
     pooling = AttentionPool(in_dim=128, num_heads=2)
 
@@ -172,6 +174,7 @@ def test_with_simple_attnpool() -> None:
         embedding_size=128,
         # we now expect an extra N dimension on the back of this.
         token_pooling=False,
+        autocast_dtype=None,
     )
     pooling = SimpleAttentionPool(in_dim=128)
 
@@ -933,3 +936,21 @@ def test_normal_timestamps_two_modalities_1hr_tolerance() -> None:
         assert (s1_mask[:, :, t] == MaskValue.MISSING.value).all(), (
             f"s1 t={t} should be missing"
         )
+
+
+def test_compute_tokens_in_batch() -> None:
+    """Verify token count is B*H*W*T*S summed across present modalities."""
+    # H, W, T are shared across modalities; S (band sets) differs.
+    #                                   B  H  W  T  S  C
+    tokens_and_masks = TokensAndMasks(
+        sentinel2_l2a=torch.zeros(4, 4, 4, 3, 2, 1),
+        sentinel1=torch.zeros(4, 4, 4, 3, 1, 1),
+    )
+
+    result = OlmoEarth.compute_tokens_in_batch(
+        tokens_and_masks, ["sentinel2_l2a", "sentinel1"]
+    )
+    assert result == 4 * (4 * 4 * 3 * 2 + 4 * 4 * 3 * 1)
+
+    single = OlmoEarth.compute_tokens_in_batch(tokens_and_masks, ["sentinel2_l2a"])
+    assert single == 4 * 4 * 4 * 3 * 2

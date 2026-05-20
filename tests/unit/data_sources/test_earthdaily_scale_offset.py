@@ -14,11 +14,11 @@ import shapely
 
 from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType
 from rslearn.data_sources import DataSourceContext
-from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2
+from rslearn.data_sources.earthdaily import EarthDailyItem, Sentinel2C1L2A
 from rslearn.utils.geometry import Projection, STGeometry
 
 
-class _FakeSentinel2(Sentinel2):
+class _FakeSentinel2(Sentinel2C1L2A):
     def __init__(self, item: EarthDailyItem, *, apply_scale_offset: bool = True):
         super().__init__(
             apply_scale_offset=apply_scale_offset, assets=["red"], cache_dir=None
@@ -192,7 +192,7 @@ def test_init_requires_float32_band_dtype_when_scale_offset_enabled() -> None:
         band_sets=[BandSetConfig(dtype=DType.UINT16, bands=["B04"])],
     )
     with pytest.raises(ValueError, match="requires band_sets dtype=float32"):
-        Sentinel2(
+        Sentinel2C1L2A(
             apply_scale_offset=True,
             assets=["red"],
             context=DataSourceContext(layer_config=layer_cfg),
@@ -204,7 +204,7 @@ def test_init_allows_non_float32_when_scale_offset_disabled() -> None:
         type=LayerType.RASTER,
         band_sets=[BandSetConfig(dtype=DType.UINT16, bands=["B04"])],
     )
-    Sentinel2(
+    Sentinel2C1L2A(
         apply_scale_offset=False,
         assets=["red"],
         context=DataSourceContext(layer_config=layer_cfg),

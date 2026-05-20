@@ -52,6 +52,9 @@ The overall dataset configuration file looks like this:
           "space_mode": "MOSAIC",
           // The max matches defaults to 1.
           "max_matches": 1,
+          // The min matches defaults to 0. If fewer item groups are found, the window is
+          // rejected for this layer and no item groups are returned.
+          "min_matches": 0,
           // For MOSAIC, the number of overlapping items wanted within each item group covering
           // the window (default 1). Set higher for compositing.
           "mosaic_compositing_overlaps": 1,

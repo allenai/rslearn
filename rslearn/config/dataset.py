@@ -235,6 +235,8 @@ class BandSetConfig(BaseModel):
             )
             if len(self.nodata_vals) > 0:
                 self.nodata_value = unique_nodata_value(self.nodata_vals)
+            # Clear self.nodata_vals so it doesn't cause error in case of re-validation.
+            self.nodata_vals = None
 
         return self
 

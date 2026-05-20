@@ -25,7 +25,7 @@ from rslearn.data_sources.data_source import Item
 from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
-from rslearn.data_sources.stac import SourceItem, StacDataSource
+from rslearn.data_sources.stac import AxisAlignedStacDataSource, SourceItem
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
@@ -123,8 +123,12 @@ class _EarthdataAuth:
         return self.get_boto3_session().client("s3", region_name=self.aws_region)
 
 
-class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
-    """Shared implementation for NASA HLS v2.0 raster data sources."""
+class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], AxisAlignedStacDataSource):
+    """Shared implementation for NASA HLS v2.0 raster data sources.
+
+    CMR rejects non-axis-aligned ``intersects`` polygons, so searches use the
+    axis-aligned STAC data source variant.
+    """
 
     STAC_ENDPOINT = "https://cmr.earthdata.nasa.gov/stac/LPCLOUD"
     S3_CREDENTIALS_URL = "https://data.lpdaac.earthdatacloud.nasa.gov/s3credentials"
@@ -164,6 +168,9 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
             aws_region=self.AWS_REGION,
             timeout=timeout,
         )
+        # Track which HTTPS fallback messages have already been emitted at INFO.
+        # Repeated fallback events are still logged at DEBUG to reduce log noise.
+        self._https_fallback_info_keys: set[tuple[str, str]] = set()
 
         if context.layer_config is not None:
             requested_bands: list[str] = []
@@ -184,7 +191,7 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
         required_assets = list(asset_bands.keys()) if require_asset_filter else None
 
         DirectMaterializeDataSource.__init__(self, asset_bands=asset_bands)
-        StacDataSource.__init__(
+        AxisAlignedStacDataSource.__init__(
             self,
             endpoint=self.STAC_ENDPOINT,
             collection_name=collection_name,
@@ -193,6 +200,34 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
             sort_ascending=sort_ascending,
             required_assets=required_assets,
             properties_to_record=list(self.PROPERTIES_TO_RECORD),
+        )
+
+    def _log_https_fallback(
+        self,
+        fallback_kind: str,
+        item_name: str,
+        asset_key: str,
+    ) -> None:
+        """Log HTTPS fallback with reduced repetition.
+
+        The first fallback per (kind, asset_key) is INFO. Subsequent ones are DEBUG.
+        """
+        log_key = (fallback_kind, asset_key)
+        if log_key not in self._https_fallback_info_keys:
+            self._https_fallback_info_keys.add(log_key)
+            logger.info(
+                "falling back to HTTPS %s for %s asset %s (future repeats logged at DEBUG)",
+                fallback_kind,
+                item_name,
+                asset_key,
+            )
+            return
+
+        logger.debug(
+            "falling back to HTTPS %s for %s asset %s",
+            fallback_kind,
+            item_name,
+            asset_key,
         )
 
     def _get_http_asset_url(self, item: SourceItem, asset_key: str) -> str | None:
@@ -313,9 +348,7 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
             http_asset_url = self._get_http_asset_url(item, asset_key)
             if not asset_url.startswith("s3://") or http_asset_url is None:
                 raise
-            logger.info(
-                "falling back to HTTPS download for %s asset %s", item.name, asset_key
-            )
+            self._log_https_fallback("download", item.name, asset_key)
             self._download_asset(http_asset_url, local_fname)
 
     def _read_raster_for_item(
@@ -337,11 +370,7 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
             http_asset_url = self._get_http_asset_url(item, asset_key)
             if not asset_url.startswith("s3://") or http_asset_url is None:
                 raise
-            logger.info(
-                "falling back to HTTPS raster read for %s asset %s",
-                item.name,
-                asset_key,
-            )
+            self._log_https_fallback("raster read", item.name, asset_key)
             return self._read_raster_from_local_copy(
                 http_asset_url, projection, bounds, resampling
             )
@@ -357,11 +386,7 @@ class _NasaHlsBase(DirectMaterializeDataSource[SourceItem], StacDataSource):
             http_asset_url = self._get_http_asset_url(item, asset_key)
             if not asset_url.startswith("s3://") or http_asset_url is None:
                 raise
-            logger.info(
-                "falling back to HTTPS nodata read for %s asset %s",
-                item.name,
-                asset_key,
-            )
+            self._log_https_fallback("nodata read", item.name, asset_key)
             return self._get_nodata_from_local_copy(http_asset_url)
 
     @override

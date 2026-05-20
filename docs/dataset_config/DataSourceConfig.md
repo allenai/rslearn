@@ -23,6 +23,9 @@ options beyond those detailed in [LayerConfig](./LayerConfig.md):
       "space_mode": "MOSAIC",
       // The max matches defaults to 1.
       "max_matches": 1,
+      // The min matches defaults to 0. If fewer item groups are found, the window is
+      // rejected for this layer and no item groups are returned.
+      "min_matches": 0,
       // For MOSAIC, the number of overlapping items wanted within each item group covering
       // the window (default 1). Set higher for compositing.
       "mosaic_compositing_overlaps": 1,
@@ -60,17 +63,51 @@ The `class_path` and `init_args` options configure the data source itself. See
 [DataSources](../DataSources.md) for details on all of the built-in data sources in
 rslearn.
 
-rslearn retrieves data from data sources in three steps: prepare, ingest, and materialize.
+rslearn retrieves data from data sources in up to three stages: prepare, ingest, and
+materialize. Ingest can be skipped for data sources that support direct materialization.
+
+```mermaid
+flowchart LR
+    subgraph prepare["Prepare"]
+        window["Window geometry and time range"] --> request["Apply time_offset and duration"]
+        request --> get_items["DataSource.get_items"]
+        get_items --> matched_groups["MatchedItemGroup list"]
+        matched_groups --> items_json["Write items.json metadata\nserialized_item_groups + group_time_ranges"]
+    end
+
+    items_json --> ingest_flag{"ingest: true?"}
+
+    subgraph ingest_phase["Ingest"]
+        ingest["Download matched items"]
+        ingest --> tile_store["Tile store assets"]
+    end
+
+    subgraph materialize_phase["Materialize"]
+        read_metadata["Read item groups and time ranges"]
+        direct_reads["Windowed reads from data source"]
+        read_metadata --> materialize["Materialize each item group"]
+        tile_store --> materialize
+        direct_reads --> materialize
+    end
+
+    ingest_flag -->|yes| ingest
+    ingest_flag -->|no| direct_reads
+    items_json --> read_metadata
+    materialize --> outputs["Window layer outputs"]
+```
 
 ### Prepare
 
 In the prepare stage, we match items in the data source with each window in the dataset.
 The output of prepare is a list of *item groups* for each window, where each group
 specifies a different list of items that should be composited to form a different
-vector or raster file for that window. The following options affect prepare:
+vector or raster file for that window. Each matched group also carries the request time
+range used to create it; this is stored alongside the serialized item groups and passed
+to materialization. The following options affect prepare:
 
 - `space_mode`
 - `max_matches`
+- `min_matches`
 - `mosaic_compositing_overlaps`
 - `period_duration`
 - `per_period_mosaic_reverse_time_order`
@@ -98,8 +135,13 @@ Below, we detail these options in order by stage.
 
 For each window, the prepare stage starts with a list of items provided by the data source
 that intersect the window's spatial extent and time range. The output from matching is a
-`list[list[Item]]` (list of item groups), where each item group corresponds to the items
-that will be used to create one composite of raster or vector data.
+`list[MatchedItemGroup[Item]]` for that window. Each `MatchedItemGroup` contains:
+
+- `items`: the items that will be used to create one composite of raster or vector data.
+- `request_time_range`: the exact time range used for matching that group.
+
+When prepare writes `items.json`, these are serialized as parallel
+`serialized_item_groups` and `group_time_ranges` lists.
 
 ### Time Offset and Duration
 
@@ -124,10 +166,15 @@ Suppose the window time range is [2024-01-01, 2024-02-01].
 - With duration=180d, the request time range is [2024-01-01, 2024-06-29].
 - With time_offset=30d AND duration=180d, the request time range is [2024-01-31, 2024-07-29].
 
-### Space Mode and Max Matches
+### Space Mode, Max Matches, and Min Matches
 
 The `space_mode` defines the matching strategy. It interacts with `max_matches`, which
 specifies the maximum number of item groups to produce.
+
+`min_matches` specifies the minimum number of item groups required. If matching produces
+fewer than `min_matches` groups, the window is rejected for that layer and prepare stores
+no item groups for it. The default is 0, so windows with no matching items are not
+rejected unless the user configures stricter behavior.
 
 **CONTAINS.** Use items that fully contain the window bounds. The resulting item groups
 will each consist of exactly one item. This strategy iterates over the items in the
@@ -141,8 +188,8 @@ resulting item groups will each consist of exactly one item.
 
 **MOSAIC.** Create mosaics, where each item group combines multiple items from the data
 source as needed to cover the entire window. In this case, each item group may
-include multiple items. This strategy initializes a buffer of `max_matches` empty
-item groups. It then iterates over the items, adding each item to the first group
+include multiple items. This strategy keeps up to `max_matches` pending mosaics. It
+then iterates over the items, adding each item to the first group
 that the item provides additional coverage for (skipping groups that already cover
 all the portions of the window that the new item covers). Finally, the non-empty
 groups are returned.
@@ -159,6 +206,17 @@ Consider a window covering a 10km x 10km region with a time range of January 1 t
 - Item C: covers the right half of the window (5km x 10km), from March 10
 - Item D: covers the full window (10km x 10km), from March 20
 
+```text
+Window footprint:
+
+  A and D: full window         B: left half              C: right half
+  +------------------+         +---------+---------+     +---------+---------+
+  |                  |         |/////////|         |     |         |/////////|
+  |                  |         |/////////|         |     |         |/////////|
+  |                  |         |/////////|         |     |         |/////////|
+  +------------------+         +---------+---------+     +---------+---------+
+```
+
 With `max_matches=2`:
 
 - **CONTAINS** returns `[[A], [D]]`. Both A and D fully contain the window. B and C are
@@ -170,6 +228,9 @@ With `max_matches=2`:
   so B starts the second mosaic. Item C adds the right half to the second mosaic. Item D
   doesn't add new coverage to either mosaic.
 - **SINGLE_COMPOSITE** returns `[[A, B, C, D]]`.
+
+These examples use `[[A], [B, C]]` shorthand for the item lists within matched groups;
+the actual matching result also includes one `request_time_range` per group.
 
 ### Period Duration
 
@@ -191,6 +252,18 @@ March, items C and D are combined into one mosaic. February is skipped since the
 no matching items. For January, item A covers the full window. In other words, we end
 up with one monthly mosaic for each 30-day period in the request time range.
 
+```text
+Request time range split into 30-day periods:
+
+  January period          February period         March period
+  +----------------+      +----------------+      +----------------+
+  | A              |      | no matches     |      | C + D          |
+  | full mosaic    |      | skipped        |      | full mosaic    |
+  +----------------+      +----------------+      +----------------+
+
+  Resulting item groups: [[A], [C, D]]
+```
+
 ### Compositing Overlaps
 
 For MOSAIC, the default behavior is to create item groups that cover the window's
@@ -205,8 +278,9 @@ the window once, but it is still returned.
 
 ## Ingest Stage Configuration
 
-During the ingest stage, rslearn downloads all items that appear in an item group for at
-least one window.
+When `ingest` is true, rslearn downloads all items that appear in an item group for at
+least one window into the tile store. When `ingest` is false, this stage is skipped and
+materialization reads windowed data directly from the data source.
 
 ### Ingest Flag
 
