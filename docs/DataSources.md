@@ -22,6 +22,7 @@ detailed page with configuration options and available bands. See
 | [copernicus.Sentinel2](data_sources/copernicus.md#rslearndatasourcescopernicussentinel2) | ESA Copernicus OData API | L1C and L2A |
 | [earthdaily.Sentinel2L2A](data_sources/earthdaily_Sentinel2L2A.md) | EarthDaily | PC-compatible L2A (`sentinel-2-l2a`), same band names as `planetary_computer.Sentinel2` |
 | [earthdaily.Sentinel2C1L2A](data_sources/earthdaily_Sentinel2C1L2A.md) | EarthDaily | Collection 1 L2A (`sentinel-2-c1-l2a`), scale/offset reflectance |
+| [earthdaily.Sentinel2EDACloudMask](data_sources/earthdaily_Sentinel2EDACloudMask.md) | EarthDaily | Sentinel-2 EDA cloud mask (`sentinel-2-eda-cloud-mask`), categorical cloud-mask band |
 | [gcp_public_data.Sentinel2](data_sources/gcp_public_data_Sentinel2.md) | Google Cloud Storage | L1C scenes |
 
 #### Sentinel-1

@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+import math
 import os
 import tempfile
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+import rasterio
+import rasterio.warp
+import rasterio.windows
 import requests
+import shapely
+from rasterio.enums import Resampling
 from typing_extensions import override
 from upath import UPath
 
 from rslearn.config import QueryConfig, SpaceMode
+from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import (
     DataSourceContext,
     Item,
@@ -29,6 +36,8 @@ from rslearn.utils.geometry import (
     get_global_geometry,
     get_global_raster_bounds,
 )
+from rslearn.utils.raster_array import RasterArray, RasterMetadata
+from rslearn.utils.raster_format import get_raster_projection_and_bounds
 
 
 class CHELSADailyItem(Item):
@@ -68,7 +77,7 @@ class CHELSADaily(
     """Data source for CHELSA-daily global climate rasters.
 
     URL pattern:
-    ``https://os.unil.cloud.switch.ch/chelsa02/chelsa/{extent}/daily/{variable}/{year}/CHELSA_{variable}_{day}_{month}_{year}_{version}.tif``
+    ``https://os.unil.cloud.switch.ch/chelsa02/chelsa/global/daily/{variable}/{year}/CHELSA_{variable}_{day}_{month}_{year}_{version}.tif``
     """
 
     BASE_URL = "https://os.unil.cloud.switch.ch/chelsa02/chelsa"
@@ -97,9 +106,9 @@ class CHELSADaily(
     def __init__(
         self,
         band_names: list[str] | None = None,
-        extent: str = "global",
         start_date: date | str = DEFAULT_START_DATE,
         end_date: date | str = DEFAULT_END_DATE,
+        bounds: tuple[float, float, float, float] | None = None,
         base_url: str = BASE_URL,
         version: str = DEFAULT_VERSION,
         timeout: timedelta = timedelta(seconds=60),
@@ -110,18 +119,20 @@ class CHELSADaily(
         Args:
             band_names: CHELSA variable names (e.g. "tas", "pr"). If omitted and
                 context.layer_config is present, uses the unique bands from the layer.
-            extent: CHELSA extent in URL path, usually "global".
             start_date: earliest available date (inclusive).
             end_date: latest available date (inclusive).
+            bounds: optional bounding box as (min_lon, min_lat, max_lon, max_lat).
+                If specified, items and ingested rasters are clipped to this AOI.
+                If omitted, the whole source GeoTIFF is ingested.
             base_url: CHELSA base URL.
             version: filename version segment, e.g. "V.2.1".
             timeout: HTTP timeout for ingest downloads.
             context: data source context.
         """
-        self.extent = extent
         self.base_url = base_url.rstrip("/")
         self.version = version
         self.timeout = timeout
+        self.bounds = bounds
 
         self.start_date = self._parse_date(start_date)
         self.end_date = self._parse_date(end_date)
@@ -180,10 +191,59 @@ class CHELSADaily(
     def _build_item(self, item_date: date) -> CHELSADailyItem:
         start = datetime(item_date.year, item_date.month, item_date.day, tzinfo=UTC)
         end = start + timedelta(days=1)
+        time_range = (start, end)
+        if self.bounds is None:
+            geometry = get_global_geometry(time_range)
+        else:
+            geometry = STGeometry(
+                WGS84_PROJECTION,
+                shapely.box(*self.bounds),
+                time_range,
+            )
         return CHELSADailyItem(
             name=self._item_name_for_date(item_date),
-            geometry=get_global_geometry((start, end)),
+            geometry=geometry,
             item_date=item_date,
+        )
+
+    def _get_configured_bounds_projection_and_pixel_bounds(
+        self, asset_url: str
+    ) -> tuple[Projection, PixelBounds]:
+        """Get source-grid projection and pixel bounds for configured WGS84 bounds."""
+        if self.bounds is None:
+            raise ValueError("bounds must be configured")
+
+        with rasterio.open(asset_url) as src:
+            if src.crs is None:
+                raise ValueError(f"CHELSA source raster has no CRS: {asset_url}")
+
+            projection, full_pixel_bounds = get_raster_projection_and_bounds(src)
+            src_bounds = rasterio.warp.transform_bounds(
+                WGS84_PROJECTION.crs,
+                src.crs,
+                *self.bounds,
+                densify_pts=21,
+            )
+            window = rasterio.windows.from_bounds(*src_bounds, transform=src.transform)
+
+            col_start = max(0, math.floor(window.col_off))
+            row_start = max(0, math.floor(window.row_off))
+            col_stop = min(src.width, math.ceil(window.col_off + window.width))
+            row_stop = min(src.height, math.ceil(window.row_off + window.height))
+
+            if col_start >= col_stop or row_start >= row_stop:
+                raise ValueError(
+                    f"configured bounds {self.bounds} do not overlap CHELSA raster"
+                )
+
+        return (
+            projection,
+            (
+                full_pixel_bounds[0] + col_start,
+                full_pixel_bounds[1] + row_start,
+                full_pixel_bounds[0] + col_stop,
+                full_pixel_bounds[1] + row_stop,
+            ),
         )
 
     @classmethod
@@ -253,9 +313,10 @@ class CHELSADaily(
                 items.append(self._build_item(day_cursor.date()))
                 day_cursor += timedelta(days=1)
 
-            groups.append(
-                match_candidate_items_to_window(geometry, items, query_config)
+            matched_groups = match_candidate_items_to_window(
+                geometry, items, query_config
             )
+            groups.append(matched_groups)
 
         return groups
 
@@ -301,6 +362,32 @@ class CHELSADaily(
 
                 asset_url = self.get_asset_url(item, asset_key)
 
+                if self.bounds is not None:
+                    projection, pixel_bounds = (
+                        self._get_configured_bounds_projection_and_pixel_bounds(
+                            asset_url
+                        )
+                    )
+                    raw_data, src_nodata = self._read_raster_from_url(
+                        asset_url,
+                        projection,
+                        pixel_bounds,
+                        Resampling.nearest,
+                    )
+                    raster = RasterArray(
+                        chw_array=raw_data,
+                        time_range=item.geometry.time_range,
+                        metadata=RasterMetadata(nodata_value=src_nodata),
+                    )
+                    tile_store.write_raster(
+                        item,
+                        band_names,
+                        projection,
+                        pixel_bounds,
+                        raster,
+                    )
+                    continue
+
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     local_fname = os.path.join(
                         tmp_dir,
@@ -336,6 +423,6 @@ class CHELSADaily(
         resolved_variable = self._resolve_variable_for_date(asset_key, d)
 
         return (
-            f"{self.base_url}/{self.extent}/daily/{resolved_variable}/{yyyy}/"
+            f"{self.base_url}/global/daily/{resolved_variable}/{yyyy}/"
             f"CHELSA_{resolved_variable}_{dd}_{mm}_{yyyy}_{self.version}.tif"
         )

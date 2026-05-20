@@ -1218,6 +1218,233 @@ class Sentinel2L2A(EarthDaily):
                     )
 
 
+class Sentinel2EDACloudMask(EarthDaily):
+    """EarthDaily Sentinel-2 EDA cloud mask (`sentinel-2-eda-cloud-mask`) source.
+
+    The `cloud-mask` STAC asset contains two thematic bands. They are exposed as
+    `cloud-mask` (0 nodata, 1 clear, 2 cloud, 3 cloud shadow, 4 thin cloud) and
+    `cirrus-mask` (0 nodata, 1 non-cirrus, 2 cirrus).
+    """
+
+    COLLECTION_NAME = "sentinel-2-eda-cloud-mask"
+    ASSET_KEY = "cloud-mask"
+    DEFAULT_BAND_NAMES = ["cloud-mask", "cirrus-mask"]
+
+    ASSET_BANDS = {
+        ASSET_KEY: DEFAULT_BAND_NAMES,
+    }
+
+    def __init__(
+        self,
+        assets: list[str] | None = None,
+        band_names: list[str] | None = None,
+        cloud_cover_max: float | None = None,
+        search_max_items: int = 500,
+        sort_items_by: Literal["cloud_cover", "datetime"] | None = "cloud_cover",
+        query: dict[str, Any] | None = None,
+        sort_by: str | None = None,
+        sort_ascending: bool = True,
+        timeout: timedelta = timedelta(seconds=10),
+        cache_dir: str | None = None,
+        max_retries: int = 3,
+        retry_backoff_factor: float = 5.0,
+        context: DataSourceContext = DataSourceContext(),
+    ) -> None:
+        """Initialize an EarthDaily Sentinel-2 EDA cloud mask data source.
+
+        Args:
+            assets: optional list of EarthDaily cloud-mask STAC asset keys. The only
+                supported asset is `cloud-mask`. If omitted and a LayerConfig is
+                provided via context, assets are inferred from that layer's band sets.
+            band_names: ordered rslearn names for bands to expose from the
+                `cloud-mask` GeoTIFF asset. The default is `["cloud-mask",
+                "cirrus-mask"]`. The first name maps to GeoTIFF band 1, the second
+                name maps to GeoTIFF band 2.
+            cloud_cover_max: max cloud cover (%) applied in searches. If set, injects
+                an `eo:cloud_cover` upper bound into the STAC query.
+            search_max_items: max number of STAC items to fetch per window before
+                rslearn's grouping/matching logic runs.
+            sort_items_by: optional ordering applied before grouping; useful when
+                using `SpaceMode.COMPOSITE` with `CompositingMethod.FIRST_VALID`.
+            query: optional STAC API `query` filter passed to searches.
+            sort_by: optional STAC item property to sort by before grouping/matching.
+                If set, it takes precedence over sort_items_by.
+            sort_ascending: whether to sort ascending when sort_by is set.
+            timeout: timeout for HTTP asset downloads (when ingesting).
+            cache_dir: optional directory to cache item metadata by item id.
+            max_retries: max retries for EarthDaily API client (search/get item).
+            retry_backoff_factor: backoff factor for EarthDaily API client retries.
+            context: rslearn data source context.
+        """
+        if band_names is not None:
+            if not band_names:
+                raise ValueError("band_names must contain at least one band")
+            if len(set(band_names)) != len(band_names):
+                raise ValueError(f"band_names must be unique, got {band_names}")
+
+        if assets is not None:
+            unknown_assets = [
+                asset_key for asset_key in assets if asset_key != self.ASSET_KEY
+            ]
+            if unknown_assets:
+                raise ValueError(
+                    f"unknown EarthDaily Sentinel-2 EDA cloud mask assets "
+                    f"{unknown_assets}; supported assets are [{self.ASSET_KEY!r}]"
+                )
+
+        if context.layer_config is not None and assets is None and band_names is None:
+            supported_bands = set(self.DEFAULT_BAND_NAMES)
+            wanted_bands: list[str] = []
+            for band_set in context.layer_config.band_sets:
+                for band in band_set.bands:
+                    if band not in supported_bands:
+                        continue
+                    if band in wanted_bands:
+                        continue
+                    wanted_bands.append(band)
+            source_ordered_bands = [
+                band for band in self.DEFAULT_BAND_NAMES if band in wanted_bands
+            ]
+            asset_bands = (
+                {self.ASSET_KEY: source_ordered_bands} if source_ordered_bands else {}
+            )
+        else:
+            if assets == []:
+                asset_bands = {}
+            else:
+                asset_bands = {
+                    self.ASSET_KEY: list(band_names or self.DEFAULT_BAND_NAMES)
+                }
+
+        super().__init__(
+            collection_name=self.COLLECTION_NAME,
+            asset_bands=asset_bands,
+            query=query,
+            sort_by=sort_by,
+            sort_ascending=sort_ascending,
+            cloud_cover_max=cloud_cover_max,
+            search_max_items=search_max_items,
+            sort_items_by=sort_items_by,
+            timeout=timeout,
+            skip_items_missing_assets=True,
+            cache_dir=cache_dir,
+            max_retries=max_retries,
+            retry_backoff_factor=retry_backoff_factor,
+            read_scale_offsets=False,
+            context=context,
+        )
+
+        self.cloud_mask_source_band_names = list(band_names or self.DEFAULT_BAND_NAMES)
+
+    def _get_asset_by_band(self, bands: list[str]) -> str:
+        """Get the cloud-mask asset for exact or subset band requests."""
+        configured_bands = self.asset_bands.get(self.ASSET_KEY)
+        if configured_bands is not None and all(
+            band in configured_bands for band in bands
+        ):
+            return self.ASSET_KEY
+        return super()._get_asset_by_band(bands)
+
+    def _source_band_indexes_for_bands(self, bands: list[str]) -> list[int]:
+        """Return 0-based source GeoTIFF band indexes for configured rslearn bands."""
+        indexes: list[int] = []
+        for band in bands:
+            try:
+                indexes.append(self.cloud_mask_source_band_names.index(band))
+            except ValueError as e:
+                raise ValueError(
+                    f"band {band!r} is not configured for EarthDaily "
+                    f"{self.ASSET_KEY} asset bands {self.cloud_mask_source_band_names}"
+                ) from e
+        return indexes
+
+    def _validate_asset_band_count(
+        self,
+        item: EarthDailyItem,
+        asset_key: str,
+        raster_band_count: int,
+        source_band_indexes: list[int],
+    ) -> None:
+        required_count = max(source_band_indexes, default=-1) + 1
+        if raster_band_count < required_count:
+            raise ValueError(
+                f"EarthDaily item {item.name} asset {asset_key} has "
+                f"{raster_band_count} raster bands but configured bands "
+                f"{self.asset_bands[asset_key]} require source band {required_count}"
+            )
+
+    def read_raster(
+        self,
+        layer_name: str,
+        item: Item,
+        bands: list[str],
+        projection: Projection,
+        bounds: PixelBounds,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> RasterArray:
+        """Read configured bands from the cloud-mask asset."""
+        if not isinstance(item, EarthDailyItem):
+            raise TypeError(f"expected EarthDailyItem, got {type(item)}")
+        raster = super().read_raster(
+            layer_name, item, bands, projection, bounds, resampling=resampling
+        )
+        asset_key = self._get_asset_by_band(bands)
+        source_band_indexes = self._source_band_indexes_for_bands(bands)
+        self._validate_asset_band_count(
+            item, asset_key, raster.array.shape[0], source_band_indexes
+        )
+        return RasterArray(
+            array=raster.array[source_band_indexes, :, :, :],
+            timestamps=raster.timestamps,
+            metadata=raster.metadata,
+        )
+
+    def ingest(
+        self,
+        tile_store: TileStoreWithLayer,
+        items: list[EarthDailyItem],
+        geometries: list[list[STGeometry]],
+    ) -> None:
+        """Ingest configured bands from the cloud-mask asset."""
+        for item in items:
+            band_names = self.asset_bands.get(self.ASSET_KEY)
+            if band_names is None:
+                continue
+            asset_url = item.asset_urls.get(self.ASSET_KEY)
+            if asset_url is None:
+                continue
+            if tile_store.is_raster_ready(item, band_names):
+                continue
+
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                local_fname = self._download_asset_to_tmp(
+                    asset_url, tmp_dir, self.ASSET_KEY, item.name
+                )
+                with rasterio.open(local_fname) as src:
+                    source_band_indexes = self._source_band_indexes_for_bands(
+                        band_names
+                    )
+                    self._validate_asset_band_count(
+                        item, self.ASSET_KEY, src.count, source_band_indexes
+                    )
+                    indexes = [index + 1 for index in source_band_indexes]
+                    array = src.read(indexes=indexes)
+                    src_nodata = src.nodata
+                    projection, bounds = get_raster_projection_and_bounds(src)
+
+                tile_store.write_raster(
+                    item,
+                    band_names,
+                    projection,
+                    bounds,
+                    RasterArray(
+                        chw_array=array,
+                        time_range=item.geometry.time_range,
+                        metadata=RasterMetadata(nodata_value=src_nodata),
+                    ),
+                )
+
+
 class Biophysical(EarthDaily):
     """Biophysical variables on EarthDaily platform (EDAgro layers).
 

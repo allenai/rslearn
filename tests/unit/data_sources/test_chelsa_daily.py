@@ -180,6 +180,42 @@ def test_chelsa_daily_item_serialization_roundtrip() -> None:
     assert restored.geometry.serialize() == item.geometry.serialize()
 
 
+def test_chelsa_daily_bounds_limit_item_geometry() -> None:
+    data_source = CHELSADaily(
+        band_names=["tas"],
+        bounds=(-8.0, 49.0, 2.0, 61.0),
+    )
+    item = data_source.get_item_by_name("chelsa_daily_20190907")
+
+    assert item.geometry.to_projection(WGS84_PROJECTION).shp.bounds == pytest.approx(
+        (-8.0, 49.0, 2.0, 61.0)
+    )
+
+
+def test_chelsa_daily_get_items_outside_bounds_returns_no_groups() -> None:
+    data_source = CHELSADaily(
+        band_names=["tas"],
+        bounds=(-8.0, 49.0, 2.0, 61.0),
+    )
+    time_range = (
+        datetime(2023, 6, 16, 0, tzinfo=UTC),
+        datetime(2023, 6, 17, 0, tzinfo=UTC),
+    )
+    geometry = STGeometry(
+        WGS84_PROJECTION,
+        shapely.box(10.0, 49.0, 11.0, 50.0),
+        time_range,
+    )
+
+    groups = data_source.get_items(
+        [geometry],
+        query_config=QueryConfig(space_mode=SpaceMode.SINGLE_COMPOSITE),
+    )
+
+    assert len(groups) == 1
+    assert groups[0] == []
+
+
 def test_chelsa_daily_get_raster_bounds_global_item_local_crs() -> None:
     data_source = CHELSADaily(band_names=["tas"])
     item = data_source.get_item_by_name("chelsa_daily_20190907")
@@ -237,6 +273,57 @@ def test_chelsa_daily_read_raster_window_from_tiles_local_crs(
     assert raster is not None
     assert raster.array.shape == (1, 1, 96, 96)
     assert np.all(raster.array == 1.0)
+
+
+def test_chelsa_daily_ingest_with_bounds_writes_spatial_subset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    src_transform = from_origin(0.0, 2.0, 0.5, 0.5)
+    src_crs = CRS.from_epsg(4326)
+    arr = np.arange(16, dtype=np.uint16).reshape(1, 4, 4)
+    src_path = tmp_path / "chelsa_source.tif"
+    with rasterio.open(
+        src_path,
+        "w",
+        driver="GTiff",
+        width=arr.shape[2],
+        height=arr.shape[1],
+        count=1,
+        dtype="uint16",
+        crs=src_crs,
+        transform=src_transform,
+        nodata=65535,
+    ) as dst:
+        dst.write(arr)
+
+    data_source = CHELSADaily(
+        band_names=["tas"],
+        start_date="2020-03-28",
+        end_date="2020-03-28",
+        bounds=(0.5, 0.5, 1.5, 1.5),
+    )
+    item = data_source.get_item_by_name("chelsa_daily_20200328")
+    monkeypatch.setattr(
+        data_source, "get_asset_url", lambda item, asset_key: str(src_path)
+    )
+    monkeypatch.setattr(
+        "rslearn.data_sources.chelsa.requests.get",
+        lambda *args, **kwargs: pytest.fail("bounded ingest should not download file"),
+    )
+
+    tile_store = DefaultTileStore(convert_rasters_to_cogs=True)
+    tile_store.set_dataset_path(UPath(tmp_path / "ds"))
+    layer_store = TileStoreWithLayer(tile_store, "chelsa")
+    data_source.ingest(layer_store, [item], geometries=[[]])
+
+    stored_path = tile_store._get_raster_fname("chelsa", item.name, ["tas"])
+    with rasterio.open(stored_path) as stored:
+        assert stored.width == 2
+        assert stored.height == 2
+        assert stored.transform == from_origin(0.5, 1.5, 0.5, 0.5)
+        assert stored.nodata == 65535
+        np.testing.assert_array_equal(stored.read(), arr[:, 1:3, 1:3])
 
 
 def test_chelsa_daily_ingest_preserves_nodata_and_temporal_reducers_ignore_it(
