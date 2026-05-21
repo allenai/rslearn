@@ -16,6 +16,7 @@ from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
+from rslearn.utils.archive import safe_extract_zip_member
 from rslearn.utils.geometry import STGeometry
 
 logger = get_logger(__name__)
@@ -184,7 +185,9 @@ class CDL(DataSource):
                         raise ValueError(
                             f"expected CDL zip to have one .tif file but got {candidate_member_names}"
                         )
-                    local_fname = zip_f.extract(candidate_member_names[0], path=tmp_dir)
+                    local_fname = safe_extract_zip_member(
+                        zip_f, candidate_member_names[0], tmp_dir
+                    )
 
                 # Now we can ingest it.
                 logger.debug(f"Ingesting data for {item.name}")

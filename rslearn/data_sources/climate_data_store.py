@@ -20,6 +20,7 @@ from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import MatchedItemGroup
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
+from rslearn.utils.archive import safe_extract_zip
 from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.raster_array import RasterArray, RasterMetadata
 
@@ -971,7 +972,7 @@ class ERA5LandHourlyTimeseries(DataSource):
                         raise ValueError(
                             f"No NetCDF file found in downloaded zip: {local_zip_fname}"
                         )
-                    zip_ref.extractall(tmp_dir)
+                    safe_extract_zip(zip_ref, tmp_dir)
                     local_nc_paths = [
                         UPath(os.path.join(tmp_dir, nc_file)) for nc_file in nc_files
                     ]

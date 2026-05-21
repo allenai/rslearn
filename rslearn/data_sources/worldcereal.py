@@ -14,6 +14,7 @@ from upath import UPath
 from rslearn.config import LayerType
 from rslearn.data_sources.local_files import LocalFiles, RasterItemSpec
 from rslearn.log_utils import get_logger
+from rslearn.utils.archive import safe_extract_zip
 from rslearn.utils.fsspec import get_upath_local, join_upath, open_atomic
 
 from .data_source import DataSourceContext, Item
@@ -409,7 +410,7 @@ class WorldCereal(LocalFiles):
 
             with get_upath_local(zip_filepath) as local_fname:
                 with zipfile.ZipFile(local_fname) as zip_f:
-                    zip_f.extractall(local_dir)
+                    safe_extract_zip(zip_f, local_dir)
 
             # Copy it over if the tif_dir was remote.
             if not isinstance(tif_dir.fs, LocalFileSystem):

@@ -16,6 +16,7 @@ from rslearn.data_sources import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
+from rslearn.utils.archive import safe_extract_zip
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import Projection, STGeometry, get_global_geometry
 
@@ -177,7 +178,7 @@ class EuroCrops(DataSource[EuroCropsItem]):
             # Extract all of the files and look for shapefile filename.
             logger.debug(f"Extracting zip file {fname}")
             with zipfile.ZipFile(zip_fname) as zip_f:
-                zip_f.extractall(path=tmp_dir)
+                safe_extract_zip(zip_f, tmp_dir)
 
             # The shapefiles or geopackage files can appear at any level in the hierarchy.
             # Most zip files contain one but some contain multiple (one per region).

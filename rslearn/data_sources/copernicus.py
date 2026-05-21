@@ -29,6 +29,7 @@ from rslearn.data_sources.data_source import DataSource, DataSourceContext, Item
 from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
+from rslearn.utils.archive import safe_extract_zip_member
 from rslearn.utils.fsspec import open_atomic
 from rslearn.utils.geometry import (
     FloatBounds,
@@ -601,7 +602,9 @@ class Copernicus(DataSource):
                 # Extract it to a temporary directory.
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     logger.debug(f"Extracting {member_name} for bands {band_names}")
-                    local_raster_fname = zipf.extract(member_name, path=tmp_dir)
+                    local_raster_fname = safe_extract_zip_member(
+                        zipf, member_name, tmp_dir
+                    )
 
                     # Now we can ingest it.
                     logger.debug(f"Ingesting the raster for bands {band_names}")
@@ -833,7 +836,9 @@ class Sentinel2(Copernicus):
                 # Extract it to a temporary directory.
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     logger.debug(f"Extracting {member_name} for bands {band_names}")
-                    local_raster_fname = zipf.extract(member_name, path=tmp_dir)
+                    local_raster_fname = safe_extract_zip_member(
+                        zipf, member_name, tmp_dir
+                    )
 
                     logger.debug(f"Ingesting the raster for bands {band_names}")
 
