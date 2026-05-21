@@ -118,6 +118,7 @@ def test_with_attnpool() -> None:
         embedding_size=128,
         # we now expect an extra N dimension on the back of this.
         token_pooling=False,
+        autocast_dtype=None,
     )
     pooling = AttentionPool(in_dim=128, num_heads=2)
 
@@ -173,6 +174,7 @@ def test_with_simple_attnpool() -> None:
         embedding_size=128,
         # we now expect an extra N dimension on the back of this.
         token_pooling=False,
+        autocast_dtype=None,
     )
     pooling = SimpleAttentionPool(in_dim=128)
 

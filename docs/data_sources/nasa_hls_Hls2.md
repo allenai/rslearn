@@ -66,6 +66,43 @@ Additional supported raster assets:
 
 Band names are the HLS asset keys listed above.
 
+### HLS Fmask Cloud-Aware Compositing
+
+To rank HLS items by per-window cloudiness before FIRST_VALID compositing, configure:
+
+```jsonc
+{
+  "layers": {
+    "hls": {
+      "type": "raster",
+      "band_sets": [
+        {"bands": ["red", "green", "blue"], "dtype": "int16", "nodata_value": -9999},
+        {"bands": ["fmask"], "dtype": "uint8"}
+      ],
+      "data_source": {
+        "class_path": "rslearn.data_sources.nasa_hls.Hls2",
+        "init_args": {
+          "query": {"eo:cloud_cover": {"lt": 90}}
+        },
+        "query_config": {
+          "max_matches": 8,
+          "space_mode": "MOSAIC"
+        }
+      },
+      "compositing_method": {
+        "class_path": "rslearn.dataset.hls_fmask.HlsFmaskFirstValid",
+        "init_args": {
+          "fmask_band": "fmask"
+        }
+      }
+    }
+  }
+}
+```
+
+When using `Hls2S30` or `Hls2L30`, use `fmask_band: "Fmask"` and include `Fmask` in a
+configured `band_sets` entry.
+
 ## rslearn.data_sources.nasa_hls.Hls2
 
 Combined NASA LP DAAC HLS v2.0 time-series datasource with a shared semantic band
