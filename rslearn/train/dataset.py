@@ -914,6 +914,7 @@ class ModelDataset(torch.utils.data.Dataset):
         name: str | None = None,
         fix_crop_pick: bool = False,
         index_mode: IndexMode = IndexMode.OFF,
+        load_full_windows: bool = False,
     ) -> None:
         """Instantiate a new ModelDataset.
 
@@ -927,6 +928,9 @@ class ModelDataset(torch.utils.data.Dataset):
             fix_crop_pick: if True, fix the crop pick to be the same every time
                 for a given window. Useful for testing (default: False)
             index_mode: controls dataset index caching behavior (default: IndexMode.OFF)
+            load_full_windows: if True, always load entire windows regardless
+                of crop_size. Used by in-memory dataset wrappers that handle
+                cropping themselves.
         """
         self.dataset = dataset
         self.split_config = split_config
@@ -939,10 +943,9 @@ class ModelDataset(torch.utils.data.Dataset):
         else:
             self.transforms = rslearn.train.transforms.transform.Identity()
 
-        # Get normalized crop size from the SplitConfig.
-        # But if load_all_crops is enabled, this is handled by AllCropsDataset, so
-        # here we instead load the entire windows.
-        if split_config.get_load_all_crops():
+        # Skip cropping if the caller will handle it (in-memory wrappers,
+        # AllCropsDataset, etc.).
+        if load_full_windows or split_config.get_load_all_crops():
             self.crop_size = None
         else:
             self.crop_size = split_config.get_crop_size()
