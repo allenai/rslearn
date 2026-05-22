@@ -1,7 +1,13 @@
 import pytest
 from rasterio.crs import CRS
 
-from rslearn.data_sources.soilgrids import _crs_to_rasterio, _crs_to_soilgrids_urn
+from rslearn.data_sources.soilgrids import (
+    VALID_COVERAGE_IDS,
+    VALID_SERVICE_IDS,
+    SoilGrids,
+    _crs_to_rasterio,
+    _crs_to_soilgrids_urn,
+)
 
 
 def test_crs_to_soilgrids_urn_passthrough() -> None:
@@ -43,3 +49,30 @@ def test_crs_to_rasterio_fallback_extracts_epsg_code() -> None:
 def test_crs_to_rasterio_raises_on_unknown() -> None:
     with pytest.raises(Exception):
         _crs_to_rasterio("definitely-not-a-crs")
+
+
+def test_valid_service_ids_nonempty() -> None:
+    assert len(VALID_SERVICE_IDS) > 0
+
+
+def test_valid_coverage_ids_keyed_by_service_ids() -> None:
+    assert set(VALID_COVERAGE_IDS.keys()) == set(VALID_SERVICE_IDS)
+
+
+def test_valid_coverage_ids_spot_check() -> None:
+    assert "clay_0-5cm_mean" in VALID_COVERAGE_IDS["clay"]
+    assert "ocs_0-30cm_mean" in VALID_COVERAGE_IDS["ocs"]
+
+
+def test_invalid_service_id_raises() -> None:
+    with pytest.raises(ValueError, match="service_id"):
+        SoilGrids(service_id="notaservice", coverage_id="x")
+
+
+def test_invalid_coverage_id_raises() -> None:
+    with pytest.raises(ValueError, match="coverage_id"):
+        SoilGrids(service_id="clay", coverage_id="clay_bad")
+
+
+def test_valid_service_and_coverage_id_accepted() -> None:
+    SoilGrids(service_id="clay", coverage_id="clay_0-5cm_mean")
