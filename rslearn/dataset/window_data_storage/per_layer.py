@@ -189,6 +189,7 @@ class _PerLayerStorageLayerWriter(LayerWriter):
 
     def _flush_bandset(self, buf: _BandsetBuffer) -> None:
         """Concatenate buffered groups along T and write the combined raster."""
+        # Sort groups by group_idx so the on-disk T axis order is deterministic.
         group_idxs = sorted(buf.rasters.keys())
         if group_idxs != list(range(len(group_idxs))):
             raise ValueError(
@@ -205,6 +206,7 @@ class _PerLayerStorageLayerWriter(LayerWriter):
             ]
         )
 
+        # Either all groups have timestamps or none do; otherwise drop timestamps.
         all_have_timestamps = all(r.timestamps is not None for r in arrays)
         timestamps: list[tuple[datetime, datetime]] | None = None
         if all_have_timestamps:
@@ -248,6 +250,7 @@ class PerLayerStorage(WindowDataStorage):
     def __init__(self, window: Window) -> None:
         """Initialize the storage bound to a specific window."""
         super().__init__(window)
+        # PerLayerStorage delegates vector ops to PerItemGroupStorage.
         self._per_item_group_storage = PerItemGroupStorage(window)
 
     @override
