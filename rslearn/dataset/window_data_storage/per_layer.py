@@ -318,7 +318,7 @@ class PerLayerStorage(WindowDataStorage):
         out: list[RasterArray] = []
         for group_idx in group_idxs:
             t_slice = meta.t_slice_for_group(group_idx)
-            sub_array = combined.array[:, t_slice, :, :]
+            sub_array = combined.array[:, t_slice, :, :].copy()
             sub_timestamps: list[tuple[datetime, datetime]] | None
             if combined.timestamps is None:
                 sub_timestamps = None
