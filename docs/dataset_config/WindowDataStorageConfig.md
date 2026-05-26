@@ -58,5 +58,6 @@ Notes:
 - With the default window metadata storage, FileWindowStorage, a per-item-group
   completed sentinel file will be written, meaning the per-item-group directories of
   PerItemGroupStorage will still be created even when using PerLayerStorage. To reduce
-  the number of files/directories, it is recommended to use SQLiteWindowStorage or
-  another similar window metadata storage when using PerLayerStorage.
+  the number of files/directories, it is recommended to use
+  [SQLiteWindowStorage](WindowStorageConfig.md#sqlitewindowstorage) or another similar
+  window metadata storage when using PerLayerStorage.
