@@ -129,9 +129,9 @@ for window in tqdm.tqdm(windows):
         window.get_geometry(),
         {"category": "old_then_new"},
     )
-    # Then write it to the label layer.
-    layer_dir = window.get_layer_dir("label")
-    GeojsonVectorFormat().encode_vector(layer_dir, [feat])
+    # Then write it to the label layer via Window.open_layer_writer.
+    with window.open_layer_writer("label") as writer:
+        writer.write_vector(GeojsonVectorFormat(), [feat])
     window.mark_layer_completed("label")
 ```
 

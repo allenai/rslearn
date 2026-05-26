@@ -137,6 +137,7 @@ def add_windows_from_geometries(
             projection=cur_projection,
             bounds=out_box,
             time_range=time_range,
+            data_factory=dataset.window_data_storage_factory,
         )
         window.save()
         windows.append(window)

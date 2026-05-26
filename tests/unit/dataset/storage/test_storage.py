@@ -91,10 +91,6 @@ def test_mark_one_layer_completed(
         windows.append(window)
         storage.create_or_update_window(window)
 
-    # Make layer directory since it is expected for the data to be materialized there
-    # before marking completed.
-    windows[0].get_layer_dir("layer_name").mkdir(parents=True, exist_ok=True)
-
     storage.mark_layer_completed(group, window_names[0], "layer_name")
     assert storage.is_layer_completed(group, window_names[0], "layer_name")
     assert not storage.is_layer_completed(group, window_names[1], "layer_name")
@@ -115,11 +111,6 @@ def test_mark_two_item_groups_completed(
         time_range=None,
     )
     storage.create_or_update_window(window)
-
-    # Make layer directory since it is expected for the data to be materialized there
-    # before marking completed.
-    window.get_layer_dir("layer_name", group_idx=0).mkdir(parents=True, exist_ok=True)
-    window.get_layer_dir("layer_name", group_idx=1).mkdir(parents=True, exist_ok=True)
 
     storage.mark_layer_completed("group", "name", "layer_name", group_idx=0)
     storage.mark_layer_completed("group", "name", "layer_name", group_idx=1)
@@ -210,7 +201,6 @@ def test_migrate_window_storage(
             )
         },
     )
-    window.get_layer_dir("layer_name", group_idx=0).mkdir(parents=True, exist_ok=True)
     source_storage.mark_layer_completed(
         window.group, window.name, "layer_name", group_idx=0
     )

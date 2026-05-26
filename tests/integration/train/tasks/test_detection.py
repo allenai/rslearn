@@ -11,6 +11,9 @@ from upath import UPath
 from rslearn.arg_parser import RslearnArgumentParser
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.lightning_cli import RslearnLightningCLI
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
@@ -69,19 +72,21 @@ def detection_dataset(tmp_path: pathlib.Path) -> Dataset:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 32, 32),
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
     window.save()
 
     # Add a simple input image.
     image = np.random.randint(0, 255, size=(1, 32, 32), dtype=np.uint8)
     layer_name = "image"
-    layer_dir = window.get_layer_dir(layer_name)
-    GeotiffRasterFormat().encode_raster(
-        layer_dir / "band",
-        window.projection,
-        window.bounds,
-        RasterArray(chw_array=image),
-    )
+    with window.data.open_layer_writer(layer_name) as writer:
+        writer.write_raster(
+            ["band"],
+            GeotiffRasterFormat(),
+            window.projection,
+            window.bounds,
+            RasterArray(chw_array=image),
+        )
     window.mark_layer_completed(layer_name)
 
     # Add vector detection targets (bounding boxes with class labels).
@@ -109,8 +114,8 @@ def detection_dataset(tmp_path: pathlib.Path) -> Dataset:
         )
     )
     layer_name = "targets"
-    layer_dir = window.get_layer_dir(layer_name)
-    GeojsonVectorFormat().encode_vector(layer_dir, features)
+    with window.data.open_layer_writer(layer_name) as writer:
+        writer.write_vector(GeojsonVectorFormat(), features)
     window.mark_layer_completed(layer_name)
 
     return dataset
@@ -239,10 +244,9 @@ def test_detection_prediction_writes_to_dataset(
     # Verify that predictions were written to the dataset.
     window = detection_dataset.load_windows()[0]
     assert window.is_layer_completed("predictions")
-    features = GeojsonVectorFormat().decode_vector(
-        window.get_layer_dir("predictions"),
-        window.projection,
-        window.bounds,
+    features = window.data.read_vector(
+        "predictions",
+        GeojsonVectorFormat(),
     )
     # We can have 0 or more predictions (depends on model confidence).
     # Just verify it's a list of features.

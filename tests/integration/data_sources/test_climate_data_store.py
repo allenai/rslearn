@@ -30,6 +30,9 @@ from rslearn.dataset.manage import (
     prepare_dataset_windows,
 )
 from rslearn.dataset.window import Window
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
 from rslearn.utils.raster_format import GeotiffRasterFormat
@@ -446,6 +449,7 @@ class TestERA5LandHourlyTimeseries:
                 datetime(2025, 1, 15, tzinfo=UTC),
                 datetime(2025, 2, 15, tzinfo=UTC),
             ),
+            data_factory=PerItemGroupStorageFactory(),
         )
         window.save()
 
@@ -456,10 +460,11 @@ class TestERA5LandHourlyTimeseries:
         materialize_dataset_windows(dataset, windows)
 
         # Read the materialized raster
-        layer_dir = window.get_raster_dir("era5_layer", [band_name], group_idx=0)
         raster_format = GeotiffRasterFormat()
-        raster = raster_format.decode_raster(
-            layer_dir, window.projection, window.bounds
+        raster = window.data.read_raster(
+            "era5_layer",
+            [band_name],
+            raster_format,
         )
 
         # Verify shape: (1 band, 744 timesteps, height, width)

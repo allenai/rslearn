@@ -4,9 +4,7 @@ from typing import Any
 
 import tqdm
 
-from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.storage.storage import WindowStorage
-from rslearn.dataset.window import get_window_layer_dir
 from rslearn.log_utils import get_logger
 
 logger = get_logger(__name__)
@@ -54,15 +52,6 @@ def migrate_window_storage(
         for layer_name, group_idx in source.list_completed_layers(
             window.group, window.name
         ):
-            if isinstance(target, FileWindowStorage):
-                # FileWindowStorage expects the layer directory to exist before marking
-                # completion, so ensure migration creates it.
-                layer_dir = get_window_layer_dir(
-                    target.get_window_root(window.group, window.name),
-                    layer_name,
-                    group_idx,
-                )
-                layer_dir.mkdir(parents=True, exist_ok=True)
             target.mark_layer_completed(
                 window.group, window.name, layer_name, group_idx
             )

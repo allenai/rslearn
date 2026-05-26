@@ -43,8 +43,7 @@ def test_layer_alias(local_files_dataset: Dataset) -> None:
     prepare_dataset_windows(local_files_dataset, windows)
     ingest_dataset_windows(local_files_dataset, windows)
     materialize_dataset_windows(local_files_dataset, windows)
-    layer_dir = window.get_layer_dir("layer1")
-    assert (layer_dir / "data.geojson").exists()
+    assert window.is_layer_completed("layer1")
 
     # Now make a different layer with same alias.
     # Then rename src_dir after preparing.
@@ -71,8 +70,7 @@ def test_layer_alias(local_files_dataset: Dataset) -> None:
     ingest_dataset_windows(local_files_dataset, windows)
     materialize_dataset_windows(local_files_dataset, windows)
     os.rename(src_dir + ".moved", src_dir)
-    layer_dir = window.get_layer_dir("layer2")
-    assert (layer_dir / "data.geojson").exists()
+    assert window.is_layer_completed("layer2")
 
     # Now third layer with no alias should fail.
     dataset_config = {

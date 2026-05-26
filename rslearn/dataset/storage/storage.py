@@ -1,5 +1,7 @@
 """Abstract classes for window metadata storage."""
 
+from __future__ import annotations
+
 import abc
 from typing import TYPE_CHECKING
 
@@ -32,7 +34,7 @@ class WindowStorage(abc.ABC):
         self,
         groups: list[str] | None = None,
         names: list[str] | None = None,
-    ) -> list["Window"]:
+    ) -> list[Window]:
         """Load the windows in the dataset.
 
         Args:
@@ -42,7 +44,7 @@ class WindowStorage(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def create_or_update_window(self, window: "Window") -> None:
+    def create_or_update_window(self, window: Window) -> None:
         """Create or update the window.
 
         An existing window is only updated if there is one with the same name and group.
@@ -53,7 +55,7 @@ class WindowStorage(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def get_layer_datas(self, group: str, name: str) -> dict[str, "WindowLayerData"]:
+    def get_layer_datas(self, group: str, name: str) -> dict[str, WindowLayerData]:
         """Get the window layer datas for the specified window.
 
         Args:
@@ -68,7 +70,7 @@ class WindowStorage(abc.ABC):
 
     @abc.abstractmethod
     def save_layer_datas(
-        self, group: str, name: str, layer_datas: dict[str, "WindowLayerData"]
+        self, group: str, name: str, layer_datas: dict[str, WindowLayerData]
     ) -> None:
         """Set the window layer datas for the specified window."""
         raise NotImplementedError
