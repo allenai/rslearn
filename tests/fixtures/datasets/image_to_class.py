@@ -8,6 +8,9 @@ from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.models.pooling_decoder import PoolingDecoder
 from rslearn.models.singletask import SingleTaskModel
 from rslearn.models.swin import Swin
@@ -60,8 +63,8 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
-        data_storage=dataset.window_data_storage,
     )
+    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     # Add image where pixel value is 4*col+row.
@@ -69,7 +72,7 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
     image = image.reshape(1, 4, 4)
     layer_name = "image"
     raster_format = SingleImageRasterFormat()
-    with window.open_layer_writer(layer_name) as writer:
+    with window.data.open_layer_writer(layer_name) as writer:
         writer.write_raster(
             ["band"],
             raster_format,
@@ -88,7 +91,7 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
     )
     layer_name = "label"
     vector_format = GeojsonVectorFormat()
-    with window.open_layer_writer(layer_name) as writer:
+    with window.data.open_layer_writer(layer_name) as writer:
         writer.write_vector(vector_format, [feature])
     window.mark_layer_completed(layer_name)
 

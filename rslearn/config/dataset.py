@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from rslearn.data_sources.data_source import DataSource
     from rslearn.dataset.compositing import Compositor
     from rslearn.dataset.storage.storage import WindowStorageFactory
-    from rslearn.dataset.window_data_storage.storage import WindowDataStorage
+    from rslearn.dataset.window_data_storage.storage import WindowDataStorageFactory
 
 logger = get_logger("__name__")
 
@@ -815,24 +815,24 @@ class WindowDataStorageConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     class_path: str = Field(
-        default="rslearn.dataset.window_data_storage.per_item_group.PerItemGroupStorage",
-        description="Class path for the WindowDataStorage.",
+        default="rslearn.dataset.window_data_storage.per_item_group.PerItemGroupStorageFactory",
+        description="Class path for the WindowDataStorageFactory.",
     )
     init_args: dict[str, Any] = Field(
         default_factory=lambda: {},
-        description="jsonargparse init args for the WindowDataStorage.",
+        description="jsonargparse init args for the WindowDataStorageFactory.",
     )
 
-    def instantiate_window_data_storage(self) -> "WindowDataStorage":
-        """Instantiate the WindowDataStorage specified by this config."""
+    def instantiate_factory(self) -> "WindowDataStorageFactory":
+        """Instantiate the WindowDataStorageFactory specified by this config."""
         from rslearn.dataset.window_data_storage.storage import (
-            WindowDataStorage,
+            WindowDataStorageFactory,
         )
         from rslearn.utils.jsonargparse import init_jsonargparse
 
         init_jsonargparse()
         parser = jsonargparse.ArgumentParser()
-        parser.add_argument("--wds", type=WindowDataStorage)
+        parser.add_argument("--wds", type=WindowDataStorageFactory)
         cfg = parser.parse_object(
             {
                 "wds": dict(

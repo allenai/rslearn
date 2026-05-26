@@ -9,7 +9,6 @@ from upath import UPath
 
 if TYPE_CHECKING:
     from rslearn.dataset.window import Window, WindowLayerData
-    from rslearn.dataset.window_data_storage.storage import WindowDataStorage
 
 
 class WindowStorage(abc.ABC):
@@ -35,15 +34,12 @@ class WindowStorage(abc.ABC):
         self,
         groups: list[str] | None = None,
         names: list[str] | None = None,
-        *,
-        data_storage: WindowDataStorage,
     ) -> list[Window]:
         """Load the windows in the dataset.
 
         Args:
             groups: an optional list of groups to filter loading
             names: an optional list of window names to filter loading
-            data_storage: the WindowDataStorage to inject into each Window.
         """
         raise NotImplementedError
 

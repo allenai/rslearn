@@ -18,7 +18,7 @@ from rslearn.utils.raster_array import RasterArray
 from rslearn.utils.raster_format import RasterFormat, get_bandset_dirname
 from rslearn.utils.vector_format import VectorFormat
 
-from .storage import LayerWriter, WindowDataStorage
+from .storage import LayerWriter, WindowDataStorage, WindowDataStorageFactory
 
 if TYPE_CHECKING:
     from rslearn.dataset.window import Window
@@ -97,40 +97,52 @@ class PerItemGroupStorage(WindowDataStorage):
     @override
     def open_layer_writer(
         self,
-        window: Window,
         layer_name: str,
     ) -> LayerWriter:
         """Return a writer that writes each raster individually upon ``write_raster`` call."""
-        return _PerItemGroupLayerWriter(window, layer_name)
+        return _PerItemGroupLayerWriter(self.window, layer_name)
 
     @override
     def read_raster(
         self,
-        window: Window,
         layer_name: str,
         bands: list[str],
         raster_format: RasterFormat,
-        projection: Projection,
-        bounds: PixelBounds,
+        projection: Projection | None = None,
+        bounds: PixelBounds | None = None,
         group_idx: int = 0,
         resampling: Resampling = Resampling.bilinear,
     ) -> RasterArray:
         """Decode the raster from the per-group directory."""
+        proj = projection if projection is not None else self.window.projection
+        bnds = bounds if bounds is not None else self.window.bounds
         raster_dir = per_item_group_raster_dir(
-            window.window_root, layer_name, bands, group_idx
+            self.window.window_root, layer_name, bands, group_idx
         )
-        return raster_format.decode_raster(raster_dir, projection, bounds, resampling)
+        return raster_format.decode_raster(raster_dir, proj, bnds, resampling)
 
     @override
     def read_vector(
         self,
-        window: Window,
         layer_name: str,
         vector_format: VectorFormat,
-        projection: Projection,
-        bounds: PixelBounds,
+        projection: Projection | None = None,
+        bounds: PixelBounds | None = None,
         group_idx: int = 0,
     ) -> list[Feature]:
         """Decode the vector features from the per-group directory."""
-        layer_dir = per_item_group_layer_dir(window.window_root, layer_name, group_idx)
-        return vector_format.decode_vector(layer_dir, projection, bounds)
+        proj = projection if projection is not None else self.window.projection
+        bnds = bounds if bounds is not None else self.window.bounds
+        layer_dir = per_item_group_layer_dir(
+            self.window.window_root, layer_name, group_idx
+        )
+        return vector_format.decode_vector(layer_dir, proj, bnds)
+
+
+class PerItemGroupStorageFactory(WindowDataStorageFactory):
+    """Factory that creates :class:`PerItemGroupStorage` instances."""
+
+    @override
+    def create(self, window: Window) -> PerItemGroupStorage:
+        """Create a PerItemGroupStorage bound to the given window."""
+        return PerItemGroupStorage(window)

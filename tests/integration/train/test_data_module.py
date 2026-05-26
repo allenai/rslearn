@@ -9,6 +9,9 @@ from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.dataset import DataInput, SplitConfig
 from rslearn.train.tasks.classification import ClassificationTask
@@ -89,12 +92,12 @@ class TestPredictLoader:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 4, 4),
             time_range=None,
-            data_storage=empty_image_dataset.window_data_storage,
         )
+        window._data = PerItemGroupStorageFactory().create(window)
         window.save()
         image = np.zeros((1, 4, 4), dtype=np.uint8)
         image[0, 0, 0] = 1
-        with window.open_layer_writer(self.LAYER_NAME) as writer:
+        with window.data.open_layer_writer(self.LAYER_NAME) as writer:
             writer.write_raster(
                 self.BANDS,
                 GeotiffRasterFormat(),

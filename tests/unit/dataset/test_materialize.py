@@ -19,7 +19,9 @@ from rslearn.dataset.materialize import RasterMaterializer, resolve_nodata_value
 from rslearn.dataset.remap import Remapper
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.tile_utils import read_raster_window_from_tiles
-from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.dataset.window_data_storage.per_layer import (
     PER_LAYER_STORAGE_META_FNAME,
     PerLayerStorage,
@@ -357,8 +359,8 @@ def test_raster_materializer_passes_all_band_sets_to_compositor(
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
-        data_storage=PerItemGroupStorage(),
     )
+    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     tile_store = DefaultTileStore()
@@ -400,7 +402,6 @@ def test_raster_materializer_with_per_layer_storage(
     compositor = RecordingCompositor()
     monkeypatch.setattr(LayerConfig, "instantiate_compositor", lambda self: compositor)
 
-    per_layer_storage = PerLayerStorage()
     window = Window(
         storage=FileWindowStorage(UPath(tmp_path / "dataset")),
         group="default",
@@ -408,8 +409,8 @@ def test_raster_materializer_with_per_layer_storage(
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
-        data_storage=per_layer_storage,
     )
+    window._data = PerLayerStorage(window)
     window.save()
 
     tile_store = DefaultTileStore()
@@ -434,8 +435,8 @@ def test_raster_materializer_with_per_layer_storage(
 
     # Reading back via read_rasters should yield two RasterArrays.
     raster_format = layer_cfg.band_sets[0].instantiate_raster_format()
-    arrays = per_layer_storage.read_rasters(
-        window, "layer", ["B1"], [0, 1], raster_format, WGS84_PROJECTION, (0, 0, 4, 4)
+    arrays = window.data.read_rasters(
+        "layer", ["B1"], [0, 1], raster_format, WGS84_PROJECTION, (0, 0, 4, 4)
     )
     assert len(arrays) == 2
     for arr in arrays:

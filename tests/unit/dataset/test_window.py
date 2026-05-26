@@ -6,7 +6,9 @@ from upath import UPath
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
-from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 
 
 @pytest.fixture
@@ -18,8 +20,8 @@ def empty_window(tmp_path: pathlib.Path) -> Window:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 1, 1),
         time_range=None,
-        data_storage=PerItemGroupStorage(),
     )
+    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
     return window
 

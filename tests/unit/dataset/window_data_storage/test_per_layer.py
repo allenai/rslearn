@@ -12,7 +12,7 @@ from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.window_data_storage.per_layer import (
     PER_LAYER_STORAGE_META_FNAME,
-    PerLayerStorage,
+    PerLayerStorageFactory,
 )
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import STGeometry
@@ -35,8 +35,8 @@ def _make_window(tmp_path: pathlib.Path) -> Window:
         projection=PROJECTION,
         bounds=BOUNDS,
         time_range=None,
-        data_storage=PerLayerStorage(),
     )
+    window._data = PerLayerStorageFactory().create(window)
     window.save()
     return window
 
@@ -54,7 +54,7 @@ def test_raster_roundtrip(tmp_path: pathlib.Path) -> None:
         for i in range(3)
     ]
 
-    with window.open_layer_writer(LAYER_NAME) as writer:
+    with window.data.open_layer_writer(LAYER_NAME) as writer:
         for i, raster in enumerate(rasters):
             writer.write_raster(
                 BANDS, raster_format, PROJECTION, BOUNDS, raster, group_idx=i
@@ -68,10 +68,10 @@ def test_raster_roundtrip(tmp_path: pathlib.Path) -> None:
     assert not (window.window_root / f"layers/{LAYER_NAME}.2/B1_B2").exists()
 
     for i in range(3):
-        arr = window.read_raster(LAYER_NAME, BANDS, raster_format, group_idx=i)
+        arr = window.data.read_raster(LAYER_NAME, BANDS, raster_format, group_idx=i)
         assert np.all(arr.get_chw_array() == i + 1)
 
-    all_rasters = window.read_rasters(LAYER_NAME, BANDS, [0, 1, 2], raster_format)
+    all_rasters = window.data.read_rasters(LAYER_NAME, BANDS, [0, 1, 2], raster_format)
     assert len(all_rasters) == 3
     for i, arr in enumerate(all_rasters):
         assert np.all(arr.get_chw_array() == i + 1)
@@ -91,7 +91,7 @@ def test_groups_can_be_written_out_of_order(tmp_path: pathlib.Path) -> None:
         metadata=RasterMetadata(nodata_value=0),
     )
 
-    with window.open_layer_writer(LAYER_NAME) as writer:
+    with window.data.open_layer_writer(LAYER_NAME) as writer:
         writer.write_raster(
             BANDS, raster_format, PROJECTION, BOUNDS, raster_for_group_1, group_idx=1
         )
@@ -99,8 +99,8 @@ def test_groups_can_be_written_out_of_order(tmp_path: pathlib.Path) -> None:
             BANDS, raster_format, PROJECTION, BOUNDS, raster_for_group_0, group_idx=0
         )
 
-    arr0 = window.read_raster(LAYER_NAME, BANDS, raster_format, group_idx=0)
-    arr1 = window.read_raster(LAYER_NAME, BANDS, raster_format, group_idx=1)
+    arr0 = window.data.read_raster(LAYER_NAME, BANDS, raster_format, group_idx=0)
+    arr1 = window.data.read_raster(LAYER_NAME, BANDS, raster_format, group_idx=1)
     assert np.all(arr0.get_chw_array() == 9)
     assert np.all(arr1.get_chw_array() == 5)
 
@@ -118,7 +118,7 @@ def test_inconsistent_bounds_rejected(tmp_path: pathlib.Path) -> None:
         chw_array=np.full((2, 8, 8), 1, dtype=np.uint8),
         metadata=RasterMetadata(nodata_value=0),
     )
-    with window.open_layer_writer(LAYER_NAME) as writer:
+    with window.data.open_layer_writer(LAYER_NAME) as writer:
         writer.write_raster(
             BANDS, raster_format, PROJECTION, BOUNDS, raster_4, group_idx=0
         )
@@ -142,7 +142,7 @@ def test_vector_falls_back_to_per_item_group(tmp_path: pathlib.Path) -> None:
         properties={"label": "b"},
     )
 
-    with window.open_layer_writer(LAYER_NAME) as writer:
+    with window.data.open_layer_writer(LAYER_NAME) as writer:
         writer.write_vector(vector_format, [feat0], group_idx=0)
         writer.write_vector(vector_format, [feat1], group_idx=1)
 
@@ -150,8 +150,8 @@ def test_vector_falls_back_to_per_item_group(tmp_path: pathlib.Path) -> None:
     assert (window.window_root / "layers" / LAYER_NAME / "data.geojson").exists()
     assert (window.window_root / f"layers/{LAYER_NAME}.1" / "data.geojson").exists()
 
-    out0 = window.read_vector(LAYER_NAME, vector_format, group_idx=0)
-    out1 = window.read_vector(LAYER_NAME, vector_format, group_idx=1)
+    out0 = window.data.read_vector(LAYER_NAME, vector_format, group_idx=0)
+    out1 = window.data.read_vector(LAYER_NAME, vector_format, group_idx=1)
     assert len(out0) == 1 and out0[0].properties["label"] == "a"
     assert len(out1) == 1 and out1[0].properties["label"] == "b"
 
@@ -170,7 +170,7 @@ def test_writer_skips_flush_on_exception(tmp_path: pathlib.Path) -> None:
         pass
 
     with pytest.raises(BoomError):
-        with window.open_layer_writer(LAYER_NAME) as writer:
+        with window.data.open_layer_writer(LAYER_NAME) as writer:
             writer.write_raster(BANDS, raster_format, PROJECTION, BOUNDS, raster)
             raise BoomError
 

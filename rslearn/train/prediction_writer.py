@@ -22,8 +22,10 @@ from rslearn.config import (
 )
 from rslearn.dataset import Window
 from rslearn.dataset.storage.storage import WindowStorage
-from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
-from rslearn.dataset.window_data_storage.storage import WindowDataStorage
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
+from rslearn.dataset.window_data_storage.storage import WindowDataStorageFactory
 from rslearn.log_utils import get_logger
 from rslearn.train.model_context import SampleMetadata
 from rslearn.utils.array import copy_spatial_array
@@ -332,7 +334,7 @@ class RslearnWriter(BasePredictionWriter):
 
         """
         dataset_storage: WindowStorage | None = None
-        window_data_storage: WindowDataStorage | None = None
+        window_data_storage_factory: WindowDataStorageFactory | None = None
 
         # Instantiate the WindowStorage from the storage_config if provided.
         if self.storage_config:
@@ -342,10 +344,10 @@ class RslearnWriter(BasePredictionWriter):
                 )
             )
 
-        # Likewise for the WindowDataStorage.
+        # Likewise for the WindowDataStorageFactory.
         if self.window_data_storage_config:
-            window_data_storage = (
-                self.window_data_storage_config.instantiate_window_data_storage()
+            window_data_storage_factory = (
+                self.window_data_storage_config.instantiate_factory()
             )
 
         if not self.layer_config or not dataset_storage:
@@ -371,20 +373,22 @@ class RslearnWriter(BasePredictionWriter):
 
             # Only honor the dataset config's window_data_storage when the
             # caller didn't override it explicitly.
-            if not window_data_storage:
-                window_data_storage = (
-                    dataset_config.window_data_storage.instantiate_window_data_storage()
+            if not window_data_storage_factory:
+                window_data_storage_factory = (
+                    dataset_config.window_data_storage.instantiate_factory()
                 )
 
-        if not window_data_storage:
+        if not window_data_storage_factory:
             # Caller provided both layer_config and storage_config (so we
             # didn't load config.json) but didn't provide
             # window_data_storage_config. Fall back to the default
-            # PerItemGroupStorage to preserve legacy behavior.
-            window_data_storage = PerItemGroupStorage()
+            # PerItemGroupStorageFactory to preserve legacy behavior.
+            window_data_storage_factory = PerItemGroupStorageFactory()
 
         self.dataset_storage: WindowStorage = dataset_storage
-        self.window_data_storage: WindowDataStorage = window_data_storage
+        self.window_data_storage_factory: WindowDataStorageFactory = (
+            window_data_storage_factory
+        )
 
     def write_on_batch_end(
         self,
@@ -453,8 +457,8 @@ class RslearnWriter(BasePredictionWriter):
                 projection=metadata.projection,
                 bounds=metadata.window_bounds,
                 time_range=metadata.time_range,
-                data_storage=self.window_data_storage,
             )
+            window._data = self.window_data_storage_factory.create(window)
             self.process_output(
                 window,
                 metadata.crop_idx,
@@ -501,7 +505,7 @@ class RslearnWriter(BasePredictionWriter):
         assert self.layer_config is not None and self.merger is not None
         merged_output = self.merger.merge(window, pending_output, self.layer_config)
 
-        with window.open_layer_writer(self.output_layer) as writer:
+        with window.data.open_layer_writer(self.output_layer) as writer:
             if self.layer_config.type == LayerType.RASTER:
                 assert isinstance(self.format, RasterFormat)
 

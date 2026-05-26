@@ -21,7 +21,9 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.nasa_hls import Hls2S30
 from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
-from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
 from rslearn.utils.raster_array import RasterArray
@@ -205,8 +207,8 @@ def test_materialize(
         projection=seattle2020.projection,
         bounds=bounds,
         time_range=seattle2020.time_range,
-        data_storage=PerItemGroupStorage(),
     )
+    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     data_source.materialize(

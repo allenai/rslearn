@@ -21,6 +21,9 @@ from rslearn.dataset.manage import (
     prepare_dataset_windows,
 )
 from rslearn.dataset.window import Window
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
 from rslearn.utils.raster_array import RasterArray
@@ -135,8 +138,8 @@ def _materialize_numpy_era5_window(
             datetime(2020, 1, 2, tzinfo=UTC),
             datetime(2020, 1, 5, tzinfo=UTC),
         ),
-        data_storage=dataset.window_data_storage,
     )
+    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     windows = dataset.load_windows()
@@ -152,7 +155,7 @@ def _decode_numpy_era5_raster(dataset: Dataset, window: Window) -> RasterArray:
     projection, bounds = band_set.get_final_projection_and_bounds(
         window.projection, window.bounds
     )
-    return window.read_raster(
+    return window.data.read_raster(
         "era5",
         ERA5_TEST_BANDS,
         NumpyRasterFormat(),

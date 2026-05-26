@@ -19,6 +19,9 @@ from rslearn.data_sources.gcp_public_data import Sentinel2Item
 from rslearn.data_sources.local_files import VectorItem
 from rslearn.data_sources.soilgrids import SoilGrids
 from rslearn.dataset import Dataset, Window, WindowLayerData
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.log_utils import get_logger
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.raster_array import RasterArray
@@ -107,8 +110,8 @@ class TestIngestion:
                 datetime(2024, 1, 1, tzinfo=UTC),
                 datetime(2024, 2, 1, tzinfo=UTC),
             ),
-            data_storage=dataset.window_data_storage,
         )
+        window._data = PerItemGroupStorageFactory().create(window)
         window.save()
 
         # Manually set the window's items.json.
@@ -301,8 +304,8 @@ class TestMaterialization:
                 datetime(2024, 1, 1, tzinfo=UTC),
                 datetime(2024, 2, 1, tzinfo=UTC),
             ),
-            data_storage=dataset.window_data_storage,
         )
+        window1._data = PerItemGroupStorageFactory().create(window1)
         window1.save()
 
         # Second window
@@ -316,8 +319,8 @@ class TestMaterialization:
                 datetime(2024, 2, 1, tzinfo=UTC),
                 datetime(2024, 3, 1, tzinfo=UTC),  # Different time range
             ),
-            data_storage=dataset.window_data_storage,
         )
+        window2._data = PerItemGroupStorageFactory().create(window2)
         window2.save()
 
         # Create items and layer data for both windows

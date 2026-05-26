@@ -29,7 +29,7 @@ from rslearn.utils.raster_format import RasterFormat, get_bandset_dirname
 from rslearn.utils.vector_format import VectorFormat
 
 from .per_item_group import PerItemGroupStorage
-from .storage import LayerWriter, WindowDataStorage
+from .storage import LayerWriter, WindowDataStorage, WindowDataStorageFactory
 
 if TYPE_CHECKING:
     from rslearn.dataset.window import Window
@@ -124,9 +124,8 @@ class _PerLayerStorageLayerWriter(LayerWriter):
         self._buffers: dict[str, _BandsetBuffer] = {}
         # Vector data is not packed by PerLayerStorage, so we delegate vector
         # writes to a per-item-group writer.
-        self._vector_writer = PerItemGroupStorage().open_layer_writer(
-            window, layer_name
-        )
+        per_item_group = PerItemGroupStorage(window)
+        self._vector_writer = per_item_group.open_layer_writer(layer_name)
 
     @override
     def write_raster(
@@ -190,7 +189,6 @@ class _PerLayerStorageLayerWriter(LayerWriter):
 
     def _flush_bandset(self, buf: _BandsetBuffer) -> None:
         """Concatenate buffered groups along T and write the combined raster."""
-        # Sort groups by group_idx so the on-disk T axis order is deterministic.
         group_idxs = sorted(buf.rasters.keys())
         if group_idxs != list(range(len(group_idxs))):
             raise ValueError(
@@ -207,7 +205,6 @@ class _PerLayerStorageLayerWriter(LayerWriter):
             ]
         )
 
-        # Either all groups have timestamps or none do; otherwise drop timestamps.
         all_have_timestamps = all(r.timestamps is not None for r in arrays)
         timestamps: list[tuple[datetime, datetime]] | None = None
         if all_have_timestamps:
@@ -248,35 +245,32 @@ class PerLayerStorage(WindowDataStorage):
     through to :class:`PerItemGroupStorage`.
     """
 
-    def __init__(self) -> None:
-        """Initialize the storage."""
-        # PerLayerStorage delegates vector ops to PerItemGroupStorage.
-        self._per_item_group_storage = PerItemGroupStorage()
+    def __init__(self, window: Window) -> None:
+        """Initialize the storage bound to a specific window."""
+        super().__init__(window)
+        self._per_item_group_storage = PerItemGroupStorage(window)
 
     @override
     def open_layer_writer(
         self,
-        window: Window,
         layer_name: str,
     ) -> LayerWriter:
         """Return a writer that buffers all groups before flushing."""
-        return _PerLayerStorageLayerWriter(window, layer_name)
+        return _PerLayerStorageLayerWriter(self.window, layer_name)
 
     @override
     def read_raster(
         self,
-        window: Window,
         layer_name: str,
         bands: list[str],
         raster_format: RasterFormat,
-        projection: Projection,
-        bounds: PixelBounds,
+        projection: Projection | None = None,
+        bounds: PixelBounds | None = None,
         group_idx: int = 0,
         resampling: Resampling = Resampling.bilinear,
     ) -> RasterArray:
         """Decode the combined raster and slice out the requested item group."""
         return self.read_rasters(
-            window,
             layer_name,
             bands,
             [group_idx],
@@ -289,17 +283,18 @@ class PerLayerStorage(WindowDataStorage):
     @override
     def read_rasters(
         self,
-        window: Window,
         layer_name: str,
         bands: list[str],
         group_idxs: list[int],
         raster_format: RasterFormat,
-        projection: Projection,
-        bounds: PixelBounds,
+        projection: Projection | None = None,
+        bounds: PixelBounds | None = None,
         resampling: Resampling = Resampling.bilinear,
     ) -> list[RasterArray]:
         """Decode the combined raster once and slice out the requested groups."""
-        raster_dir = _per_layer_raster_dir(window.window_root, layer_name, bands)
+        proj = projection if projection is not None else self.window.projection
+        bnds = bounds if bounds is not None else self.window.bounds
+        raster_dir = _per_layer_raster_dir(self.window.window_root, layer_name, bands)
         meta = _PerLayerStorageMeta.read(raster_dir)
         for group_idx in group_idxs:
             if group_idx < 0 or group_idx >= meta.num_groups:
@@ -307,9 +302,7 @@ class PerLayerStorage(WindowDataStorage):
                     f"PerLayerStorage: group_idx {group_idx} out of range "
                     f"[0, {meta.num_groups})"
                 )
-        combined = raster_format.decode_raster(
-            raster_dir, projection, bounds, resampling
-        )
+        combined = raster_format.decode_raster(raster_dir, proj, bnds, resampling)
         if combined.array.shape[1] != sum(meta.group_timestep_counts):
             raise ValueError(
                 f"PerLayerStorage: combined raster T={combined.array.shape[1]} "
@@ -338,19 +331,26 @@ class PerLayerStorage(WindowDataStorage):
     @override
     def read_vector(
         self,
-        window: Window,
         layer_name: str,
         vector_format: VectorFormat,
-        projection: Projection,
-        bounds: PixelBounds,
+        projection: Projection | None = None,
+        bounds: PixelBounds | None = None,
         group_idx: int = 0,
     ) -> list[Feature]:
         """Decode vector features per-item-group (we don't currently handle per-layer vector)."""
         return self._per_item_group_storage.read_vector(
-            window,
             layer_name,
             vector_format,
             projection,
             bounds,
             group_idx=group_idx,
         )
+
+
+class PerLayerStorageFactory(WindowDataStorageFactory):
+    """Factory that creates :class:`PerLayerStorage` instances."""
+
+    @override
+    def create(self, window: Window) -> PerLayerStorage:
+        """Create a PerLayerStorage bound to the given window."""
+        return PerLayerStorage(window)

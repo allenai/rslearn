@@ -385,7 +385,7 @@ def read_raster_layer_groups_for_data_input(
         # resampling. If it really is much faster to handle it via torch, then it may
         # make sense to bring back that functionality.
 
-        per_group_arrays = window.read_rasters(
+        per_group_arrays = window.data.read_rasters(
             layer_name,
             band_set.bands,
             group_idxs,
@@ -608,7 +608,7 @@ def read_data_input(
         for layer_name, group_idx in layers_to_read:
             layer_config = dataset.layers[layer_name]
             vector_format = layer_config.instantiate_vector_format()
-            cur_features = window.read_vector(
+            cur_features = window.data.read_vector(
                 layer_name,
                 vector_format,
                 group_idx=group_idx,
@@ -1096,7 +1096,7 @@ class ModelDataset(torch.utils.data.Dataset):
             logger.info(f"Checking index for dataset {self.dataset.path}")
             index = DatasetIndex(
                 storage=self.dataset.storage,
-                data_storage=self.dataset.window_data_storage,
+                data_storage_factory=self.dataset.window_data_storage_factory,
                 dataset_path=self.dataset.path,
                 groups=split_config.groups,
                 names=split_config.names,
@@ -1203,11 +1203,9 @@ class ModelDataset(torch.utils.data.Dataset):
         return example.get_metadata()
 
     def _deserialize_item(self, d: dict[str, Any]) -> Window:
-        return Window.from_metadata(
-            self.dataset.storage,
-            d,
-            data_storage=self.dataset.window_data_storage,
-        )
+        window = Window.from_metadata(self.dataset.storage, d)
+        window._data = self.dataset.window_data_storage_factory.create(window)
+        return window
 
     def get_dataset_examples(self) -> list[Window]:
         """Get a list of examples in the dataset.

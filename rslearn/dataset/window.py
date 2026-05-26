@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Any
 
 import shapely
-from rasterio.enums import Resampling
 from upath import UPath
 
 from rslearn.dataset.storage.storage import WindowStorage
@@ -13,16 +12,9 @@ from rslearn.dataset.window_data_storage.per_item_group import (
     per_item_group_layer_dir,
     per_item_group_raster_dir,
 )
-from rslearn.dataset.window_data_storage.storage import (
-    LayerWriter,
-    WindowDataStorage,
-)
+from rslearn.dataset.window_data_storage.storage import WindowDataStorage
 from rslearn.log_utils import get_logger
 from rslearn.utils import Projection, STGeometry
-from rslearn.utils.feature import Feature
-from rslearn.utils.raster_array import RasterArray
-from rslearn.utils.raster_format import RasterFormat
-from rslearn.utils.vector_format import VectorFormat
 
 logger = get_logger(__name__)
 
@@ -144,7 +136,6 @@ class Window:
         projection: Projection,
         bounds: tuple[int, int, int, int],
         time_range: tuple[datetime, datetime] | None,
-        data_storage: WindowDataStorage,
         options: dict[str, Any] = {},
     ) -> None:
         """Creates a new Window instance.
@@ -159,7 +150,6 @@ class Window:
             projection: the projection of the window
             bounds: the bounds of the window in pixel coordinates
             time_range: optional time range of the window
-            data_storage: the WindowDataStorage for materialized raster/vector data.
             options: additional options. This is typically used to store metadata on
                 the window. Train, val, and test splits can filter for key-value pairs
                 (called "tags" in DataInput) in this options dictionary.
@@ -171,7 +161,22 @@ class Window:
         self.bounds = bounds
         self.time_range = time_range
         self.options = options
-        self.data_storage = data_storage
+        self._data: WindowDataStorage | None = None
+
+    @property
+    def data(self) -> WindowDataStorage:
+        """The bound WindowDataStorage for materialized raster/vector data.
+
+        Raises:
+            RuntimeError: if no WindowDataStorage has been bound to this window.
+        """
+        if self._data is None:
+            raise RuntimeError(
+                "WindowDataStorage not bound to this window. "
+                "Use a WindowDataStorageFactory to bind data storage, "
+                "or set window._data directly."
+            )
+        return self._data
 
     def get_geometry(self) -> STGeometry:
         """Computes the STGeometry corresponding to this window."""
@@ -220,7 +225,7 @@ class Window:
         """
         warnings.warn(
             "Window.get_layer_dir is deprecated; access materialized data via "
-            "Window.data_storage (WindowDataStorage).",
+            "window.data (WindowDataStorage).",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -255,107 +260,6 @@ class Window:
         """
         self.storage.mark_layer_completed(self.group, self.name, layer_name, group_idx)
 
-    def open_layer_writer(self, layer_name: str) -> LayerWriter:
-        """Open a writer for one materialization pass over a layer.
-
-        Args:
-            layer_name: the layer name.
-
-        Returns:
-            a context-managed LayerWriter.
-        """
-        return self.data_storage.open_layer_writer(self, layer_name)
-
-    def read_raster(
-        self,
-        layer_name: str,
-        bands: list[str],
-        raster_format: RasterFormat,
-        group_idx: int = 0,
-        projection: Projection | None = None,
-        bounds: tuple[int, int, int, int] | None = None,
-        resampling: Resampling = Resampling.bilinear,
-    ) -> RasterArray:
-        """Read a single item group's raster.
-
-        Args:
-            layer_name: the layer name.
-            bands: the band set to read.
-            raster_format: the raster format to decode with.
-            group_idx: the item group index (default 0).
-            projection: target projection (defaults to window projection).
-            bounds: target bounds (defaults to window bounds).
-            resampling: resampling method (defaults to bilinear).
-        """
-        return self.data_storage.read_raster(
-            self,
-            layer_name,
-            bands,
-            raster_format,
-            projection if projection is not None else self.projection,
-            bounds if bounds is not None else self.bounds,
-            group_idx=group_idx,
-            resampling=resampling,
-        )
-
-    def read_rasters(
-        self,
-        layer_name: str,
-        bands: list[str],
-        group_idxs: list[int],
-        raster_format: RasterFormat,
-        projection: Projection | None = None,
-        bounds: tuple[int, int, int, int] | None = None,
-        resampling: Resampling = Resampling.bilinear,
-    ) -> list[RasterArray]:
-        """Read rasters for the specified item groups.
-
-        Args:
-            layer_name: the layer name.
-            bands: the band set to read.
-            group_idxs: ordered list of item group indices to read.
-            raster_format: the raster format to decode with.
-            projection: target projection (defaults to window projection).
-            bounds: target bounds (defaults to window bounds).
-            resampling: resampling method (defaults to bilinear).
-        """
-        return self.data_storage.read_rasters(
-            self,
-            layer_name,
-            bands,
-            group_idxs,
-            raster_format,
-            projection if projection is not None else self.projection,
-            bounds if bounds is not None else self.bounds,
-            resampling=resampling,
-        )
-
-    def read_vector(
-        self,
-        layer_name: str,
-        vector_format: VectorFormat,
-        group_idx: int = 0,
-        projection: Projection | None = None,
-        bounds: tuple[int, int, int, int] | None = None,
-    ) -> list[Feature]:
-        """Read a single item group's vector features.
-
-        Args:
-            layer_name: the layer name.
-            vector_format: the vector format to decode with.
-            group_idx: the item group index (default 0).
-            projection: target projection (defaults to window projection).
-            bounds: target bounds (defaults to window bounds).
-        """
-        return self.data_storage.read_vector(
-            self,
-            layer_name,
-            vector_format,
-            projection if projection is not None else self.projection,
-            bounds if bounds is not None else self.bounds,
-            group_idx=group_idx,
-        )
-
     def get_raster_dir(
         self, layer_name: str, bands: list[str], group_idx: int = 0
     ) -> UPath:
@@ -378,7 +282,7 @@ class Window:
         """
         warnings.warn(
             "Window.get_raster_dir is deprecated; access raster data via "
-            "Window.data_storage (WindowDataStorage).",
+            "window.data (WindowDataStorage).",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -412,19 +316,16 @@ class Window:
     def from_metadata(
         storage: WindowStorage,
         metadata: dict[str, Any],
-        data_storage: WindowDataStorage,
     ) -> "Window":
         """Create a Window from the WindowStorage and the window's metadata dictionary.
 
         Args:
             storage: the WindowStorage for the underlying dataset.
             metadata: the window metadata.
-            data_storage: the WindowDataStorage for materialized raster/vector data.
 
         Returns:
             the Window
         """
-        # Ensure bounds is converted from list to tuple.
         bounds = (
             metadata["bounds"][0],
             metadata["bounds"][1],
@@ -446,7 +347,6 @@ class Window:
                 if metadata["time_range"]
                 else None
             ),
-            data_storage=data_storage,
             options=metadata["options"],
         )
 

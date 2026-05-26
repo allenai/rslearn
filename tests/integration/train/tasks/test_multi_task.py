@@ -11,6 +11,9 @@ from upath import UPath
 from rslearn.arg_parser import RslearnArgumentParser
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.lightning_cli import RslearnLightningCLI
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
@@ -78,14 +81,14 @@ def multi_task_dataset(tmp_path: pathlib.Path) -> Dataset:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 32, 32),
         time_range=None,
-        data_storage=dataset.window_data_storage,
     )
+    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     # Add a simple input image.
     image = np.random.randint(0, 255, size=(1, 32, 32), dtype=np.uint8)
     layer_name = "image"
-    with window.open_layer_writer(layer_name) as writer:
+    with window.data.open_layer_writer(layer_name) as writer:
         writer.write_raster(
             ["band"],
             GeotiffRasterFormat(),
@@ -106,7 +109,7 @@ def multi_task_dataset(tmp_path: pathlib.Path) -> Dataset:
         {REGRESSION_PROPERTY: target_value},
     )
     layer_name = "regression_targets"
-    with window.open_layer_writer(layer_name) as writer:
+    with window.data.open_layer_writer(layer_name) as writer:
         writer.write_vector(GeojsonVectorFormat(), [feature])
     window.mark_layer_completed(layer_name)
 
@@ -120,7 +123,7 @@ def multi_task_dataset(tmp_path: pathlib.Path) -> Dataset:
         {CLASSIFICATION_PROPERTY: "medium"},
     )
     layer_name = "classification_targets"
-    with window.open_layer_writer(layer_name) as writer:
+    with window.data.open_layer_writer(layer_name) as writer:
         writer.write_vector(GeojsonVectorFormat(), [feature])
     window.mark_layer_completed(layer_name)
 
@@ -327,7 +330,7 @@ def test_multi_task_prediction_writes_to_dataset(
     # Verify that regression predictions were written to the dataset.
     window = multi_task_dataset.load_windows()[0]
     assert window.is_layer_completed("regression_predictions")
-    features = window.read_vector(
+    features = window.data.read_vector(
         "regression_predictions",
         GeojsonVectorFormat(),
     )
@@ -337,7 +340,7 @@ def test_multi_task_prediction_writes_to_dataset(
 
     # Verify that classification predictions were written to the dataset.
     assert window.is_layer_completed("classification_predictions")
-    features = window.read_vector(
+    features = window.data.read_vector(
         "classification_predictions",
         GeojsonVectorFormat(),
     )

@@ -74,7 +74,6 @@ class TestLocalFiles:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 10, 10),
             time_range=None,
-            data_storage=dataset.window_data_storage,
         ).save()
 
         windows = dataset.load_windows()
@@ -87,7 +86,7 @@ class TestLocalFiles:
         window = windows[0]
         layer_config = dataset.layers["local_file"]
         vector_format = layer_config.instantiate_vector_format()
-        features = window.read_vector("local_file", vector_format)
+        features = window.data.read_vector("local_file", vector_format)
 
         assert len(features) == 2
 

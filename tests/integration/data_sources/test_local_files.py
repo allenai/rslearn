@@ -17,6 +17,9 @@ from rslearn.dataset.manage import (
     materialize_dataset_windows,
     prepare_dataset_windows,
 )
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import Projection, STGeometry
 from rslearn.utils.get_utm_ups_crs import get_utm_ups_projection
@@ -44,7 +47,7 @@ class TestLocalFiles:
         window = windows[0]
         layer_config = local_files_dataset.layers["local_file"]
         vector_format = layer_config.instantiate_vector_format()
-        features = window.read_vector("local_file", vector_format)
+        features = window.data.read_vector("local_file", vector_format)
 
         assert len(features) == 2
 
@@ -115,7 +118,6 @@ class TestLocalFiles:
             projection=utm_proj,
             bounds=dst_bounds,
             time_range=None,
-            data_storage=dataset.window_data_storage,
         ).save()
 
         # Now materialize the windows and check that it was done correctly.
@@ -127,7 +129,7 @@ class TestLocalFiles:
         window = windows[0]
         layer_config = dataset.layers["local_file"]
         vector_format = layer_config.instantiate_vector_format()
-        features = window.read_vector("local_file", vector_format)
+        features = window.data.read_vector("local_file", vector_format)
         assert len(features) == 1
         assert features[0].properties is not None
         assert features[0].properties["check"]
@@ -190,7 +192,6 @@ class TestLocalFiles:
             projection=projection,
             bounds=bounds,
             time_range=None,
-            data_storage=dataset.window_data_storage,
         ).save()
         windows = dataset.load_windows()
         prepare_dataset_windows(dataset, windows)
@@ -199,7 +200,7 @@ class TestLocalFiles:
 
         # Verify that b1 is 0s and b2 is 1s.
         window = windows[0]
-        materialized_image = window.read_raster(
+        materialized_image = window.data.read_raster(
             layer_name,
             ["b1", "b2"],
             GeotiffRasterFormat(),
@@ -273,7 +274,6 @@ class TestLocalFiles:
             projection=projection,
             bounds=window_bounds,
             time_range=None,
-            data_storage=dataset.window_data_storage,
         ).save()
 
         windows = dataset.load_windows()
@@ -282,7 +282,7 @@ class TestLocalFiles:
         materialize_dataset_windows(dataset, windows)
 
         window = windows[0]
-        materialized_image = window.read_raster(
+        materialized_image = window.data.read_raster(
             layer_name,
             ["B1"],
             GeotiffRasterFormat(),
@@ -366,8 +366,8 @@ class TestCoordinateModes:
                 int(window_center.y) + 10,
             ),
             time_range=None,
-            data_storage=dataset.window_data_storage,
         )
+        bad_window._data = PerItemGroupStorageFactory().create(bad_window)
         bad_window.save()
 
         windows = dataset.load_windows()
@@ -397,8 +397,8 @@ class TestCoordinateModes:
                 int(window_center.y) + 10,
             ),
             time_range=None,
-            data_storage=dataset.window_data_storage,
         )
+        good_window._data = PerItemGroupStorageFactory().create(good_window)
         good_window.save()
 
         windows = dataset.load_windows()

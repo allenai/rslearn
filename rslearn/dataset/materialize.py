@@ -187,7 +187,7 @@ class RasterMaterializer(Materializer):
                 (band_cfg, projection, bounds, remapper, raster_format)
             )
 
-        with window.open_layer_writer(layer_name) as writer:
+        with window.data.open_layer_writer(layer_name) as writer:
             for group_id, group in enumerate(item_groups):
                 request_time_range = (
                     group_time_ranges[group_id]
@@ -262,7 +262,7 @@ class VectorMaterializer(Materializer):
         """
         vector_format = layer_cfg.instantiate_vector_format()
 
-        with window.open_layer_writer(layer_name) as writer:
+        with window.data.open_layer_writer(layer_name) as writer:
             for group_id, group in enumerate(item_groups):
                 features: list[Feature] = []
 

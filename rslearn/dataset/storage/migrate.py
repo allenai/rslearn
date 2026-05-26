@@ -5,7 +5,6 @@ from typing import Any
 import tqdm
 
 from rslearn.dataset.storage.storage import WindowStorage
-from rslearn.dataset.window_data_storage.storage import WindowDataStorage
 from rslearn.log_utils import get_logger
 
 logger = get_logger(__name__)
@@ -14,7 +13,6 @@ logger = get_logger(__name__)
 def migrate_window_storage(
     source: WindowStorage,
     target: WindowStorage,
-    data_storage: WindowDataStorage,
     fail_if_target_nonempty: bool = True,
     source_get_windows_kwargs: dict[str, Any] | None = None,
 ) -> int:
@@ -23,7 +21,6 @@ def migrate_window_storage(
     Args:
         source: source storage to read windows from.
         target: target storage to write windows to.
-        data_storage: the WindowDataStorage to inject into loaded windows.
         fail_if_target_nonempty: whether to fail if target already has windows.
         source_get_windows_kwargs: optional keyword args to pass to
             source.get_windows, e.g. {"workers": 8, "show_progress": True}
@@ -32,17 +29,14 @@ def migrate_window_storage(
     Returns:
         number of migrated windows.
     """
-    if (
-        fail_if_target_nonempty
-        and len(target.get_windows(data_storage=data_storage)) > 0
-    ):
+    if fail_if_target_nonempty and len(target.get_windows()) > 0:
         raise ValueError(
             "target window storage is not empty; rerun with --no-fail-if-target-nonempty to bypass this check"
         )
 
     if source_get_windows_kwargs is None:
         source_get_windows_kwargs = {}
-    windows = source.get_windows(data_storage=data_storage, **source_get_windows_kwargs)
+    windows = source.get_windows(**source_get_windows_kwargs)
     total = len(windows)
     logger.info(f"Found {total} windows in source storage")
     if total == 0:

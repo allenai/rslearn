@@ -46,7 +46,7 @@ def read_vector_layer(
         f"{window.name}, bounds: {window.bounds}, projection: {window.projection}"
     )
 
-    features = window.read_vector(
+    features = window.data.read_vector(
         layer_name,
         vector_format,
         group_idx=group_idx,

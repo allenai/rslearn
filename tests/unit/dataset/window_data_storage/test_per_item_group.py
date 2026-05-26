@@ -10,7 +10,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.window_data_storage.per_item_group import (
-    PerItemGroupStorage,
+    PerItemGroupStorageFactory,
     per_item_group_layer_dir,
 )
 from rslearn.utils.feature import Feature
@@ -34,8 +34,8 @@ def _make_window(tmp_path: pathlib.Path) -> Window:
         projection=PROJECTION,
         bounds=BOUNDS,
         time_range=None,
-        data_storage=PerItemGroupStorage(),
     )
+    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
     return window
 
@@ -43,7 +43,6 @@ def _make_window(tmp_path: pathlib.Path) -> Window:
 def test_raster_roundtrip(tmp_path: pathlib.Path) -> None:
     """Raster writes land at per-group on-disk paths and round-trip cleanly."""
     window = _make_window(tmp_path)
-    storage = PerItemGroupStorage()
     raster_format = GeotiffRasterFormat()
 
     raster0 = RasterArray(
@@ -55,7 +54,7 @@ def test_raster_roundtrip(tmp_path: pathlib.Path) -> None:
         metadata=RasterMetadata(nodata_value=0),
     )
 
-    with storage.open_layer_writer(window, LAYER_NAME) as writer:
+    with window.data.open_layer_writer(LAYER_NAME) as writer:
         writer.write_raster(
             BANDS, raster_format, PROJECTION, BOUNDS, raster0, group_idx=0
         )
@@ -67,17 +66,17 @@ def test_raster_roundtrip(tmp_path: pathlib.Path) -> None:
     assert (window.window_root / "layers" / LAYER_NAME / "B1_B2").exists()
     assert (window.window_root / f"layers/{LAYER_NAME}.1/B1_B2").exists()
 
-    out0 = storage.read_raster(
-        window, LAYER_NAME, BANDS, raster_format, PROJECTION, BOUNDS, group_idx=0
+    out0 = window.data.read_raster(
+        LAYER_NAME, BANDS, raster_format, PROJECTION, BOUNDS, group_idx=0
     )
-    out1 = storage.read_raster(
-        window, LAYER_NAME, BANDS, raster_format, PROJECTION, BOUNDS, group_idx=1
+    out1 = window.data.read_raster(
+        LAYER_NAME, BANDS, raster_format, PROJECTION, BOUNDS, group_idx=1
     )
     assert np.all(out0.get_chw_array() == 1)
     assert np.all(out1.get_chw_array() == 7)
 
-    all_rasters = storage.read_rasters(
-        window, LAYER_NAME, BANDS, [0, 1], raster_format, PROJECTION, BOUNDS
+    all_rasters = window.data.read_rasters(
+        LAYER_NAME, BANDS, [0, 1], raster_format, PROJECTION, BOUNDS
     )
     assert len(all_rasters) == 2
     assert np.all(all_rasters[0].get_chw_array() == 1)
@@ -87,14 +86,13 @@ def test_raster_roundtrip(tmp_path: pathlib.Path) -> None:
 def test_underscore_band_name(tmp_path: pathlib.Path) -> None:
     """A band name that contains an underscore still produces one bandset directory."""
     window = _make_window(tmp_path)
-    storage = PerItemGroupStorage()
     raster_format = GeotiffRasterFormat()
 
     raster = RasterArray(
         chw_array=np.zeros((1, 4, 4), dtype=np.uint8),
         metadata=RasterMetadata(nodata_value=0),
     )
-    with storage.open_layer_writer(window, "layer") as writer:
+    with window.data.open_layer_writer("layer") as writer:
         writer.write_raster(["_"], raster_format, PROJECTION, (0, 0, 4, 4), raster)
     window.mark_layer_completed("layer")
     assert window.is_layer_completed("layer")
@@ -111,7 +109,6 @@ def test_underscore_band_name(tmp_path: pathlib.Path) -> None:
 def test_vector_roundtrip(tmp_path: pathlib.Path) -> None:
     """Vector features are written and read back per item group."""
     window = _make_window(tmp_path)
-    storage = PerItemGroupStorage()
     vector_format = GeojsonVectorFormat()
 
     feat0 = Feature(
@@ -123,15 +120,15 @@ def test_vector_roundtrip(tmp_path: pathlib.Path) -> None:
         properties={"label": "b"},
     )
 
-    with storage.open_layer_writer(window, LAYER_NAME) as writer:
+    with window.data.open_layer_writer(LAYER_NAME) as writer:
         writer.write_vector(vector_format, [feat0], group_idx=0)
         writer.write_vector(vector_format, [feat1], group_idx=1)
 
-    out0 = storage.read_vector(
-        window, LAYER_NAME, vector_format, PROJECTION, BOUNDS, group_idx=0
+    out0 = window.data.read_vector(
+        LAYER_NAME, vector_format, PROJECTION, BOUNDS, group_idx=0
     )
-    out1 = storage.read_vector(
-        window, LAYER_NAME, vector_format, PROJECTION, BOUNDS, group_idx=1
+    out1 = window.data.read_vector(
+        LAYER_NAME, vector_format, PROJECTION, BOUNDS, group_idx=1
     )
     assert len(out0) == 1 and out0[0].properties["label"] == "a"
     assert len(out1) == 1 and out1[0].properties["label"] == "b"

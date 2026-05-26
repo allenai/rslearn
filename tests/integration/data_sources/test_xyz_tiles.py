@@ -22,7 +22,9 @@ from rslearn.config import (
 from rslearn.data_sources.xyz_tiles import XyzTiles
 from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
-from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.raster_format import GeotiffRasterFormat
 
@@ -90,8 +92,8 @@ def test_materialize(
         projection=proj,
         bounds=bounds,
         time_range=TIME_RANGE,
-        data_storage=PerItemGroupStorage(),
     )
+    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     data_source.materialize(
@@ -100,7 +102,7 @@ def test_materialize(
         "raster",
         layer_config,
     )
-    array = window.read_raster(
+    array = window.data.read_raster(
         "raster",
         ["R", "G", "B"],
         GeotiffRasterFormat(),

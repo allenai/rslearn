@@ -61,47 +61,60 @@ class LayerWriter(ABC):
 class WindowDataStorage(ABC):
     """Storage backend for per-window materialized raster and vector data.
 
-    A WindowDataStorage is dataset-level: one instance per dataset, used for
-    all windows and layers in that dataset. The dataset config selects which
-    implementation to use via :class:`WindowDataStorageConfig`.
+    A WindowDataStorage is bound to a specific window. It is created by a
+    :class:`WindowDataStorageFactory` and holds a reference to its window.
     """
+
+    def __init__(self, window: Window) -> None:
+        """Initialize the storage bound to a specific window.
+
+        Args:
+            window: the window this storage is bound to.
+        """
+        self.window = window
 
     @abstractmethod
     def open_layer_writer(
         self,
-        window: Window,
         layer_name: str,
     ) -> LayerWriter:
         """Open a writer for one materialization pass over a layer.
 
         Args:
-            window: the window being written.
             layer_name: the layer name.
         """
 
     @abstractmethod
     def read_raster(
         self,
-        window: Window,
         layer_name: str,
         bands: list[str],
         raster_format: RasterFormat,
-        projection: Projection,
-        bounds: PixelBounds,
+        projection: Projection | None = None,
+        bounds: PixelBounds | None = None,
         group_idx: int = 0,
         resampling: Resampling = Resampling.bilinear,
     ) -> RasterArray:
-        """Read a single item group's raster.."""
+        """Read a single item group's raster.
+
+        Args:
+            layer_name: the layer name.
+            bands: the band set to read.
+            raster_format: the raster format to decode with.
+            projection: target projection (defaults to window projection).
+            bounds: target bounds (defaults to window bounds).
+            group_idx: the item group index (default 0).
+            resampling: resampling method (defaults to bilinear).
+        """
 
     def read_rasters(
         self,
-        window: Window,
         layer_name: str,
         bands: list[str],
         group_idxs: list[int],
         raster_format: RasterFormat,
-        projection: Projection,
-        bounds: PixelBounds,
+        projection: Projection | None = None,
+        bounds: PixelBounds | None = None,
         resampling: Resampling = Resampling.bilinear,
     ) -> list[RasterArray]:
         """Read rasters for the specified item groups.
@@ -110,7 +123,6 @@ class WindowDataStorage(ABC):
         """
         return [
             self.read_raster(
-                window,
                 layer_name,
                 bands,
                 raster_format,
@@ -125,11 +137,35 @@ class WindowDataStorage(ABC):
     @abstractmethod
     def read_vector(
         self,
-        window: Window,
         layer_name: str,
         vector_format: VectorFormat,
-        projection: Projection,
-        bounds: PixelBounds,
+        projection: Projection | None = None,
+        bounds: PixelBounds | None = None,
         group_idx: int = 0,
     ) -> list[Feature]:
-        """Read a single item group's vector features."""
+        """Read a single item group's vector features.
+
+        Args:
+            layer_name: the layer name.
+            vector_format: the vector format to decode with.
+            projection: target projection (defaults to window projection).
+            bounds: target bounds (defaults to window bounds).
+            group_idx: the item group index (default 0).
+        """
+
+
+class WindowDataStorageFactory(ABC):
+    """Factory that creates a :class:`WindowDataStorage` bound to a window.
+
+    The dataset config selects which implementation to use via
+    :class:`WindowDataStorageConfig`. The dataset holds a factory and uses it
+    to bind data storage to each loaded window.
+    """
+
+    @abstractmethod
+    def create(self, window: Window) -> WindowDataStorage:
+        """Create a WindowDataStorage bound to the given window.
+
+        Args:
+            window: the window to bind the storage to.
+        """

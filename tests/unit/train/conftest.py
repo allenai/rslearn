@@ -11,6 +11,9 @@ from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, STGeometry
 from rslearn.utils.raster_array import RasterArray
@@ -83,8 +86,8 @@ def add_window(
         projection=WGS84_PROJECTION,
         bounds=bounds,
         time_range=None,
-        data_storage=dataset.window_data_storage,
     )
+    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     raster_format = GeotiffRasterFormat()
@@ -93,7 +96,7 @@ def add_window(
     for (layer_name, group_idx), image in images.items():
         images_by_layer.setdefault(layer_name, []).append((group_idx, image))
     for layer_name, group_images in images_by_layer.items():
-        with window.open_layer_writer(layer_name) as writer:
+        with window.data.open_layer_writer(layer_name) as writer:
             for group_idx, image in group_images:
                 writer.write_raster(
                     ["band"],
@@ -114,7 +117,7 @@ def add_window(
         },
     )
     vector_format = GeojsonVectorFormat()
-    with window.open_layer_writer("vector_layer") as writer:
+    with window.data.open_layer_writer("vector_layer") as writer:
         writer.write_vector(vector_format, [feature])
     window.mark_layer_completed("vector_layer")
 

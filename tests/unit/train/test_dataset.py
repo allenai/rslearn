@@ -17,6 +17,9 @@ from rslearn.config import (
 )
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.train.dataset import (
     DataInput,
     IndexMode,
@@ -235,8 +238,8 @@ def test_read_data_input_timestamps(tmp_path: UPath) -> None:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
-        data_storage=dataset.window_data_storage,
     )
+    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     ts1 = (datetime(2024, 1, 5), datetime(2024, 1, 10))
@@ -245,7 +248,7 @@ def test_read_data_input_timestamps(tmp_path: UPath) -> None:
     image1 = np.ones((1, 4, 4), dtype=np.uint8)
     image2 = 2 * np.ones((1, 4, 4), dtype=np.uint8)
     raster_format = GeotiffRasterFormat()
-    with window.open_layer_writer("image") as writer:
+    with window.data.open_layer_writer("image") as writer:
         writer.write_raster(
             ["band"],
             raster_format,
@@ -317,8 +320,8 @@ def test_read_data_input_use_all_bands_single_band_set(tmp_path: UPath) -> None:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
-        data_storage=dataset.window_data_storage,
     )
+    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     raster = np.stack(
@@ -330,7 +333,7 @@ def test_read_data_input_use_all_bands_single_band_set(tmp_path: UPath) -> None:
         axis=0,
     )
     raster_format = GeotiffRasterFormat()
-    with window.open_layer_writer("embeddings") as writer:
+    with window.data.open_layer_writer("embeddings") as writer:
         writer.write_raster(
             ["B0", "B1", "B2"],
             raster_format,
@@ -392,8 +395,8 @@ def test_read_data_input_use_all_bands_with_band_set_index(tmp_path: UPath) -> N
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
-        data_storage=dataset.window_data_storage,
     )
+    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     raster = np.stack(
@@ -405,7 +408,7 @@ def test_read_data_input_use_all_bands_with_band_set_index(tmp_path: UPath) -> N
         axis=0,
     )
     raster_format = GeotiffRasterFormat()
-    with window.open_layer_writer("embeddings") as writer:
+    with window.data.open_layer_writer("embeddings") as writer:
         writer.write_raster(
             ["B0", "B1", "B2"],
             raster_format,

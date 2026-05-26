@@ -18,6 +18,9 @@ from rslearn.config import (
     StorageConfig,
 )
 from rslearn.dataset import Dataset, Window
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.models.conv import Conv
 from rslearn.models.module_wrapper import EncoderModuleWrapper
 from rslearn.models.singletask import SingleTaskModel
@@ -62,7 +65,6 @@ class TestDataset:
                 projection=projection,
                 bounds=bounds,
                 time_range=None,
-                data_storage=dataset.window_data_storage,
                 options=options,
             ).save()
 
@@ -143,13 +145,13 @@ class TestDataset:
             projection=projection,
             bounds=bounds,
             time_range=None,
-            data_storage=dataset.window_data_storage,
         )
+        window._data = PerItemGroupStorageFactory().create(window)
         window.save()
 
         # Write raster data for group_idx=0 (value 1) and group_idx=1 (value 2).
         raster_format = GeotiffRasterFormat()
-        with window.open_layer_writer("raster_layer") as writer:
+        with window.data.open_layer_writer("raster_layer") as writer:
             for group_idx, pixel_value in [(0, 1), (1, 2)]:
                 writer.write_raster(
                     ["B1"],
@@ -241,14 +243,14 @@ class TestResolutionFactor:
             projection=Projection(CRS.from_epsg(3857), 1, -1),
             bounds=(0, 0, 4, 4),
             time_range=None,
-            data_storage=dataset.window_data_storage,
         )
+        window._data = PerItemGroupStorageFactory().create(window)
         window.save()
 
         raster_format = GeotiffRasterFormat()
 
         # Add image layer.
-        with window.open_layer_writer("image") as writer:
+        with window.data.open_layer_writer("image") as writer:
             writer.write_raster(
                 ["B1"],
                 raster_format,
@@ -259,7 +261,7 @@ class TestResolutionFactor:
         window.mark_layer_completed("image")
 
         # Add label layer.
-        with window.open_layer_writer("label") as writer:
+        with window.data.open_layer_writer("label") as writer:
             writer.write_raster(
                 ["B1"],
                 raster_format,

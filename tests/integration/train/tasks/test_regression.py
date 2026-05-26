@@ -11,6 +11,9 @@ from upath import UPath
 from rslearn.arg_parser import RslearnArgumentParser
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.lightning_cli import RslearnLightningCLI
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
@@ -67,14 +70,14 @@ def regression_dataset(tmp_path: pathlib.Path) -> Dataset:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 32, 32),
         time_range=None,
-        data_storage=dataset.window_data_storage,
     )
+    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     # Add a simple input image.
     image = np.random.randint(0, 255, size=(1, 32, 32), dtype=np.uint8)
     layer_name = "image"
-    with window.open_layer_writer(layer_name) as writer:
+    with window.data.open_layer_writer(layer_name) as writer:
         writer.write_raster(
             ["band"],
             GeotiffRasterFormat(),
@@ -95,7 +98,7 @@ def regression_dataset(tmp_path: pathlib.Path) -> Dataset:
         {PROPERTY_NAME: target_value},
     )
     layer_name = "targets"
-    with window.open_layer_writer(layer_name) as writer:
+    with window.data.open_layer_writer(layer_name) as writer:
         writer.write_vector(GeojsonVectorFormat(), [feature])
     window.mark_layer_completed(layer_name)
 
@@ -210,7 +213,7 @@ def test_regression_prediction_writes_to_dataset(
     # Verify that predictions were written to the dataset.
     window = regression_dataset.load_windows()[0]
     assert window.is_layer_completed("predictions")
-    features = window.read_vector(
+    features = window.data.read_vector(
         "predictions",
         GeojsonVectorFormat(),
     )

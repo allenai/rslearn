@@ -13,6 +13,9 @@ from upath import UPath
 from rslearn.arg_parser import RslearnArgumentParser
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.lightning_cli import RslearnLightningCLI
 from rslearn.train.data_module import RslearnDataModule
 from rslearn.train.lightning_module import RslearnLightningModule
@@ -81,12 +84,12 @@ def classification_dataset(tmp_path: pathlib.Path) -> Dataset:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 32, 32),
         time_range=None,
-        data_storage=dataset.window_data_storage,
     )
+    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     image = np.random.randint(0, 255, size=(1, 32, 32), dtype=np.uint8)
-    with window.open_layer_writer("image") as writer:
+    with window.data.open_layer_writer("image") as writer:
         writer.write_raster(
             ["band"],
             GeotiffRasterFormat(),
@@ -100,7 +103,7 @@ def classification_dataset(tmp_path: pathlib.Path) -> Dataset:
         STGeometry(WGS84_PROJECTION, shapely.Point(16, 16), None),
         {PROPERTY_NAME: CLASSES[0]},
     )
-    with window.open_layer_writer("targets") as writer:
+    with window.data.open_layer_writer("targets") as writer:
         writer.write_vector(GeojsonVectorFormat(), [feature])
     window.mark_layer_completed("targets")
 

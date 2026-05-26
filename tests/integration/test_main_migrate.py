@@ -11,7 +11,6 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import Item
 from rslearn.dataset import Dataset, Window, WindowLayerData
 from rslearn.dataset.storage.sqlite import SQLiteWindowStorageFactory
-from rslearn.dataset.window_data_storage.per_item_group import PerItemGroupStorage
 from rslearn.utils.geometry import STGeometry
 
 
@@ -32,8 +31,8 @@ class TestMigrate:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 4, 4),
             time_range=None,
-            data_storage=dataset.window_data_storage,
         )
+        window._data = dataset.window_data_storage_factory.create(window)
         window.save()
         item = Item(
             name="item",
@@ -67,9 +66,7 @@ class TestMigrate:
         rslearn.main.main()
 
         sqlite_storage = SQLiteWindowStorageFactory().get_storage(ds_path)
-        migrated_windows = sqlite_storage.get_windows(
-            data_storage=PerItemGroupStorage()
-        )
+        migrated_windows = sqlite_storage.get_windows()
         assert len(migrated_windows) == 1
         assert migrated_windows[0].group == "group"
         assert migrated_windows[0].name == "window"
