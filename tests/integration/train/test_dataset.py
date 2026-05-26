@@ -145,8 +145,8 @@ class TestDataset:
             projection=projection,
             bounds=bounds,
             time_range=None,
+            data_factory=PerItemGroupStorageFactory(),
         )
-        window._data = PerItemGroupStorageFactory().create(window)
         window.save()
 
         # Write raster data for group_idx=0 (value 1) and group_idx=1 (value 2).
@@ -243,8 +243,8 @@ class TestResolutionFactor:
             projection=Projection(CRS.from_epsg(3857), 1, -1),
             bounds=(0, 0, 4, 4),
             time_range=None,
+            data_factory=PerItemGroupStorageFactory(),
         )
-        window._data = PerItemGroupStorageFactory().create(window)
         window.save()
 
         raster_format = GeotiffRasterFormat()

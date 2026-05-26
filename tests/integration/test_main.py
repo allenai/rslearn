@@ -110,8 +110,8 @@ class TestIngestion:
                 datetime(2024, 1, 1, tzinfo=UTC),
                 datetime(2024, 2, 1, tzinfo=UTC),
             ),
+            data_factory=PerItemGroupStorageFactory(),
         )
-        window._data = PerItemGroupStorageFactory().create(window)
         window.save()
 
         # Manually set the window's items.json.
@@ -304,8 +304,8 @@ class TestMaterialization:
                 datetime(2024, 1, 1, tzinfo=UTC),
                 datetime(2024, 2, 1, tzinfo=UTC),
             ),
+            data_factory=PerItemGroupStorageFactory(),
         )
-        window1._data = PerItemGroupStorageFactory().create(window1)
         window1.save()
 
         # Second window
@@ -319,8 +319,8 @@ class TestMaterialization:
                 datetime(2024, 2, 1, tzinfo=UTC),
                 datetime(2024, 3, 1, tzinfo=UTC),  # Different time range
             ),
+            data_factory=PerItemGroupStorageFactory(),
         )
-        window2._data = PerItemGroupStorageFactory().create(window2)
         window2.save()
 
         # Create items and layer data for both windows

@@ -31,8 +31,8 @@ class TestMigrate:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 4, 4),
             time_range=None,
+            data_factory=dataset.window_data_storage_factory,
         )
-        window._data = dataset.window_data_storage_factory.create(window)
         window.save()
         item = Item(
             name="item",

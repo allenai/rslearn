@@ -107,8 +107,8 @@ class TestRasterMerger:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 4, 4),
             time_range=None,
+            data_factory=PerItemGroupStorageFactory(),
         )
-        window._data = PerItemGroupStorageFactory().create(window)
         outputs = [
             PendingCropOutput(
                 bounds=(0, 0, 3, 3),
@@ -154,8 +154,8 @@ class TestRasterMerger:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 4, 4),
             time_range=None,
+            data_factory=PerItemGroupStorageFactory(),
         )
-        window._data = PerItemGroupStorageFactory().create(window)
         # We make four 3x3 patches:
         # - (0, 0, 3, 3)
         # - (0, 1, 3, 4)
@@ -209,8 +209,8 @@ class TestRasterMerger:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 4, 4),
             time_range=None,
+            data_factory=PerItemGroupStorageFactory(),
         )
-        window._data = PerItemGroupStorageFactory().create(window)
         outputs = [
             PendingCropOutput(
                 bounds=(0, 0, 4, 4),
@@ -262,8 +262,8 @@ def test_write_raster(tmp_path: pathlib.Path) -> None:
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         bounds=(0, 0, 1, 1),
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     # Initialize prediction writer.
@@ -355,8 +355,8 @@ def test_write_raster_with_custom_output_path(tmp_path: pathlib.Path) -> None:
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         bounds=(0, 0, 1, 1),
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     # Use custom output path different from dataset path.
@@ -414,8 +414,8 @@ def test_write_raster_with_custom_output_path(tmp_path: pathlib.Path) -> None:
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         bounds=(0, 0, 1, 1),
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
-    custom_window._data = PerItemGroupStorageFactory().create(custom_window)
     assert custom_window.is_layer_completed(output_layer_name)
     raster = custom_window.data.read_raster(
         output_layer_name,
@@ -507,8 +507,8 @@ def test_write_raster_with_layer_config(tmp_path: pathlib.Path) -> None:
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         bounds=(0, 0, 1, 1),
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     assert window.is_layer_completed(output_layer_name)
     raster = window.data.read_raster(
         output_layer_name,
@@ -604,8 +604,8 @@ def test_selector_with_dictionary_output(tmp_path: pathlib.Path) -> None:
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         bounds=(0, 0, 5, 5),
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     assert window.is_layer_completed(output_layer_name)
     raster = window.data.read_raster(
         output_layer_name,
@@ -735,8 +735,8 @@ def test_selector_with_nested_dictionary(tmp_path: pathlib.Path) -> None:
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         bounds=(0, 0, 3, 3),
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     assert window.is_layer_completed(output_layer_name)
     raster = window.data.read_raster(
         output_layer_name,
@@ -773,8 +773,8 @@ def test_write_raster_with_path_from_datamodule(tmp_path: pathlib.Path) -> None:
         projection=Projection(WGS84_PROJECTION.crs, 0.2, 0.2),
         bounds=(0, 0, 1, 1),
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     task = SegmentationTask(num_classes=2)

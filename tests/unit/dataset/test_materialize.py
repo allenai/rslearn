@@ -359,8 +359,8 @@ def test_raster_materializer_passes_all_band_sets_to_compositor(
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     tile_store = DefaultTileStore()

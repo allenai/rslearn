@@ -78,8 +78,8 @@ def segmentation_dataset(tmp_path: pathlib.Path) -> Dataset:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 32, 32),
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     # Add a simple input image.

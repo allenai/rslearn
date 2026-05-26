@@ -366,8 +366,8 @@ class TestCoordinateModes:
                 int(window_center.y) + 10,
             ),
             time_range=None,
+            data_factory=PerItemGroupStorageFactory(),
         )
-        bad_window._data = PerItemGroupStorageFactory().create(bad_window)
         bad_window.save()
 
         windows = dataset.load_windows()
@@ -397,8 +397,8 @@ class TestCoordinateModes:
                 int(window_center.y) + 10,
             ),
             time_range=None,
+            data_factory=PerItemGroupStorageFactory(),
         )
-        good_window._data = PerItemGroupStorageFactory().create(good_window)
         good_window.save()
 
         windows = dataset.load_windows()

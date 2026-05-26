@@ -75,8 +75,8 @@ def test_nodata_persists_through_ingestion_and_materialization(
         projection=PROJECTION,
         bounds=BOUNDS,
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     RasterMaterializer().materialize(

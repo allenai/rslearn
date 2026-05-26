@@ -449,8 +449,8 @@ class TestERA5LandHourlyTimeseries:
                 datetime(2025, 1, 15, tzinfo=UTC),
                 datetime(2025, 2, 15, tzinfo=UTC),
             ),
+            data_factory=PerItemGroupStorageFactory(),
         )
-        window._data = PerItemGroupStorageFactory().create(window)
         window.save()
 
         # Run prepare/ingest/materialize.

@@ -35,8 +35,8 @@ def _make_window(tmp_path: pathlib.Path) -> Window:
         projection=PROJECTION,
         bounds=BOUNDS,
         time_range=None,
+        data_factory=PerLayerStorageFactory(),
     )
-    window._data = PerLayerStorageFactory().create(window)
     window.save()
     return window
 

@@ -92,8 +92,8 @@ class TestPredictLoader:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 4, 4),
             time_range=None,
+            data_factory=PerItemGroupStorageFactory(),
         )
-        window._data = PerItemGroupStorageFactory().create(window)
         window.save()
         image = np.zeros((1, 4, 4), dtype=np.uint8)
         image[0, 0, 0] = 1

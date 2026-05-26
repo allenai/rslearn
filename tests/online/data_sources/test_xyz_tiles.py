@@ -47,8 +47,8 @@ class TestXyzTiles:
             projection=seattle2020.projection,
             bounds=tuple([int(x) for x in seattle2020.shp.bounds]),  # type: ignore
             time_range=seattle2020.time_range,
+            data_factory=PerItemGroupStorageFactory(),
         )
-        window._data = PerItemGroupStorageFactory().create(window)
         window.save()
         print("materialize")
         data_source.materialize(

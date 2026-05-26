@@ -457,8 +457,8 @@ class RslearnWriter(BasePredictionWriter):
                 projection=metadata.projection,
                 bounds=metadata.window_bounds,
                 time_range=metadata.time_range,
+                data_factory=self.window_data_storage_factory,
             )
-            window._data = self.window_data_storage_factory.create(window)
             self.process_output(
                 window,
                 metadata.crop_idx,

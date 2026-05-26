@@ -92,8 +92,8 @@ def test_materialize(
         projection=proj,
         bounds=bounds,
         time_range=TIME_RANGE,
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     data_source.materialize(

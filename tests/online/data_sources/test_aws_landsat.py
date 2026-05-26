@@ -86,8 +86,8 @@ class TestLandsatOliTirs:
             projection=seattle2020.projection,
             bounds=bounds,
             time_range=seattle2020.time_range,
+            data_factory=PerItemGroupStorageFactory(),
         )
-        window._data = PerItemGroupStorageFactory().create(window)
         window.save()
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
         item_groups = landsat_data_source.get_items([seattle2020], query_config)[0]

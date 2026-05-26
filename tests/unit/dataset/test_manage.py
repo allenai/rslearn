@@ -379,8 +379,8 @@ class TestPrepareDatasetWindows:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 1, 1),  # Doesn't intersect any files
             time_range=None,
+            data_factory=PerItemGroupStorageFactory(),
         )
-        window1._data = PerItemGroupStorageFactory().create(window1)
         window1.save()
         # Manually mark window1 as prepared by creating empty layer data
         layer_datas = window1.load_layer_datas()
@@ -565,8 +565,8 @@ class TestPrepareDatasetWindows:
                 datetime(2024, 1, 1, tzinfo=UTC),
                 datetime(2024, 2, 26, tzinfo=UTC),
             ),
+            data_factory=PerItemGroupStorageFactory(),
         )
-        window._data = PerItemGroupStorageFactory().create(window)
         window.save()
 
         expected_periods = [

@@ -207,8 +207,8 @@ def test_materialize(
         projection=seattle2020.projection,
         bounds=bounds,
         time_range=seattle2020.time_range,
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     data_source.materialize(

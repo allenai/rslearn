@@ -63,8 +63,8 @@ def image_to_class_dataset(tmp_path: pathlib.Path) -> Dataset:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     # Add image where pixel value is 4*col+row.

@@ -88,8 +88,8 @@ def test_soilgrids_clay_scale_offset_applied(
         projection=projection,
         bounds=bounds,
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     layer_cfg = LayerConfig(

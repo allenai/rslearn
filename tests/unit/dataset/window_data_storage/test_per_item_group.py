@@ -34,8 +34,8 @@ def _make_window(tmp_path: pathlib.Path) -> Window:
         projection=PROJECTION,
         bounds=BOUNDS,
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
     return window
 

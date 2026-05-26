@@ -20,8 +20,8 @@ def empty_window(tmp_path: pathlib.Path) -> Window:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 1, 1),
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
     return window
 

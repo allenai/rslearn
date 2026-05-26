@@ -138,8 +138,8 @@ def _materialize_numpy_era5_window(
             datetime(2020, 1, 2, tzinfo=UTC),
             datetime(2020, 1, 5, tzinfo=UTC),
         ),
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     windows = dataset.load_windows()

@@ -12,7 +12,10 @@ from rslearn.dataset.window_data_storage.per_item_group import (
     per_item_group_layer_dir,
     per_item_group_raster_dir,
 )
-from rslearn.dataset.window_data_storage.storage import WindowDataStorage
+from rslearn.dataset.window_data_storage.storage import (
+    WindowDataStorage,
+    WindowDataStorageFactory,
+)
 from rslearn.log_utils import get_logger
 from rslearn.utils import Projection, STGeometry
 
@@ -137,6 +140,7 @@ class Window:
         bounds: tuple[int, int, int, int],
         time_range: tuple[datetime, datetime] | None,
         options: dict[str, Any] = {},
+        data_factory: WindowDataStorageFactory | None = None,
     ) -> None:
         """Creates a new Window instance.
 
@@ -153,6 +157,7 @@ class Window:
             options: additional options. This is typically used to store metadata on
                 the window. Train, val, and test splits can filter for key-value pairs
                 (called "tags" in DataInput) in this options dictionary.
+            data_factory: optional factory to bind a WindowDataStorage to this window.
         """
         self.storage = storage
         self.group = group
@@ -161,7 +166,9 @@ class Window:
         self.bounds = bounds
         self.time_range = time_range
         self.options = options
-        self._data: WindowDataStorage | None = None
+        self._data: WindowDataStorage | None = (
+            data_factory.create(self) if data_factory else None
+        )
 
     @property
     def data(self) -> WindowDataStorage:

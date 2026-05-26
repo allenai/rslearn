@@ -140,8 +140,8 @@ def test_materialize_auto_asset(
             datetime(2020, 7, 20, tzinfo=UTC),
             datetime(2020, 7, 21, tzinfo=UTC),
         ),
+        data_factory=PerItemGroupStorageFactory(),
     )
-    window._data = PerItemGroupStorageFactory().create(window)
     window.save()
 
     data_source.materialize(
