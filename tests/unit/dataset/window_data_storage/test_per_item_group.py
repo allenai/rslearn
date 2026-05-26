@@ -11,7 +11,7 @@ from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
 from rslearn.dataset.window_data_storage.per_item_group import (
     PerItemGroupStorage,
-    _per_item_group_layer_dir,
+    per_item_group_layer_dir,
 )
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import STGeometry
@@ -102,7 +102,7 @@ def test_underscore_band_name(tmp_path: pathlib.Path) -> None:
     # There should be exactly one bandset subfolder under the layer directory.
     subfolders = [
         entry
-        for entry in _per_item_group_layer_dir(window.window_root, "layer").iterdir()
+        for entry in per_item_group_layer_dir(window.window_root, "layer").iterdir()
         if entry.is_dir()
     ]
     assert len(subfolders) == 1

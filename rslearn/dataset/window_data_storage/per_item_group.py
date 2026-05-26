@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 LAYERS_SUBDIR = "layers"
 
 
-def _per_item_group_layer_dir(
+def per_item_group_layer_dir(
     window_root: UPath, layer_name: str, group_idx: int = 0
 ) -> UPath:
     """Per-item-group layer directory: ``layers/{layer_name}`` or ``layers/{layer_name}.{group_idx}``."""
@@ -34,12 +34,12 @@ def _per_item_group_layer_dir(
     return window_root / LAYERS_SUBDIR / folder_name
 
 
-def _per_item_group_raster_dir(
+def per_item_group_raster_dir(
     window_root: UPath, layer_name: str, bands: list[str], group_idx: int
 ) -> UPath:
     """Per-item-group raster directory: ``layers/{layer_name}.{group_idx}/{bandset}/``."""
     dirname = get_bandset_dirname(bands)
-    return _per_item_group_layer_dir(window_root, layer_name, group_idx) / dirname
+    return per_item_group_layer_dir(window_root, layer_name, group_idx) / dirname
 
 
 class _PerItemGroupLayerWriter(LayerWriter):
@@ -61,7 +61,7 @@ class _PerItemGroupLayerWriter(LayerWriter):
         group_idx: int = 0,
     ) -> None:
         """Encode ``raster`` to the per-group on-disk path immediately."""
-        raster_dir = _per_item_group_raster_dir(
+        raster_dir = per_item_group_raster_dir(
             self._window.window_root, self._layer_name, bands, group_idx
         )
         raster_format.encode_raster(raster_dir, projection, bounds, raster)
@@ -74,7 +74,7 @@ class _PerItemGroupLayerWriter(LayerWriter):
         group_idx: int = 0,
     ) -> None:
         """Encode ``features`` to the per-group on-disk path immediately."""
-        layer_dir = _per_item_group_layer_dir(
+        layer_dir = per_item_group_layer_dir(
             self._window.window_root, self._layer_name, group_idx
         )
         vector_format.encode_vector(layer_dir, features)
@@ -116,7 +116,7 @@ class PerItemGroupStorage(WindowDataStorage):
         resampling: Resampling = Resampling.bilinear,
     ) -> RasterArray:
         """Decode the raster from the per-group directory."""
-        raster_dir = _per_item_group_raster_dir(
+        raster_dir = per_item_group_raster_dir(
             window.window_root, layer_name, bands, group_idx
         )
         return raster_format.decode_raster(raster_dir, projection, bounds, resampling)
@@ -132,5 +132,5 @@ class PerItemGroupStorage(WindowDataStorage):
         group_idx: int = 0,
     ) -> list[Feature]:
         """Decode the vector features from the per-group directory."""
-        layer_dir = _per_item_group_layer_dir(window.window_root, layer_name, group_idx)
+        layer_dir = per_item_group_layer_dir(window.window_root, layer_name, group_idx)
         return vector_format.decode_vector(layer_dir, projection, bounds)

@@ -10,8 +10,8 @@ from upath import UPath
 
 from rslearn.dataset.storage.storage import WindowStorage
 from rslearn.dataset.window_data_storage.per_item_group import (
-    _per_item_group_layer_dir,
-    _per_item_group_raster_dir,
+    per_item_group_layer_dir,
+    per_item_group_raster_dir,
 )
 from rslearn.dataset.window_data_storage.storage import (
     LayerWriter,
@@ -224,7 +224,7 @@ class Window:
             DeprecationWarning,
             stacklevel=2,
         )
-        return _per_item_group_layer_dir(self.window_root, layer_name, group_idx)
+        return per_item_group_layer_dir(self.window_root, layer_name, group_idx)
 
     def is_layer_completed(self, layer_name: str, group_idx: int = 0) -> bool:
         """Check whether the specified item group is completed (materialized).
@@ -382,7 +382,7 @@ class Window:
             DeprecationWarning,
             stacklevel=2,
         )
-        return _per_item_group_raster_dir(
+        return per_item_group_raster_dir(
             self.window_root,
             layer_name,
             bands,
