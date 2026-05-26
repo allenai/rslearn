@@ -4,10 +4,17 @@
 
 The window data storage controls the on-disk layout of materialized raster and
 vector data inside each window. It is dataset-wide: all layers in a dataset
-share the same window data storage. The default stores each item group of each layer
-in a separate directory under `windows/{group_name}/{window_name}/layers/`.
+share the same window data storage.
 
-The default window data storage writes one directory per item group:
+### PerItemGroupStorage
+
+The default window data storage is PerItemGroupStorage, which stores each item group of
+each layer in a separate directory under `windows/{group_name}/{window_name}/layers/`.
+Raster data is stored at `layers/{layer_name}.{group_idx}/{bandset_dir}/...` and vector
+data at `layers/{layer_name}.{group_idx}/...`.
+
+The configuration is like this (this is the default in case `window_data_storage` is
+not set):
 
 ```jsonc
 {
@@ -16,13 +23,6 @@ The default window data storage writes one directory per item group:
   }
 }
 ```
-
-`PerItemGroupStorage` lays out raster data at
-`layers/{layer_name}.{group_idx}/{bandset_dir}/...` and vector data at
-`layers/{layer_name}.{group_idx}/...`. Both raster and vector layers are
-supported.
-
-Below, we detail other window data storages.
 
 ### PerLayerStorage
 
@@ -40,9 +40,7 @@ configured like this:
 }
 ```
 
-Raster on-disk layout: `layers/{layer_name}/{bandset_dir}/...`. Per-group
-completion markers (`layers/{layer_name}.{group_idx}/completed`) are still
-written, so completion tracking is unchanged.
+Raster on-disk layout: `layers/{layer_name}/{bandset_dir}/...`.
 
 Vector data is not packed — vector layers fall through to the same
 `layers/{layer_name}.{group_idx}/...` layout used by `PerItemGroupStorage`.
