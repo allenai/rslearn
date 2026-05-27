@@ -19,6 +19,9 @@ from rslearn.dataset.manage import (
     prepare_dataset_windows,
 )
 from rslearn.dataset.materialize import VectorMaterializer
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.main import IngestHandler
 from rslearn.utils import STGeometry
 
@@ -376,6 +379,7 @@ class TestPrepareDatasetWindows:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 1, 1),  # Doesn't intersect any files
             time_range=None,
+            data_factory=PerItemGroupStorageFactory(),
         )
         window1.save()
         # Manually mark window1 as prepared by creating empty layer data
@@ -561,6 +565,7 @@ class TestPrepareDatasetWindows:
                 datetime(2024, 1, 1, tzinfo=UTC),
                 datetime(2024, 2, 26, tzinfo=UTC),
             ),
+            data_factory=PerItemGroupStorageFactory(),
         )
         window.save()
 

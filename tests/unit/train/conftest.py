@@ -11,6 +11,9 @@ from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.utils.feature import Feature
 from rslearn.utils.geometry import PixelBounds, STGeometry
 from rslearn.utils.raster_array import RasterArray
@@ -83,16 +86,28 @@ def add_window(
         projection=WGS84_PROJECTION,
         bounds=bounds,
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
     window.save()
 
+    raster_format = GeotiffRasterFormat()
+    # Group raster writes by layer so each layer has a single writer context.
+    images_by_layer: dict[str, list[tuple[int, npt.NDArray]]] = {}
     for (layer_name, group_idx), image in images.items():
-        raster_dir = window.get_raster_dir(layer_name, ["band"], group_idx=group_idx)
-        raster = RasterArray(chw_array=image)
-        GeotiffRasterFormat().encode_raster(
-            raster_dir, window.projection, window.bounds, raster
-        )
-        window.mark_layer_completed(layer_name, group_idx=group_idx)
+        images_by_layer.setdefault(layer_name, []).append((group_idx, image))
+    for layer_name, group_images in images_by_layer.items():
+        with window.data.open_layer_writer(layer_name) as writer:
+            for group_idx, image in group_images:
+                writer.write_raster(
+                    ["band"],
+                    raster_format,
+                    window.projection,
+                    window.bounds,
+                    RasterArray(chw_array=image),
+                    group_idx=group_idx,
+                )
+        for group_idx, _ in group_images:
+            window.mark_layer_completed(layer_name, group_idx=group_idx)
 
     # Add label.
     feature = Feature(
@@ -101,11 +116,9 @@ def add_window(
             "label": 1,
         },
     )
-    layer_dir = window.get_layer_dir("vector_layer")
-    GeojsonVectorFormat().encode_vector(
-        layer_dir,
-        [feature],
-    )
+    vector_format = GeojsonVectorFormat()
+    with window.data.open_layer_writer("vector_layer") as writer:
+        writer.write_vector(vector_format, [feature])
     window.mark_layer_completed("vector_layer")
 
     return window

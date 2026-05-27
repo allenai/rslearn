@@ -31,6 +31,7 @@ class TestMigrate:
             projection=WGS84_PROJECTION,
             bounds=(0, 0, 4, 4),
             time_range=None,
+            data_factory=dataset.window_data_storage_factory,
         )
         window.save()
         item = Item(
@@ -44,7 +45,6 @@ class TestMigrate:
                 )
             }
         )
-        window.get_layer_dir("layer_name").mkdir(parents=True, exist_ok=True)
         window.mark_layer_completed("layer_name", group_idx=0)
 
         storage_config = json.dumps(
