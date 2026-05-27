@@ -19,7 +19,7 @@ not set):
 ```jsonc
 {
   "window_data_storage": {
-    "class_path": "rslearn.dataset.window_data_storage.per_item_group.PerItemGroupStorage"
+    "class_path": "rslearn.dataset.window_data_storage.per_item_group.PerItemGroupStorageFactory"
   }
 }
 ```
@@ -35,7 +35,7 @@ configured like this:
 ```jsonc
 {
   "window_data_storage": {
-    "class_path": "rslearn.dataset.window_data_storage.per_layer.PerLayerStorage"
+    "class_path": "rslearn.dataset.window_data_storage.per_layer.PerLayerStorageFactory"
   }
 }
 ```

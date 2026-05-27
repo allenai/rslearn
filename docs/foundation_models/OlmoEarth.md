@@ -116,7 +116,7 @@ may need to adjust the `query_config` depending on your window time range.
         "query_config": {
           "max_matches": 12,
           "period_duration": "30d",
-          "space_mode": "PER_PERIOD_MOSAIC"
+          "space_mode": "MOSAIC"
         }
       },
       "type": "raster"
@@ -140,7 +140,7 @@ may need to adjust the `query_config` depending on your window time range.
         "query_config": {
           "max_matches": 12,
           "period_duration": "30d",
-          "space_mode": "PER_PERIOD_MOSAIC"
+          "space_mode": "MOSAIC"
         }
       },
       "type": "raster"
@@ -161,7 +161,7 @@ may need to adjust the `query_config` depending on your window time range.
         "query_config": {
           "max_matches": 12,
           "period_duration": "30d",
-          "space_mode": "PER_PERIOD_MOSAIC"
+          "space_mode": "MOSAIC"
         }
       },
       "type": "raster"
