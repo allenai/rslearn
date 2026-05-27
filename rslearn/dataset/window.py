@@ -1,5 +1,6 @@
 """rslearn windows."""
 
+import warnings
 from datetime import datetime
 from typing import Any
 
@@ -7,37 +8,18 @@ import shapely
 from upath import UPath
 
 from rslearn.dataset.storage.storage import WindowStorage
+from rslearn.dataset.window_data_storage.per_item_group import (
+    per_item_group_layer_dir,
+    per_item_group_raster_dir,
+)
+from rslearn.dataset.window_data_storage.storage import (
+    WindowDataStorage,
+    WindowDataStorageFactory,
+)
 from rslearn.log_utils import get_logger
 from rslearn.utils import Projection, STGeometry
-from rslearn.utils.raster_format import get_bandset_dirname
 
 logger = get_logger(__name__)
-
-LAYERS_DIRECTORY_NAME = "layers"
-
-
-def get_window_layer_dir(
-    window_path: UPath, layer_name: str, group_idx: int = 0
-) -> UPath:
-    """Get the directory containing materialized data for the specified item group.
-
-    A layer may have multiple item groups (different timesteps/mosaics). The directory
-    for group_idx=0 is named after the layer (e.g. ``layers/sentinel2``), while
-    subsequent groups append the index (e.g. ``layers/sentinel2.1``).
-
-    Args:
-        window_path: the window directory.
-        layer_name: the layer name.
-        group_idx: the item group index within the layer (default 0).
-
-    Returns:
-        the path where data for this item group is or should be materialized.
-    """
-    if group_idx == 0:
-        folder_name = layer_name
-    else:
-        folder_name = f"{layer_name}.{group_idx}"
-    return window_path / LAYERS_DIRECTORY_NAME / folder_name
 
 
 def get_layer_and_group_from_dir_name(layer_dir_name: str) -> tuple[str, int]:
@@ -58,25 +40,6 @@ def get_layer_and_group_from_dir_name(layer_dir_name: str) -> tuple[str, int]:
         return (parts[0], int(parts[1]))
     else:
         return (layer_dir_name, 0)
-
-
-def get_window_raster_dir(
-    window_path: UPath, layer_name: str, bands: list[str], group_idx: int = 0
-) -> UPath:
-    """Get the directory where the raster is materialized for a specific item group.
-
-    Args:
-        window_path: the window directory.
-        layer_name: the layer name.
-        bands: the bands in the raster. It should match a band set defined for this
-            layer.
-        group_idx: the item group index within the layer (default 0).
-
-    Returns:
-        the directory containing the raster for this item group.
-    """
-    dirname = get_bandset_dirname(bands)
-    return get_window_layer_dir(window_path, layer_name, group_idx) / dirname
 
 
 class WindowLayerData:
@@ -177,6 +140,7 @@ class Window:
         bounds: tuple[int, int, int, int],
         time_range: tuple[datetime, datetime] | None,
         options: dict[str, Any] = {},
+        data_factory: WindowDataStorageFactory | None = None,
     ) -> None:
         """Creates a new Window instance.
 
@@ -184,13 +148,16 @@ class Window:
         stored in metadata.json.
 
         Args:
-            storage: the dataset storage for the underlying rslearn dataset.
+            storage: the metadata storage for the underlying rslearn dataset.
             group: the group the window belongs to
             name: the unique name for this window
             projection: the projection of the window
             bounds: the bounds of the window in pixel coordinates
             time_range: optional time range of the window
-            options: additional options (?)
+            options: additional options. This is typically used to store metadata on
+                the window. Train, val, and test splits can filter for key-value pairs
+                (called "tags" in DataInput) in this options dictionary.
+            data_factory: optional factory to bind a WindowDataStorage to this window.
         """
         self.storage = storage
         self.group = group
@@ -199,6 +166,24 @@ class Window:
         self.bounds = bounds
         self.time_range = time_range
         self.options = options
+        self._data: WindowDataStorage | None = (
+            data_factory.create(self) if data_factory else None
+        )
+
+    @property
+    def data(self) -> WindowDataStorage:
+        """The bound WindowDataStorage for materialized raster/vector data.
+
+        Raises:
+            RuntimeError: if no WindowDataStorage has been bound to this window.
+        """
+        if self._data is None:
+            raise RuntimeError(
+                "WindowDataStorage not bound to this window. "
+                "Use a WindowDataStorageFactory to bind data storage, "
+                "or set window._data directly."
+            )
+        return self._data
 
     def get_geometry(self) -> STGeometry:
         """Computes the STGeometry corresponding to this window."""
@@ -207,6 +192,11 @@ class Window:
             shp=shapely.geometry.box(*self.bounds),
             time_range=self.time_range,
         )
+
+    @property
+    def window_root(self) -> UPath:
+        """The root directory of this window in its WindowStorage."""
+        return self.storage.get_window_root(self.group, self.name)
 
     def load_layer_datas(self) -> dict[str, WindowLayerData]:
         """Load layer datas describing items in retrieved layers from items.json."""
@@ -227,6 +217,12 @@ class Window:
     def get_layer_dir(self, layer_name: str, group_idx: int = 0) -> UPath:
         """Get the directory containing materialized data for the specified item group.
 
+        .. deprecated::
+            This returns the per-item-group layout used by
+            :class:`rslearn.dataset.window_storage.PerItemGroupStorage`. It is
+            not valid for other ``WindowDataStorage`` implementations. Read
+            and write materialized data through ``WindowDataStorage`` instead.
+
         Args:
             layer_name: the layer name.
             group_idx: the item group index within the layer (default 0).
@@ -234,9 +230,13 @@ class Window:
         Returns:
             the path where data for this item group is or should be materialized.
         """
-        return get_window_layer_dir(
-            self.storage.get_window_root(self.group, self.name), layer_name, group_idx
+        warnings.warn(
+            "Window.get_layer_dir is deprecated; access materialized data via "
+            "window.data (WindowDataStorage).",
+            DeprecationWarning,
+            stacklevel=2,
         )
+        return per_item_group_layer_dir(self.window_root, layer_name, group_idx)
 
     def is_layer_completed(self, layer_name: str, group_idx: int = 0) -> bool:
         """Check whether the specified item group is completed (materialized).
@@ -272,6 +272,12 @@ class Window:
     ) -> UPath:
         """Get the directory where the raster is materialized for a specific item group.
 
+        .. deprecated::
+            This returns the per-item-group layout used by
+            :class:`rslearn.dataset.window_storage.PerItemGroupStorage`. It is
+            not valid for other ``WindowDataStorage`` implementations. Read
+            and write raster data through ``WindowDataStorage`` instead.
+
         Args:
             layer_name: the layer name.
             bands: the bands in the raster. It should match a band set defined for this
@@ -281,8 +287,14 @@ class Window:
         Returns:
             the directory containing the raster for this item group.
         """
-        return get_window_raster_dir(
-            self.storage.get_window_root(self.group, self.name),
+        warnings.warn(
+            "Window.get_raster_dir is deprecated; access raster data via "
+            "window.data (WindowDataStorage).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return per_item_group_raster_dir(
+            self.window_root,
             layer_name,
             bands,
             group_idx,
@@ -308,7 +320,10 @@ class Window:
         self.storage.create_or_update_window(self)
 
     @staticmethod
-    def from_metadata(storage: WindowStorage, metadata: dict[str, Any]) -> "Window":
+    def from_metadata(
+        storage: WindowStorage,
+        metadata: dict[str, Any],
+    ) -> "Window":
         """Create a Window from the WindowStorage and the window's metadata dictionary.
 
         Args:
@@ -318,7 +333,6 @@ class Window:
         Returns:
             the Window
         """
-        # Ensure bounds is converted from list to tuple.
         bounds = (
             metadata["bounds"][0],
             metadata["bounds"][1],
