@@ -143,6 +143,34 @@ def test_mape_metric_with_scale_factor_and_mask() -> None:
     assert results["mape"] == pytest.approx(0.1)
 
 
+def test_r2_metric_with_scale_factor_and_mask() -> None:
+    """Verify R² metric respects scale_factor and validity masking."""
+    scale_factor = 0.1
+    task = RegressionTask(
+        property_name="property_name",
+        scale_factor=scale_factor,
+        metrics=("r2",),
+    )
+    metrics = task.get_metrics()
+
+    # Labels (in original space): 10, 20; mean = 15
+    # Preds (in original space): 10, 20 (perfect) => R2 = 1.0
+    targets = [
+        {"value": torch.tensor(10.0 * scale_factor), "valid": torch.tensor(1.0)},
+        {"value": torch.tensor(20.0 * scale_factor), "valid": torch.tensor(1.0)},
+        # Invalid sample — should be ignored.
+        {"value": torch.tensor(0.0), "valid": torch.tensor(0.0)},
+    ]
+    preds = torch.tensor(
+        [10.0 * scale_factor, 20.0 * scale_factor, 999.0 * scale_factor],
+        dtype=torch.float32,
+    )
+
+    metrics.update(preds, targets)
+    results = metrics.compute()
+    assert results["r2"] == pytest.approx(1.0)
+
+
 @pytest.mark.parametrize(
     ("loss_mode", "expected"),
     [
