@@ -155,7 +155,7 @@ import tqdm
 from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
-from rslearn.dataset.storage.file import FileWindowStorage
+from rslearn.dataset.dataset import Dataset
 from rslearn.dataset.window import Window
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.get_utm_ups_crs import get_utm_ups_projection
@@ -177,28 +177,41 @@ def state_to_split(state: str) -> str:
     return "val" if (h % 100) < VAL_RATIO * 100 else "train"
 
 # Read the points in the CSV.
+# The columns include "state", "longitude", "latitude", and "stadium".
 with open(CSV_PATH) as f:
     rows = [row for row in csv.DictReader(f) if row["state"].strip() != "WA"]
 
+# Initialize a Dataset object that represents the entire rslearn dataset.
+ds = Dataset(UPath(os.environ["DATASET_PATH"])
+
 split_counts: dict[str, int] = {}
-storage = FileWindowStorage(UPath(os.environ["DATASET_PATH"]))
 for row in tqdm.tqdm(rows):
+    # For each row in the CSV, start by extracting the columns we want.
     lon = float(row["longitude"])
     lat = float(row["latitude"])
     stadium_name = row["stadium"].strip().replace(" ", "_").replace("/", "")
+
+    # Assign it to train or val split based on the state code.
     split = state_to_split(row["state"].strip())
     split_counts[split] = split_counts.get(split, 0) + 1
 
-    # Use an appropriate UTM zone for the location, create a 256x256 window at 10 m/pixel.
+    # OlmoEarth expects inputs to be at 10 m/pixel in UTM projection.
+    # We first find the appropriate UTM projection for this location.
+    # In addition to the CRS, the Projection also specifies the m/pixel resolution,
+    # which is RESOLUTION=10 here.
     projection = get_utm_ups_projection(lon, lat, RESOLUTION, -RESOLUTION)
+
+    # Now convert the lon/lat to pixel coordinates in that projection.
     src_geom = STGeometry(WGS84_PROJECTION, shapely.Point(lon, lat), None)
     dst_geom = src_geom.to_projection(projection)
     cx, cy = int(dst_geom.shp.x), int(dst_geom.shp.y)
+
+    # Compute bounds so that the stadium will be at the center.
     bounds = (cx - WINDOW_SIZE // 2, cy - WINDOW_SIZE // 2, cx + WINDOW_SIZE // 2, cy + WINDOW_SIZE // 2)
 
     # Create the window.
     window = Window(
-        storage=storage,
+        storage=ds.storage,
         group="default",
         name=stadium_name,
         projection=projection,
@@ -208,15 +221,15 @@ for row in tqdm.tqdm(rows):
     )
     window.save()
 
-    # Most of the label is "background".
+    # Most of the label is "background" (2).
     label = np.full((1, WINDOW_SIZE, WINDOW_SIZE), 2, dtype=np.uint8)
     mid = WINDOW_SIZE // 2
-    # Create a 40x40 NODATA buffer.
+    # Create a 40x40 NODATA (0) buffer in the center.
     label[:, mid - 20 : mid + 20, mid - 20 : mid + 20] = 0
-    # And set the middle 5x5 to "stadium".
+    # And set the middle 5x5 to "stadium" (1).
     label[:, mid - 2 : mid + 3, mid - 2 : mid + 3] = 1
 
-    # Finally we can write the label raster.
+    # Finally we can write the label raster as a GeoTIFF.
     raster_dir = window.get_raster_dir("label", ["label"])
     GeotiffRasterFormat().encode_raster(
         raster_dir, projection, bounds, RasterArray(chw_array=label)
