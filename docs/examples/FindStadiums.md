@@ -202,14 +202,23 @@ for row in tqdm.tqdm(rows):
     projection = get_utm_ups_projection(lon, lat, RESOLUTION, -RESOLUTION)
 
     # Now convert the lon/lat to pixel coordinates in that projection.
+    # (Pixel coordinates are just CRS coordinates divided by the resolution.)
+    # The STGeometry specifies the Projection (CRS + resolution), a shapely geometry in
+    # pixel coordinates, and an optional time range (omitted here).
     src_geom = STGeometry(WGS84_PROJECTION, shapely.Point(lon, lat), None)
+    # STGeometry.to_projection re-projects the geometry to another projection by
+    # transforming each vertex. dst_geom.shp is in pixel coordinates in the target
+    # projection.
     dst_geom = src_geom.to_projection(projection)
     cx, cy = int(dst_geom.shp.x), int(dst_geom.shp.y)
 
     # Compute bounds so that the stadium will be at the center.
     bounds = (cx - WINDOW_SIZE // 2, cy - WINDOW_SIZE // 2, cx + WINDOW_SIZE // 2, cy + WINDOW_SIZE // 2)
 
-    # Create the window.
+    # Create the window. The Window object represents one rslearn window (spatiotemporal
+    # bounding box). When we call Window.save, it creates a new folder corresponding to
+    # the window in {DATASET_PATH}/windows/{group_name}/{window_name}, and writes the
+    # projection, bounds, time range, and other details to metadata.json in that folder.
     window = Window(
         storage=ds.storage,
         group="default",
@@ -230,6 +239,10 @@ for row in tqdm.tqdm(rows):
     label[:, mid - 2 : mid + 3, mid - 2 : mid + 3] = 1
 
     # Finally we can write the label raster as a GeoTIFF.
+    # We use GeotiffRasterFormat for this. window.get_raster_dir gives us the folder
+    # where rslearn expects the raster to be written. RasterFormat.encode_raster then
+    # writes the raster to that folder; the projection and bounds we pass must match
+    # the projection/bounds of the array.
     raster_dir = window.get_raster_dir("label", ["label"])
     GeotiffRasterFormat().encode_raster(
         raster_dir, projection, bounds, RasterArray(chw_array=label)
