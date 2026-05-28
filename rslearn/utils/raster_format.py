@@ -375,8 +375,11 @@ class ImageTileRasterFormat(RasterFormat):
             end_tile[0] * self.tile_size - bounds[2],
             end_tile[1] * self.tile_size - bounds[3],
         )
+        pad_value = nodata_value if nodata_value is not None else 0
         array = np.pad(
-            array, ((0, 0), (padding[1], padding[3]), (padding[0], padding[2]))
+            array,
+            ((0, 0), (padding[1], padding[3]), (padding[0], padding[2])),
+            constant_values=pad_value,
         )
 
         path.mkdir(parents=True, exist_ok=True)

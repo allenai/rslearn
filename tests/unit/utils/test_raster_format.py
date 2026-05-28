@@ -9,7 +9,13 @@ from upath import UPath
 
 from rslearn.utils.geometry import Projection
 from rslearn.utils.raster_array import RasterArray, RasterMetadata
-from rslearn.utils.raster_format import GeotiffRasterFormat, NumpyRasterFormat
+from rslearn.utils.raster_format import (
+    GeotiffRasterFormat,
+    ImageTileRasterFormat,
+    NumpyRasterFormat,
+    RasterFormat,
+    SingleImageRasterFormat,
+)
 
 
 def test_geotiff_tiling(tmp_path: pathlib.Path) -> None:
@@ -51,40 +57,6 @@ class TestGeotiffBoundsAndNodata:
     """Test GeotiffRasterFormat bounds and nodata handling."""
 
     PROJECTION = Projection(CRS.from_epsg(3857), 1, -1)
-
-    @pytest.fixture
-    def encoded_raster_path(self, tmp_path: pathlib.Path) -> UPath:
-        path = UPath(tmp_path)
-        array = np.ones((1, 8, 8), dtype=np.uint8)
-        GeotiffRasterFormat().encode_raster(
-            path, self.PROJECTION, (0, 0, 8, 8), RasterArray(chw_array=array)
-        )
-        return path
-
-    def test_geotiff_in_bounds(self, encoded_raster_path: UPath) -> None:
-        """In-bounds read from GeoTIFF of 1s should yield 1s."""
-        ra = GeotiffRasterFormat().decode_raster(
-            encoded_raster_path, self.PROJECTION, (2, 2, 6, 6)
-        )
-        assert ra.array.shape == (1, 1, 4, 4)
-        assert np.all(ra.array == 1)
-
-    def test_geotiff_partial_overlap(self, encoded_raster_path: UPath) -> None:
-        """Read with partial overlap should yield nodata (0) for out of bounds pixels."""
-        ra = GeotiffRasterFormat().decode_raster(
-            encoded_raster_path, self.PROJECTION, (4, 4, 12, 12)
-        )
-        assert ra.array.shape == (1, 1, 8, 8)
-        assert np.all(ra.array[:, :, 0:4, 0:4] == 1)
-        assert np.all(ra.array[:, :, 0:8, 4:8] == 0)
-
-    def test_geotiff_out_of_bounds(self, encoded_raster_path: UPath) -> None:
-        """Fully out-of-bounds read should yield nodata (0) for all pixels."""
-        ra = GeotiffRasterFormat().decode_raster(
-            encoded_raster_path, self.PROJECTION, (8, 8, 12, 12)
-        )
-        assert ra.array.shape == (1, 1, 4, 4)
-        assert np.all(ra.array == 0)
 
     def test_geotiff_write_nodata_value(self, tmp_path: pathlib.Path) -> None:
         """Test that nodata_value on metadata is correctly written to the GeoTIFF."""
@@ -385,53 +357,6 @@ class TestNumpyRasterFormat:
         assert (path / "data.npy").exists()
         assert (path / "metadata.json").exists()
 
-    def test_bounds_subset(self, tmp_path: pathlib.Path) -> None:
-        """Decoding with a subset of the stored bounds crops correctly."""
-        path = UPath(tmp_path)
-        data = np.arange(16, dtype=np.float32).reshape(1, 1, 4, 4)
-        fmt = NumpyRasterFormat()
-        fmt.encode_raster(path, self.PROJECTION, (0, 0, 4, 4), RasterArray(array=data))
-        decoded = fmt.decode_raster(path, self.PROJECTION, (1, 1, 3, 3))
-        assert decoded.array.shape == (1, 1, 2, 2)
-        np.testing.assert_array_equal(decoded.array, data[:, :, 1:3, 1:3])
-
-    def test_bounds_superset(self, tmp_path: pathlib.Path) -> None:
-        """Decoding with larger bounds pads with nodata (0 when unset)."""
-        path = UPath(tmp_path)
-        data = np.ones((1, 1, 2, 2), dtype=np.float32)
-        fmt = NumpyRasterFormat()
-        fmt.encode_raster(path, self.PROJECTION, (0, 0, 2, 2), RasterArray(array=data))
-        decoded = fmt.decode_raster(path, self.PROJECTION, (-1, -1, 3, 3))
-        assert decoded.array.shape == (1, 1, 4, 4)
-        # Original data at offset (1,1).
-        np.testing.assert_array_equal(decoded.array[:, :, 1:3, 1:3], 1.0)
-        # Padded region should be 0.
-        assert decoded.array[:, :, 0, :].sum() == 0
-        assert decoded.array[:, :, 3, :].sum() == 0
-        assert decoded.array[:, :, :, 0].sum() == 0
-        assert decoded.array[:, :, :, 3].sum() == 0
-
-    def test_bounds_superset_nodata(self, tmp_path: pathlib.Path) -> None:
-        """Padded pixels use the stored nodata_value."""
-        path = UPath(tmp_path)
-        data = np.ones((1, 1, 2, 2), dtype=np.float32)
-        nodata = -9999.0
-        raster = RasterArray(array=data, metadata=RasterMetadata(nodata_value=nodata))
-        fmt = NumpyRasterFormat()
-        fmt.encode_raster(path, self.PROJECTION, (0, 0, 2, 2), raster)
-        decoded = fmt.decode_raster(path, self.PROJECTION, (-1, -1, 3, 3))
-        assert decoded.array[:, :, 0, 0] == nodata
-
-    def test_bounds_no_overlap(self, tmp_path: pathlib.Path) -> None:
-        """Decoding with no overlap returns all nodata."""
-        path = UPath(tmp_path)
-        data = np.ones((1, 1, 2, 2), dtype=np.float32)
-        fmt = NumpyRasterFormat()
-        fmt.encode_raster(path, self.PROJECTION, (0, 0, 2, 2), RasterArray(array=data))
-        decoded = fmt.decode_raster(path, self.PROJECTION, (10, 10, 12, 12))
-        assert decoded.array.shape == (1, 1, 2, 2)
-        np.testing.assert_array_equal(decoded.array, 0.0)
-
     def test_projection_mismatch_raises(self, tmp_path: pathlib.Path) -> None:
         """Decoding with a different projection should raise NotImplementedError."""
         path = UPath(tmp_path)
@@ -457,3 +382,75 @@ class TestNumpyRasterFormat:
 
         assert decoded.metadata.nodata_value == nodata_value
         np.testing.assert_array_equal(decoded.array, data)
+
+
+_ALL_RASTER_FORMATS = [
+    pytest.param(GeotiffRasterFormat(), id="geotiff"),
+    pytest.param(ImageTileRasterFormat("png"), id="image_tile_png"),
+    pytest.param(SingleImageRasterFormat("png"), id="single_image_png"),
+    pytest.param(NumpyRasterFormat(), id="numpy"),
+]
+
+_PROJECTION = Projection(CRS.from_epsg(3857), 1, -1)
+
+
+@pytest.mark.parametrize("fmt", _ALL_RASTER_FORMATS)
+class TestRasterFormatRoundTrip:
+    """Bounds crop/pad tests that apply to every RasterFormat."""
+
+    def test_in_bounds_crop(self, tmp_path: pathlib.Path, fmt: RasterFormat) -> None:
+        """Reading a strict subset of stored bounds returns only the cropped data."""
+        path = UPath(tmp_path)
+        data = np.arange(64, dtype=np.uint8).reshape(1, 8, 8)
+        fmt.encode_raster(path, _PROJECTION, (0, 0, 8, 8), RasterArray(chw_array=data))
+        decoded = fmt.decode_raster(path, _PROJECTION, (2, 2, 6, 6))
+        assert decoded.array.shape == (1, 1, 4, 4)
+        np.testing.assert_array_equal(decoded.array[0, 0], data[0, 2:6, 2:6])
+
+    def test_superset_bounds(self, tmp_path: pathlib.Path, fmt: RasterFormat) -> None:
+        """Reading with bounds larger than stored pads missing pixels with 0."""
+        path = UPath(tmp_path)
+        data = np.arange(16, dtype=np.uint8).reshape(1, 4, 4)
+        fmt.encode_raster(path, _PROJECTION, (2, 2, 6, 6), RasterArray(chw_array=data))
+        decoded = fmt.decode_raster(path, _PROJECTION, (0, 0, 8, 8))
+        assert decoded.array.shape == (1, 1, 8, 8)
+        np.testing.assert_array_equal(decoded.array[0, 0, 2:6, 2:6], data[0])
+        np.testing.assert_array_equal(decoded.array[:, :, :2, :], 0)
+        np.testing.assert_array_equal(decoded.array[:, :, 6:, :], 0)
+        np.testing.assert_array_equal(decoded.array[:, :, :, :2], 0)
+        np.testing.assert_array_equal(decoded.array[:, :, :, 6:], 0)
+
+    def test_partial_overlap(self, tmp_path: pathlib.Path, fmt: RasterFormat) -> None:
+        """Reading with partially overlapping bounds crops and pads correctly."""
+        path = UPath(tmp_path)
+        data = np.arange(64, dtype=np.uint8).reshape(1, 8, 8)
+        fmt.encode_raster(path, _PROJECTION, (0, 0, 8, 8), RasterArray(chw_array=data))
+        decoded = fmt.decode_raster(path, _PROJECTION, (4, 4, 12, 12))
+        assert decoded.array.shape == (1, 1, 8, 8)
+        np.testing.assert_array_equal(decoded.array[0, 0, :4, :4], data[0, 4:8, 4:8])
+        np.testing.assert_array_equal(decoded.array[:, :, 4:, :], 0)
+        np.testing.assert_array_equal(decoded.array[:, :, :, 4:], 0)
+
+    def test_partial_overlap_nodata(
+        self, tmp_path: pathlib.Path, fmt: RasterFormat
+    ) -> None:
+        """Out-of-bounds pixels are filled with the stored nodata value."""
+        path = UPath(tmp_path)
+        data = np.arange(64, dtype=np.uint8).reshape(1, 8, 8)
+        raster = RasterArray(chw_array=data, metadata=RasterMetadata(nodata_value=255))
+        fmt.encode_raster(path, _PROJECTION, (0, 0, 8, 8), raster)
+        decoded = fmt.decode_raster(path, _PROJECTION, (4, 4, 12, 12))
+        assert decoded.array.shape == (1, 1, 8, 8)
+        np.testing.assert_array_equal(decoded.array[0, 0, :4, :4], data[0, 4:8, 4:8])
+        np.testing.assert_array_equal(decoded.array[:, :, 4:, :], 255)
+        np.testing.assert_array_equal(decoded.array[:, :, :, 4:], 255)
+
+    def test_no_overlap_nodata(self, tmp_path: pathlib.Path, fmt: RasterFormat) -> None:
+        """Reading with zero overlap returns all nodata."""
+        path = UPath(tmp_path)
+        data = np.arange(64, dtype=np.uint8).reshape(1, 8, 8)
+        raster = RasterArray(chw_array=data, metadata=RasterMetadata(nodata_value=255))
+        fmt.encode_raster(path, _PROJECTION, (0, 0, 8, 8), raster)
+        decoded = fmt.decode_raster(path, _PROJECTION, (1000, 1000, 1004, 1004))
+        assert decoded.array.shape == (1, 1, 4, 4)
+        np.testing.assert_array_equal(decoded.array, 255)
