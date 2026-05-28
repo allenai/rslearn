@@ -145,6 +145,59 @@ def adjust_projection_and_bounds_for_array(
     return (adjusted_projection, adjusted_bounds)
 
 
+def _check_projection_and_crop_bounds(
+    array: npt.NDArray[Any],
+    stored_projection: dict[str, Any] | None,
+    stored_bounds: PixelBounds,
+    requested_projection: Projection,
+    requested_bounds: PixelBounds,
+    nodata_value: int | float | None,
+    format_name: str,
+) -> npt.NDArray[Any]:
+    """Verify projection matches and crop/pad array to requested bounds.
+
+    Projection must match (raises ``NotImplementedError`` on mismatch).
+    Bounds may differ: the returned array is cropped/padded to
+    ``requested_bounds`` using :func:`copy_spatial_array`.
+
+    Args:
+        array: the CTHW decoded raster array.
+        stored_projection: serialised projection dict from metadata, or None if it
+            is unknown, in which case we assume the requested projection is correct.
+        stored_bounds: pixel bounds the data was written with.
+        requested_projection: projection the caller asked for.
+        requested_bounds: bounds the caller asked for.
+        nodata_value: fill value for pixels outside the stored bounds.
+        format_name: human-readable name used in error messages.
+
+    Returns:
+        The (possibly cropped/padded) CTHW array matching ``requested_bounds``.
+    """
+    if stored_projection is not None:
+        source_proj = Projection.deserialize(stored_projection)
+        if source_proj != requested_projection:
+            raise NotImplementedError(
+                f"{format_name} does not support reprojection "
+                f"(stored={source_proj}, requested={requested_projection})"
+            )
+
+    if tuple(stored_bounds) == tuple(requested_bounds):
+        return array
+
+    shape = list(array.shape)
+    shape[-2] = requested_bounds[3] - requested_bounds[1]
+    shape[-1] = requested_bounds[2] - requested_bounds[0]
+    fill = nodata_value if nodata_value is not None else 0
+    dst = np.full(shape, fill, dtype=array.dtype)
+    copy_spatial_array(
+        array,
+        dst,
+        src_offset=(stored_bounds[0], stored_bounds[1]),
+        dst_offset=(requested_bounds[0], requested_bounds[1]),
+    )
+    return dst
+
+
 class RasterFormat:
     """An abstract class for writing raster data.
 
@@ -322,8 +375,11 @@ class ImageTileRasterFormat(RasterFormat):
             end_tile[0] * self.tile_size - bounds[2],
             end_tile[1] * self.tile_size - bounds[3],
         )
+        pad_value = nodata_value if nodata_value is not None else 0
         array = np.pad(
-            array, ((0, 0), (padding[1], padding[3]), (padding[0], padding[2]))
+            array,
+            ((0, 0), (padding[1], padding[3]), (padding[0], padding[2])),
+            constant_values=pad_value,
         )
 
         path.mkdir(parents=True, exist_ok=True)
@@ -766,42 +822,27 @@ class SingleImageRasterFormat(RasterFormat):
         with (path / METADATA_FNAME).open() as f:
             image_metadata = SingleImageRasterMetadata.model_validate_json(f.read())
 
-        # If the projection key is set, verify that it matches the requested projection
-        # since SingleImageRasterFormat currently does not support re-projecting.
-        if image_metadata.projection is not None:
-            source_data_projection = Projection.deserialize(image_metadata.projection)
-            if projection != source_data_projection:
-                raise NotImplementedError(
-                    "not implemented to re-project source data "
-                    + f"(source projection {source_data_projection} does not match requested projection {projection})"
-                )
-
         image_fname = path / ("image." + self.get_extension())
         with image_fname.open("rb") as f:
             array = np.array(Image.open(f, formats=[self.format.upper()]))
 
+        # Convert HWC or HW array to CTHW.
         if len(array.shape) == 2:
             array = array[:, :, None]
-        array = array.transpose(2, 0, 1)
+        array = array.transpose(2, 0, 1)[:, np.newaxis, :, :]
 
-        if bounds != image_metadata.bounds:
-            # Need to extract relevant portion of image.
-            shape = (array.shape[0], bounds[3] - bounds[1], bounds[2] - bounds[0])
-            if image_metadata.nodata_value is not None:
-                dst = np.full(shape, image_metadata.nodata_value, dtype=array.dtype)
-            else:
-                dst = np.zeros(shape, dtype=array.dtype)
-            copy_spatial_array(
-                array,
-                dst,
-                src_offset=(image_metadata.bounds[0], image_metadata.bounds[1]),
-                dst_offset=(bounds[0], bounds[1]),
-            )
-            array = dst
+        array = _check_projection_and_crop_bounds(
+            array=array,
+            stored_projection=image_metadata.projection,
+            stored_bounds=image_metadata.bounds,
+            requested_projection=projection,
+            requested_bounds=bounds,
+            nodata_value=image_metadata.nodata_value,
+            format_name="SingleImageRasterFormat",
+        )
 
-        # Wrap as CTHW with T=1.
         return RasterArray(
-            array=array[:, np.newaxis, :, :],
+            array=array,
             timestamps=image_metadata.timestamps,
             metadata=RasterMetadata(nodata_value=image_metadata.nodata_value),
         )
@@ -827,9 +868,9 @@ class NumpyRasterFormat(RasterFormat):
     - ``metadata.json``: projection, bounds, dtype, channel/timestep counts,
       and optional timestamps.
 
-    ``decode_raster`` returns the stored array as-is without any reprojection
-    or resampling -- data is assumed to have been materialized at the target
-    resolution already.
+    ``decode_raster`` does not support re-projection, only cropping/padding; if the
+    requested Projection does not match the Projection under which the image data was
+    stored, an exception will be raised.
     """
 
     data_fname = "data.npy"
@@ -874,15 +915,14 @@ class NumpyRasterFormat(RasterFormat):
     ) -> RasterArray:
         """Decode a previously stored ``data.npy`` + ``metadata.json``.
 
-        The returned array is the stored array *as-is* -- no reprojection or
-        resampling is performed. The ``projection``, ``bounds``, and
-        ``resampling`` parameters are accepted for interface conformance but
-        are not used for spatial transformation.
+        Projection must match the stored projection. If the requested bounds
+        differ from the stored bounds the array is cropped/padded accordingly
+        (out-of-bounds pixels are filled with the nodata value, or 0).
 
         Args:
             path: directory to read from.
-            projection: used to verify consistency with stored projection.
-            bounds: used to verify consistency with stored bounds.
+            projection: the projection to read the raster in.
+            bounds: the bounds to read in the given projection.
             resampling: ignored (kept for interface conformance).
 
         Returns:
@@ -891,16 +931,18 @@ class NumpyRasterFormat(RasterFormat):
         with (path / METADATA_FNAME).open() as f:
             metadata = NumpyRasterMetadata.model_validate_json(f.read())
 
-        if metadata.bounds != tuple(bounds):
-            raise ValueError(
-                f"NumpyRasterFormat: requested bounds {bounds} differ from "
-                f"stored bounds {metadata.bounds}. Unlike GeotiffRasterFormat, "
-                f"NumpyRasterFormat cannot reproject or crop to different "
-                f"bounds."
-            )
-
         with (path / self.data_fname).open("rb") as f:
             array = np.load(f)
+
+        array = _check_projection_and_crop_bounds(
+            array=array,
+            stored_projection=metadata.projection,
+            stored_bounds=metadata.bounds,
+            requested_projection=projection,
+            requested_bounds=bounds,
+            nodata_value=metadata.nodata_value,
+            format_name="NumpyRasterFormat",
+        )
 
         return RasterArray(
             array=array,
