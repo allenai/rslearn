@@ -18,6 +18,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PlainSerializer,
+    PrivateAttr,
     field_validator,
     model_validator,
 )
@@ -203,6 +204,10 @@ class BandSetConfig(BaseModel):
         description="Optional (height, width) output size. Mutually exclusive with non-zero zoom_offset.",
     )
 
+    # Cached instantiated RasterFormat. We cache since it can take a few ms to
+    # instantiate.
+    _raster_format: RasterFormat | None = PrivateAttr(default=None)
+
     @model_validator(mode="after")
     def after_validator(self) -> "BandSetConfig":
         """Ensure the BandSetConfig is valid, and handle the num_bands field."""
@@ -332,14 +337,17 @@ class BandSetConfig(BaseModel):
 
     def instantiate_raster_format(self) -> RasterFormat:
         """Instantiate the RasterFormat specified by this BandSetConfig."""
+        if self._raster_format is not None:
+            return self._raster_format
+
         from rslearn.utils.jsonargparse import init_jsonargparse
 
         init_jsonargparse()
         parser = jsonargparse.ArgumentParser()
         parser.add_argument("--raster_format", type=RasterFormat)
         cfg = parser.parse_object({"raster_format": self.format})
-        raster_format = parser.instantiate_classes(cfg).raster_format
-        return raster_format
+        self._raster_format = parser.instantiate_classes(cfg).raster_format
+        return self._raster_format
 
 
 class SpaceMode(StrEnum):
