@@ -868,9 +868,9 @@ class NumpyRasterFormat(RasterFormat):
     - ``metadata.json``: projection, bounds, dtype, channel/timestep counts,
       and optional timestamps.
 
-    ``decode_raster`` returns the stored array as-is without any reprojection
-    or resampling -- data is assumed to have been materialized at the target
-    resolution already.
+    ``decode_raster`` does not support re-projection, only cropping/padding; if the
+    requested Projection does not match the Projection under which the image data was
+    stored, an exception will be raised.
     """
 
     data_fname = "data.npy"

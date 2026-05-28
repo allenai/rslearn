@@ -93,6 +93,10 @@ def copy_spatial_array(
     col_overlap = min(src_width - src_col_offset, dst_width - dst_col_offset)
     row_overlap = min(src_height - src_row_offset, dst_height - dst_row_offset)
 
+    # Skip copy if there's no overlap.
+    if col_overlap <= 0 or row_overlap <= 0:
+        return
+
     dst[
         ...,
         dst_row_offset : dst_row_offset + row_overlap,
