@@ -66,14 +66,20 @@ def copy_spatial_array(
     array will be copied, and other parts of the destination array will not be
     overwritten.
 
+    Supports arrays with any number of dimensions >= 2. The last two dimensions are
+    treated as (H, W); any leading dimensions (e.g. C, or C and T) are preserved.
+
     Args:
-        src: the source array (HW or CHW).
-        dst: the destination array (HW or CHW).
+        src: the source array (``...HW``).
+        dst: the destination array (``...HW``).
         src_offset: the (col, row) position of the top-left pixel of src in the coordinate
             system.
         dst_offset: the (col, row) position of the top-left pixel of dst in the coordinate
             system.
     """
+    if len(src.shape) < 2:
+        raise ValueError(f"src must be at least 2-D, got shape {src.shape}")
+
     src_height, src_width = src.shape[-2:]
     dst_height, dst_width = dst.shape[-2:]
     # The top-left position within src that intersects with dst.
@@ -87,23 +93,12 @@ def copy_spatial_array(
     col_overlap = min(src_width - src_col_offset, dst_width - dst_col_offset)
     row_overlap = min(src_height - src_row_offset, dst_height - dst_row_offset)
 
-    if len(src.shape) == 2:
-        dst[
-            dst_row_offset : dst_row_offset + row_overlap,
-            dst_col_offset : dst_col_offset + col_overlap,
-        ] = src[
-            src_row_offset : src_row_offset + row_overlap,
-            src_col_offset : src_col_offset + col_overlap,
-        ]
-    elif len(src.shape) == 3:
-        dst[
-            :,
-            dst_row_offset : dst_row_offset + row_overlap,
-            dst_col_offset : dst_col_offset + col_overlap,
-        ] = src[
-            :,
-            src_row_offset : src_row_offset + row_overlap,
-            src_col_offset : src_col_offset + col_overlap,
-        ]
-    else:
-        raise ValueError(f"Unsupported src shape: {src.shape}")
+    dst[
+        ...,
+        dst_row_offset : dst_row_offset + row_overlap,
+        dst_col_offset : dst_col_offset + col_overlap,
+    ] = src[
+        ...,
+        src_row_offset : src_row_offset + row_overlap,
+        src_col_offset : src_col_offset + col_overlap,
+    ]

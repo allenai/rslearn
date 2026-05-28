@@ -385,15 +385,62 @@ class TestNumpyRasterFormat:
         assert (path / "data.npy").exists()
         assert (path / "metadata.json").exists()
 
-    def test_bounds_mismatch_raises(self, tmp_path: pathlib.Path) -> None:
-        """Decoding with different bounds should raise ValueError."""
+    def test_bounds_subset(self, tmp_path: pathlib.Path) -> None:
+        """Decoding with a subset of the stored bounds crops correctly."""
+        path = UPath(tmp_path)
+        data = np.arange(16, dtype=np.float32).reshape(1, 1, 4, 4)
+        fmt = NumpyRasterFormat()
+        fmt.encode_raster(path, self.PROJECTION, (0, 0, 4, 4), RasterArray(array=data))
+        decoded = fmt.decode_raster(path, self.PROJECTION, (1, 1, 3, 3))
+        assert decoded.array.shape == (1, 1, 2, 2)
+        np.testing.assert_array_equal(decoded.array, data[:, :, 1:3, 1:3])
+
+    def test_bounds_superset(self, tmp_path: pathlib.Path) -> None:
+        """Decoding with larger bounds pads with nodata (0 when unset)."""
         path = UPath(tmp_path)
         data = np.ones((1, 1, 2, 2), dtype=np.float32)
         fmt = NumpyRasterFormat()
         fmt.encode_raster(path, self.PROJECTION, (0, 0, 2, 2), RasterArray(array=data))
+        decoded = fmt.decode_raster(path, self.PROJECTION, (-1, -1, 3, 3))
+        assert decoded.array.shape == (1, 1, 4, 4)
+        # Original data at offset (1,1).
+        np.testing.assert_array_equal(decoded.array[:, :, 1:3, 1:3], 1.0)
+        # Padded region should be 0.
+        assert decoded.array[:, :, 0, :].sum() == 0
+        assert decoded.array[:, :, 3, :].sum() == 0
+        assert decoded.array[:, :, :, 0].sum() == 0
+        assert decoded.array[:, :, :, 3].sum() == 0
 
-        with pytest.raises(ValueError, match="bounds .* differ"):
-            fmt.decode_raster(path, self.PROJECTION, (10, 10, 12, 12))
+    def test_bounds_superset_nodata(self, tmp_path: pathlib.Path) -> None:
+        """Padded pixels use the stored nodata_value."""
+        path = UPath(tmp_path)
+        data = np.ones((1, 1, 2, 2), dtype=np.float32)
+        nodata = -9999.0
+        raster = RasterArray(array=data, metadata=RasterMetadata(nodata_value=nodata))
+        fmt = NumpyRasterFormat()
+        fmt.encode_raster(path, self.PROJECTION, (0, 0, 2, 2), raster)
+        decoded = fmt.decode_raster(path, self.PROJECTION, (-1, -1, 3, 3))
+        assert decoded.array[:, :, 0, 0] == nodata
+
+    def test_bounds_no_overlap(self, tmp_path: pathlib.Path) -> None:
+        """Decoding with no overlap returns all nodata."""
+        path = UPath(tmp_path)
+        data = np.ones((1, 1, 2, 2), dtype=np.float32)
+        fmt = NumpyRasterFormat()
+        fmt.encode_raster(path, self.PROJECTION, (0, 0, 2, 2), RasterArray(array=data))
+        decoded = fmt.decode_raster(path, self.PROJECTION, (10, 10, 12, 12))
+        assert decoded.array.shape == (1, 1, 2, 2)
+        np.testing.assert_array_equal(decoded.array, 0.0)
+
+    def test_projection_mismatch_raises(self, tmp_path: pathlib.Path) -> None:
+        """Decoding with a different projection should raise NotImplementedError."""
+        path = UPath(tmp_path)
+        data = np.ones((1, 1, 2, 2), dtype=np.float32)
+        fmt = NumpyRasterFormat()
+        fmt.encode_raster(path, self.PROJECTION, (0, 0, 2, 2), RasterArray(array=data))
+        other_proj = Projection(CRS.from_epsg(4326), 1, -1)
+        with pytest.raises(NotImplementedError, match="reprojection"):
+            fmt.decode_raster(path, other_proj, (0, 0, 2, 2))
 
     def test_nodata_value_roundtrip(self, tmp_path: pathlib.Path) -> None:
         """nodata_value should round-trip through NumpyRasterFormat."""
