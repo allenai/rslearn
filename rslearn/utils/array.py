@@ -77,8 +77,8 @@ def copy_spatial_array(
         dst_offset: the (col, row) position of the top-left pixel of dst in the coordinate
             system.
     """
-    if len(src.shape) < 2:
-        raise ValueError(f"src must be at least 2-D, got shape {src.shape}")
+    if len(src.shape) < 2 or len(dst.shape) < 2:
+        raise ValueError(f"src and dst must be at least 2-D, got shape {src.shape}")
 
     src_height, src_width = src.shape[-2:]
     dst_height, dst_width = dst.shape[-2:]

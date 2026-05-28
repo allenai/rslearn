@@ -161,7 +161,7 @@ def _check_projection_and_crop_bounds(
     ``requested_bounds`` using :func:`copy_spatial_array`.
 
     Args:
-        array: the decoded raster array (any shape with last two dims H, W).
+        array: the CTHW decoded raster array.
         stored_projection: serialised projection dict from metadata, or None if it
             is unknown, in which case we assume the requested projection is correct.
         stored_bounds: pixel bounds the data was written with.
@@ -171,7 +171,7 @@ def _check_projection_and_crop_bounds(
         format_name: human-readable name used in error messages.
 
     Returns:
-        The (possibly cropped/padded) array matching ``requested_bounds``.
+        The (possibly cropped/padded) CTHW array matching ``requested_bounds``.
     """
     if stored_projection is not None:
         source_proj = Projection.deserialize(stored_projection)
@@ -826,9 +826,10 @@ class SingleImageRasterFormat(RasterFormat):
         with image_fname.open("rb") as f:
             array = np.array(Image.open(f, formats=[self.format.upper()]))
 
+        # Convert HWC or HW array to CTHW.
         if len(array.shape) == 2:
             array = array[:, :, None]
-        array = array.transpose(2, 0, 1)
+        array = array.transpose(2, 0, 1)[:, np.newaxis, :, :]
 
         array = _check_projection_and_crop_bounds(
             array=array,
@@ -840,9 +841,8 @@ class SingleImageRasterFormat(RasterFormat):
             format_name="SingleImageRasterFormat",
         )
 
-        # Wrap as CTHW with T=1.
         return RasterArray(
-            array=array[:, np.newaxis, :, :],
+            array=array,
             timestamps=image_metadata.timestamps,
             metadata=RasterMetadata(nodata_value=image_metadata.nodata_value),
         )
