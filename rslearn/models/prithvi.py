@@ -183,9 +183,9 @@ class PrithviV2(FeatureExtractor):
         # in addition we average along the time dimension (instead of concatenating)
         # to keep the embeddings reasonably sized.
         result = self.model.encoder.prepare_features_for_image_model(
-            features, x.shape[2]
+            [features[-1]], x.shape[2]
         )
-        return FeatureMaps([torch.cat(result, dim=1)])
+        return FeatureMaps(result)
 
     def get_backbone_channels(self) -> list:
         """Returns the output channels of this model when used as a backbone.
@@ -396,7 +396,9 @@ def _interpolate_pos_encoding(
         new_pos_embed = get_3d_sincos_pos_embed(
             pos_embed.shape[-1], new_grid_size, add_cls_token=True
         )
-        new_pos_embed = torch.from_numpy(new_pos_embed).float().unsqueeze(0)
+        new_pos_embed = (
+            torch.from_numpy(new_pos_embed).float().unsqueeze(0).to(pos_embed.device)
+        )
     else:
         new_grid_size = grid_size  # type: ignore
         new_pos_embed = pos_embed

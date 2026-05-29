@@ -48,7 +48,7 @@ configuration file to `./dataset/config.json`:
         "query_config": {
           "max_matches": 4,
           "period_duration": "30d",
-          "space_mode": "PER_PERIOD_MOSAIC"
+          "space_mode": "MOSAIC"
         }
       },
       "type": "raster"

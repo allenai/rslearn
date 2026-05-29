@@ -26,6 +26,11 @@ Examples
   are taken from the USDA Cropland Data Layer.
 - [OlmoEarthEmbeddings](examples/OlmoEarthEmbeddings.md): compute OlmoEarth embeddings
   on a location and time range of interest.
+- [FindStadiums](examples/FindStadiums.md): a fine-tuning example that shows how to turn
+  point labels into rasters for training a segmentation model, and how to compare
+  several remote sensing foundation models.
+- [GetImageTimeSeries](examples/GetImageTimeSeries.md): a quick example to obtain time
+  series of satellite images for several locations.
 - [EarthDailySentinel2Biophysical](examples/EarthDailySentinel2Biophysical.md): align
   EarthDaily Sentinel-2 scenes with derived LAI/FAPAR/FCOVER products.
 - [EarthDailyCloudMaskClearCover](examples/EarthDailyCloudMaskClearCover.md): rank
