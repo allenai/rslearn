@@ -37,6 +37,7 @@ detailed page with configuration options and available bands. See
 
 | Data Source | Provider | Notes |
 |---|---|---|
+| [gcp_landsat.Landsat](data_sources/gcp_landsat_Landsat.md) | Google Cloud Storage | Collection 2 L1/L2 all missions, requester-pays, direct materialization |
 | [aws_landsat.LandsatOliTirs](data_sources/aws_landsat_LandsatOliTirs.md) | AWS (USGS) | Level-1, all bands |
 | [planetary_computer.LandsatC2L2](data_sources/planetary_computer_LandsatC2L2.md) | Microsoft Planetary Computer | Collection 2 Level-2, direct materialization |
 | [usgs_landsat.LandsatOliTirs](data_sources/usgs_landsat_LandsatOliTirs.md) | USGS M2M API | Requires M2M access |
