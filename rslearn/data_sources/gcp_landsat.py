@@ -80,6 +80,21 @@ class ProcessingLevel(StrEnum):
     L2SR = "L2SR"
 
 
+# For Level-2 products, each band is delivered as either a surface reflectance
+# (SR_) or surface temperature (ST_) asset. This maps each band to its asset
+# type prefix. Bands not listed default to surface reflectance.
+_LEVEL2_BAND_ASSET = {
+    "B1": "SR",
+    "B2": "SR",
+    "B3": "SR",
+    "B4": "SR",
+    "B5": "SR",
+    "B6": "SR",
+    "B7": "SR",
+    "B10": "ST",
+}
+
+
 class LandsatItem(Item):
     """An item in the Landsat data source."""
 
@@ -573,6 +588,38 @@ class Landsat(
     # DirectMaterializeDataSource implementation
     # -------------------------------------------------------------------------
 
+    def _band_to_file_token(self, item: LandsatItem, band: str) -> str:
+        """Get the band token used in the GCS blob filename for the given band.
+
+        Level-1 products name band files simply by the band (e.g. "B4"), while
+        Level-2 products prefix them with the asset type: surface temperature
+        ("ST_B10") for the thermal band and surface reflectance ("SR_B4") for
+        all other bands.
+
+        Args:
+            item: the item.
+            band: the band name (e.g. "B4").
+
+        Returns:
+            the band token used in the blob filename (e.g. "B4" or "SR_B4").
+        """
+        if not item.processing_level.startswith("L2"):
+            return band
+        prefix = _LEVEL2_BAND_ASSET.get(band, "SR")
+        return f"{prefix}_{band}"
+
+    def _band_blob_key(self, item: LandsatItem, band: str) -> str:
+        """Get the blob key (path within the bucket) for an item's band file.
+
+        Args:
+            item: the item.
+            band: the band name (e.g. "B4").
+
+        Returns:
+            the blob key, e.g. "<blob_path><name>_SR_B4.TIF".
+        """
+        return f"{item.blob_path}{item.name}_{self._band_to_file_token(item, band)}.TIF"
+
     @override
     def get_asset_url(self, item: LandsatItem, asset_key: str) -> str:
         """Get a gs:// URL for the band TIF.
@@ -584,7 +631,7 @@ class Landsat(
         Returns:
             a gs:// URL readable by rasterio.
         """
-        blob_key = f"{item.blob_path}{item.name}_{asset_key}.TIF"
+        blob_key = self._band_blob_key(item, asset_key)
         return f"gs://{BUCKET_NAME}/{blob_key}"
 
     # -------------------------------------------------------------------------
@@ -611,7 +658,7 @@ class Landsat(
                 if tile_store.is_raster_ready(item, band_names):
                     continue
 
-                blob_key = f"{item.blob_path}{item.name}_{band}.TIF"
+                blob_key = self._band_blob_key(item, band)
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     fname = os.path.join(tmp_dir, f"{band}.tif")
                     blob = self._get_bucket().blob(blob_key)
@@ -634,7 +681,7 @@ class Landsat(
     ) -> Generator[tuple[str, BinaryIO], None, None]:
         """Retrieves the rasters corresponding to an item as file streams."""
         for band in self.effective_bands:
-            blob_key = f"{item.blob_path}{item.name}_{band}.TIF"
+            blob_key = self._band_blob_key(item, band)
             blob = self._get_bucket().blob(blob_key)
             buf = io.BytesIO()
             blob.download_to_file(buf)
