@@ -153,7 +153,7 @@ class L2ABand:
     """A band image file in an L2A product.
 
     L2A band files are stored in resolution subfolders under IMG_DATA with a per-scene
-    stem, e.g. IMG_DATA/R10m/L2A_T31UFS_20170403T104021_B04_10m.jp2. Each band is taken
+    stem, e.g. IMG_DATA/R10m/T31UFS_20170403T104021_B04_10m.jp2. Each band is taken
     at its native (highest) resolution.
     """
 
@@ -171,10 +171,10 @@ class L2ABand:
 
         The per-scene stem is derived from the scene name, e.g. scene
         S2A_MSIL2A_20170403T104021_N0204_R008_T31UFS_... has band files named like
-        L2A_T31UFS_20170403T104021_B04_10m.jp2.
+        T31UFS_20170403T104021_B04_10m.jp2.
         """
         parts = scene_name.split("_")
-        stem = f"L2A_{parts[5]}_{parts[2]}_"
+        stem = f"{parts[5]}_{parts[2]}_"
         return f"{self.res_folder}/{stem}{self.band_token}_{self.res_suffix}.jp2"
 
     def local_name(self) -> str:
@@ -721,13 +721,19 @@ class Sentinel2(DataSource):
         product_folder = self._build_product_folder_name(name)
         if self.product_type == Sentinel2ProductType.L2A:
             # L2A band files live in resolution subfolders under IMG_DATA, so the blob
-            # prefix is the IMG_DATA directory. The IMAGE_FILE_2A entries are relative
-            # paths like GRANULE/<granule>/IMG_DATA/R10m/L2A_<tile>_<time>_B04_10m.
-            elements = [
-                el
-                for el in tree.iter(self.config.image_file_tag)
-                if el.text is not None and "/IMG_DATA/" in el.text
-            ]
+            # prefix is the IMG_DATA directory. The image file entries are relative
+            # paths like GRANULE/<granule>/IMG_DATA/R10m/T<tile>_<time>_B04_10m.
+            # Older processing baselines use the IMAGE_FILE_2A tag while newer ones
+            # (e.g. N0512) use IMAGE_FILE, so we accept either.
+            elements = []
+            for tag in (self.config.image_file_tag, "IMAGE_FILE"):
+                elements = [
+                    el
+                    for el in tree.iter(tag)
+                    if el.text is not None and "/IMG_DATA/" in el.text
+                ]
+                if elements:
+                    break
             if not elements:
                 raise ValueError(f"no {self.config.image_file_tag} entries for {name}")
             rel_path = elements[0].text

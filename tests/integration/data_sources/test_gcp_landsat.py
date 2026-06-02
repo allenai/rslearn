@@ -62,7 +62,7 @@ def _make_item(seattle2020: STGeometry) -> LandsatItem:
         blob_path=MOCK_BLOB_PATH,
         cloud_cover=5.0,
         spacecraft_id="LANDSAT_8",
-        data_type="L1TP",
+        processing_level="L1TP",
     )
 
 

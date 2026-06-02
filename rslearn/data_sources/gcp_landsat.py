@@ -70,7 +70,7 @@ class CollectionCategory(StrEnum):
     RT = "RT"
 
 
-class DataType(StrEnum):
+class ProcessingLevel(StrEnum):
     """Landsat processing levels."""
 
     L1GS = "L1GS"
@@ -90,7 +90,7 @@ class LandsatItem(Item):
         blob_path: str,
         cloud_cover: float,
         spacecraft_id: str | None,
-        data_type: str,
+        processing_level: str,
         sensor_id: str | None = None,
     ) -> None:
         """Creates a new LandsatItem.
@@ -103,14 +103,14 @@ class LandsatItem(Item):
             cloud_cover: the scene's cloud cover percentage (0-100).
             spacecraft_id: the spacecraft identifier, e.g. "LANDSAT_8".
             sensor_id: the sensor identifier, e.g. "OLI_TIRS".
-            data_type: the processing level, e.g. "L1TP".
+            processing_level: the processing level, e.g. "L1TP".
         """
         super().__init__(name, geometry)
         self.blob_path = blob_path
         self.cloud_cover = cloud_cover
         self.spacecraft_id = spacecraft_id
         self.sensor_id = sensor_id
-        self.data_type = data_type
+        self.processing_level = processing_level
 
     @override
     def serialize(self) -> dict[str, Any]:
@@ -120,7 +120,7 @@ class LandsatItem(Item):
         d["cloud_cover"] = self.cloud_cover
         d["spacecraft_id"] = self.spacecraft_id
         d["sensor_id"] = self.sensor_id
-        d["data_type"] = self.data_type
+        d["processing_level"] = self.processing_level
         return d
 
     @staticmethod
@@ -134,7 +134,7 @@ class LandsatItem(Item):
             blob_path=d["blob_path"],
             cloud_cover=d["cloud_cover"],
             spacecraft_id=d["spacecraft_id"],
-            data_type=d["data_type"],
+            processing_level=d["processing_level"],
             sensor_id=d["sensor_id"],
         )
 
@@ -170,7 +170,7 @@ class Landsat(
         bands: list[str] | None = None,
         sort_by: str | None = None,
         collection_category: list[CollectionCategory] | None = None,
-        data_type: list[DataType] | None = None,
+        processing_level: list[ProcessingLevel] | None = None,
         use_rtree_index: bool = True,
         rtree_time_range: tuple[datetime, datetime] | None = None,
         context: DataSourceContext = DataSourceContext(),
@@ -186,7 +186,8 @@ class Landsat(
                 specify band sets.
             sort_by: "cloud_cover" or None (arbitrary order).
             collection_category: filter by tier, e.g. ["T1"]. None means all.
-            data_type: filter by processing level, e.g. ["L1TP"]. None means all.
+            processing_level: filter by processing level, e.g. ["L1TP"]. None
+                means all.
             use_rtree_index: whether to build and query local rtree index.
             rtree_time_range: only index scenes within this time range.
                 Restricting to a shorter period significantly speeds up rtree
@@ -223,7 +224,9 @@ class Landsat(
         self.collection_category_filter = (
             set(collection_category) if collection_category is not None else None
         )
-        self.data_type_filter = set(data_type) if data_type is not None else None
+        self.processing_level_filter = (
+            set(processing_level) if processing_level is not None else None
+        )
         self.use_rtree_index = use_rtree_index
         self.rtree_time_range = rtree_time_range
         self.sort_by = sort_by
@@ -293,7 +296,7 @@ class Landsat(
         """Read Landsat scenes from BigQuery table."""
         query_str = f"""
             SELECT  product_id, spacecraft_id, sensor_id, sensing_time,
-                    data_type, collection_category, wrs_path, wrs_row,
+                    collection_category, wrs_path, wrs_row,
                     cloud_cover, north_lat, south_lat, west_lon, east_lon,
                     base_url
             FROM    `{TABLE_NAME}`
@@ -362,7 +365,6 @@ class Landsat(
 
         _add_in_filter("spacecraft_ids", "spacecraft_id", self.spacecraft_id_filter)
         _add_in_filter("sensor_ids", "sensor_id", self.sensor_id_filter)
-        _add_in_filter("data_types", "data_type", self.data_type_filter)
         _add_in_filter(
             "collection_categories",
             "collection_category",
@@ -401,13 +403,24 @@ class Landsat(
             )
             geometry = split_at_antimeridian(geometry)
 
+            # Derive processing level from the product_id e.g. "L1TP" in
+            # "LC09_L1TP_231062_20260426_20260426_02_T1").
+            product_id_parts = product_id.split("_")
+            processing_level = product_id_parts[1] if len(product_id_parts) > 1 else ""
+
+            if (
+                self.processing_level_filter is not None
+                and processing_level not in self.processing_level_filter
+            ):
+                continue
+
             yield LandsatItem(
                 name=product_id,
                 geometry=geometry,
                 blob_path=blob_path,
                 cloud_cover=float(row["cloud_cover"]),
                 spacecraft_id=row["spacecraft_id"],
-                data_type=row["data_type"],
+                processing_level=processing_level,
                 sensor_id=row["sensor_id"],
             )
 

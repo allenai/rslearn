@@ -36,7 +36,7 @@ def _make_bigquery_row(
     spacecraft_id: str = "LANDSAT_8",
     sensor_id: str | None = "OLI_TIRS",
     sensing_time: str = "2025-01-31T18:22:13Z",
-    data_type: str = "L1TP",
+    processing_level: str = "L1TP",
     collection_category: str = "T1",
     wrs_path: int = 40,
     wrs_row: int = 36,
@@ -47,7 +47,7 @@ def _make_bigquery_row(
         "spacecraft_id": spacecraft_id,
         "sensor_id": sensor_id,
         "sensing_time": datetime.fromisoformat(sensing_time),
-        "data_type": data_type,
+        "processing_level": processing_level,
         "collection_category": collection_category,
         "wrs_path": wrs_path,
         "wrs_row": wrs_row,
@@ -64,7 +64,7 @@ def _make_item(
     name: str,
     spacecraft_id: str = "LANDSAT_8",
     sensor_id: str | None = "OLI_TIRS",
-    data_type: str = "L1TP",
+    processing_level: str = "L1TP",
     cloud_cover: float = 10.0,
     lon: float = -122.0,
     lat: float = 47.0,
@@ -84,7 +84,7 @@ def _make_item(
         cloud_cover=cloud_cover,
         spacecraft_id=spacecraft_id,
         sensor_id=sensor_id,
-        data_type=data_type,
+        processing_level=processing_level,
     )
 
 
@@ -108,7 +108,7 @@ class TestLandsatItemSerialize:
         assert restored.cloud_cover == item.cloud_cover
         assert restored.spacecraft_id == item.spacecraft_id
         assert restored.sensor_id == item.sensor_id
-        assert restored.data_type == item.data_type
+        assert restored.processing_level == item.processing_level
 
 
 class TestReadBigQuery:

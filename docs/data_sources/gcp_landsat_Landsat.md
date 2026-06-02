@@ -54,7 +54,7 @@ The following environment variables must be set:
     "collection_category": ["T1"],
     // Filter by processing level. null means all.
     // Values: "L1GS", "L1GT", "L1TP", "L2SP", "L2SR".
-    "data_type": ["L1TP"],
+    "processing_level": ["L1TP"],
     // Which bands to expose. null defaults to layer config bands or OLI-TIRS bands.
     "bands": null,
     // Sort by this attribute. null (default) for arbitrary ordering, or "cloud_cover".
