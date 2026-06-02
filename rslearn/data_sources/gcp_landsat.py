@@ -35,7 +35,12 @@ from rslearn.utils.geometry import STGeometry, flatten_shape, split_at_antimerid
 from rslearn.utils.grid_index import GridIndex
 from rslearn.utils.rtree_index import RtreeIndex, get_cached_rtree
 
-from .data_source import DataSourceContext, Item, QueryConfig
+from .data_source import (
+    DataSourceContext,
+    Item,
+    QueryConfig,
+    RetrieveItemDataSource,
+)
 from .wrs2 import build_wrs2_grid_index, get_pathrows_for_geometry
 
 logger = logging.getLogger(__name__)
@@ -130,11 +135,14 @@ class LandsatItem(Item):
             cloud_cover=d["cloud_cover"],
             spacecraft_id=d["spacecraft_id"],
             data_type=d["data_type"],
-            sensor_id=d.get("sensor_id"),
+            sensor_id=d["sensor_id"],
         )
 
 
-class Landsat(DirectMaterializeDataSource[LandsatItem]):
+class Landsat(
+    DirectMaterializeDataSource[LandsatItem],
+    RetrieveItemDataSource[LandsatItem],
+):
     """Data source for Landsat imagery on GCP's public Landsat GCS bucket.
 
     Uses gs://gee-public-data-landsat which contains Collection 2 data for all
@@ -164,7 +172,6 @@ class Landsat(DirectMaterializeDataSource[LandsatItem]):
         collection_category: list[CollectionCategory] | None = None,
         data_type: list[DataType] | None = None,
         use_rtree_index: bool = True,
-        gcp_project: str | None = None,
         rtree_time_range: tuple[datetime, datetime] | None = None,
         context: DataSourceContext = DataSourceContext(),
     ) -> None:
@@ -181,7 +188,6 @@ class Landsat(DirectMaterializeDataSource[LandsatItem]):
             collection_category: filter by tier, e.g. ["T1"]. None means all.
             data_type: filter by processing level, e.g. ["L1TP"]. None means all.
             use_rtree_index: whether to build and query local rtree index.
-            gcp_project: GCP project for requester-pays billing.
             rtree_time_range: only index scenes within this time range.
                 Restricting to a shorter period significantly speeds up rtree
                 creation.
@@ -222,14 +228,22 @@ class Landsat(DirectMaterializeDataSource[LandsatItem]):
         self.rtree_time_range = rtree_time_range
         self.sort_by = sort_by
         self.effective_bands = effective_bands
-        self.gcp_project = gcp_project
+
+        # The bucket is requester-pays, so we need a project to bill. GDAL uses the
+        # GS_USER_PROJECT environment variable for the same purpose when reading the
+        # rasters directly via gs:// URLs, so we reuse it here for consistency and to
+        # avoid requiring separate configuration.
+        user_project = os.environ.get("GS_USER_PROJECT")
+        if not user_project:
+            raise ValueError(
+                "the GS_USER_PROJECT environment variable must be set to a GCP "
+                "project for requester-pays billing on the Landsat bucket"
+            )
+        self.user_project = user_project
 
         self.index_cache_dir.mkdir(parents=True, exist_ok=True)
 
-        self._storage_client = storage.Client()
-        self._bucket = self._storage_client.bucket(
-            BUCKET_NAME, user_project=gcp_project
-        )
+        self._bucket: storage.Bucket | None = None
         self._bigquery_client: bigquery.Client | None = None
         self._wrs2_index: GridIndex | None = None
 
@@ -254,6 +268,14 @@ class Landsat(DirectMaterializeDataSource[LandsatItem]):
         if self._bigquery_client is None:
             self._bigquery_client = bigquery.Client()
         return self._bigquery_client
+
+    def _get_bucket(self) -> storage.Bucket:
+        """Lazily initialize the requester-pays GCS bucket."""
+        if self._bucket is None:
+            self._bucket = storage.Client().bucket(
+                BUCKET_NAME, user_project=self.user_project
+            )
+        return self._bucket
 
     def _get_wrs2_index(self) -> GridIndex:
         """Lazily initialize WRS2 index for direct BigQuery mode."""
@@ -284,38 +306,73 @@ class Landsat(DirectMaterializeDataSource[LandsatItem]):
                     AND north_lat IS NOT NULL
                     AND base_url IS NOT NULL
         """
+        query_params: list[
+            bigquery.ScalarQueryParameter | bigquery.ArrayQueryParameter
+        ] = []
         if time_range is not None:
             query_str += (
-                f' AND sensing_time >= "{time_range[0]}"'
-                f' AND sensing_time <= "{time_range[1]}"'
+                " AND sensing_time >= @time_start AND sensing_time <= @time_end"
+            )
+            query_params.append(
+                bigquery.ScalarQueryParameter("time_start", "TIMESTAMP", time_range[0])
+            )
+            query_params.append(
+                bigquery.ScalarQueryParameter("time_end", "TIMESTAMP", time_range[1])
             )
         if wgs84_bbox is not None:
             query_str += (
-                f" AND west_lon < {wgs84_bbox[2]}"
-                f" AND east_lon > {wgs84_bbox[0]}"
-                f" AND south_lat < {wgs84_bbox[3]}"
-                f" AND north_lat > {wgs84_bbox[1]}"
+                " AND west_lon < @bbox_east"
+                " AND east_lon > @bbox_west"
+                " AND south_lat < @bbox_north"
+                " AND north_lat > @bbox_south"
+            )
+            query_params.append(
+                bigquery.ScalarQueryParameter("bbox_west", "FLOAT64", wgs84_bbox[0])
+            )
+            query_params.append(
+                bigquery.ScalarQueryParameter("bbox_south", "FLOAT64", wgs84_bbox[1])
+            )
+            query_params.append(
+                bigquery.ScalarQueryParameter("bbox_east", "FLOAT64", wgs84_bbox[2])
+            )
+            query_params.append(
+                bigquery.ScalarQueryParameter("bbox_north", "FLOAT64", wgs84_bbox[3])
             )
         if pathrows:
-            pairs = [
-                f"(wrs_path = {int(path)} AND wrs_row = {int(row)})"
-                for path, row in sorted(pathrows)
-            ]
-            query_str += f" AND ({' OR '.join(pairs)})"
+            # Match against "path,row" strings to filter on both columns at once.
+            query_str += (
+                " AND CONCAT(CAST(wrs_path AS STRING), ',',"
+                " CAST(wrs_row AS STRING)) IN UNNEST(@pathrows)"
+            )
+            pathrow_strs = [f"{int(path)},{int(row)}" for path, row in sorted(pathrows)]
+            query_params.append(
+                bigquery.ArrayQueryParameter("pathrows", "STRING", pathrow_strs)
+            )
 
-        def _add_in_filter(column_name: str, values: Collection[str] | None) -> None:
+        def _add_in_filter(
+            param_name: str, column_name: str, values: Collection[str] | None
+        ) -> None:
             nonlocal query_str
             if values is None:
                 return
-            formatted_values = ", ".join(f'"{v}"' for v in sorted(values))
-            query_str += f" AND {column_name} IN ({formatted_values})"
+            query_str += f" AND {column_name} IN UNNEST(@{param_name})"
+            query_params.append(
+                bigquery.ArrayQueryParameter(param_name, "STRING", sorted(values))
+            )
 
-        _add_in_filter("spacecraft_id", self.spacecraft_id_filter)
-        _add_in_filter("sensor_id", self.sensor_id_filter)
-        _add_in_filter("data_type", self.data_type_filter)
-        _add_in_filter("collection_category", self.collection_category_filter)
+        _add_in_filter("spacecraft_ids", "spacecraft_id", self.spacecraft_id_filter)
+        _add_in_filter("sensor_ids", "sensor_id", self.sensor_id_filter)
+        _add_in_filter("data_types", "data_type", self.data_type_filter)
+        _add_in_filter(
+            "collection_categories",
+            "collection_category",
+            self.collection_category_filter,
+        )
 
-        result = self._get_bigquery_client().query(query_str)
+        result = self._get_bigquery_client().query(
+            query_str,
+            job_config=bigquery.QueryJobConfig(query_parameters=query_params),
+        )
         if desc is not None:
             result = tqdm.tqdm(result, desc=desc)
 
@@ -452,10 +509,11 @@ class Landsat(DirectMaterializeDataSource[LandsatItem]):
             max_east = east if max_east is None else max(max_east, east)
             max_north = north if max_north is None else max(max_north, north)
 
-            if wgs84_geometry.time_range is not None:
-                start, end = wgs84_geometry.time_range
-                min_time = start if min_time is None else min(min_time, start)
-                max_time = end if max_time is None else max(max_time, end)
+            # get_items already verifies that every geometry has a time range.
+            assert wgs84_geometry.time_range is not None
+            start, end = wgs84_geometry.time_range
+            min_time = start if min_time is None else min(min_time, start)
+            max_time = end if max_time is None else max(max_time, end)
 
         if (
             min_west is None
@@ -542,7 +600,7 @@ class Landsat(DirectMaterializeDataSource[LandsatItem]):
                 blob_key = f"{item.blob_path}{item.name}_{band}.TIF"
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     fname = os.path.join(tmp_dir, f"{band}.tif")
-                    blob = self._bucket.blob(blob_key)
+                    blob = self._get_bucket().blob(blob_key)
                     logger.debug("Downloading %s", blob_key)
                     blob.download_to_filename(fname)
                     tile_store.write_raster_file(
@@ -556,13 +614,14 @@ class Landsat(DirectMaterializeDataSource[LandsatItem]):
     # Retrieve
     # -------------------------------------------------------------------------
 
+    @override
     def retrieve_item(
         self, item: LandsatItem
     ) -> Generator[tuple[str, BinaryIO], None, None]:
         """Retrieves the rasters corresponding to an item as file streams."""
         for band in self.effective_bands:
             blob_key = f"{item.blob_path}{item.name}_{band}.TIF"
-            blob = self._bucket.blob(blob_key)
+            blob = self._get_bucket().blob(blob_key)
             buf = io.BytesIO()
             blob.download_to_file(buf)
             buf.seek(0)

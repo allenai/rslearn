@@ -1,5 +1,6 @@
 """Utilities for working with Landsat WRS-2 path/row polygons."""
 
+import logging
 import shutil
 import urllib.request
 import zipfile
@@ -13,6 +14,8 @@ from rslearn.const import SHAPEFILE_AUX_EXTENSIONS
 from rslearn.utils.fsspec import get_upath_local
 from rslearn.utils.geometry import STGeometry, flatten_shape
 from rslearn.utils.grid_index import GridIndex
+
+logger = logging.getLogger(__name__)
 
 WRS2_GRID_SIZE = 1.0
 
@@ -37,6 +40,7 @@ def get_wrs2_polygons(
     shp_fname = cache_dir / f"{prefix}.shp"
     if not shp_fname.exists():
         zip_fname = cache_dir / f"{prefix}.zip"
+        logger.info("downloading WRS2 shapefile from %s", WRS2_URL)
         with urllib.request.urlopen(WRS2_URL) as response:
             with zip_fname.open("wb") as f:
                 shutil.copyfileobj(response, f)

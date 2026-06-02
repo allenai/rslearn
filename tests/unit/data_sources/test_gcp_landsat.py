@@ -21,6 +21,12 @@ from rslearn.utils.geometry import STGeometry
 from rslearn.utils.grid_index import GridIndex
 
 
+@pytest.fixture(autouse=True)
+def _gs_user_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set GS_USER_PROJECT, which Landsat requires for requester-pays billing."""
+    monkeypatch.setenv("GS_USER_PROJECT", "test-project")
+
+
 def _make_bigquery_row(
     product_id: str,
     west_lon: float,
@@ -40,7 +46,7 @@ def _make_bigquery_row(
         "product_id": product_id,
         "spacecraft_id": spacecraft_id,
         "sensor_id": sensor_id,
-        "sensing_time": sensing_time,
+        "sensing_time": datetime.fromisoformat(sensing_time),
         "data_type": data_type,
         "collection_category": collection_category,
         "wrs_path": wrs_path,
@@ -83,13 +89,9 @@ def _make_item(
 
 
 def _make_data_source(tmp_path: pathlib.Path, **kwargs: Any) -> Landsat:
-    """Create a Landsat data source with mocked GCS client and optional rtree."""
-    with (
-        patch("rslearn.data_sources.gcp_landsat.storage") as mock_storage,
-        patch("rslearn.data_sources.gcp_landsat.get_cached_rtree") as mock_rtree,
-    ):
-        mock_storage.Client.return_value = MagicMock()
-        mock_storage.Client.return_value.bucket.return_value = MagicMock()
+    """Create a Landsat data source with the rtree build mocked out."""
+    kwargs.setdefault("bands", ["B4"])
+    with patch("rslearn.data_sources.gcp_landsat.get_cached_rtree") as mock_rtree:
         mock_rtree.return_value = MagicMock()
         return Landsat(index_cache_dir=str(tmp_path), **kwargs)
 
@@ -124,10 +126,12 @@ class TestReadBigQuery:
             )
         ]
 
-        with patch("rslearn.data_sources.gcp_landsat.bigquery") as mock_bigquery:
+        with patch(
+            "rslearn.data_sources.gcp_landsat.bigquery.Client"
+        ) as mock_client_cls:
             mock_client = MagicMock()
             mock_client.query.return_value = rows
-            mock_bigquery.Client.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             items = list(ds._read_bigquery())
 
@@ -137,15 +141,23 @@ class TestReadBigQuery:
     def test_filters_by_spacecraft_id_in_sql(self, tmp_path: pathlib.Path) -> None:
         ds = _make_data_source(tmp_path, spacecraft_id=[SpacecraftId.LANDSAT_9])
 
-        with patch("rslearn.data_sources.gcp_landsat.bigquery") as mock_bigquery:
+        with patch(
+            "rslearn.data_sources.gcp_landsat.bigquery.Client"
+        ) as mock_client_cls:
             mock_client = MagicMock()
             mock_client.query.return_value = []
-            mock_bigquery.Client.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             list(ds._read_bigquery())
             query_str = mock_client.query.call_args[0][0]
+            job_config = mock_client.query.call_args[1]["job_config"]
 
-        assert 'spacecraft_id IN ("LANDSAT_9")' in query_str
+        assert "spacecraft_id IN UNNEST(@spacecraft_ids)" in query_str
+        spacecraft_params = [
+            p for p in job_config.query_parameters if p.name == "spacecraft_ids"
+        ]
+        assert len(spacecraft_params) == 1
+        assert spacecraft_params[0].values == ["LANDSAT_9"]
 
     def test_antimeridian_crossing(self, tmp_path: pathlib.Path) -> None:
         """A scene crossing the antimeridian produces a valid multi-polygon."""
@@ -161,10 +173,12 @@ class TestReadBigQuery:
             )
         ]
 
-        with patch("rslearn.data_sources.gcp_landsat.bigquery") as mock_bigquery:
+        with patch(
+            "rslearn.data_sources.gcp_landsat.bigquery.Client"
+        ) as mock_client_cls:
             mock_client = MagicMock()
             mock_client.query.return_value = rows
-            mock_bigquery.Client.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
             items = list(ds._read_bigquery())
 
@@ -217,8 +231,9 @@ class TestGetItemsBigQueryMode:
         ]
 
         with (
-            patch("rslearn.data_sources.gcp_landsat.bigquery") as mock_bigquery,
-            patch("rslearn.data_sources.gcp_landsat.storage"),
+            patch(
+                "rslearn.data_sources.gcp_landsat.bigquery.Client"
+            ) as mock_client_cls,
             patch(
                 "rslearn.data_sources.gcp_landsat.build_wrs2_grid_index",
                 return_value=wrs2_index,
@@ -226,17 +241,28 @@ class TestGetItemsBigQueryMode:
         ):
             mock_client = MagicMock()
             mock_client.query.return_value = rows
-            mock_bigquery.Client.return_value = mock_client
+            mock_client_cls.return_value = mock_client
 
-            ds = Landsat(index_cache_dir=str(tmp_path), use_rtree_index=False)
+            ds = Landsat(
+                index_cache_dir=str(tmp_path),
+                bands=["B4"],
+                use_rtree_index=False,
+            )
             result = ds.get_items([geometry], QueryConfig())
 
         # One query for the whole get_items call.
         assert mock_client.query.call_count == 1
 
-        # The real path/row lookup must have produced the 40/36 filter in the SQL.
+        # The real path/row lookup must have produced the 40/36 filter, passed as a
+        # "path,row" entry in the @pathrows query parameter.
         query_str = mock_client.query.call_args[0][0]
-        assert "wrs_path = 40 AND wrs_row = 36" in query_str
+        job_config = mock_client.query.call_args[1]["job_config"]
+        assert "IN UNNEST(@pathrows)" in query_str
+        pathrow_params = [
+            p for p in job_config.query_parameters if p.name == "pathrows"
+        ]
+        assert len(pathrow_params) == 1
+        assert "40,36" in pathrow_params[0].values
 
         # The candidate item should be matched into a single group for the geometry.
         assert len(result) == 1

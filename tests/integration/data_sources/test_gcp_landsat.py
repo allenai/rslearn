@@ -22,6 +22,12 @@ MOCK_PRODUCT_ID = "LC08_L1TP_046027_20200715_20200724_02_T1"
 MOCK_BLOB_PATH = "LC08/L1/02/046/027/LC08_L1TP_046027_20200715_20200724_02_T1/"
 
 
+@pytest.fixture(autouse=True)
+def _gs_user_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set GS_USER_PROJECT, which Landsat requires for requester-pays billing."""
+    monkeypatch.setenv("GS_USER_PROJECT", "test-project")
+
+
 @pytest.fixture
 def test_geotiff(tmp_path: pathlib.Path, seattle2020: STGeometry) -> UPath:
     """Create a small single-band uint16 GeoTIFF in the seattle2020 projection."""

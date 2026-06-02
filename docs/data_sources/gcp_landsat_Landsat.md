@@ -29,6 +29,8 @@ The following environment variables must be set:
 
 - `GOOGLE_APPLICATION_CREDENTIALS`: path to a GCP service account JSON key file.
 - `GS_USER_PROJECT`: GCP project for requester-pays billing (e.g. `my-gcp-project`).
+  This is used both for BigQuery/GCS calls made directly by the data source, and by
+  GDAL for `gs://` URLs.
 
 ### Configuration
 
@@ -42,7 +44,10 @@ The following environment variables must be set:
     // Filter by spacecraft. null means all missions (Landsat 1-9).
     // Values: "LANDSAT_1" through "LANDSAT_9".
     "spacecraft_id": ["LANDSAT_8", "LANDSAT_9"],
-    // Filter by sensor. null means all sensors.
+    // Filter by sensor. This should almost always be set, because the available
+    // bands differ across sensors (see "Available Bands" below).
+    // Values: "OLI_TIRS" (Landsat 8/9), "ETM" (Landsat 7), "TM" (Landsat 4/5),
+    // "MSS" (Landsat 1-5).
     "sensor_id": ["OLI_TIRS"],
     // Filter by collection tier. null means all.
     // Values: "T1", "T2", "RT".
@@ -56,8 +61,6 @@ The following environment variables must be set:
     "sort_by": "cloud_cover",
     // Whether to use local rtree mode or one-query-per-get_items BigQuery mode.
     "use_rtree_index": true,
-    // GCP project for requester-pays billing when downloading scene rasters.
-    "gcp_project": "my-gcp-project",
     // Only index scenes within this time range. Highly recommended to speed up
     // rtree creation. null means all scenes.
     "rtree_time_range": ["2025-01-01T00:00:00", "2025-12-31T23:59:59"]

@@ -443,7 +443,8 @@ class Sentinel2(DataSource):
         prefix = f"{cell_folder}{mission}_{l2a_token}_{sensing_time}_"
         blobs = self.bucket.list_blobs(prefix=prefix, delimiter="/")
 
-        # Consume the iterator so that blobs.prefixes is populated with folder names.
+        # Need to consume the iterator to obtain folder names.
+        # See https://cloud.google.com/storage/docs/samples/storage-list-files-with-prefix#storage_list_files_with_prefix-python # noqa: E501
         for _ in blobs:
             pass
 
@@ -524,20 +525,42 @@ class Sentinel2(DataSource):
                     AND north_lat IS NOT NULL
                     AND cloud_cover IS NOT NULL
         """
+        query_params: list[bigquery.ScalarQueryParameter] = []
         if time_range is not None:
-            query_str += f"""
-                AND sensing_time >= "{time_range[0]}" AND sensing_time <= "{time_range[1]}"
+            query_str += """
+                AND sensing_time >= @time_start AND sensing_time <= @time_end
             """
+            query_params.append(
+                bigquery.ScalarQueryParameter("time_start", "TIMESTAMP", time_range[0])
+            )
+            query_params.append(
+                bigquery.ScalarQueryParameter("time_end", "TIMESTAMP", time_range[1])
+            )
         if wgs84_bbox is not None:
-            query_str += f"""
-                AND west_lon < {wgs84_bbox[2]}
-                AND east_lon > {wgs84_bbox[0]}
-                AND south_lat < {wgs84_bbox[3]}
-                AND north_lat > {wgs84_bbox[1]}
+            query_str += """
+                AND west_lon < @bbox_east
+                AND east_lon > @bbox_west
+                AND south_lat < @bbox_north
+                AND north_lat > @bbox_south
             """
+            query_params.append(
+                bigquery.ScalarQueryParameter("bbox_west", "FLOAT64", wgs84_bbox[0])
+            )
+            query_params.append(
+                bigquery.ScalarQueryParameter("bbox_south", "FLOAT64", wgs84_bbox[1])
+            )
+            query_params.append(
+                bigquery.ScalarQueryParameter("bbox_east", "FLOAT64", wgs84_bbox[2])
+            )
+            query_params.append(
+                bigquery.ScalarQueryParameter("bbox_north", "FLOAT64", wgs84_bbox[3])
+            )
 
         client = bigquery.Client()
-        result = client.query(query_str)
+        result = client.query(
+            query_str,
+            job_config=bigquery.QueryJobConfig(query_parameters=query_params),
+        )
         if desc is not None:
             result = tqdm.tqdm(result, desc=desc)
 
