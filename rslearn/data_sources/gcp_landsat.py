@@ -17,7 +17,6 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, BinaryIO
 
-import dateutil.parser
 import shapely
 import tqdm
 from google.cloud import bigquery, storage
@@ -74,13 +73,6 @@ class DataType(StrEnum):
     L1TP = "L1TP"
     L2SP = "L2SP"
     L2SR = "L2SR"
-
-
-# Band definitions per sensor family.
-BANDS_OLI_TIRS = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11"]
-BANDS_ETM = ["B1", "B2", "B3", "B4", "B5", "B6_VCID_1", "B6_VCID_2", "B7", "B8"]
-BANDS_TM = ["B1", "B2", "B3", "B4", "B5", "B6", "B7"]
-BANDS_MSS = ["B4", "B5", "B6", "B7"]
 
 
 class LandsatItem(Item):
@@ -183,8 +175,8 @@ class Landsat(DirectMaterializeDataSource[LandsatItem]):
             spacecraft_id: filter by mission, e.g. ["LANDSAT_8", "LANDSAT_9"].
                 None means all missions.
             sensor_id: filter by sensor, e.g. ["OLI_TIRS"]. None means all.
-            bands: which bands to expose. Defaults to layer config bands or
-                OLI-TIRS bands (B1-B11).
+            bands: which bands to expose. Required if the layer config does not
+                specify band sets.
             sort_by: "cloud_cover" or None (arbitrary order).
             collection_category: filter by tier, e.g. ["T1"]. None means all.
             data_type: filter by processing level, e.g. ["L1TP"]. None means all.
@@ -195,7 +187,7 @@ class Landsat(DirectMaterializeDataSource[LandsatItem]):
                 creation.
             context: the data source context.
         """
-        # Determine bands from context, explicit argument, or default.
+        # Determine bands from context or explicit argument.
         if context.layer_config is not None:
             needed_bands: list[str] = []
             for band_set in context.layer_config.band_sets:
@@ -206,7 +198,9 @@ class Landsat(DirectMaterializeDataSource[LandsatItem]):
         elif bands is not None:
             effective_bands = bands
         else:
-            effective_bands = list(BANDS_OLI_TIRS)
+            raise ValueError(
+                "bands must be specified when no layer config band sets are provided"
+            )
 
         asset_bands = {band: [band] for band in effective_bands}
         super().__init__(asset_bands=asset_bands)
@@ -329,17 +323,14 @@ class Landsat(DirectMaterializeDataSource[LandsatItem]):
             product_id = row["product_id"]
             base_url = row["base_url"]
 
+            # base_url is always a gs://BUCKET_NAME/... path without a trailing
+            # slash, so convert it to a bucket-relative blob path ending in "/".
             gs_prefix = f"gs://{BUCKET_NAME}/"
-            if base_url.startswith(gs_prefix):
-                blob_path = base_url[len(gs_prefix) :]
-            else:
-                blob_path = base_url
-            if not blob_path.endswith("/"):
-                blob_path += "/"
+            if not base_url.startswith(gs_prefix):
+                raise ValueError(f"unexpected base_url {base_url}")
+            blob_path = base_url[len(gs_prefix) :] + "/"
 
             ts = row["sensing_time"]
-            if isinstance(ts, str):
-                ts = dateutil.parser.isoparse(ts)
 
             geometry = STGeometry(
                 WGS84_PROJECTION,
