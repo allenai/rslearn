@@ -86,7 +86,8 @@ These data sources are still experimental and may have incomplete functionality.
 | Data Source | Description |
 |---|---|
 | [hf_srtm.SRTM](data_sources/hf_srtm_SRTM.md) | SRTM elevation (~30-90m), served from Hugging Face |
-| [planetary_computer.CopDemGlo30](data_sources/planetary_computer_CopDemGlo30.md) | Copernicus DEM GLO-30 (30m) |
+| [copernicus_glo30.CopernicusGLO30](data_sources/copernicus_glo30_CopernicusGLO30.md) | Copernicus GLO-30 (30m) from public S3, with optional slope/aspect |
+| [planetary_computer.CopDemGlo30](data_sources/planetary_computer_CopDemGlo30.md) | Copernicus DEM GLO-30 (30m) via Planetary Computer |
 
 #### Climate / Weather
 

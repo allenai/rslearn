@@ -69,10 +69,10 @@ def _tile_name(lat: int, lon: int) -> str:
     return f"Copernicus_DSM_COG_10_{ns}{abs(lat):02d}_00_{ew}{abs(lon):03d}_00_DEM"
 
 
-def _tile_url(lat: int, lon: int) -> str:
+def _tile_url(lat: int, lon: int, base_url: str = GLO30_BASE_URL) -> str:
     """Return the full HTTPS URL for a GLO-30 COG tile."""
     name = _tile_name(lat, lon)
-    return f"{GLO30_BASE_URL}{name}/{name}.tif"
+    return f"{base_url}{name}/{name}.tif"
 
 
 def compute_terrain(
@@ -318,7 +318,7 @@ class CopernicusGLO30(DataSource):
                 continue
 
             lat, lon = self._parse_tile_name(item.name)
-            url = _tile_url(lat, lon)
+            url = _tile_url(lat, lon, base_url=self.BASE_URL)
             logger.debug(f"Downloading GLO-30 tile {item.name} from {url}")
 
             response = self.session.get(
