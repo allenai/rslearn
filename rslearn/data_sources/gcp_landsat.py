@@ -467,11 +467,12 @@ class Landsat(
         self, wgs84_geometries: list[STGeometry]
     ) -> list[list[LandsatItem]]:
         """List relevant items using rtree index."""
+        if self.rtree_index is None:
+            raise ValueError("rtree_index is required")
+
         candidates: list[list[LandsatItem]] = [[] for _ in wgs84_geometries]
         for idx, wgs84_geometry in enumerate(wgs84_geometries):
             encoded_items: set[str] = set()
-            if self.rtree_index is None:
-                raise ValueError("rtree_index is required")
             for shp in flatten_shape(wgs84_geometry.shp):
                 encoded_items.update(self.rtree_index.query(shp.bounds))
 
