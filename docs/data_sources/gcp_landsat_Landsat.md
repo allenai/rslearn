@@ -5,10 +5,19 @@ This data source is for Landsat imagery on GCP's public Landsat GCS bucket
 Landsat missions (1-9) as cloud-optimized GeoTIFFs. The bucket is requester-pays, so a
 GCP project must be configured for billing.
 
-Scene discovery uses the bucket's `index.csv.gz` (~23M rows), which is parsed once and
-stored in an on-disk rtree index for fast spatial lookups. Scene geometry uses the
-bounding box from the index. Use `rtree_time_range` to restrict the index to a date
-range, which significantly speeds up rtree creation.
+Scene discovery uses BigQuery table
+`earth-engine-public-data.geo_index.landsat_c2_index`.
+
+Two discovery modes are supported:
+
+- `use_rtree_index=true` (default): one BigQuery scan builds an on-disk rtree index
+  for fast repeated lookups.
+- `use_rtree_index=false`: each `get_items` call runs one BigQuery query filtered by
+  time, geometry bounding box, and WRS path/row.
+
+Scene geometry uses the bounding box from the BigQuery index. Use
+`rtree_time_range` to restrict rtree construction to a date range, which
+significantly speeds up index creation.
 
 This data source supports direct materialization: if the "ingest" flag is set false,
 then ingestion will be skipped and windows will be directly populated from windowed
@@ -33,6 +42,8 @@ The following environment variables must be set:
     // Filter by spacecraft. null means all missions (Landsat 1-9).
     // Values: "LANDSAT_1" through "LANDSAT_9".
     "spacecraft_id": ["LANDSAT_8", "LANDSAT_9"],
+    // Filter by sensor. null means all sensors.
+    "sensor_id": ["OLI_TIRS"],
     // Filter by collection tier. null means all.
     // Values: "T1", "T2", "RT".
     "collection_category": ["T1"],
@@ -43,7 +54,9 @@ The following environment variables must be set:
     "bands": null,
     // Sort by this attribute. null (default) for arbitrary ordering, or "cloud_cover".
     "sort_by": "cloud_cover",
-    // GCP project for requester-pays billing (used for downloading index.csv.gz).
+    // Whether to use local rtree mode or one-query-per-get_items BigQuery mode.
+    "use_rtree_index": true,
+    // GCP project for requester-pays billing when downloading scene rasters.
     "gcp_project": "my-gcp-project",
     // Only index scenes within this time range. Highly recommended to speed up
     // rtree creation. null means all scenes.

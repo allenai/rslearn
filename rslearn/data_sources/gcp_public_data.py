@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Generator
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from typing import Any, BinaryIO
 
 import dateutil.parser
@@ -32,6 +33,16 @@ from rslearn.utils.raster_format import get_raster_projection_and_bounds
 from .copernicus import get_harmonize_callback, get_sentinel2_tiles
 
 logger = get_logger(__name__)
+
+
+class Sentinel2ProductType(StrEnum):
+    """The Sentinel-2 product type.
+
+    L1C is top-of-atmosphere reflectance and L2A is surface reflectance.
+    """
+
+    L1C = "L1C"
+    L2A = "L2A"
 
 
 class Sentinel2Item(Item):
@@ -110,6 +121,94 @@ class ParsedProductXML:
     cloud_cover: float
 
 
+@dataclass
+class L1CBand:
+    """A band image file in an L1C product.
+
+    L1C band files all share a per-scene blob_prefix and differ only by this suffix,
+    e.g. blob_prefix + "B01.jp2".
+    """
+
+    # Suffix appended to the item blob_prefix, e.g. "B01.jp2".
+    suffix: str
+    # Names of the bands provided by this file.
+    band_names: list[str]
+
+    def blob_relative_path(self, scene_name: str) -> str:
+        """Path of this band's image file relative to the item blob_prefix."""
+        return self.suffix
+
+    def local_name(self) -> str:
+        """Local filename to use when downloading this band."""
+        return self.suffix
+
+    @property
+    def is_tci(self) -> bool:
+        """Whether this is the true-color (TCI) asset, which is not harmonized."""
+        return self.band_names == ["R", "G", "B"]
+
+
+@dataclass
+class L2ABand:
+    """A band image file in an L2A product.
+
+    L2A band files are stored in resolution subfolders under IMG_DATA with a per-scene
+    stem, e.g. IMG_DATA/R10m/L2A_T31UFS_20170403T104021_B04_10m.jp2. Each band is taken
+    at its native (highest) resolution.
+    """
+
+    # Resolution subfolder, e.g. "R10m".
+    res_folder: str
+    # Band token that appears in the filename, e.g. "B04" or "TCI".
+    band_token: str
+    # Resolution suffix that appears in the filename, e.g. "10m".
+    res_suffix: str
+    # Names of the bands provided by this file.
+    band_names: list[str]
+
+    def blob_relative_path(self, scene_name: str) -> str:
+        """Path of this band's image file relative to the item blob_prefix.
+
+        The per-scene stem is derived from the scene name, e.g. scene
+        S2A_MSIL2A_20170403T104021_N0204_R008_T31UFS_... has band files named like
+        L2A_T31UFS_20170403T104021_B04_10m.jp2.
+        """
+        parts = scene_name.split("_")
+        stem = f"L2A_{parts[5]}_{parts[2]}_"
+        return f"{self.res_folder}/{stem}{self.band_token}_{self.res_suffix}.jp2"
+
+    def local_name(self) -> str:
+        """Local filename to use when downloading this band."""
+        return f"{self.band_token}_{self.res_suffix}.jp2"
+
+    @property
+    def is_tci(self) -> bool:
+        """Whether this is the true-color (TCI) asset, which is not harmonized."""
+        return self.band_names == ["R", "G", "B"]
+
+
+# A band descriptor for either product type.
+Band = L1CBand | L2ABand
+
+
+@dataclass
+class ProductTypeConfig:
+    """Per-product-type configuration for locating scenes and band files on GCS."""
+
+    # Product name prefixes (mission + product token) that may appear on GCS, e.g.
+    # "S2A_MSIL1C". Used when listing products for a given year, since the year comes
+    # right after this prefix in the product name.
+    product_prefixes: list[str]
+    # The name of the product metadata XML file.
+    metadata_filename: str
+    # The product type token that appears in the product ID, e.g. "MSIL1C".
+    product_token: str
+    # The base folder in the bucket where scenes are stored.
+    base_folder: str
+    # The XML tag listing band image files.
+    image_file_tag: str
+
+
 class Sentinel2(DataSource):
     """A data source for Sentinel-2 data on Google Cloud Storage.
 
@@ -127,37 +226,64 @@ class Sentinel2(DataSource):
     # Name of BigQuery table containing index of Sentinel-2 scenes in the bucket.
     TABLE_NAME = "bigquery-public-data.cloud_storage_geo_index.sentinel_2_index"
 
-    BANDS = [
-        ("B01.jp2", ["B01"]),
-        ("B02.jp2", ["B02"]),
-        ("B03.jp2", ["B03"]),
-        ("B04.jp2", ["B04"]),
-        ("B05.jp2", ["B05"]),
-        ("B06.jp2", ["B06"]),
-        ("B07.jp2", ["B07"]),
-        ("B08.jp2", ["B08"]),
-        ("B09.jp2", ["B09"]),
-        ("B10.jp2", ["B10"]),
-        ("B11.jp2", ["B11"]),
-        ("B12.jp2", ["B12"]),
-        ("B8A.jp2", ["B8A"]),
-        ("TCI.jp2", ["R", "G", "B"]),
+    # L1C band files, keyed by the suffix appended to the item blob_prefix.
+    L1C_BANDS: list[L1CBand] = [
+        L1CBand("B01.jp2", ["B01"]),
+        L1CBand("B02.jp2", ["B02"]),
+        L1CBand("B03.jp2", ["B03"]),
+        L1CBand("B04.jp2", ["B04"]),
+        L1CBand("B05.jp2", ["B05"]),
+        L1CBand("B06.jp2", ["B06"]),
+        L1CBand("B07.jp2", ["B07"]),
+        L1CBand("B08.jp2", ["B08"]),
+        L1CBand("B09.jp2", ["B09"]),
+        L1CBand("B10.jp2", ["B10"]),
+        L1CBand("B11.jp2", ["B11"]),
+        L1CBand("B12.jp2", ["B12"]),
+        L1CBand("B8A.jp2", ["B8A"]),
+        L1CBand("TCI.jp2", ["R", "G", "B"]),
     ]
 
-    # Possible prefixes of the product name that may appear on GCS, before the year
-    # appears in the product name. For example, a product may start with
-    # "S2A_MSIL1C_20230101..." so S2A_MSIL1C appears here. This list is used when
-    # enumerating the list of products on GCS that fall in a certain year: because the
-    # year comes after this prefix, filtering in the object list operation requires
-    # including this prefix first followed by the year.
-    VALID_PRODUCT_PREFIXES = ["S2A_MSIL1C", "S2B_MSIL1C", "S2C_MSIL1C"]
+    # L2A band files. Each band is taken at its native (highest) resolution. B10
+    # (cirrus) is not part of the L2A product.
+    L2A_BANDS: list[L2ABand] = [
+        L2ABand("R60m", "B01", "60m", ["B01"]),
+        L2ABand("R10m", "B02", "10m", ["B02"]),
+        L2ABand("R10m", "B03", "10m", ["B03"]),
+        L2ABand("R10m", "B04", "10m", ["B04"]),
+        L2ABand("R20m", "B05", "20m", ["B05"]),
+        L2ABand("R20m", "B06", "20m", ["B06"]),
+        L2ABand("R20m", "B07", "20m", ["B07"]),
+        L2ABand("R10m", "B08", "10m", ["B08"]),
+        L2ABand("R60m", "B09", "60m", ["B09"]),
+        L2ABand("R20m", "B11", "20m", ["B11"]),
+        L2ABand("R20m", "B12", "20m", ["B12"]),
+        L2ABand("R20m", "B8A", "20m", ["B8A"]),
+        L2ABand("R10m", "TCI", "10m", ["R", "G", "B"]),
+    ]
 
-    # The name of the L1C product metadata XML file.
-    METADATA_FILENAME = "MTD_MSIL1C.xml"
+    # Per-product-type configuration for locating scenes and band files on GCS.
+    PRODUCT_TYPE_CONFIGS = {
+        Sentinel2ProductType.L1C: ProductTypeConfig(
+            product_prefixes=["S2A_MSIL1C", "S2B_MSIL1C", "S2C_MSIL1C"],
+            metadata_filename="MTD_MSIL1C.xml",
+            product_token="MSIL1C",  # nosec B106
+            base_folder="tiles",
+            image_file_tag="IMAGE_FILE",
+        ),
+        Sentinel2ProductType.L2A: ProductTypeConfig(
+            product_prefixes=["S2A_MSIL2A", "S2B_MSIL2A", "S2C_MSIL2A"],
+            metadata_filename="MTD_MSIL2A.xml",
+            product_token="MSIL2A",  # nosec B106
+            base_folder="L2/tiles",
+            image_file_tag="IMAGE_FILE_2A",
+        ),
+    }
 
     def __init__(
         self,
         index_cache_dir: str,
+        product_type: Sentinel2ProductType = Sentinel2ProductType.L1C,
         sort_by: str | None = None,
         use_rtree_index: bool = True,
         harmonize: bool = False,
@@ -172,6 +298,8 @@ class Sentinel2(DataSource):
         Args:
             index_cache_dir: local directory to cache the index contents, as well as
                 individual product metadata files.
+            product_type: the Sentinel-2 product type, either Sentinel2ProductType.L1C
+                (default) or Sentinel2ProductType.L2A.
             sort_by: can be "cloud_cover", default arbitrary order; only has effect for
                 SpaceMode.WITHIN.
             use_rtree_index: whether to create an rtree index to enable faster lookups
@@ -197,6 +325,10 @@ class Sentinel2(DataSource):
                 used if the layer config is not in the context.
             context: the data source context.
         """
+        product_type = Sentinel2ProductType(product_type)
+        self.product_type = product_type
+        self.config = self.PRODUCT_TYPE_CONFIGS[product_type]
+
         if use_bigquery is None:
             use_bigquery = use_rtree_index
         if not use_bigquery and use_rtree_index:
@@ -224,25 +356,32 @@ class Sentinel2(DataSource):
         self.index_cache_dir.mkdir(parents=True, exist_ok=True)
 
         # Determine the subset of bands that are needed based on the layer config.
-        self.needed_bands: list[tuple[str, list[str]]]
+        all_bands = self._all_bands()
+        self.needed_bands: list[Band] = []
         if context.layer_config is not None:
-            self.needed_bands = []
-            for fname, cur_bands in self.BANDS:
+            for entry in all_bands:
                 # See if the bands provided by this file intersect with the bands in at
                 # least one configured band set.
                 for band_set in context.layer_config.band_sets:
-                    if not set(band_set.bands).intersection(cur_bands):
+                    if not set(band_set.bands).intersection(entry.band_names):
                         continue
-                    self.needed_bands.append((fname, cur_bands))
+                    self.needed_bands.append(entry)
                     break
         elif bands is not None:
-            self.needed_bands = []
-            for fname, cur_bands in self.BANDS:
-                if not set(bands).intersection(cur_bands):
-                    continue
-                self.needed_bands.append((fname, cur_bands))
+            available = {band for entry in all_bands for band in entry.band_names}
+            missing = set(bands) - available
+            if missing:
+                raise ValueError(
+                    f"bands {sorted(missing)} are not available for "
+                    f"product_type={self.product_type}"
+                )
+            self.needed_bands = [
+                entry
+                for entry in all_bands
+                if set(bands).intersection(entry.band_names)
+            ]
         else:
-            self.needed_bands = list(self.BANDS)
+            self.needed_bands = list(all_bands)
 
         self.bucket = storage.Client.create_anonymous_client().bucket(self.BUCKET_NAME)
         self.rtree_index: Any | None = None
@@ -260,6 +399,102 @@ class Sentinel2(DataSource):
                         index.insert(shp.bounds, json.dumps(item.serialize()))
 
             self.rtree_index = get_cached_rtree(self.rtree_cache_dir, build_fn)
+
+    def _all_bands(self) -> list[L1CBand] | list[L2ABand]:
+        """Get the band descriptors for the configured product type."""
+        if self.product_type == Sentinel2ProductType.L2A:
+            return self.L2A_BANDS
+        return self.L1C_BANDS
+
+    def _cell_id_from_name(self, name: str) -> str:
+        """Get the 5-character MGRS cell ID from a Sentinel-2 scene name."""
+        cell_id_with_prefix = name.split("_")[5]
+        if len(cell_id_with_prefix) != 6 or cell_id_with_prefix[0] != "T":
+            raise ValueError(
+                f"cell ID should be 6 characters starting with T but got "
+                f"{cell_id_with_prefix}"
+            )
+        return cell_id_with_prefix[1:]
+
+    def _l1c_name_to_l2a_name(self, l1c_name: str) -> str | None:
+        """Translate an L1C scene name to the corresponding L2A scene name.
+
+        The L2A scene shares the mission, sensing time, relative orbit, and MGRS tile
+        with the L1C scene, but the processing baseline (Nxxxx) and trailing
+        discriminator timestamp may differ (e.g. when L2A was generated in a separate
+        reprocessing campaign). So we cannot derive the L2A name by simple
+        substitution; instead we list the L2A folder for the matching mission and
+        sensing time and pick the scene that also matches the orbit and tile.
+
+        Args:
+            l1c_name: the L1C scene name (e.g. as found in the BigQuery index).
+
+        Returns:
+            the corresponding L2A scene name, or None if no L2A scene exists.
+        """
+        parts = l1c_name.split("_")
+        mission = parts[0]
+        sensing_time = parts[2]
+        orbit = parts[4]
+        tile = parts[5]
+        cell_id = self._cell_id_from_name(l1c_name)
+        cell_folder = self._build_cell_folder_name(cell_id)
+        l2a_token = self.PRODUCT_TYPE_CONFIGS[Sentinel2ProductType.L2A].product_token
+        prefix = f"{cell_folder}{mission}_{l2a_token}_{sensing_time}_"
+        blobs = self.bucket.list_blobs(prefix=prefix, delimiter="/")
+
+        # Consume the iterator so that blobs.prefixes is populated with folder names.
+        for _ in blobs:
+            pass
+
+        matches = []
+        for folder_prefix in blobs.prefixes:
+            folder_name = folder_prefix.split("/")[-2]
+            if not folder_name.endswith(".SAFE"):
+                continue
+            scene_name = folder_name[: -len(".SAFE")]
+            scene_parts = scene_name.split("_")
+            if scene_parts[4] == orbit and scene_parts[5] == tile:
+                matches.append(scene_name)
+
+        if not matches:
+            return None
+        # If there are multiple L2A reprocessings, use the last (latest) one.
+        matches.sort()
+        return matches[-1]
+
+    def _resolve_index_item_name(self, l1c_name: str) -> str | None:
+        """Resolve the scene name to fetch for an L1C name from the index.
+
+        For L1C this is a no-op. For L2A the L1C name is translated to the
+        corresponding L2A scene name (or None if no L2A scene exists).
+        """
+        if self.product_type == Sentinel2ProductType.L2A:
+            return self._l1c_name_to_l2a_name(l1c_name)
+        return l1c_name
+
+    def _resolve_and_get_item(self, index_name: str) -> Sentinel2Item | None:
+        """Resolve an index (L1C) scene name and fetch the corresponding item.
+
+        The BigQuery/rtree index only knows L1C scenes, so for L2A the name is first
+        translated to the matching L2A scene. The item is then fetched from its XML to
+        obtain its exact geometry (the index only stores the bounding box).
+
+        Returns None if the scene should be skipped (no L2A counterpart, corrupt, or
+        missing XML); the reason is logged.
+        """
+        name = self._resolve_index_item_name(index_name)
+        if name is None:
+            logger.warning("no L2A scene found for L1C scene %s", index_name)
+            return None
+        try:
+            return self.get_item_by_name(name)
+        except CorruptItemException as e:
+            logger.warning("skipping corrupt item %s: %s", name, e.message)
+            return None
+        except MissingXMLException:
+            logger.warning("skipping item %s that is missing XML file", name)
+            return None
 
     def _read_bigquery(
         self,
@@ -322,7 +557,13 @@ class Sentinel2(DataSource):
             if len(product_id_parts) < 7:
                 continue
             product_type = product_id_parts[1]
-            if product_type != "MSIL1C":
+            # The BigQuery index only contains L1C scenes, so we always read L1C here
+            # (regardless of self.product_type); for L2A the resulting L1C scene names
+            # are later translated to their L2A counterparts via _l1c_name_to_l2a_name.
+            l1c_token = self.PRODUCT_TYPE_CONFIGS[
+                Sentinel2ProductType.L1C
+            ].product_token
+            if product_type != l1c_token:
                 continue
             time_str = product_id_parts[2]
             tile_id = product_id_parts[5]
@@ -385,7 +626,9 @@ class Sentinel2(DataSource):
         Returns:
             the path on GCS of the folder corresponding to this Sentinel-2 cell.
         """
-        return f"tiles/{cell_id[0:2]}/{cell_id[2:3]}/{cell_id[3:5]}/"
+        return (
+            f"{self.config.base_folder}/{cell_id[0:2]}/{cell_id[2:3]}/{cell_id[3:5]}/"
+        )
 
     def _build_product_folder_name(self, item_name: str) -> str:
         """Get the folder containing the given Sentinel-2 scene ID on GCS.
@@ -396,17 +639,7 @@ class Sentinel2(DataSource):
         Returns:
             the path on GCS of the .SAFE folder corresponding to this item.
         """
-        parts = item_name.split("_")
-        cell_id_with_prefix = parts[5]
-        if len(cell_id_with_prefix) != 6:
-            raise ValueError(
-                f"cell ID should be 6 characters but got {cell_id_with_prefix}"
-            )
-        if cell_id_with_prefix[0] != "T":
-            raise ValueError(
-                f"cell ID should start with T but got {cell_id_with_prefix}"
-            )
-        cell_id = cell_id_with_prefix[1:]
+        cell_id = self._cell_id_from_name(item_name)
         return self._build_cell_folder_name(cell_id) + f"{item_name}.SAFE/"
 
     def _get_xml_by_name(self, name: str) -> "ET.ElementTree[ET.Element[str]]":
@@ -421,7 +654,7 @@ class Sentinel2(DataSource):
         cache_xml_fname = self.index_cache_dir / (name + ".xml")
         if not cache_xml_fname.exists():
             product_folder = self._build_product_folder_name(name)
-            metadata_blob_path = product_folder + self.METADATA_FILENAME
+            metadata_blob_path = product_folder + self.config.metadata_filename
             logger.debug("reading metadata XML from %s", metadata_blob_path)
             blob = self.bucket.blob(metadata_blob_path)
             if not blob.exists():
@@ -463,14 +696,31 @@ class Sentinel2(DataSource):
         # Get blob prefix which is a subfolder of the product folder.
         # The blob prefix is the prefix to the JP2 image files on GCS.
         product_folder = self._build_product_folder_name(name)
-        elements = list(tree.iter("IMAGE_FILE"))
-        elements = [
-            el for el in elements if el.text is not None and el.text.endswith("_B01")
-        ]
-        assert len(elements) == 1
-        if elements[0].text is None:
-            raise ValueError(f"IMAGE_FILE is empty for {name}")
-        blob_prefix = product_folder + elements[0].text.split("B01")[0]
+        if self.product_type == Sentinel2ProductType.L2A:
+            # L2A band files live in resolution subfolders under IMG_DATA, so the blob
+            # prefix is the IMG_DATA directory. The IMAGE_FILE_2A entries are relative
+            # paths like GRANULE/<granule>/IMG_DATA/R10m/L2A_<tile>_<time>_B04_10m.
+            elements = [
+                el
+                for el in tree.iter(self.config.image_file_tag)
+                if el.text is not None and "/IMG_DATA/" in el.text
+            ]
+            if not elements:
+                raise ValueError(f"no {self.config.image_file_tag} entries for {name}")
+            rel_path = elements[0].text
+            assert rel_path is not None
+            blob_prefix = product_folder + rel_path.split("IMG_DATA/")[0] + "IMG_DATA/"
+        else:
+            elements = list(tree.iter(self.config.image_file_tag))
+            elements = [
+                el
+                for el in elements
+                if el.text is not None and el.text.endswith("_B01")
+            ]
+            assert len(elements) == 1
+            if elements[0].text is None:
+                raise ValueError(f"IMAGE_FILE is empty for {name}")
+            blob_prefix = product_folder + elements[0].text.split("B01")[0]
 
         # Get the sensing start time.
         elements = list(tree.iter("PRODUCT_START_TIME"))
@@ -506,7 +756,9 @@ class Sentinel2(DataSource):
 
         # Some Sentinel-2 scenes in the bucket are missing a subset of image files. So
         # here we verify that all the bands we know about are intact.
-        expected_suffixes = {t[0] for t in self.BANDS}
+        expected_suffixes = {
+            band.blob_relative_path(name) for band in self._all_bands()
+        }
         for blob in self.bucket.list_blobs(prefix=product_xml.blob_prefix):
             assert blob.name.startswith(product_xml.blob_prefix)
             suffix = blob.name[len(product_xml.blob_prefix) :]
@@ -591,7 +843,7 @@ class Sentinel2(DataSource):
         """
         items = []
 
-        for product_prefix in self.VALID_PRODUCT_PREFIXES:
+        for product_prefix in self.config.product_prefixes:
             cell_folder = self._build_cell_folder_name(cell_id)
             blob_prefix = f"{cell_folder}{product_prefix}_{year}"
             blobs = self.bucket.list_blobs(prefix=blob_prefix, delimiter="/")
@@ -696,21 +948,12 @@ class Sentinel2(DataSource):
                 if not item.geometry.shp.intersects(geometry.shp):
                     continue
 
-                # Get the item from XML to get its exact geometry (the index only
-                # knows the bounding box of the item).
-                try:
-                    item = self.get_item_by_name(item.name)
-                except CorruptItemException as e:
-                    logger.warning("skipping corrupt item %s: %s", item.name, e.message)
+                # The index only knows the bounding box of each scene, so fetch the
+                # item from XML to get its exact geometry (and translate L1C->L2A).
+                fetched = self._resolve_and_get_item(item.name)
+                if fetched is None:
                     continue
-                except MissingXMLException:
-                    # Sometimes a scene that appears in the BigQuery index does not
-                    # actually have an XML file on GCS. Since we know this happens
-                    # occasionally, we ignore the error here.
-                    logger.warning(
-                        "skipping item %s that is missing XML file", item.name
-                    )
-                    continue
+                item = fetched
 
                 if not item.geometry.shp.intersects(geometry.shp):
                     continue
@@ -740,7 +983,7 @@ class Sentinel2(DataSource):
 
         items_by_cell: dict[str, list[Sentinel2Item]] = {}
         for item in self._read_products(needed_cell_years):
-            cell_id = "".join(item.blob_prefix.split("/")[1:4])
+            cell_id = self._cell_id_from_name(item.name)
             assert len(cell_id) == 5
             if cell_id not in items_by_cell:
                 items_by_cell[cell_id] = []
@@ -774,20 +1017,11 @@ class Sentinel2(DataSource):
                     if item.name in seen_names:
                         continue
                     seen_names.add(item.name)
-                    try:
-                        item = self.get_item_by_name(item.name)
-                    except CorruptItemException as e:
-                        logger.warning(
-                            "skipping corrupt item %s: %s", item.name, e.message
-                        )
-                        continue
-                    except MissingXMLException:
-                        logger.warning(
-                            "skipping item %s that is missing XML file", item.name
-                        )
-                        continue
 
-                    candidates[idx].append(item)
+                    fetched = self._resolve_and_get_item(item.name)
+                    if fetched is None:
+                        continue
+                    candidates[idx].append(fetched)
 
         return candidates
 
@@ -832,11 +1066,11 @@ class Sentinel2(DataSource):
         self, item: Sentinel2Item
     ) -> Generator[tuple[str, BinaryIO], None, None]:
         """Retrieves the rasters corresponding to an item as file streams."""
-        for suffix, _ in self.BANDS:
-            blob_path = item.blob_prefix + suffix
+        for entry in self._all_bands():
+            blob_path = item.blob_prefix + entry.blob_relative_path(item.name)
             fname = blob_path.split("/")[-1]
             buf = io.BytesIO()
-            blob = self.bucket.blob(item.blob_prefix + suffix)
+            blob = self.bucket.blob(blob_path)
             if not blob.exists():
                 continue
             blob.download_to_file(buf)
@@ -857,27 +1091,30 @@ class Sentinel2(DataSource):
             geometries: a list of geometries needed for each item
         """
         for item in items:
-            for suffix, band_names in self.needed_bands:
+            for entry in self.needed_bands:
+                band_names = entry.band_names
                 if tile_store.is_raster_ready(item, band_names):
                     continue
 
+                blob_path = item.blob_prefix + entry.blob_relative_path(item.name)
+                local_name = entry.local_name()
                 with tempfile.TemporaryDirectory() as tmp_dir:
-                    fname = os.path.join(tmp_dir, suffix)
-                    blob = self.bucket.blob(item.blob_prefix + suffix)
+                    fname = os.path.join(tmp_dir, local_name)
+                    blob = self.bucket.blob(blob_path)
                     logger.debug(
                         "gcp_public_data downloading raster file %s",
-                        item.blob_prefix + suffix,
+                        blob_path,
                     )
                     blob.download_to_filename(fname)
                     logger.debug(
                         "gcp_public_data ingesting raster file %s into tile store",
-                        item.blob_prefix + suffix,
+                        blob_path,
                     )
 
                     # Harmonize values if needed.
                     # TCI does not need harmonization.
                     harmonize_callback = None
-                    if self.harmonize and suffix != "TCI.jp2":
+                    if self.harmonize and not entry.is_tci:
                         harmonize_callback = get_harmonize_callback(
                             self._get_xml_by_name(item.name)
                         )
@@ -913,5 +1150,5 @@ class Sentinel2(DataSource):
 
                 logger.debug(
                     "gcp_public_data done ingesting raster file %s",
-                    item.blob_prefix + suffix,
+                    blob_path,
                 )

@@ -1,97 +1,63 @@
 """Unit tests for the gcp_landsat data source."""
 
-import csv
-import gzip
 import pathlib
-from datetime import datetime
-from io import StringIO
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 import shapely
 
+from rslearn.config import QueryConfig
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.gcp_landsat import (
     BUCKET_NAME,
-    CollectionCategory,
-    DataType,
     Landsat,
     LandsatItem,
     SpacecraftId,
 )
+from rslearn.data_sources.wrs2 import WRS2_GRID_SIZE
 from rslearn.utils.geometry import STGeometry
-
-INDEX_COLUMNS = [
-    "SCENE_ID",
-    "PRODUCT_ID",
-    "SPACECRAFT_ID",
-    "SENSOR_ID",
-    "DATE_ACQUIRED",
-    "COLLECTION_NUMBER",
-    "COLLECTION_CATEGORY",
-    "SENSING_TIME",
-    "DATA_TYPE",
-    "WRS_PATH",
-    "WRS_ROW",
-    "CLOUD_COVER",
-    "NORTH_LAT",
-    "SOUTH_LAT",
-    "WEST_LON",
-    "EAST_LON",
-    "TOTAL_SIZE",
-    "BASE_URL",
-]
+from rslearn.utils.grid_index import GridIndex
 
 
-def _make_index_row(
+def _make_bigquery_row(
     product_id: str,
     west_lon: float,
     south_lat: float,
     east_lon: float,
     north_lat: float,
     spacecraft_id: str = "LANDSAT_8",
-    date_acquired: str = "2025-01-31",
+    sensor_id: str | None = "OLI_TIRS",
     sensing_time: str = "2025-01-31T18:22:13Z",
     data_type: str = "L1TP",
-) -> dict:
-    """Build a single row dict for a mock index CSV."""
+    collection_category: str = "T1",
+    wrs_path: int = 40,
+    wrs_row: int = 36,
+) -> dict[str, Any]:
+    """Build a single row dict for a mock BigQuery result."""
     return {
-        "SCENE_ID": "SCENE",
-        "PRODUCT_ID": product_id,
-        "SPACECRAFT_ID": spacecraft_id,
-        "SENSOR_ID": "OLI_TIRS",
-        "DATE_ACQUIRED": date_acquired,
-        "COLLECTION_NUMBER": "02",
-        "COLLECTION_CATEGORY": "T1",
-        "SENSING_TIME": sensing_time,
-        "DATA_TYPE": data_type,
-        "WRS_PATH": "40",
-        "WRS_ROW": "36",
-        "CLOUD_COVER": "10.0",
-        "NORTH_LAT": str(north_lat),
-        "SOUTH_LAT": str(south_lat),
-        "WEST_LON": str(west_lon),
-        "EAST_LON": str(east_lon),
-        "TOTAL_SIZE": "1000000",
-        "BASE_URL": f"gs://{BUCKET_NAME}/LC08/L1/02/040/036/{product_id}",
+        "product_id": product_id,
+        "spacecraft_id": spacecraft_id,
+        "sensor_id": sensor_id,
+        "sensing_time": sensing_time,
+        "data_type": data_type,
+        "collection_category": collection_category,
+        "wrs_path": wrs_path,
+        "wrs_row": wrs_row,
+        "cloud_cover": 10.0,
+        "north_lat": north_lat,
+        "south_lat": south_lat,
+        "west_lon": west_lon,
+        "east_lon": east_lon,
+        "base_url": f"gs://{BUCKET_NAME}/LC08/L1/02/040/036/{product_id}",
     }
-
-
-def _write_mock_index(tmp_path: pathlib.Path, rows: list[dict]) -> None:
-    """Write a gzipped CSV index file from row dicts."""
-    buf = StringIO()
-    writer = csv.DictWriter(buf, fieldnames=INDEX_COLUMNS)
-    writer.writeheader()
-    for row in rows:
-        writer.writerow(row)
-    gz_path = tmp_path / "index.csv.gz"
-    with gzip.open(str(gz_path), "wt") as f:
-        f.write(buf.getvalue())
 
 
 def _make_item(
     name: str,
     spacecraft_id: str = "LANDSAT_8",
+    sensor_id: str | None = "OLI_TIRS",
     data_type: str = "L1TP",
     cloud_cover: float = 10.0,
     lon: float = -122.0,
@@ -111,12 +77,13 @@ def _make_item(
         blob_path=blob_path,
         cloud_cover=cloud_cover,
         spacecraft_id=spacecraft_id,
+        sensor_id=sensor_id,
         data_type=data_type,
     )
 
 
 def _make_data_source(tmp_path: pathlib.Path, **kwargs: Any) -> Landsat:
-    """Create a Landsat data source with mocked GCS client and rtree."""
+    """Create a Landsat data source with mocked GCS client and optional rtree."""
     with (
         patch("rslearn.data_sources.gcp_landsat.storage") as mock_storage,
         patch("rslearn.data_sources.gcp_landsat.get_cached_rtree") as mock_rtree,
@@ -138,173 +105,145 @@ class TestLandsatItemSerialize:
         assert restored.blob_path == item.blob_path
         assert restored.cloud_cover == item.cloud_cover
         assert restored.spacecraft_id == item.spacecraft_id
+        assert restored.sensor_id == item.sensor_id
         assert restored.data_type == item.data_type
 
 
-class TestReadIndex:
-    """Tests for _read_index filtering."""
+class TestReadBigQuery:
+    """Tests for _read_bigquery filtering."""
 
     def test_yields_matching_items(self, tmp_path: pathlib.Path) -> None:
         ds = _make_data_source(tmp_path)
-        _write_mock_index(
-            tmp_path,
-            [
-                _make_index_row(
-                    "LC08_L1TP_040036_20250131_20250208_02_T1",
-                    west_lon=-118.0,
-                    south_lat=33.0,
-                    east_lon=-115.0,
-                    north_lat=35.0,
-                ),
-            ],
-        )
+        rows = [
+            _make_bigquery_row(
+                "LC08_L1TP_040036_20250131_20250208_02_T1",
+                west_lon=-118.0,
+                south_lat=33.0,
+                east_lon=-115.0,
+                north_lat=35.0,
+            )
+        ]
 
-        items = list(ds._read_index())
+        with patch("rslearn.data_sources.gcp_landsat.bigquery") as mock_bigquery:
+            mock_client = MagicMock()
+            mock_client.query.return_value = rows
+            mock_bigquery.Client.return_value = mock_client
+
+            items = list(ds._read_bigquery())
+
         assert len(items) == 1
         assert items[0].name == "LC08_L1TP_040036_20250131_20250208_02_T1"
 
-    def test_filters_by_spacecraft_id(self, tmp_path: pathlib.Path) -> None:
+    def test_filters_by_spacecraft_id_in_sql(self, tmp_path: pathlib.Path) -> None:
         ds = _make_data_source(tmp_path, spacecraft_id=[SpacecraftId.LANDSAT_9])
-        _write_mock_index(
-            tmp_path,
-            [
-                _make_index_row(
-                    "LC08_L1TP_040036_20250131_20250208_02_T1",
-                    west_lon=-118.0,
-                    south_lat=33.0,
-                    east_lon=-115.0,
-                    north_lat=35.0,
-                    spacecraft_id="LANDSAT_8",
-                ),
-                _make_index_row(
-                    "LC09_L1TP_040036_20250215_20250215_02_T1",
-                    west_lon=-118.0,
-                    south_lat=33.0,
-                    east_lon=-115.0,
-                    north_lat=35.0,
-                    spacecraft_id="LANDSAT_9",
-                    date_acquired="2025-02-15",
-                    sensing_time="2025-02-15T18:00:00Z",
-                ),
-            ],
-        )
 
-        items = list(ds._read_index())
-        assert len(items) == 1
-        assert items[0].spacecraft_id == "LANDSAT_9"
+        with patch("rslearn.data_sources.gcp_landsat.bigquery") as mock_bigquery:
+            mock_client = MagicMock()
+            mock_client.query.return_value = []
+            mock_bigquery.Client.return_value = mock_client
 
-    def test_filters_by_data_type(self, tmp_path: pathlib.Path) -> None:
-        ds = _make_data_source(tmp_path, data_type=[DataType.L1TP])
-        _write_mock_index(
-            tmp_path,
-            [
-                _make_index_row(
-                    "LC08_L1GT_040036_20250131_20250208_02_T2",
-                    west_lon=-118.0,
-                    south_lat=33.0,
-                    east_lon=-115.0,
-                    north_lat=35.0,
-                    data_type="L1GT",
-                ),
-                _make_index_row(
-                    "LC08_L1TP_040036_20250215_20250215_02_T1",
-                    west_lon=-118.0,
-                    south_lat=33.0,
-                    east_lon=-115.0,
-                    north_lat=35.0,
-                    date_acquired="2025-02-15",
-                    sensing_time="2025-02-15T18:00:00Z",
-                ),
-            ],
-        )
+            list(ds._read_bigquery())
+            query_str = mock_client.query.call_args[0][0]
 
-        items = list(ds._read_index())
-        assert len(items) == 1
-        assert items[0].data_type == "L1TP"
-
-    def test_filters_by_collection_category(self, tmp_path: pathlib.Path) -> None:
-        ds = _make_data_source(tmp_path, collection_category=[CollectionCategory.T1])
-        _write_mock_index(
-            tmp_path,
-            [
-                _make_index_row(
-                    "LC08_L1TP_040036_20250131_20250208_02_T2",
-                    west_lon=-118.0,
-                    south_lat=33.0,
-                    east_lon=-115.0,
-                    north_lat=35.0,
-                ),
-                _make_index_row(
-                    "LC08_L1TP_040036_20250215_20250215_02_T1",
-                    west_lon=-118.0,
-                    south_lat=33.0,
-                    east_lon=-115.0,
-                    north_lat=35.0,
-                    date_acquired="2025-02-15",
-                    sensing_time="2025-02-15T18:00:00Z",
-                ),
-            ],
-        )
-
-        items = list(ds._read_index())
-        assert len(items) == 1
-        assert items[0].name.endswith("_T1")
-
-    def test_filters_by_rtree_time_range(self, tmp_path: pathlib.Path) -> None:
-        ds = _make_data_source(
-            tmp_path,
-            rtree_time_range=(datetime(2025, 2, 1), datetime(2025, 12, 31)),
-        )
-        _write_mock_index(
-            tmp_path,
-            [
-                _make_index_row(
-                    "LC08_L1TP_040036_20250131_20250208_02_T1",
-                    west_lon=-118.0,
-                    south_lat=33.0,
-                    east_lon=-115.0,
-                    north_lat=35.0,
-                    date_acquired="2025-01-31",
-                    sensing_time="2025-01-31T18:00:00Z",
-                ),
-                _make_index_row(
-                    "LC08_L1TP_040036_20250215_20250215_02_T1",
-                    west_lon=-118.0,
-                    south_lat=33.0,
-                    east_lon=-115.0,
-                    north_lat=35.0,
-                    date_acquired="2025-02-15",
-                    sensing_time="2025-02-15T18:00:00Z",
-                ),
-            ],
-        )
-
-        items = list(ds._read_index())
-        assert len(items) == 1
-        assert items[0].name == "LC08_L1TP_040036_20250215_20250215_02_T1"
+        assert 'spacecraft_id IN ("LANDSAT_9")' in query_str
 
     def test_antimeridian_crossing(self, tmp_path: pathlib.Path) -> None:
         """A scene crossing the antimeridian produces a valid multi-polygon."""
         ds = _make_data_source(tmp_path)
-        _write_mock_index(
-            tmp_path,
-            [
-                _make_index_row(
-                    "LE07_L1TP_091014_20120313_20200909_02_T2",
-                    west_lon=176.5,
-                    south_lat=50.0,
-                    east_lon=-177.7,
-                    north_lat=52.0,
-                    date_acquired="2012-03-13",
-                    sensing_time="2012-03-13T00:00:00Z",
-                ),
-            ],
-        )
+        rows = [
+            _make_bigquery_row(
+                "LE07_L1TP_091014_20120313_20200909_02_T2",
+                west_lon=176.5,
+                south_lat=50.0,
+                east_lon=-177.7,
+                north_lat=52.0,
+                sensing_time="2012-03-13T00:00:00Z",
+            )
+        ]
 
-        items = list(ds._read_index())
+        with patch("rslearn.data_sources.gcp_landsat.bigquery") as mock_bigquery:
+            mock_client = MagicMock()
+            mock_client.query.return_value = rows
+            mock_bigquery.Client.return_value = mock_client
+
+            items = list(ds._read_bigquery())
+
         assert len(items) == 1
         shp = items[0].geometry.shp
         assert shp.geom_type == "MultiPolygon"
+        # The scene spans 176.5E to 177.7W, so splitting at the antimeridian must
+        # yield one part hugging +180 and one hugging -180 (not a globe-spanning box).
+        part_bounds = sorted(part.bounds for part in shp.geoms)
+        west_part, east_part = part_bounds
+        assert west_part[0] == pytest.approx(-180)
+        assert west_part[2] == pytest.approx(-177.7)
+        assert east_part[0] == pytest.approx(176.5)
+        assert east_part[2] == pytest.approx(180)
+
+
+class TestGetItemsBigQueryMode:
+    """Tests for get_items in direct BigQuery mode.
+
+    These tests mock the BigQuery client and the WRS2 grid build (which would
+    otherwise download a shapefile), but test the path/row lookup, scene parsing,
+    spatial/temporal intersection, and window matching.
+    """
+
+    def test_matches_item_with_real_pathrow_lookup(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        ts = datetime(2025, 1, 31, tzinfo=UTC)
+        geometry = STGeometry(
+            WGS84_PROJECTION,
+            shapely.box(-118.0, 33.0, -115.0, 35.0),
+            (ts, ts + timedelta(days=1)),
+        )
+
+        # Build a GridIndex covering the geometry, tagged with WRS path/row 40/36.
+        wrs2_index = GridIndex(WRS2_GRID_SIZE)
+        wrs2_polygon = shapely.box(-119.0, 32.0, -114.0, 36.0)
+        wrs2_index.insert(wrs2_polygon.bounds, (wrs2_polygon, "40", "36"))
+
+        rows = [
+            _make_bigquery_row(
+                "LC08_L1TP_040036_20250131_20250208_02_T1",
+                west_lon=-118.0,
+                south_lat=33.0,
+                east_lon=-115.0,
+                north_lat=35.0,
+                wrs_path=40,
+                wrs_row=36,
+            )
+        ]
+
+        with (
+            patch("rslearn.data_sources.gcp_landsat.bigquery") as mock_bigquery,
+            patch("rslearn.data_sources.gcp_landsat.storage"),
+            patch(
+                "rslearn.data_sources.gcp_landsat.build_wrs2_grid_index",
+                return_value=wrs2_index,
+            ),
+        ):
+            mock_client = MagicMock()
+            mock_client.query.return_value = rows
+            mock_bigquery.Client.return_value = mock_client
+
+            ds = Landsat(index_cache_dir=str(tmp_path), use_rtree_index=False)
+            result = ds.get_items([geometry], QueryConfig())
+
+        # One query for the whole get_items call.
+        assert mock_client.query.call_count == 1
+
+        # The real path/row lookup must have produced the 40/36 filter in the SQL.
+        query_str = mock_client.query.call_args[0][0]
+        assert "wrs_path = 40 AND wrs_row = 36" in query_str
+
+        # The candidate item should be matched into a single group for the geometry.
+        assert len(result) == 1
+        group = result[0]
+        assert len(group) == 1
+        matched_names = [item.name for item in group[0].items]
+        assert matched_names == ["LC08_L1TP_040036_20250131_20250208_02_T1"]
 
 
 class TestGetAssetUrl:
