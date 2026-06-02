@@ -288,3 +288,40 @@ class TestGetAssetUrl:
             "LC08_L1TP_040036_20250131_20250208_02_T1_B4.TIF"
         )
         assert url == expected
+
+
+class TestBandToFileToken:
+    """Tests for Level-1 vs Level-2 band file token naming.
+
+    Level-1 band files are named simply by the band (e.g. "B4"). Level-2 files
+    are prefixed with the asset type: surface reflectance ("SR_") for all bands
+    except the sensor's thermal band, which is surface temperature ("ST_").
+    OLI-TIRS thermal is B10; TM and ETM+ thermal is B6.
+    """
+
+    def test_level1_returns_band_as_is(self, tmp_path: pathlib.Path) -> None:
+        ds = _make_data_source(tmp_path)
+        item = _make_item(
+            "LC08_L1TP_040036_20250131_20250208_02_T1",
+            sensor_id="OLI_TIRS",
+            processing_level="L1TP",
+        )
+        assert ds._band_to_file_token(item, "B4") == "B4"
+        assert ds._band_to_file_token(item, "B10") == "B10"
+
+    @pytest.mark.parametrize(
+        ("sensor_id", "thermal_band"),
+        [("OLI_TIRS", "B10"), ("TM", "B6"), ("ETM", "B6")],
+    )
+    def test_level2_thermal_and_reflectance(
+        self, tmp_path: pathlib.Path, sensor_id: str, thermal_band: str
+    ) -> None:
+        ds = _make_data_source(tmp_path)
+        item = _make_item(
+            "X_L2SP_040036_20250131_20250208_02_T1",
+            sensor_id=sensor_id,
+            processing_level="L2SP",
+        )
+        assert ds._band_to_file_token(item, thermal_band) == f"ST_{thermal_band}"
+        # A non-thermal band is surface reflectance.
+        assert ds._band_to_file_token(item, "B4") == "SR_B4"

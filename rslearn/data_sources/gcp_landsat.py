@@ -81,17 +81,14 @@ class ProcessingLevel(StrEnum):
 
 
 # For Level-2 products, each band is delivered as either a surface reflectance
-# (SR_) or surface temperature (ST_) asset. This maps each band to its asset
-# type prefix. Bands not listed default to surface reflectance.
-_LEVEL2_BAND_ASSET = {
-    "B1": "SR",
-    "B2": "SR",
-    "B3": "SR",
-    "B4": "SR",
-    "B5": "SR",
-    "B6": "SR",
-    "B7": "SR",
-    "B10": "ST",
+# ("SR_") or surface temperature ("ST_") asset. Exactly one band per sensor
+# becomes the surface temperature asset: B10 for OLI-TIRS (Landsat 8/9) and B6
+# for TM (Landsat 4/5) and ETM+ (Landsat 7). All other bands are surface
+# reflectance.
+_LEVEL2_THERMAL_BAND = {
+    "OLI_TIRS": "B10",
+    "TM": "B6",
+    "ETM": "B6",
 }
 
 
@@ -394,7 +391,6 @@ class Landsat(
             result = tqdm.tqdm(result, desc=desc)
 
         for row in result:
-            product_id = row["product_id"]
             base_url = row["base_url"]
 
             # base_url is always a gs://BUCKET_NAME/... path without a trailing
@@ -403,6 +399,14 @@ class Landsat(
             if not base_url.startswith(gs_prefix):
                 raise ValueError(f"unexpected base_url {base_url}")
             blob_path = base_url[len(gs_prefix) :] + "/"
+
+            # Use the product folder name as the canonical product ID. The
+            # product_id column can disagree with base_url for a small number
+            # of rows (e.g. a Level-1 product_id paired with a Level-2
+            # base_url). The band files on GCS live in the base_url folder and
+            # are named after it, so the folder name is authoritative for both
+            # the item name and the derived processing level.
+            product_id = blob_path.rstrip("/").split("/")[-1]
 
             ts = row["sensing_time"]
 
@@ -593,8 +597,8 @@ class Landsat(
 
         Level-1 products name band files simply by the band (e.g. "B4"), while
         Level-2 products prefix them with the asset type: surface temperature
-        ("ST_B10") for the thermal band and surface reflectance ("SR_B4") for
-        all other bands.
+        ("ST_B10" for OLI-TIRS, "ST_B6" for TM/ETM+) for the sensor's thermal
+        band and surface reflectance ("SR_B4") for all other bands.
 
         Args:
             item: the item.
@@ -605,8 +609,10 @@ class Landsat(
         """
         if not item.processing_level.startswith("L2"):
             return band
-        prefix = _LEVEL2_BAND_ASSET.get(band, "SR")
-        return f"{prefix}_{band}"
+        thermal_band = _LEVEL2_THERMAL_BAND.get(item.sensor_id or "")
+        if band == thermal_band:
+            return f"ST_{band}"
+        return f"SR_{band}"
 
     def _band_blob_key(self, item: LandsatItem, band: str) -> str:
         """Get the blob key (path within the bucket) for an item's band file.
