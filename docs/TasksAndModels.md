@@ -284,9 +284,6 @@ The configuration snippet below summarizes the most common options. See
 	        nodata_value: -1
 ```
 
-Note: `metric_mode` is deprecated; use `metrics` instead. Support will be removed
-after 2026-06-01.
-
 In `process_inputs`, PerPixelRegressionTask computes a target dict containing the
 "values" (scaled ground truth values) and "valid" (mask indicating which pixels are
 valid for training) keys.
@@ -370,9 +367,6 @@ The configuration snippet below summarizes the most common options. See
         # Metric(s) to compute. Supported: "mse", "rmse", "l1", "mape".
         metrics: ["mse"]
 ```
-
-Note: `metric_mode` is deprecated; use `metrics` instead. Support will be removed
-after 2026-06-01.
 
 In `process_inputs`, RegressionTask computes a target dict containing the "value"
 (ground truth regression value) and "valid" (flag indicating whether the sample is
