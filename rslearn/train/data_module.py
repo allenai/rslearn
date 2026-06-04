@@ -15,7 +15,7 @@ from rslearn.dataset import Dataset
 from rslearn.log_utils import get_logger
 from rslearn.train.tasks import Task
 
-from .all_crops_dataset import IterableAllCropsDataset
+from .all_crops_dataset import IterableAllCropsDataset, MapAllCropsDataset
 from .dataset import (
     DataInput,
     IndexMode,
@@ -71,6 +71,7 @@ class RslearnDataModule(L.LightningDataModule):
         retries: int = 0,
         use_in_memory_dataset: bool = False,
         use_in_memory_all_crops_dataset: bool | None = None,
+        use_map_all_crops_dataset: bool = False,
         index_mode: IndexMode = IndexMode.OFF,
     ) -> None:
         """Initialize a new RslearnDataModule.
@@ -98,6 +99,10 @@ class RslearnDataModule(L.LightningDataModule):
                 uses InMemoryRandomCropDataset.
             use_in_memory_all_crops_dataset: deprecated alias for
                 use_in_memory_dataset. If set, overrides use_in_memory_dataset.
+            use_map_all_crops_dataset: when load_all_crops is set, use
+                MapAllCropsDataset (map-style, reads each crop from disk on demand)
+                instead of IterableAllCropsDataset. Keeps peak memory to one crop
+                regardless of window size. Ignored if use_in_memory_dataset is set.
             index_mode: controls dataset index caching behavior (default: IndexMode.OFF)
         """
         super().__init__()
@@ -121,6 +126,7 @@ class RslearnDataModule(L.LightningDataModule):
             self.use_in_memory_dataset = use_in_memory_all_crops_dataset
         else:
             self.use_in_memory_dataset = use_in_memory_dataset
+        self.use_map_all_crops_dataset = use_map_all_crops_dataset
         self.index_mode = index_mode
         self.split_configs = {
             "train": SplitConfig.merge_and_validate([default_config, train_config]),
@@ -170,7 +176,8 @@ class RslearnDataModule(L.LightningDataModule):
 
             if load_all_crops:
                 logger.info(
-                    f"using AllCropsDataset (in_memory={use_in_memory_dataset})"
+                    f"using AllCropsDataset (in_memory={use_in_memory_dataset}, "
+                    f"map={self.use_map_all_crops_dataset})"
                 )
                 crop_size = split_config.get_crop_size()
                 if crop_size is None:
@@ -185,6 +192,12 @@ class RslearnDataModule(L.LightningDataModule):
                             "but this may split windows across ranks leading to incomplete prediction outputs"
                         )
                     dataset = InMemoryAllCropsDataset(
+                        dataset=dataset,
+                        crop_size=crop_size,
+                        overlap_pixels=split_config.get_overlap_pixels(),
+                    )
+                elif self.use_map_all_crops_dataset:
+                    dataset = MapAllCropsDataset(
                         dataset=dataset,
                         crop_size=crop_size,
                         overlap_pixels=split_config.get_overlap_pixels(),
