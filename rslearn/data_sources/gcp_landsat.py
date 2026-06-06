@@ -7,7 +7,6 @@ Scene discovery uses BigQuery table
 earth-engine-public-data.geo_index.landsat_c2_index.
 """
 
-import io
 import json
 import logging
 import os
@@ -15,7 +14,7 @@ import tempfile
 from collections.abc import Collection, Generator
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, BinaryIO
+from typing import Any
 
 import shapely
 import tqdm
@@ -39,7 +38,6 @@ from .data_source import (
     DataSourceContext,
     Item,
     QueryConfig,
-    RetrieveItemDataSource,
 )
 from .wrs2 import build_wrs2_grid_index, get_pathrows_for_geometry
 
@@ -213,10 +211,7 @@ class LandsatItem(Item):
         )
 
 
-class Landsat(
-    DirectMaterializeDataSource[LandsatItem],
-    RetrieveItemDataSource[LandsatItem],
-):
+class Landsat(DirectMaterializeDataSource[LandsatItem]):
     """Data source for Landsat imagery on GCP's public Landsat GCS bucket.
 
     Uses gs://gee-public-data-landsat which contains Collection 2 data for all
@@ -244,7 +239,7 @@ class Landsat(
         spacecraft_ids: list[SpacecraftId] | None = None,
         bands: list[str] | None = None,
         sort_by: str | None = None,
-        collection_category: list[CollectionCategory] | None = None,
+        collection_categories: list[CollectionCategory] | None = None,
         use_rtree_index: bool = True,
         rtree_time_range: tuple[datetime, datetime] | None = None,
         context: DataSourceContext = DataSourceContext(),
@@ -266,7 +261,7 @@ class Landsat(
                 does not specify band sets. Requested/default bands must be
                 available for every configured sensor and processing level.
             sort_by: "cloud_cover" or None (arbitrary order).
-            collection_category: filter by tier, e.g. ["T1"]. None means all.
+            collection_categories: filter by tier, e.g. ["T1"]. None means all.
             use_rtree_index: whether to build and query local rtree index.
             rtree_time_range: only index scenes within this time range.
                 Restricting to a shorter period significantly speeds up rtree
@@ -314,11 +309,8 @@ class Landsat(
         else:
             self.index_cache_dir = UPath(index_cache_dir)
 
-        self.collection_category_filter = (
-            set(collection_category) if collection_category is not None else None
-        )
+        self.collection_categories = collection_categories
         self.use_rtree_index = use_rtree_index
-        self.rtree_time_range = rtree_time_range
         self.sort_by = sort_by
         self.effective_bands = effective_bands
 
@@ -423,13 +415,12 @@ class Landsat(
     ) -> Generator[LandsatItem, None, None]:
         """Read Landsat scenes from BigQuery table."""
         query_str = f"""
-            SELECT  product_id, spacecraft_id, sensor_id, sensing_time,
-                    collection_category, wrs_path, wrs_row,
+            SELECT  spacecraft_id, sensor_id, sensing_time,
+                    wrs_path, wrs_row,
                     cloud_cover, north_lat, south_lat, west_lon, east_lon,
                     base_url
             FROM    `{TABLE_NAME}`
-            WHERE   product_id IS NOT NULL
-                    AND sensing_time IS NOT NULL
+            WHERE   sensing_time IS NOT NULL
                     AND cloud_cover IS NOT NULL
                     AND west_lon IS NOT NULL
                     AND south_lat IS NOT NULL
@@ -508,7 +499,14 @@ class Landsat(
         _add_in_filter(
             "collection_categories",
             "collection_category",
-            self.collection_category_filter,
+            (
+                [
+                    collection_category.value
+                    for collection_category in self.collection_categories
+                ]
+                if self.collection_categories is not None
+                else None
+            ),
         )
 
         result = self._get_bigquery_client().query(
@@ -532,11 +530,12 @@ class Landsat(
             blob_path = base_url[len(gs_prefix) :] + "/"
 
             # Use the product folder name as the canonical product ID. The
-            # product_id column can disagree with base_url for a small number
-            # of rows (e.g. a Level-1 product_id paired with a Level-2
-            # base_url). The band files on GCS live in the base_url folder and
-            # are named after it, so the folder name is authoritative for both
-            # the item name and the derived processing level.
+            # BigQuery product_id column can disagree with base_url for a small
+            # number of rows (e.g. a Level-1 product_id paired with a Level-2
+            # base_url), so this query intentionally does not read that column.
+            # The band files on GCS live in the base_url folder and are named
+            # after it, so the folder name is authoritative for both the item
+            # name and the derived processing level.
             product_id = blob_path.rstrip("/").split("/")[-1]
 
             ts = row["sensing_time"]
@@ -804,20 +803,3 @@ class Landsat(
                         UPath(fname),
                         time_range=item.geometry.time_range,
                     )
-
-    # -------------------------------------------------------------------------
-    # Retrieve
-    # -------------------------------------------------------------------------
-
-    @override
-    def retrieve_item(
-        self, item: LandsatItem
-    ) -> Generator[tuple[str, BinaryIO], None, None]:
-        """Retrieves the rasters corresponding to an item as file streams."""
-        for band in self.effective_bands:
-            blob_key = self._band_blob_key(item, band)
-            blob = self._get_bucket().blob(blob_key)
-            buf = io.BytesIO()
-            blob.download_to_file(buf)
-            buf.seek(0)
-            yield (f"{item.name}_{band}.TIF", buf)

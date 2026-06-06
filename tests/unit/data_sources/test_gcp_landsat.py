@@ -46,7 +46,6 @@ def _make_bigquery_row(
     south_lat: float,
     east_lon: float,
     north_lat: float,
-    product_id: str = LC09_L1_PRODUCT_ID,
     spacecraft_id: str = "LANDSAT_9",
     sensor_id: str | None = "OLI_TIRS",
     sensing_time: str = "2026-06-03T02:45:00Z",
@@ -57,7 +56,6 @@ def _make_bigquery_row(
 ) -> dict[str, Any]:
     """Build a single row dict for a mock BigQuery result."""
     return {
-        "product_id": product_id,
         "spacecraft_id": spacecraft_id,
         "sensor_id": sensor_id,
         "sensing_time": datetime.fromisoformat(sensing_time),
@@ -180,9 +178,7 @@ class TestReadBigQuery:
         assert len(sensor_params) == 1
         assert sensor_params[0].values == ["OLI_TIRS"]
 
-    def test_uses_base_url_product_id_as_authoritative(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_uses_base_url_as_authoritative(self, tmp_path: pathlib.Path) -> None:
         ds = _make_data_source(
             tmp_path,
             processing_levels=[ProcessingLevel.L2SP],
@@ -190,9 +186,8 @@ class TestReadBigQuery:
         )
         rows = [
             _make_bigquery_row(
-                # Real public-index mismatch shape: product_id can be L1-style while
-                # base_url points at an L2 product folder.
-                product_id="LC08_L1TP_181075_20201028_20201106_02_T1",
+                # The base_url folder is authoritative for item name and processing
+                # level, since that is where the band files live on GCS.
                 base_url=LC09_L2SP_BASE_URL,
                 west_lon=-118.0,
                 south_lat=33.0,
@@ -226,7 +221,6 @@ class TestReadBigQuery:
         )
         rows = [
             _make_bigquery_row(
-                product_id=LC08_L1GT_PRODUCT_ID,
                 base_url=LC08_L1GT_BASE_URL,
                 west_lon=70.0,
                 south_lat=78.0,
@@ -263,7 +257,6 @@ class TestReadBigQuery:
         )
         rows = [
             _make_bigquery_row(
-                product_id=LE07_L1_PRODUCT_ID,
                 base_url=LE07_L1_BASE_URL,
                 west_lon=176.5,
                 south_lat=50.0,

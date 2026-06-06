@@ -58,7 +58,7 @@ The following environment variables must be set:
     "spacecraft_ids": null,
     // Filter by collection tier. null means all.
     // Values: "T1", "T2", "RT".
-    "collection_category": ["T1"],
+    "collection_categories": ["T1"],
     // Sort by this attribute. null (default) for arbitrary ordering, or "cloud_cover".
     "sort_by": "cloud_cover",
     // Whether to use local rtree mode or one-query-per-get_items BigQuery mode.
