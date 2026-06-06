@@ -10,7 +10,12 @@ import pytest
 from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources.gcp_landsat import Landsat, LandsatItem
+from rslearn.data_sources.gcp_landsat import (
+    Landsat,
+    LandsatItem,
+    ProcessingLevel,
+    SensorId,
+)
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry, flatten_shape
 from rslearn.utils.raster_array import RasterArray
@@ -18,8 +23,8 @@ from rslearn.utils.raster_format import GeotiffRasterFormat
 from rslearn.utils.rtree_index import RtreeIndex
 
 PIXEL_VALUE = 5000
-MOCK_PRODUCT_ID = "LC08_L1TP_046027_20200715_20200724_02_T1"
-MOCK_BLOB_PATH = "LC08/L1/02/046/027/LC08_L1TP_046027_20200715_20200724_02_T1/"
+MOCK_PRODUCT_ID = "LC09_L1TP_129040_20260603_20260603_02_T1"
+MOCK_BLOB_PATH = "LC09/L1/02/129/040/LC09_L1TP_129040_20260603_20260603_02_T1/"
 
 
 @pytest.fixture(autouse=True)
@@ -61,7 +66,8 @@ def _make_item(seattle2020: STGeometry) -> LandsatItem:
         geometry=geometry,
         blob_path=MOCK_BLOB_PATH,
         cloud_cover=5.0,
-        spacecraft_id="LANDSAT_8",
+        spacecraft_id="LANDSAT_9",
+        sensor_id=SensorId.OLI_TIRS,
         processing_level="L1TP",
     )
 
@@ -113,6 +119,8 @@ def test_ingest(
 
     data_source = Landsat(
         index_cache_dir=str(cache_dir),
+        sensor_ids=[SensorId.OLI_TIRS],
+        processing_levels=[ProcessingLevel.L1TP],
         bands=["B4"],
     )
     mock_item = _make_item(seattle2020)
@@ -159,6 +167,8 @@ def test_direct_materialize(
 
     data_source = Landsat(
         index_cache_dir=str(cache_dir),
+        sensor_ids=[SensorId.OLI_TIRS],
+        processing_levels=[ProcessingLevel.L1TP],
         bands=["B4"],
     )
     mock_item = _make_item(seattle2020)

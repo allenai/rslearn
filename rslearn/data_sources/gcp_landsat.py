@@ -80,15 +80,77 @@ class ProcessingLevel(StrEnum):
     L2SR = "L2SR"
 
 
-# For Level-2 products, each band is delivered as either a surface reflectance
-# ("SR_") or surface temperature ("ST_") asset. Exactly one band per sensor
-# becomes the surface temperature asset: B10 for OLI-TIRS (Landsat 8/9) and B6
-# for TM (Landsat 4/5) and ETM+ (Landsat 7). All other bands are surface
-# reflectance.
-_LEVEL2_THERMAL_BAND = {
-    "OLI_TIRS": "B10",
-    "TM": "B6",
-    "ETM": "B6",
+class SensorId(StrEnum):
+    """Landsat sensor identifiers."""
+
+    MSS = "MSS"
+    TM = "TM"
+    ETM = "ETM"
+    OLI = "OLI"
+    TIRS = "TIRS"
+    OLI_TIRS = "OLI_TIRS"
+
+
+# Level-2 product folders use SR_ surface reflectance assets and, for L2SP
+# products, ST_ surface temperature assets. L2SR products omit ST_* files. This
+# map identifies the sensor-specific thermal band used for L2SP ST_* filenames.
+_LEVEL2_THERMAL_BAND: dict[SensorId, str] = {
+    SensorId.OLI_TIRS: "B10",
+    SensorId.TM: "B6",
+    SensorId.ETM: "B6",
+}
+
+_LEVEL1_PROCESSING_LEVELS = {
+    ProcessingLevel.L1GS,
+    ProcessingLevel.L1GT,
+    ProcessingLevel.L1TP,
+}
+
+_L1_BANDS: dict[SensorId, list[str]] = {
+    SensorId.OLI_TIRS: [
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B9",
+        "B10",
+        "B11",
+    ],
+    SensorId.OLI: ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9"],
+    SensorId.TIRS: ["B10", "B11"],
+    SensorId.ETM: [
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6_VCID_1",
+        "B6_VCID_2",
+        "B7",
+        "B8",
+    ],
+    SensorId.TM: ["B1", "B2", "B3", "B4", "B5", "B6", "B7"],
+    SensorId.MSS: ["B4", "B5", "B6", "B7"],
+}
+
+AVAILABLE_BANDS: dict[ProcessingLevel, dict[SensorId, list[str]]] = {
+    ProcessingLevel.L1GS: _L1_BANDS,
+    ProcessingLevel.L1GT: _L1_BANDS,
+    ProcessingLevel.L1TP: _L1_BANDS,
+    ProcessingLevel.L2SP: {
+        SensorId.OLI_TIRS: ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B10"],
+        SensorId.ETM: ["B1", "B2", "B3", "B4", "B5", "B6", "B7"],
+        SensorId.TM: ["B1", "B2", "B3", "B4", "B5", "B6", "B7"],
+    },
+    ProcessingLevel.L2SR: {
+        SensorId.OLI_TIRS: ["B1", "B2", "B3", "B4", "B5", "B6", "B7"],
+        SensorId.ETM: ["B1", "B2", "B3", "B4", "B5", "B7"],
+        SensorId.TM: ["B1", "B2", "B3", "B4", "B5", "B7"],
+    },
 }
 
 
@@ -177,12 +239,12 @@ class Landsat(
     def __init__(
         self,
         index_cache_dir: str,
-        spacecraft_id: list[SpacecraftId] | None = None,
-        sensor_id: list[str] | None = None,
+        sensor_ids: list[SensorId],
+        processing_levels: list[ProcessingLevel],
+        spacecraft_ids: list[SpacecraftId] | None = None,
         bands: list[str] | None = None,
         sort_by: str | None = None,
         collection_category: list[CollectionCategory] | None = None,
-        processing_level: list[ProcessingLevel] | None = None,
         use_rtree_index: bool = True,
         rtree_time_range: tuple[datetime, datetime] | None = None,
         context: DataSourceContext = DataSourceContext(),
@@ -191,21 +253,37 @@ class Landsat(
 
         Args:
             index_cache_dir: directory to cache the index and rtree files.
-            spacecraft_id: filter by mission, e.g. ["LANDSAT_8", "LANDSAT_9"].
-                None means all missions.
-            sensor_id: filter by sensor, e.g. ["OLI_TIRS"]. None means all.
-            bands: which bands to expose. Required if the layer config does not
-                specify band sets.
+            sensor_ids: filter by sensor, e.g. [SensorId.OLI_TIRS]. Multiple sensors
+                are only supported for Level-1 processing levels.
+            processing_levels: filter by processing level, e.g.
+                [ProcessingLevel.L1TP]. Multiple processing levels are only
+                supported when all configured processing levels are Level-1.
+            spacecraft_ids: optional filter by mission, e.g.
+                [SpacecraftId.LANDSAT_8, SpacecraftId.LANDSAT_9]. None means
+                all missions with the configured sensors.
+            bands: which bands to expose. Defaults to all bands available for the
+                configured sensor(s) and processing level(s) if the layer config
+                does not specify band sets. Requested/default bands must be
+                available for every configured sensor and processing level.
             sort_by: "cloud_cover" or None (arbitrary order).
             collection_category: filter by tier, e.g. ["T1"]. None means all.
-            processing_level: filter by processing level, e.g. ["L1TP"]. None
-                means all.
             use_rtree_index: whether to build and query local rtree index.
             rtree_time_range: only index scenes within this time range.
                 Restricting to a shorter period significantly speeds up rtree
                 creation.
             context: the data source context.
         """
+        if len(sensor_ids) == 0:
+            raise ValueError("sensor_ids must contain at least one sensor")
+        if len(processing_levels) == 0:
+            raise ValueError("processing_levels must contain at least one level")
+        self.sensor_ids = sensor_ids
+        self.processing_levels = processing_levels
+        self.spacecraft_ids = spacecraft_ids
+        available_bands = self._get_available_bands(
+            self.sensor_ids, self.processing_levels
+        )
+
         # Determine bands from context or explicit argument.
         if context.layer_config is not None:
             needed_bands: list[str] = []
@@ -217,8 +295,15 @@ class Landsat(
         elif bands is not None:
             effective_bands = bands
         else:
+            effective_bands = list(available_bands)
+
+        missing_bands = set(effective_bands) - set(available_bands)
+        if missing_bands:
             raise ValueError(
-                "bands must be specified when no layer config band sets are provided"
+                f"bands {sorted(missing_bands)} are not available for "
+                f"sensor_ids={self.sensor_ids} and "
+                f"processing_levels={self.processing_levels}; "
+                f"available bands are {available_bands}"
             )
 
         asset_bands = {band: [band] for band in effective_bands}
@@ -229,15 +314,8 @@ class Landsat(
         else:
             self.index_cache_dir = UPath(index_cache_dir)
 
-        self.spacecraft_id_filter = (
-            set(spacecraft_id) if spacecraft_id is not None else None
-        )
-        self.sensor_id_filter = set(sensor_id) if sensor_id is not None else None
         self.collection_category_filter = (
             set(collection_category) if collection_category is not None else None
-        )
-        self.processing_level_filter = (
-            set(processing_level) if processing_level is not None else None
         )
         self.use_rtree_index = use_rtree_index
         self.rtree_time_range = rtree_time_range
@@ -277,6 +355,44 @@ class Landsat(
             self.rtree_index = get_cached_rtree(self.index_cache_dir, build_fn)
         else:
             self.rtree_index = None
+
+    def _get_available_bands(
+        self, sensor_ids: list[SensorId], processing_levels: list[ProcessingLevel]
+    ) -> list[str]:
+        """Get bands available for every configured sensor and processing level."""
+        all_level1 = all(
+            processing_level in _LEVEL1_PROCESSING_LEVELS
+            for processing_level in processing_levels
+        )
+        if len(processing_levels) > 1 and not all_level1:
+            raise ValueError(
+                "multiple processing_levels values are only supported when all "
+                f"configured processing levels are Level-1; got {processing_levels}"
+            )
+        if len(sensor_ids) > 1 and not all_level1:
+            raise ValueError(
+                "multiple sensor_ids values are only supported for Level-1 "
+                f"processing levels; got processing_levels={processing_levels}"
+            )
+
+        common_bands: set[str] | None = None
+        for processing_level in processing_levels:
+            sensor_bands = AVAILABLE_BANDS[processing_level]
+            valid_sensors = sorted(sensor.value for sensor in sensor_bands)
+            for sensor_id in sensor_ids:
+                if sensor_id not in sensor_bands:
+                    raise ValueError(
+                        f"sensor_id={sensor_id} is not available for "
+                        f"processing_level={processing_level}; valid sensors are "
+                        f"{valid_sensors}"
+                    )
+                if common_bands is None:
+                    common_bands = set(sensor_bands[sensor_id])
+                else:
+                    common_bands.intersection_update(sensor_bands[sensor_id])
+
+        assert common_bands is not None
+        return list(common_bands)
 
     def _get_bigquery_client(self) -> bigquery.Client:
         """Lazily initialize BigQuery client."""
@@ -375,8 +491,20 @@ class Landsat(
                 bigquery.ArrayQueryParameter(param_name, "STRING", sorted(values))
             )
 
-        _add_in_filter("spacecraft_ids", "spacecraft_id", self.spacecraft_id_filter)
-        _add_in_filter("sensor_ids", "sensor_id", self.sensor_id_filter)
+        _add_in_filter(
+            "sensor_ids",
+            "sensor_id",
+            [sensor_id.value for sensor_id in self.sensor_ids],
+        )
+        _add_in_filter(
+            "spacecraft_ids",
+            "spacecraft_id",
+            (
+                [spacecraft_id.value for spacecraft_id in self.spacecraft_ids]
+                if self.spacecraft_ids is not None
+                else None
+            ),
+        )
         _add_in_filter(
             "collection_categories",
             "collection_category",
@@ -390,6 +518,9 @@ class Landsat(
         if desc is not None:
             result = tqdm.tqdm(result, desc=desc)
 
+        configured_processing_levels = {
+            processing_level.value for processing_level in self.processing_levels
+        }
         for row in result:
             base_url = row["base_url"]
 
@@ -427,10 +558,7 @@ class Landsat(
             product_id_parts = product_id.split("_")
             processing_level = product_id_parts[1] if len(product_id_parts) > 1 else ""
 
-            if (
-                self.processing_level_filter is not None
-                and processing_level not in self.processing_level_filter
-            ):
+            if processing_level not in configured_processing_levels:
                 continue
 
             yield LandsatItem(
@@ -609,7 +737,7 @@ class Landsat(
         """
         if not item.processing_level.startswith("L2"):
             return band
-        thermal_band = _LEVEL2_THERMAL_BAND.get(item.sensor_id or "")
+        thermal_band = _LEVEL2_THERMAL_BAND.get(SensorId(item.sensor_id or ""))
         if band == thermal_band:
             return f"ST_{band}"
         return f"SR_{band}"

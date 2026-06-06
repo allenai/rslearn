@@ -157,10 +157,10 @@ def test_ingest_l2a(
         bands=["B04"],
     )
 
-    # The L2A B04 band file is stored under the R10m resolution folder with a per-scene
-    # stem, so the blob path passed to bucket.blob should reflect that layout.
+    # The L2A B04 band file is stored under the R10m resolution folder with a tile/time
+    # stem.
     expected_blob_path = (
-        MOCK_L2A_BLOB_PREFIX + "R10m/L2A_T10TEM_20200715T000000_B04_10m.jp2"
+        MOCK_L2A_BLOB_PREFIX + "R10m/T10TEM_20200715T000000_B04_10m.jp2"
     )
 
     tile_store_dir = UPath(tmp_path / "tiles")

@@ -18,6 +18,7 @@ from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.gcp_landsat import (
     Landsat,
     ProcessingLevel,
+    SensorId,
     SpacecraftId,
 )
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
@@ -45,11 +46,12 @@ class TestLandsat:
     """Tests ingesting different Landsat scene types from GCP."""
 
     @pytest.mark.parametrize(
-        ("spacecraft_id", "processing_level", "bands", "time_range"),
+        ("spacecraft_id", "sensor_id", "processing_level", "bands", "time_range"),
         [
             # Landsat 5 TM, Level-1 (legacy mission, B1-B7).
             (
                 SpacecraftId.LANDSAT_5,
+                SensorId.TM,
                 ProcessingLevel.L1TP,
                 ["B3"],
                 (
@@ -60,6 +62,7 @@ class TestLandsat:
             # Landsat 9 OLI-TIRS, Level-1.
             (
                 SpacecraftId.LANDSAT_9,
+                SensorId.OLI_TIRS,
                 ProcessingLevel.L1TP,
                 ["B4"],
                 (
@@ -71,6 +74,7 @@ class TestLandsat:
             # (B4 -> SR_B4 surface reflectance, B10 -> ST_B10 surface temp).
             (
                 SpacecraftId.LANDSAT_9,
+                SensorId.OLI_TIRS,
                 ProcessingLevel.L2SP,
                 ["B4", "B10"],
                 (
@@ -85,6 +89,7 @@ class TestLandsat:
         self,
         tmp_path: pathlib.Path,
         spacecraft_id: SpacecraftId,
+        sensor_id: SensorId,
         processing_level: ProcessingLevel,
         bands: list[str],
         time_range: tuple[datetime, datetime],
@@ -93,8 +98,9 @@ class TestLandsat:
         geometry = _seattle_geometry(time_range)
         data_source = Landsat(
             index_cache_dir=str(UPath(tmp_path) / "cache"),
-            spacecraft_id=[spacecraft_id],
-            processing_level=[processing_level],
+            sensor_ids=[sensor_id],
+            processing_levels=[processing_level],
+            spacecraft_ids=[spacecraft_id],
             bands=bands,
             sort_by="cloud_cover",
             use_rtree_index=False,
@@ -105,6 +111,7 @@ class TestLandsat:
         assert len(item_groups) > 0, "expected at least one matching scene"
         item = item_groups[0].items[0]
         assert item.spacecraft_id == spacecraft_id.value
+        assert item.sensor_id == sensor_id.value
         assert item.processing_level == processing_level.value
 
         tile_store_dir = UPath(tmp_path) / "tiles"

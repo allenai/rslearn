@@ -14,6 +14,8 @@ from rslearn.data_sources.gcp_landsat import (
     BUCKET_NAME,
     Landsat,
     LandsatItem,
+    ProcessingLevel,
+    SensorId,
     SpacecraftId,
 )
 from rslearn.data_sources.wrs2 import WRS2_GRID_SIZE
@@ -27,19 +29,31 @@ def _gs_user_project(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GS_USER_PROJECT", "test-project")
 
 
+LC09_L1_PRODUCT_ID = "LC09_L1TP_129040_20260603_20260603_02_T1"
+LC09_L1_BASE_URL = f"gs://{BUCKET_NAME}/LC09/L1/02/129/040/{LC09_L1_PRODUCT_ID}"
+LC09_L2SP_PRODUCT_ID = "LC09_L2SP_001093_20240324_20240325_02_T2"
+LC09_L2SP_BASE_URL = f"gs://{BUCKET_NAME}/LC09/L2/02/001/093/{LC09_L2SP_PRODUCT_ID}"
+LC09_L2SR_PRODUCT_ID = "LC09_L2SR_145065_20260603_20260605_02_T1"
+LC09_L2SR_BASE_URL = f"gs://{BUCKET_NAME}/LC09/L2/02/145/065/{LC09_L2SR_PRODUCT_ID}"
+LE07_L1_PRODUCT_ID = "LE07_L1TP_001091_20160724_20200902_02_T1"
+LE07_L1_BASE_URL = f"gs://{BUCKET_NAME}/LE07/L1/02/001/091/{LE07_L1_PRODUCT_ID}"
+LC08_L1GT_PRODUCT_ID = "LC08_L1GT_155005_20260601_20260603_02_RT"
+LC08_L1GT_BASE_URL = f"gs://{BUCKET_NAME}/LC08/L1/02/155/005/{LC08_L1GT_PRODUCT_ID}"
+
+
 def _make_bigquery_row(
-    product_id: str,
     west_lon: float,
     south_lat: float,
     east_lon: float,
     north_lat: float,
-    spacecraft_id: str = "LANDSAT_8",
+    product_id: str = LC09_L1_PRODUCT_ID,
+    spacecraft_id: str = "LANDSAT_9",
     sensor_id: str | None = "OLI_TIRS",
-    sensing_time: str = "2025-01-31T18:22:13Z",
-    processing_level: str = "L1TP",
+    sensing_time: str = "2026-06-03T02:45:00Z",
     collection_category: str = "T1",
-    wrs_path: int = 40,
-    wrs_row: int = 36,
+    wrs_path: int = 129,
+    wrs_row: int = 40,
+    base_url: str = LC09_L1_BASE_URL,
 ) -> dict[str, Any]:
     """Build a single row dict for a mock BigQuery result."""
     return {
@@ -47,7 +61,6 @@ def _make_bigquery_row(
         "spacecraft_id": spacecraft_id,
         "sensor_id": sensor_id,
         "sensing_time": datetime.fromisoformat(sensing_time),
-        "processing_level": processing_level,
         "collection_category": collection_category,
         "wrs_path": wrs_path,
         "wrs_row": wrs_row,
@@ -56,13 +69,13 @@ def _make_bigquery_row(
         "south_lat": south_lat,
         "west_lon": west_lon,
         "east_lon": east_lon,
-        "base_url": f"gs://{BUCKET_NAME}/LC08/L1/02/040/036/{product_id}",
+        "base_url": base_url,
     }
 
 
 def _make_item(
-    name: str,
-    spacecraft_id: str = "LANDSAT_8",
+    name: str = LC09_L1_PRODUCT_ID,
+    spacecraft_id: str = "LANDSAT_9",
     sensor_id: str | None = "OLI_TIRS",
     processing_level: str = "L1TP",
     cloud_cover: float = 10.0,
@@ -70,13 +83,13 @@ def _make_item(
     lat: float = 47.0,
 ) -> LandsatItem:
     """Create a LandsatItem with reasonable defaults."""
-    ts = datetime(2025, 1, 31)
+    ts = datetime(2026, 6, 3)
     geometry = STGeometry(
         WGS84_PROJECTION,
         shapely.Point(lon, lat).buffer(1.0),
         (ts, ts),
     )
-    blob_path = f"LC08/L1/02/040/036/{name}/"
+    blob_path = f"LC09/L1/02/129/040/{name}/"
     return LandsatItem(
         name=name,
         geometry=geometry,
@@ -90,6 +103,8 @@ def _make_item(
 
 def _make_data_source(tmp_path: pathlib.Path, **kwargs: Any) -> Landsat:
     """Create a Landsat data source with the rtree build mocked out."""
+    kwargs.setdefault("sensor_ids", [SensorId.OLI_TIRS])
+    kwargs.setdefault("processing_levels", [ProcessingLevel.L1TP])
     kwargs.setdefault("bands", ["B4"])
     with patch("rslearn.data_sources.gcp_landsat.get_cached_rtree") as mock_rtree:
         mock_rtree.return_value = MagicMock()
@@ -100,7 +115,7 @@ class TestLandsatItemSerialize:
     """Tests for LandsatItem serialization roundtrip."""
 
     def test_roundtrip(self) -> None:
-        item = _make_item("LC08_L1TP_040036_20250131_20250208_02_T1")
+        item = _make_item()
         d = item.serialize()
         restored = LandsatItem.deserialize(d)
         assert restored.name == item.name
@@ -118,7 +133,6 @@ class TestReadBigQuery:
         ds = _make_data_source(tmp_path)
         rows = [
             _make_bigquery_row(
-                "LC08_L1TP_040036_20250131_20250208_02_T1",
                 west_lon=-118.0,
                 south_lat=33.0,
                 east_lon=-115.0,
@@ -136,10 +150,10 @@ class TestReadBigQuery:
             items = list(ds._read_bigquery())
 
         assert len(items) == 1
-        assert items[0].name == "LC08_L1TP_040036_20250131_20250208_02_T1"
+        assert items[0].name == LC09_L1_PRODUCT_ID
 
-    def test_filters_by_spacecraft_id_in_sql(self, tmp_path: pathlib.Path) -> None:
-        ds = _make_data_source(tmp_path, spacecraft_id=[SpacecraftId.LANDSAT_9])
+    def test_filters_by_spacecraft_ids_in_sql(self, tmp_path: pathlib.Path) -> None:
+        ds = _make_data_source(tmp_path, spacecraft_ids=[SpacecraftId.LANDSAT_9])
 
         with patch(
             "rslearn.data_sources.gcp_landsat.bigquery.Client"
@@ -153,23 +167,113 @@ class TestReadBigQuery:
             job_config = mock_client.query.call_args[1]["job_config"]
 
         assert "spacecraft_id IN UNNEST(@spacecraft_ids)" in query_str
+        assert "sensor_id IN UNNEST(@sensor_ids)" in query_str
+        assert "processing_level" not in query_str
         spacecraft_params = [
             p for p in job_config.query_parameters if p.name == "spacecraft_ids"
         ]
         assert len(spacecraft_params) == 1
         assert spacecraft_params[0].values == ["LANDSAT_9"]
+        sensor_params = [
+            p for p in job_config.query_parameters if p.name == "sensor_ids"
+        ]
+        assert len(sensor_params) == 1
+        assert sensor_params[0].values == ["OLI_TIRS"]
+
+    def test_uses_base_url_product_id_as_authoritative(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        ds = _make_data_source(
+            tmp_path,
+            processing_levels=[ProcessingLevel.L2SP],
+            bands=["B4", "B10"],
+        )
+        rows = [
+            _make_bigquery_row(
+                # Real public-index mismatch shape: product_id can be L1-style while
+                # base_url points at an L2 product folder.
+                product_id="LC08_L1TP_181075_20201028_20201106_02_T1",
+                base_url=LC09_L2SP_BASE_URL,
+                west_lon=-118.0,
+                south_lat=33.0,
+                east_lon=-115.0,
+                north_lat=35.0,
+                sensing_time="2024-03-24T02:17:00Z",
+                collection_category="T2",
+                wrs_path=1,
+                wrs_row=93,
+            )
+        ]
+
+        with patch(
+            "rslearn.data_sources.gcp_landsat.bigquery.Client"
+        ) as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.query.return_value = rows
+            mock_client_cls.return_value = mock_client
+
+            items = list(ds._read_bigquery())
+
+        assert len(items) == 1
+        assert items[0].name == LC09_L2SP_PRODUCT_ID
+        assert items[0].processing_level == ProcessingLevel.L2SP
+
+    def test_multiple_l1_processing_levels_parse(self, tmp_path: pathlib.Path) -> None:
+        ds = _make_data_source(
+            tmp_path,
+            processing_levels=[ProcessingLevel.L1TP, ProcessingLevel.L1GT],
+            bands=["B4"],
+        )
+        rows = [
+            _make_bigquery_row(
+                product_id=LC08_L1GT_PRODUCT_ID,
+                base_url=LC08_L1GT_BASE_URL,
+                west_lon=70.0,
+                south_lat=78.0,
+                east_lon=74.0,
+                north_lat=81.0,
+                spacecraft_id="LANDSAT_8",
+                sensing_time="2026-06-01T05:59:37Z",
+                collection_category="RT",
+                wrs_path=155,
+                wrs_row=5,
+            )
+        ]
+
+        with patch(
+            "rslearn.data_sources.gcp_landsat.bigquery.Client"
+        ) as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.query.return_value = rows
+            mock_client_cls.return_value = mock_client
+
+            items = list(ds._read_bigquery())
+
+        assert len(items) == 1
+        assert items[0].name == LC08_L1GT_PRODUCT_ID
+        assert items[0].processing_level == ProcessingLevel.L1GT
 
     def test_antimeridian_crossing(self, tmp_path: pathlib.Path) -> None:
         """A scene crossing the antimeridian produces a valid multi-polygon."""
-        ds = _make_data_source(tmp_path)
+        ds = _make_data_source(
+            tmp_path,
+            sensor_ids=[SensorId.ETM],
+            spacecraft_ids=[SpacecraftId.LANDSAT_7],
+            bands=["B4"],
+        )
         rows = [
             _make_bigquery_row(
-                "LE07_L1TP_091014_20120313_20200909_02_T2",
+                product_id=LE07_L1_PRODUCT_ID,
+                base_url=LE07_L1_BASE_URL,
                 west_lon=176.5,
                 south_lat=50.0,
                 east_lon=-177.7,
                 north_lat=52.0,
-                sensing_time="2012-03-13T00:00:00Z",
+                spacecraft_id="LANDSAT_7",
+                sensor_id="ETM",
+                sensing_time="2016-07-24T00:00:00Z",
+                wrs_path=1,
+                wrs_row=91,
             )
         ]
 
@@ -206,27 +310,25 @@ class TestGetItemsBigQueryMode:
     def test_matches_item_with_real_pathrow_lookup(
         self, tmp_path: pathlib.Path
     ) -> None:
-        ts = datetime(2025, 1, 31, tzinfo=UTC)
+        ts = datetime(2026, 6, 3, tzinfo=UTC)
         geometry = STGeometry(
             WGS84_PROJECTION,
             shapely.box(-118.0, 33.0, -115.0, 35.0),
             (ts, ts + timedelta(days=1)),
         )
 
-        # Build a GridIndex covering the geometry, tagged with WRS path/row 40/36.
+        # Build a GridIndex covering the geometry, tagged with the real scene's WRS
+        # path/row.
         wrs2_index = GridIndex(WRS2_GRID_SIZE)
         wrs2_polygon = shapely.box(-119.0, 32.0, -114.0, 36.0)
-        wrs2_index.insert(wrs2_polygon.bounds, (wrs2_polygon, "40", "36"))
+        wrs2_index.insert(wrs2_polygon.bounds, (wrs2_polygon, "129", "40"))
 
         rows = [
             _make_bigquery_row(
-                "LC08_L1TP_040036_20250131_20250208_02_T1",
                 west_lon=-118.0,
                 south_lat=33.0,
                 east_lon=-115.0,
                 north_lat=35.0,
-                wrs_path=40,
-                wrs_row=36,
             )
         ]
 
@@ -245,6 +347,8 @@ class TestGetItemsBigQueryMode:
 
             ds = Landsat(
                 index_cache_dir=str(tmp_path),
+                sensor_ids=[SensorId.OLI_TIRS],
+                processing_levels=[ProcessingLevel.L1TP],
                 bands=["B4"],
                 use_rtree_index=False,
             )
@@ -253,7 +357,7 @@ class TestGetItemsBigQueryMode:
         # One query for the whole get_items call.
         assert mock_client.query.call_count == 1
 
-        # The real path/row lookup must have produced the 40/36 filter, passed as a
+        # The real path/row lookup must have produced the 129/40 filter, passed as a
         # "path,row" entry in the @pathrows query parameter.
         query_str = mock_client.query.call_args[0][0]
         job_config = mock_client.query.call_args[1]["job_config"]
@@ -262,14 +366,14 @@ class TestGetItemsBigQueryMode:
             p for p in job_config.query_parameters if p.name == "pathrows"
         ]
         assert len(pathrow_params) == 1
-        assert "40,36" in pathrow_params[0].values
+        assert "129,40" in pathrow_params[0].values
 
         # The candidate item should be matched into a single group for the geometry.
         assert len(result) == 1
         group = result[0]
         assert len(group) == 1
         matched_names = [item.name for item in group[0].items]
-        assert matched_names == ["LC08_L1TP_040036_20250131_20250208_02_T1"]
+        assert matched_names == [LC09_L1_PRODUCT_ID]
 
 
 class TestGetAssetUrl:
@@ -278,14 +382,14 @@ class TestGetAssetUrl:
     def test_returns_gs_url(self, tmp_path: pathlib.Path) -> None:
         """get_asset_url returns a gs:// URL."""
         ds = _make_data_source(tmp_path)
-        item = _make_item("LC08_L1TP_040036_20250131_20250208_02_T1")
+        item = _make_item()
 
         url = ds.get_asset_url(item, "B4")
 
         expected = (
             f"gs://{BUCKET_NAME}/"
-            "LC08/L1/02/040/036/LC08_L1TP_040036_20250131_20250208_02_T1/"
-            "LC08_L1TP_040036_20250131_20250208_02_T1_B4.TIF"
+            "LC09/L1/02/129/040/LC09_L1TP_129040_20260603_20260603_02_T1/"
+            "LC09_L1TP_129040_20260603_20260603_02_T1_B4.TIF"
         )
         assert url == expected
 
@@ -301,27 +405,42 @@ class TestBandToFileToken:
 
     def test_level1_returns_band_as_is(self, tmp_path: pathlib.Path) -> None:
         ds = _make_data_source(tmp_path)
-        item = _make_item(
-            "LC08_L1TP_040036_20250131_20250208_02_T1",
-            sensor_id="OLI_TIRS",
-            processing_level="L1TP",
-        )
+        item = _make_item()
         assert ds._band_to_file_token(item, "B4") == "B4"
         assert ds._band_to_file_token(item, "B10") == "B10"
 
     @pytest.mark.parametrize(
         ("sensor_id", "thermal_band"),
-        [("OLI_TIRS", "B10"), ("TM", "B6"), ("ETM", "B6")],
+        [(SensorId.OLI_TIRS, "B10"), (SensorId.TM, "B6"), (SensorId.ETM, "B6")],
     )
     def test_level2_thermal_and_reflectance(
-        self, tmp_path: pathlib.Path, sensor_id: str, thermal_band: str
+        self, tmp_path: pathlib.Path, sensor_id: SensorId, thermal_band: str
     ) -> None:
-        ds = _make_data_source(tmp_path)
+        ds = _make_data_source(
+            tmp_path,
+            sensor_ids=[sensor_id],
+            processing_levels=[ProcessingLevel.L2SP],
+            bands=["B4", thermal_band],
+        )
         item = _make_item(
-            "X_L2SP_040036_20250131_20250208_02_T1",
+            LC09_L2SP_PRODUCT_ID,
             sensor_id=sensor_id,
             processing_level="L2SP",
         )
         assert ds._band_to_file_token(item, thermal_band) == f"ST_{thermal_band}"
         # A non-thermal band is surface reflectance.
+        assert ds._band_to_file_token(item, "B4") == "SR_B4"
+
+    def test_l2sr_reflectance_band(self, tmp_path: pathlib.Path) -> None:
+        ds = _make_data_source(
+            tmp_path,
+            processing_levels=[ProcessingLevel.L2SR],
+            bands=["B4"],
+        )
+        item = _make_item(
+            LC09_L2SR_PRODUCT_ID,
+            sensor_id="OLI_TIRS",
+            processing_level=ProcessingLevel.L2SR,
+        )
+
         assert ds._band_to_file_token(item, "B4") == "SR_B4"
