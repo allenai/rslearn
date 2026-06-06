@@ -15,6 +15,7 @@ from rslearn.data_sources.gcp_landsat import (
     LandsatItem,
     ProcessingLevel,
     SensorId,
+    SpacecraftId,
 )
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry, flatten_shape
@@ -66,9 +67,9 @@ def _make_item(seattle2020: STGeometry) -> LandsatItem:
         geometry=geometry,
         blob_path=MOCK_BLOB_PATH,
         cloud_cover=5.0,
-        spacecraft_id="LANDSAT_9",
+        spacecraft_id=SpacecraftId.LANDSAT_9,
         sensor_id=SensorId.OLI_TIRS,
-        processing_level="L1TP",
+        processing_level=ProcessingLevel.L1TP,
     )
 
 

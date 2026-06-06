@@ -110,9 +110,9 @@ class TestLandsat:
         item_groups = data_source.get_items([geometry], query_config)[0]
         assert len(item_groups) > 0, "expected at least one matching scene"
         item = item_groups[0].items[0]
-        assert item.spacecraft_id == spacecraft_id.value
-        assert item.sensor_id == sensor_id.value
-        assert item.processing_level == processing_level.value
+        assert item.spacecraft_id == spacecraft_id
+        assert item.sensor_id == sensor_id
+        assert item.processing_level == processing_level
 
         tile_store_dir = UPath(tmp_path) / "tiles"
         tile_store = DefaultTileStore(str(tile_store_dir))

@@ -163,9 +163,9 @@ class LandsatItem(Item):
         geometry: STGeometry,
         blob_path: str,
         cloud_cover: float,
-        spacecraft_id: str | None,
-        processing_level: str,
-        sensor_id: str | None = None,
+        spacecraft_id: SpacecraftId,
+        processing_level: ProcessingLevel,
+        sensor_id: SensorId,
     ) -> None:
         """Creates a new LandsatItem.
 
@@ -175,9 +175,9 @@ class LandsatItem(Item):
             blob_path: path within the GCS bucket to the scene folder, e.g.
                 "LC09/L1/02/231/062/LC09_L1TP_231062_20260426_20260426_02_T1/".
             cloud_cover: the scene's cloud cover percentage (0-100).
-            spacecraft_id: the spacecraft identifier, e.g. "LANDSAT_8".
-            sensor_id: the sensor identifier, e.g. "OLI_TIRS".
-            processing_level: the processing level, e.g. "L1TP".
+            spacecraft_id: the spacecraft identifier, e.g. SpacecraftId.LANDSAT_8.
+            sensor_id: the sensor identifier, e.g. SensorId.OLI_TIRS.
+            processing_level: the processing level, e.g. ProcessingLevel.L1TP.
         """
         super().__init__(name, geometry)
         self.blob_path = blob_path
@@ -192,9 +192,9 @@ class LandsatItem(Item):
         d = super().serialize()
         d["blob_path"] = self.blob_path
         d["cloud_cover"] = self.cloud_cover
-        d["spacecraft_id"] = self.spacecraft_id
-        d["sensor_id"] = self.sensor_id
-        d["processing_level"] = self.processing_level
+        d["spacecraft_id"] = self.spacecraft_id.value
+        d["sensor_id"] = self.sensor_id.value
+        d["processing_level"] = self.processing_level.value
         return d
 
     @staticmethod
@@ -207,9 +207,9 @@ class LandsatItem(Item):
             geometry=item.geometry,
             blob_path=d["blob_path"],
             cloud_cover=d["cloud_cover"],
-            spacecraft_id=d["spacecraft_id"],
-            processing_level=d["processing_level"],
-            sensor_id=d["sensor_id"],
+            spacecraft_id=SpacecraftId(d["spacecraft_id"]),
+            processing_level=ProcessingLevel(d["processing_level"]),
+            sensor_id=SensorId(d["sensor_id"]),
         )
 
 
@@ -566,9 +566,9 @@ class Landsat(
                 geometry=geometry,
                 blob_path=blob_path,
                 cloud_cover=float(row["cloud_cover"]),
-                spacecraft_id=row["spacecraft_id"],
-                processing_level=processing_level,
-                sensor_id=row["sensor_id"],
+                spacecraft_id=SpacecraftId(row["spacecraft_id"]),
+                processing_level=ProcessingLevel(processing_level),
+                sensor_id=SensorId(row["sensor_id"]),
             )
 
     # -------------------------------------------------------------------------
@@ -735,9 +735,9 @@ class Landsat(
         Returns:
             the band token used in the blob filename (e.g. "B4" or "SR_B4").
         """
-        if not item.processing_level.startswith("L2"):
+        if item.processing_level in _LEVEL1_PROCESSING_LEVELS:
             return band
-        thermal_band = _LEVEL2_THERMAL_BAND.get(SensorId(item.sensor_id or ""))
+        thermal_band = _LEVEL2_THERMAL_BAND.get(item.sensor_id)
         if band == thermal_band:
             return f"ST_{band}"
         return f"SR_{band}"

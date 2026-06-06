@@ -75,9 +75,9 @@ def _make_bigquery_row(
 
 def _make_item(
     name: str = LC09_L1_PRODUCT_ID,
-    spacecraft_id: str = "LANDSAT_9",
-    sensor_id: str | None = "OLI_TIRS",
-    processing_level: str = "L1TP",
+    spacecraft_id: SpacecraftId = SpacecraftId.LANDSAT_9,
+    sensor_id: SensorId = SensorId.OLI_TIRS,
+    processing_level: ProcessingLevel = ProcessingLevel.L1TP,
     cloud_cover: float = 10.0,
     lon: float = -122.0,
     lat: float = 47.0,
@@ -425,7 +425,7 @@ class TestBandToFileToken:
         item = _make_item(
             LC09_L2SP_PRODUCT_ID,
             sensor_id=sensor_id,
-            processing_level="L2SP",
+            processing_level=ProcessingLevel.L2SP,
         )
         assert ds._band_to_file_token(item, thermal_band) == f"ST_{thermal_band}"
         # A non-thermal band is surface reflectance.
@@ -439,7 +439,7 @@ class TestBandToFileToken:
         )
         item = _make_item(
             LC09_L2SR_PRODUCT_ID,
-            sensor_id="OLI_TIRS",
+            sensor_id=SensorId.OLI_TIRS,
             processing_level=ProcessingLevel.L2SR,
         )
 
