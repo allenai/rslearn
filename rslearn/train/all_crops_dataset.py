@@ -1,6 +1,7 @@
 """Wrapper around ModelDataset to load all crops in a window."""
 
 import itertools
+import random
 from collections.abc import Iterable, Iterator
 from dataclasses import replace
 from typing import Any
@@ -10,7 +11,12 @@ import torch
 
 from rslearn.dataset import Window
 from rslearn.log_utils import get_logger
-from rslearn.train.dataset import DataInput, ModelDataset
+from rslearn.train.dataset import (
+    DataInput,
+    ModelDataset,
+    is_data_input_available,
+    read_data_input,
+)
 from rslearn.train.model_context import RasterImage, SampleMetadata
 from rslearn.utils.geometry import PixelBounds, STGeometry
 
@@ -385,6 +391,117 @@ class IterableAllCropsDataset(torch.utils.data.IterableDataset):
 
             if num_samples_returned >= num_samples_needed:
                 break
+
+    def get_dataset_examples(self) -> list[Window]:
+        """Returns a list of windows in this dataset."""
+        return self.dataset.get_dataset_examples()
+
+
+class MapAllCropsDataset(torch.utils.data.Dataset):
+    """Map-style dataset over all crops in a window, reading each crop on demand.
+
+    This is the map-style counterpart to IterableAllCropsDataset: it enumerates
+    every crop of every window and exposes __len__/__getitem__ for random access
+    (which allows multiple data loader workers and avoids the iterable's manual
+    rank/worker bookkeeping). Unlike InMemoryAllCropsDataset, it does not cache
+    windows; each __getitem__ reads only the requested crop's pixel bounds from
+    disk, so peak memory is one crop rather than a whole window. This matters when
+    a single window is very large (e.g. a whole scene), where loading the full
+    window would be prohibitively expensive.
+    """
+
+    def __init__(
+        self,
+        dataset: ModelDataset,
+        crop_size: tuple[int, int],
+        overlap_pixels: int = 0,
+    ):
+        """Create a new MapAllCropsDataset.
+
+        Args:
+            dataset: the ModelDataset to wrap.
+            crop_size: the size of the crops to extract.
+            overlap_pixels: the number of pixels shared between adjacent crops. Note
+                that the right/bottom-most crops may still overlap with other crops
+                even if overlap_pixels=0, since all crops are kept within the window
+                bounds.
+        """
+        super().__init__()
+        self.dataset = dataset
+        self.crop_size = crop_size
+        self.overlap_size = (overlap_pixels, overlap_pixels)
+        self.windows = dataset.get_dataset_examples()
+        self.inputs = dataset.inputs
+
+        # Enumerate (window_id, crop_bounds, crop_idx, num_crops) from window-bounds
+        # metadata only; no pixel data is read here. Crops within a window are
+        # contiguous and in increasing crop_idx order, which RslearnWriter relies on
+        # to reassemble per-window outputs.
+        self.crops: list[tuple[int, PixelBounds, int, int]] = []
+        for window_id, window in enumerate(self.windows):
+            crop_bounds_list = get_window_crop_options(
+                crop_size, self.overlap_size, window.bounds
+            )
+            for crop_idx, crop_bounds in enumerate(crop_bounds_list):
+                self.crops.append(
+                    (window_id, crop_bounds, crop_idx, len(crop_bounds_list))
+                )
+
+    def __len__(self) -> int:
+        """Return the total number of crops across all windows."""
+        return len(self.crops)
+
+    def __getitem__(
+        self, index: int
+    ) -> tuple[dict[str, Any], dict[str, Any], SampleMetadata]:
+        """Read one crop directly from disk and return a finalized sample."""
+        window_id, crop_bounds, crop_idx, num_crops = self.crops[index]
+        window = self.windows[window_id]
+        rng = random.Random(window_id if self.dataset.fix_crop_pick else None)
+
+        # Read each input over just this crop's bounds. read_data_input issues a
+        # windowed read of the crop bbox, so no full-window array is allocated.
+        raw_inputs: dict[str, Any] = {}
+        passthrough_inputs: dict[str, Any] = {}
+        for name, data_input in self.inputs.items():
+            if not data_input.required and not is_data_input_available(
+                data_input, window
+            ):
+                continue
+            raw_inputs[name] = read_data_input(
+                self.dataset.dataset, window, crop_bounds, data_input, rng
+            )
+            if data_input.passthrough:
+                passthrough_inputs[name] = raw_inputs[name]
+
+        metadata = SampleMetadata(
+            window_group=window.group,
+            window_name=window.name,
+            window_bounds=window.bounds,
+            crop_bounds=crop_bounds,
+            crop_idx=crop_idx,
+            num_crops_in_window=num_crops,
+            time_range=window.time_range,
+            projection=window.projection,
+            dataset_source=self.dataset.name,
+        )
+
+        input_dict, target_dict = self.dataset.task.process_inputs(
+            raw_inputs,
+            metadata=metadata,
+            load_targets=not self.dataset.split_config.get_skip_targets(),
+        )
+        input_dict.update(passthrough_inputs)
+        input_dict, target_dict = self.dataset.transforms(input_dict, target_dict)
+        return input_dict, target_dict, metadata
+
+    def set_name(self, name: str) -> None:
+        """Sets dataset name.
+
+        Args:
+            name: dataset name
+        """
+        self.dataset.set_name(name)
 
     def get_dataset_examples(self) -> list[Window]:
         """Returns a list of windows in this dataset."""
