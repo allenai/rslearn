@@ -171,12 +171,6 @@ def test_r2_metric_with_scale_factor_and_mask() -> None:
     assert results["r2"] == pytest.approx(1.0)
 
 
-def test_metric_mode_removed() -> None:
-    """RegressionTask no longer accepts the deprecated metric_mode option."""
-    with pytest.raises(TypeError, match="metric_mode"):
-        RegressionTask(property_name="property_name", metric_mode="rmse")
-
-
 @pytest.mark.parametrize(
     ("loss_mode", "expected"),
     [

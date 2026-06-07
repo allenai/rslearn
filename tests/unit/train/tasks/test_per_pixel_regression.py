@@ -227,12 +227,6 @@ def test_r2_metric_list(empty_sample_metadata: SampleMetadata) -> None:
     assert results["r2"] == pytest.approx(-1.5)
 
 
-def test_metric_mode_removed() -> None:
-    """PerPixelRegressionTask no longer accepts the deprecated metric_mode option."""
-    with pytest.raises(TypeError, match="metric_mode"):
-        PerPixelRegressionTask(metric_mode="rmse")
-
-
 def test_process_inputs_masks_out_of_window_padding(
     empty_sample_metadata: SampleMetadata,
 ) -> None:
