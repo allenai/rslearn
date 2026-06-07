@@ -491,7 +491,6 @@ Here is an example of its usage.
               # Compute metric as the L1 (absolute error) between the predicted values
               # and the labels. Note that while the loss operates over the scaled
               # values, the metric operates over the unscaled values.
-              # (metric_mode is deprecated; use metrics.)
               metrics: ["l1"]
           segment:
             class_path: rslearn.train.tasks.segmentation.SegmentationTask

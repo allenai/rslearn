@@ -573,9 +573,9 @@ an encoder that expects a single-image input, and applies that encoder on each i
 the time series. It then applies max temporal pooling to combine the per-image feature
 maps extracted by the encoder.
 
-Image time series in rslearn are currently stored as [T*C, H, W] tensors. So we pass
-the `image_channels` to SimpleTimeSeries so it knows how to slice up the tensor to
-recover the per-timestep images.
+SimpleTimeSeries processes one timestep at a time by default. Set
+`num_timesteps_per_forward_pass` if the encoder should receive multiple timesteps in
+each forward pass.
 
 ```yaml
 model:
@@ -591,7 +591,7 @@ model:
                 class_path: rslearn.models.satlaspretrain.SatlasPretrain
                 init_args:
                   model_identifier: "Sentinel2_SwinB_SI_RGB"
-              image_channels: 3
+              num_timesteps_per_forward_pass: 1
         decoder:
           # ...
 ```

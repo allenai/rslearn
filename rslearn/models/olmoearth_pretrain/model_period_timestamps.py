@@ -70,7 +70,6 @@ class OlmoEarthPeriodTimestamps(OlmoEarth):
             embedding_size=embedding_size,
             autocast_dtype=autocast_dtype,
             token_pooling=token_pooling,
-            use_legacy_timestamps=False,
         )
         self.period_duration = period_duration
         self.max_matches = max_matches

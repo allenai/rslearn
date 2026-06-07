@@ -1,6 +1,5 @@
 """Per-pixel regression task."""
 
-import warnings
 from collections.abc import Sequence
 from typing import Any, Literal
 
@@ -28,11 +27,6 @@ class PerPixelRegressionTask(BasicTask):
     def __init__(
         self,
         scale_factor: float = 1,
-        metric_mode: (
-            Literal["mse", "rmse", "l1", "r2", "mape"]
-            | Sequence[Literal["mse", "rmse", "l1", "r2", "mape"]]
-            | None
-        ) = None,
         nodata_value: float | None = None,
         metrics: Sequence[str] | None = None,
         **kwargs: Any,
@@ -42,8 +36,6 @@ class PerPixelRegressionTask(BasicTask):
         Args:
             scale_factor: multiply ground truth values by this factor before using it for
                 training.
-            metric_mode: deprecated; use metrics instead. Will be removed after
-                2026-06-01.
             nodata_value: optional value to treat as invalid. The loss will be masked
                 at pixels where the ground truth value is equal to nodata_value.
             metrics: metric(s) to compute. Supported values: "mse", "rmse", "l1",
@@ -55,24 +47,6 @@ class PerPixelRegressionTask(BasicTask):
 
         if metrics is not None:
             metric_names = list(metrics)
-            if metric_mode is not None:
-                warnings.warn(
-                    "PerPixelRegressionTask.metric_mode is deprecated and ignored when "
-                    "`metrics` is set. It will be removed after 2026-06-01.",
-                    FutureWarning,
-                    stacklevel=2,
-                )
-        elif metric_mode is not None:
-            warnings.warn(
-                "PerPixelRegressionTask.metric_mode is deprecated; use `metrics` "
-                "instead. It will be removed after 2026-06-01.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            if isinstance(metric_mode, str):
-                metric_names = [metric_mode]
-            else:
-                metric_names = list(metric_mode)
         else:
             metric_names = ["mse"]
 

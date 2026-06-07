@@ -129,7 +129,6 @@ period of each window's time range.
         },
         "query_config": {
           "max_matches": 3,
-          "per_period_mosaic_reverse_time_order": false,
           "period_duration": "30d"
         }
       },

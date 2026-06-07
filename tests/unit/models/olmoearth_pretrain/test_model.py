@@ -228,8 +228,6 @@ def test_forward_with_different_timesteps() -> None:
         random_initialization=True,
         patch_size=4,
         embedding_size=128,
-        # Use non-legacy timestamps to properly test variable-length padding behavior
-        use_legacy_timestamps=False,
     )
 
     max_timesteps = 8
@@ -358,7 +356,6 @@ def test_batch_with_missing_modality_in_later_samples() -> None:
         random_initialization=True,
         patch_size=4,
         embedding_size=128,
-        use_legacy_timestamps=False,
     )
 
     T = 2
@@ -423,7 +420,6 @@ def test_batch_with_missing_modality_in_first_sample() -> None:
         random_initialization=True,
         patch_size=4,
         embedding_size=128,
-        use_legacy_timestamps=False,
     )
 
     T = 2
@@ -488,7 +484,6 @@ def test_missing_modality_handling() -> None:
         random_initialization=True,
         patch_size=4,
         embedding_size=128,
-        use_legacy_timestamps=False,
     )
 
     H = 4
@@ -548,158 +543,6 @@ def test_missing_modality_handling() -> None:
     assert (s2_s1_mask == MaskValue.MISSING.value).all()
 
 
-def test_legacy_varying_timesteps() -> None:
-    """Legacy timestamps with different samples having different numbers of timesteps."""
-    model = OlmoEarth(
-        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
-        random_initialization=True,
-        patch_size=4,
-        embedding_size=128,
-        use_legacy_timestamps=True,
-    )
-
-    H = 4
-    W = 4
-    inputs = [
-        {
-            "sentinel2_l2a": RasterImage(
-                image=torch.ones((12, 4, H, W), dtype=torch.float32),
-                timestamps=[
-                    (datetime(2025, m, 1), datetime(2025, m, 1)) for m in range(1, 5)
-                ],
-            ),
-        },
-        {
-            "sentinel2_l2a": RasterImage(
-                image=torch.ones((12, 2, H, W), dtype=torch.float32) * 2,
-                timestamps=[
-                    (datetime(2025, m, 1), datetime(2025, m, 1)) for m in range(1, 3)
-                ],
-            ),
-        },
-    ]
-    context = ModelContext(
-        inputs=inputs,
-        metadatas=[_make_metadata((0, 0, H, W)), _make_metadata((0, 0, H, W))],
-    )
-    sample, _, _ = model._prepare_modality_inputs_legacy(context)
-
-    # Sample 0: all 4 timesteps have data (value 1).
-    assert torch.allclose(sample.sentinel2_l2a[0], torch.ones(H, W, 4, 12))
-
-    # Sample 1: first 2 timesteps have data (value 2), last 2 are zero-padded.
-    assert torch.allclose(
-        sample.sentinel2_l2a[1, :, :, :2, :], torch.ones(H, W, 2, 12) * 2
-    )
-    assert torch.allclose(
-        sample.sentinel2_l2a[1, :, :, 2:, :], torch.zeros(H, W, 2, 12)
-    )
-
-    mask = sample.sentinel2_l2a_mask  # (2, H, W, T, S)
-    assert (mask[0, :, :, :4] == MaskValue.ONLINE_ENCODER.value).all()
-    assert (mask[1, :, :, :2] == MaskValue.ONLINE_ENCODER.value).all()
-    assert (mask[1, :, :, 2:] == MaskValue.MISSING.value).all()
-
-
-def test_legacy_timestamps_one_modality_three_timesteps() -> None:
-    """Legacy timestamps with one modality should produce [1 Jan 2024, 1 Feb 2024, 1 Mar 2024]."""
-    model = OlmoEarth(
-        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
-        random_initialization=True,
-        patch_size=4,
-        embedding_size=128,
-        use_legacy_timestamps=True,
-    )
-
-    H = 4
-    W = 4
-    T = 3
-    inputs = [
-        {
-            "sentinel2_l2a": RasterImage(
-                image=torch.zeros((12, T, H, W), dtype=torch.float32),
-                timestamps=[
-                    (datetime(2025, 6, 15), datetime(2025, 6, 15)),
-                    (datetime(2025, 9, 1), datetime(2025, 9, 1)),
-                    (datetime(2025, 12, 25), datetime(2025, 12, 25)),
-                ],
-            ),
-        }
-    ]
-    context = ModelContext(inputs=inputs, metadatas=[_make_metadata((0, 0, H, W))])
-    sample, present_modalities, _ = model._prepare_modality_inputs_legacy(context)
-
-    assert present_modalities == ["sentinel2_l2a"]
-    assert sample.timestamps.shape == (1, T, 3)
-
-    # Legacy timestamps: day=1, month=0-indexed, year=2024
-    expected = torch.tensor(
-        [
-            [1, 0, 2024],  # 1 January 2024
-            [1, 1, 2024],  # 1 February 2024
-            [1, 2, 2024],  # 1 March 2024
-        ],
-        dtype=torch.int32,
-    )
-    assert (sample.timestamps[0] == expected).all()
-
-
-def test_legacy_timestamps_two_modalities_different_timesteps() -> None:
-    """Legacy timestamps with two modalities: max_timesteps from the larger, shorter one padded."""
-    model = OlmoEarth(
-        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
-        random_initialization=True,
-        patch_size=4,
-        embedding_size=128,
-        use_legacy_timestamps=True,
-    )
-
-    H = 4
-    W = 4
-    inputs = [
-        {
-            "sentinel2_l2a": RasterImage(
-                image=torch.ones((12, 3, H, W), dtype=torch.float32),
-                timestamps=[
-                    (datetime(2025, m, 1), datetime(2025, m, 1)) for m in range(1, 4)
-                ],
-            ),
-            "sentinel1": RasterImage(
-                image=torch.ones((2, 2, H, W), dtype=torch.float32) * 2,
-                timestamps=[
-                    (datetime(2025, m, 1), datetime(2025, m, 1)) for m in range(1, 3)
-                ],
-            ),
-        }
-    ]
-    context = ModelContext(inputs=inputs, metadatas=[_make_metadata((0, 0, H, W))])
-    sample, present_modalities, _ = model._prepare_modality_inputs_legacy(context)
-
-    assert "sentinel2_l2a" in present_modalities
-    assert "sentinel1" in present_modalities
-
-    # max_timesteps = 3 (from sentinel2_l2a)
-    expected_ts = torch.tensor(
-        [
-            [1, 0, 2024],
-            [1, 1, 2024],
-            [1, 2, 2024],
-        ],
-        dtype=torch.int32,
-    )
-    assert sample.timestamps.shape == (1, 3, 3)
-    assert (sample.timestamps[0] == expected_ts).all()
-
-    # sentinel2_l2a: all 3 timesteps valid
-    s2_mask = sample.sentinel2_l2a_mask[0]  # H, W, T, S
-    assert (s2_mask == MaskValue.ONLINE_ENCODER.value).all()
-
-    # sentinel1: first 2 timesteps valid, third is MISSING
-    s1_mask = sample.sentinel1_mask[0]  # H, W, T, S
-    assert (s1_mask[:, :, :2] == MaskValue.ONLINE_ENCODER.value).all()
-    assert (s1_mask[:, :, 2] == MaskValue.MISSING.value).all()
-
-
 def test_normal_timestamps_one_modality() -> None:
     """Normal timestamps with one modality should exactly match the input timestamps."""
     model = OlmoEarth(
@@ -707,7 +550,6 @@ def test_normal_timestamps_one_modality() -> None:
         random_initialization=True,
         patch_size=4,
         embedding_size=128,
-        use_legacy_timestamps=False,
     )
 
     H = 4
@@ -750,7 +592,6 @@ def test_normal_timestamps_two_modalities_15d_tolerance() -> None:
         random_initialization=True,
         patch_size=4,
         embedding_size=128,
-        use_legacy_timestamps=False,
         timestamp_error_tolerance=timedelta(days=15),
     )
 
@@ -858,7 +699,6 @@ def test_normal_timestamps_two_modalities_1hr_tolerance() -> None:
         random_initialization=True,
         patch_size=4,
         embedding_size=128,
-        use_legacy_timestamps=False,
         timestamp_error_tolerance=timedelta(hours=1),
     )
 

@@ -303,10 +303,6 @@ Here is a summary of the configuration options:
             input_selector: "image"
             # The output selector under which to save the image, default "image".
             output_selector: "image"
-            # Optional number of bands per image, to distinguish between stacked images
-            # in an image time series. If set, then the band_indices are selected for
-            # each image in the time series.
-            num_bands_per_timestep: 9
 ```
 
 ## Sentinel1ToDecibels

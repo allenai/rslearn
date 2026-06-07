@@ -159,7 +159,7 @@ model:
                 init_args:
                   model_id: "OLMOEARTH_V1_BASE"
                   patch_size: 8
-              image_channels: 12
+              num_timesteps_per_forward_pass: 1
               # SimpleTimeSeries will apply max temporal pooling across images in the
               # same feature group, but concatenate across feature groups. Here, we
               # only want to concatenate the features across the two images, so we put

@@ -34,10 +34,6 @@ options beyond those detailed in [LayerConfig](./LayerConfig.md):
       // divided into periods of this duration, and the space mode is applied within each
       // period to produce one item group per period.
       "period_duration": null,
-      // When period_duration is set, whether to return item groups in reverse temporal
-      // order (most recent first). Should always be set to false when setting period_duration.
-      // The default is true for backwards compatibility (deprecated).
-      "per_period_mosaic_reverse_time_order": false,
     },
     // The time offset is optional. It defaults to 0.
     "time_offset": "0d",
@@ -110,7 +106,6 @@ to materialization. The following options affect prepare:
 - `min_matches`
 - `mosaic_compositing_overlaps`
 - `period_duration`
-- `per_period_mosaic_reverse_time_order`
 - `time_offset`
 - `duration`
 

@@ -59,7 +59,7 @@ model:
               - class_path: rslearn.models.satlaspretrain.SatlasPretrain
                 init_args:
                   model_identifier: Sentinel2_SwinB_SI_MS
-              image_channels: 9
+              num_timesteps_per_forward_pass: 1
               op: "max"
         decoder:
           # ...
@@ -198,7 +198,7 @@ model:
                   pretrained: true
                   input_channels: 9
                   output_layers: [1, 3, 5, 7]
-              image_channels: 9
+              num_timesteps_per_forward_pass: 1
     restore_config:
       restore_path: https://ai2-public-datasets.s3.amazonaws.com/satlas/satlas-model-v1-lowres-band-multi.pth
       remap_prefixes:

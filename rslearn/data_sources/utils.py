@@ -1,9 +1,8 @@
 """Utilities shared by data sources."""
 
-import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Generic, TypeVar
 
 import shapely
@@ -300,13 +299,10 @@ SpaceModeHandler = Callable[
 ]
 
 # Dict mapping SpaceMode values to their handler functions.
-# PER_PERIOD_MOSAIC is deprecated; it reuses the MOSAIC handler and period splitting
-# is handled in match_candidate_items_to_window.
 space_mode_handlers: dict[SpaceMode, SpaceModeHandler] = {
     SpaceMode.CONTAINS: match_with_space_mode_contains,
     SpaceMode.INTERSECTS: match_with_space_mode_intersects,
     SpaceMode.MOSAIC: match_with_space_mode_mosaic,
-    SpaceMode.PER_PERIOD_MOSAIC: match_with_space_mode_mosaic,
     SpaceMode.SINGLE_COMPOSITE: match_with_space_mode_single_composite,
 }
 
@@ -391,11 +387,6 @@ def match_candidate_items_to_window(
     If ``period_duration`` is set, the window time range is split into sub-periods
     and the handler is applied per-period with effective max_matches=1.
 
-    When ``period_duration`` is set and ``per_period_mosaic_reverse_time_order``
-    is True (the current default), the resulting groups are reversed so that the
-    most recent period comes first. This default will change to False after
-    2026-04-01.
-
     Args:
         geometry: the window's geometry
         items: all items from the data source that intersect spatially with the geometry
@@ -404,15 +395,7 @@ def match_candidate_items_to_window(
     Returns:
         list of matched item groups.
     """
-    # PER_PERIOD_MOSAIC should default to 30-day periods in case period_duration is not
-    # set, since period_duration previously applied only for PER_PERIOD_MOSAIC with
-    # default 30 day duration.
     period_duration = query_config.period_duration
-    if (
-        query_config.space_mode == SpaceMode.PER_PERIOD_MOSAIC
-        and period_duration is None
-    ):
-        period_duration = timedelta(days=30)
 
     # Filter items by time and project them into the geometry's projection.
     acceptable_items, acceptable_item_shps = _filter_and_project_items(
@@ -465,20 +448,9 @@ def match_candidate_items_to_window(
                     )
                 )
 
-        # Groups are in reverse chronological order. Reverse to chronological
-        # unless the deprecated per_period_mosaic_reverse_time_order is True.
-        if query_config.per_period_mosaic_reverse_time_order:
-            warnings.warn(
-                "QueryConfig.per_period_mosaic_reverse_time_order defaults to True, "
-                "which returns item groups in reverse temporal order (most recent "
-                "first) when period_duration is set. This default will change to "
-                "False (chronological order) after 2026-04-01. To silence this "
-                "warning, explicitly set per_period_mosaic_reverse_time_order=False.",
-                FutureWarning,
-                stacklevel=3,
-            )
-        else:
-            groups.reverse()
+        # Groups are produced newest-first because the loop walks backwards from the
+        # window end. Return them in chronological order.
+        groups.reverse()
     else:
         groups = [
             MatchedItemGroup(group, geometry.time_range)

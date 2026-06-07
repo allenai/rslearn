@@ -1,6 +1,5 @@
 """Regression task."""
 
-import warnings
 from collections.abc import Sequence
 from typing import Any, Literal
 
@@ -34,11 +33,6 @@ class RegressionTask(BasicTask):
         filters: list[tuple[str, str]] | None = None,
         allow_invalid: bool = False,
         scale_factor: float = 1,
-        metric_mode: (
-            Literal["mse", "rmse", "l1", "r2", "mape"]
-            | Sequence[Literal["mse", "rmse", "l1", "r2", "mape"]]
-            | None
-        ) = None,
         use_accuracy_metric: bool = False,
         within_factor: float = 0.1,
         metrics: Sequence[str] | None = None,
@@ -54,8 +48,6 @@ class RegressionTask(BasicTask):
             allow_invalid: instead of throwing error when no regression label is found
                 at a window, simply mark the example invalid for this task
             scale_factor: multiply the label value by this factor for training
-            metric_mode: deprecated; use metrics instead. Will be removed after
-                2026-06-01.
             use_accuracy_metric: include metric that reports percentage of
                 examples where output is within a factor of the ground truth.
             within_factor: the factor for accuracy metric. If it's 0.2, and ground
@@ -72,24 +64,6 @@ class RegressionTask(BasicTask):
 
         if metrics is not None:
             metric_names = list(metrics)
-            if metric_mode is not None:
-                warnings.warn(
-                    "RegressionTask.metric_mode is deprecated and ignored when "
-                    "`metrics` is set. It will be removed after 2026-06-01.",
-                    FutureWarning,
-                    stacklevel=2,
-                )
-        elif metric_mode is not None:
-            warnings.warn(
-                "RegressionTask.metric_mode is deprecated; use `metrics` instead. "
-                "It will be removed after 2026-06-01.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            if isinstance(metric_mode, str):
-                metric_names = [metric_mode]
-            else:
-                metric_names = list(metric_mode)
         else:
             metric_names = ["mse"]
 

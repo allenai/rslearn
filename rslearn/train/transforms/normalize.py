@@ -1,6 +1,5 @@
 """Normalization transforms."""
 
-import warnings
 from typing import Any
 
 import torch
@@ -22,7 +21,6 @@ class Normalize(Transform):
         ) = None,
         selectors: list[str] = ["image"],
         bands: list[int] | None = None,
-        num_bands: int | None = None,
         skip_missing: bool = False,
     ) -> None:
         """Initialize a new Normalize.
@@ -37,18 +35,10 @@ class Normalize(Transform):
             bands: optionally restrict the normalization to these band indices. If set,
                 mean and std must either be one value, or have length equal to the
                 number of band indices passed here.
-            num_bands: deprecated, no longer used. Will be removed after 2026-04-01.
             skip_missing: if True, skip selectors that don't exist in the input/target
                 dicts. Useful when working with optional inputs.
         """
         super().__init__(skip_missing=skip_missing)
-
-        if num_bands is not None:
-            warnings.warn(
-                "num_bands is deprecated and no longer used. "
-                "It will be removed after 2026-04-01.",
-                FutureWarning,
-            )
 
         self.mean = torch.tensor(mean)
         self.std = torch.tensor(std)
