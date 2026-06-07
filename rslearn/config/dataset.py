@@ -299,42 +299,6 @@ class BandSetConfig(BaseModel):
 
         return (factor.multiply_projection(projection), factor.multiply_bounds(bounds))
 
-    @field_validator("format", mode="before")
-    @classmethod
-    def convert_format_from_legacy(cls, v: dict[str, Any]) -> dict[str, Any]:
-        """Support legacy format of the RasterFormat.
-
-        The legacy format sets 'name' instead of 'class_path', and uses custom parsing
-        for the init_args.
-        """
-        if "name" not in v:
-            # New version, it is all good.
-            return v
-
-        warnings.warn(
-            "`format = {'name': ...}` is deprecated; "
-            "use `{'class_path': '...', 'init_args': {...}}` instead. "
-            "Support will be removed after 2026-03-01.",
-            FutureWarning,
-        )
-
-        legacy_name_to_class_path = {
-            "image_tile": "rslearn.utils.raster_format.ImageTileRasterFormat",
-            "geotiff": "rslearn.utils.raster_format.GeotiffRasterFormat",
-            "single_image": "rslearn.utils.raster_format.SingleImageRasterFormat",
-        }
-        if v["name"] not in legacy_name_to_class_path:
-            raise ValueError(
-                f"could not parse legacy format with unknown raster format {v['name']}"
-            )
-        init_args = dict(v)
-        class_path = legacy_name_to_class_path[init_args.pop("name")]
-
-        return dict(
-            class_path=class_path,
-            init_args=init_args,
-        )
-
     def instantiate_raster_format(self) -> RasterFormat:
         """Instantiate the RasterFormat specified by this BandSetConfig."""
         if self._raster_format is not None:
@@ -365,9 +329,6 @@ class SpaceMode(StrEnum):
     During materialization, items in each group are merged to form a mosaic in the
     dataset.
     """
-
-    PER_PERIOD_MOSAIC = "PER_PERIOD_MOSAIC"
-    """Deprecated: use MOSAIC with period_duration instead. Will be removed after 2026-05-01."""
 
     SINGLE_COMPOSITE = "SINGLE_COMPOSITE"
     """Put all intersecting items into a single group.
@@ -420,12 +381,6 @@ class QueryConfig(BaseModel):
                 "Remove it from your config (WITHIN is the only supported behavior).",
                 FutureWarning,
             )
-        if self.space_mode == SpaceMode.PER_PERIOD_MOSAIC:
-            warnings.warn(
-                "SpaceMode.PER_PERIOD_MOSAIC is deprecated and will be removed after "
-                "2026-05-01. Use SpaceMode.MOSAIC with period_duration instead.",
-                FutureWarning,
-            )
         return self
 
     # Minimum number of item groups. If there are fewer than this many matches, then no
@@ -455,17 +410,10 @@ class QueryConfig(BaseModel):
     )
     mosaic_compositing_overlaps: int = Field(
         default=1,
-        description="For MOSAIC and PER_PERIOD_MOSAIC modes, the number of overlapping items "
+        description="For MOSAIC mode, the number of overlapping items "
         "wanted within each item group covering the window. Set to 1 for a single coverage "
         "(default mosaic behavior), or higher for compositing multiple overlapping items."
         "with mean or median compositing method.",
-    )
-    per_period_mosaic_reverse_time_order: bool = Field(
-        default=True,
-        description="For PER_PERIOD_MOSAIC mode, whether to return item groups in reverse "
-        "temporal order (most recent first). Set to False for chronological order (oldest first). "
-        "Default True is deprecated and will change to False with error if still unset or set True "
-        "after 2026-04-01.",
     )
 
 
@@ -526,55 +474,6 @@ class DataSourceConfig(BaseModel):
         if self.duration:
             result = (result[0], result[0] + self.duration)
         return result
-
-    @model_validator(mode="before")
-    @classmethod
-    def convert_from_legacy(cls, d: dict[str, Any]) -> dict[str, Any]:
-        """Support legacy format of the DataSourceConfig.
-
-        The legacy format sets 'name' instead of 'class_path', and mixes the arguments
-        for the DataSource in with the DataSourceConfig keys.
-        """
-        if "name" not in d:
-            # New version, it is all good.
-            return d
-
-        warnings.warn(
-            "`Data source configuration {'name': ...}` is deprecated; "
-            "use `{'class_path': '...', 'init_args': {...}, ...}` instead. "
-            "Support will be removed after 2026-03-01.",
-            FutureWarning,
-        )
-
-        # Split the dict into the base config that is in the pydantic model, and the
-        # source-specific options that should be moved to init_args dict.
-        class_path = d["name"]
-        base_config: dict[str, Any] = {}
-        ds_init_args: dict[str, Any] = {}
-        for k, v in d.items():
-            if k == "name":
-                continue
-            if k in cls.model_fields:
-                base_config[k] = v
-            else:
-                ds_init_args[k] = v
-
-        # Some legacy configs erroneously specify these keys, which are now caught by
-        # validation. But we still want those specific legacy configs to work.
-        if (
-            class_path == "rslearn.data_sources.planetary_computer.Sentinel2"
-            and "max_cloud_cover" in ds_init_args
-        ):
-            warnings.warn(
-                "Data source configuration specifies invalid 'max_cloud_cover' option."
-                "Support for ignoring this option will be removed after 2026-03-01.",
-                FutureWarning,
-            )
-            del ds_init_args["max_cloud_cover"]
-
-        base_config["class_path"] = class_path
-        base_config["init_args"] = ds_init_args
-        return base_config
 
 
 class LayerType(StrEnum):

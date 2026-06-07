@@ -544,7 +544,6 @@ class TestPrepareDatasetWindows:
                             "min_matches": 0,
                             "max_matches": 2,
                             "period_duration": "14d",
-                            "per_period_mosaic_reverse_time_order": False,
                         },
                     },
                 },

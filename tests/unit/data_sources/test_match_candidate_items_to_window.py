@@ -529,7 +529,6 @@ class TestMosaicWithPeriodDuration:
             space_mode=SpaceMode.MOSAIC,
             max_matches=3,
             period_duration=timedelta(days=30),
-            per_period_mosaic_reverse_time_order=False,
         )
         item_groups = match_candidate_items_to_window(
             window_geometry, item_list, query_config
@@ -546,61 +545,6 @@ class TestMosaicWithPeriodDuration:
             periods[1],
             periods[2],
             periods[3],
-        ]
-
-    def test_reverse_time_order(self) -> None:
-        """Test that per_period_mosaic_reverse_time_order keeps reverse chronological order.
-
-        With per_period_mosaic_reverse_time_order=True (current default), groups
-        are returned in reverse chronological order (most recent first).
-        """
-        base_ts = datetime(2024, 1, 1, tzinfo=UTC)
-        period_duration = timedelta(days=30)
-        periods = [
-            (base_ts, base_ts + period_duration),
-            (base_ts + period_duration, base_ts + period_duration * 2),
-            (base_ts + period_duration * 2, base_ts + period_duration * 3),
-            (base_ts + period_duration * 3, base_ts + period_duration * 4),
-        ]
-        bbox = shapely.box(0, 0, 1, 1)
-        window_geometry = STGeometry(
-            WGS84_PROJECTION, bbox, (base_ts, base_ts + period_duration * 4)
-        )
-        item_list = [
-            # Full first time period.
-            Item("item0", STGeometry(WGS84_PROJECTION, bbox, periods[0])),
-            # Full second time period with two items.
-            Item(
-                "item1",
-                STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 1, 0.5), periods[1]),
-            ),
-            Item(
-                "item2",
-                STGeometry(WGS84_PROJECTION, shapely.box(0, 0.5, 1, 1), periods[1]),
-            ),
-            # Partial third time period.
-            Item(
-                "item3",
-                STGeometry(WGS84_PROJECTION, shapely.box(0, 0, 0.5, 0.5), periods[2]),
-            ),
-            # Full fourth time period.
-            Item("item4", STGeometry(WGS84_PROJECTION, bbox, periods[3])),
-        ]
-        query_config = QueryConfig(
-            space_mode=SpaceMode.MOSAIC,
-            max_matches=3,
-            period_duration=timedelta(days=30),
-            per_period_mosaic_reverse_time_order=True,
-        )
-        with pytest.warns(FutureWarning, match="per_period_mosaic_reverse_time_order"):
-            item_groups = match_candidate_items_to_window(
-                window_geometry, item_list, query_config
-            )
-        # Most recent 3 periods in reverse chronological order: period 4, 3, 2
-        assert _group_items(item_groups) == [
-            [item_list[4]],
-            [item_list[3]],
-            [item_list[1], item_list[2]],
         ]
 
     def test_skip_empty_period(self) -> None:
@@ -634,7 +578,6 @@ class TestMosaicWithPeriodDuration:
             space_mode=SpaceMode.MOSAIC,
             max_matches=2,
             period_duration=timedelta(days=30),
-            per_period_mosaic_reverse_time_order=False,
         )
         item_groups = match_candidate_items_to_window(
             window_geometry, item_list, query_config
@@ -803,7 +746,6 @@ class TestMinMatches:
             max_matches=10,
             min_matches=2,
             period_duration=period_duration,
-            per_period_mosaic_reverse_time_order=False,
         )
         item_groups = match_candidate_items_to_window(
             window_geometry, item_list, query_config
