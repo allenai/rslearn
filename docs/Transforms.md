@@ -193,6 +193,30 @@ The `Sentinel2SCLToMask` transform converts a Sentinel-2 Scene Classification La
             mask_value: 0
 ```
 
+## EarthDailyCloudMaskToMask
+
+The `EarthDailyCloudMaskToMask` transform converts an EarthDaily EDA cloud-mask raster
+into a binary mask image (1 = clear, 0 = masked). This can be used with `Mask` to set
+cloudy, shadowed, thin-cloud, and nodata pixels to the input image's nodata value at
+training time.
+
+```yaml
+      transforms:
+        - class_path: rslearn.train.transforms.earthdaily.EarthDailyCloudMaskToMask
+          init_args:
+            cloud_mask_selector: "cloud_mask"
+            output_selector: "mask"
+            clear_values: [1]
+        - class_path: rslearn.train.transforms.mask.Mask
+          init_args:
+            selectors: ["image"]
+            mask_selector: "mask"
+            mask_value: 0
+```
+
+By default, only EarthDaily EDA class `1` is treated as clear. Values `0` nodata, `2`
+cloud, `3` cloud shadow, and `4` thin cloud are masked out.
+
 ## Normalize
 
 The `Normalize` transform implements linear normalization of images.

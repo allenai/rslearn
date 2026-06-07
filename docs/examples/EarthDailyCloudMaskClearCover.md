@@ -17,6 +17,8 @@ The workflow is:
    group to the clearest related image.
 4. Run `rslearn dataset ingest` if the selected layers use `ingest: true`.
 5. Run `rslearn dataset materialize`.
+6. In the training config, convert the materialized `cloud_mask` layer to a binary
+   mask and apply it to Sentinel-2 inputs.
 
 The EDA cloud-mask class values are:
 
@@ -148,6 +150,54 @@ Finally materialize:
 ```bash
 rslearn dataset materialize --root ./dataset
 ```
+
+### Training-Time Masking
+
+The selected `cloud_mask` layer can be used at training time to set non-clear
+Sentinel-2 pixels to the Sentinel-2 nodata value. This keeps the materialized
+Sentinel-2 raster unchanged while making the masking explicit in the training
+configuration.
+
+Configure the training inputs to load both the Sentinel-2 image and the selected
+cloud-mask raster:
+
+```yaml
+inputs:
+  image:
+    data_type: "raster"
+    layers: ["sentinel2"]
+    bands: ["B02", "B03", "B04", "B08"]
+    passthrough: true
+    dtype: FLOAT32
+  cloud_mask:
+    data_type: "raster"
+    layers: ["cloud_mask"]
+    bands: ["cloud-mask"]
+    passthrough: true
+    dtype: UINT8
+```
+
+Then convert EarthDaily EDA cloud-mask classes to a binary mask and apply it to the
+Sentinel-2 input:
+
+```yaml
+transforms:
+  - class_path: rslearn.train.transforms.earthdaily.EarthDailyCloudMaskToMask
+    init_args:
+      cloud_mask_selector: "cloud_mask"
+      output_selector: "mask"
+      # EarthDaily EDA value 1 is clear. Values 0, 2, 3, and 4 are masked out.
+      clear_values: [1]
+  - class_path: rslearn.train.transforms.mask.Mask
+    init_args:
+      selectors: ["image"]
+      mask_selector: "mask"
+      # Match the Sentinel-2 band-set nodata_value configured above.
+      mask_value: 0
+```
+
+The resulting `image` tensor keeps pixels where `cloud-mask == 1` and sets all other
+pixels (`0` nodata, `2` cloud, `3` cloud shadow, `4` thin cloud) to `mask_value`.
 
 ### Selection Helper
 

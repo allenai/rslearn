@@ -23,7 +23,7 @@ detailed page with configuration options and available bands. See
 | [earthdaily.Sentinel2L2A](data_sources/earthdaily_Sentinel2L2A.md) | EarthDaily | PC-compatible L2A (`sentinel-2-l2a`), same band names as `planetary_computer.Sentinel2` |
 | [earthdaily.Sentinel2C1L2A](data_sources/earthdaily_Sentinel2C1L2A.md) | EarthDaily | Collection 1 L2A (`sentinel-2-c1-l2a`), scale/offset reflectance |
 | [earthdaily.Sentinel2EDACloudMask](data_sources/earthdaily_Sentinel2EDACloudMask.md) | EarthDaily | Sentinel-2 EDA cloud mask (`sentinel-2-eda-cloud-mask`), categorical cloud-mask band |
-| [gcp_public_data.Sentinel2](data_sources/gcp_public_data_Sentinel2.md) | Google Cloud Storage | L1C scenes |
+| [gcp_public_data.Sentinel2](data_sources/gcp_public_data_Sentinel2.md) | Google Cloud Storage | L1C and L2A scenes |
 
 #### Sentinel-1
 
@@ -37,6 +37,7 @@ detailed page with configuration options and available bands. See
 
 | Data Source | Provider | Notes |
 |---|---|---|
+| [gcp_landsat.Landsat](data_sources/gcp_landsat_Landsat.md) | Google Cloud Storage | Collection 2 L1/L2 all missions, requester-pays, direct materialization |
 | [aws_landsat.LandsatOliTirs](data_sources/aws_landsat_LandsatOliTirs.md) | AWS (USGS) | Level-1, all bands |
 | [planetary_computer.LandsatC2L2](data_sources/planetary_computer_LandsatC2L2.md) | Microsoft Planetary Computer | Collection 2 Level-2, direct materialization |
 | [usgs_landsat.LandsatOliTirs](data_sources/usgs_landsat_LandsatOliTirs.md) | USGS M2M API | Requires M2M access |
