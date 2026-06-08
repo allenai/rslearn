@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime@sha256:7db0e1bf4b1ac274ea09cf6358ab516f8a5c7d3d0e02311bed445f7e236a5d80
+FROM pytorch/pytorch:2.10.0-cuda12.8-cudnn9-runtime@sha256:b85566342b86d13a67712e9315d40cdc2dad7f8d86df1aff3831f80835edbcca
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
@@ -6,8 +6,8 @@ WORKDIR /rslearn
 
 COPY pyproject.toml /rslearn/pyproject.toml
 COPY uv.lock /rslearn/uv.lock
-RUN uv sync --extra extra --extra dev --no-install-project
+RUN uv sync --extra extra --extra dev --extra terratorch --no-install-project
 
 ENV PATH="/rslearn/.venv/bin:$PATH"
 COPY ./ /rslearn
-RUN uv sync --extra extra --extra dev --locked
+RUN uv sync --extra extra --extra dev --extra terratorch --locked
