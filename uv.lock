@@ -979,7 +979,7 @@ platform = [
 
 [[package]]
 name = "earthengine-api"
-version = "1.7.29"
+version = "1.7.30"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-api-python-client" },
@@ -989,9 +989,9 @@ dependencies = [
     { name = "httplib2" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/09/18/de6ea506d7af22eb5e62ea9a054a24cf75d789e7390bc5b58be5ce4a6915/earthengine_api-1.7.29.tar.gz", hash = "sha256:cb9bc185a95ebd311ed674a63bd5054431ba057f85d39c8611d7e20fa533306a", size = 433012, upload-time = "2026-06-02T00:03:12.619Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d0/41/343e9726c0479d6cbed6b454d57216e4f8388f071606160a3a6ab599e54d/earthengine_api-1.7.30.tar.gz", hash = "sha256:d2ec12ef17d3d0f25a65a5ecd90e22ff207fbe5868ac7d541c388da88eec8d52", size = 433011, upload-time = "2026-06-08T19:45:57.831Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/52/d3/b7f84a04b8bdb29794b5b82a6c7fc7f3665973148e454a0061b201071a2e/earthengine_api-1.7.29-py3-none-any.whl", hash = "sha256:c0f0fc91814a552cb7bddbe6157f493e2849dacc4b21b8a7bd88fd72103334d3", size = 480349, upload-time = "2026-06-02T00:03:10.812Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/64/9951d61d6581d1fe15754909d1e76a115cfa4b7e84c64b3582da5c06ca4c/earthengine_api-1.7.30-py3-none-any.whl", hash = "sha256:4e003399aa6ecd376c8be46e73e991bbdcdabd2f07f699ca908687f0f1806843", size = 480350, upload-time = "2026-06-08T19:45:55.775Z" },
 ]
 
 [[package]]
@@ -4811,7 +4811,7 @@ wheels = [
 
 [[package]]
 name = "rslearn"
-version = "0.1.8"
+version = "0.1.9"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
@@ -4870,13 +4870,15 @@ extra = [
     { name = "satlaspretrain-models" },
     { name = "scipy" },
     { name = "termcolor" },
-    { name = "terratorch" },
     { name = "timm" },
     { name = "transformers" },
     { name = "wandb" },
     { name = "xarray" },
     { name = "zarr", version = "3.1.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "zarr", version = "3.2.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+terratorch = [
+    { name = "terratorch" },
 ]
 
 [package.metadata]
@@ -4926,7 +4928,7 @@ requires-dist = [
     { name = "shapely", specifier = ">=2.1" },
     { name = "soilgrids", specifier = ">=0.1.5" },
     { name = "termcolor", marker = "extra == 'extra'", specifier = ">=3.0" },
-    { name = "terratorch", marker = "extra == 'extra'", specifier = ">=1.0.2" },
+    { name = "terratorch", marker = "extra == 'terratorch'", specifier = ">=1.0.2" },
     { name = "timm", marker = "extra == 'extra'", specifier = ">=0.9.7" },
     { name = "torch", specifier = ">=2.7.0" },
     { name = "torchvision", specifier = ">=0.22.0" },
@@ -4937,7 +4939,7 @@ requires-dist = [
     { name = "xarray", marker = "extra == 'extra'", specifier = ">=2024.1" },
     { name = "zarr", marker = "extra == 'extra'", specifier = ">=3.1.2" },
 ]
-provides-extras = ["extra", "dev"]
+provides-extras = ["extra", "dev", "terratorch"]
 
 [[package]]
 name = "rtree"
