@@ -9,6 +9,7 @@ from typing import Any
 import osmium
 import osmium.osm.types
 import shapely
+from fsspec.implementations.local import LocalFileSystem
 from upath import UPath
 
 from rslearn.config import QueryConfig
@@ -32,12 +33,40 @@ class FeatureType(Enum):
     RELATION = "relation"
 
 
+def _parse_feature_type(value: str | FeatureType) -> FeatureType:
+    """Parse a feature type from jsonargparse (enum member) or config strings (OSM names)."""
+    if isinstance(value, FeatureType):
+        return value
+    s = str(value).strip()
+    if not s:
+        raise ValueError("empty feature type")
+    try:
+        return FeatureType[s.upper()]
+    except KeyError:
+        pass
+    lowered = s.lower()
+    for member in FeatureType:
+        if member.value == lowered:
+            return member
+    allowed = ", ".join(repr(m.value) for m in FeatureType)
+    raise ValueError(f"unknown OSM feature type {value!r}; expected one of {allowed}")
+
+
+def _coerce_feature_types(
+    feature_types: list[FeatureType | str] | None,
+) -> list[FeatureType] | None:
+    """Normalize feature_types after loading from JSON."""
+    if feature_types is None:
+        return None
+    return [_parse_feature_type(x) for x in feature_types]
+
+
 class Filter:
     """Specifies filters corresponding to one category to extract from OSM data."""
 
     def __init__(
         self,
-        feature_types: list[FeatureType] | None = None,
+        feature_types: list[FeatureType | str] | None = None,
         tag_conditions: dict[str, list[str]] | None = None,
         tag_properties: dict[str, str] | None = None,
         to_geometry: str | None = None,
@@ -45,7 +74,9 @@ class Filter:
         """Create a new Filter instance.
 
         Args:
-            feature_types: limit which types of features to match
+            feature_types: limit which types of features to match. Each entry may be a
+                :class:`FeatureType` or a string: the enum member name (``WAY``), or the
+                OSM type string (``way``, ``node``, ``relation``).
             tag_conditions: for each entry (tag_name, values), only match features with
                 that tag, and if values is not empty, where tag value matches some
                 element of values.
@@ -54,7 +85,7 @@ class Filter:
             to_geometry: output geometry as the specified type (Point, LineString, or
                 Polygon). Otherwise defaults to Point or LineString.
         """
-        self.feature_types = feature_types
+        self.feature_types = _coerce_feature_types(feature_types)
         self.tag_conditions = tag_conditions
         self.tag_properties = tag_properties
         self.to_geometry = to_geometry
@@ -386,10 +417,13 @@ class OpenStreetMap(DataSource[OsmItem]):
         self.categories = categories
 
         if context.ds_path is not None:
+            base = context.ds_path
+            if isinstance(base.fs, LocalFileSystem):
+                base = base.resolve()
             self.pbf_fnames = [
-                join_upath(context.ds_path, pbf_fname) for pbf_fname in pbf_fnames
+                join_upath(base, pbf_fname) for pbf_fname in pbf_fnames
             ]
-            self.bounds_fname = join_upath(context.ds_path, bounds_fname)
+            self.bounds_fname = join_upath(base, bounds_fname)
         else:
             self.pbf_fnames = [UPath(pbf_fname) for pbf_fname in pbf_fnames]
             self.bounds_fname = UPath(bounds_fname)
@@ -402,6 +436,18 @@ class OpenStreetMap(DataSource[OsmItem]):
             with urllib.request.urlopen(self.planet_pbf_url) as response:
                 with self.pbf_fnames[0].open("wb") as f:
                     shutil.copyfileobj(response, f)
+
+        missing_pbfs = [str(p) for p in self.pbf_fnames if not p.exists()]
+        if missing_pbfs:
+            raise FileNotFoundError(
+                "Some paths in OpenStreetMap pbf_fnames are missing on disk "
+                "(paths are relative to the dataset root when using DataSourceContext):\n  "
+                + "\n  ".join(missing_pbfs)
+                + "\nDownload regional extracts (e.g. from Geofabrik) into those paths, "
+                "or shorten pbf_fnames to only the files you have. "
+                "If you list exactly one missing path, rslearn downloads the full "
+                "planet PBF there instead."
+            )
 
         # Detect bounds of each pbf file if needed.
         self.pbf_bounds = self._get_pbf_bounds()

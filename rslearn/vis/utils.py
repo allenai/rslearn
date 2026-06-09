@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 from PIL import Image
+from shapely.geometry import mapping
 
 from rslearn.config import LayerConfig, LayerType
 from rslearn.dataset import Window
@@ -94,6 +95,27 @@ def format_window_info(
     lat = float(centroid.y)
 
     return window.time_range, lat, lon
+
+
+def window_geometry_geojson(window: Window) -> dict[str, Any] | None:
+    """Return the window's geometry as a GeoJSON geometry dict in WGS84 (lon, lat).
+
+    Works for both point and polygon windows. Returns None if the geometry can't
+    be resolved.
+
+    Args:
+        window: Window object
+
+    Returns:
+        A GeoJSON geometry mapping (e.g. {"type": "Polygon", "coordinates": [...]})
+        with WGS84 lon/lat coordinates, or None on failure.
+    """
+    try:
+        geom_wgs84 = window.get_geometry().to_projection(WGS84_PROJECTION)
+        return mapping(geom_wgs84.shp)
+    except Exception as e:
+        logger.debug("Could not build GeoJSON for window %s: %s", window.name, e)
+        return None
 
 
 def array_to_bytes(

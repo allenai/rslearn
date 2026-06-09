@@ -4,6 +4,7 @@ import json
 import pathlib
 from datetime import UTC, datetime
 
+import jsonargparse
 import osmium
 import pytest
 import shapely
@@ -11,7 +12,9 @@ from upath import UPath
 
 from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
+from rslearn.data_sources.data_source import DataSource, DataSourceContext
 from rslearn.data_sources.openstreetmap import FeatureType, Filter, OpenStreetMap
+from rslearn.utils.jsonargparse import init_jsonargparse
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
 
@@ -105,3 +108,55 @@ def test_ingest(tmp_path: pathlib.Path, test_pbf: pathlib.Path) -> None:
         geojson = json.load(f)
     assert len(geojson["features"]) == 1
     assert geojson["features"][0]["properties"]["category"] == "building"
+
+
+def test_openstreetmap_missing_pbf_raises_file_not_found(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Multiple configured extracts must exist; otherwise prepare fails early."""
+    with pytest.raises(FileNotFoundError, match="missing on disk"):
+        OpenStreetMap(
+            pbf_fnames=["a.osm.pbf", "b.osm.pbf"],
+            bounds_fname="bounds.json",
+            categories={"building": Filter(tag_conditions={"building": []})},
+            context=DataSourceContext(ds_path=UPath(tmp_path)),
+        )
+
+
+def test_openstreetmap_jsonargparse_accepts_osm_feature_type_strings(
+    tmp_path: pathlib.Path,
+) -> None:
+    """JSON configs often use OSM-style type names (way, relation) instead of enum names."""
+    init_jsonargparse()
+    pbf = tmp_path / "dummy.osm.pbf"
+    pbf.write_bytes(b"")
+    bounds = tmp_path / "bounds.json"
+    # Skip osmium bounds scan during OpenStreetMap.__init__ (dummy PBF is not valid OSM).
+    bounds.write_text("[[-10.0, -10.0, 10.0, 10.0]]")
+
+    parser = jsonargparse.ArgumentParser()
+    parser.add_argument("--data_source", type=DataSource)
+    cfg = parser.parse_object(
+        {
+            "data_source": {
+                "class_path": "rslearn.data_sources.openstreetmap.OpenStreetMap",
+                "init_args": {
+                    "pbf_fnames": [str(pbf)],
+                    "bounds_fname": str(bounds),
+                    "categories": {
+                        "building": {
+                            "feature_types": ["way", "relation"],
+                            "tag_conditions": {"building": []},
+                            "to_geometry": "Polygon",
+                        }
+                    },
+                },
+            }
+        }
+    )
+    ds = parser.instantiate_classes(cfg).data_source
+    assert isinstance(ds, OpenStreetMap)
+    assert ds.categories["building"].feature_types == [
+        FeatureType.WAY,
+        FeatureType.RELATION,
+    ]
