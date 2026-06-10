@@ -146,30 +146,35 @@ def read_raster_window_from_tiles(
         dst_col = intersection[0] - bounds[0]
         dst_row = intersection[1] - bounds[1]
 
-        src_sel = src[src_indexes, :, :, :]  # (C_sel, T, H_int, W_int)
-        if remapper:
-            src_sel = remapper(src_sel, band_dtype)
-
         out_crop = dst.array[
             :,
             :,
-            dst_row : dst_row + src_sel.shape[2],
-            dst_col : dst_col + src_sel.shape[3],
+            dst_row : dst_row + src.shape[2],
+            dst_col : dst_col + src.shape[3],
         ]  # (C, T, H_int, W_int) view
 
-        src_typed = src_sel.astype(band_dtype)
-
+        # Work band-by-band on views and write with np.copyto so that no
+        # intersection-sized temporary is ever materialized. For whole-scene
+        # windows the fancy-indexing copies (src[src_indexes], astype, the
+        # masked gathers) each cost multiple GB and dominated peak memory.
         if nodata_val is not None:
             # First-valid: only overwrite pixels where all dst bands are nodata.
-            mask = nodata_eq(out_crop[dst_indexes], nodata_val).min(
-                axis=0
-            )  # (T, H_int, W_int)
-
-            for src_index, dst_index in enumerate(dst_indexes):
-                out_crop[dst_index][mask] = src_typed[src_index][mask]
+            mask = nodata_eq(out_crop[dst_indexes[0]], nodata_val)
+            for dst_index in dst_indexes[1:]:
+                mask &= nodata_eq(out_crop[dst_index], nodata_val)
         else:
-            for src_index, dst_index in enumerate(dst_indexes):
-                out_crop[dst_index] = src_typed[src_index]
+            mask = None
+
+        for src_index, dst_index in zip(src_indexes, dst_indexes, strict=True):
+            src_band = src[src_index]  # (T, H_int, W_int) view
+            if remapper:
+                src_band = remapper(src_band, band_dtype)
+            if mask is not None:
+                # casting="unsafe" matches the astype() conversion semantics
+                # this replaces.
+                np.copyto(out_crop[dst_index], src_band, where=mask, casting="unsafe")
+            else:
+                np.copyto(out_crop[dst_index], src_band, casting="unsafe")
 
     return dst
 
