@@ -173,7 +173,13 @@ def test_partial_intersection_offset(tile_store: DefaultTileStore) -> None:
     nodata_val = 0
     item = make_item("item")
     # Item only covers the bottom-right 2x2 of the 4x4 window.
-    write(tile_store, item, bands, np.full((1, 2, 2), 8, dtype=np.uint8), bounds=(2, 2, 4, 4))
+    write(
+        tile_store,
+        item,
+        bands,
+        np.full((1, 2, 2), 8, dtype=np.uint8),
+        bounds=(2, 2, 4, 4),
+    )
 
     dst = read(tile_store, item, bands, nodata_val)
     assert dst is not None
@@ -207,7 +213,12 @@ def test_nan_nodata(tile_store: DefaultTileStore) -> None:
 
     dst = read(tile_store, item1, bands, nodata_val=float("nan"), band_dtype=np.float32)
     dst = read(
-        tile_store, item2, bands, nodata_val=float("nan"), band_dtype=np.float32, dst=dst
+        tile_store,
+        item2,
+        bands,
+        nodata_val=float("nan"),
+        band_dtype=np.float32,
+        dst=dst,
     )
     assert dst is not None
     result = dst.get_chw_array()
