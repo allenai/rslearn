@@ -61,6 +61,7 @@ class AnySat(FeatureExtractor):
         pretrained: bool = True,
         force_reload: bool = False,
         flash_attn: bool = False,
+        trust_repo: bool | str = True,
     ) -> None:
         """Initialize an AnySat model.
 
@@ -77,6 +78,8 @@ class AnySat(FeatureExtractor):
             pretrained: whether to load pretrained weights.
             force_reload: whether to force re-download of the model.
             flash_attn: whether to use flash attention (if available).
+            trust_repo: trust setting to pass to torch.hub.load. Defaults to True to
+                avoid interactive prompts in noninteractive test and CI environments.
         """
         super().__init__()
 
@@ -108,6 +111,7 @@ class AnySat(FeatureExtractor):
             pretrained=pretrained,
             force_reload=force_reload,
             flash_attn=flash_attn,
+            trust_repo=trust_repo,
         )
         self._embed_dim = 768  # base width, 'dense' returns 2x
 
