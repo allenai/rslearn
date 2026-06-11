@@ -11,6 +11,9 @@ from typing import Any
 import torch
 from einops import rearrange
 from olmoearth_pretrain_minimal import ModelID, load_model_from_id, load_model_from_path
+from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.data.normalize import (
+    load_computed_config,
+)
 from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.nn.flexi_vit import (
     TokensAndMasks,
 )
@@ -24,6 +27,7 @@ from upath import UPath
 
 from rslearn.log_utils import get_logger
 from rslearn.models.component import FeatureExtractor, FeatureMaps, TokenFeatureMaps
+from rslearn.models.olmoearth_pretrain.norm import OlmoEarthNormalize
 from rslearn.train.model_context import ModelContext, RasterImage
 
 logger = get_logger(__name__)
@@ -72,6 +76,8 @@ class OlmoEarth(FeatureExtractor):
         token_pooling: bool = True,
         use_legacy_timestamps: bool = True,
         timestamp_error_tolerance: timedelta = timedelta(days=15),
+        normalize: bool = False,
+        normalize_std_multiplier: float | None = 2,
     ):
         """Create a new OlmoEarth model.
 
@@ -108,6 +114,16 @@ class OlmoEarth(FeatureExtractor):
                 if the closest previous timestamp to a new image is within timestamp_error_tolerance of
                 the new image's capture time, then we reuse that timestamp; otherwise, we create a new
                 timestep.
+            normalize: whether to normalize the inputs inside the forward pass using
+                OlmoEarthNormalize. Defaults to False, in which case the inputs are
+                assumed to already be normalized (e.g. by an OlmoEarthNormalize transform
+                in the data pipeline). When True, the inputs must be the raw, un-normalized
+                values (Sentinel-1 must still be converted to decibels beforehand), and
+                they will be normalized in place at the start of forward. The band order
+                is assumed to match the canonical OlmoEarth modality definitions, which is
+                the same order the rest of the model assumes for the input channels.
+            normalize_std_multiplier: the std multiplier to use for normalization, passed
+                through to OlmoEarthNormalize. Only used when normalize=True.
         """
         if use_legacy_timestamps:
             warnings.warn(
@@ -168,6 +184,30 @@ class OlmoEarth(FeatureExtractor):
         self.token_pooling = token_pooling
         self.use_legacy_timestamps = use_legacy_timestamps
         self.timestamp_error_tolerance = timestamp_error_tolerance
+
+        self.normalize = normalize
+        if normalize:
+            # Derive the band names from the OlmoEarth modality definitions for every
+            # modality that has normalization statistics. The input channels are already
+            # assumed to be in this canonical order (see _prepare_modality_inputs), so
+            # there is no separate band order to configure. Some modalities (e.g.
+            # openstreetmap_raster) have no stats and are left un-normalized.
+            norm_config = load_computed_config()
+            band_names = {
+                modality: [
+                    band
+                    for band_set in Modality.get(modality).band_sets
+                    for band in band_set.bands
+                ]
+                for modality in MODALITY_NAMES
+                if modality in norm_config
+            }
+            # skip_missing so modalities absent from a given sample are ignored.
+            self.normalizer = OlmoEarthNormalize(
+                band_names=band_names,
+                std_multiplier=normalize_std_multiplier,
+                skip_missing=True,
+            )
 
     def _patch_legacy_encoder_config(self, config_dict: dict) -> dict:
         """Patch checkpoint config dicts that predate use_linear_patch_embed.
@@ -656,6 +696,12 @@ class OlmoEarth(FeatureExtractor):
             a FeatureMaps consisting of one feature map, at 1/patch_size of the input
                 resolution. Embeddings will be pooled across modalities and timesteps.
         """
+        if self.normalize:
+            # Normalize each sample's inputs in place before assembling the modality
+            # tensors. The targets are not needed so we pass an empty dict.
+            for input_dict in context.inputs:
+                self.normalizer(input_dict, {})
+
         if self.use_legacy_timestamps:
             sample, present_modalities, device = self._prepare_modality_inputs_legacy(
                 context
