@@ -20,13 +20,14 @@ See [Dataset Configuration](DatasetConfig.md) for where this field appears.
 | [TEMPORAL_MAX](compositors/built_in.md#temporal_reducers) | Temporal reduction over stacked timesteps. |
 | [TEMPORAL_MIN](compositors/built_in.md#temporal_reducers) | Temporal reduction over stacked timesteps. |
 
-### Custom Cloud-Aware Ranking Compositors
+### Custom Cloud-Aware Compositors
 
-These compositors reorder items inside each materialized item group, then apply
-FIRST_VALID in that ranked order.
+These compositors use cloud or classification signals inside each materialized item
+group to rank or select items.
 
 | Class Path | Description |
 |---|---|
 | [rslearn.dataset.hls_fmask.HlsFmaskFirstValid](compositors/hls_fmask_HlsFmaskFirstValid.md) | Uses HLS Fmask QA bits to score cloudiness. |
 | [rslearn.dataset.omni_cloud_mask.OmniCloudMaskFirstValid](compositors/omni_cloud_mask_OmniCloudMaskFirstValid.md) | Uses OmniCloudMask model inference on R/G/NIR. |
+| [rslearn.dataset.sentinel2_scl.Sentinel2SCLBestClear](compositors/sentinel2_scl_Sentinel2SCLBestClear.md) | Selects the single Sentinel-2 item with highest SCL clear cover. |
 | [rslearn.dataset.sentinel2_scl.Sentinel2SCLFirstValid](compositors/sentinel2_scl_Sentinel2SCLFirstValid.md) | Uses Sentinel-2 SCL classes to score cloudiness. |
