@@ -39,23 +39,6 @@ def make_item(name: str) -> Item:
     )
 
 
-def write(
-    tile_store: DefaultTileStore,
-    item: Item,
-    bands: list[str],
-    data: np.ndarray,
-    bounds: tuple[int, int, int, int] = BOUNDS,
-) -> None:
-    tile_store.write_raster(
-        LAYER_NAME,
-        item,
-        bands,
-        PROJECTION,
-        bounds,
-        RasterArray(chw_array=data),
-    )
-
-
 def read(
     tile_store: DefaultTileStore,
     item: Item,
@@ -89,8 +72,12 @@ def test_first_valid_only_overwrites_nodata(tile_store: DefaultTileStore) -> Non
 
     item1 = make_item("item1")
     item2 = make_item("item2")
-    write(tile_store, item1, bands, array1)
-    write(tile_store, item2, bands, array2)
+    tile_store.write_raster(
+        LAYER_NAME, item1, bands, PROJECTION, BOUNDS, RasterArray(chw_array=array1)
+    )
+    tile_store.write_raster(
+        LAYER_NAME, item2, bands, PROJECTION, BOUNDS, RasterArray(chw_array=array2)
+    )
 
     dst = read(tile_store, item1, bands, nodata_val)
     assert dst is not None
@@ -115,8 +102,12 @@ def test_partially_valid_pixel_is_not_overwritten(
 
     item1 = make_item("item1")
     item2 = make_item("item2")
-    write(tile_store, item1, bands, array1)
-    write(tile_store, item2, bands, array2)
+    tile_store.write_raster(
+        LAYER_NAME, item1, bands, PROJECTION, BOUNDS, RasterArray(chw_array=array1)
+    )
+    tile_store.write_raster(
+        LAYER_NAME, item2, bands, PROJECTION, BOUNDS, RasterArray(chw_array=array2)
+    )
 
     dst = read(tile_store, item1, bands, nodata_val)
     dst = read(tile_store, item2, bands, nodata_val, dst=dst)
@@ -132,7 +123,14 @@ def test_dtype_conversion(tile_store: DefaultTileStore) -> None:
     """Stored uint8 data must be converted to the requested band_dtype."""
     bands = ["band1"]
     item = make_item("item")
-    write(tile_store, item, bands, np.full((1, 4, 4), 3, dtype=np.uint8))
+    tile_store.write_raster(
+        LAYER_NAME,
+        item,
+        bands,
+        PROJECTION,
+        BOUNDS,
+        RasterArray(chw_array=np.full((1, 4, 4), 3, dtype=np.uint8)),
+    )
 
     dst = read(tile_store, item, bands, nodata_val=0, band_dtype=np.float32)
     assert dst is not None
@@ -145,8 +143,22 @@ def test_no_nodata_overwrites_everything(tile_store: DefaultTileStore) -> None:
     bands = ["band1"]
     item1 = make_item("item1")
     item2 = make_item("item2")
-    write(tile_store, item1, bands, np.full((1, 4, 4), 5, dtype=np.uint8))
-    write(tile_store, item2, bands, np.full((1, 4, 4), 9, dtype=np.uint8))
+    tile_store.write_raster(
+        LAYER_NAME,
+        item1,
+        bands,
+        PROJECTION,
+        BOUNDS,
+        RasterArray(chw_array=np.full((1, 4, 4), 5, dtype=np.uint8)),
+    )
+    tile_store.write_raster(
+        LAYER_NAME,
+        item2,
+        bands,
+        PROJECTION,
+        BOUNDS,
+        RasterArray(chw_array=np.full((1, 4, 4), 9, dtype=np.uint8)),
+    )
 
     dst = read(tile_store, item1, bands, nodata_val=None)
     dst = read(tile_store, item2, bands, nodata_val=None, dst=dst)
@@ -157,8 +169,22 @@ def test_no_nodata_overwrites_everything(tile_store: DefaultTileStore) -> None:
 def test_band_reorder_across_band_sets(tile_store: DefaultTileStore) -> None:
     """Requested band order must be honored when bands live in separate band sets."""
     item = make_item("item")
-    write(tile_store, item, ["band1"], np.full((1, 4, 4), 1, dtype=np.uint8))
-    write(tile_store, item, ["band2"], np.full((1, 4, 4), 2, dtype=np.uint8))
+    tile_store.write_raster(
+        LAYER_NAME,
+        item,
+        ["band1"],
+        PROJECTION,
+        BOUNDS,
+        RasterArray(chw_array=np.full((1, 4, 4), 1, dtype=np.uint8)),
+    )
+    tile_store.write_raster(
+        LAYER_NAME,
+        item,
+        ["band2"],
+        PROJECTION,
+        BOUNDS,
+        RasterArray(chw_array=np.full((1, 4, 4), 2, dtype=np.uint8)),
+    )
 
     dst = read(tile_store, item, ["band2", "band1"], nodata_val=0)
     assert dst is not None
@@ -173,12 +199,13 @@ def test_partial_intersection_offset(tile_store: DefaultTileStore) -> None:
     nodata_val = 0
     item = make_item("item")
     # Item only covers the bottom-right 2x2 of the 4x4 window.
-    write(
-        tile_store,
+    tile_store.write_raster(
+        LAYER_NAME,
         item,
         bands,
-        np.full((1, 2, 2), 8, dtype=np.uint8),
-        bounds=(2, 2, 4, 4),
+        PROJECTION,
+        (2, 2, 4, 4),
+        RasterArray(chw_array=np.full((1, 2, 2), 8, dtype=np.uint8)),
     )
 
     dst = read(tile_store, item, bands, nodata_val)
@@ -193,7 +220,14 @@ def test_remapper_applied(tile_store: DefaultTileStore) -> None:
     """The remapper must be applied to source values before writing."""
     bands = ["band1"]
     item = make_item("item")
-    write(tile_store, item, bands, np.full((1, 4, 4), 100, dtype=np.uint8))
+    tile_store.write_raster(
+        LAYER_NAME,
+        item,
+        bands,
+        PROJECTION,
+        BOUNDS,
+        RasterArray(chw_array=np.full((1, 4, 4), 100, dtype=np.uint8)),
+    )
 
     remapper = LinearRemapper({"src": (0, 200), "dst": (0, 20)})
     dst = read(tile_store, item, bands, nodata_val=0, remapper=remapper)
@@ -208,8 +242,17 @@ def test_nan_nodata(tile_store: DefaultTileStore) -> None:
     item2 = make_item("item2")
     array1 = np.full((1, 4, 4), np.nan, dtype=np.float32)
     array1[0, :2, :] = 1.0
-    write(tile_store, item1, bands, array1)
-    write(tile_store, item2, bands, np.full((1, 4, 4), 2.0, dtype=np.float32))
+    tile_store.write_raster(
+        LAYER_NAME, item1, bands, PROJECTION, BOUNDS, RasterArray(chw_array=array1)
+    )
+    tile_store.write_raster(
+        LAYER_NAME,
+        item2,
+        bands,
+        PROJECTION,
+        BOUNDS,
+        RasterArray(chw_array=np.full((1, 4, 4), 2.0, dtype=np.float32)),
+    )
 
     dst = read(tile_store, item1, bands, nodata_val=float("nan"), band_dtype=np.float32)
     dst = read(
