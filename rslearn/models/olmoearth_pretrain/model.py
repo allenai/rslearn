@@ -77,7 +77,6 @@ class OlmoEarth(FeatureExtractor):
         use_legacy_timestamps: bool = True,
         timestamp_error_tolerance: timedelta = timedelta(days=15),
         normalize: bool = False,
-        normalize_band_names: dict[str, list[str]] | None = None,
         normalize_std_multiplier: float | None = 2,
     ):
         """Create a new OlmoEarth model.
@@ -120,12 +119,9 @@ class OlmoEarth(FeatureExtractor):
                 assumed to already be normalized (e.g. by an OlmoEarthNormalize transform
                 in the data pipeline). When True, the inputs must be the raw, un-normalized
                 values (Sentinel-1 must still be converted to decibels beforehand), and
-                they will be normalized in place at the start of forward.
-            normalize_band_names: map from modality name to the list of bands in that
-                modality in the order they are being loaded, passed through to
-                OlmoEarthNormalize. Only used when normalize=True. If None, the band
-                names are derived from the OlmoEarth modality definitions for every
-                modality that has normalization statistics.
+                they will be normalized in place at the start of forward. The band order
+                is assumed to match the canonical OlmoEarth modality definitions, which is
+                the same order the rest of the model assumes for the input channels.
             normalize_std_multiplier: the std multiplier to use for normalization, passed
                 through to OlmoEarthNormalize. Only used when normalize=True.
         """
@@ -191,23 +187,24 @@ class OlmoEarth(FeatureExtractor):
 
         self.normalize = normalize
         if normalize:
-            if normalize_band_names is None:
-                # Derive the band names from the OlmoEarth modality definitions for
-                # every modality that has normalization statistics. Some modalities
-                # (e.g. openstreetmap_raster) have no stats and are left un-normalized.
-                norm_config = load_computed_config()
-                normalize_band_names = {
-                    modality: [
-                        band
-                        for band_set in Modality.get(modality).band_sets
-                        for band in band_set.bands
-                    ]
-                    for modality in MODALITY_NAMES
-                    if modality in norm_config
-                }
+            # Derive the band names from the OlmoEarth modality definitions for every
+            # modality that has normalization statistics. The input channels are already
+            # assumed to be in this canonical order (see _prepare_modality_inputs), so
+            # there is no separate band order to configure. Some modalities (e.g.
+            # openstreetmap_raster) have no stats and are left un-normalized.
+            norm_config = load_computed_config()
+            band_names = {
+                modality: [
+                    band
+                    for band_set in Modality.get(modality).band_sets
+                    for band in band_set.bands
+                ]
+                for modality in MODALITY_NAMES
+                if modality in norm_config
+            }
             # skip_missing so modalities absent from a given sample are ignored.
             self.normalizer = OlmoEarthNormalize(
-                band_names=normalize_band_names,
+                band_names=band_names,
                 std_multiplier=normalize_std_multiplier,
                 skip_missing=True,
             )
