@@ -14,9 +14,9 @@ from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources.data_source import DataSource, DataSourceContext
 from rslearn.data_sources.openstreetmap import FeatureType, Filter, OpenStreetMap
-from rslearn.utils.jsonargparse import init_jsonargparse
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
+from rslearn.utils.jsonargparse import init_jsonargparse
 
 # A small area for the test (subset of Seattle).
 TEST_BOUNDS = (-122.34, 47.60, -122.32, 47.62)

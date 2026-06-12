@@ -420,9 +420,7 @@ class OpenStreetMap(DataSource[OsmItem]):
             base = context.ds_path
             if isinstance(base.fs, LocalFileSystem):
                 base = base.resolve()
-            self.pbf_fnames = [
-                join_upath(base, pbf_fname) for pbf_fname in pbf_fnames
-            ]
+            self.pbf_fnames = [join_upath(base, pbf_fname) for pbf_fname in pbf_fnames]
             self.bounds_fname = join_upath(base, bounds_fname)
         else:
             self.pbf_fnames = [UPath(pbf_fname) for pbf_fname in pbf_fnames]
