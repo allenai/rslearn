@@ -34,6 +34,38 @@ from .utils import MatchedItemGroup, match_candidate_items_to_window
 SOILGRIDS_NODATA_VALUE = -32768.0
 """Default nodata value used by SoilGrids GeoTIFF responses (GEOTIFF_INT16)."""
 
+VALID_SERVICE_IDS: frozenset[str] = frozenset(
+    {
+        "bdod",  # Bulk density
+        "cec",  # Cation exchange capacity
+        "cfvo",  # Coarse fragments
+        "clay",  # Clay content
+        "nitrogen",  # Total nitrogen
+        "ocd",  # Organic carbon density
+        "ocs",  # Organic carbon stocks
+        "phh2o",  # pH in water
+        "sand",  # Sand content
+        "silt",  # Silt content
+        "soc",  # Soil organic carbon
+        "wv0010",  # Volumetric water content at pF 1.0
+        "wv0033",  # Volumetric water content at pF 2.0
+        "wv1500",  # Volumetric water content at pF 4.2
+    }
+)
+
+_DEPTHS_STANDARD = ("0-5cm", "5-15cm", "15-30cm", "30-60cm", "60-100cm", "100-200cm")
+_DEPTHS_OCS = ("0-30cm",)
+_STATS = ("Q0.05", "Q0.5", "Q0.95", "mean", "uncertainty")
+
+VALID_COVERAGE_IDS: dict[str, frozenset[str]] = {
+    sid: frozenset(
+        f"{sid}_{depth}_{stat}"
+        for depth in (_DEPTHS_OCS if sid == "ocs" else _DEPTHS_STANDARD)
+        for stat in _STATS
+    )
+    for sid in VALID_SERVICE_IDS
+}
+
 
 def _crs_to_rasterio(crs: str) -> CRS:
     """Best-effort conversion of CRS strings used by `soilgrids` to rasterio CRS."""
@@ -106,6 +138,17 @@ class SoilGrids(DataSource, TileStore):
                 should have length 1.
             context: rslearn data source context.
         """
+        if service_id not in VALID_SERVICE_IDS:
+            raise ValueError(
+                f"service_id {service_id!r} is not a valid SoilGrids service. "
+                f"Valid values: {sorted(VALID_SERVICE_IDS)}"
+            )
+        valid_coverages = VALID_COVERAGE_IDS[service_id]
+        if coverage_id not in valid_coverages:
+            raise ValueError(
+                f"coverage_id {coverage_id!r} is not valid for service {service_id!r}. "
+                f"Valid values: {sorted(valid_coverages)}"
+            )
         if len(band_names) != 1:
             raise ValueError("SoilGrids currently supports only single-band coverages")
         if (width is None) != (height is None):

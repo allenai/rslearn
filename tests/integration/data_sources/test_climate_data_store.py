@@ -30,6 +30,9 @@ from rslearn.dataset.manage import (
     prepare_dataset_windows,
 )
 from rslearn.dataset.window import Window
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import Projection, STGeometry
 from rslearn.utils.raster_format import GeotiffRasterFormat
@@ -86,12 +89,14 @@ def _make_monthly_nc(
     lon_var[:] = lons
 
     # Finally add the data variables.
-    # We use arange so data[i, j] = i*width+j, and add 1000 for "tp".
+    # We use arange so data[i, j] = i*width+j+1, and add 1000 for "tp".
     for band_name in ["t2m", "tp"]:
         var = ds.createVariable(
             band_name, "f4", ("valid_time", "latitude", "longitude")
         )
-        data = np.arange(height * width, dtype=np.float32).reshape(1, height, width)
+        data = np.arange(1, height * width + 1, dtype=np.float32).reshape(
+            1, height, width
+        )
         if band_name == "tp":
             data = data + 1000.0
         var[:] = data
@@ -105,7 +110,7 @@ def _make_timeseries_nc(
     month: int,
     band_name: str,
     num_hours: int,
-    start_value: int = 0,
+    start_value: int = 1,
 ) -> None:
     """Create a netCDF file mimicking one ERA5-Land timeseries variable.
 
@@ -118,7 +123,7 @@ def _make_timeseries_nc(
         month: month for the valid_time.
         band_name: CDS variable name (e.g., "t2m").
         num_hours: number of hourly time steps.
-        start_value: first value in the sequence (default 0). Allows creating
+        start_value: first value in the sequence (default 1). Allows creating
             continuous sequences across multiple months.
     """
     ds = netCDF4.Dataset(str(nc_path), "w", format="NETCDF4")
@@ -217,15 +222,15 @@ class TestERA5LandMonthlyMeans:
         assert raster.timestamps is not None
         assert raster.timestamps[0][0] == datetime(self.YEAR, self.MONTH, 1, tzinfo=UTC)
 
-        # The first band (t2m) was filled with arange(100).reshape(1, 10, 10).
+        # The first band (t2m) was filled with arange(1, 101).reshape(1, 10, 10).
         band0 = raster.array[0, 0, :, :]
-        assert band0[0, 0] == 0.0
-        assert band0[9, 9] == 99.0
+        assert band0[0, 0] == 1.0
+        assert band0[9, 9] == 100.0
 
-        # The second band (tp) was filled with arange(100) + 1000.
+        # The second band (tp) was filled with arange(1, 101) + 1000.
         band1 = raster.array[1, 0, :, :]
-        assert band1[0, 0] == 1000.0
-        assert band1[9, 9] == 1099.0
+        assert band1[0, 0] == 1001.0
+        assert band1[9, 9] == 1100.0
 
 
 class TestERA5LandHourlyTimeseries:
@@ -326,11 +331,11 @@ class TestERA5LandHourlyTimeseries:
             start_next = raster.timestamps[i + 1][0]
             assert (start_next - start_i) == timedelta(seconds=3600)
 
-        # Verify band values (each variable was filled with arange(num_hours)).
-        assert raster.array[0, 0, 0, 0] == 0.0
-        assert raster.array[0, -1, 0, 0] == self.NUM_HOURS - 1
-        assert raster.array[1, 0, 0, 0] == 0.0
-        assert raster.array[1, -1, 0, 0] == self.NUM_HOURS - 1
+        # Verify band values (each variable was filled with arange(1, num_hours + 1)).
+        assert raster.array[0, 0, 0, 0] == 1.0
+        assert raster.array[0, -1, 0, 0] == self.NUM_HOURS
+        assert raster.array[1, 0, 0, 0] == 1.0
+        assert raster.array[1, -1, 0, 0] == self.NUM_HOURS
 
     def test_full_pipeline_with_temporal_clipping(
         self,
@@ -446,6 +451,7 @@ class TestERA5LandHourlyTimeseries:
                 datetime(2025, 1, 15, tzinfo=UTC),
                 datetime(2025, 2, 15, tzinfo=UTC),
             ),
+            data_factory=PerItemGroupStorageFactory(),
         )
         window.save()
 
@@ -456,10 +462,11 @@ class TestERA5LandHourlyTimeseries:
         materialize_dataset_windows(dataset, windows)
 
         # Read the materialized raster
-        layer_dir = window.get_raster_dir("era5_layer", [band_name], group_idx=0)
         raster_format = GeotiffRasterFormat()
-        raster = raster_format.decode_raster(
-            layer_dir, window.projection, window.bounds
+        raster = window.data.read_raster(
+            "era5_layer",
+            [band_name],
+            raster_format,
         )
 
         # Verify shape: (1 band, 744 timesteps, height, width)

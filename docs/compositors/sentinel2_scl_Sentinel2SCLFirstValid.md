@@ -5,6 +5,10 @@ over the requested window, then applies FIRST_VALID in ranked order.
 
 This compositor is Sentinel-2-specific and requires access to an SCL band.
 
+If you need the single scene with the highest clear-cover fraction rather than a
+FIRST_VALID composite, use
+[`Sentinel2SCLBestClear`](sentinel2_scl_Sentinel2SCLBestClear.md).
+
 ### Configuration
 
 ```jsonc

@@ -1,5 +1,7 @@
 """SQLite-based window storage backend."""
 
+from __future__ import annotations
+
 import functools
 import json
 import os

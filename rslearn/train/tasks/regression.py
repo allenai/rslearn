@@ -35,8 +35,8 @@ class RegressionTask(BasicTask):
         allow_invalid: bool = False,
         scale_factor: float = 1,
         metric_mode: (
-            Literal["mse", "rmse", "l1", "mape"]
-            | Sequence[Literal["mse", "rmse", "l1", "mape"]]
+            Literal["mse", "rmse", "l1", "r2", "mape"]
+            | Sequence[Literal["mse", "rmse", "l1", "r2", "mape"]]
             | None
         ) = None,
         use_accuracy_metric: bool = False,
@@ -61,7 +61,7 @@ class RegressionTask(BasicTask):
             within_factor: the factor for accuracy metric. If it's 0.2, and ground
                 truth is 5.0, then values from 5.0*0.8 to 5.0*1.2 are accepted.
             metrics: metric(s) to compute. Supported values: "mse", "rmse", "l1",
-                "mape".
+                "r2", "mape".
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
@@ -95,7 +95,7 @@ class RegressionTask(BasicTask):
 
         if len(metric_names) == 0:
             raise ValueError("metrics must contain at least one metric")
-        allowed = {"mse", "rmse", "l1", "mape"}
+        allowed = {"mse", "rmse", "l1", "r2", "mape"}
         invalid = [m for m in metric_names if m not in allowed]
         if invalid:
             raise ValueError(f"invalid metrics entries: {invalid}")
@@ -231,6 +231,11 @@ class RegressionTask(BasicTask):
                     metric=torchmetrics.MeanAbsoluteError(),
                     scale_factor=self.scale_factor,
                 )
+            elif metric_name == "r2":
+                metric_dict["r2"] = RegressionMetricWrapper(
+                    metric=torchmetrics.R2Score(),
+                    scale_factor=self.scale_factor,
+                )
             elif metric_name == "mape":
                 metric_dict["mape"] = RegressionMetricWrapper(
                     metric=torchmetrics.MeanAbsolutePercentageError(),
@@ -281,7 +286,7 @@ class RegressionHead(Predictor):
 
         Args:
             intermediates: output from previous model component, which must be a
-                FeatureVector with channel dimension size 1 (Bx1).
+                FeatureVector with channel dimension 1 (Bx1).
             context: the model context.
             targets: target dicts, which each must contain a "value" key containing the
                 regression label, along with a "valid" key containing a flag indicating
@@ -293,12 +298,15 @@ class RegressionHead(Predictor):
         """
         if not isinstance(intermediates, FeatureVector):
             raise ValueError("the input to RegressionHead must be a FeatureVector")
-        if intermediates.feature_vector.shape[1] != 1:
+
+        features = intermediates.feature_vector
+
+        if features.shape[1] != 1:
             raise ValueError(
-                f"the input to RegressionHead must have channel dimension size 1, but got shape {intermediates.feature_vector.shape}"
+                f"the input to RegressionHead must have channel dimension size 1, but got shape {features.shape}"
             )
 
-        logits = intermediates.feature_vector[:, 0]
+        logits = features[:, 0]
 
         if self.use_sigmoid:
             outputs = torch.nn.functional.sigmoid(logits)

@@ -129,9 +129,9 @@ for window in tqdm.tqdm(windows):
         window.get_geometry(),
         {"category": "old_then_new"},
     )
-    # Then write it to the label layer.
-    layer_dir = window.get_layer_dir("label")
-    GeojsonVectorFormat().encode_vector(layer_dir, [feat])
+    # Then write it to the label layer via Window.open_layer_writer.
+    with window.open_layer_writer("label") as writer:
+        writer.write_vector(GeojsonVectorFormat(), [feat])
     window.mark_layer_completed("label")
 ```
 
@@ -187,7 +187,7 @@ model:
           # ground truth category.
           - class_path: rslearn.train.tasks.classification.ClassificationHead
     optimizer:
-      class_path: rslearn.train.optimizer.AdamW
+      class_path: rslearn.models.olmoearth_pretrain.optimizer.LayerDecayAdamW
       init_args:
         lr: 0.0001
 data:
@@ -240,11 +240,6 @@ data:
 trainer:
   max_epochs: 100
   callbacks:
-    # It is recommended to freeze the OlmoEarth encoder for the first few epochs.
-    - class_path: rslearn.train.callbacks.freeze_unfreeze.FreezeUnfreeze
-      init_args:
-        module_selector: ["model", "encoder", 0]
-        unfreeze_at_epoch: 10
     # Save best checkpoint based on accuracy metric.
     - class_path: rslearn.train.callbacks.checkpointing.ManagedBestLastCheckpoint
       init_args:

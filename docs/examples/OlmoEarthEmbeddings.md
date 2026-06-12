@@ -37,7 +37,7 @@ pre-training:
         "query_config": {
           "max_matches": 12,
           "period_duration": "30d",
-          "space_mode": "PER_PERIOD_MOSAIC"
+          "space_mode": "MOSAIC"
         }
       },
       "type": "raster"
@@ -61,7 +61,7 @@ pre-training:
         "query_config": {
           "max_matches": 12,
           "period_duration": "30d",
-          "space_mode": "PER_PERIOD_MOSAIC"
+          "space_mode": "MOSAIC"
         }
       },
       "type": "raster"
@@ -82,7 +82,7 @@ pre-training:
         "query_config": {
           "max_matches": 12,
           "period_duration": "30d",
-          "space_mode": "PER_PERIOD_MOSAIC"
+          "space_mode": "MOSAIC"
         }
       },
       "type": "raster"

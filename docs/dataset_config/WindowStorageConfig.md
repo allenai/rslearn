@@ -34,7 +34,7 @@ SQLiteWindowStorage uses an sqlite database. It can be configured like this:
 ```jsonc
 {
   "storage": {
-    "class_path": "rslearn.dataset.storage.file.SQLiteWindowStorageFactory"
+    "class_path": "rslearn.dataset.storage.sqlite.SQLiteWindowStorageFactory"
   }
 }
 ```

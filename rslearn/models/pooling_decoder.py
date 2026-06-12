@@ -19,6 +19,10 @@ class PoolingDecoder(IntermediateComponent):
     It inputs multi-scale features, but only uses the last feature map. Then applies a
     configurable number of convolutional layers before pooling, and a configurable
     number of fully connected layers after pooling.
+
+    For patch-level regression from a spatial backbone (e.g. OlmoEarth), set
+    out_channels=1 to produce a Bx1 FeatureVector that feeds directly into
+    RegressionHead without any additional projection step.
     """
 
     def __init__(

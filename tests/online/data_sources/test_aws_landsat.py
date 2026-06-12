@@ -15,6 +15,9 @@ from rslearn.config import (
 from rslearn.data_sources.aws_landsat import LandsatOliTirs
 from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils import STGeometry
 
@@ -83,6 +86,7 @@ class TestLandsatOliTirs:
             projection=seattle2020.projection,
             bounds=bounds,
             time_range=seattle2020.time_range,
+            data_factory=PerItemGroupStorageFactory(),
         )
         window.save()
         query_config = QueryConfig(space_mode=SpaceMode.INTERSECTS)
