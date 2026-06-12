@@ -1,6 +1,6 @@
 ## rslearn.data_sources.gcp_public_data.Sentinel2
 
-This data source is for Sentinel-2 L1C data on Google Cloud Storage.
+This data source is for Sentinel-2 L1C and L2A data on Google Cloud Storage.
 
 Sentinel-2 imagery is available on Google Cloud Storage as part of the Google
 Public Cloud Data Program. The images are added with a 1-2 day latency after
@@ -19,6 +19,9 @@ The bucket is public and free so no credentials are needed.
     // Required cache directory to cache product metadata files and the optional rtree
     // index.
     "index_cache_dir": "cache/sentinel2",
+    // The Sentinel-2 product type, either "L1C" (default) or "L2A" (surface
+    // reflectance).
+    "product_type": "L1C",
     // Sort by this attribute, either null (default, meaning arbitrary ordering) or
     // "cloud_cover".
     "sort_by": null,
@@ -55,7 +58,7 @@ uint16 bands:
 - B07
 - B08
 - B09
-- B10
+- B10 (L1C only)
 - B11
 - B12
 - B8A

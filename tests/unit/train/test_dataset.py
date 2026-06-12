@@ -17,6 +17,9 @@ from rslearn.config import (
 )
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset, Window
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.train.dataset import (
     DataInput,
     IndexMode,
@@ -235,6 +238,7 @@ def test_read_data_input_timestamps(tmp_path: UPath) -> None:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
     window.save()
 
@@ -242,23 +246,25 @@ def test_read_data_input_timestamps(tmp_path: UPath) -> None:
     ts2 = (datetime(2024, 1, 15), datetime(2024, 1, 20))
 
     image1 = np.ones((1, 4, 4), dtype=np.uint8)
-    raster_dir1 = window.get_raster_dir("image", ["band"], group_idx=0)
-    GeotiffRasterFormat().encode_raster(
-        raster_dir1,
-        window.projection,
-        window.bounds,
-        RasterArray(chw_array=image1, time_range=ts1),
-    )
-
     image2 = 2 * np.ones((1, 4, 4), dtype=np.uint8)
-    raster_dir2 = window.get_raster_dir("image", ["band"], group_idx=1)
-    GeotiffRasterFormat().encode_raster(
-        raster_dir2,
-        window.projection,
-        window.bounds,
-        RasterArray(chw_array=image2, time_range=ts2),
-    )
-
+    raster_format = GeotiffRasterFormat()
+    with window.data.open_layer_writer("image") as writer:
+        writer.write_raster(
+            ["band"],
+            raster_format,
+            window.projection,
+            window.bounds,
+            RasterArray(chw_array=image1, time_range=ts1),
+            group_idx=0,
+        )
+        writer.write_raster(
+            ["band"],
+            raster_format,
+            window.projection,
+            window.bounds,
+            RasterArray(chw_array=image2, time_range=ts2),
+            group_idx=1,
+        )
     window.mark_layer_completed("image", group_idx=0)
     window.mark_layer_completed("image", group_idx=1)
 
@@ -314,6 +320,7 @@ def test_read_data_input_use_all_bands_single_band_set(tmp_path: UPath) -> None:
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
     window.save()
 
@@ -325,13 +332,15 @@ def test_read_data_input_use_all_bands_single_band_set(tmp_path: UPath) -> None:
         ],
         axis=0,
     )
-    raster_dir = window.get_raster_dir("embeddings", ["B0", "B1", "B2"], group_idx=0)
-    GeotiffRasterFormat().encode_raster(
-        raster_dir,
-        window.projection,
-        window.bounds,
-        RasterArray(chw_array=raster),
-    )
+    raster_format = GeotiffRasterFormat()
+    with window.data.open_layer_writer("embeddings") as writer:
+        writer.write_raster(
+            ["B0", "B1", "B2"],
+            raster_format,
+            window.projection,
+            window.bounds,
+            RasterArray(chw_array=raster),
+        )
     window.mark_layer_completed("embeddings", group_idx=0)
 
     data_input = DataInput(
@@ -386,6 +395,7 @@ def test_read_data_input_use_all_bands_with_band_set_index(tmp_path: UPath) -> N
         projection=WGS84_PROJECTION,
         bounds=(0, 0, 4, 4),
         time_range=None,
+        data_factory=PerItemGroupStorageFactory(),
     )
     window.save()
 
@@ -397,13 +407,15 @@ def test_read_data_input_use_all_bands_with_band_set_index(tmp_path: UPath) -> N
         ],
         axis=0,
     )
-    raster_dir = window.get_raster_dir("embeddings", ["B0", "B1", "B2"], group_idx=0)
-    GeotiffRasterFormat().encode_raster(
-        raster_dir,
-        window.projection,
-        window.bounds,
-        RasterArray(chw_array=raster),
-    )
+    raster_format = GeotiffRasterFormat()
+    with window.data.open_layer_writer("embeddings") as writer:
+        writer.write_raster(
+            ["B0", "B1", "B2"],
+            raster_format,
+            window.projection,
+            window.bounds,
+            RasterArray(chw_array=raster),
+        )
     window.mark_layer_completed("embeddings", group_idx=0)
 
     data_input = DataInput(
@@ -593,10 +605,7 @@ def test_skip_if_output_layer_exists(
         window_name="window_without_output",
     )
 
-    # Mark the first window as having the output layer completed
-    # Ensure the output layer directory exists before marking completed.
-    layer_dir = window1.get_layer_dir("predictions")
-    layer_dir.mkdir(parents=True, exist_ok=True)
+    # Mark the first window as having the output layer completed.
     window1.mark_layer_completed("predictions")
 
     dataset = ModelDataset(
@@ -809,8 +818,6 @@ class TestCheckWindow:
             images={("image_layer1", 0): image},
         )
         # Mark an output layer as completed.
-        layer_dir = window.get_layer_dir("predictions")
-        layer_dir.mkdir(parents=True, exist_ok=True)
         window.mark_layer_completed("predictions")
 
         inputs = {

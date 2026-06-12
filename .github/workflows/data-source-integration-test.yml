@@ -35,6 +35,7 @@ jobs:
             -e TEST_PREFIX="rslearn_gha_data_source_tests/" \
             -v /tmp/gcp-credentials.json:/tmp/gcp-credentials.json:ro \
             -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-credentials.json \
+            -e GS_USER_PROJECT="${GS_USER_PROJECT}" \
             -e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
             -e AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
             -e AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION}" \
@@ -58,6 +59,7 @@ jobs:
             pytest tests/online/
         env:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          GS_USER_PROJECT: ${{ secrets.GS_USER_PROJECT }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}

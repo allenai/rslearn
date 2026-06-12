@@ -18,6 +18,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PlainSerializer,
+    PrivateAttr,
     field_validator,
     model_validator,
 )
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     from rslearn.data_sources.data_source import DataSource
     from rslearn.dataset.compositing import Compositor
     from rslearn.dataset.storage.storage import WindowStorageFactory
+    from rslearn.dataset.window_data_storage.storage import WindowDataStorageFactory
 
 logger = get_logger("__name__")
 
@@ -202,6 +204,10 @@ class BandSetConfig(BaseModel):
         description="Optional (height, width) output size. Mutually exclusive with non-zero zoom_offset.",
     )
 
+    # Cached instantiated RasterFormat. We cache since it can take a few ms to
+    # instantiate.
+    _raster_format: RasterFormat | None = PrivateAttr(default=None)
+
     @model_validator(mode="after")
     def after_validator(self) -> "BandSetConfig":
         """Ensure the BandSetConfig is valid, and handle the num_bands field."""
@@ -331,14 +337,17 @@ class BandSetConfig(BaseModel):
 
     def instantiate_raster_format(self) -> RasterFormat:
         """Instantiate the RasterFormat specified by this BandSetConfig."""
+        if self._raster_format is not None:
+            return self._raster_format
+
         from rslearn.utils.jsonargparse import init_jsonargparse
 
         init_jsonargparse()
         parser = jsonargparse.ArgumentParser()
         parser.add_argument("--raster_format", type=RasterFormat)
         cfg = parser.parse_object({"raster_format": self.format})
-        raster_format = parser.instantiate_classes(cfg).raster_format
-        return raster_format
+        self._raster_format = parser.instantiate_classes(cfg).raster_format
+        return self._raster_format
 
 
 class SpaceMode(StrEnum):
@@ -415,12 +424,6 @@ class QueryConfig(BaseModel):
             warnings.warn(
                 "SpaceMode.PER_PERIOD_MOSAIC is deprecated and will be removed after "
                 "2026-05-01. Use SpaceMode.MOSAIC with period_duration instead.",
-                FutureWarning,
-            )
-        if "per_period_mosaic_reverse_time_order" in self.model_fields_set:
-            warnings.warn(
-                "per_period_mosaic_reverse_time_order is deprecated and will be "
-                "removed after 2026-05-01.",
                 FutureWarning,
             )
         return self
@@ -804,6 +807,45 @@ class StorageConfig(BaseModel):
         return wsf
 
 
+class WindowDataStorageConfig(BaseModel):
+    """Configuration for the WindowDataStorage of the dataset.
+
+    The WindowDataStorage controls the on-disk layout of materialized raster
+    and vector data within each window.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    class_path: str = Field(
+        default="rslearn.dataset.window_data_storage.per_item_group.PerItemGroupStorageFactory",
+        description="Class path for the WindowDataStorageFactory.",
+    )
+    init_args: dict[str, Any] = Field(
+        default_factory=lambda: {},
+        description="jsonargparse init args for the WindowDataStorageFactory.",
+    )
+
+    def instantiate_factory(self) -> "WindowDataStorageFactory":
+        """Instantiate the WindowDataStorageFactory specified by this config."""
+        from rslearn.dataset.window_data_storage.storage import (
+            WindowDataStorageFactory,
+        )
+        from rslearn.utils.jsonargparse import init_jsonargparse
+
+        init_jsonargparse()
+        parser = jsonargparse.ArgumentParser()
+        parser.add_argument("--wds", type=WindowDataStorageFactory)
+        cfg = parser.parse_object(
+            {
+                "wds": dict(
+                    class_path=self.class_path,
+                    init_args=self.init_args,
+                )
+            }
+        )
+        return parser.instantiate_classes(cfg).wds
+
+
 class DatasetConfig(BaseModel):
     """Overall dataset configuration."""
 
@@ -817,6 +859,15 @@ class DatasetConfig(BaseModel):
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(),
         description="jsonargparse configuration for the WindowStorageFactory.",
+    )
+    window_data_storage: WindowDataStorageConfig = Field(
+        default_factory=lambda: WindowDataStorageConfig(),
+        description=(
+            "jsonargparse configuration for the WindowDataStorage. "
+            "Controls how materialized raster/vector data is laid out on "
+            "disk inside each window. Defaults to per-item-group layout, "
+            "compatible with all existing rslearn datasets."
+        ),
     )
 
     @field_validator("layers", mode="after")

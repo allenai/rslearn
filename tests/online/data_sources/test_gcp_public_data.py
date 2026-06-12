@@ -18,6 +18,7 @@ from rslearn.data_sources.gcp_public_data import (
     CorruptItemException,
     MissingXMLException,
     Sentinel2,
+    Sentinel2ProductType,
 )
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
@@ -85,6 +86,21 @@ class TestSentinel2:
             index_cache_dir=index_cache_dir,
             use_rtree_index=use_rtree_index,
             use_bigquery=use_bigquery,
+        )
+
+    def test_l2a(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
+        """Test ingesting an L2A (surface reflectance) product."""
+        tile_store_dir = UPath(tmp_path) / "tiles"
+        tile_store_dir.mkdir(parents=True, exist_ok=True)
+        index_cache_dir = UPath(tmp_path) / "cache"
+        index_cache_dir.mkdir(parents=True, exist_ok=True)
+        self.run_simple_test(
+            tile_store_dir,
+            seattle2020,
+            index_cache_dir=index_cache_dir,
+            use_rtree_index=False,
+            use_bigquery=True,
+            product_type=Sentinel2ProductType.L2A,
         )
 
     @pytest.mark.parametrize("use_rtree_index", [False, True])

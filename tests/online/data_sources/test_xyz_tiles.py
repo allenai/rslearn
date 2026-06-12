@@ -14,6 +14,9 @@ from rslearn.config import (
 from rslearn.data_sources.xyz_tiles import XyzTiles
 from rslearn.dataset import Window
 from rslearn.dataset.storage.file import FileWindowStorage
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.utils import STGeometry
 
 
@@ -44,6 +47,7 @@ class TestXyzTiles:
             projection=seattle2020.projection,
             bounds=tuple([int(x) for x in seattle2020.shp.bounds]),  # type: ignore
             time_range=seattle2020.time_range,
+            data_factory=PerItemGroupStorageFactory(),
         )
         window.save()
         print("materialize")
@@ -53,8 +57,7 @@ class TestXyzTiles:
             "raster",
             layer_config,
         )
-        expected_path = window.get_raster_dir("raster", self.TEST_BANDS) / "geotiff.tif"
-        assert expected_path.exists()
+        assert window.is_layer_completed("raster")
 
     def test_local(self, tmp_path: pathlib.Path, seattle2020: STGeometry) -> None:
         """Test ingesting to local filesystem."""

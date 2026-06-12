@@ -146,30 +146,39 @@ def read_raster_window_from_tiles(
         dst_col = intersection[0] - bounds[0]
         dst_row = intersection[1] - bounds[1]
 
-        src_sel = src[src_indexes, :, :, :]  # (C_sel, T, H_int, W_int)
-        if remapper:
-            src_sel = remapper(src_sel, band_dtype)
-
         out_crop = dst.array[
             :,
             :,
-            dst_row : dst_row + src_sel.shape[2],
-            dst_col : dst_col + src_sel.shape[3],
+            dst_row : dst_row + src.shape[2],
+            dst_col : dst_col + src.shape[3],
         ]  # (C, T, H_int, W_int) view
 
-        src_typed = src_sel.astype(band_dtype)
-
+        # Build the first-valid mask: a pixel may be written only where it is
+        # nodata in *every* destination band. Start from the first band's
+        # nodata mask and logically-and (&=) each remaining band into it, so a
+        # pixel that is already valid in any band stays False (untouched).
         if nodata_val is not None:
-            # First-valid: only overwrite pixels where all dst bands are nodata.
-            mask = nodata_eq(out_crop[dst_indexes], nodata_val).min(
-                axis=0
-            )  # (T, H_int, W_int)
-
-            for src_index, dst_index in enumerate(dst_indexes):
-                out_crop[dst_index][mask] = src_typed[src_index][mask]
+            mask = nodata_eq(out_crop[dst_indexes[0]], nodata_val)
+            for dst_index in dst_indexes[1:]:
+                mask &= nodata_eq(out_crop[dst_index], nodata_val)
         else:
-            for src_index, dst_index in enumerate(dst_indexes):
-                out_crop[dst_index] = src_typed[src_index]
+            # nodata_val is None: every source pixel overwrites the destination.
+            mask = None
+
+        # Copy one band at a time. src[src_index] is a view (no copy), and
+        # np.copyto writes straight into the destination window, so no
+        # intersection-sized temporary array is allocated.
+        for src_index, dst_index in zip(src_indexes, dst_indexes, strict=True):
+            src_band = src[src_index]  # (T, H_int, W_int) view
+            if remapper:
+                src_band = remapper(src_band, band_dtype)
+            if mask is not None:
+                # where=mask restricts the write to first-valid pixels;
+                # casting="unsafe" converts src_band's dtype to band_dtype
+                # during the copy (e.g. uint16 -> float32).
+                np.copyto(out_crop[dst_index], src_band, where=mask, casting="unsafe")
+            else:
+                np.copyto(out_crop[dst_index], src_band, casting="unsafe")
 
     return dst
 

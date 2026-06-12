@@ -118,6 +118,7 @@ def test_with_attnpool() -> None:
         embedding_size=128,
         # we now expect an extra N dimension on the back of this.
         token_pooling=False,
+        autocast_dtype=None,
     )
     pooling = AttentionPool(in_dim=128, num_heads=2)
 
@@ -173,6 +174,7 @@ def test_with_simple_attnpool() -> None:
         embedding_size=128,
         # we now expect an extra N dimension on the back of this.
         token_pooling=False,
+        autocast_dtype=None,
     )
     pooling = SimpleAttentionPool(in_dim=128)
 
@@ -934,6 +936,47 @@ def test_normal_timestamps_two_modalities_1hr_tolerance() -> None:
         assert (s1_mask[:, :, t] == MaskValue.MISSING.value).all(), (
             f"s1 t={t} should be missing"
         )
+
+
+def test_normalize_in_forward() -> None:
+    """normalize=True should normalize the inputs in place using OlmoEarthNormalize."""
+    from rslearn.models.olmoearth_pretrain.norm import OlmoEarthNormalize
+
+    model = OlmoEarth(
+        checkpoint_path="tests/unit/models/olmoearth_pretrain/",
+        random_initialization=True,
+        patch_size=4,
+        embedding_size=128,
+        normalize=True,
+    )
+
+    T = 2
+    H = 4
+    W = 4
+    band_names = [
+        "B02", "B03", "B04", "B08", "B05", "B06",
+        "B07", "B8A", "B11", "B12", "B01", "B09",
+    ]  # fmt: skip
+    raw_image = torch.arange(12 * T * H * W, dtype=torch.float32).reshape(12, T, H, W)
+    timestamps = [(datetime(2025, x, 1), datetime(2025, x, 1)) for x in range(1, T + 1)]
+
+    inputs = [
+        {"sentinel2_l2a": RasterImage(image=raw_image.clone(), timestamps=timestamps)}
+    ]
+    model(ModelContext(inputs=inputs, metadatas=[_make_metadata((0, 0, H, W))]))
+
+    # The inputs should have been normalized in place, matching a standalone
+    # OlmoEarthNormalize applied to the same raw inputs.
+    expected = {
+        "sentinel2_l2a": RasterImage(image=raw_image.clone(), timestamps=timestamps)
+    }
+    OlmoEarthNormalize(band_names={"sentinel2_l2a": band_names})(expected, {})
+
+    assert torch.allclose(
+        inputs[0]["sentinel2_l2a"].image, expected["sentinel2_l2a"].image
+    )
+    # Sanity check that normalization actually changed the values.
+    assert not torch.allclose(inputs[0]["sentinel2_l2a"].image, raw_image)
 
 
 def test_compute_tokens_in_batch() -> None:

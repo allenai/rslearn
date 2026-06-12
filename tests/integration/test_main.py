@@ -19,6 +19,9 @@ from rslearn.data_sources.gcp_public_data import Sentinel2Item
 from rslearn.data_sources.local_files import VectorItem
 from rslearn.data_sources.soilgrids import SoilGrids
 from rslearn.dataset import Dataset, Window, WindowLayerData
+from rslearn.dataset.window_data_storage.per_item_group import (
+    PerItemGroupStorageFactory,
+)
 from rslearn.log_utils import get_logger
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.raster_array import RasterArray
@@ -107,6 +110,7 @@ class TestIngestion:
                 datetime(2024, 1, 1, tzinfo=UTC),
                 datetime(2024, 2, 1, tzinfo=UTC),
             ),
+            data_factory=PerItemGroupStorageFactory(),
         )
         window.save()
 
@@ -300,6 +304,7 @@ class TestMaterialization:
                 datetime(2024, 1, 1, tzinfo=UTC),
                 datetime(2024, 2, 1, tzinfo=UTC),
             ),
+            data_factory=PerItemGroupStorageFactory(),
         )
         window1.save()
 
@@ -314,6 +319,7 @@ class TestMaterialization:
                 datetime(2024, 2, 1, tzinfo=UTC),
                 datetime(2024, 3, 1, tzinfo=UTC),  # Different time range
             ),
+            data_factory=PerItemGroupStorageFactory(),
         )
         window2.save()
 
