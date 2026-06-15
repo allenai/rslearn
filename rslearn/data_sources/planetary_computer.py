@@ -731,7 +731,6 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
     """
 
     STAC_ENDPOINT = "https://planetarycomputer.microsoft.com/api/stac/v1"
-    client: StacClient | PlanetaryComputerGeoParquetClient
 
     def __init__(
         self,
@@ -824,7 +823,7 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
                     )
                 else:
                     metadata_cache_path = UPath(metadata_cache_dir)
-            self.client = PlanetaryComputerGeoParquetClient(
+            self.client = PlanetaryComputerGeoParquetClient(  # type: ignore[assignment]
                 endpoint=self.STAC_ENDPOINT,
                 collection_name=collection_name,
                 required_assets=required_assets,
