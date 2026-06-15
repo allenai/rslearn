@@ -1,18 +1,24 @@
 """Data on Planetary Computer."""
 
+import hashlib
+import json
 import os
+import re
 import tempfile
 import warnings
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import Any
+from urllib.parse import urlparse
 
 import numpy as np
 import numpy.typing as npt
 import planetary_computer
 import rasterio
 import requests
+import shapely
 import xarray as xr
 from typing_extensions import override
 from upath import UPath
@@ -23,13 +29,15 @@ from rslearn.data_sources.direct_materialize_data_source import (
     DirectMaterializeDataSource,
 )
 from rslearn.data_sources.stac import SourceItem, StacDataSource
+from rslearn.data_sources.utils import MatchedItemGroup, match_candidate_items_to_window
 from rslearn.log_utils import get_logger
 from rslearn.tile_stores import TileStoreWithLayer
+from rslearn.utils.fsspec import join_upath
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.interpolation import NODATA_VALUE, interpolate_to_grid
 from rslearn.utils.raster_array import RasterArray, RasterMetadata
 from rslearn.utils.raster_format import get_raster_projection_and_bounds
-from rslearn.utils.stac import StacClient, StacItem
+from rslearn.utils.stac import StacAsset, StacClient, StacItem
 
 from .copernicus import get_harmonize_callback
 
@@ -37,6 +45,585 @@ logger = get_logger(__name__)
 
 # Max limit accepted by Planetary Computer API.
 PLANETARY_COMPUTER_LIMIT = 1000
+
+
+class PlanetaryComputerMetadataBackend(StrEnum):
+    """Metadata backend for Planetary Computer item discovery."""
+
+    STAC = "stac"
+    GEOPARQUET = "geoparquet"
+
+
+def _datetime_to_utc(value: datetime) -> datetime:
+    """Return a timezone-aware UTC datetime."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _quote_duckdb_identifier(identifier: str) -> str:
+    """Quote a DuckDB identifier."""
+    return '"' + identifier.replace('"', '""') + '"'
+
+
+def _quote_duckdb_string(value: str) -> str:
+    """Quote a DuckDB string literal."""
+    return "'" + value.replace("'", "''") + "'"
+
+
+class PlanetaryComputerGeoParquetClient:
+    """A STAC-like client that searches Planetary Computer STAC GeoParquet items.
+
+    Planetary Computer exposes collection-level ``geoparquet-items`` assets for bulk
+    item metadata queries. For large prepare jobs this avoids one STAC API request per
+    window, which can otherwise hit Planetary Computer API rate limits.
+    """
+
+    GEOPARQUET_ASSET_KEY = "geoparquet-items"
+    _PARTITION_RE = re.compile(
+        r"/part-\d+_"
+        r"(?P<start>\d{4}-\d{2}-\d{2}T[^_]+)"
+        r"_"
+        r"(?P<end>\d{4}-\d{2}-\d{2}T[^_]+)"
+        r"\.parquet$"
+    )
+    _SENTINEL2_ID_TIME_RE = re.compile(r"_MSIL2A_(?P<date>\d{8})T\d{6}_")
+
+    def __init__(
+        self,
+        endpoint: str,
+        collection_name: str,
+        required_assets: list[str] | None,
+        query_properties: list[str],
+        timeout: timedelta,
+        metadata_cache_dir: UPath | None = None,
+        geoparquet_href: str | None = None,
+    ) -> None:
+        """Create a GeoParquet-backed client.
+
+        Args:
+            endpoint: Planetary Computer STAC endpoint.
+            collection_name: STAC collection name.
+            required_assets: asset keys that must exist on returned items.
+            query_properties: STAC property columns needed for filtering/sorting.
+            timeout: HTTP timeout for collection metadata and Azure listing requests.
+            metadata_cache_dir: optional directory for file-list and query-result cache.
+            geoparquet_href: optional explicit GeoParquet asset href.
+        """
+        self.endpoint = endpoint
+        self.collection_name = collection_name
+        self.required_assets = required_assets
+        self.query_properties = query_properties
+        self.timeout = timeout
+        self.metadata_cache_dir = metadata_cache_dir
+        self.geoparquet_href = geoparquet_href
+
+        self._resolved_geoparquet_url: str | None = None
+        self._partition_blob_names: list[str] | None = None
+        self._items_by_name: dict[str, StacItem] = {}
+
+        if self.metadata_cache_dir is not None:
+            self.metadata_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def search(
+        self,
+        collections: list[str] | None = None,
+        bbox: tuple[float, float, float, float] | None = None,
+        intersects: dict[str, Any] | None = None,
+        date_time: datetime | tuple[datetime, datetime] | None = None,
+        ids: list[str] | None = None,
+        limit: int | None = None,
+        query: dict[str, Any] | None = None,
+        sortby: list[dict[str, str]] | None = None,
+    ) -> list[StacItem]:
+        """Execute a STAC-like item search against STAC GeoParquet rows."""
+        del limit
+
+        if collections is not None and self.collection_name not in collections:
+            return []
+
+        if (
+            ids is not None
+            and bbox is None
+            and intersects is None
+            and date_time is None
+            and query is None
+            and sortby is None
+            and all(item_id in self._items_by_name for item_id in ids)
+        ):
+            return [self._items_by_name[item_id] for item_id in ids]
+
+        if bbox is None and intersects is not None:
+            bbox = shapely.geometry.shape(intersects).bounds
+
+        search_time_range = self._normalize_search_time_range(date_time)
+        if search_time_range is None and ids is not None:
+            search_time_range = self._infer_time_range_from_sentinel2_ids(ids)
+
+        rows = self._read_geoparquet_rows(
+            bbox=bbox,
+            date_time=search_time_range,
+            ids=ids,
+            query=query,
+            sortby=sortby,
+        )
+        stac_items = [self._row_to_stac_item(row) for row in rows]
+        for stac_item in stac_items:
+            self._items_by_name[stac_item.id] = stac_item
+        return stac_items
+
+    def _normalize_search_time_range(
+        self, date_time: datetime | tuple[datetime, datetime] | None
+    ) -> tuple[datetime, datetime] | None:
+        """Normalize a STAC search datetime argument to a range."""
+        if date_time is None:
+            return None
+        if isinstance(date_time, tuple):
+            return (_datetime_to_utc(date_time[0]), _datetime_to_utc(date_time[1]))
+        dt = _datetime_to_utc(date_time)
+        return (dt, dt)
+
+    def _infer_time_range_from_sentinel2_ids(
+        self, ids: list[str]
+    ) -> tuple[datetime, datetime] | None:
+        """Infer a coarse time range from Sentinel-2 item IDs."""
+        dates: list[datetime] = []
+        for item_id in ids:
+            match = self._SENTINEL2_ID_TIME_RE.search(item_id)
+            if match is None:
+                continue
+            dates.append(
+                datetime.strptime(match.group("date"), "%Y%m%d").replace(tzinfo=UTC)
+            )
+        if not dates:
+            return None
+        return (min(dates), max(dates) + timedelta(days=1))
+
+    def _get_duckdb(self) -> Any:
+        """Import duckdb lazily so GeoParquet support is optional."""
+        try:
+            import duckdb
+        except (
+            ImportError
+        ) as e:  # pragma: no cover - exercised only without optional dep
+            raise ImportError(
+                "Planetary Computer GeoParquet metadata requires the optional "
+                "'duckdb' dependency. Install rslearn with the 'extra' extras or "
+                "install duckdb separately."
+            ) from e
+        return duckdb
+
+    def _resolve_geoparquet_url(self) -> str:
+        """Resolve the configured or collection-level GeoParquet href to HTTPS."""
+        if self._resolved_geoparquet_url is not None:
+            return self._resolved_geoparquet_url
+
+        href = self.geoparquet_href
+        storage_account: str | None = None
+        if href is None:
+            response = requests.get(
+                f"{self.endpoint}/collections/{self.collection_name}",
+                timeout=self.timeout.total_seconds(),
+            )
+            response.raise_for_status()
+            collection = response.json()
+            asset = collection.get("assets", {}).get(self.GEOPARQUET_ASSET_KEY)
+            if asset is None:
+                raise ValueError(
+                    f"Planetary Computer collection {self.collection_name!r} has no "
+                    f"{self.GEOPARQUET_ASSET_KEY!r} asset"
+                )
+            href = asset["href"]
+            storage_account = asset.get("table:storage_options", {}).get("account_name")
+
+        parsed = urlparse(href)
+        if parsed.scheme in ("http", "https", "file"):
+            self._resolved_geoparquet_url = href
+            return href
+        if parsed.scheme == "abfs":
+            if not storage_account:
+                raise ValueError(
+                    f"GeoParquet href {href!r} requires table:storage_options.account_name"
+                )
+            container = parsed.netloc
+            blob = parsed.path.lstrip("/")
+            self._resolved_geoparquet_url = (
+                f"https://{storage_account}.blob.core.windows.net/{container}/{blob}"
+            )
+            return self._resolved_geoparquet_url
+
+        raise ValueError(f"unsupported GeoParquet href scheme in {href!r}")
+
+    def _get_signed_query_string(self, base_url: str) -> str:
+        """Return a Planetary Computer SAS query string for an HTTPS Blob URL."""
+        signed = planetary_computer.sign(base_url)
+        if "?" not in signed:
+            return ""
+        return signed.split("?", 1)[1]
+
+    def _list_partition_blob_names(self) -> list[str]:
+        """List partition parquet blob names under the GeoParquet directory."""
+        if self._partition_blob_names is not None:
+            return self._partition_blob_names
+
+        cache_path = None
+        if self.metadata_cache_dir is not None:
+            cache_path = self.metadata_cache_dir / "geoparquet_partitions.json"
+            if cache_path.exists():
+                with cache_path.open() as f:
+                    self._partition_blob_names = json.load(f)
+                return self._partition_blob_names
+
+        base_url = self._resolve_geoparquet_url()
+        parsed = urlparse(base_url)
+        if parsed.scheme == "file" or parsed.scheme == "":
+            self._partition_blob_names = [base_url]
+            return self._partition_blob_names
+        if parsed.scheme != "https":
+            raise ValueError(f"expected HTTPS GeoParquet URL, got {base_url!r}")
+
+        account_url = f"{parsed.scheme}://{parsed.netloc}"
+        path_parts = parsed.path.lstrip("/").split("/", 1)
+        if len(path_parts) != 2:
+            raise ValueError(f"invalid Azure Blob GeoParquet URL {base_url!r}")
+        container, blob_prefix = path_parts
+
+        query_string = self._get_signed_query_string(base_url)
+        names: list[str] = []
+        marker = ""
+        while True:
+            list_url = (
+                f"{account_url}/{container}?restype=container&comp=list"
+                f"&prefix={blob_prefix}/&maxresults=5000"
+            )
+            if marker:
+                list_url += f"&marker={marker}"
+            if query_string:
+                list_url += f"&{query_string}"
+            response = requests.get(list_url, timeout=self.timeout.total_seconds())
+            response.raise_for_status()
+
+            root = ET.fromstring(response.content)
+            for name_el in root.findall(".//Blob/Name"):
+                if name_el.text and name_el.text.endswith(".parquet"):
+                    names.append(name_el.text)
+
+            marker_el = root.find("NextMarker")
+            if marker_el is None or not marker_el.text:
+                break
+            marker = marker_el.text
+
+        self._partition_blob_names = names
+        if cache_path is not None:
+            with cache_path.open("w") as f:
+                json.dump(names, f)
+        return names
+
+    def _partition_time_range(
+        self, blob_name_or_url: str
+    ) -> tuple[datetime, datetime] | None:
+        """Parse the time range encoded in a Planetary Computer partition filename."""
+        match = self._PARTITION_RE.search(blob_name_or_url)
+        if match is None:
+            return None
+        return (
+            datetime.fromisoformat(match.group("start")),
+            datetime.fromisoformat(match.group("end")),
+        )
+
+    def _get_parquet_files(
+        self, date_time: tuple[datetime, datetime] | None
+    ) -> list[str]:
+        """Return signed Parquet files relevant to the requested time range."""
+        base_url = self._resolve_geoparquet_url()
+        parsed = urlparse(base_url)
+        if parsed.scheme == "file" or parsed.scheme == "":
+            return [base_url]
+
+        path_parts = parsed.path.lstrip("/").split("/", 1)
+        if len(path_parts) != 2:
+            raise ValueError(f"invalid Azure Blob GeoParquet URL {base_url!r}")
+        container, _ = path_parts
+        account_url = f"{parsed.scheme}://{parsed.netloc}"
+        query_string = self._get_signed_query_string(base_url)
+
+        files = []
+        for blob_name in self._list_partition_blob_names():
+            partition_time_range = self._partition_time_range(blob_name)
+            if date_time is not None and partition_time_range is not None:
+                if (
+                    partition_time_range[1] < date_time[0]
+                    or partition_time_range[0] > date_time[1]
+                ):
+                    continue
+            url = f"{account_url}/{container}/{blob_name}"
+            if query_string:
+                url += f"?{query_string}"
+            files.append(url)
+        return files
+
+    def _cache_path(
+        self,
+        *,
+        bbox: tuple[float, float, float, float] | None,
+        date_time: tuple[datetime, datetime] | None,
+        ids: list[str] | None,
+        query: dict[str, Any] | None,
+        sortby: list[dict[str, str]] | None,
+    ) -> UPath | None:
+        """Return a local cache path for a GeoParquet query result."""
+        if self.metadata_cache_dir is None:
+            return None
+        parsed_cache = urlparse(str(self.metadata_cache_dir))
+        if parsed_cache.scheme not in ("", "file"):
+            return None
+        key_payload = {
+            "collection": self.collection_name,
+            "geoparquet_url": self._resolve_geoparquet_url(),
+            "bbox": bbox,
+            "date_time": [dt.isoformat() for dt in date_time] if date_time else None,
+            "ids": sorted(ids) if ids else None,
+            "query": query,
+            "sortby": sortby,
+            "required_assets": self.required_assets,
+            "query_properties": self.query_properties,
+            "version": 1,
+        }
+        key = hashlib.sha256(
+            json.dumps(key_payload, sort_keys=True, default=str).encode()
+        ).hexdigest()
+        query_cache_dir = self.metadata_cache_dir / "queries"
+        query_cache_dir.mkdir(parents=True, exist_ok=True)
+        return query_cache_dir / f"{key}.parquet"
+
+    def _query_condition_sql(
+        self, query: dict[str, Any] | None, params: list[Any]
+    ) -> list[str]:
+        """Translate supported STAC query predicates to DuckDB SQL."""
+        if query is None:
+            return []
+
+        conditions = []
+        op_to_sql = {
+            "eq": "=",
+            "lt": "<",
+            "lte": "<=",
+            "gt": ">",
+            "gte": ">=",
+        }
+        for prop_name, predicate in query.items():
+            column = _quote_duckdb_identifier(prop_name)
+            if not isinstance(predicate, dict):
+                conditions.append(f"{column} = ?")
+                params.append(predicate)
+                continue
+            for op, value in predicate.items():
+                if op in op_to_sql:
+                    conditions.append(f"{column} {op_to_sql[op]} ?")
+                    params.append(value)
+                elif op == "in":
+                    if not isinstance(value, list) or len(value) == 0:
+                        raise ValueError(
+                            f"STAC query operator 'in' for {prop_name!r} requires a non-empty list"
+                        )
+                    placeholders = ", ".join("?" for _ in value)
+                    conditions.append(f"{column} IN ({placeholders})")
+                    params.extend(value)
+                else:
+                    raise ValueError(
+                        f"unsupported STAC query operator {op!r} for GeoParquet backend"
+                    )
+        return conditions
+
+    def _build_select_sql(
+        self,
+        files_expr: str,
+        *,
+        bbox: tuple[float, float, float, float] | None,
+        date_time: tuple[datetime, datetime] | None,
+        ids: list[str] | None,
+        query: dict[str, Any] | None,
+        sortby: list[dict[str, str]] | None,
+        params: list[Any],
+    ) -> str:
+        """Build a DuckDB SELECT over STAC GeoParquet files."""
+        property_columns = []
+        for prop_name in self.query_properties:
+            if prop_name == "datetime" or prop_name in property_columns:
+                continue
+            property_columns.append(prop_name)
+
+        select_columns = [
+            "id",
+            "bbox",
+            "datetime",
+            "collection",
+            "assets",
+            "geometry",
+            *[_quote_duckdb_identifier(prop) for prop in property_columns],
+        ]
+        conditions = ["collection = ?"]
+        params.append(self.collection_name)
+
+        if date_time is not None:
+            conditions.append("datetime >= ? AND datetime <= ?")
+            params.extend(date_time)
+        if bbox is not None:
+            west, south, east, north = bbox
+            conditions.append(
+                "bbox.xmin < ? AND bbox.xmax > ? AND bbox.ymin < ? AND bbox.ymax > ?"
+            )
+            params.extend([east, west, north, south])
+        if ids is not None:
+            if len(ids) == 0:
+                conditions.append("FALSE")
+            else:
+                placeholders = ", ".join("?" for _ in ids)
+                conditions.append(f"id IN ({placeholders})")
+                params.extend(ids)
+        if self.required_assets is not None:
+            for asset_key in self.required_assets:
+                conditions.append(
+                    f"assets.{_quote_duckdb_identifier(asset_key)}.href IS NOT NULL"
+                )
+
+        conditions.extend(self._query_condition_sql(query, params))
+
+        order_by = ""
+        if sortby is not None:
+            order_clauses = []
+            for spec in sortby:
+                direction = spec.get("direction", "asc").upper()
+                if direction not in ("ASC", "DESC"):
+                    raise ValueError(f"invalid sort direction {direction!r}")
+                order_clauses.append(
+                    f"{_quote_duckdb_identifier(spec['field'])} {direction}"
+                )
+            if order_clauses:
+                order_by = " ORDER BY " + ", ".join(order_clauses)
+
+        return (
+            f"SELECT {', '.join(select_columns)} FROM read_parquet({files_expr}) "
+            f"WHERE {' AND '.join(conditions)}{order_by}"
+        )
+
+    def _fetch_rows(
+        self, con: Any, sql: str, params: list[Any]
+    ) -> list[dict[str, Any]]:
+        """Fetch DuckDB query results as dictionaries."""
+        cursor = con.execute(sql, params)
+        columns = [desc[0] for desc in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def _read_geoparquet_rows(
+        self,
+        *,
+        bbox: tuple[float, float, float, float] | None,
+        date_time: tuple[datetime, datetime] | None,
+        ids: list[str] | None,
+        query: dict[str, Any] | None,
+        sortby: list[dict[str, str]] | None,
+    ) -> list[dict[str, Any]]:
+        """Read matching rows from local cache or remote GeoParquet partitions."""
+        cache_path = self._cache_path(
+            bbox=bbox, date_time=date_time, ids=ids, query=query, sortby=sortby
+        )
+        duckdb = self._get_duckdb()
+        con = duckdb.connect()
+
+        if (
+            cache_path is not None
+            and cache_path.exists()
+            and (cache_path.parent / f"{cache_path.name}.done").exists()
+        ):
+            return self._fetch_rows(
+                con, "SELECT * FROM read_parquet(?)", [str(cache_path)]
+            )
+
+        parquet_files = self._get_parquet_files(date_time)
+        if not parquet_files:
+            return []
+
+        params: list[Any] = [parquet_files]
+        select_sql = self._build_select_sql(
+            "?",
+            bbox=bbox,
+            date_time=date_time,
+            ids=ids,
+            query=query,
+            sortby=sortby,
+            params=params,
+        )
+
+        if cache_path is None:
+            return self._fetch_rows(con, select_sql, params)
+
+        tmp_cache_path = cache_path.parent / f"{cache_path.name}.tmp"
+        done_path = cache_path.parent / f"{cache_path.name}.done"
+        if tmp_cache_path.exists():
+            tmp_cache_path.unlink()
+        copy_sql = (
+            f"COPY ({select_sql}) TO {_quote_duckdb_string(str(tmp_cache_path))} "
+            "(FORMAT PARQUET)"
+        )
+        con.execute(copy_sql, params)
+        tmp_cache_path.rename(cache_path)
+        done_path.touch()
+        return self._fetch_rows(con, "SELECT * FROM read_parquet(?)", [str(cache_path)])
+
+    def _row_to_stac_item(self, row: dict[str, Any]) -> StacItem:
+        """Convert a GeoParquet row to the local StacItem representation."""
+        bbox_dict = row.get("bbox")
+        bbox = None
+        if bbox_dict is not None:
+            bbox = (
+                bbox_dict["xmin"],
+                bbox_dict["ymin"],
+                bbox_dict["xmax"],
+                bbox_dict["ymax"],
+            )
+
+        geometry_wkb = row.get("geometry")
+        if geometry_wkb is not None:
+            geometry = shapely.geometry.mapping(shapely.from_wkb(geometry_wkb))
+        elif bbox is not None:
+            geometry = shapely.geometry.mapping(shapely.box(*bbox))
+        else:
+            geometry = None
+
+        raw_datetime = row["datetime"]
+        if isinstance(raw_datetime, str):
+            item_datetime = datetime.fromisoformat(raw_datetime.replace("Z", "+00:00"))
+        else:
+            item_datetime = raw_datetime
+        item_datetime = _datetime_to_utc(item_datetime)
+
+        assets = {}
+        for asset_key, asset_dict in row.get("assets", {}).items():
+            if asset_dict is None or asset_dict.get("href") is None:
+                continue
+            assets[asset_key] = StacAsset(
+                href=asset_dict["href"],
+                title=asset_dict.get("title"),
+                type=asset_dict.get("type"),
+                roles=asset_dict.get("roles"),
+            )
+
+        properties = {"datetime": item_datetime.isoformat()}
+        for key, value in row.items():
+            if key in {"id", "bbox", "datetime", "collection", "assets", "geometry"}:
+                continue
+            properties[key] = value
+
+        return StacItem(
+            id=row["id"],
+            properties=properties,
+            collection=row.get("collection"),
+            bbox=bbox,
+            geometry=geometry,
+            assets=assets,
+            time_range=(item_datetime, item_datetime),
+        )
 
 
 class PlanetaryComputerStacClient(StacClient):
@@ -155,6 +742,9 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
         timeout: timedelta = timedelta(seconds=10),
         skip_items_missing_assets: bool = False,
         cache_dir: str | None = None,
+        metadata_backend: PlanetaryComputerMetadataBackend = PlanetaryComputerMetadataBackend.STAC,
+        metadata_cache_dir: str | None = None,
+        geoparquet_href: str | None = None,
         context: DataSourceContext = DataSourceContext(),
     ):
         """Initialize a new PlanetaryComputer instance.
@@ -171,6 +761,14 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
                 assets in asset_bands during get_items.
             cache_dir: deprecated, no longer used. Item data is now passed to
                 materialization functions so caching in the data source is unnecessary.
+            metadata_backend: item metadata backend, either "stac" or "geoparquet".
+                The GeoParquet backend performs one bulk query per get_items call and
+                avoids repeated Planetary Computer STAC API search requests.
+            metadata_cache_dir: optional directory for GeoParquet partition-list and
+                query-result caches. Relative paths are resolved against the dataset
+                path when available.
+            geoparquet_href: optional explicit GeoParquet asset href. If omitted, the
+                GeoParquet backend resolves the collection's "geoparquet-items" asset.
             context: the data source context.
         """
         if cache_dir is not None:
@@ -180,6 +778,8 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
                 FutureWarning,
                 stacklevel=2,
             )
+
+        self.metadata_backend = PlanetaryComputerMetadataBackend(metadata_backend)
 
         # Initialize the DirectMaterializeDataSource with asset_bands
         DirectMaterializeDataSource.__init__(self, asset_bands=asset_bands)
@@ -199,8 +799,41 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
             required_assets=required_assets,
         )
 
-        # Replace the client with PlanetaryComputerStacClient to handle PC's pagination limits.
-        self.client = PlanetaryComputerStacClient(self.STAC_ENDPOINT)
+        self.collection_name = (
+            collection_name if isinstance(collection_name, str) else None
+        )
+
+        if self.metadata_backend == PlanetaryComputerMetadataBackend.STAC:
+            # Replace the client with PlanetaryComputerStacClient to handle PC's
+            # pagination limits.
+            self.client = PlanetaryComputerStacClient(self.STAC_ENDPOINT)
+        elif self.metadata_backend == PlanetaryComputerMetadataBackend.GEOPARQUET:
+            if not isinstance(collection_name, str):
+                raise ValueError("GeoParquet metadata backend requires one collection")
+            query_properties = []
+            if query is not None:
+                query_properties.extend(query.keys())
+            if sort_by is not None and sort_by not in query_properties:
+                query_properties.append(sort_by)
+            metadata_cache_path = None
+            if metadata_cache_dir is not None:
+                if context.ds_path is not None:
+                    metadata_cache_path = join_upath(
+                        context.ds_path, metadata_cache_dir
+                    )
+                else:
+                    metadata_cache_path = UPath(metadata_cache_dir)
+            self.client = PlanetaryComputerGeoParquetClient(
+                endpoint=self.STAC_ENDPOINT,
+                collection_name=collection_name,
+                required_assets=required_assets,
+                query_properties=query_properties,
+                timeout=timeout,
+                metadata_cache_dir=metadata_cache_path,
+                geoparquet_href=geoparquet_href,
+            )
+        else:
+            raise ValueError(f"unsupported metadata_backend {metadata_backend!r}")
 
         self.timeout = timeout
         self.skip_items_missing_assets = skip_items_missing_assets
@@ -297,6 +930,131 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
                     item.name,
                     asset_key,
                 )
+
+    def _get_aggregate_search_time_range(
+        self, geometries: list[STGeometry]
+    ) -> tuple[datetime, datetime] | None:
+        """Return the aggregate search time range for a batch of windows."""
+        min_time = None
+        max_time = None
+        for geometry in geometries:
+            search_time_range = self._get_search_time_range(geometry)
+            if search_time_range is None:
+                continue
+            if isinstance(search_time_range, tuple):
+                start, end = search_time_range
+            else:
+                start = end = search_time_range
+            min_time = start if min_time is None else min(min_time, start)
+            max_time = end if max_time is None else max(max_time, end)
+        if min_time is None or max_time is None:
+            return None
+        return (min_time, max_time)
+
+    def _get_aggregate_search_bbox(
+        self, geometries: list[STGeometry]
+    ) -> tuple[float, float, float, float] | None:
+        """Return the aggregate WGS84 bbox for a batch of windows."""
+        min_west = None
+        min_south = None
+        max_east = None
+        max_north = None
+        for geometry in geometries:
+            west, south, east, north = geometry.shp.bounds
+            min_west = west if min_west is None else min(min_west, west)
+            min_south = south if min_south is None else min(min_south, south)
+            max_east = east if max_east is None else max(max_east, east)
+            max_north = north if max_north is None else max(max_north, north)
+        if (
+            min_west is None
+            or min_south is None
+            or max_east is None
+            or max_north is None
+        ):
+            return None
+        return (min_west, min_south, max_east, max_north)
+
+    def _get_items_geoparquet(
+        self, geometries: list[STGeometry], query_config: Any
+    ) -> list[list[MatchedItemGroup[SourceItem]]]:
+        """Get items using one batched GeoParquet metadata query."""
+        wgs84_geometries = [geometry.to_wgs84() for geometry in geometries]
+        aggregate_bbox = self._get_aggregate_search_bbox(wgs84_geometries)
+        aggregate_time_range = self._get_aggregate_search_time_range(wgs84_geometries)
+
+        stac_items = self.client.search(
+            collections=self.collection_names,
+            bbox=aggregate_bbox,
+            date_time=aggregate_time_range,
+            query=self.query,
+            limit=self.limit,
+        )
+        logger.debug("GeoParquet search yielded %d items", len(stac_items))
+
+        if self.required_assets is not None:
+            good_stac_items = []
+            for stac_item in stac_items:
+                if stac_item.assets is None:
+                    raise ValueError(f"got STAC item {stac_item.id} with no assets")
+
+                good = True
+                for asset_key in self.required_assets:
+                    if asset_key in stac_item.assets:
+                        continue
+                    good = False
+                    break
+                if good:
+                    good_stac_items.append(stac_item)
+            logger.debug(
+                "required_assets filter from %d to %d items",
+                len(stac_items),
+                len(good_stac_items),
+            )
+            stac_items = good_stac_items
+
+        if self.sort_by is not None:
+            stac_items.sort(
+                key=self._get_sort_key,
+                reverse=not self.sort_ascending,
+            )
+
+        candidate_items = []
+        for stac_item in stac_items:
+            candidate_item = self._stac_item_to_item(stac_item)
+            if not self._should_include_item(candidate_item):
+                continue
+            candidate_items.append(candidate_item)
+
+        groups = []
+        for geometry, wgs84_geometry in zip(geometries, wgs84_geometries):
+            cur_candidate_items = []
+            for item in candidate_items:
+                if (
+                    wgs84_geometry.time_range is not None
+                    and not wgs84_geometry.intersects_time_range(
+                        item.geometry.time_range
+                    )
+                ):
+                    continue
+                if not wgs84_geometry.shp.intersects(item.geometry.shp):
+                    continue
+                cur_candidate_items.append(item)
+
+            cur_groups = match_candidate_items_to_window(
+                geometry, cur_candidate_items, query_config
+            )
+            groups.append(cur_groups)
+
+        return groups
+
+    @override
+    def get_items(
+        self, geometries: list[STGeometry], query_config: Any
+    ) -> list[list[MatchedItemGroup[SourceItem]]]:
+        """Get items intersecting the given geometries."""
+        if self.metadata_backend == PlanetaryComputerMetadataBackend.GEOPARQUET:
+            return self._get_items_geoparquet(geometries, query_config)
+        return super().get_items(geometries, query_config)
 
 
 class Sentinel2(PlanetaryComputer):

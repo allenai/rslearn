@@ -18,12 +18,46 @@ Sentinel-2 satellite images from https://planetarycomputer.microsoft.com/dataset
     "query": null,
     "sort_by": null,
     "sort_ascending": true,
+    // Metadata backend for scene discovery. The default "stac" uses the Planetary
+    // Computer STAC API. Set "geoparquet" to query the collection's GeoParquet item
+    // table instead, which avoids per-window STAC search requests during prepare.
+    "metadata_backend": "stac",
+    // Optional cache directory for GeoParquet partition listings and local query
+    // result subsets. Relative paths are resolved against the dataset root.
+    "metadata_cache_dir": null,
+    // Optional explicit GeoParquet href. If omitted with metadata_backend="geoparquet",
+    // rslearn resolves the collection-level "geoparquet-items" asset.
+    "geoparquet_href": null,
     "timeout_seconds": 10
   }
 }
 ```
 
 This data source supports direct materialization (`"ingest": false`).
+
+### GeoParquet Metadata Backend
+
+For large batches of windows, Planetary Computer STAC searches can hit API rate limits.
+Set `metadata_backend` to `"geoparquet"` to perform one bulk metadata query over the
+Sentinel-2 L2A GeoParquet item table for each `get_items` call. During
+`rslearn dataset prepare`, rslearn already passes all windows that need a layer into
+one `get_items` call, so the backend infers the aggregate spatial bounds and time range
+from the windows and then filters exact per-window matches locally.
+
+```jsonc
+{
+  "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+  "init_args": {
+    "harmonize": true,
+    "sort_by": "eo:cloud_cover",
+    "metadata_backend": "geoparquet",
+    "metadata_cache_dir": "cache/planetary_computer/sentinel2_l2a"
+  }
+}
+```
+
+The GeoParquet backend requires the optional `duckdb` dependency, included in
+rslearn's `extra` optional dependencies.
 
 ### Available Bands
 

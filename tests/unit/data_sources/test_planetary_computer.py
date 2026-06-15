@@ -1,10 +1,12 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import cast
 from unittest.mock import patch
 
 import pytest
+import shapely
 
-from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType
+from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType, QueryConfig
+from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSourceContext
 from rslearn.data_sources.planetary_computer import (
     CopDemGlo30,
@@ -16,6 +18,7 @@ from rslearn.data_sources.planetary_computer import (
     Sentinel3SlstrLST,
 )
 from rslearn.data_sources.stac import SourceItem
+from rslearn.utils.geometry import STGeometry
 from rslearn.utils.stac import StacAsset, StacItem
 
 
@@ -187,6 +190,147 @@ def test_sentinel2_get_read_callback_skips_scl_harmonization() -> None:
         callback = data_source.get_read_callback(item=item, asset_key="SCL")
 
     assert callback is None
+
+
+def _make_geoparquet_row(
+    *,
+    item_id: str,
+    shp: shapely.Geometry,
+    dt: datetime,
+    cloud_cover: float = 0,
+) -> dict:
+    """Create a mock Planetary Computer STAC GeoParquet row."""
+    west, south, east, north = shp.bounds
+    return {
+        "id": item_id,
+        "bbox": {"xmin": west, "ymin": south, "xmax": east, "ymax": north},
+        "datetime": dt,
+        "collection": Sentinel2.COLLECTION_NAME,
+        "geometry": shapely.to_wkb(shp),
+        "assets": {
+            "B04": {
+                "href": f"https://example.com/{item_id}/B04.tif",
+                "title": "Band 4",
+                "type": "image/tiff",
+                "roles": ["data"],
+            },
+            "product-metadata": {
+                "href": f"https://example.com/{item_id}/metadata.xml",
+                "title": "Product metadata",
+                "type": "application/xml",
+                "roles": ["metadata"],
+            },
+        },
+        "eo:cloud_cover": cloud_cover,
+    }
+
+
+def test_sentinel2_geoparquet_batches_prepare_window_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_source = Sentinel2(
+        assets=["B04"],
+        metadata_backend="geoparquet",
+        geoparquet_href="file:///unused.parquet",
+        sort_by="eo:cloud_cover",
+    )
+
+    geom1 = STGeometry(
+        WGS84_PROJECTION,
+        shapely.box(-1, 50, 0, 51),
+        (
+            datetime(2020, 1, 1, tzinfo=UTC),
+            datetime(2021, 1, 1, tzinfo=UTC),
+        ),
+    )
+    geom2 = STGeometry(
+        WGS84_PROJECTION,
+        shapely.box(-5, 55, -4, 56),
+        (
+            datetime(2021, 1, 1, tzinfo=UTC),
+            datetime(2022, 1, 1, tzinfo=UTC),
+        ),
+    )
+
+    captured = {}
+
+    def fake_read_geoparquet_rows(**kwargs: object) -> list[dict]:
+        captured.update(kwargs)
+        return [
+            _make_geoparquet_row(
+                item_id="S2A_MSIL2A_20200601T000000_R000_T30UXB_20200601T000000",
+                shp=shapely.box(-1, 50, 0, 51),
+                dt=datetime(2020, 6, 1, tzinfo=UTC),
+                cloud_cover=80,
+            ),
+            _make_geoparquet_row(
+                item_id="S2A_MSIL2A_20200602T000000_R000_T30UXB_20200602T000000",
+                shp=shapely.box(-1, 50, 0, 51),
+                dt=datetime(2020, 6, 2, tzinfo=UTC),
+                cloud_cover=5,
+            ),
+            _make_geoparquet_row(
+                item_id="S2A_MSIL2A_20210601T000000_R000_T30UWA_20210601T000000",
+                shp=shapely.box(-5, 55, -4, 56),
+                dt=datetime(2021, 6, 1, tzinfo=UTC),
+                cloud_cover=10,
+            ),
+        ]
+
+    monkeypatch.setattr(
+        data_source.client, "_read_geoparquet_rows", fake_read_geoparquet_rows
+    )
+
+    groups = data_source.get_items([geom1, geom2], QueryConfig(space_mode="INTERSECTS"))
+
+    assert captured["bbox"] == (-5.0, 50.0, 0.0, 56.0)
+    assert captured["date_time"] == (
+        datetime(2020, 1, 1, tzinfo=UTC),
+        datetime(2022, 1, 1, tzinfo=UTC),
+    )
+    assert len(groups) == 2
+    assert groups[0][0].items[0].name == (
+        "S2A_MSIL2A_20200602T000000_R000_T30UXB_20200602T000000"
+    )
+    assert groups[1][0].items[0].name == (
+        "S2A_MSIL2A_20210601T000000_R000_T30UWA_20210601T000000"
+    )
+
+
+def test_sentinel2_geoparquet_get_item_by_name_infers_time_from_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_source = Sentinel2(
+        assets=["B04"],
+        metadata_backend="geoparquet",
+        geoparquet_href="file:///unused.parquet",
+    )
+    item_id = "S2A_MSIL2A_20200718T130301_R038_T27VVL_20210515T015108"
+    captured = {}
+
+    def fake_read_geoparquet_rows(**kwargs: object) -> list[dict]:
+        captured.update(kwargs)
+        return [
+            _make_geoparquet_row(
+                item_id=item_id,
+                shp=shapely.box(-23, 63, -21, 64),
+                dt=datetime(2020, 7, 18, 13, 3, 1, tzinfo=UTC),
+            )
+        ]
+
+    monkeypatch.setattr(
+        data_source.client, "_read_geoparquet_rows", fake_read_geoparquet_rows
+    )
+
+    item = data_source.get_item_by_name(item_id)
+
+    assert captured["ids"] == [item_id]
+    assert captured["date_time"] == (
+        datetime(2020, 7, 18, tzinfo=UTC),
+        datetime(2020, 7, 19, tzinfo=UTC),
+    )
+    assert item.name == item_id
+    assert item.asset_urls["B04"] == f"https://example.com/{item_id}/B04.tif"
 
 
 def test_hls2_s30_defaults_to_reflectance_bands() -> None:
