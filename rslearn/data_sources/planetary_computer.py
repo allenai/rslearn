@@ -731,6 +731,7 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
     """
 
     STAC_ENDPOINT = "https://planetarycomputer.microsoft.com/api/stac/v1"
+    client: StacClient | PlanetaryComputerGeoParquetClient
 
     def __init__(
         self,
@@ -810,7 +811,7 @@ class PlanetaryComputer(DirectMaterializeDataSource[SourceItem], StacDataSource)
         elif self.metadata_backend == PlanetaryComputerMetadataBackend.GEOPARQUET:
             if not isinstance(collection_name, str):
                 raise ValueError("GeoParquet metadata backend requires one collection")
-            query_properties = []
+            query_properties: list[str] = []
             if query is not None:
                 query_properties.extend(query.keys())
             if sort_by is not None and sort_by not in query_properties:

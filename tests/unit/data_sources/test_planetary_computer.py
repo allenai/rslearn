@@ -5,7 +5,14 @@ from unittest.mock import patch
 import pytest
 import shapely
 
-from rslearn.config import BandSetConfig, DType, LayerConfig, LayerType, QueryConfig
+from rslearn.config import (
+    BandSetConfig,
+    DType,
+    LayerConfig,
+    LayerType,
+    QueryConfig,
+    SpaceMode,
+)
 from rslearn.const import WGS84_PROJECTION
 from rslearn.data_sources import DataSourceContext
 from rslearn.data_sources.planetary_computer import (
@@ -281,7 +288,9 @@ def test_sentinel2_geoparquet_batches_prepare_window_metadata(
         data_source.client, "_read_geoparquet_rows", fake_read_geoparquet_rows
     )
 
-    groups = data_source.get_items([geom1, geom2], QueryConfig(space_mode="INTERSECTS"))
+    groups = data_source.get_items(
+        [geom1, geom2], QueryConfig(space_mode=SpaceMode.INTERSECTS)
+    )
 
     assert captured["bbox"] == (-5.0, 50.0, 0.0, 56.0)
     assert captured["date_time"] == (
