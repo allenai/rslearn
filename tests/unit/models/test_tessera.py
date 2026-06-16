@@ -7,8 +7,7 @@ import pytest
 import torch
 
 from rslearn.models.singletask import SingleTaskModel
-from rslearn.models.tessera import Tessera
-from rslearn.models.tessera.tessera import build_resample_indices
+from rslearn.models.tessera import Tessera, build_resample_indices
 from rslearn.train.model_context import ModelContext, RasterImage
 from rslearn.train.tasks.embedding import EmbeddingHead
 

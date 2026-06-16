@@ -3,15 +3,20 @@
 rslearn includes a wrapper for Tessera v1.1 QAT encoder checkpoints from
 https://github.com/ucam-eo/tessera.
 
-The wrapper does not download weights automatically. Download an encoder-only v1.1
-checkpoint from the official Tessera README, then pass it with `checkpoint_path`.
+The wrapper does not download weights automatically. We recommend using the
+Microsoft Planetary Computer checkpoint because rslearn does not currently
+support OPERA RTC-S1 here. Download the encoder-only
+[`tessera_v1_1_mpc_encoder.pt`](https://drive.google.com/file/d/1t-gfTxi3Hg_uJXpJ9etROCRgKt2myfJ2/view?usp=drive_link)
+checkpoint from the official Tessera README, then pass it with
+`checkpoint_path`.
 
 Tessera inputs should be normalized with `rslearn.models.tessera.TesseraNormalize`
 before they reach the model. Set the transform's `data_source` to match the
 checkpoint family:
 
 - `mpc`: Microsoft Planetary Computer Sentinel-2 L2A and Sentinel-1 RTC.
-- `aws`: AWS Open Data Earth-search Sentinel-2 L2A and ASF OPERA RTC-S1.
+- `aws`: AWS Open Data Earth-search Sentinel-2 L2A and ASF OPERA RTC-S1. This
+  is not currently recommended because rslearn does not have an OPERA data source yet.
 
 Tessera uses different normalization statistics for the two checkpoint families.
 The model wrapper still accepts a `data_source` argument for compatibility, but
@@ -47,6 +52,7 @@ model:
         encoder:
           - class_path: rslearn.models.tessera.Tessera
             init_args:
+              # Replace with the path to the downloaded checkpoint!
               checkpoint_path: /path/to/tessera_v1_1_mpc_encoder.pt
               pixel_batch_size: 1024
         decoder:
@@ -86,3 +92,128 @@ data:
 
 The wrapper returns float32 feature maps with 128 channels by default, so it can be
 used with `EmbeddingHead` and `RslearnWriter`.
+
+## Data Source Example
+
+This dataset config uses rslearn's native Microsoft Planetary Computer data
+sources for Sentinel-2 L2A and Sentinel-1 RTC. It creates 12 chronological
+30-day mosaics per layer, which matches the `mpc` Tessera normalization family.
+
+```json
+{
+  "layers": {
+    "sentinel2_l2a": {
+      "type": "raster",
+      "band_sets": [
+        {
+          "bands": [
+            "B01",
+            "B02",
+            "B03",
+            "B04",
+            "B05",
+            "B06",
+            "B07",
+            "B08",
+            "B8A",
+            "B09",
+            "B11",
+            "B12"
+          ],
+          "dtype": "uint16"
+        }
+      ],
+      "data_source": {
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+        "init_args": {
+          "cache_dir": "cache/planetary_computer",
+          "harmonize": true,
+          "sort_by": "eo:cloud_cover"
+        },
+        "ingest": false,
+        "query_config": {
+          "max_matches": 12,
+          "min_matches": 12,
+          "per_period_mosaic_reverse_time_order": false,
+          "period_duration": "30d",
+          "space_mode": "MOSAIC"
+        }
+      }
+    },
+    "sentinel1_ascending": {
+      "type": "raster",
+      "band_sets": [
+        {
+          "bands": ["vv", "vh"],
+          "dtype": "float32"
+        }
+      ],
+      "data_source": {
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel1",
+        "init_args": {
+          "cache_dir": "cache/planetary_computer",
+          "query": {
+            "sar:instrument_mode": {
+              "eq": "IW"
+            },
+            "sar:polarizations": {
+              "eq": [
+                "VV",
+                "VH"
+              ]
+            },
+            "sat:orbit_state": {
+              "eq": "ascending"
+            }
+          }
+        },
+        "ingest": false,
+        "query_config": {
+          "max_matches": 12,
+          "min_matches": 12,
+          "per_period_mosaic_reverse_time_order": false,
+          "period_duration": "30d",
+          "space_mode": "MOSAIC"
+        }
+      }
+    },
+    "sentinel1_descending": {
+      "type": "raster",
+      "band_sets": [
+        {
+          "bands": ["vv", "vh"],
+          "dtype": "float32"
+        }
+      ],
+      "data_source": {
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel1",
+        "init_args": {
+          "cache_dir": "cache/planetary_computer",
+          "query": {
+            "sar:instrument_mode": {
+              "eq": "IW"
+            },
+            "sar:polarizations": {
+              "eq": [
+                "VV",
+                "VH"
+              ]
+            },
+            "sat:orbit_state": {
+              "eq": "descending"
+            }
+          }
+        },
+        "ingest": false,
+        "query_config": {
+          "max_matches": 12,
+          "min_matches": 12,
+          "per_period_mosaic_reverse_time_order": false,
+          "period_duration": "30d",
+          "space_mode": "MOSAIC"
+        }
+      }
+    }
+  }
+}
+```

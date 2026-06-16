@@ -2,8 +2,7 @@
 
 import torch
 
-from rslearn.models.tessera import TesseraNormalize
-from rslearn.models.tessera.tessera import NORM_STATS
+from rslearn.models.tessera import NORM_STATS, TesseraNormalize
 from rslearn.train.model_context import RasterImage
 
 
