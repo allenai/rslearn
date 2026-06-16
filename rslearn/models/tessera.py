@@ -7,9 +7,7 @@ released under the MIT license.
 
 from __future__ import annotations
 
-import logging
 import math
-from collections import defaultdict
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -21,8 +19,6 @@ import torch.nn as nn
 from rslearn.models.component import FeatureExtractor, FeatureMaps
 from rslearn.train.model_context import ModelContext, RasterImage
 from rslearn.train.transforms.transform import Transform
-
-logger = logging.getLogger(__name__)
 
 TESSERA_S2_BANDS = [
     "B04",
@@ -38,13 +34,10 @@ TESSERA_S2_BANDS = [
 ]
 TESSERA_S1_BANDS = ["vv", "vh"]
 
-DEFAULT_NUM_OBS_CHECKPOINTS = list(range(8, 257, 8))
-
 DEFAULT_MODEL_CONFIG: dict[str, Any] = {
     "fusion_method": "concat",
     "latent_dim": 192,
     "representation_dim": 192,
-    "save_embedding_dim": 128,
     "s2_num_heads": 4,
     "s2_num_layers": 4,
     "s2_dim_feedforward": 2048,
@@ -52,7 +45,6 @@ DEFAULT_MODEL_CONFIG: dict[str, Any] = {
     "s1_num_layers": 4,
     "s1_dim_feedforward": 2048,
     "split_s1_modalities": False,
-    "num_obs_checkpoints": DEFAULT_NUM_OBS_CHECKPOINTS,
 }
 
 NORM_STATS: dict[str, dict[str, list[float]]] = {
@@ -202,7 +194,19 @@ class TesseraNormalize(Transform):
 
     @staticmethod
     def _db_to_tessera_scaled(values: torch.Tensor) -> torch.Tensor:
-        """Convert standard power dB to Tessera's upstream Sentinel-1 scale."""
+        """Convert standard power dB to Tessera's stored Sentinel-1 int16 scale.
+
+        Tessera's preprocessing stores Sentinel-1 as int16 via
+        ``clip((20 * log10(x) + 50) * 200, 0, 32767)``, where ``x`` is the linear
+        RTC value, ``+50`` offsets away from negatives and ``* 200`` preserves
+        precision in int16. See ``amplitude_to_db`` in
+        ``tessera_preprocessing/s1_fast_processor.py`` of the upstream
+        https://github.com/ucam-eo/tessera repo. The Tessera v1.1 NORM_STATS are
+        computed in this stored space, so inputs must match it.
+
+        Our input is standard power dB, ``10 * log10(x)``, so we multiply by 2 to
+        recover Tessera's ``20 * log10(x)`` before applying the offset and scale.
+        """
         return torch.clamp((2 * values + 50) * 200, min=0, max=32767)
 
     def _normalize_s1(
@@ -253,51 +257,6 @@ class TesseraNormalize(Transform):
             std=self.s1d_std,
         )
         return input_dict, target_dict
-
-
-def build_resample_indices(valid_len: int, target_size: int) -> list[int]:
-    """Build deterministic indexes to resize a sequence to target_size.
-
-    Args:
-        valid_len: Number of valid observations in the original sequence.
-        target_size: Requested output sequence length.
-
-    Returns:
-        Indexes into the valid observation list.
-    """
-    valid_len = int(valid_len)
-    target_size = int(target_size)
-    if valid_len <= 0:
-        return []
-    if target_size == valid_len:
-        return list(range(valid_len))
-    if target_size < valid_len:
-        return [
-            int((chunk_start + chunk_end) // 2)
-            for chunk_start, chunk_end in _array_split_ranges(valid_len, target_size)
-            if chunk_end > chunk_start
-        ]
-
-    extra = target_size - valid_len
-    anchors = torch.linspace(0, valid_len - 1, steps=extra + 2, dtype=torch.float64)[
-        1:-1
-    ]
-    extras = anchors.round().long().clamp(0, valid_len - 1).tolist()
-    return list(range(valid_len)) + [int(idx) for idx in extras]
-
-
-def _array_split_ranges(length: int, sections: int) -> list[tuple[int, int]]:
-    """Return ranges equivalent to numpy.array_split for a 1D array."""
-    base = length // sections
-    remainder = length % sections
-    ranges = []
-    start = 0
-    for idx in range(sections):
-        size = base + (1 if idx < remainder else 0)
-        end = start + size
-        ranges.append((start, end))
-        start = end
-    return ranges
 
 
 class CustomGRUCell(nn.Module):
@@ -550,8 +509,6 @@ class Tessera(FeatureExtractor):
         checkpoint_path: str | Path | None = None,
         data_source: TesseraDataSource | str = TesseraDataSource.MPC,
         pixel_batch_size: int = 1024,
-        num_obs_checkpoints: list[int] | None = None,
-        save_embedding_dim: int = 128,
         apply_amp: bool = True,
         autocast_dtype: str | None = "bfloat16",
         random_initialization: bool = False,
@@ -564,11 +521,10 @@ class Tessera(FeatureExtractor):
             data_source: Deprecated compatibility argument. Normalization
                 statistics are selected in ``TesseraNormalize``.
             pixel_batch_size: Number of pixels to evaluate per forward chunk.
-            num_obs_checkpoints: Sequence-length buckets for all-observation inference.
-            save_embedding_dim: Number of representation dimensions to return.
             apply_amp: Whether to use autocast on CUDA.
             autocast_dtype: Autocast dtype name, or None to disable autocast.
-            random_initialization: Skip checkpoint loading, intended for tests only.
+            random_initialization: skip checkpoint loading and initialize the model
+                randomly instead.
             model_config: Optional architecture overrides.
         """
         super().__init__()
@@ -580,25 +536,8 @@ class Tessera(FeatureExtractor):
         config = dict(DEFAULT_MODEL_CONFIG)
         if model_config is not None:
             config.update(model_config)
-        if num_obs_checkpoints is not None:
-            config["num_obs_checkpoints"] = num_obs_checkpoints
-        config["save_embedding_dim"] = save_embedding_dim
         self.model_config = config
-        self.num_obs_checkpoints = sorted(
-            {int(v) for v in config["num_obs_checkpoints"] if int(v) > 0}
-        )
-        if not self.num_obs_checkpoints:
-            raise ValueError(
-                "num_obs_checkpoints must include at least one positive integer"
-            )
-        self.save_embedding_dim = int(config["save_embedding_dim"])
-        if self.save_embedding_dim <= 0:
-            raise ValueError("save_embedding_dim must be positive")
-        representation_dim = int(config["representation_dim"])
-        if self.save_embedding_dim > representation_dim:
-            raise ValueError(
-                "save_embedding_dim must be less than or equal to representation_dim"
-            )
+        self.embedding_dim = int(config["representation_dim"])
 
         self.model = build_v1_1_inference_model(config)
         if not random_initialization:
@@ -606,40 +545,10 @@ class Tessera(FeatureExtractor):
                 raise ValueError(
                     "checkpoint_path is required unless random_initialization=True"
                 )
-            self._load_checkpoint(Path(checkpoint_path))
-
-    def _load_checkpoint(self, checkpoint_path: Path) -> None:
-        """Load a Tessera checkpoint into the inference graph."""
-        ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-        if "model_state" in ckpt:
-            raw_state = ckpt["model_state"]
-        elif "model_state_dict" in ckpt:
-            raw_state = ckpt["model_state_dict"]
-        else:
-            raw_state = ckpt
-
-        cleaned = {}
-        for key, value in raw_state.items():
-            if key.startswith("_orig_mod."):
-                key = key[len("_orig_mod.") :]
-            if key.startswith("projector.") or key.startswith(
-                "segmented_matryoshka_projector."
-            ):
-                continue
-            cleaned[key] = value
-
-        missing, unexpected = self.model.load_state_dict(cleaned, strict=False)
-        if missing:
-            logger.info("Missing Tessera checkpoint keys: %s", missing[:10])
-        if unexpected:
-            logger.info("Unexpected Tessera checkpoint keys: %s", unexpected[:10])
-
-    def _to_bin(self, n: int) -> int:
-        """Map an observation count to a Tessera sequence-length bucket."""
-        for checkpoint in self.num_obs_checkpoints:
-            if n <= checkpoint:
-                return checkpoint
-        return self.num_obs_checkpoints[-1]
+            ckpt = torch.load(
+                Path(checkpoint_path), map_location="cpu", weights_only=True
+            )
+            self.model.load_state_dict(ckpt["model_state"])
 
     @staticmethod
     def _time_ranges_to_doy(
@@ -655,67 +564,26 @@ class Tessera(FeatureExtractor):
             doys.append(midpoint.timetuple().tm_yday)
         return torch.tensor(doys, dtype=torch.float32, device=device)
 
-    def _prepare_s2_sequence(
-        self,
-        image: torch.Tensor,
-        doys: torch.Tensor,
-        row: int,
-        col: int,
-        target: int,
+    @staticmethod
+    def _build_sequence(
+        image: torch.Tensor, doys: torch.Tensor, num_pixels: int
     ) -> torch.Tensor:
-        """Prepare one pixel's S2 sequence."""
-        series = image[:, :, row, col].transpose(0, 1)
-        valid_idx = torch.nonzero(
-            torch.any(series != 0, dim=1), as_tuple=False
-        ).flatten()
-        if len(valid_idx) == 0:
-            return torch.zeros(target, 11, dtype=image.dtype, device=image.device)
-        local_idx = torch.tensor(
-            build_resample_indices(len(valid_idx), target),
-            dtype=torch.long,
-            device=image.device,
-        )
-        real_idx = valid_idx[local_idx]
-        bands = series[real_idx].float()
-        return torch.cat([bands, doys[real_idx, None]], dim=1)
+        """Build per-pixel observation sequences with a day-of-year channel.
 
-    def _prepare_s1_sequence(
-        self,
-        asc_image: torch.Tensor,
-        asc_doys: torch.Tensor,
-        desc_image: torch.Tensor,
-        desc_doys: torch.Tensor,
-        row: int,
-        col: int,
-        target: int,
-    ) -> torch.Tensor:
-        """Prepare one pixel's merged S1 sequence."""
-        parts = []
-        for image, doys in [
-            (asc_image, asc_doys),
-            (desc_image, desc_doys),
-        ]:
-            series = image[:, :, row, col].transpose(0, 1)
-            valid_idx = torch.nonzero(
-                torch.any(series != 0, dim=1), as_tuple=False
-            ).flatten()
-            if len(valid_idx) == 0:
-                continue
-            bands = series[valid_idx].float()
-            parts.append(torch.cat([bands, doys[valid_idx, None]], dim=1))
+        Args:
+            image: a CTHW tensor for one modality.
+            doys: day-of-year values for each timestep, shaped (T,).
+            num_pixels: number of pixels (H * W) in the image.
 
-        if not parts:
-            return torch.zeros(
-                target, 3, dtype=asc_image.dtype, device=asc_image.device
-            )
-
-        merged = torch.cat(parts, dim=0)
-        local_idx = torch.tensor(
-            build_resample_indices(merged.shape[0], target),
-            dtype=torch.long,
-            device=asc_image.device,
-        )
-        return merged[local_idx]
+        Returns:
+            A (num_pixels, T, C + 1) tensor where the trailing channel is the
+            day-of-year feature.
+        """
+        num_bands, num_timesteps, _, _ = image.shape
+        # CTHW -> HWTC -> (num_pixels, T, C).
+        bands = image.permute(2, 3, 1, 0).reshape(num_pixels, num_timesteps, num_bands)
+        doy = doys.view(1, num_timesteps, 1).expand(num_pixels, num_timesteps, 1)
+        return torch.cat([bands.float(), doy], dim=2)
 
     def _forward_one_sample(
         self,
@@ -723,7 +591,11 @@ class Tessera(FeatureExtractor):
         s1_ascending: RasterImage,
         s1_descending: RasterImage,
     ) -> torch.Tensor:
-        """Compute Tessera features for one sample."""
+        """Compute Tessera features for one sample.
+
+        All timesteps are assumed valid, so every pixel's full observation
+        sequence is passed to the model.
+        """
         s2_image = s2.image
         s1a_image = s1_ascending.image
         s1d_image = s1_descending.image
@@ -741,60 +613,30 @@ class Tessera(FeatureExtractor):
 
         device = s2_image.device
         _, _, height, width = s2_image.shape
+        num_pixels = height * width
         s2_doys = self._time_ranges_to_doy(s2.timestamps, device)
         s1a_doys = self._time_ranges_to_doy(s1_ascending.timestamps, device)
         s1d_doys = self._time_ranges_to_doy(s1_descending.timestamps, device)
 
-        features = torch.zeros(
-            self.save_embedding_dim, height, width, dtype=torch.float32, device=device
+        # Sentinel-1 ascending and descending observations are merged into a
+        # single time series along the temporal axis.
+        s2_seq = self._build_sequence(s2_image, s2_doys, num_pixels)
+        s1_seq = torch.cat(
+            [
+                self._build_sequence(s1a_image, s1a_doys, num_pixels),
+                self._build_sequence(s1d_image, s1d_doys, num_pixels),
+            ],
+            dim=1,
         )
-        buckets: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
-        s2_valid = torch.any(s2_image != 0, dim=0)
-        s1a_valid = torch.any(s1a_image != 0, dim=0)
-        s1d_valid = torch.any(s1d_image != 0, dim=0)
-        for row in range(height):
-            for col in range(width):
-                s2_target = self._to_bin(int(s2_valid[:, row, col].sum().item()))
-                s1_target = self._to_bin(
-                    int(s1a_valid[:, row, col].sum().item())
-                    + int(s1d_valid[:, row, col].sum().item())
-                )
-                buckets[(s2_target, s1_target)].append((row, col))
 
-        for (s2_target, s1_target), coords in buckets.items():
-            for start in range(0, len(coords), self.pixel_batch_size):
-                chunk = coords[start : start + self.pixel_batch_size]
-                s2_batch = torch.stack(
-                    [
-                        self._prepare_s2_sequence(
-                            s2_image, s2_doys, row, col, s2_target
-                        )
-                        for row, col in chunk
-                    ],
-                    dim=0,
-                )
-                s1_batch = torch.stack(
-                    [
-                        self._prepare_s1_sequence(
-                            s1a_image,
-                            s1a_doys,
-                            s1d_image,
-                            s1d_doys,
-                            row,
-                            col,
-                            s1_target,
-                        )
-                        for row, col in chunk
-                    ],
-                    dim=0,
-                )
-                output = self._run_model(s2_batch, s1_batch)[
-                    :, : self.save_embedding_dim
-                ]
-                output = output.float()
-                for idx, (row, col) in enumerate(chunk):
-                    features[:, row, col] = output[idx]
-        return features
+        outputs = []
+        for start in range(0, num_pixels, self.pixel_batch_size):
+            end = start + self.pixel_batch_size
+            output = self._run_model(s2_seq[start:end], s1_seq[start:end])
+            outputs.append(output.float())
+
+        features = torch.cat(outputs, dim=0)
+        return features.transpose(0, 1).reshape(self.embedding_dim, height, width)
 
     def _run_model(
         self, s2_batch: torch.Tensor, s1_batch: torch.Tensor
@@ -829,7 +671,7 @@ class Tessera(FeatureExtractor):
 
     def get_backbone_channels(self) -> list[tuple[int, int]]:
         """Return Tessera output channel metadata."""
-        return [(1, self.save_embedding_dim)]
+        return [(1, self.embedding_dim)]
 
 
 def _get_autocast_dtype(dtype_name: str | None) -> torch.dtype | None:

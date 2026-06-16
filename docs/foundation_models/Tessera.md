@@ -42,6 +42,8 @@ already stored in standard dB, skip `Sentinel1ToDecibels` and still run
 
 ## Example
 
+Here is an example of a model config to compute embeddings with Tessera:
+
 ```yaml
 model:
   class_path: rslearn.train.lightning_module.RslearnLightningModule
@@ -90,14 +92,15 @@ data:
           data_source: mpc
 ```
 
-The wrapper returns float32 feature maps with 128 channels by default, so it can be
+The wrapper returns float32 feature maps with 192 channels by default, so it can be
 used with `EmbeddingHead` and `RslearnWriter`.
 
 ## Data Source Example
 
-This dataset config uses rslearn's native Microsoft Planetary Computer data
-sources for Sentinel-2 L2A and Sentinel-1 RTC. It creates 12 chronological
-30-day mosaics per layer, which matches the `mpc` Tessera normalization family.
+Here is an example for obtaining Sentinel-2 L2A and Sentinel-1 RTC (with separated
+ascending and descending images) that are compatible with Tessera. It creates 12
+chronological 30-day mosaics per layer, but note that Tessera can input more frequent
+images.
 
 ```json
 {
