@@ -125,6 +125,9 @@ class TesseraNormalize(Transform):
     Sentinel-1 inputs are expected to be standard power dB values
     (``10 * log10(linear)``); use ``Sentinel1ToDecibels`` first for linear RTC
     sources.
+
+    All inputs are assumed to be complete (no nodata or empty observations);
+    every timestep is standardized and passed through to the model.
     """
 
     def __init__(
@@ -171,7 +174,7 @@ class TesseraNormalize(Transform):
         )
 
     def _normalize_s2(self, image: RasterImage) -> RasterImage:
-        """Normalize a Sentinel-2 CTHW image while preserving empty observations."""
+        """Standardize a Sentinel-2 CTHW image with the checkpoint's stats."""
         if image.image.shape[0] != len(TESSERA_S2_BANDS):
             raise ValueError(
                 "Tessera s2 input must have "
@@ -184,12 +187,7 @@ class TesseraNormalize(Transform):
         std = self.s2_std.to(device=values.device, dtype=values.dtype)[
             :, None, None, None
         ]
-        valid = torch.any(values != 0, dim=0, keepdim=True)
-        image.image = torch.where(
-            valid,
-            (values - mean) / (std + 1e-9),
-            torch.zeros_like(values),
-        )
+        image.image = (values - mean) / (std + 1e-9)
         return image
 
     @staticmethod
@@ -212,7 +210,7 @@ class TesseraNormalize(Transform):
     def _normalize_s1(
         self, image: RasterImage, mean: torch.Tensor, std: torch.Tensor
     ) -> RasterImage:
-        """Normalize a Sentinel-1 CTHW image while preserving clipped-empty pixels."""
+        """Scale a Sentinel-1 dB CTHW image and standardize with the stats."""
         if image.image.shape[0] != len(TESSERA_S1_BANDS):
             raise ValueError(
                 "Tessera Sentinel-1 inputs must have "
@@ -222,12 +220,7 @@ class TesseraNormalize(Transform):
         scaled = self._db_to_tessera_scaled(values)
         mean = mean.to(device=scaled.device, dtype=scaled.dtype)[:, None, None, None]
         std = std.to(device=scaled.device, dtype=scaled.dtype)[:, None, None, None]
-        valid = torch.any(scaled != 0, dim=0, keepdim=True)
-        image.image = torch.where(
-            valid,
-            (scaled - mean) / (std + 1e-9),
-            torch.zeros_like(scaled),
-        )
+        image.image = (scaled - mean) / (std + 1e-9)
         return image
 
     def forward(
@@ -279,9 +272,9 @@ class CustomGRUCell(nn.Module):
         self._init_weights()
 
     def _init_weights(self) -> None:
-        """Initialize GRU weights."""
+        """Initialize GRU weights (biases are left at zero)."""
         for name, param in self.named_parameters():
-            if "weight" in name or name.startswith("W_"):
+            if "weight" in name:
                 nn.init.xavier_uniform_(param)
 
     def forward(self, x_t: torch.Tensor, h_prev: torch.Tensor) -> torch.Tensor:
@@ -500,6 +493,10 @@ class Tessera(FeatureExtractor):
     The model expects normalized input keys ``s2``, ``s1_ascending``, and
     ``s1_descending``. Use ``TesseraNormalize`` in the data transforms to
     prepare raw source imagery.
+
+    All inputs are assumed to be complete: every timestep of every pixel is
+    treated as a valid observation. Nodata or empty observations are not
+    handled and would be fed to the model as-is.
     """
 
     input_keys = ["s2", "s1_ascending", "s1_descending"]
@@ -507,7 +504,6 @@ class Tessera(FeatureExtractor):
     def __init__(
         self,
         checkpoint_path: str | Path | None = None,
-        data_source: TesseraDataSource | str = TesseraDataSource.MPC,
         pixel_batch_size: int = 1024,
         apply_amp: bool = True,
         autocast_dtype: str | None = "bfloat16",
@@ -518,8 +514,6 @@ class Tessera(FeatureExtractor):
 
         Args:
             checkpoint_path: Local path to a Tessera v1.1 checkpoint.
-            data_source: Deprecated compatibility argument. Normalization
-                statistics are selected in ``TesseraNormalize``.
             pixel_batch_size: Number of pixels to evaluate per forward chunk.
             apply_amp: Whether to use autocast on CUDA.
             autocast_dtype: Autocast dtype name, or None to disable autocast.
@@ -528,7 +522,6 @@ class Tessera(FeatureExtractor):
             model_config: Optional architecture overrides.
         """
         super().__init__()
-        self.data_source = TesseraDataSource(data_source)
         self.pixel_batch_size = int(pixel_batch_size)
         self.apply_amp = apply_amp
         self.autocast_dtype = _get_autocast_dtype(autocast_dtype)
@@ -619,7 +612,9 @@ class Tessera(FeatureExtractor):
         s1d_doys = self._time_ranges_to_doy(s1_descending.timestamps, device)
 
         # Sentinel-1 ascending and descending observations are merged into a
-        # single time series along the temporal axis.
+        # single time series along the temporal axis, ascending first and
+        # descending second. This order matches what Tessera expects (position matters
+        # for the GRU component).
         s2_seq = self._build_sequence(s2_image, s2_doys, num_pixels)
         s1_seq = torch.cat(
             [

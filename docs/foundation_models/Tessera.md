@@ -18,9 +18,8 @@ checkpoint family:
 - `aws`: AWS Open Data Earth-search Sentinel-2 L2A and ASF OPERA RTC-S1. This
   is not currently recommended because rslearn does not have an OPERA data source yet.
 
-Tessera uses different normalization statistics for the two checkpoint families.
-The model wrapper still accepts a `data_source` argument for compatibility, but
-normalization statistics are now selected by `TesseraNormalize`.
+Tessera uses different normalization statistics for the two checkpoint families,
+which are selected by the `data_source` argument of `TesseraNormalize`.
 
 ## Inputs
 

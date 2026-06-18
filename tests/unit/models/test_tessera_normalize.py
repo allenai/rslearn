@@ -27,14 +27,16 @@ def test_tessera_normalize_s1_standard_db_to_scaled_values() -> None:
         - torch.tensor(stats["s1a_mean"])
     ) / torch.tensor(stats["s1a_std"])
     assert torch.allclose(inputs["s1_ascending"].image[:, 0, 0, 0], expected)
-    assert torch.equal(
-        inputs["s1_ascending"].image[:, 0, 0, 1],
-        torch.zeros(2),
-    )
+    # -60 dB clamps to a scaled value of 0, which is still standardized (no
+    # nodata handling).
+    expected_clamped = (
+        torch.tensor([0.0, 0.0]) - torch.tensor(stats["s1a_mean"])
+    ) / torch.tensor(stats["s1a_std"])
+    assert torch.allclose(inputs["s1_ascending"].image[:, 0, 0, 1], expected_clamped)
 
 
-def test_tessera_normalize_s2_preserves_empty_observations() -> None:
-    """Sentinel-2 all-zero pixels remain zero after normalization."""
+def test_tessera_normalize_s2_standardizes_all_pixels() -> None:
+    """Sentinel-2 pixels are standardized, including all-zero pixels."""
     image = torch.zeros((10, 1, 1, 2), dtype=torch.float32)
     image[:, 0, 0, 0] = torch.arange(1000, 1010, dtype=torch.float32)
     transform = TesseraNormalize(skip_missing=True)
@@ -47,7 +49,10 @@ def test_tessera_normalize_s2_preserves_empty_observations() -> None:
         torch.arange(1000, 1010, dtype=torch.float32) - torch.tensor(stats["s2_mean"])
     ) / torch.tensor(stats["s2_std"])
     assert torch.allclose(inputs["s2"].image[:, 0, 0, 0], expected)
-    assert torch.equal(inputs["s2"].image[:, 0, 0, 1], torch.zeros(10))
+    expected_zero = (torch.zeros(10) - torch.tensor(stats["s2_mean"])) / torch.tensor(
+        stats["s2_std"]
+    )
+    assert torch.allclose(inputs["s2"].image[:, 0, 0, 1], expected_zero)
 
 
 def test_tessera_normalize_aws_uses_aws_stats() -> None:
