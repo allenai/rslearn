@@ -4,10 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>rslearn Dataset Visualization</title>
-    <!-- Leaflet + basemap tiles are proxied through this server (/vendor, /basemap)
-         so the browser needs no direct internet access. -->
-    <link rel="stylesheet" href="/vendor/leaflet.css" />
-    <script src="/vendor/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -223,13 +221,12 @@
                 return;
             }
             var map = L.map(el);  // default controls; scroll-wheel zoom enabled
-            // Tiles are served same-origin by this app (proxied to OpenStreetMap).
-            var tiles = L.tileLayer('/basemap/{z}/{x}/{y}.png', {
+            var tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 maxZoom: 19,
                 attribution: '&copy; OpenStreetMap contributors'
             }).addTo(map);
-            // If the server itself can't fetch tiles, surface that instead of an
-            // unexplained white box.
+            // If the browser can't fetch tiles (no internet), surface that instead
+            // of an unexplained white box.
             tiles.on('tileerror', function () { el.classList.add('tiles-failed'); });
             var layer = L.geoJSON(geojson, {
                 style: { color: '#e74c3c', weight: 2, fillColor: '#e74c3c', fillOpacity: 0.2 },

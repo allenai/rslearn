@@ -6,20 +6,19 @@ This module provides a web server to visualize rslearn datasets using the Datase
 import argparse
 import json
 import random
-import threading
-import urllib.request
-from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
 from flask import Flask, Response
 from flask import render_template as flask_render_template
 from PIL import Image
+from shapely.geometry import mapping
 from upath import UPath
 
 from rslearn.dataset import Dataset, Window
 from rslearn.dataset.window import get_layer_and_group_from_dir_name
 from rslearn.log_utils import get_logger
+from rslearn.utils.geometry import WGS84_PROJECTION
 
 from .render_raster import (
     read_raster_layer,
@@ -31,51 +30,9 @@ from .utils import (
     array_to_bytes,
     format_window_info,
     generate_label_colors_for_layer,
-    window_geometry_geojson,
 )
 
 logger = get_logger(__name__)
-
-# The browser viewing the page may have no internet access (e.g. when the server
-# is reached through an SSH port-forward), but the server host usually does. So we
-# proxy Leaflet and the basemap tiles through the server: the browser only ever
-# talks to this Flask app, and the server fetches the external resources.
-_HTTP_UA = "rslearn-vis-server/1.0 (+https://github.com/allenai/rslearn)"
-_HTTP_TIMEOUT = 15.0
-_HTTP_CACHE_MAX = 8192
-_HTTP_CACHE: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
-_HTTP_CACHE_LOCK = threading.Lock()
-
-# Leaflet assets proxied via /vendor/<name>.
-_VENDOR_SOURCES = {
-    "leaflet.js": "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-    "leaflet.css": "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
-}
-# OpenStreetMap tile template proxied via /basemap/<z>/<x>/<y>.png.
-_TILE_URL_TEMPLATE = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-
-
-def _http_get_cached(url: str) -> tuple[bytes, str] | None:
-    """Fetch a URL server-side with a small LRU cache. Returns (body, content_type)."""
-    with _HTTP_CACHE_LOCK:
-        hit = _HTTP_CACHE.get(url)
-        if hit is not None:
-            _HTTP_CACHE.move_to_end(url)
-            return hit
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": _HTTP_UA})
-        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:  # nosec B310
-            body = resp.read()
-            content_type = resp.headers.get_content_type()
-    except Exception as e:
-        logger.warning("vis proxy fetch failed for %s: %s", url, e)
-        return None
-    with _HTTP_CACHE_LOCK:
-        _HTTP_CACHE[url] = (body, content_type)
-        _HTTP_CACHE.move_to_end(url)
-        while len(_HTTP_CACHE) > _HTTP_CACHE_MAX:
-            _HTTP_CACHE.popitem(last=False)
-    return body, content_type
 
 
 def prepare_visualization_data(
@@ -109,7 +66,9 @@ def prepare_visualization_data(
             if lat is not None and lon is not None
             else None
         )
-        geometry_geojson = window_geometry_geojson(window)
+        geometry_geojson = mapping(
+            window.get_geometry().to_projection(WGS84_PROJECTION).shp
+        )
 
         available_raster_groups: set[str] = set()
         available_vector_image_groups: list[str] = []
@@ -242,38 +201,6 @@ def create_app(
             label_colors_dict,
         )
         return flask_render_template("visualization.html", **template_data)
-
-    @app.route("/vendor/<path:name>")
-    def vendor_asset(name: str) -> Response:
-        """Serve Leaflet's JS/CSS, fetched server-side (browser may lack internet)."""
-        url = _VENDOR_SOURCES.get(name)
-        if url is None:
-            return Response("Not found", status=404, mimetype="text/plain")
-        result = _http_get_cached(url)
-        if result is None:
-            return Response("Vendor fetch failed", status=502, mimetype="text/plain")
-        body, _ = result
-        mimetype = "text/css" if name.endswith(".css") else "application/javascript"
-        return Response(
-            body,
-            mimetype=mimetype,
-            headers={"Cache-Control": "public, max-age=86400"},
-        )
-
-    @app.route("/basemap/<int:z>/<int:x>/<int:y>.png")
-    def basemap_tile(z: int, x: int, y: int) -> Response:
-        """Proxy an OpenStreetMap basemap tile, fetched server-side and cached."""
-        subdomain = "abc"[(x + y) % 3]
-        url = _TILE_URL_TEMPLATE.format(s=subdomain, z=z, x=x, y=y)
-        result = _http_get_cached(url)
-        if result is None:
-            return Response("Tile fetch failed", status=502, mimetype="text/plain")
-        body, content_type = result
-        return Response(
-            body,
-            mimetype=content_type or "image/png",
-            headers={"Cache-Control": "public, max-age=86400"},
-        )
 
     @app.route("/images/<int:window_idx>/<item_group_name>")
     def get_image(window_idx: int, item_group_name: str) -> Response:

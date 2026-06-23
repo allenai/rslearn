@@ -123,10 +123,10 @@ def test_openstreetmap_missing_pbf_raises_file_not_found(
         )
 
 
-def test_openstreetmap_jsonargparse_accepts_osm_feature_type_strings(
+def test_openstreetmap_jsonargparse_accepts_feature_type_names(
     tmp_path: pathlib.Path,
 ) -> None:
-    """JSON configs often use OSM-style type names (way, relation) instead of enum names."""
+    """jsonargparse parses FeatureType member names (e.g. "WAY") from JSON configs."""
     init_jsonargparse()
     pbf = tmp_path / "dummy.osm.pbf"
     pbf.write_bytes(b"")
@@ -145,7 +145,7 @@ def test_openstreetmap_jsonargparse_accepts_osm_feature_type_strings(
                     "bounds_fname": str(bounds),
                     "categories": {
                         "building": {
-                            "feature_types": ["way", "relation"],
+                            "feature_types": ["WAY", "RELATION"],
                             "tag_conditions": {"building": []},
                             "to_geometry": "Polygon",
                         }

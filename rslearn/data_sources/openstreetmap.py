@@ -33,40 +33,12 @@ class FeatureType(Enum):
     RELATION = "relation"
 
 
-def _parse_feature_type(value: str | FeatureType) -> FeatureType:
-    """Parse a feature type from jsonargparse (enum member) or config strings (OSM names)."""
-    if isinstance(value, FeatureType):
-        return value
-    s = str(value).strip()
-    if not s:
-        raise ValueError("empty feature type")
-    try:
-        return FeatureType[s.upper()]
-    except KeyError:
-        pass
-    lowered = s.lower()
-    for member in FeatureType:
-        if member.value == lowered:
-            return member
-    allowed = ", ".join(repr(m.value) for m in FeatureType)
-    raise ValueError(f"unknown OSM feature type {value!r}; expected one of {allowed}")
-
-
-def _coerce_feature_types(
-    feature_types: list[FeatureType | str] | None,
-) -> list[FeatureType] | None:
-    """Normalize feature_types after loading from JSON."""
-    if feature_types is None:
-        return None
-    return [_parse_feature_type(x) for x in feature_types]
-
-
 class Filter:
     """Specifies filters corresponding to one category to extract from OSM data."""
 
     def __init__(
         self,
-        feature_types: list[FeatureType | str] | None = None,
+        feature_types: list[FeatureType] | None = None,
         tag_conditions: dict[str, list[str]] | None = None,
         tag_properties: dict[str, str] | None = None,
         to_geometry: str | None = None,
@@ -74,9 +46,9 @@ class Filter:
         """Create a new Filter instance.
 
         Args:
-            feature_types: limit which types of features to match. Each entry may be a
-                :class:`FeatureType` or a string: the enum member name (``WAY``), or the
-                OSM type string (``way``, ``node``, ``relation``).
+            feature_types: limit which types of features to match. In config files,
+                each entry is the :class:`FeatureType` member name (``NODE``, ``WAY``,
+                ``RELATION``), which jsonargparse parses into the enum.
             tag_conditions: for each entry (tag_name, values), only match features with
                 that tag, and if values is not empty, where tag value matches some
                 element of values.
@@ -85,7 +57,7 @@ class Filter:
             to_geometry: output geometry as the specified type (Point, LineString, or
                 Polygon). Otherwise defaults to Point or LineString.
         """
-        self.feature_types = _coerce_feature_types(feature_types)
+        self.feature_types = feature_types
         self.tag_conditions = tag_conditions
         self.tag_properties = tag_properties
         self.to_geometry = to_geometry
