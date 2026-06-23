@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,7 @@ from upath import UPath
 
 from rslearn.utils import Feature, PixelBounds, Projection
 from rslearn.utils.raster_array import RasterArray, RasterMetadata
+from rslearn.utils.raster_format import DEFAULT_READ_BLOCK_SIZE
 
 if TYPE_CHECKING:
     from rslearn.data_sources.data_source import Item
@@ -117,6 +119,42 @@ class TileStore:
             the raster data
         """
         raise NotImplementedError
+
+    def read_raster_blocked(
+        self,
+        layer_name: str,
+        item: Item,
+        bands: list[str],
+        projection: Projection,
+        bounds: PixelBounds,
+        block_size: int = DEFAULT_READ_BLOCK_SIZE,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> Iterator[tuple[PixelBounds, RasterArray]]:
+        """Read raster data in blocks, yielding one block at a time.
+
+        Lets callers composite a large window while holding only one block in memory.
+        This default preserves the original single-read behavior: it yields the whole
+        bounds as one block, so non-overriding stores (e.g. remote/API-backed sources
+        where each read is expensive) keep their exact one-read-per-item call pattern.
+        Stores backed by a windowed raster format (DefaultTileStore) override this to
+        read true sub-blocks and bound peak memory.
+
+        Args:
+            layer_name: the layer name or alias.
+            item: the item to read.
+            bands: the list of bands identifying which specific raster to read.
+            projection: the projection to read in.
+            bounds: the bounds to read.
+            block_size: the spatial block size, in pixels.
+            resampling: the resampling method to use in case reprojection is needed.
+
+        Yields:
+            (block_bounds, RasterArray) for each block within bounds.
+        """
+        yield (
+            bounds,
+            self.read_raster(layer_name, item, bands, projection, bounds, resampling),
+        )
 
     def write_raster(
         self,
@@ -295,6 +333,32 @@ class TileStoreWithLayer:
         """
         return self.tile_store.read_raster(
             self.layer_name, item, bands, projection, bounds, resampling
+        )
+
+    def read_raster_blocked(
+        self,
+        item: Item,
+        bands: list[str],
+        projection: Projection,
+        bounds: PixelBounds,
+        block_size: int = DEFAULT_READ_BLOCK_SIZE,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> Iterator[tuple[PixelBounds, RasterArray]]:
+        """Read raster data in spatial blocks, yielding one block at a time.
+
+        Args:
+            item: the item to read.
+            bands: the list of bands identifying which specific raster to read.
+            projection: the projection to read in.
+            bounds: the bounds to read.
+            block_size: the spatial block size, in pixels.
+            resampling: the resampling method to use in case reprojection is needed.
+
+        Yields:
+            (block_bounds, RasterArray) for each block within bounds.
+        """
+        return self.tile_store.read_raster_blocked(
+            self.layer_name, item, bands, projection, bounds, block_size, resampling
         )
 
     def write_raster(

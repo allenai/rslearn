@@ -18,6 +18,13 @@ from .remap import Remapper
 if TYPE_CHECKING:
     from rslearn.data_sources.data_source import ItemType
 
+# Spatial block size for windowed reads in read_raster_window_from_tiles. Reading a
+# whole-scene intersection at once allocates a full-scene source array plus rasterio
+# warp buffers, which dominate peak memory on large scenes; reading in blocks bounds
+# the transient warp allocation to roughly one block. 2048 keeps that transient small;
+# larger blocks raise the per-block warp buffer with no offsetting benefit.
+_READ_BLOCK_SIZE = 2048
+
 
 def get_needed_band_sets_and_indexes(
     item: ItemType,
@@ -114,67 +121,76 @@ def read_raster_window_from_tiles(
         if intersection[2] <= intersection[0] or intersection[3] <= intersection[1]:
             continue
 
-        raster_array = tile_store.read_raster(
-            item, src_bands, projection, intersection, resampling=resampling
-        )
-        src = raster_array.array  # (C_src, T, H_int, W_int)
+        # Read and composite the intersection in spatial blocks. A single whole-scene
+        # read allocates a full-scene source array plus rasterio warp buffers, which
+        # dominate peak memory; a blocked read opens the source once and reads each
+        # block as a window of a shared WarpedVRT, capping the transient allocation to
+        # one block while avoiding per-block open/VRT-build overhead. The shared VRT
+        # resamples each block identically to a single full read (no seam artifacts).
+        for block_bounds, raster_array in tile_store.read_raster_blocked(
+            item,
+            src_bands,
+            projection,
+            intersection,
+            _READ_BLOCK_SIZE,
+            resampling=resampling,
+        ):
+            src = raster_array.array  # (C_src, T, blk_h, blk_w)
 
-        if dst is None:
-            num_timesteps = src.shape[1]
-            shape = (
-                len(bands),
-                num_timesteps,
-                bounds[3] - bounds[1],
-                bounds[2] - bounds[0],
-            )
+            if dst is None:
+                num_timesteps = src.shape[1]
+                shape = (
+                    len(bands),
+                    num_timesteps,
+                    bounds[3] - bounds[1],
+                    bounds[2] - bounds[0],
+                )
+                if nodata_val is not None:
+                    dst_arr = np.full(shape, nodata_val, dtype=band_dtype)
+                else:
+                    dst_arr = np.zeros(shape, dtype=band_dtype)
+                dst = RasterArray(
+                    array=dst_arr,
+                    timestamps=raster_array.timestamps,
+                    metadata=RasterMetadata(nodata_value=nodata_val),
+                )
+
+            if src.shape[1] != dst.array.shape[1]:
+                raise ValueError(
+                    f"Item {item.name!r} has T={src.shape[1]} in tile store but "
+                    f"dst has T={dst.array.shape[1]}"
+                )
+
+            dst_col = block_bounds[0] - bounds[0]
+            dst_row = block_bounds[1] - bounds[1]
+            out_crop = dst.array[
+                :,
+                :,
+                dst_row : dst_row + src.shape[2],
+                dst_col : dst_col + src.shape[3],
+            ]  # (C, T, blk_h, blk_w) view
+
+            # Work band-by-band on views and write with np.copyto so that no
+            # block-sized temporary is ever materialized.
             if nodata_val is not None:
-                dst_arr = np.full(shape, nodata_val, dtype=band_dtype)
+                # First-valid: only overwrite pixels where all dst bands are nodata.
+                mask = nodata_eq(out_crop[dst_indexes[0]], nodata_val)
+                for dst_index in dst_indexes[1:]:
+                    mask &= nodata_eq(out_crop[dst_index], nodata_val)
             else:
-                dst_arr = np.zeros(shape, dtype=band_dtype)
-            dst = RasterArray(
-                array=dst_arr,
-                timestamps=raster_array.timestamps,
-                metadata=RasterMetadata(nodata_value=nodata_val),
-            )
+                mask = None
 
-        if src.shape[1] != dst.array.shape[1]:
-            raise ValueError(
-                f"Item {item.name!r} has T={src.shape[1]} in tile store but "
-                f"dst has T={dst.array.shape[1]}"
-            )
-
-        dst_col = intersection[0] - bounds[0]
-        dst_row = intersection[1] - bounds[1]
-
-        out_crop = dst.array[
-            :,
-            :,
-            dst_row : dst_row + src.shape[2],
-            dst_col : dst_col + src.shape[3],
-        ]  # (C, T, H_int, W_int) view
-
-        # Work band-by-band on views and write with np.copyto so that no
-        # intersection-sized temporary is ever materialized. For whole-scene
-        # windows the fancy-indexing copies (src[src_indexes], astype, the
-        # masked gathers) each cost multiple GB and dominated peak memory.
-        if nodata_val is not None:
-            # First-valid: only overwrite pixels where all dst bands are nodata.
-            mask = nodata_eq(out_crop[dst_indexes[0]], nodata_val)
-            for dst_index in dst_indexes[1:]:
-                mask &= nodata_eq(out_crop[dst_index], nodata_val)
-        else:
-            mask = None
-
-        for src_index, dst_index in zip(src_indexes, dst_indexes, strict=True):
-            src_band = src[src_index]  # (T, H_int, W_int) view
-            if remapper:
-                src_band = remapper(src_band, band_dtype)
-            if mask is not None:
-                # casting="unsafe" matches the astype() conversion semantics
-                # this replaces.
-                np.copyto(out_crop[dst_index], src_band, where=mask, casting="unsafe")
-            else:
-                np.copyto(out_crop[dst_index], src_band, casting="unsafe")
+            for src_index, dst_index in zip(src_indexes, dst_indexes, strict=True):
+                src_band = src[src_index]  # (T, blk_h, blk_w) view
+                if remapper:
+                    src_band = remapper(src_band, band_dtype)
+                if mask is not None:
+                    # casting="unsafe" matches the astype() conversion semantics.
+                    np.copyto(
+                        out_crop[dst_index], src_band, where=mask, casting="unsafe"
+                    )
+                else:
+                    np.copyto(out_crop[dst_index], src_band, casting="unsafe")
 
     return dst
 

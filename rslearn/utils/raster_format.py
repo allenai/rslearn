@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from collections.abc import Iterator
 from datetime import datetime
 from typing import Any, BinaryIO
 
@@ -11,6 +12,7 @@ import numpy as np
 import numpy.typing as npt
 import pydantic
 import rasterio
+import rasterio.windows
 from PIL import Image
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
@@ -504,6 +506,36 @@ class GeotiffRasterMetadata(pydantic.BaseModel):
     timestamps: list[tuple[datetime, datetime]] | None = None
 
 
+# Default spatial block size (pixels) for blocked reads. Reading a large window in
+# blocks bounds the transient warp allocation; this is the per-call default when a
+# caller does not specify one.
+DEFAULT_READ_BLOCK_SIZE = 2048
+
+
+def _reshape_raw_to_cthw(
+    raw: npt.NDArray, metadata: GeotiffRasterMetadata | None
+) -> npt.NDArray:
+    """Reshape a raw (C*T, H, W) GeoTIFF read into (C, T, H, W) using sidecar metadata.
+
+    Shared by decode_raster and decode_raster_blocked so the two read paths can never
+    drift in how they split the channel axis into channels and timesteps.
+
+    Args:
+        raw: the array read from the GeoTIFF, shape (C*T, H, W).
+        metadata: the decoded sidecar metadata, or None.
+
+    Returns:
+        the array reshaped to (C, T, H, W).
+    """
+    if metadata and metadata.num_timesteps is not None:
+        num_timesteps = metadata.num_timesteps
+        num_channels = metadata.num_channels or raw.shape[0]
+    else:
+        num_timesteps = 1
+        num_channels = raw.shape[0]
+    return raw.reshape(num_channels, num_timesteps, raw.shape[1], raw.shape[2])
+
+
 class GeotiffRasterFormat(RasterFormat):
     """A raster format that uses one big, tiled GeoTIFF with small block size."""
 
@@ -696,13 +728,7 @@ class GeotiffRasterFormat(RasterFormat):
                 raw = vrt.read()  # (bands, H, W)
 
         # Reshape from (C*T, H, W) -> (C, T, H, W).
-        if metadata and metadata.num_timesteps is not None:
-            num_timesteps = metadata.num_timesteps
-            num_channels = metadata.num_channels or raw.shape[0]
-        else:
-            num_timesteps = 1
-            num_channels = raw.shape[0]
-        array = raw.reshape(num_channels, num_timesteps, raw.shape[1], raw.shape[2])
+        array = _reshape_raw_to_cthw(raw, metadata)
 
         timestamps = metadata.timestamps if metadata else None
 
@@ -713,6 +739,87 @@ class GeotiffRasterFormat(RasterFormat):
             timestamps=timestamps,
             metadata=RasterMetadata(nodata_value=reported_nodata),
         )
+
+    def decode_raster_blocked(
+        self,
+        path: UPath,
+        projection: Projection,
+        bounds: PixelBounds,
+        block_size: int = DEFAULT_READ_BLOCK_SIZE,
+        resampling: Resampling = Resampling.bilinear,
+        fname: str | None = None,
+        nodata_val: int | float | None = None,
+    ) -> Iterator[tuple[PixelBounds, RasterArray]]:
+        """Decode the raster window in spatial blocks, yielding one block at a time.
+
+        Opens the source and builds the WarpedVRT once for the full bounds, then reads
+        each block as a window of that VRT. Memory is bounded to a single block while
+        avoiding the per-block open/VRT-build overhead of repeated decode_raster calls.
+        Each yielded block is resampled within the shared VRT, so the result is
+        identical to decode_raster over the same bounds (no seam artifacts).
+
+        Args:
+            path: the directory to read from.
+            projection: the projection to read the raster in.
+            bounds: the bounds to read in the given projection.
+            block_size: the spatial block size, in pixels.
+            resampling: resampling method to use in case resampling is needed.
+            fname: override the filename to read from.
+            nodata_val: override the nodata value in the raster when reading.
+
+        Yields:
+            (block_bounds, RasterArray) for each block, where block_bounds are the
+            block's absolute pixel bounds in the given projection.
+        """
+        if fname is None:
+            fname = self.fname
+
+        metadata = self.decode_metadata(path)
+        wanted_transform = get_transform_from_projection_and_bounds(projection, bounds)
+        width = bounds[2] - bounds[0]
+        height = bounds[3] - bounds[1]
+
+        with open_rasterio_upath_reader(path / fname) as src:
+            src_nodata = src.nodata
+
+            vrt_kwargs: dict = dict(
+                crs=projection.crs,
+                transform=wanted_transform,
+                width=width,
+                height=height,
+                resampling=resampling,
+            )
+            # Only pass src_nodata if nodata_val is None, since src_nodata=None is
+            # treated as setting it to 0 (overriding the actual src nodata) in rasterio.
+            if nodata_val is not None:
+                vrt_kwargs["src_nodata"] = nodata_val
+
+            reported_nodata = nodata_val if nodata_val is not None else src_nodata
+            timestamps = metadata.timestamps if metadata else None
+
+            with rasterio.vrt.WarpedVRT(src, **vrt_kwargs) as vrt:
+                for row_off in range(0, height, block_size):
+                    blk_h = min(block_size, height - row_off)
+                    for col_off in range(0, width, block_size):
+                        blk_w = min(block_size, width - col_off)
+                        window = rasterio.windows.Window(col_off, row_off, blk_w, blk_h)
+                        raw = vrt.read(window=window)  # (C*T, blk_h, blk_w)
+                        array = _reshape_raw_to_cthw(raw, metadata)
+
+                        block_bounds = (
+                            bounds[0] + col_off,
+                            bounds[1] + row_off,
+                            bounds[0] + col_off + blk_w,
+                            bounds[1] + row_off + blk_h,
+                        )
+                        yield (
+                            block_bounds,
+                            RasterArray(
+                                array=array,
+                                timestamps=timestamps,
+                                metadata=RasterMetadata(nodata_value=reported_nodata),
+                            ),
+                        )
 
     def get_raster_bounds(self, path: UPath) -> PixelBounds:
         """Returns the bounds of the stored raster.

@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 import rasterio
 from rasterio.crs import CRS
+from rasterio.enums import Resampling
 from upath import UPath
 
 from rslearn.utils.geometry import Projection
@@ -454,3 +455,82 @@ class TestRasterFormatRoundTrip:
         decoded = fmt.decode_raster(path, _PROJECTION, (1000, 1000, 1004, 1004))
         assert decoded.array.shape == (1, 1, 4, 4)
         np.testing.assert_array_equal(decoded.array, 255)
+
+
+class TestDecodeRasterBlocked:
+    """decode_raster_blocked must stitch bit-identically to a full decode_raster."""
+
+    PROJECTION = Projection(CRS.from_epsg(3857), 1, -1)
+
+    def _stitch(self, fmt, path, projection, bounds, block_size, resampling):
+        """Read a window in blocks and reassemble it into one (C, T, H, W) array."""
+        width = bounds[2] - bounds[0]
+        height = bounds[3] - bounds[1]
+        out = None
+        for block_bounds, ra in fmt.decode_raster_blocked(
+            path, projection, bounds, block_size, resampling=resampling
+        ):
+            arr = ra.array
+            if out is None:
+                out = np.zeros(
+                    (arr.shape[0], arr.shape[1], height, width), dtype=arr.dtype
+                )
+            col0 = block_bounds[0] - bounds[0]
+            row0 = block_bounds[1] - bounds[1]
+            out[:, :, row0 : row0 + arr.shape[2], col0 : col0 + arr.shape[3]] = arr
+        return out
+
+    @pytest.mark.parametrize(
+        "resampling",
+        [Resampling.nearest, Resampling.bilinear, Resampling.cubic],
+    )
+    @pytest.mark.parametrize("scale", [1, 2])
+    def test_blocked_matches_full_read(
+        self, tmp_path: pathlib.Path, resampling: Resampling, scale: int
+    ) -> None:
+        """Blocked read equals full read for identity (scale=1) and resampled (scale=2).
+
+        scale=2 reads at a coarser resolution so the warp actually interpolates, which
+        stresses the block seams: GDAL must pull source pixels straddling each block
+        boundary, so any window-dependent warping would show up as a mismatch.
+        """
+        path = UPath(tmp_path)
+        # A 2-D gradient in float32 so resampling produces distinct interior values.
+        rows, cols = 100, 100
+        data = (np.arange(rows)[:, None] * 1.0 + np.arange(cols)[None, :] * 0.5).astype(
+            np.float32
+        )[None]  # (1, 100, 100)
+        fmt = GeotiffRasterFormat(block_size=16, always_enable_tiling=True)
+        fmt.encode_raster(
+            path, self.PROJECTION, (0, 0, cols, rows), RasterArray(chw_array=data)
+        )
+
+        read_proj = Projection(CRS.from_epsg(3857), scale, -scale)
+        read_bounds = (0, 0, cols // scale, rows // scale)
+        full = fmt.decode_raster(
+            path, read_proj, read_bounds, resampling=resampling
+        ).array
+        stitched = self._stitch(
+            fmt, path, read_proj, read_bounds, block_size=16, resampling=resampling
+        )
+        assert stitched is not None
+        np.testing.assert_array_equal(stitched, full)
+
+    def test_blocked_matches_full_multi_timestep(self, tmp_path: pathlib.Path) -> None:
+        """The (C*T, H, W) -> (C, T, H, W) reshape path matches full read across blocks."""
+        path = UPath(tmp_path)
+        c, t, rows, cols = 2, 3, 40, 40
+        data = np.arange(c * t * rows * cols, dtype=np.float32).reshape(
+            c, t, rows, cols
+        )
+        fmt = GeotiffRasterFormat(block_size=16, always_enable_tiling=True)
+        fmt.encode_raster(
+            path, self.PROJECTION, (0, 0, cols, rows), RasterArray(array=data)
+        )
+        full = fmt.decode_raster(path, self.PROJECTION, (0, 0, cols, rows)).array
+        assert full.shape == (c, t, rows, cols)
+        stitched = self._stitch(
+            fmt, path, self.PROJECTION, (0, 0, cols, rows), 16, Resampling.nearest
+        )
+        assert stitched is not None
+        np.testing.assert_array_equal(stitched, full)

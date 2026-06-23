@@ -173,7 +173,13 @@ def test_partial_intersection_offset(tile_store: DefaultTileStore) -> None:
     nodata_val = 0
     item = make_item("item")
     # Item only covers the bottom-right 2x2 of the 4x4 window.
-    write(tile_store, item, bands, np.full((1, 2, 2), 8, dtype=np.uint8), bounds=(2, 2, 4, 4))
+    write(
+        tile_store,
+        item,
+        bands,
+        np.full((1, 2, 2), 8, dtype=np.uint8),
+        bounds=(2, 2, 4, 4),
+    )
 
     dst = read(tile_store, item, bands, nodata_val)
     assert dst is not None
@@ -195,6 +201,90 @@ def test_remapper_applied(tile_store: DefaultTileStore) -> None:
     assert np.array_equal(dst.get_chw_array(), np.full((1, 4, 4), 10))
 
 
+def test_multi_block_stitch_matches_single_block(
+    tile_store: DefaultTileStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Compositing many small blocks into dst must equal a single whole-window read.
+
+    Forces several blocks (and partial edge blocks at nonzero dst offsets) by shrinking
+    the read block size below the window size, then checks the result is identical to
+    reading the whole window in one block.
+    """
+    import rslearn.dataset.tile_utils as tu
+
+    bands = ["band1", "band2"]
+    nodata_val = 0
+    bounds = (0, 0, 10, 10)
+    rng = np.arange(2 * 10 * 10, dtype=np.uint8).reshape(2, 10, 10)
+    # Leave some genuine nodata so the first-valid mask is exercised across blocks.
+    rng[:, 3:6, 3:6] = 0
+    item = make_item("item")
+    tile_store.write_raster(
+        LAYER_NAME, item, bands, PROJECTION, bounds, RasterArray(chw_array=rng)
+    )
+
+    def read_at_block_size(block_size: int) -> np.ndarray:
+        monkeypatch.setattr(tu, "_READ_BLOCK_SIZE", block_size)
+        dst = read_raster_window_from_tiles(
+            tile_store=TileStoreWithLayer(tile_store, LAYER_NAME),
+            item=item,
+            bands=bands,
+            projection=PROJECTION,
+            bounds=bounds,
+            nodata_val=nodata_val,
+            band_dtype=np.uint8,
+        )
+        assert dst is not None
+        return dst.get_chw_array()
+
+    whole = read_at_block_size(64)  # single block
+    blocked = read_at_block_size(3)  # 4x4 grid incl. partial edge blocks
+    np.testing.assert_array_equal(blocked, whole)
+
+
+def test_multi_block_with_intersection_offset(
+    tile_store: DefaultTileStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Multi-block read where the item covers only a sub-region (nonzero block offsets).
+
+    Exercises the per-block dst-offset math (block_bounds - bounds) at offsets that are
+    both nonzero AND span multiple blocks — the one interaction the single-block offset
+    test and the offset-0 multi-block test don't cover together.
+    """
+    import rslearn.dataset.tile_utils as tu
+
+    bands = ["band1"]
+    nodata_val = 0
+    window_bounds = (0, 0, 12, 12)
+    item = make_item("item")
+    # Item covers only the 7x7 bottom-right region of the 12x12 window.
+    sub = np.arange(1, 7 * 7 + 1, dtype=np.uint8).reshape(1, 7, 7)
+    tile_store.write_raster(
+        LAYER_NAME, item, bands, PROJECTION, (5, 5, 12, 12), RasterArray(chw_array=sub)
+    )
+
+    def read_at_block_size(block_size: int) -> np.ndarray:
+        monkeypatch.setattr(tu, "_READ_BLOCK_SIZE", block_size)
+        dst = read_raster_window_from_tiles(
+            tile_store=TileStoreWithLayer(tile_store, LAYER_NAME),
+            item=item,
+            bands=bands,
+            projection=PROJECTION,
+            bounds=window_bounds,
+            nodata_val=nodata_val,
+            band_dtype=np.uint8,
+        )
+        assert dst is not None
+        return dst.get_chw_array()
+
+    whole = read_at_block_size(64)
+    blocked = read_at_block_size(3)
+    np.testing.assert_array_equal(blocked, whole)
+    # The covered sub-region must hold the data; the rest stays nodata.
+    assert np.array_equal(blocked[0, 5:, 5:], sub[0])
+    assert np.array_equal(blocked[0, :5, :], np.zeros((5, 12), dtype=np.uint8))
+
+
 def test_nan_nodata(tile_store: DefaultTileStore) -> None:
     """NaN nodata sentinels must be matched by the first-valid mask."""
     bands = ["band1"]
@@ -207,7 +297,12 @@ def test_nan_nodata(tile_store: DefaultTileStore) -> None:
 
     dst = read(tile_store, item1, bands, nodata_val=float("nan"), band_dtype=np.float32)
     dst = read(
-        tile_store, item2, bands, nodata_val=float("nan"), band_dtype=np.float32, dst=dst
+        tile_store,
+        item2,
+        bands,
+        nodata_val=float("nan"),
+        band_dtype=np.float32,
+        dst=dst,
     )
     assert dst is not None
     result = dst.get_chw_array()

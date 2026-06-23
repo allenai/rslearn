@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import shutil
+from collections.abc import Iterator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -29,6 +30,7 @@ from rslearn.utils.geometry import PixelBounds, Projection, STGeometry
 from rslearn.utils.get_utm_ups_crs import get_utm_ups_crs
 from rslearn.utils.raster_array import RasterArray, RasterMetadata
 from rslearn.utils.raster_format import (
+    DEFAULT_READ_BLOCK_SIZE,
     METADATA_FNAME,
     GeotiffRasterFormat,
     GeotiffRasterMetadata,
@@ -228,6 +230,27 @@ class DefaultTileStore(TileStore):
             fname=raster_fname.name,
             projection=projection,
             bounds=bounds,
+            resampling=resampling,
+        )
+
+    @override
+    def read_raster_blocked(
+        self,
+        layer_name: str,
+        item: Item,
+        bands: list[str],
+        projection: Projection,
+        bounds: PixelBounds,
+        block_size: int = DEFAULT_READ_BLOCK_SIZE,
+        resampling: Resampling = Resampling.bilinear,
+    ) -> Iterator[tuple[PixelBounds, RasterArray]]:
+        raster_fname = self._get_raster_fname(layer_name, item.name, bands)
+        yield from GeotiffRasterFormat().decode_raster_blocked(
+            path=raster_fname.parent,
+            fname=raster_fname.name,
+            projection=projection,
+            bounds=bounds,
+            block_size=block_size,
             resampling=resampling,
         )
 
