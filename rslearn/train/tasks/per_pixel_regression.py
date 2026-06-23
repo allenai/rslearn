@@ -28,6 +28,8 @@ class PerPixelRegressionTask(BasicTask):
     def __init__(
         self,
         scale_factor: float = 1,
+        target_mean: float = 0.0,
+        target_std: float = 1.0,
         metric_mode: (
             Literal["mse", "rmse", "l1", "r2", "mape"]
             | Sequence[Literal["mse", "rmse", "l1", "r2", "mape"]]
@@ -39,9 +41,24 @@ class PerPixelRegressionTask(BasicTask):
     ) -> None:
         """Initialize a new PerPixelRegressionTask.
 
+        The target can be rescaled before training in one of two mutually exclusive ways:
+
+        - ``scale_factor``: simple multiplicative scaling (``value * scale_factor``).
+        - ``target_mean`` / ``target_std``: z-normalization
+          (``(value - target_mean) / target_std``).
+
+        In all cases predictions are mapped back to the original units in
+        ``process_output``, and metrics are computed on the reconstructed values (see
+        ``PerPixelRegressionMetricWrapper``), so reported numbers remain in the original
+        units. The defaults (scale_factor=1, mean=0, std=1) leave the targets unchanged.
+
         Args:
             scale_factor: multiply ground truth values by this factor before using it for
-                training.
+                training. Mutually exclusive with target_mean/target_std.
+            target_mean: mean subtracted from the targets for normalization. Mutually
+                exclusive with scale_factor.
+            target_std: standard deviation the (mean-subtracted) targets are divided by
+                for normalization. Must be positive. Mutually exclusive with scale_factor.
             metric_mode: deprecated; use metrics instead. Will be removed after
                 2026-06-01.
             nodata_value: optional value to treat as invalid. The loss will be masked
@@ -51,7 +68,18 @@ class PerPixelRegressionTask(BasicTask):
             kwargs: other arguments to pass to BasicTask
         """
         super().__init__(**kwargs)
+        if target_std <= 0:
+            raise ValueError(f"target_std must be positive, but got {target_std}")
+        uses_scale_factor = scale_factor != 1
+        uses_normalization = target_mean != 0.0 or target_std != 1.0
+        if uses_scale_factor and uses_normalization:
+            raise ValueError(
+                "scale_factor and target_mean/target_std are mutually exclusive; "
+                "use one or the other (normalization is preferred)."
+            )
         self.scale_factor = scale_factor
+        self.target_mean = target_mean
+        self.target_std = target_std
 
         if metrics is not None:
             metric_names = list(metrics)
@@ -107,7 +135,9 @@ class PerPixelRegressionTask(BasicTask):
 
         assert isinstance(raw_inputs["targets"], RasterImage)
         raw_labels = raw_inputs["targets"].get_hw_tensor()
-        labels = raw_labels.float() * self.scale_factor
+        labels = (raw_labels.float() * self.scale_factor - self.target_mean) / (
+            self.target_std
+        )
 
         window_valid = self._get_window_valid_mask(labels, metadata)
         if self.nodata_value is not None:
@@ -140,7 +170,10 @@ class PerPixelRegressionTask(BasicTask):
             raise ValueError(
                 f"PerPixelRegressionTask output must be an HW tensor, but got shape {raw_output.shape}"
             )
-        return (raw_output[None, :, :] / self.scale_factor).cpu().numpy()
+        reconstructed = (
+            raw_output[None, :, :] * self.target_std + self.target_mean
+        ) / self.scale_factor
+        return reconstructed.cpu().numpy()
 
     def visualize(
         self,
@@ -163,6 +196,11 @@ class PerPixelRegressionTask(BasicTask):
             raise ValueError("target_dict is required for visualization")
         gt_values = target_dict["values"].get_hw_tensor().cpu().numpy()
         pred_values = output.cpu().numpy()[0, :, :]
+        # De-normalize back to original target units before rendering.
+        gt_values = (gt_values * self.target_std + self.target_mean) / self.scale_factor
+        pred_values = (
+            pred_values * self.target_std + self.target_mean
+        ) / self.scale_factor
         gt_vis = np.clip(gt_values * 255, 0, 255).astype(np.uint8)
         pred_vis = np.clip(pred_values * 255, 0, 255).astype(np.uint8)
         return {
@@ -175,31 +213,36 @@ class PerPixelRegressionTask(BasicTask):
         """Get the metrics for this task."""
         metric_dict: dict[str, Metric] = {}
 
+        metric_kwargs = dict(
+            scale_factor=self.scale_factor,
+            target_mean=self.target_mean,
+            target_std=self.target_std,
+        )
         for metric_name in self.metrics:
             if metric_name == "mse":
                 metric_dict["mse"] = PerPixelRegressionMetricWrapper(
                     metric=torchmetrics.MeanSquaredError(),
-                    scale_factor=self.scale_factor,
+                    **metric_kwargs,
                 )
             elif metric_name == "rmse":
                 metric_dict["rmse"] = PerPixelRegressionMetricWrapper(
                     metric=torchmetrics.MeanSquaredError(squared=False),
-                    scale_factor=self.scale_factor,
+                    **metric_kwargs,
                 )
             elif metric_name == "l1":
                 metric_dict["l1"] = PerPixelRegressionMetricWrapper(
                     metric=torchmetrics.MeanAbsoluteError(),
-                    scale_factor=self.scale_factor,
+                    **metric_kwargs,
                 )
             elif metric_name == "r2":
                 metric_dict["r2"] = PerPixelRegressionMetricWrapper(
                     metric=torchmetrics.R2Score(),
-                    scale_factor=self.scale_factor,
+                    **metric_kwargs,
                 )
             elif metric_name == "mape":
                 metric_dict["mape"] = PerPixelRegressionMetricWrapper(
                     metric=torchmetrics.MeanAbsolutePercentageError(),
-                    scale_factor=self.scale_factor,
+                    **metric_kwargs,
                 )
             else:
                 raise ValueError(f"unknown metric {metric_name}")
@@ -312,19 +355,40 @@ class PerPixelRegressionHead(Predictor):
 class PerPixelRegressionMetricWrapper(Metric):
     """Metric for per-pixel regression task."""
 
-    def __init__(self, metric: Metric, scale_factor: float, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        metric: Metric,
+        scale_factor: float,
+        target_mean: float = 0.0,
+        target_std: float = 1.0,
+        **kwargs: Any,
+    ) -> None:
         """Initialize a new PerPixelRegressionMetricWrapper.
+
+        Both predictions and targets arrive in the normalized training space. They are
+        de-normalized back to the original units before the underlying metric is updated,
+        so reported metrics (e.g. RMSE) are in the original target units rather than the
+        scaled/normalized space.
 
         Args:
             metric: the underlying torchmetric to apply, which should accept a flat
                 tensor of predicted values followed by a flat tensor of target values
             scale_factor: scale factor to undo so that metric is based on original
                 values
+            target_mean: mean to add back when de-normalizing to original units.
+            target_std: standard deviation to multiply by when de-normalizing to
+                original units.
             kwargs: other arguments to pass to super constructor
         """
         super().__init__(**kwargs)
         self.metric = metric
         self.scale_factor = scale_factor
+        self.target_mean = target_mean
+        self.target_std = target_std
+
+    def _to_original_units(self, values: torch.Tensor) -> torch.Tensor:
+        """De-normalize values from the training space back to the original units."""
+        return (values * self.target_std + self.target_mean) / self.scale_factor
 
     def update(
         self, preds: list[Any] | torch.Tensor, targets: list[dict[str, Any]]
@@ -349,6 +413,11 @@ class PerPixelRegressionMetricWrapper(Metric):
         labels = labels[mask]
         if len(preds) == 0:
             return
+
+        # De-normalize both back to original units so the metric is reported in the
+        # original target space rather than the normalized training space.
+        preds = self._to_original_units(preds)
+        labels = self._to_original_units(labels)
 
         self.metric.update(preds, labels)
 

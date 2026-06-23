@@ -76,6 +76,89 @@ def test_process_output(empty_sample_metadata: SampleMetadata) -> None:
     assert torch.all(output == torch.tensor([[[1, 2], [3, 4]]]))
 
 
+def test_process_inputs_normalization(empty_sample_metadata: SampleMetadata) -> None:
+    """Targets are normalized with (value * scale_factor - mean) / std."""
+    task = PerPixelRegressionTask(
+        target_mean=2.0,
+        target_std=4.0,
+        nodata_value=-1,
+    )
+    metadata = _make_metadata(empty_sample_metadata, height=2, width=2)
+    _, target_dict = task.process_inputs(
+        raw_inputs={
+            "targets": RasterImage(torch.tensor([[[[1, 2], [-1, 3]]]])),
+        },
+        metadata=metadata,
+    )
+    values = target_dict["values"].get_hw_tensor()
+    valid = target_dict["valid"].get_hw_tensor()
+    assert values[0, 0] == pytest.approx((1 - 2) / 4)
+    assert values[0, 1] == pytest.approx((2 - 2) / 4)
+    assert values[1, 1] == pytest.approx((3 - 2) / 4)
+    assert torch.all(valid == torch.tensor([[1, 1], [0, 1]]))
+
+
+def test_process_output_normalization(empty_sample_metadata: SampleMetadata) -> None:
+    """process_output de-normalizes predictions back to original units."""
+    task = PerPixelRegressionTask(
+        target_mean=2.0,
+        target_std=4.0,
+    )
+    output = task.process_output(
+        raw_output=torch.tensor([[-0.25, 0.0], [0.25, 0.5]], dtype=torch.float32),
+        metadata=empty_sample_metadata,
+    )
+    assert isinstance(output, np.ndarray)
+    assert output.shape == (1, 2, 2)
+    np.testing.assert_allclose(output[0], [[1, 2], [3, 4]])
+
+
+def test_metric_normalization_reports_original_units(
+    empty_sample_metadata: SampleMetadata,
+) -> None:
+    """Metrics are computed in the original units even when targets are normalized."""
+    task = PerPixelRegressionTask(
+        target_mean=2.0,
+        target_std=4.0,
+        metrics=("mse",),
+        nodata_value=-1,
+    )
+    metrics = task.get_metrics()
+
+    metadata = _make_metadata(empty_sample_metadata, height=2, width=2)
+    _, target_dict = task.process_inputs(
+        raw_inputs={
+            "targets": RasterImage(torch.tensor([[[[1, 2], [-1, 3]]]])),
+        },
+        metadata=metadata,
+    )
+    # A normalized prediction of 0 corresponds to the mean (2.0) in original units.
+    preds = torch.zeros((1, 1, 2, 2))
+
+    metrics.update(preds, [target_dict])
+    results = metrics.compute()
+    # Original labels are [1, 2, 3], preds are all 2.0.
+    # MSE = ((1-2)^2 + (2-2)^2 + (3-2)^2) / 3 = 2 / 3.
+    assert results["mse"] == pytest.approx(2 / 3)
+
+
+def test_invalid_target_std() -> None:
+    """target_std must be positive."""
+    with pytest.raises(ValueError):
+        PerPixelRegressionTask(target_std=0.0)
+
+
+def test_scale_factor_and_normalization_mutually_exclusive() -> None:
+    """scale_factor and target_mean/target_std cannot be used together."""
+    with pytest.raises(ValueError):
+        PerPixelRegressionTask(scale_factor=0.1, target_mean=2.0)
+    with pytest.raises(ValueError):
+        PerPixelRegressionTask(scale_factor=0.1, target_std=4.0)
+    # Either one alone is fine.
+    PerPixelRegressionTask(scale_factor=0.1)
+    PerPixelRegressionTask(target_mean=2.0, target_std=4.0)
+
+
 def test_head(empty_sample_metadata: SampleMetadata) -> None:
     """Verify that the head masks out invalid pixels."""
     head = PerPixelRegressionHead(loss_mode="mse")
@@ -147,10 +230,13 @@ def test_mse_metric(empty_sample_metadata: SampleMetadata) -> None:
     )
     preds = torch.tensor([[0.1, 0.1], [0.1, 0.1]])[None, None, :, :]
 
-    # Accuracy should be (0 + 0.01 + 0.04) / 3 = 0.05 / 3.
+    # Metrics are reported in the original (de-normalized) units. The scaled labels are
+    # [0.1, 0.2, 0.3] and scaled preds are [0.1, 0.1, 0.1]; dividing by scale_factor=0.1
+    # gives original labels [1, 2, 3] and preds [1, 1, 1].
+    # MSE = (0 + 1 + 4) / 3 = 5 / 3.
     metrics.update(preds, [target_dict])
     results = metrics.compute()
-    assert results["mse"] == pytest.approx(0.05 / 3)
+    assert results["mse"] == pytest.approx(5 / 3)
 
 
 def test_rmse_metric(empty_sample_metadata: SampleMetadata) -> None:
@@ -171,9 +257,11 @@ def test_rmse_metric(empty_sample_metadata: SampleMetadata) -> None:
     )
     preds = torch.tensor([[0.1, 0.1], [0.1, 0.1]])[None, None, :, :]
 
+    # Metrics are reported in the original (de-normalized) units, so labels become
+    # [1, 2, 3] and preds [1, 1, 1] after dividing by scale_factor=0.1.
     metrics.update(preds, [target_dict])
     results = metrics.compute()
-    assert results["rmse"] == pytest.approx(np.sqrt(0.05 / 3))
+    assert results["rmse"] == pytest.approx(np.sqrt(5 / 3))
 
 
 def test_mape_metric(empty_sample_metadata: SampleMetadata) -> None:
@@ -221,9 +309,10 @@ def test_r2_metric_list(empty_sample_metadata: SampleMetadata) -> None:
     metrics.update(preds, [target_dict])
     results = metrics.compute()
 
-    assert results["mse"] == pytest.approx(0.05 / 3)
-    # Labels are [0.1, 0.2, 0.3], preds are [0.1, 0.1, 0.1] over valid pixels.
-    # SSE = 0.05, SST = 0.02 => R2 = 1 - 0.05/0.02 = -1.5
+    # Metrics are in original (de-normalized) units: labels [1, 2, 3], preds [1, 1, 1].
+    # MSE = (0 + 1 + 4) / 3 = 5 / 3.
+    assert results["mse"] == pytest.approx(5 / 3)
+    # R2 is scale-invariant: SSE = 5, SST = 2 => R2 = 1 - 5/2 = -1.5.
     assert results["r2"] == pytest.approx(-1.5)
 
 
