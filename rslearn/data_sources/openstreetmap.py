@@ -9,7 +9,6 @@ from typing import Any
 import osmium
 import osmium.osm.types
 import shapely
-from fsspec.implementations.local import LocalFileSystem
 from upath import UPath
 
 from rslearn.config import QueryConfig
@@ -46,9 +45,7 @@ class Filter:
         """Create a new Filter instance.
 
         Args:
-            feature_types: limit which types of features to match. In config files,
-                each entry is the :class:`FeatureType` member name (``NODE``, ``WAY``,
-                ``RELATION``), which jsonargparse parses into the enum.
+            feature_types: limit which types of features to match
             tag_conditions: for each entry (tag_name, values), only match features with
                 that tag, and if values is not empty, where tag value matches some
                 element of values.
@@ -389,11 +386,10 @@ class OpenStreetMap(DataSource[OsmItem]):
         self.categories = categories
 
         if context.ds_path is not None:
-            base = context.ds_path
-            if isinstance(base.fs, LocalFileSystem):
-                base = base.resolve()
-            self.pbf_fnames = [join_upath(base, pbf_fname) for pbf_fname in pbf_fnames]
-            self.bounds_fname = join_upath(base, bounds_fname)
+            self.pbf_fnames = [
+                join_upath(context.ds_path, pbf_fname) for pbf_fname in pbf_fnames
+            ]
+            self.bounds_fname = join_upath(context.ds_path, bounds_fname)
         else:
             self.pbf_fnames = [UPath(pbf_fname) for pbf_fname in pbf_fnames]
             self.bounds_fname = UPath(bounds_fname)
@@ -406,18 +402,6 @@ class OpenStreetMap(DataSource[OsmItem]):
             with urllib.request.urlopen(self.planet_pbf_url) as response:
                 with self.pbf_fnames[0].open("wb") as f:
                     shutil.copyfileobj(response, f)
-
-        missing_pbfs = [str(p) for p in self.pbf_fnames if not p.exists()]
-        if missing_pbfs:
-            raise FileNotFoundError(
-                "Some paths in OpenStreetMap pbf_fnames are missing on disk "
-                "(paths are relative to the dataset root when using DataSourceContext):\n  "
-                + "\n  ".join(missing_pbfs)
-                + "\nDownload regional extracts (e.g. from Geofabrik) into those paths, "
-                "or shorten pbf_fnames to only the files you have. "
-                "If you list exactly one missing path, rslearn downloads the full "
-                "planet PBF there instead."
-            )
 
         # Detect bounds of each pbf file if needed.
         self.pbf_bounds = self._get_pbf_bounds()

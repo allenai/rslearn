@@ -12,7 +12,7 @@ from upath import UPath
 
 from rslearn.config import QueryConfig, SpaceMode
 from rslearn.const import WGS84_PROJECTION
-from rslearn.data_sources.data_source import DataSource, DataSourceContext
+from rslearn.data_sources.data_source import DataSource
 from rslearn.data_sources.openstreetmap import FeatureType, Filter, OpenStreetMap
 from rslearn.tile_stores import DefaultTileStore, TileStoreWithLayer
 from rslearn.utils.geometry import STGeometry
@@ -108,19 +108,6 @@ def test_ingest(tmp_path: pathlib.Path, test_pbf: pathlib.Path) -> None:
         geojson = json.load(f)
     assert len(geojson["features"]) == 1
     assert geojson["features"][0]["properties"]["category"] == "building"
-
-
-def test_openstreetmap_missing_pbf_raises_file_not_found(
-    tmp_path: pathlib.Path,
-) -> None:
-    """Multiple configured extracts must exist; otherwise prepare fails early."""
-    with pytest.raises(FileNotFoundError, match="missing on disk"):
-        OpenStreetMap(
-            pbf_fnames=["a.osm.pbf", "b.osm.pbf"],
-            bounds_fname="bounds.json",
-            categories={"building": Filter(tag_conditions={"building": []})},
-            context=DataSourceContext(ds_path=UPath(tmp_path)),
-        )
 
 
 def test_openstreetmap_jsonargparse_accepts_feature_type_names(
