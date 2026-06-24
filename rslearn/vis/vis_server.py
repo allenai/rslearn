@@ -12,11 +12,13 @@ from typing import Any
 from flask import Flask, Response
 from flask import render_template as flask_render_template
 from PIL import Image
+from shapely.geometry import mapping
 from upath import UPath
 
 from rslearn.dataset import Dataset, Window
 from rslearn.dataset.window import get_layer_and_group_from_dir_name
 from rslearn.log_utils import get_logger
+from rslearn.utils.geometry import WGS84_PROJECTION
 
 from .render_raster import (
     read_raster_layer,
@@ -63,6 +65,9 @@ def prepare_visualization_data(
             f"https://www.google.com/maps?q={lat},{lon}"
             if lat is not None and lon is not None
             else None
+        )
+        geometry_geojson = mapping(
+            window.get_geometry().to_projection(WGS84_PROJECTION).shp
         )
 
         available_raster_groups: set[str] = set()
@@ -122,6 +127,7 @@ def prepare_visualization_data(
                 "lat": lat,
                 "lon": lon,
                 "maps_link": maps_link,
+                "geometry_geojson": geometry_geojson,
                 "available_raster_groups": available_raster_groups,
                 "available_vector_image_groups": available_vector_image_groups,
                 "label_texts": label_texts,
