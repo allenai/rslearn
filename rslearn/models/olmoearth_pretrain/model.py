@@ -28,7 +28,7 @@ from upath import UPath
 from rslearn.log_utils import get_logger
 from rslearn.models.component import FeatureExtractor, FeatureMaps, TokenFeatureMaps
 from rslearn.models.olmoearth_pretrain.norm import OlmoEarthNormalize
-from rslearn.train.model_context import ModelContext, RasterImage
+from rslearn.train.model_context import ModelContext, RasterImage, SampleMetadata
 
 logger = get_logger(__name__)
 
@@ -82,6 +82,7 @@ class OlmoEarth(FeatureExtractor):
         timestamp_error_tolerance: timedelta = timedelta(days=15),
         normalize: bool = False,
         normalize_std_multiplier: float | None = 2,
+        use_latlon: bool = False,
     ):
         """Create a new OlmoEarth model.
 
@@ -128,6 +129,11 @@ class OlmoEarth(FeatureExtractor):
                 the same order the rest of the model assumes for the input channels.
             normalize_std_multiplier: the std multiplier to use for normalization, passed
                 through to OlmoEarthNormalize. Only used when normalize=True.
+            use_latlon: whether to compute each sample's crop-center lat/lon from its
+                metadata + CRS and pass it to the encoder for geographic encoding.
+                Requires the pretrained model to have been trained with a lat/lon
+                encoding. When enabled, the encoder's latlon dropout is forced to 0 so
+                the encoding is active on every fine-tuning step.
         """
         if use_legacy_timestamps:
             warnings.warn(
@@ -213,6 +219,17 @@ class OlmoEarth(FeatureExtractor):
                 skip_missing=True,
             )
 
+        self.use_latlon = use_latlon
+        # During fine-tuning we want the geographic (lat/lon) encoding active on every
+        # step. Models trained with a latlon encoding may carry a non-zero
+        # latlon_dropout_rate (e.g. rope_simple_v1 used 0.5); dropout is train-only, so
+        # force it to 0 so lat/lon is ingested on every training step rather than being
+        # randomly zeroed.
+        if use_latlon and hasattr(self.model, "composite_encodings"):
+            encodings = self.model.composite_encodings
+            if hasattr(encodings, "latlon_dropout_rate"):
+                encodings.latlon_dropout_rate = 0.0
+
     def _patch_legacy_encoder_config(self, config_dict: dict) -> dict:
         """Patch checkpoint config dicts that predate use_linear_patch_embed.
 
@@ -225,6 +242,38 @@ class OlmoEarth(FeatureExtractor):
             config_dict = copy.deepcopy(config_dict)
             config_dict["model"]["encoder_config"]["use_linear_patch_embed"] = False
         return config_dict
+
+    @staticmethod
+    def _compute_latlon_from_metadata(
+        metadatas: list[SampleMetadata], device: torch.device
+    ) -> torch.Tensor:
+        """Compute lat/lon center coordinates from sample metadata.
+
+        Converts each sample's crop center from its native CRS to WGS84
+        (EPSG:4326) to produce geographic coordinates for the lat/lon encoding.
+
+        Args:
+            metadatas: list of SampleMetadata, one per sample in the batch.
+            device: torch device to place the output tensor on.
+
+        Returns:
+            Tensor of shape (B, 2) with (latitude, longitude) in degrees.
+        """
+        from rasterio.crs import CRS
+        from rasterio.warp import transform
+
+        wgs84 = CRS.from_epsg(4326)
+        latlons = []
+        for meta in metadatas:
+            col_start, row_start, col_end, row_end = meta.crop_bounds
+            cx = (col_start + col_end) / 2.0
+            cy = (row_start + row_end) / 2.0
+            crs_x = cx * meta.projection.x_resolution
+            crs_y = cy * meta.projection.y_resolution
+            xs, ys = transform(meta.projection.crs, wgs84, [crs_x], [crs_y])
+            # transform returns (lon, lat) in WGS84; the encoder expects (lat, lon).
+            latlons.append([ys[0], xs[0]])
+        return torch.tensor(latlons, dtype=torch.float32, device=device)
 
     def _load_model_from_checkpoint(
         self, checkpoint_upath: UPath, random_initialization: bool
@@ -712,6 +761,10 @@ class OlmoEarth(FeatureExtractor):
             )
         else:
             sample, present_modalities, device = self._prepare_modality_inputs(context)
+
+        if self.use_latlon:
+            latlon = self._compute_latlon_from_metadata(context.metadatas, device)
+            sample = sample._replace(latlon=latlon)
 
         # Decide context based on self.autocast_dtype.
         if self.autocast_dtype is None:
