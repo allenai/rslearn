@@ -135,8 +135,7 @@ class OlmoEarth(FeatureExtractor):
             use_latlon: whether to compute each sample's crop-center lat/lon from its
                 metadata + CRS and pass it to the encoder for geographic encoding.
                 Requires the pretrained model to have been trained with a lat/lon
-                encoding. When enabled, the encoder's latlon dropout is forced to 0 so
-                the encoding is active on every fine-tuning step.
+                encoding.
         """
         if use_legacy_timestamps:
             warnings.warn(
@@ -223,15 +222,6 @@ class OlmoEarth(FeatureExtractor):
             )
 
         self.use_latlon = use_latlon
-        # During fine-tuning we want the geographic (lat/lon) encoding active on every
-        # step. Models trained with a latlon encoding may carry a non-zero
-        # latlon_dropout_rate (e.g. rope_simple_v1 used 0.5); dropout is train-only, so
-        # force it to 0 so lat/lon is ingested on every training step rather than being
-        # randomly zeroed.
-        if use_latlon and hasattr(self.model, "composite_encodings"):
-            encodings = self.model.composite_encodings
-            if hasattr(encodings, "latlon_dropout_rate"):
-                encodings.latlon_dropout_rate = 0.0
 
     def _patch_legacy_encoder_config(self, config_dict: dict) -> dict:
         """Patch checkpoint config dicts that predate use_linear_patch_embed.
