@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+import shapely
 import torch
 from einops import rearrange
 from olmoearth_pretrain_minimal import ModelID, load_model_from_id, load_model_from_path
@@ -25,10 +26,12 @@ from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (
 )
 from upath import UPath
 
+from rslearn.const import WGS84_PROJECTION
 from rslearn.log_utils import get_logger
 from rslearn.models.component import FeatureExtractor, FeatureMaps, TokenFeatureMaps
 from rslearn.models.olmoearth_pretrain.norm import OlmoEarthNormalize
 from rslearn.train.model_context import ModelContext, RasterImage, SampleMetadata
+from rslearn.utils.geometry import STGeometry
 
 logger = get_logger(__name__)
 
@@ -259,20 +262,17 @@ class OlmoEarth(FeatureExtractor):
         Returns:
             Tensor of shape (B, 2) with (latitude, longitude) in degrees.
         """
-        from rasterio.crs import CRS
-        from rasterio.warp import transform
-
-        wgs84 = CRS.from_epsg(4326)
         latlons = []
         for meta in metadatas:
             col_start, row_start, col_end, row_end = meta.crop_bounds
             cx = (col_start + col_end) / 2.0
             cy = (row_start + row_end) / 2.0
-            crs_x = cx * meta.projection.x_resolution
-            crs_y = cy * meta.projection.y_resolution
-            xs, ys = transform(meta.projection.crs, wgs84, [crs_x], [crs_y])
-            # transform returns (lon, lat) in WGS84; the encoder expects (lat, lon).
-            latlons.append([ys[0], xs[0]])
+            # crop_bounds are pixel coordinates in the window's projection; STGeometry
+            # carries the projection's resolution so to_projection handles the
+            # pixel -> CRS -> WGS84 conversion.
+            geom = STGeometry(meta.projection, shapely.Point(cx, cy), None)
+            wgs84_geom = geom.to_projection(WGS84_PROJECTION)
+            latlons.append([wgs84_geom.shp.y, wgs84_geom.shp.x])
         return torch.tensor(latlons, dtype=torch.float32, device=device)
 
     def _load_model_from_checkpoint(
