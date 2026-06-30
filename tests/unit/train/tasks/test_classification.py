@@ -109,3 +109,87 @@ def test_per_class_f1() -> None:
     assert results["1_recall"] == pytest.approx(1)
     assert results["2_precision"] == pytest.approx(0)
     assert results["2_recall"] == pytest.approx(0)
+
+
+def test_auroc_partial() -> None:
+    # Binary case with hand-computable macro AUROC.
+    # Labels are [0, 0, 1, 1] with class-1 probabilities [0.1, 0.4, 0.35, 0.8].
+    # For 2 classes, macro one-vs-rest AUROC equals the class-1 AUROC, i.e. the
+    # fraction of (positive, negative) score pairs that are correctly ranked:
+    #   positives (label 1) scores: 0.35, 0.8
+    #   negatives (label 0) scores: 0.1, 0.4
+    #   correctly ranked: (0.35>0.1), (0.8>0.1), (0.8>0.4) -> 3 of 4 -> 0.75
+    targets = [
+        {
+            "class": torch.tensor(0, dtype=torch.int32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+        {
+            "class": torch.tensor(0, dtype=torch.int32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+        {
+            "class": torch.tensor(1, dtype=torch.int32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+        {
+            "class": torch.tensor(1, dtype=torch.int32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+    ]
+    preds = torch.tensor(
+        [
+            [0.9, 0.1],
+            [0.6, 0.4],
+            [0.65, 0.35],
+            [0.2, 0.8],
+        ],
+        dtype=torch.float32,
+    )
+
+    task = ClassificationTask(
+        property_name="ignored", classes=["0", "1"], enable_auroc=True
+    )
+    metrics = task.get_metrics()
+    metrics.update(preds, targets)
+    results = metrics.compute()
+    assert results["auroc"] == pytest.approx(0.75)
+
+
+def test_auroc_perfect() -> None:
+    # Perfectly separable predictions should yield AUROC of 1.0.
+    targets = [
+        {
+            "class": torch.tensor(0, dtype=torch.int32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+        {
+            "class": torch.tensor(0, dtype=torch.int32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+        {
+            "class": torch.tensor(1, dtype=torch.int32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+        {
+            "class": torch.tensor(1, dtype=torch.int32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+    ]
+    preds = torch.tensor(
+        [
+            [0.9, 0.1],
+            [0.8, 0.2],
+            [0.2, 0.8],
+            [0.1, 0.9],
+        ],
+        dtype=torch.float32,
+    )
+
+    task = ClassificationTask(
+        property_name="ignored", classes=["0", "1"], enable_auroc=True
+    )
+    metrics = task.get_metrics()
+    metrics.update(preds, targets)
+    results = metrics.compute()
+    assert results["auroc"] == pytest.approx(1.0)
