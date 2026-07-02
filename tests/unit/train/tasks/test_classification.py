@@ -193,3 +193,88 @@ def test_auroc_perfect() -> None:
     metrics.update(preds, targets)
     results = metrics.compute()
     assert results["auroc"] == pytest.approx(1.0)
+
+
+def test_prauc_partial() -> None:
+    # Binary case with hand-computable macro PRAUC (average precision).
+    # Labels are [0, 0, 1, 1] with class-1 probabilities [0.1, 0.4, 0.35, 0.8].
+    # Average precision uses AP = sum_n (R_n - R_{n-1}) * P_n over score thresholds.
+    #   Class 1: ranking by class-1 prob gives 0.8(pos), 0.4(neg), 0.35(pos), 0.1(neg)
+    #     -> (1/2)*1 + (1/2)*(2/3) = 5/6.
+    #   Class 0: ranking by class-0 prob gives 0.9(pos), 0.65(neg), 0.6(pos), 0.2(neg)
+    #     -> (1/2)*1 + (1/2)*(2/3) = 5/6.
+    #   Macro average = 5/6 ~= 0.8333.
+    targets = [
+        {
+            "class": torch.tensor(0, dtype=torch.int32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+        {
+            "class": torch.tensor(0, dtype=torch.int32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+        {
+            "class": torch.tensor(1, dtype=torch.int32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+        {
+            "class": torch.tensor(1, dtype=torch.int32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+    ]
+    preds = torch.tensor(
+        [
+            [0.9, 0.1],
+            [0.6, 0.4],
+            [0.65, 0.35],
+            [0.2, 0.8],
+        ],
+        dtype=torch.float32,
+    )
+
+    task = ClassificationTask(
+        property_name="ignored", classes=["0", "1"], enable_prauc=True
+    )
+    metrics = task.get_metrics()
+    metrics.update(preds, targets)
+    results = metrics.compute()
+    assert results["prauc"] == pytest.approx(5 / 6)
+
+
+def test_prauc_perfect() -> None:
+    # Perfectly separable predictions should yield PRAUC of 1.0.
+    targets = [
+        {
+            "class": torch.tensor(0, dtype=torch.int32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+        {
+            "class": torch.tensor(0, dtype=torch.int32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+        {
+            "class": torch.tensor(1, dtype=torch.int32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+        {
+            "class": torch.tensor(1, dtype=torch.int32),
+            "valid": torch.tensor(1, dtype=torch.int32),
+        },
+    ]
+    preds = torch.tensor(
+        [
+            [0.9, 0.1],
+            [0.8, 0.2],
+            [0.2, 0.8],
+            [0.1, 0.9],
+        ],
+        dtype=torch.float32,
+    )
+
+    task = ClassificationTask(
+        property_name="ignored", classes=["0", "1"], enable_prauc=True
+    )
+    metrics = task.get_metrics()
+    metrics.update(preds, targets)
+    results = metrics.compute()
+    assert results["prauc"] == pytest.approx(1.0)

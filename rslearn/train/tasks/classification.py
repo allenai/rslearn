@@ -11,6 +11,7 @@ from torchmetrics import Metric, MetricCollection
 from torchmetrics.classification import (
     MulticlassAccuracy,
     MulticlassAUROC,
+    MulticlassAveragePrecision,
     MulticlassF1Score,
     MulticlassPrecision,
     MulticlassRecall,
@@ -46,6 +47,8 @@ class ClassificationTask(BasicTask):
         f1_metric_kwargs: dict[str, Any] = {},
         enable_auroc: bool = False,
         auroc_metric_kwargs: dict[str, Any] = {},
+        enable_prauc: bool = False,
+        prauc_metric_kwargs: dict[str, Any] = {},
         positive_class: str | None = None,
         positive_class_threshold: float = 0.5,
         enable_confusion_matrix: bool = False,
@@ -74,6 +77,10 @@ class ClassificationTask(BasicTask):
             enable_auroc: whether to compute AUROC (default false).
             auroc_metric_kwargs: extra arguments to pass to the AUROC metric, see
                 torchmetrics.classification.MulticlassAUROC.
+            enable_prauc: whether to compute PRAUC, i.e. average precision / area under
+                the precision-recall curve (default false).
+            prauc_metric_kwargs: extra arguments to pass to the PRAUC metric, see
+                torchmetrics.classification.MulticlassAveragePrecision.
             positive_class: positive class name.
             positive_class_threshold: threshold for classifying the positive class in
                 binary classification (default 0.5).
@@ -94,6 +101,8 @@ class ClassificationTask(BasicTask):
         self.f1_metric_kwargs = f1_metric_kwargs
         self.enable_auroc = enable_auroc
         self.auroc_metric_kwargs = auroc_metric_kwargs
+        self.enable_prauc = enable_prauc
+        self.prauc_metric_kwargs = prauc_metric_kwargs
         self.positive_class = positive_class
         self.positive_class_threshold = positive_class_threshold
         self.enable_confusion_matrix = enable_confusion_matrix
@@ -295,6 +304,13 @@ class ClassificationTask(BasicTask):
             auroc_kwargs = {"num_classes": len(self.classes)}
             auroc_kwargs.update(self.auroc_metric_kwargs)
             metrics["auroc"] = ClassificationMetric(MulticlassAUROC(**auroc_kwargs))
+
+        if self.enable_prauc:
+            prauc_kwargs = {"num_classes": len(self.classes)}
+            prauc_kwargs.update(self.prauc_metric_kwargs)
+            metrics["prauc"] = ClassificationMetric(
+                MulticlassAveragePrecision(**prauc_kwargs)
+            )
 
         if self.enable_confusion_matrix:
             metrics["confusion_matrix"] = ClassificationMetric(
