@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>rslearn Dataset Visualization</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -91,6 +93,33 @@
             border-top: 1px solid #e0e0e0;
             font-weight: 600;
         }
+        /* Per-sample interactive location map tile. */
+        .image-container.map-tile {
+            width: 320px;
+            border: 1px solid #e0e0e0;
+            /* Don't stretch to the grid row height, which would leave an empty
+               white box below the map + label. */
+            align-self: start;
+        }
+        .sample-map {
+            width: 320px;
+            height: 260px;
+            background: #fff;
+            position: relative;
+        }
+        /* Shown when basemap tiles fail to load (usually no network to the
+           tile server); the geometry overlay still renders on top. */
+        .sample-map.tiles-failed::after {
+            content: "Basemap tiles unavailable (the server could not reach the tile source). The red geometry is still shown.";
+            position: absolute;
+            left: 0; right: 0; bottom: 0;
+            padding: 6px 8px;
+            font-size: 11px;
+            color: #fff;
+            background: rgba(192, 57, 43, 0.85);
+            z-index: 1000;
+            pointer-events: none;
+        }
         .label-text-box {
             padding: 12px 20px;
             font-size: 14px;
@@ -141,6 +170,15 @@
             {% endif %}
         </div>
         <div class="window-grid">
+            {% if window.geometry_geojson %}
+            <div class="image-container map-tile">
+                <div class="sample-map" id="map-{{ window.idx }}"
+                     data-geojson='{{ window.geometry_geojson | tojson }}'
+                     {% if window.lat is not none and window.lon is not none %}data-lat="{{ window.lat }}" data-lon="{{ window.lon }}"{% endif %}></div>
+                <div class="image-label">Location</div>
+            </div>
+            {% endif %}
+
             {% for group_name in raster_groups %}
                 {% if group_name in window.available_raster_groups %}
                 <div class="image-container">
@@ -168,5 +206,69 @@
         </div>
     </div>
     {% endfor %}
+
+    <script>
+        // Render an interactive (pan/zoom) map per sample on a clean light
+        // basemap, drawing the window geometry (polygon outline, or a marker
+        // for point geometries).
+        var sampleMaps = [];
+        document.querySelectorAll('.sample-map').forEach(function (el) {
+            var geojson;
+            try {
+                geojson = JSON.parse(el.dataset.geojson);
+            } catch (e) {
+                el.textContent = 'No geometry';
+                return;
+            }
+            var map = L.map(el);  // default controls; scroll-wheel zoom enabled
+            var tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; OpenStreetMap contributors'
+            }).addTo(map);
+            // If the browser can't fetch tiles (no internet), surface that instead
+            // of an unexplained white box.
+            tiles.on('tileerror', function () { el.classList.add('tiles-failed'); });
+            var layer = L.geoJSON(geojson, {
+                style: { color: '#e74c3c', weight: 2, fillColor: '#e74c3c', fillOpacity: 0.2 },
+                pointToLayer: function (feature, latlng) {
+                    return L.circleMarker(latlng, {
+                        radius: 6, color: '#e74c3c', fillColor: '#e74c3c', fillOpacity: 0.9
+                    });
+                }
+            }).addTo(map);
+            // Position the view; re-runnable so we can re-fit after the container
+            // is correctly sized (see invalidateSize below).
+            function fitView() {
+                if (geojson.type === 'Point') {
+                    map.setView([geojson.coordinates[1], geojson.coordinates[0]], 15);
+                } else {
+                    var bounds = layer.getBounds();
+                    if (bounds.isValid()) {
+                        // Fit the whole geometry, capping zoom so tiny footprints
+                        // still show surrounding context.
+                        map.fitBounds(bounds.pad(0.3), { maxZoom: 16 });
+                    } else if (el.dataset.lat && el.dataset.lon) {
+                        map.setView([parseFloat(el.dataset.lat), parseFloat(el.dataset.lon)], 15);
+                    } else {
+                        map.setView([0, 0], 1);
+                    }
+                }
+            }
+            fitView();
+            sampleMaps.push({ map: map, fitView: fitView });
+        });
+
+        // Leaflet often measures the container before the CSS grid finishes laying
+        // it out, so tiles only fill part of the box (controls + vectors show, but
+        // the basemap looks blank). Recompute size and re-fit once layout settles.
+        function refreshMaps() {
+            sampleMaps.forEach(function (m) {
+                m.map.invalidateSize();
+                m.fitView();
+            });
+        }
+        window.addEventListener('load', refreshMaps);
+        setTimeout(refreshMaps, 300);
+    </script>
 </body>
 </html>
