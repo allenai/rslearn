@@ -170,4 +170,5 @@ nav:
           - Foundation Models:
               - foundation_models/OlmoEarth.md
               - foundation_models/SatlasPretrain.md
+              - foundation_models/Tessera.md
   - API Reference: reference/
