@@ -56,7 +56,7 @@ dataset instead of importing it from a data source.
 [ProgrammaticWindows](examples/ProgrammaticWindows.md) shows how to programmatically
 add additional raster and vector data to a dataset. Alternatively, if you have a
 local collection of GeoTIFF or GeoJSON files, you can use the
-[LocalFiles data source](./data_sources/LocalFiles.md) to import them.
+[LocalFiles data source](./data_sources/local_files_LocalFiles.md) to import them.
 
 ## Specify the Model Configuration File
 
@@ -77,4 +77,4 @@ targets, and training hyperparameters.
 
 Getting model predictions in a new region involves creating windows corresponding to
 that region, and running the `rslearn model predict` command. The examples in the
-[README](../README.md) and [Examples](./Examples.md) show how to do that.
+[README](https://github.com/allenai/rslearn/blob/master/README.md) and [Examples](./Examples.md) show how to do that.

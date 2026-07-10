@@ -9,13 +9,6 @@ should be able to substitute any GeoJSON (although model performance will vary):
 
 https://pub-956f3eb0f5974f37b9228e0a62f449bf.r2.dev/outputs/marine/latest.geojson
 
-### Table of Contents
-
-1. [Create the Dataset and Add Windows](#create-the-dataset-and-add-windows)
-2. [Add Labels to the Dataset](#add-labels-to-the-dataset)
-3. [Train a Model](#train-a-model)
-4. [Evaluate and Visualize Outputs](#evaluate-and-visualize-outputs)
-
 ## Create the Dataset and Add Windows
 
 We will start by creating a new dataset: create a directory `/path/to/dataset` and
@@ -93,7 +86,7 @@ rslearn dataset materialize --root $DATASET_PATH --workers 8 --no-use-initial-jo
 ## Add Labels to the Dataset
 
 We now use the
-[LocalFiles data source](../DatasetConfig.md#rslearndata_sourceslocal_fileslocalfiles)
+[LocalFiles data source](../data_sources/local_files_LocalFiles.md#rslearndata_sourceslocal_fileslocalfiles)
 to incorporate the points as an additional vector layer in our dataset.
 
 Add a new layer to the dataset configuration file:

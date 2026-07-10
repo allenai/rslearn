@@ -63,7 +63,6 @@ class SimpleAttentionPool(IntermediateComponent):
                 We pool over the final dimension in the TokenFeatureMaps. If multiple maps
                 are passed, we apply the same linear layers to all of them.
             context: the model context.
-            feat_tokens (torch.Tensor): Input feature tokens of shape (B, C, H, W, N).
 
         Returns:
             torch.Tensor:
@@ -165,7 +164,6 @@ class AttentionPool(IntermediateComponent):
                 maps are passed, we apply the same attention weights (query token and linear k, v layers)
                 to all the maps.
             context: the model context.
-            feat_tokens (torch.Tensor): Input feature tokens of shape (B, C, H, W, N).
 
         Returns:
             torch.Tensor:

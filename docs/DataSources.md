@@ -19,7 +19,7 @@ detailed page with configuration options and available bands. See
 | [planetary_computer.Sentinel2](data_sources/planetary_computer_Sentinel2.md) | Microsoft Planetary Computer | L2A COGs, direct materialization |
 | [aws_open_data.Sentinel2](data_sources/aws_open_data_Sentinel2.md) | AWS (Element 84) | L1C and L2A |
 | [aws_sentinel2_element84.Sentinel2](data_sources/aws_sentinel2_element84_Sentinel2.md) | AWS (Element 84) | L2A COGs, direct materialization |
-| [copernicus.Sentinel2](data_sources/copernicus.md#rslearndatasourcescopernicussentinel2) | ESA Copernicus OData API | L1C and L2A |
+| [copernicus.Sentinel2](data_sources/copernicus.md#rslearndata_sourcescopernicussentinel2) | ESA Copernicus OData API | L1C and L2A |
 | [earthdaily.Sentinel2L2A](data_sources/earthdaily_Sentinel2L2A.md) | EarthDaily | PC-compatible L2A (`sentinel-2-l2a`), same band names as `planetary_computer.Sentinel2` |
 | [earthdaily.Sentinel2C1L2A](data_sources/earthdaily_Sentinel2C1L2A.md) | EarthDaily | Collection 1 L2A (`sentinel-2-c1-l2a`), scale/offset reflectance |
 | [earthdaily.Sentinel2EDACloudMask](data_sources/earthdaily_Sentinel2EDACloudMask.md) | EarthDaily | Sentinel-2 EDA cloud mask (`sentinel-2-eda-cloud-mask`), categorical cloud-mask band |
@@ -31,7 +31,7 @@ detailed page with configuration options and available bands. See
 |---|---|---|
 | [planetary_computer.Sentinel1](data_sources/planetary_computer_Sentinel1.md) | Microsoft Planetary Computer | terrain-corrected COGs, direct materialization |
 | [aws_sentinel1.Sentinel1](data_sources/aws_sentinel1_Sentinel1.md) | AWS (Sinergise) | GRD IW DV |
-| [copernicus.Sentinel1](data_sources/copernicus.md#rslearndatasourcescopernicussentinel1) | ESA Copernicus OData API | IW GRDH |
+| [copernicus.Sentinel1](data_sources/copernicus.md#rslearndata_sourcescopernicussentinel1) | ESA Copernicus OData API | IW GRDH |
 
 #### Landsat
 
@@ -46,11 +46,11 @@ detailed page with configuration options and available bands. See
 
 | Data Source | Provider | Notes |
 |---|---|---|
-| [planetary_computer.Hls2S30](data_sources/planetary_computer_Hls2.md#rslearndatasourcesplanetary_computerhls2s30) | Microsoft Planetary Computer | HLS v2 Sentinel-2 (30m) |
-| [planetary_computer.Hls2L30](data_sources/planetary_computer_Hls2.md#rslearndatasourcesplanetary_computerhls2l30) | Microsoft Planetary Computer | HLS v2 Landsat (30m) |
-| [nasa_hls.Hls2](data_sources/nasa_hls_Hls2.md#rslearndatasourcesnasa_hlshls2) | NASA LP DAAC | Combined semantic-band HLS v2.0 time-series across Sentinel and Landsat |
-| [nasa_hls.Hls2S30](data_sources/nasa_hls_Hls2.md#rslearndatasourcesnasa_hlshls2s30) | NASA LP DAAC | HLSS30 v2.0, direct materialization via protected S3 |
-| [nasa_hls.Hls2L30](data_sources/nasa_hls_Hls2.md#rslearndatasourcesnasa_hlshls2l30) | NASA LP DAAC | HLSL30 v2.0, direct materialization via protected S3 |
+| [planetary_computer.Hls2S30](data_sources/planetary_computer_Hls2.md#rslearndata_sourcesplanetary_computerhls2s30) | Microsoft Planetary Computer | HLS v2 Sentinel-2 (30m) |
+| [planetary_computer.Hls2L30](data_sources/planetary_computer_Hls2.md#rslearndata_sourcesplanetary_computerhls2l30) | Microsoft Planetary Computer | HLS v2 Landsat (30m) |
+| [nasa_hls.Hls2](data_sources/nasa_hls_Hls2.md#rslearndata_sourcesnasa_hlshls2) | NASA LP DAAC | Combined semantic-band HLS v2.0 time-series across Sentinel and Landsat |
+| [nasa_hls.Hls2S30](data_sources/nasa_hls_Hls2.md#rslearndata_sourcesnasa_hlshls2s30) | NASA LP DAAC | HLSS30 v2.0, direct materialization via protected S3 |
+| [nasa_hls.Hls2L30](data_sources/nasa_hls_Hls2.md#rslearndata_sourcesnasa_hlshls2l30) | NASA LP DAAC | HLSL30 v2.0, direct materialization via protected S3 |
 
 #### NAIP
 

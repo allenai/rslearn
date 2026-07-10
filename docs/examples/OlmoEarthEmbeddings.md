@@ -3,7 +3,7 @@
 This tutorial shows how to compute OlmoEarth embeddings on a target location and time
 of interest. We will use rslearn to materialize satellite images that we will then pass
 to the OlmoEarth encoder. For an introduction to rslearn, see
-[the main README](../../README.md) and [CoreConcepts](../CoreConcepts.md).
+[the main README](https://github.com/allenai/rslearn/blob/master/README.md) and [CoreConcepts](../CoreConcepts.md).
 
 We proceed in three steps:
 

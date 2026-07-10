@@ -3,14 +3,6 @@
 In this example, we show how to create windows programmatically. This is useful when the
 `rslearn dataset add_windows` command does not offer sufficient flexibility.
 
-### Table of Contents
-
-1. [Quickstart: Create One Window](#quickstart-create-one-window)
-2. [EuroSAT Conversion Example](#eurosat-conversion-example)
-   1. [Convert EuroSAT to an rslearn Dataset](#convert-eurosat-to-an-rslearn-dataset)
-   2. [Fine-tune OlmoEarth on EuroSAT](#fine-tune-olmoearth-on-eurosat)
-   3. [Test with More Sentinel-2 Images](#test-with-more-sentinel-2-images)
-
 ## Quickstart: Create One Window
 
 Here is a quick example of creating a window of a certain size centered at a longitude
