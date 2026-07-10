@@ -84,9 +84,7 @@ nav:
   - Home:
       - index.md
       - Core Concepts: CoreConcepts.md
-      - Contributing:
-          - Development: Development.md
-          - Releasing: Releasing.md
+      - Development: Development.md
   - Usage:
       - Usage.md
       - Adding Windows: DatasetAddWindows.md
