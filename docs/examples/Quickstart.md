@@ -13,34 +13,34 @@ directory `/path/to/dataset` and corresponding configuration file at
 
 ```json
 {
-    "layers": {
-        "sentinel2": {
-            "type": "raster",
-            "band_sets": [
-                {
-                    "dtype": "uint8",
-                    "bands": ["R", "G", "B"]
-                },
-                {
-                    "dtype": "uint16",
-                    "bands": ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B11", "B12"]
-                }
-            ],
-            "data_source": {
-                "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
-                "init_args": {
-                    "cache_dir": "cache/planetary_computer",
-                    "harmonize": true,
-                    "sort_by": "eo:cloud_cover"
-                },
-                "ingest": false,
-                "query_config": {
-                    "max_matches": 1,
-                    "space_mode": "MOSAIC"
-                }
-            }
+  "layers": {
+    "sentinel2": {
+      "type": "raster",
+      "band_sets": [
+        {
+          "dtype": "uint8",
+          "bands": ["R", "G", "B"]
+        },
+        {
+          "dtype": "uint16",
+          "bands": ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B11", "B12"]
         }
+      ],
+      "data_source": {
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+        "init_args": {
+          "cache_dir": "cache/planetary_computer",
+          "harmonize": true,
+          "sort_by": "eo:cloud_cover"
+        },
+        "ingest": false,
+        "query_config": {
+          "max_matches": 1,
+          "space_mode": "MOSAIC"
+        }
+      }
     }
+  }
 }
 ```
 
@@ -134,24 +134,24 @@ the dataset `config.json` with a new layer:
 
 ```jsonc
 "layers": {
-    "sentinel2": {
-        # ...
-    },
-    "worldcover": {
-        "type": "raster",
-        "band_sets": [{
-            "dtype": "uint8",
-            "bands": ["B1"]
-        }],
-        "resampling_method": "nearest",
-        "data_source": {
-            "class_path": "rslearn.data_sources.worldcover.WorldCover",
-            "init_args": {
-                "metadata_cache_dir": "cache/worldcover"
-            },
-            "ingest": false
-        }
+  "sentinel2": {
+    # ...
+  },
+  "worldcover": {
+    "type": "raster",
+    "band_sets": [{
+      "dtype": "uint8",
+      "bands": ["B1"]
+    }],
+    "resampling_method": "nearest",
+    "data_source": {
+      "class_path": "rslearn.data_sources.worldcover.WorldCover",
+      "init_args": {
+        "metadata_cache_dir": "cache/worldcover"
+      },
+      "ingest": false
     }
+  }
 },
 # ...
 ```
@@ -365,19 +365,19 @@ dataset configuration so it specifies the layer:
 
 ```jsonc
 "layers": {
-    "sentinel2": {
-        # ...
-    },
-    "worldcover": {
-        # ...
-    },
-    "output": {
-        "type": "raster",
-        "band_sets": [{
-            "dtype": "uint8",
-            "bands": ["output"]
-        }]
-    }
+  "sentinel2": {
+    # ...
+  },
+  "worldcover": {
+    # ...
+  },
+  "output": {
+    "type": "raster",
+    "band_sets": [{
+      "dtype": "uint8",
+      "bands": ["output"]
+    }]
+  }
 },
 ```
 
@@ -582,25 +582,25 @@ customizing the `query_config` section of the `sentinel2` layer:
 
 ```jsonc
 "sentinel2": {
-    "type": "raster",
-    "band_sets": [
-        {"dtype": "uint8", "bands": ["R", "G", "B"]},
-        {"dtype": "uint16", "bands": ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B11", "B12"]}
-    ],
-    "data_source": {
-        "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
-        "init_args": {
-            "cache_dir": "cache/planetary_computer",
-            "harmonize": true,
-            "sort_by": "eo:cloud_cover"
-        },
-        "ingest": false,
-        "query_config": {
-            "max_matches": 3,
-            "period_duration": "30d",
-            "space_mode": "MOSAIC"
-        }
+  "type": "raster",
+  "band_sets": [
+    {"dtype": "uint8", "bands": ["R", "G", "B"]},
+    {"dtype": "uint16", "bands": ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B11", "B12"]}
+  ],
+  "data_source": {
+    "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+    "init_args": {
+      "cache_dir": "cache/planetary_computer",
+      "harmonize": true,
+      "sort_by": "eo:cloud_cover"
+    },
+    "ingest": false,
+    "query_config": {
+      "max_matches": 3,
+      "period_duration": "30d",
+      "space_mode": "MOSAIC"
     }
+  }
 }
 ```
 

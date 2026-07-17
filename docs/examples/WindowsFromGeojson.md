@@ -16,23 +16,23 @@ create the dataset configuration file at `/path/to/dataset/config.json` as follo
 
 ```json
 {
-    "layers": {
-        "sentinel2": {
-            "type": "raster",
-            "band_sets": [{
-                "dtype": "uint8",
-                "bands": ["R", "G", "B"]
-            }],
-            "data_source": {
-                "class_path": "rslearn.data_sources.gcp_public_data.Sentinel2",
-                "init_args": {
-                  "index_cache_dir": "cache/sentinel2/",
-                  "sort_by": "cloud_cover",
-                  "use_rtree_index": false
-                }
-            }
+  "layers": {
+    "sentinel2": {
+      "type": "raster",
+      "band_sets": [{
+        "dtype": "uint8",
+        "bands": ["R", "G", "B"]
+      }],
+      "data_source": {
+        "class_path": "rslearn.data_sources.gcp_public_data.Sentinel2",
+        "init_args": {
+          "index_cache_dir": "cache/sentinel2/",
+          "sort_by": "cloud_cover",
+          "use_rtree_index": false
         }
+      }
     }
+  }
 }
 ```
 
@@ -93,22 +93,22 @@ Add a new layer to the dataset configuration file:
 
 ```json
 {
-    "layers": {
-        "sentinel2": { ... },
-        "label": {
-            "type": "vector",
-            "format": {
-                "name": "geojson",
-                "coordinate_mode": "crs"
-            },
-            "data_source": {
-                "class_path": "rslearn.data_sources.local_files.LocalFiles",
-                "init_args": {
-                  "src_dir": "source_data/all/"
-                }
-            }
+  "layers": {
+    "sentinel2": { ... },
+    "label": {
+      "type": "vector",
+      "format": {
+        "name": "geojson",
+        "coordinate_mode": "crs"
+      },
+      "data_source": {
+        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+        "init_args": {
+          "src_dir": "source_data/all/"
         }
+      }
     }
+  }
 }
 ```
 
