@@ -199,7 +199,7 @@ model:
         encoder:
           # This applies the OlmoEarth encoder on the inputs. We use the v1.2 Nano
           # model here since it is fast; larger models generally give better accuracy.
-          # Switch to TINY or BASE for better results.
+          # Switch to TINY, SMALL, or BASE for better results.
           - class_path: rslearn.models.olmoearth_pretrain.model.OlmoEarth
             init_args:
               model_id: OLMOEARTH_V1_2_NANO
@@ -212,7 +212,7 @@ model:
         decoder:
           # The UNetDecoder upsamples the OlmoEarth features (which are at 1/patch_size
           # resolution) back to the input resolution. The OlmoEarth v1.2 Nano embedding
-          # size is 128. Increase to 192 for TINY or 768 for BASE.
+          # size is 128. Increase to 192 for TINY, 384 for SMALL, or 768 for BASE.
           - class_path: rslearn.models.unet.UNetDecoder
             init_args:
               in_channels: [[8, 128]]
@@ -228,7 +228,7 @@ model:
       class_path: rslearn.models.olmoearth_pretrain.optimizer.LayerDecayAdamW
       init_args:
         lr: 0.0001
-        # num_layers must match the encoder depth: 4 for Nano, 12 for Tiny and Base.
+        # num_layers must match the encoder depth: 4 for Nano, 12 for Tiny/Small/Base.
         num_layers: 4
 data:
   class_path: rslearn.train.data_module.RslearnDataModule
