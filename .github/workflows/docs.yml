@@ -1,0 +1,48 @@
+name: 'docs'
+on:
+  release:
+    types:
+      - 'released'
+  workflow_dispatch: {}
+concurrency:
+  group: 'pages'
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: 'ubuntu-latest'
+    permissions:
+      contents: 'read'
+    steps:
+      - uses: 'actions/checkout@v5'
+      - uses: 'actions/setup-python@v5'
+        with:
+          python-version: '3.12'
+      - name: 'install docs dependencies'
+        # mkdocstrings/griffe analyze the source statically, so rslearn itself
+        # does not need to be installed. Installing just the doc tools keeps the
+        # build fast (avoids pulling in torch and other heavy runtime deps).
+        run: >-
+          pip install
+          "mkdocs-material>=9.5"
+          "mkdocstrings[python]>=0.26"
+          "mkdocs-gen-files>=0.5"
+          "mkdocs-literate-nav>=0.6"
+          "mkdocs-section-index>=0.3"
+      - name: 'build site'
+        run: 'mkdocs build --strict'
+      - uses: 'actions/upload-pages-artifact@v3'
+        with:
+          path: 'site'
+  deploy:
+    needs:
+      - 'build'
+    permissions:
+      pages: 'write'
+      id-token: 'write'
+    environment:
+      name: 'github-pages'
+      url: '${{ steps.deployment.outputs.page_url }}'
+    runs-on: 'ubuntu-latest'
+    steps:
+      - id: 'deployment'
+        uses: 'actions/deploy-pages@v4'

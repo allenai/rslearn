@@ -20,7 +20,7 @@ The default window storage is file-based:
 }
 ```
 
-[DatasetFormat.md](./DatasetFormat.md) details the file structure. `FileWindowStorage` works
+[DatasetFormat.md](../DatasetFormat.md) details the file structure. `FileWindowStorage` works
 across all filesystem types (e.g. local filesystem but also object storage), and doesn't need
 a database to be set up, but it is slow when there are a lot of windows because it stores the
 information for each window in a separate file (so many files need to be read to list windows).

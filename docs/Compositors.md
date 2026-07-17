@@ -16,9 +16,9 @@ See [Dataset Configuration](DatasetConfig.md) for where this field appears.
 | [MEAN](compositors/built_in.md#mean) | Per-pixel mean across valid pixels. |
 | [MEDIAN](compositors/built_in.md#median) | Per-pixel median across valid pixels. |
 | [SPATIAL_MOSAIC_TEMPORAL_STACK](compositors/built_in.md#spatial_mosaic_temporal_stack) | Spatial first-valid per timestep, stacked along T. |
-| [TEMPORAL_MEAN](compositors/built_in.md#temporal_reducers) | Temporal reduction over stacked timesteps. |
-| [TEMPORAL_MAX](compositors/built_in.md#temporal_reducers) | Temporal reduction over stacked timesteps. |
-| [TEMPORAL_MIN](compositors/built_in.md#temporal_reducers) | Temporal reduction over stacked timesteps. |
+| [TEMPORAL_MEAN](compositors/built_in.md#temporal-reducers) | Temporal reduction over stacked timesteps. |
+| [TEMPORAL_MAX](compositors/built_in.md#temporal-reducers) | Temporal reduction over stacked timesteps. |
+| [TEMPORAL_MIN](compositors/built_in.md#temporal-reducers) | Temporal reduction over stacked timesteps. |
 
 ### Custom Cloud-Aware Compositors
 

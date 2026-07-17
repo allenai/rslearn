@@ -750,7 +750,7 @@ model:
           - ...
 ```
 
-The [main README](../README.md) has an example of using SimpleTimeSeries with
+The [main README](https://github.com/allenai/rslearn/blob/master/README.md) has an example of using SimpleTimeSeries with
 SatlasPretrain.
 
 ## Intermediate Components

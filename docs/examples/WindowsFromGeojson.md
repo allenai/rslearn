@@ -7,14 +7,7 @@ the points, using a bounding box object detection head.
 We used this GeoJSON of marine infrastructure while creating this example, but you
 should be able to substitute any GeoJSON (although model performance will vary):
 
-https://pub-956f3eb0f5974f37b9228e0a62f449bf.r2.dev/outputs/marine/latest.geojson
-
-### Table of Contents
-
-1. [Create the Dataset and Add Windows](#create-the-dataset-and-add-windows)
-2. [Add Labels to the Dataset](#add-labels-to-the-dataset)
-3. [Train a Model](#train-a-model)
-4. [Evaluate and Visualize Outputs](#evaluate-and-visualize-outputs)
+https://storage.googleapis.com/satlas-explorer-public/outputs/marine/latest.geojson
 
 ## Create the Dataset and Add Windows
 
@@ -23,23 +16,23 @@ create the dataset configuration file at `/path/to/dataset/config.json` as follo
 
 ```json
 {
-    "layers": {
-        "sentinel2": {
-            "type": "raster",
-            "band_sets": [{
-                "dtype": "uint8",
-                "bands": ["R", "G", "B"]
-            }],
-            "data_source": {
-                "class_path": "rslearn.data_sources.gcp_public_data.Sentinel2",
-                "init_args": {
-                  "index_cache_dir": "cache/sentinel2/",
-                  "sort_by": "cloud_cover",
-                  "use_rtree_index": false
-                }
-            }
+  "layers": {
+    "sentinel2": {
+      "type": "raster",
+      "band_sets": [{
+        "dtype": "uint8",
+        "bands": ["R", "G", "B"]
+      }],
+      "data_source": {
+        "class_path": "rslearn.data_sources.gcp_public_data.Sentinel2",
+        "init_args": {
+          "index_cache_dir": "cache/sentinel2/",
+          "sort_by": "cloud_cover",
+          "use_rtree_index": false
         }
+      }
     }
+  }
 }
 ```
 
@@ -49,7 +42,7 @@ Download the GeoJSON data to a subfolder within the dataset directory:
 export DATASET_PATH=/path/to/dataset
 mkdir -p $DATASET_PATH/source_data/all/
 mkdir -p $DATASET_PATH/source_data/subset/
-wget https://pub-956f3eb0f5974f37b9228e0a62f449bf.r2.dev/outputs/marine/latest.geojson -O $DATASET_PATH/source_data/all/latest.geojson
+wget https://storage.googleapis.com/satlas-explorer-public/outputs/marine/latest.geojson -O $DATASET_PATH/source_data/all/latest.geojson
 ```
 
 We sampled 100 features to use, but you can try using the full GeoJSON if you like.
@@ -93,29 +86,29 @@ rslearn dataset materialize --root $DATASET_PATH --workers 8 --no-use-initial-jo
 ## Add Labels to the Dataset
 
 We now use the
-[LocalFiles data source](../DatasetConfig.md#rslearndata_sourceslocal_fileslocalfiles)
+[LocalFiles data source](../data_sources/local_files_LocalFiles.md#rslearndata_sourceslocal_fileslocalfiles)
 to incorporate the points as an additional vector layer in our dataset.
 
 Add a new layer to the dataset configuration file:
 
 ```json
 {
-    "layers": {
-        "sentinel2": { ... },
-        "label": {
-            "type": "vector",
-            "format": {
-                "name": "geojson",
-                "coordinate_mode": "crs"
-            },
-            "data_source": {
-                "class_path": "rslearn.data_sources.local_files.LocalFiles",
-                "init_args": {
-                  "src_dir": "source_data/all/"
-                }
-            }
+  "layers": {
+    "sentinel2": { ... },
+    "label": {
+      "type": "vector",
+      "format": {
+        "name": "geojson",
+        "coordinate_mode": "crs"
+      },
+      "data_source": {
+        "class_path": "rslearn.data_sources.local_files.LocalFiles",
+        "init_args": {
+          "src_dir": "source_data/all/"
         }
+      }
     }
+  }
 }
 ```
 

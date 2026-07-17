@@ -4,7 +4,7 @@ In this example, we use rslearn to fine-tune [OlmoEarth](https://github.com/alle
 for segmenting land cover and crop type categories. We use labels from the USDA
 Cropland Data Layer. For the inputs, we use four Sentinel-2 images (one per month).
 
-If you are new to rslearn, you may want to read [the main README](../../README.md) or
+If you are new to rslearn, you may want to read [the main README](https://github.com/allenai/rslearn/blob/master/README.md) or
 [CoreConcepts](../CoreConcepts.md) first.
 
 There will be three steps:
@@ -254,7 +254,7 @@ last saved checkpoint.
 
 ## Apply the Model
 
-Similar to in the [main README](../../README.md), we can now apply the model on a new
+Similar to in the [main README](https://github.com/allenai/rslearn/blob/master/README.md), we can now apply the model on a new
 window.
 
 We create a big window northeast of Bellingham, WA:

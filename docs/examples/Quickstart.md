@@ -1,19 +1,9 @@
-## Introductory Example
+## Quickstart
 
 This is an example of building a remote sensing dataset, and then training a model
-on that dataset, using rslearn. Specifically, we will train a model that inputs
-Sentinel-2 images and predicts land cover through a semantic segmentation task.
-
-### Table of Contents
-
-- [Creating Windows and Obtaining Satellite Imagery](#creating-windows-and-obtaining-satellite-imagery)
-- [Adding Land Cover Labels](#adding-land-cover-labels)
-- [Training a Model](#training-a-model)
-- [Apply the Model](#apply-the-model)
-- [Defining Train and Validation Splits](#defining-train-and-validation-splits)
-- [Visualizing with `model test`](#visualizing-with-model-test)
-- [Checkpoint and Logging Management](#checkpoint-and-logging-management)
-- [Inputting Multiple Sentinel-2 Images](#inputting-multiple-sentinel-2-images)
+on that dataset, using rslearn. Specifically, we will fine-tune the OlmoEarth
+foundation model to predict land cover from Sentinel-2 images through a semantic
+segmentation task.
 
 ## Creating Windows and Obtaining Satellite Imagery
 
@@ -23,64 +13,85 @@ directory `/path/to/dataset` and corresponding configuration file at
 
 ```json
 {
-    "layers": {
-        "sentinel2": {
-            "type": "raster",
-            "band_sets": [{
-                "dtype": "uint8",
-                "bands": ["R", "G", "B"]
-            }],
-            "data_source": {
-                "class_path": "rslearn.data_sources.gcp_public_data.Sentinel2",
-                "init_args": {
-                    "index_cache_dir": "cache/sentinel2/",
-                    "sort_by": "cloud_cover",
-                    "use_rtree_index": false
-                }
-            }
+  "layers": {
+    "sentinel2": {
+      "type": "raster",
+      "band_sets": [
+        {
+          "dtype": "uint8",
+          "bands": ["R", "G", "B"]
+        },
+        {
+          "dtype": "uint16",
+          "bands": ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B11", "B12"]
         }
+      ],
+      "data_source": {
+        "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+        "init_args": {
+          "cache_dir": "cache/planetary_computer",
+          "harmonize": true,
+          "sort_by": "eo:cloud_cover"
+        },
+        "ingest": false,
+        "query_config": {
+          "max_matches": 1,
+          "space_mode": "MOSAIC"
+        }
+      }
     }
+  }
 }
 ```
 
 Here, we have initialized an empty dataset and defined a raster layer called
-`sentinel2`. Because it specifies a data source, it will be populated automatically. In
-particular, the data will be sourced from a
-[public Google Cloud Storage bucket containing Sentinel-2 imagery](https://cloud.google.com/storage/docs/public-datasets/sentinel-2).
-The `sort_by` option sorts scenes in ascending order by cloud cover, so we will end up
-choosing the scenes with minimal cloud cover.
+`sentinel2`. Because it specifies a data source, it will be populated automatically. The
+imagery comes from Sentinel-2 L2A scenes on
+[Microsoft Planetary Computer](https://planetarycomputer.microsoft.com/dataset/sentinel-2-l2a),
+which are stored as Cloud-Optimized GeoTIFFs (COGs). Because COGs can be read directly,
+rslearn can crop the imagery straight from the scenes during materialization, so we set
+`"ingest": false` and skip the ingest step entirely (which would otherwise download entire
+Sentinel-2 scenes first). The `sort_by` option selects the least cloudy scene, and
+`space_mode: MOSAIC` mosaics multiple scenes together when a single one does not cover the whole window.
+
+We define two band sets: an 8-bit `R`, `G`, `B` band set that is convenient for
+visualization, and a 16-bit band set with the 12 spectral bands that we will feed to
+the model.
 
 Next, let's create our spatiotemporal windows. These will correspond to training
 examples.
 
 ```
 export DATASET_PATH=/path/to/dataset
-rslearn dataset add_windows --root $DATASET_PATH --group default --utm --resolution 10 --grid_size 128 --src_crs EPSG:4326 --box=-122.6901,47.2079,-121.4955,47.9403 --start 2024-06-01T00:00:00+00:00 --end 2024-08-01T00:00:00+00:00 --name seattle
+rslearn dataset add_windows --root $DATASET_PATH --group default --utm --resolution 10 --grid_size 128 --src_crs EPSG:4326 --box=-122.45,47.55,-122.30,47.67 --start 2024-06-01T00:00:00+00:00 --end 2024-08-01T00:00:00+00:00 --name seattle
 ```
 
 This creates windows along a 128x128 grid in the specified projection (i.e.,
 appropriate UTM zone for the location with 10 m/pixel resolution) covering the
-specified bounding box, which is centered at Seattle.
+specified bounding box over Seattle. We use a small bounding box here so that we only
+create 110 windows, which keeps this quickstart fast to run; for better results, use a
+larger bounding box to create more training examples, e.g.
+`--box=-122.7,47.2,-121.5,48.0`.
 
-We can now obtain the Sentinel-2 images by running prepare, ingest, and materialize.
+We can now obtain the Sentinel-2 images. Because the Planetary Computer scenes are
+Cloud-Optimized GeoTIFFs, we can materialize the imagery directly and skip the ingest
+step.
 
 * Prepare: lookup items (in this case, Sentinel-2 scenes) in the data source that match with the spatiotemporal windows we created.
-* Ingest: retrieve those items. This step populates the `tiles` directory within the dataset.
+* Ingest (skipped since the source images are already COGs): download those items locally and convert to formats that support random access.
 * Materialize: crop/mosaic the items to align with the windows. This populates the `layers` folder in each window directory.
 
 ```
-rslearn dataset prepare --root $DATASET_PATH --workers 32 --batch-size 8
-rslearn dataset ingest --root $DATASET_PATH --workers 32 --no-use-initial-job --jobs-per-process 1
-rslearn dataset materialize --root $DATASET_PATH --workers 32 --no-use-initial-job
+rslearn dataset prepare --root $DATASET_PATH
+rslearn dataset materialize --root $DATASET_PATH
 ```
-
-For ingestion, you may need to reduce the number of workers depending on the available
-memory on your system.
 
 You should now be able to open the GeoTIFF images. Let's find the window that
 corresponds to downtown Seattle:
 
 ```python
+import os
+
 import shapely
 from rslearn.const import WGS84_PROJECTION
 from rslearn.dataset import Dataset
@@ -91,7 +102,7 @@ from upath import UPath
 downtown_seattle = shapely.Point(-122.333, 47.606)
 
 # Iterate over the windows and find the closest one.
-dataset = Dataset(path=UPath("/path/to/dataset"))
+dataset = Dataset(path=UPath(os.environ["DATASET_PATH"]))
 best_window_name = None
 best_distance = None
 for window in dataset.load_windows(workers=32):
@@ -117,48 +128,40 @@ qgis $DATASET_PATH/windows/default/seattle_54912_-527360/layers/sentinel2/R_G_B/
 Before we can train a land cover prediction model, we need labels. Here, we will use
 the ESA WorldCover land cover map as labels.
 
-Start by downloading the WorldCover data from the [ESA WorldCover S3 bucket](https://registry.opendata.aws/esa-worldcover-vito/):
-
-```
-wget https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/macrotiles/ESA_WorldCover_10m_2021_v200_60deg_macrotile_N30W180.zip
-mkdir world_cover_tifs
-unzip ESA_WorldCover_10m_2021_v200_60deg_macrotile_N30W180.zip -d world_cover_tifs/
-```
-
-It would require some work to write a script to re-project and crop these GeoTIFFs so
-that they align with the windows we have previously defined (and the Sentinel-2 images
-we have already ingested). We can use the LocalFiles data source to have rslearn
-automate this process. Update the dataset `config.json` with a new layer:
+rslearn has a built-in WorldCover data source that reads directly from the public
+Cloud-Optimized GeoTIFFs, so there is nothing to download or reproject manually. Update
+the dataset `config.json` with a new layer:
 
 ```jsonc
 "layers": {
-    "sentinel2": {
-        # ...
-    },
-    "worldcover": {
-        "type": "raster",
-        "band_sets": [{
-            "dtype": "uint8",
-            "bands": ["B1"]
-        }],
-        "resampling_method": "nearest",
-        "data_source": {
-            "class_path": "rslearn.data_sources.local_files.LocalFiles",
-            "init_args": {
-                "src_dir": "file:///path/to/world_cover_tifs/"
-            }
-        }
+  "sentinel2": {
+    # ...
+  },
+  "worldcover": {
+    "type": "raster",
+    "band_sets": [{
+      "dtype": "uint8",
+      "bands": ["B1"]
+    }],
+    "resampling_method": "nearest",
+    "data_source": {
+      "class_path": "rslearn.data_sources.worldcover.WorldCover",
+      "init_args": {
+        "metadata_cache_dir": "cache/worldcover"
+      },
+      "ingest": false
     }
+  }
 },
 # ...
 ```
 
-Repeat the materialize process so we populate the data for this new layer:
+Like the Sentinel-2 layer, WorldCover supports direct materialization, so we just
+prepare and materialize to populate the new layer:
 
 ```
-rslearn dataset prepare --root $DATASET_PATH --workers 32 --batch-size 8
-rslearn dataset ingest --root $DATASET_PATH --workers 32 --no-use-initial-job --jobs-per-process 1
-rslearn dataset materialize --root $DATASET_PATH --workers 32 --no-use-initial-job
+rslearn dataset prepare --root $DATASET_PATH
+rslearn dataset materialize --root $DATASET_PATH
 ```
 
 We can visualize both the GeoTIFFs together in qgis:
@@ -167,13 +170,20 @@ We can visualize both the GeoTIFFs together in qgis:
 qgis $DATASET_PATH/windows/default/seattle_54912_-527360/layers/*/*/geotiff.tif
 ```
 
+<p float="left">
+<img src="seattle_sentinel2_rgb.png" alt="Sentinel-2 RGB image of downtown Seattle" width="45%" />
+<img src="seattle_worldcover.png" alt="ESA WorldCover land cover labels for downtown Seattle" width="45%" />
+</p>
+
+*Sentinel-2 RGB image (left) and corresponding ESA WorldCover labels (right).*
+
 We can also visualize samples using the visualization module:
 ```
 python -m rslearn.vis.vis_server \
     $DATASET_PATH \
-    --raster_groups sentinel2 label_raster \
-    --bands '{"sentinel2": ["B04", "B03", "B02"], "label_raster": ["class"]}' \
-    --raster_render '{"sentinel2": {"name": "sentinel2_rgb"}, "label_raster": {"name": "classes"}}' \
+    --raster_groups sentinel2 worldcover \
+    --bands '{"sentinel2": ["B04", "B03", "B02"], "worldcover": ["B1"]}' \
+    --raster_render '{"sentinel2": {"name": "sentinel2_rgb"}, "worldcover": {"name": "classes"}}' \
     --max_samples 100 \
     --port 8000
 ```
@@ -187,81 +197,103 @@ model:
   class_path: rslearn.train.lightning_module.RslearnLightningModule
   init_args:
     # This part defines the model architecture.
-    # Essentially we apply the SatlasPretrain Sentinel-2 backbone with a UNet decoder
-    # that terminates at a segmentation prediction head.
-    # The backbone outputs four feature maps at different scales, and the UNet uses
-    # these to compute a feature map at the input scale.
-    # Finally the segmentation head applies per-pixel softmax to compute the land
-    # cover class.
+    # We apply the OlmoEarth encoder, followed by a UNet decoder that upsamples the
+    # features back to the input resolution, and a segmentation head that predicts a
+    # land cover class for each pixel.
     model:
       class_path: rslearn.models.singletask.SingleTaskModel
       init_args:
         encoder:
-          - class_path: rslearn.models.satlaspretrain.SatlasPretrain
+          # This applies the OlmoEarth encoder on the inputs. We use the v1.2 Nano
+          # model here since it is fast; larger models generally give better accuracy.
+          # Switch to TINY, SMALL, or BASE for better results.
+          - class_path: rslearn.models.olmoearth_pretrain.model.OlmoEarth
             init_args:
-              model_identifier: "Sentinel2_SwinB_SI_RGB"
+              model_id: OLMOEARTH_V1_2_NANO
+              # The patch size can be set between 1 and 8. Lower patch sizes are slower
+              # but produce finer feature maps.
+              patch_size: 8
+              # Disable autocasting (which defaults to bfloat16) so the model can run
+              # on CPU.
+              autocast_dtype: null
         decoder:
+          # The UNetDecoder upsamples the OlmoEarth features (which are at 1/patch_size
+          # resolution) back to the input resolution. The OlmoEarth v1.2 Nano embedding
+          # size is 128. Increase to 192 for TINY, 384 for SMALL, or 768 for BASE.
           - class_path: rslearn.models.unet.UNetDecoder
             init_args:
-              in_channels: [[4, 128], [8, 256], [16, 512], [32, 1024]]
-              # We use 101 classes because the WorldCover classes are 10, 20, 30, 40
-              # 50, 60, 70, 80, 90, 95, 100.
-              # We could process the GeoTIFFs to collapse them to 0-10 (the 11 actual
-              # classes) but the model will quickly learn that the intermediate
-              # values are never used.
+              in_channels: [[8, 128]]
               out_channels: 101
-              conv_layers_per_resolution: 2
+              conv_layers_per_resolution: 1
+              num_channels: {8: 512, 4: 512, 2: 256, 1: 128}
+          # The SegmentationHead computes softmax and cross entropy loss.
+          # We use 101 classes because the WorldCover class IDs go up to 100.
           - class_path: rslearn.train.tasks.segmentation.SegmentationHead
-    # Remaining parameters in RslearnLightningModule define different aspects of the
-    # training process like initial learning rate.
-    lr: 0.0001
+    # When fine-tuning OlmoEarth we recommend LayerDecayAdamW, which applies a lower
+    # learning rate to earlier encoder layers to preserve pre-trained features.
+    optimizer:
+      class_path: rslearn.models.olmoearth_pretrain.optimizer.LayerDecayAdamW
+      init_args:
+        lr: 0.0001
+        # num_layers must match the encoder depth: 4 for Nano, 12 for Tiny/Small/Base.
+        num_layers: 4
 data:
   class_path: rslearn.train.data_module.RslearnDataModule
   init_args:
     path: ${DATASET_PATH}
     # This defines the layers that should be read for each window.
-    # The key ("image" / "targets") is what the data will be called in the model,
-    # while the layers option specifies which layers will be read.
+    # The key ("sentinel2_l2a" / "targets") is what the data will be called in the
+    # model, while the layers option specifies which dataset layers will be read.
     inputs:
+      # OlmoEarth expects the Sentinel-2 input to be called "sentinel2_l2a".
+      sentinel2_l2a:
+        data_type: "raster"
+        layers: ["sentinel2"]
+        # This is the 12-band order expected by OlmoEarth.
+        bands: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
+        passthrough: true
+        dtype: FLOAT32
+      # We also load the uint8 RGB images for visualization.
       image:
         data_type: "raster"
         layers: ["sentinel2"]
         bands: ["R", "G", "B"]
         passthrough: true
+        dtype: FLOAT32
       targets:
         data_type: "raster"
         layers: ["worldcover"]
         bands: ["B1"]
+        dtype: FLOAT32
         is_target: true
     task:
       # Train for semantic segmentation.
-      # The remap option is only used when visualizing outputs during testing.
       class_path: rslearn.train.tasks.segmentation.SegmentationTask
       init_args:
         num_classes: 101
-        remap_values: [[0, 1], [0, 255]]
     batch_size: 8
     num_workers: 32
     # These define different options for different phases/splits, like training,
     # validation, and testing.
-    # Here we use the same transform across splits except training where we add a
-    # flipping augmentation.
+    # OlmoEarthNormalize converts the raw Sentinel-2 reflectance values into the
+    # normalized inputs expected by OlmoEarth.
     # For now we are using the same windows for training and validation.
     default_config:
+      groups: ["default"]
       transforms:
-        - class_path: rslearn.train.transforms.normalize.Normalize
+        - class_path: rslearn.models.olmoearth_pretrain.norm.OlmoEarthNormalize
           init_args:
-            mean: 0
-            std: 255
+            band_names:
+              sentinel2_l2a: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
     train_config:
       transforms:
-        - class_path: rslearn.train.transforms.normalize.Normalize
+        - class_path: rslearn.models.olmoearth_pretrain.norm.OlmoEarthNormalize
           init_args:
-            mean: 0
-            std: 255
+            band_names:
+              sentinel2_l2a: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
         - class_path: rslearn.train.transforms.flip.Flip
           init_args:
-            image_selectors: ["image", "target/classes", "target/valid"]
+            image_selectors: ["sentinel2_l2a", "target/classes", "target/valid"]
       groups: ["default"]
     val_config:
       groups: ["default"]
@@ -271,9 +303,12 @@ data:
       groups: ["predict"]
       load_all_crops: true
       skip_targets: true
-      patch_size: 512
+      # crop_size matches our 128x128 training windows; overlap reduces border effects
+      # during sliding-window inference on the larger prediction window.
+      crop_size: 128
+      overlap_pixels: 12
 trainer:
-  max_epochs: 10
+  max_epochs: 100
   callbacks:
     - class_path: rslearn.train.callbacks.checkpointing.BestLastCheckpoint
       init_args:
@@ -291,7 +326,7 @@ rslearn model fit --config land_cover_model.yaml
 
 ## Apply the Model
 
-Let's apply the model on Portland, OR (you can change it to Portland, ME if you like).
+Let's apply the model on Portland, Oregon.
 We start by defining a new window around Portland. This time, instead of creating
 windows along a grid, we just create one big window. This is because we are just going
 to run the prediction over the whole window rather than use different windows as
@@ -299,9 +334,8 @@ different training examples.
 
 ```
 rslearn dataset add_windows --root $DATASET_PATH --group predict --utm --resolution 10 --src_crs EPSG:4326 --box=-122.712,45.477,-122.621,45.549 --start 2024-06-01T00:00:00+00:00 --end 2024-08-01T00:00:00+00:00 --name portland
-rslearn dataset prepare --root $DATASET_PATH --workers 32 --batch-size 8
-rslearn dataset ingest --root $DATASET_PATH --workers 32 --no-use-initial-job --jobs-per-process 1
-rslearn dataset materialize --root $DATASET_PATH --workers 32 --no-use-initial-job
+rslearn dataset prepare --root $DATASET_PATH
+rslearn dataset materialize --root $DATASET_PATH
 ```
 
 We also need to add an RslearnWriter to the trainer callbacks in the model
@@ -315,6 +349,12 @@ trainer:
     - class_path: rslearn.train.prediction_writer.RslearnWriter
       init_args:
         output_layer: output
+        merger:
+          class_path: rslearn.train.prediction_writer.RasterMerger
+          init_args:
+            # Discards the overlapping border so it matches the overlap_pixels we set
+            # in predict_config, keeping the center 116x116 of each 128x128 output.
+            overlap_pixels: 12
 ```
 
 Because of our `predict_config`, when we run `model predict` it will apply the model on
@@ -325,19 +365,19 @@ dataset configuration so it specifies the layer:
 
 ```jsonc
 "layers": {
-    "sentinel2": {
-        # ...
-    },
-    "worldcover": {
-        # ...
-    },
-    "output": {
-        "type": "raster",
-        "band_sets": [{
-            "dtype": "uint8",
-            "bands": ["output"]
-        }]
-    }
+  "sentinel2": {
+    # ...
+  },
+  "worldcover": {
+    # ...
+  },
+  "output": {
+    "type": "raster",
+    "band_sets": [{
+      "dtype": "uint8",
+      "bands": ["output"]
+    }]
+  }
 },
 ```
 
@@ -376,11 +416,13 @@ based on the SHA-256 hash of the window name.
 
 ```python
 import hashlib
+import os
+
 import tqdm
 from rslearn.dataset import Dataset, Window
 from upath import UPath
 
-ds_path = UPath("/path/to/dataset/")
+ds_path = UPath(os.environ["DATASET_PATH"])
 dataset = Dataset(ds_path)
 windows = dataset.load_windows(show_progress=True, workers=32)
 for window in tqdm.tqdm(windows):
@@ -398,20 +440,21 @@ Now we can update the model configuration file to use these splits:
 
 ```yaml
 default_config:
+  groups: ["default"]
   transforms:
-    - class_path: rslearn.train.transforms.normalize.Normalize
+    - class_path: rslearn.models.olmoearth_pretrain.norm.OlmoEarthNormalize
       init_args:
-        mean: 0
-        std: 255
+        band_names:
+          sentinel2_l2a: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
 train_config:
   transforms:
-    - class_path: rslearn.train.transforms.normalize.Normalize
+    - class_path: rslearn.models.olmoearth_pretrain.norm.OlmoEarthNormalize
       init_args:
-        mean: 0
-        std: 255
+        band_names:
+          sentinel2_l2a: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
     - class_path: rslearn.train.transforms.flip.Flip
       init_args:
-        image_selectors: ["image", "target/classes", "target/valid"]
+        image_selectors: ["sentinel2_l2a", "target/classes", "target/valid"]
   groups: ["default"]
   tags:
     split: train
@@ -427,7 +470,8 @@ predict_config:
   groups: ["predict"]
   load_all_crops: true
   skip_targets: true
-  patch_size: 512
+  crop_size: 128
+  overlap_pixels: 12
 ```
 
 The `tags` option that we are adding here tells rslearn to only load windows with a
@@ -437,15 +481,15 @@ Previously when we run `model fit`, it should show the same number of windows fo
 training and validation:
 
 ```
-got 4752 examples in split train
-got 4752 examples in split val
+got 110 examples in split train
+got 110 examples in split val
 ```
 
 With the updates, it should show different numbers like this:
 
 ```
-got 4167 examples in split train
-got 585 examples in split val
+got 92 examples in split train
+got 18 examples in split val
 ```
 
 
@@ -511,7 +555,6 @@ by passing the relevant init_args to the task, e.g. mean IoU and F1:
       class_path: rslearn.train.tasks.segmentation.SegmentationTask
       init_args:
         num_classes: 101
-        remap_values: [[0, 1], [0, 255]]
         enable_miou_metric: true
         enable_f1_metric: true
 ```
@@ -528,78 +571,46 @@ be overridden, using `--log_mode`.
 
 Currently our model inputs a single Sentinel-2 image. However, for most tasks where
 labels are not expected to change from week to week, we find that accuracy can be
-significantly improved by inputting multiple images, regardless of the pre-trained
-model used. Multiple images makes the model more resilient to clouds and image
-artifacts, and allows the model to synthesize information across different views that
-may come from different seasons or weather conditions.
+significantly improved by inputting multiple images. Multiple images make the model
+more resilient to clouds and image artifacts, and allow the model to synthesize
+information across different views that may come from different seasons or weather
+conditions. OlmoEarth accepts an image time series directly, so we do not need to change
+the model architecture.
 
-We first update our dataset configuration to obtain three images, by customizing the
-query_config section. This can replace the sentinel2 layer:
+We first update our dataset configuration to obtain three images per window, by
+customizing the `query_config` section of the `sentinel2` layer:
 
 ```jsonc
-"layers": {
-    "sentinel2_multi": {
-        "type": "raster",
-        "band_sets": [{
-            "dtype": "uint8",
-            "bands": ["R", "G", "B"]
-        }],
-        "data_source": {
-            "class_path": "rslearn.data_sources.gcp_public_data.Sentinel2",
-            "init_args": {
-              "index_cache_dir": "cache/sentinel2/",
-              "sort_by": "cloud_cover",
-              "use_rtree_index": false
-            },
-            "query_config": {
-                "max_matches": 3
-            }
-        }
+"sentinel2": {
+  "type": "raster",
+  "band_sets": [
+    {"dtype": "uint8", "bands": ["R", "G", "B"]},
+    {"dtype": "uint16", "bands": ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B11", "B12"]}
+  ],
+  "data_source": {
+    "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
+    "init_args": {
+      "cache_dir": "cache/planetary_computer",
+      "harmonize": true,
+      "sort_by": "eo:cloud_cover"
     },
-    "worldcover": {
-        # ...
-    },
-    "output": {
-        # ...
+    "ingest": false,
+    "query_config": {
+      "max_matches": 3,
+      "period_duration": "30d",
+      "space_mode": "MOSAIC"
     }
+  }
 }
 ```
 
-Repeat the steps from earlier to prepare, ingest, and materialize the dataset.
+With `max_matches: 3`, rslearn stores the additional images in layers named
+`sentinel2.1` and `sentinel2.2` (alongside the original `sentinel2` layer). Repeat the
+prepare and materialize steps to populate them.
 
-Now we update our model configuration file. First, we modify the model architecture to
-be able to input an image time series. We use the SimpleTimeSeries model, which takes
-an encoder that expects a single-image input, and applies that encoder on each image in
-the time series. It then applies max temporal pooling to combine the per-image feature
-maps extracted by the encoder.
-
-Image time series in rslearn are currently stored as [T*C, H, W] tensors. So we pass
-the `image_channels` to SimpleTimeSeries so it knows how to slice up the tensor to
-recover the per-timestep images.
-
-```yaml
-model:
-  class_path: rslearn.train.lightning_module.RslearnLightningModule
-  init_args:
-    model:
-      class_path: rslearn.models.singletask.SingleTaskModel
-      init_args:
-        encoder:
-          - class_path: rslearn.models.simple_time_series.SimpleTimeSeries
-            init_args:
-              encoder:
-                class_path: rslearn.models.satlaspretrain.SatlasPretrain
-                init_args:
-                  model_identifier: "Sentinel2_SwinB_SI_RGB"
-              image_channels: 3
-        decoder:
-          # ...
-```
-
-Next, we update the data module section so that the dataset loads the image time series
-rather than a single image. The `load_all_layers` option tells the dataset to stack the
-rasters from all of the layers specified, and also to ignore windows where any of those
-layers are missing.
+Next, we update the data module so that the dataset stacks the three images into a time
+series. The `load_all_layers` option stacks the rasters from all of the listed layers,
+and ignores windows where any of them are missing.
 
 ```yaml
 data:
@@ -607,11 +618,12 @@ data:
   init_args:
     path: # ...
     inputs:
-      image:
+      sentinel2_l2a:
         data_type: "raster"
-        layers: ["sentinel2_multi", "sentinel2_multi.1", "sentinel2_multi.2"]
-        bands: ["R", "G", "B"]
+        layers: ["sentinel2", "sentinel2.1", "sentinel2.2"]
+        bands: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
         passthrough: true
+        dtype: FLOAT32
         load_all_layers: true
       targets:
         # ...
