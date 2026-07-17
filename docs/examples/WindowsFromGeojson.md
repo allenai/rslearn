@@ -7,7 +7,7 @@ the points, using a bounding box object detection head.
 We used this GeoJSON of marine infrastructure while creating this example, but you
 should be able to substitute any GeoJSON (although model performance will vary):
 
-https://pub-956f3eb0f5974f37b9228e0a62f449bf.r2.dev/outputs/marine/latest.geojson
+https://storage.googleapis.com/satlas-explorer-public/outputs/marine/latest.geojson
 
 ## Create the Dataset and Add Windows
 
@@ -42,7 +42,7 @@ Download the GeoJSON data to a subfolder within the dataset directory:
 export DATASET_PATH=/path/to/dataset
 mkdir -p $DATASET_PATH/source_data/all/
 mkdir -p $DATASET_PATH/source_data/subset/
-wget https://pub-956f3eb0f5974f37b9228e0a62f449bf.r2.dev/outputs/marine/latest.geojson -O $DATASET_PATH/source_data/all/latest.geojson
+wget https://storage.googleapis.com/satlas-explorer-public/outputs/marine/latest.geojson -O $DATASET_PATH/source_data/all/latest.geojson
 ```
 
 We sampled 100 features to use, but you can try using the full GeoJSON if you like.
