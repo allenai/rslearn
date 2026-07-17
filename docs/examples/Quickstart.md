@@ -170,6 +170,13 @@ We can visualize both the GeoTIFFs together in qgis:
 qgis $DATASET_PATH/windows/default/seattle_54912_-527360/layers/*/*/geotiff.tif
 ```
 
+<p float="left">
+<img src="seattle_sentinel2_rgb.png" alt="Sentinel-2 RGB image of downtown Seattle" width="45%" />
+<img src="seattle_worldcover.png" alt="ESA WorldCover land cover labels for downtown Seattle" width="45%" />
+</p>
+
+*Sentinel-2 RGB image (left) and corresponding ESA WorldCover labels (right).*
+
 We can also visualize samples using the visualization module:
 ```
 python -m rslearn.vis.vis_server \
