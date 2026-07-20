@@ -28,7 +28,6 @@ dataset configuration file as `./bitemporal_dataset/config.json`:
       "data_source": {
         "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
         "init_args": {
-          "cache_dir": "cache/planetary_computer",
           "harmonize": true,
           "sort_by": "eo:cloud_cover"
         },
@@ -45,7 +44,6 @@ dataset configuration file as `./bitemporal_dataset/config.json`:
       "data_source": {
         "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
         "init_args": {
-          "cache_dir": "cache/planetary_computer",
           "harmonize": true,
           "sort_by": "eo:cloud_cover"
         },
@@ -122,9 +120,8 @@ from upath import UPath
 ds_path = UPath("./bitemporal_dataset")
 windows = Dataset(ds_path).load_windows()
 for window in tqdm.tqdm(windows):
-    # Create a GeoJSON feature with the category property.
-    # The geometry doesn't matter for ClassificationTask, so we just use the window
-    # geometry.
+    # Create a GeoJSON feature with the category property. The geometry doesn't
+    # matter for ClassificationTask, so we just use the window geometry.
     feat = Feature(
         window.get_geometry(),
         {"category": "old_then_new"},
@@ -148,8 +145,8 @@ model:
       class_path: rslearn.models.singletask.SingleTaskModel
       init_args:
         encoder:
-          # We wrap the OlmoEarth model in SimpleTimeSeries, which will apply a model
-          # independently on each image in a time series.
+          # We wrap the OlmoEarth model in SimpleTimeSeries, which will apply a
+          # model independently on each image in a time series.
           - class_path: rslearn.models.simple_time_series.SimpleTimeSeries
             init_args:
               encoder:
@@ -159,32 +156,33 @@ model:
                 init_args:
                   model_id: "OLMOEARTH_V1_BASE"
                   patch_size: 8
-              image_channels: 12
-              # SimpleTimeSeries will apply max temporal pooling across images in the
-              # same feature group, but concatenate across feature groups. Here, we
-              # only want to concatenate the features across the two images, so we put
-              # each image index in its own
+              num_timesteps_per_forward_pass: 1
+              # SimpleTimeSeries will apply max temporal pooling across images
+              # in the same feature group, but concatenate across feature
+              # groups. Here, we only want to concatenate the features across
+              # the two images, so we put each image index in its own
               groups: [[0], [1]]
               image_key: sentinel2_l2a
         decoder:
-          # PoolingDecoder will take the temporally concatenated feature map, and apply
-          # a sequence of convolutional layers, spatial max pooling, and fully
-          # connected layers to compute classification logits.
+          # PoolingDecoder will take the temporally concatenated feature map,
+          # and apply a sequence of convolutional layers, spatial max pooling,
+          # and fully connected layers to compute classification logits.
           - class_path: rslearn.models.pooling_decoder.PoolingDecoder
             init_args:
               # It inputs 1536 channels since we have 768 from each image.
               in_channels: 1536
-              # We apply two conv layers on the concatenated features before spatial
-              # pooling.
+              # We apply two conv layers on the concatenated features before
+              # spatial pooling.
               num_conv_layers: 2
               conv_channels: 256
               # We also apply two fully connected layers after spatial pooling.
               num_fc_layers: 2
               fc_channels: 128
-              # Then there is one final fully connected layer from 128 -> 2 classes.
+              # Then there is one final fully connected layer from 128 -> 2
+              # classes.
               out_channels: 2
-          # The ClassificationHead computes softmax cross entropy loss against the
-          # ground truth category.
+          # The ClassificationHead computes softmax cross entropy loss against
+          # the ground truth category.
           - class_path: rslearn.train.tasks.classification.ClassificationHead
     optimizer:
       class_path: rslearn.models.olmoearth_pretrain.optimizer.LayerDecayAdamW
@@ -195,7 +193,8 @@ data:
   init_args:
     path: ./bitemporal_dataset
     inputs:
-      # "sentinel2_l2a" is the key for Sentinel-2 images expected by the OlmoEarth model.
+      # "sentinel2_l2a" is the key for Sentinel-2 images expected by the
+      # OlmoEarth model.
       sentinel2_l2a:
         data_type: "raster"
         # As discussed above, we read the old image first, then the new image.
@@ -205,7 +204,8 @@ data:
         # This is the order of bands expected by the OlmoEarth model.
         bands: ["B02", "B03", "B04", "B08", "B05", "B06", "B07", "B8A", "B11", "B12", "B01", "B09"]
         passthrough: true
-      # ClassificationTask expects the labels to be called "target" in the input dict.
+      # ClassificationTask expects the labels to be called "target" in the input
+      # dict.
       targets:
         data_type: "vector"
         layers: ["label"]
@@ -217,8 +217,8 @@ data:
         classes: ["old_then_new", "new_then_old"]
         metric_kwargs:
           average: "micro"
-        # image_bands and remap_values specify how images should be visualized during
-        # `rslearn model test`.
+        # image_bands and remap_values specify how images should be visualized
+        # during `rslearn model test`.
         image_bands: [2, 1, 0]
         remap_values: [[-0.77, 0.67], [0, 255]]
     batch_size: 16
@@ -281,8 +281,8 @@ class ReverseImageOrder(Transform):
             # Do nothing.
             return input_dict, target_dict
 
-        # input_dict["sentinel2_l2a"] is a RasterImage with CTHW tensor where T=2.
-        # Flip the time dimension to reverse old/new order.
+        # input_dict["sentinel2_l2a"] is a RasterImage with CTHW tensor where
+        # T=2. Flip the time dimension to reverse old/new order.
         ri = input_dict["sentinel2_l2a"]
         input_dict["sentinel2_l2a"] = RasterImage(
             image=ri.image[:, [1, 0], :, :],

@@ -29,7 +29,6 @@ directory `/path/to/dataset` and corresponding configuration file at
       "data_source": {
         "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
         "init_args": {
-          "cache_dir": "cache/planetary_computer",
           "harmonize": true,
           "sort_by": "eo:cloud_cover"
         },
@@ -196,30 +195,31 @@ Create a model configuration file `land_cover_model.yaml`:
 model:
   class_path: rslearn.train.lightning_module.RslearnLightningModule
   init_args:
-    # This part defines the model architecture.
-    # We apply the OlmoEarth encoder, followed by a UNet decoder that upsamples the
-    # features back to the input resolution, and a segmentation head that predicts a
-    # land cover class for each pixel.
+    # This part defines the model architecture. We apply the OlmoEarth encoder,
+    # followed by a UNet decoder that upsamples the features back to the input
+    # resolution, and a segmentation head that predicts a land cover class for
+    # each pixel.
     model:
       class_path: rslearn.models.singletask.SingleTaskModel
       init_args:
         encoder:
-          # This applies the OlmoEarth encoder on the inputs. We use the v1.2 Nano
-          # model here since it is fast; larger models generally give better accuracy.
-          # Switch to TINY, SMALL, or BASE for better results.
+          # This applies the OlmoEarth encoder on the inputs. We use the v1.2
+          # Nano model here since it is fast; larger models generally give
+          # better accuracy. Switch to TINY, SMALL, or BASE for better results.
           - class_path: rslearn.models.olmoearth_pretrain.model.OlmoEarth
             init_args:
               model_id: OLMOEARTH_V1_2_NANO
-              # The patch size can be set between 1 and 8. Lower patch sizes are slower
-              # but produce finer feature maps.
+              # The patch size can be set between 1 and 8. Lower patch sizes are
+              # slower but produce finer feature maps.
               patch_size: 8
-              # Disable autocasting (which defaults to bfloat16) so the model can run
-              # on CPU.
+              # Disable autocasting (which defaults to bfloat16) so the model
+              # can run on CPU.
               autocast_dtype: null
         decoder:
-          # The UNetDecoder upsamples the OlmoEarth features (which are at 1/patch_size
-          # resolution) back to the input resolution. The OlmoEarth v1.2 Nano embedding
-          # size is 128. Increase to 192 for TINY, 384 for SMALL, or 768 for BASE.
+          # The UNetDecoder upsamples the OlmoEarth features (which are at
+          # 1/patch_size resolution) back to the input resolution. The OlmoEarth
+          # v1.2 Nano embedding size is 128. Increase to 192 for TINY, 384 for
+          # SMALL, or 768 for BASE.
           - class_path: rslearn.models.unet.UNetDecoder
             init_args:
               in_channels: [[8, 128]]
@@ -229,21 +229,24 @@ model:
           # The SegmentationHead computes softmax and cross entropy loss.
           # We use 101 classes because the WorldCover class IDs go up to 100.
           - class_path: rslearn.train.tasks.segmentation.SegmentationHead
-    # When fine-tuning OlmoEarth we recommend LayerDecayAdamW, which applies a lower
-    # learning rate to earlier encoder layers to preserve pre-trained features.
+    # When fine-tuning OlmoEarth we recommend LayerDecayAdamW, which applies a
+    # lower learning rate to earlier encoder layers to preserve pre-trained
+    # features.
     optimizer:
       class_path: rslearn.models.olmoearth_pretrain.optimizer.LayerDecayAdamW
       init_args:
         lr: 0.0001
-        # num_layers must match the encoder depth: 4 for Nano, 12 for Tiny/Small/Base.
+        # num_layers must match the encoder depth: 4 for Nano, 12 for
+        # Tiny/Small/Base.
         num_layers: 4
 data:
   class_path: rslearn.train.data_module.RslearnDataModule
   init_args:
     path: ${DATASET_PATH}
-    # This defines the layers that should be read for each window.
-    # The key ("sentinel2_l2a" / "targets") is what the data will be called in the
-    # model, while the layers option specifies which dataset layers will be read.
+    # This defines the layers that should be read for each window. The key
+    # ("sentinel2_l2a" / "targets") is what the data will be called in the
+    # model, while the layers option specifies which dataset layers will be
+    # read.
     inputs:
       # OlmoEarth expects the Sentinel-2 input to be called "sentinel2_l2a".
       sentinel2_l2a:
@@ -303,8 +306,8 @@ data:
       groups: ["predict"]
       load_all_crops: true
       skip_targets: true
-      # crop_size matches our 128x128 training windows; overlap reduces border effects
-      # during sliding-window inference on the larger prediction window.
+      # crop_size matches our 128x128 training windows; overlap reduces border
+      # effects during sliding-window inference on the larger prediction window.
       crop_size: 128
       overlap_pixels: 12
 trainer:
@@ -352,8 +355,9 @@ trainer:
         merger:
           class_path: rslearn.train.prediction_writer.RasterMerger
           init_args:
-            # Discards the overlapping border so it matches the overlap_pixels we set
-            # in predict_config, keeping the center 116x116 of each 128x128 output.
+            # Discards the overlapping border so it matches the overlap_pixels
+            # we set in predict_config, keeping the center 116x116 of each
+            # 128x128 output.
             overlap_pixels: 12
 ```
 
@@ -590,7 +594,6 @@ customizing the `query_config` section of the `sentinel2` layer:
   "data_source": {
     "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
     "init_args": {
-      "cache_dir": "cache/planetary_computer",
       "harmonize": true,
       "sort_by": "eo:cloud_cover"
     },

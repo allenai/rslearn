@@ -35,7 +35,6 @@ is a suitable dataset configuration file:
       "data_source": {
         "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
         "init_args": {
-          "cache_dir": "cache/planetary_computer",
           "harmonize": true,
           "sort_by": "eo:cloud_cover"
         },
@@ -56,9 +55,6 @@ is a suitable dataset configuration file:
       }],
       "data_source": {
         "class_path": "rslearn.data_sources.planetary_computer.Naip",
-        "init_args": {
-          "cache_dir": "cache/planetary_computer"
-        },
         "ingest": false
       },
       "type": "raster"
@@ -171,8 +167,8 @@ for (lon, lat), (proj, bounds), ts in zip(lon_lats, proj_bounds, timestamps):
         name=window_name,
         projection=proj,
         bounds=bounds,
-        # We create a four-month time range centered at the timestamp of the NAIP image
-        # so that we should be able to get enough Sentinel-2 scenes.
+        # We create a four-month time range centered at the timestamp of the
+        # NAIP image so that we should be able to get enough Sentinel-2 scenes.
         time_range=(
             ts - timedelta(days=60),
             ts + timedelta(days=60),

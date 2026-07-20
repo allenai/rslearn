@@ -79,6 +79,7 @@ markdown_extensions:
 # These helper README files sit alongside example data assets and are not pages.
 exclude_docs: |
   examples/BitemporalSentinel2/README.md
+  examples/ProgrammaticWindows.md
 
 nav:
   - Home:
@@ -86,13 +87,18 @@ nav:
       - Core Concepts: CoreConcepts.md
       - Development: Development.md
   - Usage:
-      - Usage.md
-      - Adding Windows: DatasetAddWindows.md
+      - Overview: Usage.md
+      - Create Windows:
+        - Create Windows via CLI: DatasetAddWindows.md
+        - Create Windows Programmatically: CreateWindowsProgrammatically.md
+      - Add Custom Raster and Vector Data:
+        - Add Raster Data: AddRasterData.md
+        - Add Vector Data: AddVectorData.md
   - Examples:
       - Examples.md
       - examples/Quickstart.md
       - examples/WindowsFromGeojson.md
-      - examples/ProgrammaticWindows.md
+      - examples/ConvertEuroSAT.md
       - examples/NaipSentinel2.md
       - examples/BitemporalSentinel2.md
       - examples/FinetuneOlmoEarth.md

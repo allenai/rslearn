@@ -7,7 +7,7 @@ two unique aspects to this example:
 
 - We will fine-tune with multiple remote sensing foundation models, and compare their
   performance.
-- We will start with training data consisting of the locations of 251 stadiums in the
+- We will start with source data consisting of the locations of 253 stadiums in the
   US, and show how to use it to train a segmentation model. There are two key challenges
   associated with this data: (1) instead of dense segmentation masks, we only have
   sparse point labels; and (2) we only have positive labels.
@@ -122,7 +122,6 @@ period of each window's time range.
         "class_path": "rslearn.data_sources.planetary_computer.Sentinel2",
         "ingest": false,
         "init_args": {
-          "cache_dir": "cache/planetary_computer",
           "harmonize": true,
           "query": {"eo:cloud_cover": {"lt": 50}},
           "sort_by": "eo:cloud_cover"
@@ -139,14 +138,17 @@ period of each window's time range.
 }
 ```
 
-The script below implements the data strategy discussed above. We skip Washington since
-we will test the model on a portion of Seattle, WA later. The windows all share the same
-90-day time range, from 1 June 2025 to 30 August 2025.
+The script below implements the data strategy discussed above. We skip all three rows
+in Washington state since we will test the model on a portion of Seattle, WA later.
+The CSV uses both `WA` and `Washington` in its state column, so the script handles both
+spellings while retaining Washington, D.C. The 250 resulting windows all share the
+same 90-day time range, from 1 June 2025 to 30 August 2025.
 
 ```python
 import csv
 import hashlib
 import os
+import re
 from datetime import UTC, datetime
 
 import numpy as np
@@ -155,8 +157,7 @@ import tqdm
 from upath import UPath
 
 from rslearn.const import WGS84_PROJECTION
-from rslearn.dataset.dataset import Dataset
-from rslearn.dataset.window import Window
+from rslearn.dataset import Dataset, Window
 from rslearn.utils.geometry import STGeometry
 from rslearn.utils.get_utm_ups_crs import get_utm_ups_projection
 from rslearn.utils.raster_array import RasterArray
@@ -171,62 +172,75 @@ TIME_RANGE = (
 )
 VAL_RATIO = 0.2
 
-# We assign points to train / val based on a hash of the state code.
-def state_to_split(state: str) -> str:
-    h = int(hashlib.sha256(state.encode()).hexdigest(), 16)
+# We assign nearby points to the same split based on a coarse geographic region.
+def location_to_split(lon: float, lat: float) -> str:
+    region = f"{int(lon // 2)}_{int(lat // 2)}"
+    h = int(hashlib.sha256(region.encode()).hexdigest(), 16)
     return "val" if (h % 100) < VAL_RATIO * 100 else "train"
+
+# Stadium names are not unique, so include the team in each window name.
+def get_window_name(row: dict[str, str]) -> str:
+    value = f"{row['stadium']}_{row['team']}"
+    return re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_")
 
 # Read the points in the CSV.
 # The columns include "state", "longitude", "latitude", and "stadium".
 with open(CSV_PATH) as f:
-    rows = [row for row in csv.DictReader(f) if row["state"].strip() != "WA"]
+    rows = [
+        row
+        for row in csv.DictReader(f)
+        if row["state"].strip() not in {"WA", "Washington"}
+    ]
 
 # Initialize a Dataset object that represents the entire rslearn dataset.
-ds = Dataset(UPath(os.environ["DATASET_PATH"])
+dataset = Dataset(UPath(os.environ["DATASET_PATH"]))
 
 split_counts: dict[str, int] = {}
 for row in tqdm.tqdm(rows):
     # For each row in the CSV, start by extracting the columns we want.
     lon = float(row["longitude"])
     lat = float(row["latitude"])
-    stadium_name = row["stadium"].strip().replace(" ", "_").replace("/", "")
+    window_name = get_window_name(row)
 
-    # Assign it to train or val split based on the state code.
-    split = state_to_split(row["state"].strip())
+    # Assign nearby stadiums to the same train or val split.
+    split = location_to_split(lon, lat)
     split_counts[split] = split_counts.get(split, 0) + 1
 
-    # OlmoEarth expects inputs to be at 10 m/pixel in UTM projection.
-    # We first find the appropriate UTM projection for this location.
-    # In addition to the CRS, the Projection also specifies the m/pixel resolution,
-    # which is RESOLUTION=10 here.
+    # OlmoEarth expects inputs to be at 10 m/pixel in UTM projection. We first
+    # find the appropriate UTM projection for this location. In addition to the
+    # CRS, the Projection also specifies the m/pixel resolution, which is
+    # RESOLUTION=10 here.
     projection = get_utm_ups_projection(lon, lat, RESOLUTION, -RESOLUTION)
 
-    # Now convert the lon/lat to pixel coordinates in that projection.
-    # (Pixel coordinates are just CRS coordinates divided by the resolution.)
-    # The STGeometry specifies the Projection (CRS + resolution), a shapely geometry in
-    # pixel coordinates, and an optional time range (omitted here).
+    # Now convert the lon/lat to pixel coordinates in that projection. (Pixel
+    # coordinates are just CRS coordinates divided by the resolution.) The
+    # STGeometry specifies the Projection (CRS + resolution), a shapely geometry
+    # in pixel coordinates, and an optional time range (omitted here).
     src_geom = STGeometry(WGS84_PROJECTION, shapely.Point(lon, lat), None)
     # STGeometry.to_projection re-projects the geometry to another projection by
-    # transforming each vertex. dst_geom.shp is in pixel coordinates in the target
-    # projection.
+    # transforming each vertex. dst_geom.shp is in pixel coordinates in the
+    # target projection.
     dst_geom = src_geom.to_projection(projection)
     cx, cy = int(dst_geom.shp.x), int(dst_geom.shp.y)
 
     # Compute bounds so that the stadium will be at the center.
     bounds = (cx - WINDOW_SIZE // 2, cy - WINDOW_SIZE // 2, cx + WINDOW_SIZE // 2, cy + WINDOW_SIZE // 2)
 
-    # Create the window. The Window object represents one rslearn window (spatiotemporal
-    # bounding box). When we call Window.save, it creates a new folder corresponding to
-    # the window in {DATASET_PATH}/windows/{group_name}/{window_name}, and writes the
-    # projection, bounds, time range, and other details to metadata.json in that folder.
+    # Create the window. The Window object represents one rslearn window
+    # (spatiotemporal bounding box). When we call Window.save, it creates a new
+    # folder corresponding to the window in
+    # {DATASET_PATH}/windows/{group_name}/{window_name}, and writes the
+    # projection, bounds, time range, and other details to metadata.json in that
+    # folder.
     window = Window(
-        storage=ds.storage,
+        storage=dataset.storage,
         group="default",
-        name=stadium_name,
+        name=window_name,
         projection=projection,
         bounds=bounds,
         time_range=TIME_RANGE,
         options={"split": split},
+        data_factory=dataset.window_data_storage_factory,
     )
     window.save()
 
@@ -238,15 +252,16 @@ for row in tqdm.tqdm(rows):
     # And set the middle 5x5 to "stadium" (1).
     label[:, mid - 2 : mid + 3, mid - 2 : mid + 3] = 1
 
-    # Finally we can write the label raster as a GeoTIFF.
-    # We use GeotiffRasterFormat for this. window.get_raster_dir gives us the folder
-    # where rslearn expects the raster to be written. RasterFormat.encode_raster then
-    # writes the raster to that folder; the projection and bounds we pass must match
-    # the projection/bounds of the array.
-    raster_dir = window.get_raster_dir("label", ["label"])
-    GeotiffRasterFormat().encode_raster(
-        raster_dir, projection, bounds, RasterArray(chw_array=label)
-    )
+    # Finally, write the label raster through the window's configured data
+    # storage. The projection and bounds must describe the array being written.
+    with window.data.open_layer_writer("label") as writer:
+        writer.write_raster(
+            ["label"],
+            GeotiffRasterFormat(),
+            projection,
+            bounds,
+            RasterArray(chw_array=label),
+        )
     window.mark_layer_completed("label")
 
 print(f"Done: {split_counts}")
@@ -257,8 +272,9 @@ script writes a label raster corresponding to each window.
 
 ## Materialize the Dataset
 
-Materialize the dataset to download aligned Sentinel-2 images. This tells rslearn to
-automatically populate all layers that have a data source defined.
+Materialize the dataset to download aligned Sentinel-2 images. The label layer is
+already complete because the script wrote it directly; these commands populate the
+layers that have a data source defined.
 
 ```
 rslearn dataset prepare --root $DATASET_PATH
@@ -268,7 +284,7 @@ rslearn dataset materialize --root $DATASET_PATH
 Visualize one of the GeoTIFFs:
 
 ```
-qgis $DATASET_PATH/windows/default/Eddie_Robinson_Stadium/layers/sentinel2/B01_B02_B03_B04_B05_B06_B07_B08_B8A_B09_B11_B12/geotiff.tif $DATASET_PATH/windows/default/Eddie_Robinson_Stadium/layers/label/label/geotiff.tif
+qgis $DATASET_PATH/windows/default/Eddie_Robinson_Stadium_Grambling_State_Tigers/layers/sentinel2/B01_B02_B03_B04_B05_B06_B07_B08_B8A_B09_B11_B12/geotiff.tif $DATASET_PATH/windows/default/Eddie_Robinson_Stadium_Grambling_State_Tigers/layers/label/label/geotiff.tif
 ```
 
 ## Train with OlmoEarth-v1-Tiny
@@ -280,7 +296,7 @@ OlmoEarth-v1-Tiny on 64x64 random crops from the 256x256 windows. Note that many
 will see all negative pixels, but some will intersect with the stadium points in the
 centers of windows.
 
-```
+```yaml
 model:
   class_path: rslearn.train.lightning_module.RslearnLightningModule
   init_args:
@@ -293,10 +309,10 @@ model:
               model_id: OLMOEARTH_V1_TINY
               patch_size: 4
         decoder:
-          # The encoder produces a feature map at 1/4 the input resolution.
-          # We use UNetDecoder to upsample back to the input resolution. It doesn't
-          # apply a true UNet here since we only have one feature resolution, but it
-          # still does the upsampling that we need.
+          # The encoder produces a feature map at 1/4 the input resolution. We
+          # use UNetDecoder to upsample back to the input resolution. It doesn't
+          # apply a true UNet here since we only have one feature resolution,
+          # but it still does the upsampling that we need.
           - class_path: rslearn.models.unet.UNetDecoder
             init_args:
               in_channels: [[4, 192]]
@@ -304,7 +320,8 @@ model:
               num_channels: {4: 192, 2: 128, 1: 64}
           - class_path: rslearn.train.tasks.segmentation.SegmentationHead
             init_args:
-              # Use 10x weight for stadium class since most pixels are background.
+              # Use 10x weight for stadium class since most pixels are
+              # background.
               weights: [1, 10, 1]
     optimizer:
       class_path: rslearn.models.olmoearth_pretrain.optimizer.LayerDecayAdamW
@@ -338,12 +355,12 @@ data:
     task:
       class_path: rslearn.train.tasks.segmentation.SegmentationTask
       init_args:
-        # We use three classes but reserve the first for NODATA. By setting nodata_value,
-        # we ensure the loss is masked at those pixels.
+        # We use three classes but reserve the first for NODATA. By setting
+        # nodata_value, we ensure the loss is masked at those pixels.
         num_classes: 3
         nodata_value: 0
-        # When we apply the model, we will show output probabilities for the stadium
-        # class (class 1).
+        # When we apply the model, we will show output probabilities for the
+        # stadium class (class 1).
         output_probs: true
         output_class_idx: 1
         metric_kwargs:
@@ -455,7 +472,7 @@ more training.)
 
 ```
 rslearn model predict \
-  --config docs/examples/FindStadiums/config.yaml \
+  --config model.yaml \
   --ckpt_path $MANAGEMENT_DIR/find_stadiums/olmoearth_tiny/last.ckpt
 ```
 
@@ -495,7 +512,8 @@ model:
                   model_size: LARGE
                   modality: sentinel-2-l2a
               image_keys:
-                sentinel-2-l2a: 10
+                - sentinel-2-l2a
+              num_timesteps_per_forward_pass: 1
         decoder:
           - class_path: rslearn.models.unet.UNetDecoder
             init_args:
@@ -551,6 +569,7 @@ model:
           - class_path: rslearn.models.prithvi.PrithviV2
             init_args:
               size: VIT_300
+              num_frames: 3
         decoder:
           - class_path: rslearn.models.unet.UNetDecoder
             init_args:

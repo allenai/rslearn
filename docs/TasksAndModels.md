@@ -74,26 +74,29 @@ The configuration snippet below summarizes the most common options. See
     task:
       class_path: rslearn.train.tasks.classification.ClassificationTask
       init_args:
-        # The property name from which to extract the class name. The class is read
-        # from the first matching feature.
+        # The property name from which to extract the class name. The class is
+        # read from the first matching feature.
         property_name: "category"
         # A list of class names.
         classes: ["passenger", "cargo", "tanker"]
-        # If you are performing multi-task training, and some windows do not have
-        # ground truth for the classification task, then you can enable this: if you
-        # ensure the window contains the vector layer but does not contain any features
-        # with the property_name, then instead of raising an exception, the task will
-        # mark that target invalid so it is excluded from the classification loss.
+        # If you are performing multi-task training, and some windows do not
+        # have ground truth for the classification task, then you can enable
+        # this: if you ensure the window contains the vector layer but does not
+        # contain any features with the property_name, then instead of raising
+        # an exception, the task will mark that target invalid so it is excluded
+        # from the classification loss.
         allow_invalid: false
-        # ClassificationTask will always compute an accuracy metric. A per-category F1
-        # metric can also be enabled.
+        # ClassificationTask will always compute an accuracy metric. A
+        # per-category F1 metric can also be enabled.
         enable_f1_metric: true
-        # By default, argmax is used to determine the predicted category for computing
-        # metrics and for writing predictions (in the predict stage). The pair of
-        # options below can override the confidence threshold for binary classification
-        # tasks (when there are two classes).
-        positive_class: "cls_name" # the name of the positive class, in classes list
-        positive_class_threshold: 0.75 # predict as cls_name if corresponding probability exceeds this threshold
+        # By default, argmax is used to determine the predicted category for
+        # computing metrics and for writing predictions (in the predict stage).
+        # The pair of options below can override the confidence threshold for
+        # binary classification tasks (when there are two classes). The name of
+        # the positive class in the classes list.
+        positive_class: "cls_name"
+        # Predict this class when its probability exceeds the threshold.
+        positive_class_threshold: 0.75
 ```
 
 In `process_inputs`, ClassificationTask computes a target dict containing the "class"
@@ -123,13 +126,13 @@ model:
           - class_path: rslearn.models.pooling_decoder.PoolingDecoder
             init_args:
               in_channels: 1024
-              # The number of output channels in the layer preceding ClassificationHead
-              # must match the number of classes.
+              # The number of output channels in the layer preceding
+              # ClassificationHead must match the number of classes.
               out_channels: 3
               num_conv_layers: 1
               num_fc_layers: 2
-          # ClassificationHead will compute the cross entropy loss between the input
-          # logits and the label class ID.
+          # ClassificationHead will compute the cross entropy loss between the
+          # input logits and the label class ID.
           - class_path: rslearn.train.tasks.classification.ClassificationHead
 data:
   class_path: rslearn.train.data_module.RslearnDataModule
@@ -167,13 +170,13 @@ The configuration snippet below summarizes the most common options. See
     task:
       class_path: rslearn.train.tasks.detection.DetectionTask
       init_args:
-        # The property name from which to extract the class name. Features without this
-        # property name are ignored.
+        # The property name from which to extract the class name. Features
+        # without this property name are ignored.
         property_name: "category"
         # A list of class names.
         classes: ["platform", "wind_turbine", "vessel"]
-        # Force all boxes to be two times this size, centered at the centroid of the
-        # geometry. Required for Point geometries.
+        # Force all boxes to be two times this size, centered at the centroid of
+        # the geometry. Required for Point geometries.
         box_size: 10
         # Confidence threshold for visualization and prediction.
         score_threshold: 0.5
@@ -215,24 +218,24 @@ model:
         decoder:
           - class_path: rslearn.models.pick_features.PickFeatures
             init_args:
-              # With FPN enabled, SatlasPretrain outputs five feature maps, with the
-              # first one upsampled to the input resolution.
-              # For detection tasks, it is best to skip the upsampled one, so we just
-              # use the other four.
+              # With FPN enabled, SatlasPretrain outputs five feature maps, with
+              # the first one upsampled to the input resolution. For detection
+              # tasks, it is best to skip the upsampled one, so we just use the
+              # other four.
               indexes: [1, 2, 3, 4]
           - class_path: rslearn.models.faster_rcnn.FasterRCNN
             init_args:
-              # The encoder outputs a list of feature maps at different resolutions.
-              # The downsample_factors specifies those resolutions relative to the
-              # input resolution, i.e., the feature maps are at 1/4, 1/8, 1/16, and
-              # 1/32 of the original input resolution.
+              # The encoder outputs a list of feature maps at different
+              # resolutions. The downsample_factors specifies those resolutions
+              # relative to the input resolution, i.e., the feature maps are at
+              # 1/4, 1/8, 1/16, and 1/32 of the original input resolution.
               downsample_factors: [4, 8, 16, 32]
-              # Although the Swin-Base backbone in SatlasPretrain outputs different
-              # embedding depths for each feature map, we have enabled the FPN which
-              # produces 128 features for each resolution.
+              # Although the Swin-Base backbone in SatlasPretrain outputs
+              # different embedding depths for each feature map, we have enabled
+              # the FPN which produces 128 features for each resolution.
               num_channels: 128
-              # Our task has three classes, but there is a quirk in the setup here
-              # where we need to reserve class 0 for background.
+              # Our task has three classes, but there is a quirk in the setup
+              # here where we need to reserve class 0 for background.
               num_classes: 4
               anchor_sizes: [[32], [64], [128], [256]]
 data:
@@ -252,7 +255,8 @@ data:
       class_path: rslearn.train.tasks.detection.DetectionTask
       init_args:
         property_name: "category"
-        # We reserve the first class for Faster R-CNN to use to indicate background.
+        # We reserve the first class for Faster R-CNN to use to indicate
+        # background.
         classes: ["unknown", "platform", "wind_turbine", "vessel"]
         box_size: 10
 ```
@@ -274,13 +278,14 @@ The configuration snippet below summarizes the most common options. See
 	    task:
 	      class_path: rslearn.train.tasks.per_pixel_regression.PerPixelRegressionTask
 	      init_args:
-	        # Multiply ground truth values by this factor before using it for training.
+	        # Multiply ground truth values by this factor before using it for
+	        # training.
 	        scale_factor: 0.1
 	        # Metric(s) to compute.
 	        # Supported: "mse", "rmse", "l1", "r2", "mape".
 	        metrics: ["mse", "r2"]
-	        # Optional value to treat as invalid. The loss will be masked at pixels where
-	        # the ground truth value is equal to nodata_value.
+	        # Optional value to treat as invalid. The loss will be masked at pixels
+	        # where the ground truth value is equal to nodata_value.
 	        nodata_value: -1
 ```
 
@@ -311,12 +316,12 @@ model:
               pretrained: true
               output_layers: [1, 3, 5, 7]
         decoder:
-          # We apply a UNet-style decoder on the feature maps from the Swin encoder to
-          # compute outputs at the input resolution.
+          # We apply a UNet-style decoder on the feature maps from the Swin
+          # encoder to compute outputs at the input resolution.
           - class_path: rslearn.models.unet.UNetDecoder
             init_args:
-              # These indicate the resolution (1/X relative to the input resolution)
-              # and embedding sizes of the input feature maps.
+              # These indicate the resolution (1/X relative to the input
+              # resolution) and embedding sizes of the input feature maps.
               in_channels: [[4, 128], [8, 256], [16, 512], [32, 1024]]
               # Number of output channels, should be 1 for regression.
               out_channels: 1
@@ -324,7 +329,8 @@ model:
             init_args:
               # The loss function to use: "mse" (default), "l1", or "huber".
               loss_mode: "mse"
-              # Optional: delta for Huber loss (only used when loss_mode="huber").
+              # Optional: delta for Huber loss (only used when
+              # loss_mode="huber").
               huber_delta: 1.0
 data:
   class_path: rslearn.train.data_module.RslearnDataModule
@@ -362,8 +368,8 @@ The configuration snippet below summarizes the most common options. See
     task:
       class_path: rslearn.train.tasks.regression.RegressionTask
       init_args:
-        # The property name from which to extract the ground truth regression value.
-        # The value is read from the first matching feature.
+        # The property name from which to extract the ground truth regression
+        # value. The value is read from the first matching feature.
         property_name: "length"
         # Multiply the label value by this factor for training.
         scale_factor: 0.01
@@ -446,11 +452,11 @@ The configuration snippet below summarizes the most common options. See
         # The number of classes to predict.
         # The raster label should contain values between 0 and (num_classes-1).
         num_classes: 10
-        # The value to use for NODATA pixels, which will be excluded from the loss.
-        # If null (default), all pixels are considered valid.
-        # If the NODATA value falls within 0 to (num_classes-1), then it must be
-        # counted in num_classes (higher class IDs won't automatically be remapped to
-        # lower values).
+        # The value to use for NODATA pixels, which will be excluded from the
+        # loss. If null (default), all pixels are considered valid. If the
+        # NODATA value falls within 0 to (num_classes-1), then it must be
+        # counted in num_classes (higher class IDs won't automatically be
+        # remapped to lower values).
         nodata_value: 255
         # Whether to compute mean IoU.
         enable_miou_metric: true
@@ -486,8 +492,8 @@ model:
               in_channels: [[4, 128], [8, 256], [16, 512], [32, 1024]]
               # Number of output channels, must match the number of classes.
               out_channels: 10
-          # The SegmentationHead computes cross entropy loss on valid pixels between
-          # the model output and the ground truth class IDs.
+          # The SegmentationHead computes cross entropy loss on valid pixels
+          # between the model output and the ground truth class IDs.
           - class_path: rslearn.train.tasks.segmentation.SegmentationHead
 data:
   class_path: rslearn.train.data_module.RslearnDataModule
@@ -535,8 +541,10 @@ model:
       init_args:
         encoder:
           # We compose two components in the encoder:
-          # (1) A Swin feature extractor, which processes input images and computes FeatureMaps.
-          # (2) An Fpn, which inputs a FeatureMaps and outputs updated FeatureMaps.
+          # (1) A Swin feature extractor, which processes input images and
+          # computes FeatureMaps.
+          # (2) An Fpn, which inputs a FeatureMaps and outputs updated
+          # FeatureMaps.
           - class_path: rslearn.models.swin.Swin
             init_args:
               arch: "swin_v2_b"
@@ -549,8 +557,10 @@ model:
               out_channels: 128
         decoder:
           # We also compose two components in the decoder:
-          # (1) A Conv layer, which applies a Conv2D on each feature map in the input FeatureMaps.
-          # (2) A FasterRCNN that inputs FeatureMaps and predicts bounding boxes.
+          # (1) A Conv layer, which applies a Conv2D on each feature map in the
+          # input FeatureMaps.
+          # (2) A FasterRCNN that inputs FeatureMaps and predicts bounding
+          # boxes.
           - class_path: rslearn.models.conv.Conv
             init_args:
               in_channels: 128
@@ -738,12 +748,14 @@ model:
                 class_path: # ...
                 init_args:
                   # ...
-              # One of "max" (default), "mean", "convrnn", "conv3d", or "conv1d".
+              # One of "max" (default), "mean", "convrnn", "conv3d", or
+              # "conv1d".
               op: "max"
               # Number of layers for convrnn, conv3d, and conv1d ops.
               num_layers: null
-              # A map from input dict keys to the number of bands per image. This is
-              # used to split up the time series back into the individual images.
+              # A map from input dict keys to the number of bands per image.
+              # This is used to split up the time series back into the
+              # individual images.
               image_keys:
                 sentinel2: 12
                 sentinel1: 2
@@ -773,13 +785,14 @@ Here is a summary, see `rslearn.models.fpn` for all of the available options.
           - # ...
           - class_path: rslearn.models.fpn.Fpn
             init_args:
-              # in_channels lists the number of channels in each feature map from the
-              # previous component. In this example, there are two feature maps, the
-              # first with 128 channels and the second with 256 channels.
+              # in_channels lists the number of channels in each feature map
+              # from the previous component. In this example, there are two
+              # feature maps, the first with 128 channels and the second with
+              # 256 channels.
               in_channels: [128, 256]
-              # The number of output channels. Since there are two feature maps in the
-              # input, the output will have two feature maps at the same resolutions,
-              # but with 128 channels.
+              # The number of output channels. Since there are two feature maps
+              # in the input, the output will have two feature maps at the same
+              # resolutions, but with 128 channels.
               out_channels: 128
 ```
 
@@ -798,8 +811,8 @@ model:
             init_args:
               pretrained: true
               input_channels: 3
-              # These are the typical feature maps used from Swin. They are at 1/4, 1/8,
-              # 1/16, and 1/32 of the input resolution.
+              # These are the typical feature maps used from Swin. They are at
+              # 1/4, 1/8, 1/16, and 1/32 of the input resolution.
               output_layers: [1, 3, 5, 7]
           - class_path: rslearn.models.fpn.Fpn
             init_args:
@@ -852,22 +865,24 @@ options.
         decoder:
           - class_path: rslearn.models.pooling_decoder.PoolingDecoder
             init_args:
-              # The number of channels in the input (specifically, the last feature map
-              # in the list).
+              # The number of channels in the input (specifically, the last
+              # feature map in the list).
               in_channels: 1024
-              # The number of output channels. This is typically tied to the task, e.g.
-              # if there will be 8 classes then this should be 8.
+              # The number of output channels. This is typically tied to the
+              # task, e.g. if there will be 8 classes then this should be 8.
               out_channels: 8
-              # The number of extra convolutional layers to apply before pooling. The
-              # default is 0.
+              # The number of extra convolutional layers to apply before
+              # pooling. The default is 0.
               num_conv_layers: 0
               # The number of fully connected layers to apply after pooling. The
               # default is 0.
               num_fc_layers: 0
-              # Number of hidden channels when using num_conv_layers / num_fc_layers.
+              # Number of hidden channels when using num_conv_layers /
+              # num_fc_layers.
               conv_channels: 128
               fc_channels: 512
-          # This is an example for using PoolingDecoder with a classification task.
+          # This is an example for using PoolingDecoder with a classification
+          # task.
           - class_path: rslearn.train.tasks.classification.ClassificationHead
 ```
 
@@ -882,17 +897,17 @@ convolved with each feature map.
         decoder:
           - class_path: rslearn.models.conv.Conv
             init_args:
-              # The number of input channels. If there are multiple feature maps, they
-              # can have different resolutions, but must all have the same number of
-              # channels.
+              # The number of input channels. If there are multiple feature
+              # maps, they can have different resolutions, but must all have the
+              # same number of channels.
               in_channels: 128
               # The number of output channels.
               out_channels: 64
-              # The kernel size, stride, and padding. See torch.nn.Conv2d.
-              # The stride defaults to 1 and the padding defaults to "same", while
+              # The kernel size, stride, and padding. See torch.nn.Conv2d. The
+              # stride defaults to 1 and the padding defaults to "same", while
               # kernel_size must be configured. "same" padding keeps the same
-              # resolution as the input. If stride is not 1, then padding must be set
-              # since "same" is only accepted when the stride is 1.
+              # resolution as the input. If stride is not 1, then padding must
+              # be set since "same" is only accepted when the stride is 1.
               kernel_size: 3
               stride: 1
               padding: "same"
@@ -926,11 +941,12 @@ configured like this:
             init_args:
               # The loss function to use: "mse" (default), "l1", or "huber".
               loss_mode: "mse"
-              # Optional: delta for Huber loss (only used when loss_mode="huber").
+              # Optional: delta for Huber loss (only used when
+              # loss_mode="huber").
               huber_delta: 1.0
-              # Whether to apply a sigmoid activation on the output. This requires the
-              # targets to be between 0-1. Otherwise, the previous output is
-              # unmodified.
+              # Whether to apply a sigmoid activation on the output. This
+              # requires the targets to be between 0-1. Otherwise, the previous
+              # output is unmodified.
               use_sigmoid: false
 ```
 
@@ -953,11 +969,12 @@ this:
             init_args:
               # The loss function to use: "mse" (default), "l1", or "huber".
               loss_mode: "mse"
-              # Optional: delta for Huber loss (only used when loss_mode="huber").
+              # Optional: delta for Huber loss (only used when
+              # loss_mode="huber").
               huber_delta: 1.0
-              # Whether to apply a sigmoid activation on the output. This requires the
-              # targets to be between 0-1. Otherwise, the previous output is
-              # unmodified.
+              # Whether to apply a sigmoid activation on the output. This
+              # requires the targets to be between 0-1. Otherwise, the previous
+              # output is unmodified.
               use_sigmoid: false
 ```
 
